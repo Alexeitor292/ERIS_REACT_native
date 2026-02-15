@@ -1,13 +1,4 @@
 services:
-  mariadb:
-    ports:
-      - "127.0.0.1:3306:3306"
-
-  minio:
-    ports:
-      - "${MINIO_API_BIND:-127.0.0.1}:9800:9000"
-      - "${MINIO_CONSOLE_BIND:-127.0.0.1}:9801:9001"
-
   adminer:
     profiles:
       - devtools
