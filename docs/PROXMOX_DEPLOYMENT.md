@@ -52,6 +52,11 @@ Edit `.env.proxmox` values:
 - set `CORS_ORIGINS` to web URL
 - optional `MINIO_PUBLIC_ENDPOINT` if exposing MinIO externally
 
+Important:
+
+- Proxmox deployment uses `.env.proxmox` as the single env source.
+- You do not need a separate `docker/.env` on the server.
+
 ## 4) Build and start stack
 
 From `docker/` directory:
