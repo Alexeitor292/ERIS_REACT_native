@@ -1,0 +1,23 @@
+# ---- env / secrets ----
+.env
+.env.*
+**/.env
+**/.env.local
+**/.env.*.local
+!/backend/.env.example
+!/docker/.env.example
+!/web/.env.example
+
+# ---- python ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ---- node ----
+node_modules/
+dist/
+
+# ---- misc ----
+.DS_Store
+mobile/.git.nested.backup/

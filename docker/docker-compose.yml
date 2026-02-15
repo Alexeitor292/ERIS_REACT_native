@@ -1,0 +1,48 @@
+services:
+  mariadb:
+    image: mariadb:11
+    container_name: eris_mariadb
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-America/Los_Angeles}
+    ports:
+      - "3306:3306"
+    volumes:
+      - eris_mariadb_data:/var/lib/mysql
+      - ../database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  adminer:
+    image: adminer:latest
+    container_name: eris_adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  minio:
+    image: minio/minio:latest
+    container_name: eris_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-America/Los_Angeles}
+    ports:
+      - "9800:9000"
+      - "9801:9001"
+    volumes:
+      - eris_minio_data:/data
+
+volumes:
+  eris_mariadb_data:
+  eris_minio_data:

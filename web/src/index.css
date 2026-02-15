@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+:root {
+  --space-scale: 1;
+  --bg-glow-a: rgba(31, 155, 209, 0.1);
+  --bg-glow-b: rgba(23, 180, 173, 0.08);
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f8fb;
+  --panel: #ffffff;
+  --panel-soft: #f8fafc;
+  --ink: #111111;
+  --muted: #4c5f74;
+  --line: #d3dde8;
+  --brand: #1f9bd1;
+  --accent: #17b4ad;
+  --brand-ink: #0e4c6a;
+  --good: #1d9d5d;
+  --bad: #d14b54;
+  --shadow: 0 4px 12px rgba(17, 24, 39, 0.06);
+  --bg-glow-a: transparent;
+  --bg-glow-b: transparent;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a1324;
+  --panel: #0f1d33;
+  --panel-soft: #142744;
+  --ink: #edf3ff;
+  --muted: #a6badf;
+  --line: #233a61;
+  --brand: #4f9cff;
+  --accent: #2bb6b0;
+  --brand-ink: #e4f0ff;
+  --good: #47c983;
+  --bad: #f46a76;
+  --shadow: 0 22px 46px rgba(0, 0, 0, 0.32);
+  --bg-glow-a: color-mix(in oklab, var(--brand) 24%, transparent);
+  --bg-glow-b: color-mix(in oklab, var(--accent) 20%, transparent);
+}
+
+:root[data-theme="coastal"] {
+  --bg: #edf6f5;
+  --panel: #f9fcfb;
+  --panel-soft: #ecf6f4;
+  --ink: #0f2a34;
+  --muted: #4f7280;
+  --line: #c6dde4;
+  --brand: #007b83;
+  --accent: #1d9fcc;
+  --brand-ink: #063e42;
+  --good: #137a57;
+  --bad: #b6454d;
+  --shadow: 0 14px 32px rgba(6, 62, 66, 0.13);
+  --bg-glow-a: color-mix(in oklab, var(--brand) 20%, transparent);
+  --bg-glow-b: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+:root[data-density="compact"] {
+  --space-scale: 0.88;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  font-family: "Sora", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, var(--bg-glow-a), transparent 60%),
+    radial-gradient(900px 500px at 110% 0%, var(--bg-glow-b), transparent 50%),
+    var(--bg);
+  color: var(--ink);
+}
+
+.product-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(14px * var(--space-scale));
+  box-shadow: var(--shadow);
+}
+
+.text-muted {
+  color: var(--muted);
+}
+
+.btn-brand {
+  background: var(--brand);
+  color: white;
+  border: 1px solid transparent;
+}
+
+.btn-brand:hover {
+  filter: brightness(0.95);
+}
+
+.surface-soft {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--panel-soft) 86%, transparent),
+    color-mix(in oklab, var(--panel) 92%, transparent)
+  );
+  border: 1px solid var(--line);
+}
+
+

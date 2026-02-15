@@ -1,0 +1,20 @@
+POST /auth.login
+Summary: User login
+
+POST /submissions
+Summary: Creates (DrAFT or SUBMITTED)
+
+GET /submissions?status=
+Summary: list for admins
+
+GET /submissions/{id}
+Summary: detail view (includes attachments + workflow events)
+
+POST /attachments
+Summary: returns a presigned upload URL or accepts multipart upload
+
+POST /submissions/{id}/attachments
+Summary: link attachment
+
+POST /submissions/{id}/approve  and /reject
+Sumarry: workflow transition + event log

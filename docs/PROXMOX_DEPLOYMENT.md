@@ -1,0 +1,107 @@
+# ERIS Proxmox Deployment (No Local Dev Impact)
+
+This guide adds a server deployment path without changing your local dev flow.
+
+## What was added
+
+- `docker/docker-compose.proxmox.yml`
+- `docker/.env.proxmox.example`
+- `backend/Dockerfile`
+- `backend/.dockerignore`
+- `web/Dockerfile`
+- `web/nginx.conf`
+- `web/.dockerignore`
+
+Your existing local files remain valid:
+
+- local infra: `docker/docker-compose.yml`
+- local backend: `backend/.env`
+- local web: `web/.env`
+- local mobile: `mobile/.env`
+
+## 1) Create Ubuntu LXC on Proxmox
+
+Recommended:
+
+- Ubuntu 22.04 or 24.04
+- 2 vCPU, 4 GB RAM minimum
+- 30+ GB disk
+- Bridge networking with static IP
+
+Install Docker + Compose plugin inside the LXC.
+
+## 2) Copy repository to container
+
+Example:
+
+```bash
+git clone <your-repo-url> /opt/ERIS_REACT_native
+cd /opt/ERIS_REACT_native/docker
+```
+
+## 3) Create Proxmox env file
+
+```bash
+cp .env.proxmox.example .env.proxmox
+```
+
+Edit `.env.proxmox` values:
+
+- secure DB/MinIO/JWT secrets
+- set `VITE_API_BASE_URL` to Proxmox host/IP
+- set `CORS_ORIGINS` to web URL
+- optional `MINIO_PUBLIC_ENDPOINT` if exposing MinIO externally
+
+## 4) Build and start stack
+
+From `docker/` directory:
+
+```bash
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml up -d --build
+```
+
+This will run:
+
+- MariaDB
+- MinIO
+- FastAPI backend (`:8000`)
+- Vite-built web via Nginx (`:5173`)
+
+`adminer` is disabled by default in Proxmox (profile: `devtools`).
+
+To run Adminer temporarily:
+
+```bash
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml --profile devtools up -d adminer
+```
+
+## 5) Verify
+
+```bash
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml ps
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:5173/healthz
+```
+
+From your browser:
+
+- `http://<proxmox-ip>:5173`
+
+## 6) Mobile access on same network
+
+Set `EXPO_PUBLIC_API_URL=http://<proxmox-ip>:8000` in `mobile/.env` when testing against server.
+
+## 7) Update / redeploy
+
+```bash
+cd /opt/ERIS_REACT_native
+git pull
+cd docker
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml up -d --build
+```
+
+## Notes
+
+- This deployment path does not alter local development commands or env files.
+- Vite env is compile-time, so changing `VITE_API_BASE_URL` requires rebuilding `web`.
+- For internet-facing deployment, place a reverse proxy (Nginx/Traefik/Caddy) in front and add TLS.
