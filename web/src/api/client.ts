@@ -14,6 +14,7 @@ const API_BASE = requireEnv("VITE_API_BASE");
 
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
   const token = getToken();
 
@@ -23,7 +24,7 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
 
   const res = await fetch(url, { ...init, headers });
 
-  if (res.status === 401) {
+  if (res.status === 401 && normalizedPath !== "/auth/login") {
     clearToken();
     try {
       sessionStorage.setItem("eris_session_expired", "1");
