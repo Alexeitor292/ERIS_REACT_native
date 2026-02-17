@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, Alert } from "react-native";
 import { router } from "expo-router";
 import { apiFetch } from "../../src/api/client";
-import { setToken } from "../../src/auth/tokenStore";
+import { consumeSessionExpiredNotice, setToken } from "../../src/auth/tokenStore";
 
 type LoginResponse = { access_token: string; token_type: string };
 
@@ -10,6 +10,16 @@ export default function Login() {
   const [email, setEmail] = useState("admin@local");
   const [password, setPassword] = useState("password");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    consumeSessionExpiredNotice()
+      .then((expired) => {
+        if (expired) {
+          Alert.alert("Session expired", "Session expired. Please sign in again.");
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   async function onLogin() {
     try {

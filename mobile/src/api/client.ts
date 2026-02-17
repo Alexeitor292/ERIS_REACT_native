@@ -1,11 +1,41 @@
 import { getApiBaseUrl } from "./baseUrl";
+import { router } from "expo-router";
+import { clearToken, setSessionExpiredNotice } from "../auth/tokenStore";
+
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("Session expired. Please sign in again.");
+    this.name = "SessionExpiredError";
+  }
+}
+
+export function isSessionExpiredError(error: unknown): error is SessionExpiredError {
+  return error instanceof SessionExpiredError;
+}
+
+let handlingUnauthorized = false;
+
+async function handleUnauthorized() {
+  if (handlingUnauthorized) return;
+  handlingUnauthorized = true;
+  try {
+    await clearToken();
+    await setSessionExpiredNotice();
+    router.replace("/(auth)/login");
+  } finally {
+    setTimeout(() => {
+      handlingUnauthorized = false;
+    }, 500);
+  }
+}
 
 export async function apiFetch<T = any>(
   path: string,
   opts: { method?: string; token?: string; body?: any } = {}
 ): Promise<T> {
   const base = getApiBaseUrl();
-  const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `${base}${normalizedPath}`;
 
   const headers: Record<string, string> = {};
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
@@ -16,6 +46,11 @@ export async function apiFetch<T = any>(
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
+
+  if (res.status === 401 && normalizedPath !== "/auth/login") {
+    await handleUnauthorized();
+    throw new SessionExpiredError();
+  }
 
   if (!res.ok) {
     const text = await res.text();

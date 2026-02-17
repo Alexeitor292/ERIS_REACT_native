@@ -9,11 +9,11 @@ export default function SubmissionsStackLayout() {
       screenOptions={{
         headerTitleAlign: "center",
         headerStatusBarHeight: insets.top,
-        statusBarTranslucent: false,
       }}
     >
       <Stack.Screen name="index" options={{ title: "Submissions" }} />
       <Stack.Screen name="[id]" options={{ title: "Submission" }} />
+      <Stack.Screen name="map" options={{ title: "Map Editor" }} />
     </Stack>
   );
 }

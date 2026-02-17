@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable, FlatList, StyleSheet, Alert } from "react-native";
 import { router } from "expo-router";
-import { apiFetch } from "../../../src/api/client";
+import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getToken, clearToken } from "../../../src/auth/tokenStore";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 
@@ -29,6 +29,7 @@ export default function SubmissionsList() {
       const res = await apiFetch<ListResponse>("/submissions?limit=50", { token });
       setItems(res.items ?? []);
     } catch (e: any) {
+      if (isSessionExpiredError(e)) return;
       Alert.alert("Load failed", String(e?.message ?? e));
     } finally {
       setLoading(false);
@@ -48,6 +49,7 @@ export default function SubmissionsList() {
         params: { id: String(res.submission_id) },
       });
     } catch (e: any) {
+      if (isSessionExpiredError(e)) return;
       Alert.alert("Create failed", String(e?.message ?? e));
     }
   }

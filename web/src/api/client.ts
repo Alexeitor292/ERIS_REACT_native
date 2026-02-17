@@ -25,8 +25,15 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
 
   if (res.status === 401) {
     clearToken();
-    window.location.href = "/login";
-    throw new Error("Unauthorized");
+    try {
+      sessionStorage.setItem("eris_session_expired", "1");
+    } catch {
+      // ignore
+    }
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+    throw new Error("Session expired. Please sign in again.");
   }
 
   if (!res.ok) {

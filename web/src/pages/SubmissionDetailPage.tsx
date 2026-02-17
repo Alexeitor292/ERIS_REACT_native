@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail } from "../api/types";
@@ -6,6 +6,9 @@ import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import { getToken } from "../auth/token";
 import { appConfig } from "../config";
+import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
+import { useUiSettings } from "../ui/UiSettingsContext";
+
 
 type Tri = "UNKNOWN" | "YES" | "NO";
 type Draft = Record<string, string> & { pavement_ground_cracks: Tri; indented_by_rocks: Tri };
@@ -34,12 +37,31 @@ function R({ l, v }: { l: string; v: unknown }) {
 function resolve(items: { code: string; label: string }[] | undefined, code: string) {
   return items?.find((x) => x.code === code)?.label ?? code;
 }
+function b(v: unknown) {
+  return v === true ? "Yes" : v === false ? "No" : "-";
+}
+function Section({ title, children, open = false }: { title: string; children: ReactNode; open?: boolean }) {
+  return (
+    <details className="rounded-md border border-[var(--line)] p-4" open={open}>
+      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted select-none">{title}</summary>
+      <div className="mt-3">{children}</div>
+    </details>
+  );
+}
+
+function pointFromLatLon(gisa: any): any | null {
+  const lat = Number(gisa?.latitude);
+  const lon = Number(gisa?.longitude);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+  return { type: "Point", coordinates: [lon, lat] };
+}
 
 export default function SubmissionDetailPage() {
   const { id } = useParams();
   const sid = Number(id);
   const invalid = !id || Number.isNaN(sid) || sid <= 0;
   const { me } = useAuth();
+  const { mapLayout } = useUiSettings();
 
   const [data, setData] = useState<SubmissionDetail | null>(null);
   const [lookups, setLookups] = useState<GisaLookups | null>(null);
@@ -53,6 +75,8 @@ export default function SubmissionDetailPage() {
   const [inc, setInc] = useState<string[]>([]);
   const [imm, setImm] = useState<string[]>([]);
   const [fol, setFol] = useState<string[]>([]);
+  const [geom, setGeom] = useState<any | null>(null);
+
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && data?.submission.status === "DRAFT";
@@ -62,15 +86,20 @@ export default function SubmissionDetailPage() {
   async function load() {
     setBusy(true); setErr(null);
     try {
-      const [d, l] = await Promise.all([api<SubmissionDetail>(`/submissions/${sid}`), api<GisaLookups>("/gisa/lookups")]);
+      const [d, l, geomRes] = await Promise.all([
+        api<SubmissionDetail>(`/submissions/${sid}`),
+        api<GisaLookups>("/gisa/lookups"),
+        api<{ submission_id: number; geometry: any | null }>(`/submissions/${sid}/geometry`).catch(() => null),
+      ]);
       setData(d); setLookups(l); setReviewNote(d.submission.review_comment ?? "");
-      const g: any = d.gisa || {};
+      setGeom(geomRes?.geometry ?? d.gisa?.geometry_json ?? pointFromLatLon(d.gisa) ?? null);
+      const gisa: any = d.gisa || {};
       setDraft({
         ...EMPTY,
-        report_date: t(g.report_date), district: t(g.district), county: t(g.county), route: t(g.route), post_mile: t(g.post_mile), ea: t(g.ea), project_id: t(g.project_id), date_incident_reported: t(g.date_incident_reported), district_contact: t(g.district_contact),
-        latitude: t(g.latitude), longitude: t(g.longitude), distribution_code: t(g.distribution_code), highway_status_code: t(g.highway_status_code), lanes_closed_count: t(g.lanes_closed_count),
-        pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: t(g.crack_length_ft), crack_horizontal_in: t(g.crack_horizontal_in), crack_vertical_in: t(g.crack_vertical_in), crack_depth_in: t(g.crack_depth_in), settlement_in: t(g.settlement_in), bulge_in: t(g.bulge_in), indented_by_rocks: boolToTri(g.indented_by_rocks),
-        observations_notes: t(g.observations_notes), geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "",
+        report_date: t(gisa.report_date), district: t(gisa.district), county: t(gisa.county), route: t(gisa.route), post_mile: t(gisa.post_mile), ea: t(gisa.ea), project_id: t(gisa.project_id), date_incident_reported: t(gisa.date_incident_reported), district_contact: t(gisa.district_contact),
+        latitude: t(gisa.latitude), longitude: t(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count),
+        pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
+        observations_notes: t(gisa.observations_notes), geometry_json: gisa.geometry_json ? JSON.stringify(gisa.geometry_json, null, 2) : "",
       });
       setInc(d.incident_types ?? []); setImm(d.actions?.immediate ?? []); setFol(d.actions?.follow_up ?? []);
     } catch (e: any) { setErr(e?.message ?? "Failed to load"); } finally { setBusy(false); }
@@ -158,30 +187,104 @@ export default function SubmissionDetailPage() {
               </section>
             )}
 
-            <section className="rounded-md border border-[var(--line)] p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Summary</h3>
-              <div className="mt-2"><R l="Created" v={data.submission.created_at} /><R l="Updated" v={data.submission.updated_at} /><R l="Submitted" v={data.submission.submitted_at} /><R l="District" v={data.gisa?.district} /><R l="County" v={data.gisa?.county} /><R l="Latitude" v={data.gisa?.latitude} /><R l="Longitude" v={data.gisa?.longitude} /></div>
-            </section>
+            <Section title="Summary" open>
+              <R l="Created" v={data.submission.created_at} />
+              <R l="Updated" v={data.submission.updated_at} />
+              <R l="Submitted" v={data.submission.submitted_at} />
+              <R l="Reviewed" v={data.submission.reviewed_at} />
+              <R l="Status" v={data.submission.status} />
+            </Section>
 
-            <section className="rounded-md border border-[var(--line)] p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Reviewer Note</h3>
-              <textarea value={reviewNote} onChange={(e)=>setReviewNote(e.target.value)} rows={3} disabled={busy||!canReview} className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" />
-            </section>
+            <Section title="Header Info">
+              <R l="Report Date" v={data.gisa?.report_date} />
+              <R l="District" v={data.gisa?.district} />
+              <R l="County" v={data.gisa?.county} />
+              <R l="Route" v={data.gisa?.route} />
+              <R l="Post Mile" v={data.gisa?.post_mile} />
+              <R l="EA" v={data.gisa?.ea} />
+              <R l="Project ID" v={data.gisa?.project_id} />
+              <R l="Date Incident Reported" v={data.gisa?.date_incident_reported} />
+              <R l="District Contact" v={data.gisa?.district_contact} />
+            </Section>
 
-            <section className="rounded-md border border-[var(--line)] p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Incident/Actions Snapshot</h3>
-              <div className="mt-2 text-sm"><div><span className="text-muted">Incident Types: </span>{(data.incident_types??[]).map((x)=>resolve(lookups?.incident_types,x)).join(", ") || "-"}</div><div><span className="text-muted">Immediate: </span>{(data.actions?.immediate??[]).map((x)=>resolve(lookups?.actions?.immediate,x)).join(", ") || "-"}</div><div><span className="text-muted">Follow-Up: </span>{(data.actions?.follow_up??[]).map((x)=>resolve(lookups?.actions?.follow_up,x)).join(", ") || "-"}</div></div>
-            </section>
+            <Section title="Location" open>
+              {mapLayout === "split" ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <div>
+                    <R l="Latitude" v={data.gisa?.latitude} />
+                    <R l="Longitude" v={data.gisa?.longitude} />
+                    <R l="Geometry JSON" v={data.gisa?.geometry_json ? "Available" : "-"} />
+                  </div>
+                  <div>
+                    <SubmissionArcGisMap
+                      geojson={geom}
+                      location={{ latitude: data.gisa?.latitude ?? null, longitude: data.gisa?.longitude ?? null }}
+                      height={260}
+                    />
+                    {!geom && data.gisa?.latitude == null && data.gisa?.longitude == null ? (
+                      <div className="mt-2 text-sm text-muted">No geometry or location saved yet.</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-3">
+                    <SubmissionArcGisMap
+                      geojson={geom}
+                      location={{ latitude: data.gisa?.latitude ?? null, longitude: data.gisa?.longitude ?? null }}
+                      height={mapLayout === "large" ? 420 : 210}
+                    />
+                    {!geom && data.gisa?.latitude == null && data.gisa?.longitude == null ? (
+                      <div className="mt-2 text-sm text-muted">No geometry or location saved yet.</div>
+                    ) : null}
+                  </div>
+                  <R l="Latitude" v={data.gisa?.latitude} />
+                  <R l="Longitude" v={data.gisa?.longitude} />
+                  <R l="Geometry JSON" v={data.gisa?.geometry_json ? "Available" : "-"} />
+                </>
+              )}
+            </Section>
 
-            <section className="rounded-md border border-[var(--line)] p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Attachments</h3>
-              <div className="mt-2 overflow-x-auto">{data.attachments.length===0?<div className="text-sm text-muted">No attachments.</div>:<table className="w-full border-collapse"><thead><tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted"><th className="py-2 px-2">ID</th><th className="py-2 px-2">File</th><th className="py-2 px-2">Type</th><th className="py-2 px-2">Size</th><th className="py-2 px-2"></th></tr></thead><tbody>{data.attachments.map((a)=><tr key={a.id} className="border-b border-[var(--line)]/50"><td className="py-2 px-2 text-sm">{a.id}</td><td className="py-2 px-2 text-sm">{a.file_name}</td><td className="py-2 px-2 text-sm">{a.mime_type}</td><td className="py-2 px-2 text-sm">{a.file_size_bytes.toLocaleString()}</td><td className="py-2 px-2 text-sm"><button onClick={()=>openDownloadUrl(a.id)} disabled={downloading===a.id} className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs">{downloading===a.id?"Opening...":"Open Photo"}</button></td></tr>)}</tbody></table>}</div>
-            </section>
+            <Section title="Roadway Status">
+              <R l="Distribution" v={resolve(lookups?.distribution, String(data.gisa?.distribution_code ?? "")) || data.gisa?.distribution_code} />
+              <R l="Highway Status" v={resolve(lookups?.highway_status, String(data.gisa?.highway_status_code ?? "")) || data.gisa?.highway_status_code} />
+              <R l="Lanes Closed Count" v={data.gisa?.lanes_closed_count} />
+            </Section>
 
-            <section className="rounded-md border border-[var(--line)] p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Workflow Events</h3>
-              <div className="mt-2">{data.workflow_events.length===0?<div className="text-sm text-muted">No workflow events.</div>:<ol className="space-y-2">{data.workflow_events.map((e)=><li key={e.id} className="rounded border border-[var(--line)] p-2 text-sm"><div className="text-xs text-muted">{e.created_at}</div><div className="font-medium">{e.event_type} ({e.from_status ?? "-"} {"->"} {e.to_status ?? "-"})</div><div className="text-xs text-muted">Actor {e.actor_user_id}{e.comment ? ` - ${e.comment}` : ""}</div></li>)}</ol>}</div>
-            </section>
+            <Section title="Pavement / Slope Condition">
+              <R l="Pavement Ground Cracks" v={b(data.gisa?.pavement_ground_cracks)} />
+              <R l="Crack Length (ft)" v={data.gisa?.crack_length_ft} />
+              <R l="Crack Horizontal (in)" v={data.gisa?.crack_horizontal_in} />
+              <R l="Crack Vertical (in)" v={data.gisa?.crack_vertical_in} />
+              <R l="Crack Depth (in)" v={data.gisa?.crack_depth_in} />
+              <R l="Settlement (in)" v={data.gisa?.settlement_in} />
+              <R l="Bulge (in)" v={data.gisa?.bulge_in} />
+              <R l="Indented by Rocks" v={b(data.gisa?.indented_by_rocks)} />
+            </Section>
+
+            <Section title="Observations">
+              <R l="Notes" v={data.gisa?.observations_notes} />
+            </Section>
+
+            <Section title="Incident / Actions Snapshot">
+              <div className="text-sm">
+                <div><span className="text-muted">Incident Types: </span>{(data.incident_types ?? []).map((x) => resolve(lookups?.incident_types, x)).join(", ") || "-"}</div>
+                <div><span className="text-muted">Immediate: </span>{(data.actions?.immediate ?? []).map((x) => resolve(lookups?.actions?.immediate, x)).join(", ") || "-"}</div>
+                <div><span className="text-muted">Follow-Up: </span>{(data.actions?.follow_up ?? []).map((x) => resolve(lookups?.actions?.follow_up, x)).join(", ") || "-"}</div>
+              </div>
+            </Section>
+
+            <Section title="Reviewer Note" open>
+              <textarea value={reviewNote} onChange={(e)=>setReviewNote(e.target.value)} rows={3} disabled={busy||!canReview} className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" />
+            </Section>
+
+            <Section title="Attachments">
+              <div className="overflow-x-auto">{data.attachments.length===0?<div className="text-sm text-muted">No attachments.</div>:<table className="w-full border-collapse"><thead><tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted"><th className="py-2 px-2">ID</th><th className="py-2 px-2">File</th><th className="py-2 px-2">Type</th><th className="py-2 px-2">Size</th><th className="py-2 px-2"></th></tr></thead><tbody>{data.attachments.map((a)=><tr key={a.id} className="border-b border-[var(--line)]/50"><td className="py-2 px-2 text-sm">{a.id}</td><td className="py-2 px-2 text-sm">{a.file_name}</td><td className="py-2 px-2 text-sm">{a.mime_type}</td><td className="py-2 px-2 text-sm">{a.file_size_bytes.toLocaleString()}</td><td className="py-2 px-2 text-sm"><button onClick={()=>openDownloadUrl(a.id)} disabled={downloading===a.id} className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs">{downloading===a.id?"Opening...":"Open Photo"}</button></td></tr>)}</tbody></table>}</div>
+            </Section>
+
+            <Section title="Workflow Events">
+              <div>{data.workflow_events.length===0?<div className="text-sm text-muted">No workflow events.</div>:<ol className="space-y-2">{data.workflow_events.map((e)=><li key={e.id} className="rounded border border-[var(--line)] p-2 text-sm"><div className="text-xs text-muted">{e.created_at}</div><div className="font-medium">{e.event_type} ({e.from_status ?? "-"} {"->"} {e.to_status ?? "-"})</div><div className="text-xs text-muted">Actor {e.actor_user_id}{e.comment ? ` - ${e.comment}` : ""}</div></li>)}</ol>}</div>
+            </Section>
           </div>
         )}
       </div>

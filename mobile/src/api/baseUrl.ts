@@ -25,8 +25,14 @@ export function getApiBaseCandidates(): string[] {
   const out: string[] = [];
   const add = (url: string | null | undefined) => {
     if (!url) return;
-    const trimmed = url.trim().replace(/\/+$/, "");
+    let trimmed = url.trim().replace(/\/+$/, "");
     if (!trimmed) return;
+
+    // If someone sets "192.168.x.x:8000" without scheme, fix it
+    if (!/^https?:\/\//i.test(trimmed)) {
+      trimmed = `http://${trimmed}`;
+    }
+
     if (!out.includes(trimmed)) out.push(trimmed);
   };
 

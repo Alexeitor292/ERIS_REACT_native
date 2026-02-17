@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
@@ -8,7 +8,19 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("eris_session_expired") === "1") {
+        setNotice("Session expired. Please sign in again.");
+        sessionStorage.removeItem("eris_session_expired");
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,6 +56,12 @@ export default function LoginPage() {
           </p>
 
           <form className="mt-5 space-y-4" onSubmit={onSubmit}>
+            {notice && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {notice}
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium">Email</label>
               <input

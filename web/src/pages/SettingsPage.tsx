@@ -2,7 +2,7 @@ import AppShell from "../ui/AppShell";
 import { useUiSettings } from "../ui/UiSettingsContext";
 
 export default function SettingsPage() {
-  const { theme, density, setTheme, setDensity } = useUiSettings();
+  const { theme, density, mapLayout, setTheme, setDensity, setMapLayout } = useUiSettings();
 
   return (
     <AppShell title="Settings">
@@ -44,6 +44,32 @@ export default function SettingsPage() {
                 onClick={() => setDensity(opt.id as "comfortable" | "compact")}
                 className={`rounded-md border px-3 py-2 text-sm ${
                   density === opt.id
+                    ? "border-[var(--brand)] bg-[var(--brand)] text-white"
+                    : "border-[var(--line)] bg-[var(--panel)] hover:brightness-95"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-[var(--line)] surface-soft p-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Map Layout</h2>
+          <p className="mt-1 text-sm text-muted">
+            Choose how the map appears in submission detail pages.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[
+              { id: "stretched", label: "Stretched (current)" },
+              { id: "split", label: "Split (data + map)" },
+              { id: "large", label: "Large map" },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setMapLayout(opt.id as "stretched" | "split" | "large")}
+                className={`rounded-md border px-3 py-2 text-sm ${
+                  mapLayout === opt.id
                     ? "border-[var(--brand)] bg-[var(--brand)] text-white"
                     : "border-[var(--line)] bg-[var(--panel)] hover:brightness-95"
                 }`}

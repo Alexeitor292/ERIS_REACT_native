@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useLocalSearchParams, router } from "expo-router";
 
-import { apiFetch } from "../../../src/api/client";
+import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseCandidates, getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
 import { getGisaLookups, getSubmission, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
@@ -28,6 +28,7 @@ type SubmissionDetail = {
 };
 
 type FormState = Record<string, string> & { pavement_ground_cracks: "UNKNOWN" | "YES" | "NO"; indented_by_rocks: "UNKNOWN" | "YES" | "NO" };
+type FieldErrorMap = Partial<Record<keyof FormState, string>>;
 const EMPTY_FORM: FormState = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
   latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "",
@@ -38,8 +39,10 @@ const EMPTY_FORM: FormState = {
 const n = (v: string) => (v.trim() ? v.trim() : null);
 const f = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${name} must be numeric`); return x; };
 const i = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${name} must be a whole number`); return x; };
-const triToBool = (v: "UNKNOWN" | "YES" | "NO") => (v === "YES" ? true : v === "NO" ? false : null);
+const triToBool = (v: "UNKNOWN" | "YES" | "NO") => (v === "YES" ? true : false);
 const boolToTri = (v: any) => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
+const isPlayServicesUnavailableError = (msg: string) =>
+  /LocationServices\.API is not available|SERVICE_INVALID|Google Play services/i.test(msg);
 
 function normalizeDownloadUrl(rawUrl: string, apiBaseUrl: string): string {
   try {
@@ -95,6 +98,7 @@ function Field({
   multiline,
   keyboardType,
   palette,
+  error,
 }: {
   label: string;
   value: string;
@@ -103,11 +107,20 @@ function Field({
   multiline?: boolean;
   keyboardType?: "default" | "numeric" | "decimal-pad";
   palette?: { muted: string; border: string; panel: string; text: string };
+  error?: string;
 }) {
   return (
     <View style={{ marginTop: 8 }}>
-      <Text style={[styles.label, { color: palette?.muted ?? "#465978" }]}>{label}</Text>
-      <TextInput value={value} onChangeText={onChangeText} editable={editable} multiline={multiline} keyboardType={keyboardType ?? "default"} style={[styles.input, { borderColor: palette?.border ?? "#ccd8ea", backgroundColor: palette?.panel ?? "#fdfefe", color: palette?.text ?? "#1b2a40" }, multiline ? { minHeight: 90, textAlignVertical: "top" } : null, !editable ? styles.inputDisabled : null]} />
+      <View style={styles.labelRow}>
+        <Text style={[styles.label, { color: error ? "#dc2626" : (palette?.muted ?? "#465978") }]}>{label}</Text>
+        {error ? (
+          <View style={styles.errorIcon}>
+            <Text style={styles.errorIconText}>i</Text>
+          </View>
+        ) : null}
+      </View>
+      <TextInput value={value} onChangeText={onChangeText} editable={editable} multiline={multiline} keyboardType={keyboardType ?? "default"} style={[styles.input, { borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"), backgroundColor: palette?.panel ?? "#fdfefe", color: palette?.text ?? "#1b2a40" }, multiline ? { minHeight: 90, textAlignVertical: "top" } : null, !editable ? styles.inputDisabled : null]} />
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
 }
@@ -149,6 +162,7 @@ export default function SubmissionDetailScreen() {
   const [incidentTypes, setIncidentTypes] = useState<string[]>([]);
   const [immediateActions, setImmediateActions] = useState<string[]>([]);
   const [followUpActions, setFollowUpActions] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({});
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>({});
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
@@ -209,9 +223,11 @@ export default function SubmissionDetailScreen() {
       setIncidentTypes(subRes.incident_types ?? []);
       setImmediateActions(subRes.actions?.immediate ?? []);
       setFollowUpActions(subRes.actions?.follow_up ?? []);
+      setFieldErrors({});
       setReviewComment(subRes.submission.review_comment ?? "");
       await hydratePhotoUrls(token, subRes.photos ?? []);
     } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
       Alert.alert("Load failed", err?.message ?? "Unable to load submission");
     } finally {
       setLoading(false);
@@ -220,17 +236,69 @@ export default function SubmissionDetailScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const setVal = (k: keyof FormState, v: any) => setForm((p) => ({ ...p, [k]: v }));
+  const setVal = (k: keyof FormState, v: any) => {
+    setForm((p) => ({ ...p, [k]: v }));
+    setFieldErrors((prev) => {
+      if (!prev[k]) return prev;
+      const next = { ...prev };
+      delete next[k];
+      return next;
+    });
+  };
   const toggle = (list: string[], code: string) => (list.includes(code) ? list.filter((x) => x !== code) : [...list, code]);
   const toggleSection = (key: keyof typeof openSections) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  function validateRequiredFields(): boolean {
+    const nextErrors: FieldErrorMap = {};
+    const required: { key: keyof FormState; label: string; section: keyof typeof openSections }[] = [
+      { key: "district", label: "District", section: "header" },
+      { key: "county", label: "County", section: "header" },
+      { key: "latitude", label: "Latitude", section: "location" },
+      { key: "longitude", label: "Longitude", section: "location" },
+    ];
+
+    const sectionsToOpen = new Set<keyof typeof openSections>();
+    for (const r of required) {
+      const raw = String(form[r.key] ?? "").trim();
+      if (!raw) {
+        nextErrors[r.key] = `${r.label} is required.`;
+        sectionsToOpen.add(r.section);
+      }
+    }
+
+    setFieldErrors(nextErrors);
+    if (sectionsToOpen.size > 0) {
+      setOpenSections((prev) => ({
+        ...prev,
+        ...Object.fromEntries(Array.from(sectionsToOpen).map((s) => [s, true])),
+      }));
+      Alert.alert(
+        "Almost there",
+        "Please fill the highlighted required fields before continuing."
+      );
+      return false;
+    }
+    return true;
+  }
+
   async function saveDraft() {
     if (!token || !id) return;
+    if (!validateRequiredFields()) return;
+    let geometry: any = null;
+    if (form.geometry_json.trim()) {
+      try {
+        geometry = JSON.parse(form.geometry_json);
+      } catch {
+        setFieldErrors((prev) => ({ ...prev, geometry_json: "Geometry JSON is invalid." }));
+        setOpenSections((prev) => ({ ...prev, location: true }));
+        Alert.alert("Almost there", "Please fix the highlighted Geometry JSON field.");
+        return;
+      }
+    }
     setBusy(true);
     try {
-      const geometry = form.geometry_json.trim() ? JSON.parse(form.geometry_json) : null;
       await patchSubmission(token, id, {
         report_date: n(form.report_date), district: n(form.district), county: n(form.county), route: n(form.route), post_mile: n(form.post_mile), ea: n(form.ea), project_id: n(form.project_id), date_incident_reported: n(form.date_incident_reported), district_contact: n(form.district_contact),
         latitude: f(form.latitude, "Latitude"), longitude: f(form.longitude, "Longitude"),
@@ -243,15 +311,17 @@ export default function SubmissionDetailScreen() {
       Alert.alert("Saved", "Draft saved.");
       await load();
     } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
       Alert.alert("Save failed", err?.message ?? "Unable to save");
     } finally { setBusy(false); }
   }
 
   async function submitDraft() {
     if (!token || !id) return;
+    if (!validateRequiredFields()) return;
     setBusy(true);
     try { await submitSubmission(token, id); Alert.alert("Submitted", "Sent for review."); await load(); }
-    catch (err: any) { Alert.alert("Submit failed", err?.message ?? "Unable to submit"); }
+    catch (err: any) { if (isSessionExpiredError(err)) return; Alert.alert("Submit failed", err?.message ?? "Unable to submit"); }
     finally { setBusy(false); }
   }
 
@@ -259,13 +329,13 @@ export default function SubmissionDetailScreen() {
     if (!token || !id) return;
     setBusy(true);
     try { await reviewSubmission(token, id, decision, n(reviewComment) ?? undefined); Alert.alert("Updated", `Submission ${decision === "APPROVE" ? "approved" : "rejected"}.`); await load(); }
-    catch (err: any) { Alert.alert("Review failed", err?.message ?? "Unable to review"); }
+    catch (err: any) { if (isSessionExpiredError(err)) return; Alert.alert("Review failed", err?.message ?? "Unable to review"); }
     finally { setBusy(false); }
   }
 
   async function pickPhoto() {
     if (!token || !id) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.85 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85 });
     if (result.canceled) return;
     const asset = result.assets[0];
     const uri = asset.uri;
@@ -309,6 +379,7 @@ export default function SubmissionDetailScreen() {
 
       await load();
     } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
       Alert.alert(
         "Photo upload failed",
         `${err?.message ?? "Unable to upload"}\n\nTip: For physical devices, set EXPO_PUBLIC_API_URL to your computer LAN IP (e.g. http://192.168.x.x:8000).`
@@ -318,10 +389,119 @@ export default function SubmissionDetailScreen() {
   }
 
   async function autofillLocation() {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") return Alert.alert("Permission denied", "Location permission required.");
-    const loc = await Location.getCurrentPositionAsync({});
-    setVal("latitude", String(loc.coords.latitude)); setVal("longitude", String(loc.coords.longitude));
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        return Alert.alert("Permission denied", "Location permission required.");
+      }
+
+      let playServicesUnavailable = false;
+      if (Platform.OS === "android") {
+        try {
+          await Location.enableNetworkProviderAsync();
+        } catch (e: any) {
+          const msg = String(e?.message ?? e);
+          if (isPlayServicesUnavailableError(msg)) {
+            playServicesUnavailable = true;
+          }
+        }
+      }
+
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        return Alert.alert("Location disabled", "Enable location services and try again.");
+      }
+
+      let usedImmediate = false;
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: 1000 * 60 * 60 * 24,
+      });
+      if (lastKnown) {
+        setVal("latitude", String(lastKnown.coords.latitude));
+        setVal("longitude", String(lastKnown.coords.longitude));
+        usedImmediate = true;
+      }
+
+      if (playServicesUnavailable && !usedImmediate) {
+        return Alert.alert(
+          "Location unavailable on this emulator",
+          "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
+        );
+      }
+
+      let fresh: Location.LocationObject | null = null;
+      if (!playServicesUnavailable) {
+        const fromCurrent = await Promise.race([
+          Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+            mayShowUserSettingsDialog: true,
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+        ]);
+        if (fromCurrent) {
+          fresh = fromCurrent;
+        } else {
+          await new Promise<void>((resolve) => {
+            let done = false;
+            let subscription: Location.LocationSubscription | null = null;
+            const finish = (next?: Location.LocationObject | null) => {
+              if (done) return;
+              done = true;
+              if (subscription) subscription.remove();
+              if (next) fresh = next;
+              resolve();
+            };
+            Location.watchPositionAsync(
+              {
+                accuracy: Location.Accuracy.Balanced,
+                timeInterval: 1000,
+                distanceInterval: 0,
+              },
+              (next) => finish(next)
+            )
+              .then((sub) => {
+                subscription = sub;
+                setTimeout(() => finish(null), 15000);
+              })
+              .catch(() => finish(null));
+          });
+        }
+      }
+
+      if (fresh) {
+        setVal("latitude", String(fresh.coords.latitude));
+        setVal("longitude", String(fresh.coords.longitude));
+        return;
+      }
+
+      if (usedImmediate) {
+        Alert.alert("Location captured", "Using recent location. GPS refresh is still pending.");
+        return;
+      }
+
+      if (!lastKnown) {
+        if (playServicesUnavailable) {
+          return Alert.alert(
+            "Location unavailable on this emulator",
+            "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
+          );
+        }
+        return Alert.alert(
+          "Location unavailable",
+          "Could not get location. In Android emulator, open Extended controls > Location and send a point."
+        );
+      }
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (isPlayServicesUnavailableError(msg)) {
+        Alert.alert(
+          "Location unavailable on this emulator",
+          "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
+        );
+        return;
+      }
+      Alert.alert("Location failed", msg || "Unable to fetch location.");
+    }
   }
 
   if (!token || loading || !data || !lookups || !me) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
@@ -387,21 +567,37 @@ export default function SubmissionDetailScreen() {
       <Text style={[styles.title, { color: palette.text }]}>Submission #{data.submission.id}</Text>
       <Text style={[styles.status, { color: palette.muted }]}>Status: {data.submission.status}</Text>
       <CollapsibleSection title="Header Info" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Report Date (YYYY-MM-DD)" value={form.report_date} editable={canEdit} onChangeText={(v) => setVal("report_date", v)} />
-        <Field palette={palette} label="District *" value={form.district} editable={canEdit} onChangeText={(v) => setVal("district", v)} />
-        <Field palette={palette} label="County *" value={form.county} editable={canEdit} onChangeText={(v) => setVal("county", v)} />
-        <Field palette={palette} label="Route" value={form.route} editable={canEdit} onChangeText={(v) => setVal("route", v)} />
-        <Field palette={palette} label="Post Mile" value={form.post_mile} editable={canEdit} onChangeText={(v) => setVal("post_mile", v)} />
-        <Field palette={palette} label="EA" value={form.ea} editable={canEdit} onChangeText={(v) => setVal("ea", v)} />
-        <Field palette={palette} label="Project ID" value={form.project_id} editable={canEdit} onChangeText={(v) => setVal("project_id", v)} />
-        <Field palette={palette} label="Date Incident Reported (YYYY-MM-DD)" value={form.date_incident_reported} editable={canEdit} onChangeText={(v) => setVal("date_incident_reported", v)} />
-        <Field palette={palette} label="District Contact" value={form.district_contact} editable={canEdit} onChangeText={(v) => setVal("district_contact", v)} />
+        <Field palette={palette} label="Report Date (YYYY-MM-DD)" value={form.report_date} editable={canEdit} onChangeText={(v) => setVal("report_date", v)} error={fieldErrors.report_date} />
+        <Field palette={palette} label="District *" value={form.district} editable={canEdit} onChangeText={(v) => setVal("district", v)} error={fieldErrors.district} />
+        <Field palette={palette} label="County *" value={form.county} editable={canEdit} onChangeText={(v) => setVal("county", v)} error={fieldErrors.county} />
+        <Field palette={palette} label="Route" value={form.route} editable={canEdit} onChangeText={(v) => setVal("route", v)} error={fieldErrors.route} />
+        <Field palette={palette} label="Post Mile" value={form.post_mile} editable={canEdit} onChangeText={(v) => setVal("post_mile", v)} error={fieldErrors.post_mile} />
+        <Field palette={palette} label="EA" value={form.ea} editable={canEdit} onChangeText={(v) => setVal("ea", v)} error={fieldErrors.ea} />
+        <Field palette={palette} label="Project ID" value={form.project_id} editable={canEdit} onChangeText={(v) => setVal("project_id", v)} error={fieldErrors.project_id} />
+        <Field palette={palette} label="Date Incident Reported (YYYY-MM-DD)" value={form.date_incident_reported} editable={canEdit} onChangeText={(v) => setVal("date_incident_reported", v)} error={fieldErrors.date_incident_reported} />
+        <Field palette={palette} label="District Contact" value={form.district_contact} editable={canEdit} onChangeText={(v) => setVal("district_contact", v)} error={fieldErrors.district_contact} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Location" open={openSections.location} onToggle={() => toggleSection("location")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} />
-        <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} />
-        <Field palette={palette} label="Geometry JSON (optional)" value={form.geometry_json} editable={canEdit} multiline onChangeText={(v) => setVal("geometry_json", v)} />
+        <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} error={fieldErrors.latitude} />
+        <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
+        <Field palette={palette} label="Geometry JSON (optional)" value={form.geometry_json} editable={canEdit} multiline onChangeText={(v) => setVal("geometry_json", v)} error={fieldErrors.geometry_json} />
+        <Pressable
+          style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+          onPress={() =>
+            router.push({
+              pathname: "/(tabs)/submissions/map",
+              params: {
+                id: String(id ?? ""),
+                latitude: form.latitude,
+                longitude: form.longitude,
+              },
+            })
+          }
+          disabled={busy}
+        >
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Open ArcGIS Map Editor</Text>
+        </Pressable>
         {canEdit ? <Pressable style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={autofillLocation} disabled={busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>Use Current Location</Text></Pressable> : null}
       </CollapsibleSection>
 
@@ -426,18 +622,18 @@ export default function SubmissionDetailScreen() {
             <Chip key={o.code} label={o.label} palette={palette} active={form.highway_status_code === o.code} disabled={!canEdit} onPress={() => canEdit && setVal("highway_status_code", form.highway_status_code === o.code ? "" : o.code)} />
           ))}
         </View>
-        <Field palette={palette} label="Lane(s) Closed Count" value={form.lanes_closed_count} editable={canEdit} keyboardType="numeric" onChangeText={(v) => setVal("lanes_closed_count", v)} />
+        <Field palette={palette} label="Lane(s) Closed Count" value={form.lanes_closed_count} editable={canEdit} keyboardType="numeric" onChangeText={(v) => setVal("lanes_closed_count", v)} error={fieldErrors.lanes_closed_count} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Pavement / Slope Condition" open={openSections.pavementSlope} onToggle={() => toggleSection("pavementSlope")} palette={palette} compact={compact}>
         <Text style={styles.label}>Pavement/Ground Cracks</Text>
         <View style={styles.chips}>{(["YES", "NO", "UNKNOWN"] as const).map((c) => <Chip key={c} label={c} palette={palette} active={form.pavement_ground_cracks === c} disabled={!canEdit} onPress={() => canEdit && setVal("pavement_ground_cracks", c)} />)}</View>
-        <Field palette={palette} label="Crack Length (ft)" value={form.crack_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_length_ft", v)} />
-        <Field palette={palette} label="Crack Horizontal (in)" value={form.crack_horizontal_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_horizontal_in", v)} />
-        <Field palette={palette} label="Crack Vertical (in)" value={form.crack_vertical_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_vertical_in", v)} />
-        <Field palette={palette} label="Crack Depth (in)" value={form.crack_depth_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_depth_in", v)} />
-        <Field palette={palette} label="Settlement (in)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} />
-        <Field palette={palette} label="Bulge (in)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} />
+        <Field palette={palette} label="Crack Length (ft)" value={form.crack_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_length_ft", v)} error={fieldErrors.crack_length_ft} />
+        <Field palette={palette} label="Crack Horizontal (in)" value={form.crack_horizontal_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_horizontal_in", v)} error={fieldErrors.crack_horizontal_in} />
+        <Field palette={palette} label="Crack Vertical (in)" value={form.crack_vertical_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_vertical_in", v)} error={fieldErrors.crack_vertical_in} />
+        <Field palette={palette} label="Crack Depth (in)" value={form.crack_depth_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_depth_in", v)} error={fieldErrors.crack_depth_in} />
+        <Field palette={palette} label="Settlement (in)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
+        <Field palette={palette} label="Bulge (in)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
         <Text style={styles.label}>Indented by Rocks</Text>
         <View style={styles.chips}>{(["YES", "NO", "UNKNOWN"] as const).map((c) => <Chip key={c} label={c} palette={palette} active={form.indented_by_rocks === c} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", c)} />)}</View>
       </CollapsibleSection>
@@ -450,7 +646,7 @@ export default function SubmissionDetailScreen() {
       </CollapsibleSection>
 
       <CollapsibleSection title="Observations" open={openSections.observations} onToggle={() => toggleSection("observations")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Notes" value={form.observations_notes} editable={canEdit} multiline onChangeText={(v) => setVal("observations_notes", v)} />
+        <Field palette={palette} label="Notes" value={form.observations_notes} editable={canEdit} multiline onChangeText={(v) => setVal("observations_notes", v)} error={fieldErrors.observations_notes} />
       </CollapsibleSection>
 
       {canEdit ? (
@@ -613,7 +809,18 @@ const styles = StyleSheet.create({
   sectionBody: { marginTop: 4 },
   sectionTitle: { fontWeight: "800", color: "#1b2a40", fontSize: 22 / 1.45, marginBottom: 4 },
   sectionChevron: { fontSize: 16, color: "#6b7280", fontWeight: "700", marginBottom: 1 },
+  labelRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   label: { color: "#465978", fontSize: 13, fontWeight: "700" },
+  errorIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  errorIconText: { color: "#fff", fontSize: 10, fontWeight: "800", lineHeight: 12 },
+  errorText: { color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: "600" },
   input: { borderWidth: 1, borderColor: "#ccd8ea", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, color: "#1b2a40", backgroundColor: "#fdfefe" },
   inputDisabled: { backgroundColor: "#f9fafb", color: "#6b7280" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },

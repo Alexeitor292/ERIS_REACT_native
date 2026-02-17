@@ -374,6 +374,17 @@ class ReplaceActions(BaseModel):
     immediate: list[str] = []
     follow_up: list[str] = []
 
+class GeometryUpsert(BaseModel):
+    geometry: dict = Field(..., description="GeoJSON geometry object (Polygon/MultiPolygon/etc)")
+    srid: int = Field(default=4326, ge=1, le=999999)
+    source: str = Field(default="MOBILE_ARCGIS", max_length=64)
+
+class GeometryResponse(BaseModel):
+    submission_id: int
+    geometry: dict | None
+    srid: int | None = 4326
+    source: str | None = None
+
 
 # ----------------------------
 # Health
@@ -595,6 +606,84 @@ def get_submission(
         "attachments": [dict(a) for a in attachments],
         "workflow_events": [dict(e) for e in events],
     }
+
+@app.get("/submissions/{submission_id}/geometry", response_model=GeometryResponse)
+def get_submission_geometry(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    # viewer permission (admins/reviewers + owner/grants)
+    require_can_view_submission(submission_id, db, user)
+
+    row = db.execute(text("""
+        SELECT geometry_json
+        FROM submission_gisa
+        WHERE submission_id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+
+    if not row or row["geometry_json"] is None:
+        return {"submission_id": submission_id, "geometry": None, "srid": 4326, "source": None}
+
+    geom_val = row["geometry_json"]
+    if isinstance(geom_val, str):
+        try:
+            geom_val = json.loads(geom_val)
+        except Exception:
+            # if stored as a string but not parseable, return as-is
+            geom_val = {"raw": geom_val}
+
+    return {"submission_id": submission_id, "geometry": geom_val, "srid": 4326, "source": "MOBILE_ARCGIS"}
+
+
+@app.put("/submissions/{submission_id}/geometry", response_model=GeometryResponse)
+def put_submission_geometry(
+    submission_id: int = Path(..., ge=1),
+    payload: GeometryUpsert = ...,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+):
+    # Only owner/admin can edit
+    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+
+    # Only DRAFT editable (keeps workflow clean)
+    if get_submission_status(db, submission_id) != "DRAFT":
+        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be edited")
+
+    # Basic GeoJSON sanity check (minimal but useful)
+    if not isinstance(payload.geometry, dict):
+        raise HTTPException(status_code=400, detail="geometry must be an object")
+    gtype = str(payload.geometry.get("type", "")).lower()
+    if gtype not in ("polygon", "multipolygon", "point", "multipoint", "linestring", "multilinestring", "geometrycollection"):
+        raise HTTPException(status_code=400, detail=f"Unsupported GeoJSON type: {payload.geometry.get('type')}")
+
+    geom_json_str = json.dumps(payload.geometry)
+
+    try:
+        exists = db.execute(text("""
+            SELECT 1 FROM submission_gisa WHERE submission_id=:sid LIMIT 1
+        """), {"sid": submission_id}).scalar()
+
+        if exists:
+            db.execute(text("""
+                UPDATE submission_gisa
+                SET geometry_json = :geom,
+                    updated_by_user_id = :uid
+                WHERE submission_id = :sid
+            """), {"sid": submission_id, "geom": geom_json_str, "uid": user["id"]})
+        else:
+            # Create the submission_gisa row if it doesn’t exist yet
+            db.execute(text("""
+                INSERT INTO submission_gisa (submission_id, geometry_json, updated_by_user_id)
+                VALUES (:sid, :geom, :uid)
+            """), {"sid": submission_id, "geom": geom_json_str, "uid": user["id"]})
+
+        db.commit()
+        return {"submission_id": submission_id, "geometry": payload.geometry, "srid": payload.srid, "source": payload.source}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ----------------------------

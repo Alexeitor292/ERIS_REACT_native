@@ -1,0 +1,30 @@
+# Strict allowlist for EAS uploads.
+# Ignore everything first:
+*
+
+# Keep project source/config required for Expo prebuild + EAS build.
+!app/**
+!assets/**
+!components/**
+!constants/**
+!hooks/**
+!plugins/**
+!scripts/**
+!src/**
+
+!app.json
+!eas.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!expo-env.d.ts
+!eslint.config.js
+!README.md
+
+# Keep lockfile and npm/yarn metadata if present.
+!.npmrc
+!.yarnrc
+!.yarnrc.yml
+
+# Explicitly keep this file.
+!.easignore
