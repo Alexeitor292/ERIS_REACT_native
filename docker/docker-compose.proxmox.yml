@@ -31,7 +31,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALG: ${JWT_ALG:-HS256}
       JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES:-120}
-      SEED_ADMIN: "false"
+      SEED_ADMIN: ${SEED_ADMIN:-false}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
     ports:
       - "${API_BIND:-0.0.0.0}:8000:8000"
     depends_on:
