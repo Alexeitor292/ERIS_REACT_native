@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, Alert } from "react-native";
 import { router } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { apiFetch } from "../../src/api/client";
 import { consumeSessionExpiredNotice, setToken } from "../../src/auth/tokenStore";
 
@@ -38,39 +39,42 @@ export default function Login() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>ERIS</Text>
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.container}>
+      <View style={styles.content}>
+        <Text style={styles.title}>ERIS</Text>
 
-      <Text style={styles.label}>Email</Text>
-      <TextInput
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        placeholder="admin@local"
-        placeholderTextColor="#6b7280"
-        style={styles.input}
-      />
+        <Text style={styles.label}>Email</Text>
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          placeholder="admin@local"
+          placeholderTextColor="#6b7280"
+          style={styles.input}
+        />
 
-      <Text style={styles.label}>Password</Text>
-      <TextInput
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        placeholder="password"
-        placeholderTextColor="#6b7280"
-        style={styles.input}
-      />
+        <Text style={styles.label}>Password</Text>
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          placeholder="password"
+          placeholderTextColor="#6b7280"
+          style={styles.input}
+        />
 
-      <Pressable style={styles.button} onPress={onLogin} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? "Signing in..." : "Sign in"}</Text>
-      </Pressable>
-    </View>
+        <Pressable style={styles.button} onPress={onLogin} disabled={loading}>
+          <Text style={styles.buttonText}>{loading ? "Signing in..." : "Sign in"}</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, justifyContent: "center", gap: 10, backgroundColor: "#f8fafc" },
+  container: { flex: 1, backgroundColor: "#f8fafc" },
+  content: { flex: 1, padding: 20, justifyContent: "center", gap: 10 },
   title: { fontSize: 32, fontWeight: "700", marginBottom: 10, color: "#0f172a" },
   label: { fontSize: 14, opacity: 0.8, color: "#334155" },
   input: {

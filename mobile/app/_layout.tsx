@@ -2,6 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { UiSettingsProvider, useUiSettings } from '@/src/ui/UiSettingsContext';
 
@@ -23,8 +24,10 @@ function AppNavigator() {
 
 export default function RootLayout() {
   return (
-    <UiSettingsProvider>
-      <AppNavigator />
-    </UiSettingsProvider>
+    <SafeAreaProvider>
+      <UiSettingsProvider>
+        <AppNavigator />
+      </UiSettingsProvider>
+    </SafeAreaProvider>
   );
 }

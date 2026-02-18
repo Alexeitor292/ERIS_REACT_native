@@ -1,4 +1,5 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 
 function Choice({
@@ -23,43 +24,45 @@ export default function SettingsScreen() {
   const { themeMode, accent, density, setThemeMode, setAccent, setDensity, palette } = useUiSettings();
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: palette.bg }]} contentContainerStyle={styles.content}>
-      <Text style={[styles.title, { color: palette.text }]}>Display Settings</Text>
-      <Text style={[styles.subtitle, { color: palette.muted }]}>
-        Personalize colors and spacing for better field usability.
-      </Text>
+    <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, { backgroundColor: palette.bg }]}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={[styles.title, { color: palette.text }]}>Display Settings</Text>
+        <Text style={[styles.subtitle, { color: palette.muted }]}>
+          Personalize colors and spacing for better field usability.
+        </Text>
 
-      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Theme</Text>
-        <View style={styles.row}>
-          <Choice label="System" palette={palette} active={themeMode === "system"} onPress={() => setThemeMode("system")} />
-          <Choice label="Light" palette={palette} active={themeMode === "light"} onPress={() => setThemeMode("light")} />
-          <Choice label="Dark" palette={palette} active={themeMode === "dark"} onPress={() => setThemeMode("dark")} />
+        <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Theme</Text>
+          <View style={styles.row}>
+            <Choice label="System" palette={palette} active={themeMode === "system"} onPress={() => setThemeMode("system")} />
+            <Choice label="Light" palette={palette} active={themeMode === "light"} onPress={() => setThemeMode("light")} />
+            <Choice label="Dark" palette={palette} active={themeMode === "dark"} onPress={() => setThemeMode("dark")} />
+          </View>
         </View>
-      </View>
 
-      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Accent</Text>
-        <View style={styles.row}>
-          <Choice label="Blue" palette={palette} active={accent === "blue"} onPress={() => setAccent("blue")} />
-          <Choice label="Teal" palette={palette} active={accent === "teal"} onPress={() => setAccent("teal")} />
-          <Choice label="Amber" palette={palette} active={accent === "amber"} onPress={() => setAccent("amber")} />
+        <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Accent</Text>
+          <View style={styles.row}>
+            <Choice label="Blue" palette={palette} active={accent === "blue"} onPress={() => setAccent("blue")} />
+            <Choice label="Teal" palette={palette} active={accent === "teal"} onPress={() => setAccent("teal")} />
+            <Choice label="Amber" palette={palette} active={accent === "amber"} onPress={() => setAccent("amber")} />
+          </View>
         </View>
-      </View>
 
-      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>Density</Text>
-        <View style={styles.row}>
-          <Choice
-            label="Comfortable"
-            palette={palette}
-            active={density === "comfortable"}
-            onPress={() => setDensity("comfortable")}
-          />
-          <Choice label="Compact" palette={palette} active={density === "compact"} onPress={() => setDensity("compact")} />
+        <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Density</Text>
+          <View style={styles.row}>
+            <Choice
+              label="Comfortable"
+              palette={palette}
+              active={density === "comfortable"}
+              onPress={() => setDensity("comfortable")}
+            />
+            <Choice label="Compact" palette={palette} active={density === "compact"} onPress={() => setDensity("compact")} />
+          </View>
         </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
