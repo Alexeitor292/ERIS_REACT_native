@@ -18,7 +18,22 @@ venv/
 # ---- node ----
 node_modules/
 dist/
+coverage/
+*.log
 
 # ---- misc ----
 .DS_Store
 mobile/.git.nested.backup/
+
+# ---- expo / eas / react-native native artifacts ----
+mobile/.expo/
+mobile/.expo-shared/
+mobile/android/
+mobile/ios/
+mobile/android/local.properties
+*.apk
+*.aab
+*.ipa
+
+# ---- web build cache ----
+web/.vite/

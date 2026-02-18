@@ -7,8 +7,9 @@ import { useLocalSearchParams, router } from "expo-router";
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseCandidates, getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { deleteSubmission, getGisaLookups, getSubmission, patchSubmission, patchSubmissionTitle, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
+import { getGisaLookups, getSubmission, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
+import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 
 type OptionItem = { code: string; label: string };
 type UserInfo = { id: number; roles: string[] };
@@ -167,7 +168,6 @@ export default function SubmissionDetailScreen() {
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
   const [reviewComment, setReviewComment] = useState("");
-  const [submissionTitle, setSubmissionTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [openSections, setOpenSections] = useState({
@@ -212,7 +212,6 @@ export default function SubmissionDetailScreen() {
         getGisaLookups(token) as Promise<Lookups>,
       ]);
       setMe(meRes); setData(subRes); setLookups(lookRes);
-      setSubmissionTitle((subRes.submission.title ?? "").toString());
       const g = subRes.gisa || {};
       setForm({
         ...EMPTY_FORM,
@@ -301,7 +300,6 @@ export default function SubmissionDetailScreen() {
     }
     setBusy(true);
     try {
-      await patchSubmissionTitle(token, id, n(submissionTitle));
       await patchSubmission(token, id, {
         report_date: n(form.report_date), district: n(form.district), county: n(form.county), route: n(form.route), post_mile: n(form.post_mile), ea: n(form.ea), project_id: n(form.project_id), date_incident_reported: n(form.date_incident_reported), district_contact: n(form.district_contact),
         latitude: f(form.latitude, "Latitude"), longitude: f(form.longitude, "Longitude"),
@@ -326,30 +324,6 @@ export default function SubmissionDetailScreen() {
     try { await submitSubmission(token, id); Alert.alert("Submitted", "Sent for review."); await load(); }
     catch (err: any) { if (isSessionExpiredError(err)) return; Alert.alert("Submit failed", err?.message ?? "Unable to submit"); }
     finally { setBusy(false); }
-  }
-
-  async function deleteDraft() {
-    if (!token || !id) return;
-    Alert.alert("Delete draft?", "This action cannot be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          setBusy(true);
-          try {
-            await deleteSubmission(token, id);
-            Alert.alert("Deleted", "Draft deleted.");
-            router.replace("/(tabs)/submissions");
-          } catch (err: any) {
-            if (isSessionExpiredError(err)) return;
-            Alert.alert("Delete failed", err?.message ?? "Unable to delete draft");
-          } finally {
-            setBusy(false);
-          }
-        },
-      },
-    ]);
   }
 
   async function review(decision: "APPROVE" | "REJECT") {
@@ -534,8 +508,7 @@ export default function SubmissionDetailScreen() {
   if (!token || loading || !data || !lookups || !me) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
   const roles = new Set(me.roles || []);
   const isOwner = me.id === data.submission.created_by_user_id;
-  const canEdit = data.submission.status === "DRAFT" && (roles.has("ADMIN") || (roles.has("FIELD_WORKER") && isOwner));
-  const canDeleteDraft = data.submission.status === "DRAFT" && (roles.has("ADMIN") || isOwner);
+  const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && (roles.has("ADMIN") || (roles.has("FIELD_WORKER") && isOwner));
   const canReview = data.submission.status === "SUBMITTED" && (roles.has("REVIEWER") || roles.has("ADMIN"));
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
   const stepOrder = data.submission.status === "REJECTED"
@@ -593,10 +566,16 @@ export default function SubmissionDetailScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: palette.bg }}>
     <ScrollView style={[styles.container, { backgroundColor: palette.bg }]} contentContainerStyle={[styles.contentWrap, { padding: compact ? 10 : 14, gap: compact ? 8 : 10 }]}>
-      <Text style={[styles.title, { color: palette.text }]}>{submissionTitle.trim() || `Submission #${data.submission.id}`}</Text>
+      <Text style={[styles.title, { color: palette.text }]}>{buildSubmissionDescriptor({
+        id: data.submission.id,
+        created_at: data.submission.created_at,
+        district: data.gisa?.district,
+        county: data.gisa?.county,
+        route: data.gisa?.route,
+        post_mile: data.gisa?.post_mile,
+      })}</Text>
       <Text style={[styles.status, { color: palette.muted }]}>Status: {data.submission.status}</Text>
-      <CollapsibleSection title="Header Info" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Form Name" value={submissionTitle} editable={canEdit} onChangeText={setSubmissionTitle} />
+        <CollapsibleSection title="Header Info" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
         <Field palette={palette} label="Report Date (YYYY-MM-DD)" value={form.report_date} editable={canEdit} onChangeText={(v) => setVal("report_date", v)} error={fieldErrors.report_date} />
         <Field palette={palette} label="District *" value={form.district} editable={canEdit} onChangeText={(v) => setVal("district", v)} error={fieldErrors.district} />
         <Field palette={palette} label="County *" value={form.county} editable={canEdit} onChangeText={(v) => setVal("county", v)} error={fieldErrors.county} />
@@ -690,10 +669,10 @@ export default function SubmissionDetailScreen() {
       </CollapsibleSection>
 
       {canEdit ? (
-        <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
-          <Text style={styles.sectionTitle}>Draft Actions</Text>
-          <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary }]} onPress={saveDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Save Draft"}</Text></Pressable>
-          <Pressable style={[styles.btnPrimary, { backgroundColor: palette.success, marginTop: 8 }]} onPress={submitDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Submit for Review"}</Text></Pressable>
+          <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+            <Text style={styles.sectionTitle}>Draft Actions</Text>
+            <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary }]} onPress={saveDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Save Draft"}</Text></Pressable>
+          <Pressable style={[styles.btnPrimary, { backgroundColor: palette.success, marginTop: 8 }]} onPress={submitDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : (data.submission.status === "REJECTED" ? "Resubmit for Review" : "Submit for Review")}</Text></Pressable>
           <Pressable style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={pickPhoto} disabled={busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text></Pressable>
           <Text style={[styles.label, { marginTop: 12 }]}>Latest Photo Preview</Text>
           {!latestPhoto ? (
@@ -721,15 +700,6 @@ export default function SubmissionDetailScreen() {
               )}
             </View>
           )}
-        </View>
-      ) : null}
-
-      {canDeleteDraft ? (
-        <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
-          <Text style={styles.sectionTitle}>Danger Zone</Text>
-          <Pressable style={[styles.btnGhost, { borderColor: "#ef4444", backgroundColor: "#fff1f2" }]} onPress={deleteDraft} disabled={busy}>
-            <Text style={[styles.btnGhostText, { color: "#b91c1c" }]}>{busy ? "Working..." : "Delete Draft"}</Text>
-          </Pressable>
         </View>
       ) : null}
 

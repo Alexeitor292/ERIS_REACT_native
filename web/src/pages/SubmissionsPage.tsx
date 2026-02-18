@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Submission } from "../api/types";
 import AppShell from "../ui/AppShell";
+import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 
 type Status = Submission["status"];
 
@@ -56,7 +57,11 @@ export default function SubmissionsPage() {
         !query ||
         String(s.id).includes(query) ||
         String(s.created_by_user_id).includes(query) ||
-        (s.status ?? "").toLowerCase().includes(query);
+        (s.status ?? "").toLowerCase().includes(query) ||
+        (s.district ?? "").toLowerCase().includes(query) ||
+        (s.county ?? "").toLowerCase().includes(query) ||
+        (s.route ?? "").toLowerCase().includes(query) ||
+        (s.post_mile ?? "").toLowerCase().includes(query);
 
       const matchesStatus = status === "ALL" || s.status === status;
       return matchesQuery && matchesStatus;
@@ -156,7 +161,7 @@ export default function SubmissionsPage() {
             <thead>
               <tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted">
                 <th className="px-4 py-3">ID</th>
-                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Descriptor</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Created By</th>
                 <th className="px-4 py-3">Created At</th>
@@ -189,7 +194,16 @@ export default function SubmissionsPage() {
                 filtered.map((s) => (
                   <tr key={s.id} className="border-b border-[var(--line)]/60 hover:bg-[var(--panel-soft)]">
                     <td className="px-4 py-3 text-sm font-medium">{s.id}</td>
-                    <td className="px-4 py-3 text-sm">{s.title?.trim() || `Submission #${s.id}`}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {buildSubmissionDisplayTitle({
+                        id: s.id,
+                        created_at: s.created_at,
+                        district: s.district,
+                        county: s.county,
+                        route: s.route,
+                        post_mile: s.post_mile,
+                      })}
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       <StatusChip status={s.status} />
                     </td>

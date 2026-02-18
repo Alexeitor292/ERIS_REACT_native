@@ -4,11 +4,15 @@ import { router } from "expo-router";
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getToken, clearToken } from "../../../src/auth/tokenStore";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
+import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 
 type SubmissionItem = {
   id: number;
-  title?: string | null;
   status: string;
+  district?: string | null;
+  county?: string | null;
+  route?: string | null;
+  post_mile?: string | null;
   created_at: string;
   submitted_at: string | null;
 };
@@ -96,7 +100,16 @@ export default function SubmissionsList() {
             })}
             style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}
           >
-            <Text style={[styles.cardTitle, { color: palette.text }]}>{item.title?.trim() || `Submission #${item.id}`}</Text>
+            <Text style={[styles.cardTitle, { color: palette.text }]}>
+              {buildSubmissionDescriptor({
+                id: item.id,
+                created_at: item.created_at,
+                district: item.district,
+                county: item.county,
+                route: item.route,
+                post_mile: item.post_mile,
+              })}
+            </Text>
             <View style={styles.statusRow}>
               <Text style={[styles.cardMetaLabel, { color: palette.muted }]}>Status</Text>
               <Text style={[styles.statusPill, item.status === "APPROVED" ? styles.statusApproved : item.status === "REJECTED" ? styles.statusRejected : item.status === "SUBMITTED" ? styles.statusSubmitted : styles.statusDraft]}>{item.status}</Text>

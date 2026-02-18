@@ -8,6 +8,8 @@ import { getToken } from "../auth/token";
 import { appConfig } from "../config";
 import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import { useUiSettings } from "../ui/UiSettingsContext";
+import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
+import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, districtForCounty } from "../utils/caltransLookups";
 
 type Tri = "UNKNOWN" | "YES" | "NO";
 type Draft = Record<string, string> & { pavement_ground_cracks: Tri; indented_by_rocks: Tri };
@@ -57,6 +59,15 @@ function pointFromLatLon(gisa: any): any | null {
   return { type: "Point", coordinates: [lon, lat] };
 }
 
+function normalizeCounty(value: string): string {
+  return value.replace(/\s+County$/i, "").trim();
+}
+
+function tryExtractRoute(addressText: string): string | null {
+  const m = addressText.match(/\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b/i) || addressText.match(/\b(\d{1,3})\b/);
+  return m?.[1] ?? null;
+}
+
 export default function SubmissionDetailPage() {
   const { id } = useParams();
   const sid = Number(id);
@@ -76,16 +87,15 @@ export default function SubmissionDetailPage() {
   const [imm, setImm] = useState<string[]>([]);
   const [fol, setFol] = useState<string[]>([]);
   const [geom, setGeom] = useState<any | null>(null);
-  const [titleDraft, setTitleDraft] = useState("");
   const [shareQuery, setShareQuery] = useState("");
   const [shareCandidates, setShareCandidates] = useState<AdminUser[]>([]);
   const [sharedWith, setSharedWith] = useState<SharedUser[]>([]);
+  const [geoBusy, setGeoBusy] = useState(false);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
-  const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && data?.submission.status === "DRAFT";
+  const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
   const canAct = canReview && data?.submission.status === "SUBMITTED";
   const canManageSharing = !!me?.roles?.includes("ADMIN");
-  const canDeleteDraft = !!data && data.submission.status === "DRAFT" && (!!me?.roles?.includes("ADMIN") || me?.id === data.submission.created_by_user_id);
   const tog = (arr: string[], code: string) => (arr.includes(code) ? arr.filter((x) => x !== code) : [...arr, code]);
 
   async function load() {
@@ -99,7 +109,6 @@ export default function SubmissionDetailPage() {
       setData(d);
       setLookups(l);
       setReviewNote(d.submission.review_comment ?? "");
-      setTitleDraft(d.submission.title ?? "");
       setGeom(geomRes?.geometry ?? d.gisa?.geometry_json ?? pointFromLatLon(d.gisa) ?? null);
       const gisa: any = d.gisa || {};
       setDraft({
@@ -145,29 +154,6 @@ export default function SubmissionDetailPage() {
   async function saveDraft() { setBusy(true); setErr(null); try { await persistDraft(); await load(); } catch (e: any) { setErr(e?.message ?? "Save failed"); setBusy(false); } }
   async function submitDraft() { setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setErr(e?.message ?? "Submit failed"); setBusy(false); } }
   async function review(decision: "APPROVE" | "REJECT") { setBusy(true); setErr(null); try { await api(`/submissions/${sid}/review`, { method: "POST", body: JSON.stringify({ decision, comment: reviewNote.trim() || null }) }); await load(); } catch (e: any) { setErr(e?.message ?? "Review failed"); setBusy(false); } }
-  async function saveTitle() {
-    if (!canEdit) return;
-    setBusy(true); setErr(null);
-    try {
-      await api(`/submissions/${sid}/title`, { method: "PATCH", body: JSON.stringify({ title: titleDraft.trim() || null }) });
-      await load();
-    } catch (e: any) {
-      setErr(e?.message ?? "Title update failed");
-      setBusy(false);
-    }
-  }
-  async function deleteDraft() {
-    if (!canDeleteDraft) return;
-    if (!window.confirm("Delete this draft? This cannot be undone.")) return;
-    setBusy(true); setErr(null);
-    try {
-      await api(`/submissions/${sid}`, { method: "DELETE" });
-      window.location.href = "/submissions";
-    } catch (e: any) {
-      setErr(e?.message ?? "Delete failed");
-      setBusy(false);
-    }
-  }
   async function searchShareCandidates() {
     if (!canManageSharing) return;
     const q = shareQuery.trim();
@@ -219,15 +205,75 @@ export default function SubmissionDetailPage() {
     }
   }
 
+  async function autofillFromGps() {
+    if (!canEdit || !navigator.geolocation) return;
+    setGeoBusy(true);
+    setErr(null);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 30000,
+        });
+      });
+
+      const lat = position.coords.latitude;
+      const lon = position.coords.longitude;
+
+      setDraft((prev) => ({ ...prev, latitude: String(lat), longitude: String(lon) }));
+
+      const reverseUrl =
+        `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?` +
+        `location=${encodeURIComponent(`${lon},${lat}`)}&f=pjson&langCode=en`;
+      const geocodeRes = await fetch(reverseUrl);
+      if (!geocodeRes.ok) return;
+      const geocode = await geocodeRes.json();
+      const addr = geocode?.address ?? {};
+      const countyRaw = String(addr.Subregion ?? addr.County ?? "").trim();
+      const county = countyRaw ? normalizeCounty(countyRaw) : "";
+      const districtGuess = districtForCounty(county);
+      const routeGuess = tryExtractRoute(
+        [addr.StreetName, addr.Match_addr, addr.LongLabel, addr.ShortLabel].filter(Boolean).join(" ")
+      );
+
+      setDraft((prev) => ({
+        ...prev,
+        county: county || prev.county,
+        district: districtGuess || prev.district,
+        route: routeGuess || prev.route,
+      }));
+    } catch {
+      // keep lat/lon if available; silent fallthrough with generic error
+      setErr("Could not fully autofill from GPS. Latitude/Longitude may still be available.");
+    } finally {
+      setGeoBusy(false);
+    }
+  }
+
   useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid, canManageSharing]);
 
   return (
-    <AppShell title={invalid ? "Submission" : (data?.submission.title?.trim() || `Submission #${sid}`)}>
+    <AppShell title={invalid ? "Submission" : (data ? buildSubmissionDisplayTitle({
+      id: data.submission.id,
+      created_at: data.submission.created_at,
+      district: data.gisa?.district,
+      county: data.gisa?.county,
+      route: data.gisa?.route,
+      post_mile: data.gisa?.post_mile,
+    }) : `Submission ${sid}`)}>
       <div className="p-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <Link className="text-sm underline text-muted" to="/submissions">{"<-"} Back to submissions</Link>
-            <div className="mt-2 flex items-center gap-2"><h2 className="text-lg font-semibold">{invalid ? "Invalid submission id" : (data?.submission.title?.trim() || `Case ${sid}`)}</h2>{data?.submission && <S s={data.submission.status} />}</div>
+            <div className="mt-2 flex items-center gap-2"><h2 className="text-lg font-semibold">{invalid ? "Invalid submission id" : (data ? buildSubmissionDisplayTitle({
+              id: data.submission.id,
+              created_at: data.submission.created_at,
+              district: data.gisa?.district,
+              county: data.gisa?.county,
+              route: data.gisa?.route,
+              post_mile: data.gisa?.post_mile,
+            }) : `Case ${sid}`)}</h2>{data?.submission && <S s={data.submission.status} />}</div>
           </div>
           <div className="flex gap-2">
             <button onClick={load} disabled={busy || invalid} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95 disabled:opacity-60">Refresh</button>
@@ -244,25 +290,43 @@ export default function SubmissionDetailPage() {
           <div className="mt-4 space-y-4">
             {canEdit && (
               <section className="rounded-xl surface-soft p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Form Name</h3>
-                <div className="mt-2 flex gap-2">
-                  <input className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Form name (optional)" value={titleDraft} onChange={(e)=>setTitleDraft(e.target.value)} />
-                  <button onClick={saveTitle} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:opacity-60">Save Name</button>
-                </div>
-              </section>
-            )}
-
-            {canEdit && (
-              <section className="rounded-xl surface-soft p-4">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Draft Editor</h3>
                 <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
-                  {[
-                    ["report_date","Report Date (YYYY-MM-DD)"],["district","District"],["county","County"],["route","Route"],["post_mile","Post Mile"],["ea","EA"],["project_id","Project ID"],["date_incident_reported","Date Incident Reported"],["district_contact","District Contact"],["latitude","Latitude"],["longitude","Longitude"],["lanes_closed_count","Lanes Closed Count"],["crack_length_ft","Crack Length (ft)"],["crack_horizontal_in","Crack Horizontal (in)"],["crack_vertical_in","Crack Vertical (in)"],["crack_depth_in","Crack Depth (in)"],["settlement_in","Settlement (in)"],["bulge_in","Bulge (in)"],
-                  ].map(([k,p]) => <input key={k} className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder={p} value={draft[k]} onChange={(e)=>setDraft((d)=>({...d,[k]:e.target.value}))} />)}
+                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Report Date (YYYY-MM-DD)" value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
+                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.district} onChange={(e)=>setDraft((d)=>({...d,district:e.target.value}))}>
+                    <option value="">District</option>
+                    {CALTRANS_DISTRICTS.map((d) => <option key={d} value={d}>{`District ${d}`}</option>)}
+                  </select>
+                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.county} onChange={(e)=>{
+                    const county = e.target.value;
+                    const district = districtForCounty(county);
+                    setDraft((d)=>({...d,county,district:district ?? d.district}));
+                  }}>
+                    <option value="">County</option>
+                    {CALIFORNIA_COUNTIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Route" inputMode="numeric" pattern="[0-9]*" value={draft.route} onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))} />
+                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Post Mile" value={draft.post_mile} onChange={(e)=>setDraft((d)=>({...d,post_mile:e.target.value}))} />
+                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="EA" value={draft.ea} onChange={(e)=>setDraft((d)=>({...d,ea:e.target.value}))} />
+                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Project ID" value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
+                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Date Incident Reported" value={draft.date_incident_reported} onChange={(e)=>setDraft((d)=>({...d,date_incident_reported:e.target.value}))} />
+                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="District Contact" value={draft.district_contact} onChange={(e)=>setDraft((d)=>({...d,district_contact:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Latitude" value={draft.latitude} onChange={(e)=>setDraft((d)=>({...d,latitude:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Longitude" value={draft.longitude} onChange={(e)=>setDraft((d)=>({...d,longitude:e.target.value}))} />
+                  <input type="number" step="1" inputMode="numeric" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Lanes Closed Count" value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Length (ft)" value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Horizontal (in)" value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Vertical (in)" value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Depth (in)" value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Settlement (in)" value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Bulge (in)" value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} />
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.distribution_code} onChange={(e)=>setDraft((d)=>({...d,distribution_code:e.target.value}))}><option value="">Distribution</option>{(lookups?.distribution??[]).map((x)=><option key={x.code} value={x.code}>{x.label}</option>)}</select>
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.highway_status_code} onChange={(e)=>setDraft((d)=>({...d,highway_status_code:e.target.value}))}><option value="">Highway Status</option>{(lookups?.highway_status??[]).map((x)=><option key={x.code} value={x.code}>{x.label}</option>)}</select>
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.pavement_ground_cracks} onChange={(e)=>setDraft((d)=>({...d,pavement_ground_cracks:e.target.value as Tri}))}><option value="UNKNOWN">Pavement Cracks: Unknown</option><option value="YES">Pavement Cracks: Yes</option><option value="NO">Pavement Cracks: No</option></select>
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.indented_by_rocks} onChange={(e)=>setDraft((d)=>({...d,indented_by_rocks:e.target.value as Tri}))}><option value="UNKNOWN">Indented by Rocks: Unknown</option><option value="YES">Indented by Rocks: Yes</option><option value="NO">Indented by Rocks: No</option></select>
+                </div>
+                <div className="mt-2">
+                  <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:opacity-60">{geoBusy ? "Detecting location..." : "Use GPS Autofill"}</button>
                 </div>
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={3} placeholder="Observations" value={draft.observations_notes} onChange={(e)=>setDraft((d)=>({...d,observations_notes:e.target.value}))} />
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-mono" rows={4} placeholder='Geometry JSON {"type":"Point","coordinates":[...]} ' value={draft.geometry_json} onChange={(e)=>setDraft((d)=>({...d,geometry_json:e.target.value}))} />
@@ -272,22 +336,19 @@ export default function SubmissionDetailPage() {
                   <div><div className="text-xs font-semibold uppercase text-muted">Follow-Up</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.follow_up??[]).map((x)=><button key={x.code} type="button" onClick={()=>setFol((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${fol.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
                 </div>
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Submit comment (optional)" value={submitNote} onChange={(e)=>setSubmitNote(e.target.value)} />
-                <div className="mt-2 flex gap-2"><button onClick={saveDraft} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:opacity-60">Save Draft</button><button onClick={submitDraft} disabled={busy} className="rounded-md bg-[var(--good)] px-3 py-2 text-sm text-white disabled:opacity-60">Submit for Review</button></div>
-              </section>
-            )}
-
-            {canDeleteDraft && (
-              <section className="rounded-xl surface-soft p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--bad)]">Danger Zone</h3>
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <div className="text-sm text-muted">Delete this draft permanently.</div>
-                  <button onClick={deleteDraft} disabled={busy} className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 disabled:opacity-60">Delete Draft</button>
-                </div>
+                <div className="mt-2 flex gap-2"><button onClick={saveDraft} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:opacity-60">Save Draft</button><button onClick={submitDraft} disabled={busy} className="rounded-md bg-[var(--good)] px-3 py-2 text-sm text-white disabled:opacity-60">{data.submission.status === "REJECTED" ? "Resubmit for Review" : "Submit for Review"}</button></div>
               </section>
             )}
 
             <Section title="Summary" open>
-              <R l="Form Name" v={data.submission.title ?? "-"} />
+              <R l="Descriptor" v={buildSubmissionDisplayTitle({
+                id: data.submission.id,
+                created_at: data.submission.created_at,
+                district: data.gisa?.district,
+                county: data.gisa?.county,
+                route: data.gisa?.route,
+                post_mile: data.gisa?.post_mile,
+              })} />
               <R l="Created" v={data.submission.created_at} />
               <R l="Updated" v={data.submission.updated_at} />
               <R l="Submitted" v={data.submission.submitted_at} />

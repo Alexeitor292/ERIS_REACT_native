@@ -6,6 +6,10 @@ export type Submission = {
   status: string;
   client_submission_uuid: string;
   title?: string | null;
+  district?: string | null;
+  county?: string | null;
+  route?: string | null;
+  post_mile?: string | null;
   created_at: string;
   updated_at?: string;
   submitted_at: string | null;

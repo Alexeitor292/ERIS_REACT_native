@@ -257,7 +257,7 @@ def validate_submit_ready(db: Session, submission_id: int) -> None:
 ALLOWED_TRANSITIONS = {
     "DRAFT": {"SUBMITTED"},
     "SUBMITTED": {"APPROVED", "REJECTED"},
-    "REJECTED": set(),
+    "REJECTED": {"SUBMITTED"},
     "APPROVED": set(),
 }
 
@@ -533,10 +533,13 @@ def list_submissions(
 
     if is_admin(user) or is_reviewer(user):
         rows = db.execute(text("""
-            SELECT id, created_by_user_id, status, client_submission_uuid, title, created_at, submitted_at, reviewed_at
-            FROM submissions
+            SELECT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,
+                   s.created_at, s.submitted_at, s.reviewed_at,
+                   g.district, g.county, g.route, g.post_mile
+            FROM submissions s
+            LEFT JOIN submission_gisa g ON g.submission_id = s.id
             """ + status_filter + """
-            ORDER BY id DESC
+            ORDER BY s.id DESC
             LIMIT :limit
         """), params).mappings().all()
         return {"items": [dict(r) for r in rows]}
@@ -547,10 +550,13 @@ def list_submissions(
         where_clause = f"{where_clause} AND s.status = :status"
 
     rows = db.execute(text("""
-        SELECT DISTINCT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title, s.created_at, s.submitted_at, s.reviewed_at
+        SELECT DISTINCT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,
+               s.created_at, s.submitted_at, s.reviewed_at,
+               g.district, g.county, g.route, g.post_mile
         FROM submissions s
         LEFT JOIN submission_visibility v
           ON v.submission_id = s.id AND v.user_id = :uid
+        LEFT JOIN submission_gisa g ON g.submission_id = s.id
         """ + where_clause + """
         ORDER BY s.id DESC
         LIMIT :limit
@@ -621,8 +627,8 @@ def patch_submission_title(
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
-    if get_submission_status(db, submission_id) != "DRAFT":
-        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be edited")
+    if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
     title_value = (payload.title or "").strip() or None
     try:
@@ -696,9 +702,9 @@ def put_submission_geometry(
     # Only owner/admin can edit
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
 
-    # Only DRAFT editable (keeps workflow clean)
-    if get_submission_status(db, submission_id) != "DRAFT":
-        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be edited")
+    # Only DRAFT/REJECTED editable
+    if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
     # Basic GeoJSON sanity check (minimal but useful)
     if not isinstance(payload.geometry, dict):
@@ -749,8 +755,8 @@ def patch_gisa(
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
 
     current_status = get_submission_status(db, submission_id)
-    if current_status != "DRAFT":
-        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be edited")
+    if current_status not in {"DRAFT", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
     provided = payload.model_dump(exclude_unset=True)
     if not provided:
@@ -810,8 +816,8 @@ def replace_incident_types(
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
-    if get_submission_status(db, submission_id) != "DRAFT":
-        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be edited")
+    if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
     # Validate codes exist
     for code in payload.items:
@@ -841,8 +847,8 @@ def replace_actions(
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
-    if get_submission_status(db, submission_id) != "DRAFT":
-        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be edited")
+    if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
     def validate_action(code: str, group: str):
         row = db.execute(text("""
@@ -1053,14 +1059,22 @@ def submit(
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
     validate_submit_ready(db, submission_id)
 
-    from_status = "DRAFT"
+    current_status = get_submission_status(db, submission_id)
+    if current_status not in {"DRAFT", "REJECTED"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Only DRAFT or REJECTED submissions can be submitted",
+        )
+
+    from_status = current_status
     to_status = "SUBMITTED"
+    event_type = "RESUBMIT" if from_status == "REJECTED" else "SUBMIT"
     try:
         result = transition_submission_concurrency_safe(
             db=db,
             submission_id=submission_id,
             actor_user_id=user["id"],
-            event_type="SUBMIT",
+            event_type=event_type,
             from_status=from_status,
             to_status=to_status,
             comment=payload.comment,
