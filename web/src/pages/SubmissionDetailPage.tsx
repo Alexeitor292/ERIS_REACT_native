@@ -9,9 +9,10 @@ import { appConfig } from "../config";
 import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import { useUiSettings } from "../ui/UiSettingsContext";
 
-
 type Tri = "UNKNOWN" | "YES" | "NO";
 type Draft = Record<string, string> & { pavement_ground_cracks: Tri; indented_by_rocks: Tri };
+type SharedUser = { user_id: number; email: string; full_name: string; granted_by_user_id: number; created_at: string };
+type AdminUser = { id: number; email: string; full_name: string; is_active: boolean; roles: string[] };
 
 const EMPTY: Draft = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
@@ -68,7 +69,6 @@ export default function SubmissionDetailPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState<number | null>(null);
-
   const [reviewNote, setReviewNote] = useState("");
   const [submitNote, setSubmitNote] = useState("");
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -76,11 +76,16 @@ export default function SubmissionDetailPage() {
   const [imm, setImm] = useState<string[]>([]);
   const [fol, setFol] = useState<string[]>([]);
   const [geom, setGeom] = useState<any | null>(null);
-
+  const [titleDraft, setTitleDraft] = useState("");
+  const [shareQuery, setShareQuery] = useState("");
+  const [shareCandidates, setShareCandidates] = useState<AdminUser[]>([]);
+  const [sharedWith, setSharedWith] = useState<SharedUser[]>([]);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && data?.submission.status === "DRAFT";
   const canAct = canReview && data?.submission.status === "SUBMITTED";
+  const canManageSharing = !!me?.roles?.includes("ADMIN");
+  const canDeleteDraft = !!data && data.submission.status === "DRAFT" && (!!me?.roles?.includes("ADMIN") || me?.id === data.submission.created_by_user_id);
   const tog = (arr: string[], code: string) => (arr.includes(code) ? arr.filter((x) => x !== code) : [...arr, code]);
 
   async function load() {
@@ -91,7 +96,10 @@ export default function SubmissionDetailPage() {
         api<GisaLookups>("/gisa/lookups"),
         api<{ submission_id: number; geometry: any | null }>(`/submissions/${sid}/geometry`).catch(() => null),
       ]);
-      setData(d); setLookups(l); setReviewNote(d.submission.review_comment ?? "");
+      setData(d);
+      setLookups(l);
+      setReviewNote(d.submission.review_comment ?? "");
+      setTitleDraft(d.submission.title ?? "");
       setGeom(geomRes?.geometry ?? d.gisa?.geometry_json ?? pointFromLatLon(d.gisa) ?? null);
       const gisa: any = d.gisa || {};
       setDraft({
@@ -101,8 +109,20 @@ export default function SubmissionDetailPage() {
         pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
         observations_notes: t(gisa.observations_notes), geometry_json: gisa.geometry_json ? JSON.stringify(gisa.geometry_json, null, 2) : "",
       });
-      setInc(d.incident_types ?? []); setImm(d.actions?.immediate ?? []); setFol(d.actions?.follow_up ?? []);
-    } catch (e: any) { setErr(e?.message ?? "Failed to load"); } finally { setBusy(false); }
+      setInc(d.incident_types ?? []);
+      setImm(d.actions?.immediate ?? []);
+      setFol(d.actions?.follow_up ?? []);
+      if (canManageSharing) {
+        const sharedRes = await api<{ items: SharedUser[] }>(`/submissions/${sid}/shared-with`);
+        setSharedWith(sharedRes.items ?? []);
+      } else {
+        setSharedWith([]);
+      }
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function persistDraft() {
@@ -125,6 +145,65 @@ export default function SubmissionDetailPage() {
   async function saveDraft() { setBusy(true); setErr(null); try { await persistDraft(); await load(); } catch (e: any) { setErr(e?.message ?? "Save failed"); setBusy(false); } }
   async function submitDraft() { setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setErr(e?.message ?? "Submit failed"); setBusy(false); } }
   async function review(decision: "APPROVE" | "REJECT") { setBusy(true); setErr(null); try { await api(`/submissions/${sid}/review`, { method: "POST", body: JSON.stringify({ decision, comment: reviewNote.trim() || null }) }); await load(); } catch (e: any) { setErr(e?.message ?? "Review failed"); setBusy(false); } }
+  async function saveTitle() {
+    if (!canEdit) return;
+    setBusy(true); setErr(null);
+    try {
+      await api(`/submissions/${sid}/title`, { method: "PATCH", body: JSON.stringify({ title: titleDraft.trim() || null }) });
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "Title update failed");
+      setBusy(false);
+    }
+  }
+  async function deleteDraft() {
+    if (!canDeleteDraft) return;
+    if (!window.confirm("Delete this draft? This cannot be undone.")) return;
+    setBusy(true); setErr(null);
+    try {
+      await api(`/submissions/${sid}`, { method: "DELETE" });
+      window.location.href = "/submissions";
+    } catch (e: any) {
+      setErr(e?.message ?? "Delete failed");
+      setBusy(false);
+    }
+  }
+  async function searchShareCandidates() {
+    if (!canManageSharing) return;
+    const q = shareQuery.trim();
+    if (!q) {
+      setShareCandidates([]);
+      return;
+    }
+    try {
+      const res = await api<{ items: AdminUser[] }>(`/admin/users?q=${encodeURIComponent(q)}`);
+      setShareCandidates((res.items ?? []).filter((u) => u.id !== data?.submission.created_by_user_id));
+    } catch (e: any) {
+      setErr(e?.message ?? "User search failed");
+    }
+  }
+  async function addShare(userId: number) {
+    if (!canManageSharing) return;
+    setBusy(true); setErr(null);
+    try {
+      await api(`/submissions/${sid}/share`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "Share failed");
+      setBusy(false);
+    }
+  }
+  async function removeShare(userId: number) {
+    if (!canManageSharing) return;
+    setBusy(true); setErr(null);
+    try {
+      await api(`/submissions/${sid}/share/${userId}`, { method: "DELETE" });
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "Unshare failed");
+      setBusy(false);
+    }
+  }
   async function openDownloadUrl(id: number) {
     setDownloading(id);
     try {
@@ -140,15 +219,15 @@ export default function SubmissionDetailPage() {
     }
   }
 
-  useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid]);
+  useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid, canManageSharing]);
 
   return (
-    <AppShell title={invalid ? "Submission" : `Submission #${sid}`}>
+    <AppShell title={invalid ? "Submission" : (data?.submission.title?.trim() || `Submission #${sid}`)}>
       <div className="p-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <Link className="text-sm underline text-muted" to="/submissions">{"<-"} Back to submissions</Link>
-            <div className="mt-2 flex items-center gap-2"><h2 className="text-lg font-semibold">{invalid ? "Invalid submission id" : `Case ${sid}`}</h2>{data?.submission && <S s={data.submission.status} />}</div>
+            <div className="mt-2 flex items-center gap-2"><h2 className="text-lg font-semibold">{invalid ? "Invalid submission id" : (data?.submission.title?.trim() || `Case ${sid}`)}</h2>{data?.submission && <S s={data.submission.status} />}</div>
           </div>
           <div className="flex gap-2">
             <button onClick={load} disabled={busy || invalid} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95 disabled:opacity-60">Refresh</button>
@@ -163,6 +242,16 @@ export default function SubmissionDetailPage() {
 
         {!invalid && data && (
           <div className="mt-4 space-y-4">
+            {canEdit && (
+              <section className="rounded-xl surface-soft p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Form Name</h3>
+                <div className="mt-2 flex gap-2">
+                  <input className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Form name (optional)" value={titleDraft} onChange={(e)=>setTitleDraft(e.target.value)} />
+                  <button onClick={saveTitle} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:opacity-60">Save Name</button>
+                </div>
+              </section>
+            )}
+
             {canEdit && (
               <section className="rounded-xl surface-soft p-4">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Draft Editor</h3>
@@ -187,7 +276,18 @@ export default function SubmissionDetailPage() {
               </section>
             )}
 
+            {canDeleteDraft && (
+              <section className="rounded-xl surface-soft p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--bad)]">Danger Zone</h3>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <div className="text-sm text-muted">Delete this draft permanently.</div>
+                  <button onClick={deleteDraft} disabled={busy} className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 disabled:opacity-60">Delete Draft</button>
+                </div>
+              </section>
+            )}
+
             <Section title="Summary" open>
+              <R l="Form Name" v={data.submission.title ?? "-"} />
               <R l="Created" v={data.submission.created_at} />
               <R l="Updated" v={data.submission.updated_at} />
               <R l="Submitted" v={data.submission.submitted_at} />
@@ -285,6 +385,43 @@ export default function SubmissionDetailPage() {
             <Section title="Workflow Events">
               <div>{data.workflow_events.length===0?<div className="text-sm text-muted">No workflow events.</div>:<ol className="space-y-2">{data.workflow_events.map((e)=><li key={e.id} className="rounded border border-[var(--line)] p-2 text-sm"><div className="text-xs text-muted">{e.created_at}</div><div className="font-medium">{e.event_type} ({e.from_status ?? "-"} {"->"} {e.to_status ?? "-"})</div><div className="text-xs text-muted">Actor {e.actor_user_id}{e.comment ? ` - ${e.comment}` : ""}</div></li>)}</ol>}</div>
             </Section>
+
+            {canManageSharing && (
+              <Section title="Access Sharing">
+                <div className="flex gap-2">
+                  <input
+                    className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+                    placeholder="Search users by email or name"
+                    value={shareQuery}
+                    onChange={(e) => setShareQuery(e.target.value)}
+                  />
+                  <button onClick={searchShareCandidates} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">Search</button>
+                </div>
+                {shareCandidates.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {shareCandidates.map((u) => (
+                      <div key={u.id} className="flex items-center justify-between rounded border border-[var(--line)] p-2 text-sm">
+                        <div>{u.full_name} ({u.email})</div>
+                        <button onClick={() => addShare(u.id)} className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs">Grant Access</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Users with explicit access</div>
+                {sharedWith.length === 0 ? (
+                  <div className="mt-1 text-sm text-muted">No explicit grants yet.</div>
+                ) : (
+                  <div className="mt-2 space-y-1">
+                    {sharedWith.map((u) => (
+                      <div key={u.user_id} className="flex items-center justify-between rounded border border-[var(--line)] p-2 text-sm">
+                        <div>{u.full_name} ({u.email})</div>
+                        <button onClick={() => removeShare(u.user_id)} className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs">Revoke</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            )}
           </div>
         )}
       </div>

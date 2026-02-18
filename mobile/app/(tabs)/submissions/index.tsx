@@ -7,6 +7,7 @@ import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 
 type SubmissionItem = {
   id: number;
+  title?: string | null;
   status: string;
   created_at: string;
   submitted_at: string | null;
@@ -95,7 +96,7 @@ export default function SubmissionsList() {
             })}
             style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}
           >
-            <Text style={[styles.cardTitle, { color: palette.text }]}>Submission #{item.id}</Text>
+            <Text style={[styles.cardTitle, { color: palette.text }]}>{item.title?.trim() || `Submission #${item.id}`}</Text>
             <View style={styles.statusRow}>
               <Text style={[styles.cardMetaLabel, { color: palette.muted }]}>Status</Text>
               <Text style={[styles.statusPill, item.status === "APPROVED" ? styles.statusApproved : item.status === "REJECTED" ? styles.statusRejected : item.status === "SUBMITTED" ? styles.statusSubmitted : styles.statusDraft]}>{item.status}</Text>

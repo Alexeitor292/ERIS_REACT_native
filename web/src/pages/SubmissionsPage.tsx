@@ -146,6 +146,7 @@ export default function SubmissionsPage() {
           <table className="w-full table-fixed border-collapse">
             <colgroup>
               <col className="w-16" />
+              <col className="w-56" />
               <col className="w-36" />
               <col className="w-28" />
               <col className="w-56" />
@@ -155,6 +156,7 @@ export default function SubmissionsPage() {
             <thead>
               <tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted">
                 <th className="px-4 py-3">ID</th>
+                <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Created By</th>
                 <th className="px-4 py-3">Created At</th>
@@ -165,13 +167,13 @@ export default function SubmissionsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-4 text-sm text-muted" colSpan={6}>
+                  <td className="px-4 py-4 text-sm text-muted" colSpan={7}>
                     Loading submissions...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-sm text-muted" colSpan={6}>
+                  <td className="px-4 py-6 text-sm text-muted" colSpan={7}>
                     <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-4">
                       <div className="font-medium">No submissions available</div>
                       <div className="mt-1">
@@ -187,6 +189,7 @@ export default function SubmissionsPage() {
                 filtered.map((s) => (
                   <tr key={s.id} className="border-b border-[var(--line)]/60 hover:bg-[var(--panel-soft)]">
                     <td className="px-4 py-3 text-sm font-medium">{s.id}</td>
+                    <td className="px-4 py-3 text-sm">{s.title?.trim() || `Submission #${s.id}`}</td>
                     <td className="px-4 py-3 text-sm">
                       <StatusChip status={s.status} />
                     </td>

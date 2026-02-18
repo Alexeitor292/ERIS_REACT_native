@@ -325,7 +325,7 @@ class LoginRequest(BaseModel):
     password: str
 
 class SubmissionCreate(BaseModel):
-    pass
+    title: str | None = Field(default=None, max_length=255)
 
 class WorkflowAction(BaseModel):
     comment: str | None = None
@@ -336,6 +336,9 @@ class ReviewAction(BaseModel):
 
 class ShareRequest(BaseModel):
     user_id: int = Field(..., ge=1)
+
+class SubmissionTitlePatch(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
 
 class GisaDraftPatch(BaseModel):
     report_date: str | None = None  # YYYY-MM-DD (keep as string to avoid timezone weirdness)
@@ -484,14 +487,16 @@ def me(user=Depends(get_current_user)):
 @app.post("/submissions")
 def create_submission(
     db: Session = Depends(get_db),
+    payload: SubmissionCreate = SubmissionCreate(),
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
 ):
     try:
         status_value = "DRAFT"
+        title_value = (payload.title or "").strip() or None
         db.execute(text("""
-            INSERT INTO submissions (created_by_user_id, status, client_submission_uuid)
-            VALUES (:uid, :status, UUID())
-        """), {"uid": user["id"], "status": status_value})
+            INSERT INTO submissions (created_by_user_id, status, client_submission_uuid, title)
+            VALUES (:uid, :status, UUID(), :title)
+        """), {"uid": user["id"], "status": status_value, "title": title_value})
 
         new_id = db.execute(text("SELECT LAST_INSERT_ID()")).scalar()
 
@@ -528,7 +533,7 @@ def list_submissions(
 
     if is_admin(user) or is_reviewer(user):
         rows = db.execute(text("""
-            SELECT id, created_by_user_id, status, client_submission_uuid, created_at, submitted_at, reviewed_at
+            SELECT id, created_by_user_id, status, client_submission_uuid, title, created_at, submitted_at, reviewed_at
             FROM submissions
             """ + status_filter + """
             ORDER BY id DESC
@@ -542,7 +547,7 @@ def list_submissions(
         where_clause = f"{where_clause} AND s.status = :status"
 
     rows = db.execute(text("""
-        SELECT DISTINCT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.created_at, s.submitted_at, s.reviewed_at
+        SELECT DISTINCT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title, s.created_at, s.submitted_at, s.reviewed_at
         FROM submissions s
         LEFT JOIN submission_visibility v
           ON v.submission_id = s.id AND v.user_id = :uid
@@ -561,7 +566,7 @@ def get_submission(
     user=Depends(get_current_user)
 ):
     sub = db.execute(text("""
-        SELECT id, created_by_user_id, status, client_submission_uuid,
+        SELECT id, created_by_user_id, status, client_submission_uuid, title,
                created_at, updated_at, submitted_at, reviewed_at, reviewed_by_user_id, review_comment
         FROM submissions
         WHERE id = :sid
@@ -606,6 +611,50 @@ def get_submission(
         "attachments": [dict(a) for a in attachments],
         "workflow_events": [dict(e) for e in events],
     }
+
+
+@app.patch("/submissions/{submission_id}/title")
+def patch_submission_title(
+    submission_id: int = Path(..., ge=1),
+    payload: SubmissionTitlePatch = ...,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+):
+    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    if get_submission_status(db, submission_id) != "DRAFT":
+        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be edited")
+
+    title_value = (payload.title or "").strip() or None
+    try:
+        db.execute(text("""
+            UPDATE submissions
+            SET title = :title
+            WHERE id = :sid
+        """), {"title": title_value, "sid": submission_id})
+        db.commit()
+        return {"submission_id": submission_id, "title": title_value}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/submissions/{submission_id}")
+def delete_submission(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+):
+    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    if get_submission_status(db, submission_id) != "DRAFT":
+        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be deleted")
+
+    try:
+        db.execute(text("DELETE FROM submissions WHERE id = :sid"), {"sid": submission_id})
+        db.commit()
+        return {"deleted": True, "submission_id": submission_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/submissions/{submission_id}/geometry", response_model=GeometryResponse)
 def get_submission_geometry(

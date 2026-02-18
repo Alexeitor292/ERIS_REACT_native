@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     created_by_user_id BIGINT NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'DRAFT', -- DRAFT | SUBMITTED | APPROVED | REJECTED
     client_submission_uuid VARCHAR(64) NOT NULL UNIQUE,
+    title VARCHAR(255) NULL,
     submitted_at DATETIME NULL,
 
     reviewed_at DATETIME NULL,

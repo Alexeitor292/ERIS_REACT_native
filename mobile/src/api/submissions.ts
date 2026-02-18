@@ -52,3 +52,18 @@ export async function reviewSubmission(
 export async function getGisaLookups(token: string) {
   return apiFetch("/gisa/lookups", { token });
 }
+
+export async function patchSubmissionTitle(token: string, id: string, title: string | null) {
+  return apiFetch(`/submissions/${id}/title`, {
+    method: "PATCH",
+    token,
+    body: { title },
+  });
+}
+
+export async function deleteSubmission(token: string, id: string) {
+  return apiFetch(`/submissions/${id}`, {
+    method: "DELETE",
+    token,
+  });
+}

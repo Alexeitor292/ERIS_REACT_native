@@ -5,6 +5,7 @@ export type Submission = {
   created_by_user_id: number;
   status: string;
   client_submission_uuid: string;
+  title?: string | null;
   created_at: string;
   updated_at?: string;
   submitted_at: string | null;
