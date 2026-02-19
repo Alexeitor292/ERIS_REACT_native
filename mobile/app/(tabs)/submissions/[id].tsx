@@ -10,6 +10,14 @@ import { getToken } from "../../../src/auth/tokenStore";
 import { getGisaLookups, getSubmission, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
+import {
+  CALTRANS_COUNTIES,
+  CALTRANS_DISTRICTS,
+  countyCodeFromNameOrCode,
+  countyDisplayLabel,
+  districtForCounty,
+  routesForCounty,
+} from "../../../src/utils/caltransLookups";
 
 type OptionItem = { code: string; label: string };
 type UserInfo = { id: number; roles: string[] };
@@ -44,6 +52,33 @@ const triToBool = (v: "UNKNOWN" | "YES" | "NO") => (v === "YES" ? true : false);
 const boolToTri = (v: any) => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
 const isPlayServicesUnavailableError = (msg: string) =>
   /LocationServices\.API is not available|SERVICE_INVALID|Google Play services/i.test(msg);
+
+function tryExtractRouteFromAddressLine(text: string): string | null {
+  const m = text.match(/\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\b/);
+  return m?.[1] ?? null;
+}
+
+function parseYmd(value: string): Date | null {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mm = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const dt = new Date(y, mm, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mm || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function toYmd(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function monthLabel(year: number, month: number): string {
+  return new Date(year, month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
 
 function normalizeDownloadUrl(rawUrl: string, apiBaseUrl: string): string {
   try {
@@ -106,7 +141,7 @@ function Field({
   onChangeText?: (v: string) => void;
   editable: boolean;
   multiline?: boolean;
-  keyboardType?: "default" | "numeric" | "decimal-pad";
+  keyboardType?: "default" | "numeric" | "decimal-pad" | "number-pad";
   palette?: { muted: string; border: string; panel: string; text: string };
   error?: string;
 }) {
@@ -121,6 +156,56 @@ function Field({
         ) : null}
       </View>
       <TextInput value={value} onChangeText={onChangeText} editable={editable} multiline={multiline} keyboardType={keyboardType ?? "default"} style={[styles.input, { borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"), backgroundColor: palette?.panel ?? "#fdfefe", color: palette?.text ?? "#1b2a40" }, multiline ? { minHeight: 90, textAlignVertical: "top" } : null, !editable ? styles.inputDisabled : null]} />
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+    </View>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  placeholder,
+  editable,
+  onPress,
+  palette,
+  error,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  editable: boolean;
+  onPress: () => void;
+  palette?: { muted: string; border: string; panel: string; text: string };
+  error?: string;
+}) {
+  const textValue = value.trim() || placeholder;
+  return (
+    <View style={{ marginTop: 8 }}>
+      <View style={styles.labelRow}>
+        <Text style={[styles.label, { color: error ? "#dc2626" : (palette?.muted ?? "#465978") }]}>{label}</Text>
+        {error ? (
+          <View style={styles.errorIcon}>
+            <Text style={styles.errorIconText}>i</Text>
+          </View>
+        ) : null}
+      </View>
+      <Pressable
+        disabled={!editable}
+        onPress={onPress}
+        style={[
+          styles.input,
+          {
+            borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"),
+            backgroundColor: palette?.panel ?? "#fdfefe",
+            opacity: editable ? 1 : 0.7,
+            justifyContent: "center",
+          },
+        ]}
+      >
+        <Text style={{ color: value.trim() ? (palette?.text ?? "#1b2a40") : (palette?.muted ?? "#6b7280") }}>
+          {textValue}
+        </Text>
+      </Pressable>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
@@ -168,6 +253,12 @@ export default function SubmissionDetailScreen() {
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
+  const [countyPickerOpen, setCountyPickerOpen] = useState(false);
+  const [routePickerOpen, setRoutePickerOpen] = useState(false);
+  const [datePickerKey, setDatePickerKey] = useState<"report_date" | "date_incident_reported" | null>(null);
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [openSections, setOpenSections] = useState({
@@ -182,6 +273,28 @@ export default function SubmissionDetailScreen() {
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const compact = density === "compact";
   const fullscreenProgress = useRef(new Animated.Value(0)).current;
+
+  const mapPreviewUrl = useMemo(() => {
+    const lat = Number(form.latitude);
+    const lon = Number(form.longitude);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+    const span = 0.006;
+    const bbox = `${lon - span},${lat - span},${lon + span},${lat + span}`;
+    return `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${encodeURIComponent(bbox)}&bboxSR=4326&imageSR=4326&size=1200,600&format=jpg&f=image`;
+  }, [form.latitude, form.longitude]);
+
+  const countyRouteOptions = useMemo(() => routesForCounty(form.county), [form.county]);
+  const countyLabelValue = useMemo(() => countyDisplayLabel(form.county), [form.county]);
+
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
+    const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+    const cells: Array<number | null> = [];
+    for (let i = 0; i < firstDay; i += 1) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d += 1) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }, [calendarYear, calendarMonth]);
 
   useEffect(() => {
     (async () => {
@@ -213,9 +326,11 @@ export default function SubmissionDetailScreen() {
       ]);
       setMe(meRes); setData(subRes); setLookups(lookRes);
       const g = subRes.gisa || {};
+      const countyCode = countyCodeFromNameOrCode(g.county ?? "");
+      const districtValue = g.district ? String(g.district).padStart(2, "0") : (districtForCounty(countyCode) ?? "");
       setForm({
         ...EMPTY_FORM,
-        report_date: g.report_date ?? "", district: g.district ?? "", county: g.county ?? "", route: g.route ?? "", post_mile: g.post_mile ?? "", ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
+        report_date: g.report_date ?? "", district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: g.post_mile ?? "", ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
         latitude: g.latitude != null ? String(g.latitude) : "", longitude: g.longitude != null ? String(g.longitude) : "",
         distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
@@ -250,6 +365,21 @@ export default function SubmissionDetailScreen() {
   const toggleSection = (key: keyof typeof openSections) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  function openDatePicker(key: "report_date" | "date_incident_reported") {
+    const parsed = parseYmd(form[key]);
+    const ref = parsed ?? new Date();
+    setCalendarYear(ref.getFullYear());
+    setCalendarMonth(ref.getMonth());
+    setDatePickerKey(key);
+  }
+
+  function selectDate(day: number) {
+    if (!datePickerKey) return;
+    const next = new Date(calendarYear, calendarMonth, day);
+    setVal(datePickerKey, toYmd(next));
+    setDatePickerKey(null);
+  }
 
   function validateRequiredFields(): boolean {
     const nextErrors: FieldErrorMap = {};
@@ -389,11 +519,13 @@ export default function SubmissionDetailScreen() {
     finally { setBusy(false); }
   }
 
-  async function autofillLocation() {
+  async function autofillLocation(opts?: { silent?: boolean }) {
+    const silent = !!opts?.silent;
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
-        return Alert.alert("Permission denied", "Location permission required.");
+        if (!silent) Alert.alert("Permission denied", "Location permission required.");
+        return;
       }
 
       let playServicesUnavailable = false;
@@ -410,8 +542,29 @@ export default function SubmissionDetailScreen() {
 
       const servicesEnabled = await Location.hasServicesEnabledAsync();
       if (!servicesEnabled) {
-        return Alert.alert("Location disabled", "Enable location services and try again.");
+        if (!silent) Alert.alert("Location disabled", "Enable location services and try again.");
+        return;
       }
+
+      const applyReverseGeocode = async (lat: number, lon: number) => {
+        try {
+          const list = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
+          const item = list?.[0];
+          if (!item) return;
+          const countyRaw = (item.subregion || "").replace(/\s+County$/i, "").trim();
+          const countyCode = countyCodeFromNameOrCode(countyRaw);
+          if (countyCode) setVal("county", countyCode);
+          const guessedDistrict = districtForCounty(countyCode ?? countyRaw);
+          if (guessedDistrict) setVal("district", guessedDistrict);
+          const routeGuess = tryExtractRouteFromAddressLine([item.name, item.street, item.city].filter(Boolean).join(" "));
+          if (routeGuess) {
+            const options = routesForCounty(countyCode ?? "");
+            if (options.length === 0 || options.includes(routeGuess)) {
+              setVal("route", routeGuess);
+            }
+          }
+        } catch {}
+      };
 
       let usedImmediate = false;
       const lastKnown = await Location.getLastKnownPositionAsync({
@@ -420,14 +573,18 @@ export default function SubmissionDetailScreen() {
       if (lastKnown) {
         setVal("latitude", String(lastKnown.coords.latitude));
         setVal("longitude", String(lastKnown.coords.longitude));
+        await applyReverseGeocode(lastKnown.coords.latitude, lastKnown.coords.longitude);
         usedImmediate = true;
       }
 
       if (playServicesUnavailable && !usedImmediate) {
-        return Alert.alert(
-          "Location unavailable on this emulator",
-          "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
-        );
+        if (!silent) {
+          Alert.alert(
+            "Location unavailable on this emulator",
+            "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
+          );
+        }
+        return;
       }
 
       let fresh: Location.LocationObject | null = null;
@@ -472,38 +629,61 @@ export default function SubmissionDetailScreen() {
       if (fresh) {
         setVal("latitude", String(fresh.coords.latitude));
         setVal("longitude", String(fresh.coords.longitude));
+        await applyReverseGeocode(fresh.coords.latitude, fresh.coords.longitude);
         return;
       }
 
       if (usedImmediate) {
-        Alert.alert("Location captured", "Using recent location. GPS refresh is still pending.");
+        if (!silent) Alert.alert("Location captured", "Using recent location. GPS refresh is still pending.");
         return;
       }
 
       if (!lastKnown) {
         if (playServicesUnavailable) {
-          return Alert.alert(
-            "Location unavailable on this emulator",
-            "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
+          if (!silent) {
+            Alert.alert(
+              "Location unavailable on this emulator",
+              "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
+            );
+          }
+          return;
+        }
+        if (!silent) {
+          Alert.alert(
+            "Location unavailable",
+            "Could not get location. In Android emulator, open Extended controls > Location and send a point."
           );
         }
-        return Alert.alert(
-          "Location unavailable",
-          "Could not get location. In Android emulator, open Extended controls > Location and send a point."
-        );
+        return;
       }
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (isPlayServicesUnavailableError(msg)) {
-        Alert.alert(
-          "Location unavailable on this emulator",
-          "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
-        );
+        if (!silent) {
+          Alert.alert(
+            "Location unavailable on this emulator",
+            "This Android image does not have working Google Play Location Services. Use manual lat/lon entry, or run an emulator image with Google Play."
+          );
+        }
         return;
       }
-      Alert.alert("Location failed", msg || "Unable to fetch location.");
+      if (!silent) Alert.alert("Location failed", msg || "Unable to fetch location.");
     }
   }
+
+  const canEditCandidate =
+    !!data &&
+    !!me &&
+    (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") &&
+    (me.roles?.includes("ADMIN") || (me.roles?.includes("FIELD_WORKER") && me.id === data.submission.created_by_user_id));
+
+  useEffect(() => {
+    if (!canEditCandidate) return;
+    const hasLatLon = form.latitude.trim() && form.longitude.trim();
+    if (hasLatLon) return;
+    autofillLocation({ silent: true }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEditCandidate, form.latitude, form.longitude]);
 
   if (!token || loading || !data || !lookups || !me) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
   const roles = new Set(me.roles || []);
@@ -569,40 +749,67 @@ export default function SubmissionDetailScreen() {
       <Text style={[styles.title, { color: palette.text }]}>{buildSubmissionDescriptor({
         id: data.submission.id,
         created_at: data.submission.created_at,
-        district: data.gisa?.district,
-        county: data.gisa?.county,
-        route: data.gisa?.route,
-        post_mile: data.gisa?.post_mile,
+        district: form.district || data.gisa?.district,
+        county: form.county || data.gisa?.county,
+        route: form.route || data.gisa?.route,
+        post_mile: form.post_mile || data.gisa?.post_mile,
       })}</Text>
       <Text style={[styles.status, { color: palette.muted }]}>Status: {data.submission.status}</Text>
         <CollapsibleSection title="Header Info" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Report Date (YYYY-MM-DD)" value={form.report_date} editable={canEdit} onChangeText={(v) => setVal("report_date", v)} error={fieldErrors.report_date} />
-        <Field palette={palette} label="District *" value={form.district} editable={canEdit} onChangeText={(v) => setVal("district", v)} error={fieldErrors.district} />
-        <Field palette={palette} label="County *" value={form.county} editable={canEdit} onChangeText={(v) => setVal("county", v)} error={fieldErrors.county} />
-        <Field palette={palette} label="Route" value={form.route} editable={canEdit} onChangeText={(v) => setVal("route", v)} error={fieldErrors.route} />
+        <SelectField
+          palette={palette}
+          label="Report Date (YYYY-MM-DD)"
+          value={form.report_date}
+          placeholder="Select date"
+          editable={canEdit}
+          onPress={() => openDatePicker("report_date")}
+          error={fieldErrors.report_date}
+        />
+        <SelectField
+          palette={palette}
+          label="District *"
+          value={form.district ? `District ${form.district}` : ""}
+          placeholder="Select district"
+          editable={canEdit}
+          onPress={() => setDistrictPickerOpen(true)}
+          error={fieldErrors.district}
+        />
+        <SelectField
+          palette={palette}
+          label="County *"
+          value={countyLabelValue}
+          placeholder="Select county"
+          editable={canEdit}
+          onPress={() => setCountyPickerOpen(true)}
+          error={fieldErrors.county}
+        />
+        <SelectField
+          palette={palette}
+          label="Route"
+          value={form.route}
+          placeholder={form.county ? "Select route" : "Select county first"}
+          editable={canEdit && !!form.county}
+          onPress={() => setRoutePickerOpen(true)}
+          error={fieldErrors.route}
+        />
         <Field palette={palette} label="Post Mile" value={form.post_mile} editable={canEdit} onChangeText={(v) => setVal("post_mile", v)} error={fieldErrors.post_mile} />
         <Field palette={palette} label="EA" value={form.ea} editable={canEdit} onChangeText={(v) => setVal("ea", v)} error={fieldErrors.ea} />
-        <Field palette={palette} label="Project ID" value={form.project_id} editable={canEdit} onChangeText={(v) => setVal("project_id", v)} error={fieldErrors.project_id} />
-        <Field palette={palette} label="Date Incident Reported (YYYY-MM-DD)" value={form.date_incident_reported} editable={canEdit} onChangeText={(v) => setVal("date_incident_reported", v)} error={fieldErrors.date_incident_reported} />
+        <Field palette={palette} label="Project ID" value={form.project_id} editable={canEdit} keyboardType="number-pad" onChangeText={(v) => setVal("project_id", v)} error={fieldErrors.project_id} />
+        <SelectField
+          palette={palette}
+          label="Date Incident Reported (YYYY-MM-DD)"
+          value={form.date_incident_reported}
+          placeholder="Select date"
+          editable={canEdit}
+          onPress={() => openDatePicker("date_incident_reported")}
+          error={fieldErrors.date_incident_reported}
+        />
         <Field palette={palette} label="District Contact" value={form.district_contact} editable={canEdit} onChangeText={(v) => setVal("district_contact", v)} error={fieldErrors.district_contact} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Location" open={openSections.location} onToggle={() => toggleSection("location")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} error={fieldErrors.latitude} />
-        <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
-        <View style={[styles.mapPreviewCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
-          <Text style={[styles.label, { color: palette.muted }]}>Map Preview</Text>
-          <Text style={[styles.muted, { color: palette.muted }]}>
-            {form.latitude && form.longitude
-              ? `Center: ${form.latitude}, ${form.longitude}`
-              : "Set latitude/longitude to center preview in ArcGIS editor."}
-          </Text>
-          <Text style={[styles.muted, { color: palette.muted }]}>
-            Geometry: {form.geometry_json.trim() ? "Available" : "None"}
-          </Text>
-        </View>
         <Pressable
-          style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+          style={[styles.mapPreviewCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
           onPress={() =>
             router.push({
               pathname: "/(tabs)/submissions/map",
@@ -615,9 +822,20 @@ export default function SubmissionDetailScreen() {
           }
           disabled={busy}
         >
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>{canEdit ? "Open ArcGIS Map Preview / Editor" : "Open ArcGIS Map Preview"}</Text>
+          <Text style={[styles.label, { color: palette.muted }]}>Map Preview (Tap to Open)</Text>
+          {mapPreviewUrl ? (
+            <Image source={{ uri: mapPreviewUrl }} style={styles.locationMapPreview} />
+          ) : (
+            <Text style={[styles.muted, { color: palette.muted }]}>
+              Fetching/awaiting location...
+            </Text>
+          )}
+          <Text style={[styles.muted, { color: palette.muted }]}>
+            Geometry: {form.geometry_json.trim() ? "Available" : "None"}
+          </Text>
         </Pressable>
-        {canEdit ? <Pressable style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={autofillLocation} disabled={busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>Use Current Location</Text></Pressable> : null}
+        <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} error={fieldErrors.latitude} />
+        <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Incident Types" open={openSections.incidentTypes} onToggle={() => toggleSection("incidentTypes")} palette={palette} compact={compact}>
@@ -641,7 +859,7 @@ export default function SubmissionDetailScreen() {
             <Chip key={o.code} label={o.label} palette={palette} active={form.highway_status_code === o.code} disabled={!canEdit} onPress={() => canEdit && setVal("highway_status_code", form.highway_status_code === o.code ? "" : o.code)} />
           ))}
         </View>
-        <Field palette={palette} label="Lane(s) Closed Count" value={form.lanes_closed_count} editable={canEdit} keyboardType="numeric" onChangeText={(v) => setVal("lanes_closed_count", v)} error={fieldErrors.lanes_closed_count} />
+        <Field palette={palette} label="Lane(s) Closed Count" value={form.lanes_closed_count} editable={canEdit} keyboardType="number-pad" onChangeText={(v) => setVal("lanes_closed_count", v)} error={fieldErrors.lanes_closed_count} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Pavement / Slope Condition" open={openSections.pavementSlope} onToggle={() => toggleSection("pavementSlope")} palette={palette} compact={compact}>
@@ -767,6 +985,144 @@ export default function SubmissionDetailScreen() {
         </Text>
       </View>
     </ScrollView>
+    <Modal visible={districtPickerOpen} transparent animationType="fade" onRequestClose={() => setDistrictPickerOpen(false)}>
+      <Pressable style={styles.pickerBackdrop} onPress={() => setDistrictPickerOpen(false)}>
+        <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.pickerTitle, { color: palette.text }]}>Select District</Text>
+          <ScrollView style={{ maxHeight: 340 }}>
+            {CALTRANS_DISTRICTS.map((d) => (
+              <Pressable
+                key={d}
+                style={[styles.pickerItem, form.district === d ? { backgroundColor: palette.panelSoft } : null]}
+                onPress={() => {
+                  setVal("district", d);
+                  setDistrictPickerOpen(false);
+                }}
+              >
+                <Text style={{ color: palette.text, fontWeight: "600" }}>{`District ${d}`}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={countyPickerOpen} transparent animationType="fade" onRequestClose={() => setCountyPickerOpen(false)}>
+      <Pressable style={styles.pickerBackdrop} onPress={() => setCountyPickerOpen(false)}>
+        <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.pickerTitle, { color: palette.text }]}>Select County</Text>
+          <ScrollView style={{ maxHeight: 340 }}>
+            {CALTRANS_COUNTIES.map((c) => (
+              <Pressable
+                key={c.code}
+                style={[styles.pickerItem, form.county === c.code ? { backgroundColor: palette.panelSoft } : null]}
+                onPress={() => {
+                  setVal("county", c.code);
+                  setVal("district", c.district);
+                  if (form.route && !c.routes.includes(form.route)) {
+                    setVal("route", "");
+                  }
+                  setCountyPickerOpen(false);
+                }}
+              >
+                <Text style={{ color: palette.text, fontWeight: "600" }}>{`${c.name} (${c.code})`}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={routePickerOpen} transparent animationType="fade" onRequestClose={() => setRoutePickerOpen(false)}>
+      <Pressable style={styles.pickerBackdrop} onPress={() => setRoutePickerOpen(false)}>
+        <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.pickerTitle, { color: palette.text }]}>Select Route</Text>
+          {!form.county ? (
+            <Text style={{ color: palette.muted }}>Select county first.</Text>
+          ) : null}
+          <ScrollView style={{ maxHeight: 340 }}>
+            {countyRouteOptions.map((r) => (
+              <Pressable
+                key={r}
+                style={[styles.pickerItem, form.route === r ? { backgroundColor: palette.panelSoft } : null]}
+                onPress={() => {
+                  setVal("route", r);
+                  setRoutePickerOpen(false);
+                }}
+              >
+                <Text style={{ color: palette.text, fontWeight: "600" }}>{r}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={!!datePickerKey} transparent animationType="fade" onRequestClose={() => setDatePickerKey(null)}>
+      <Pressable style={styles.pickerBackdrop} onPress={() => setDatePickerKey(null)}>
+        <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <View style={styles.calendarHeaderRow}>
+            <Pressable
+              onPress={() => {
+                if (calendarMonth === 0) {
+                  setCalendarMonth(11);
+                  setCalendarYear((y) => y - 1);
+                } else {
+                  setCalendarMonth((m) => m - 1);
+                }
+              }}
+            >
+              <Text style={[styles.calendarNav, { color: palette.text }]}>{"<"}</Text>
+            </Pressable>
+            <Text style={[styles.pickerTitle, { color: palette.text }]}>{monthLabel(calendarYear, calendarMonth)}</Text>
+            <Pressable
+              onPress={() => {
+                if (calendarMonth === 11) {
+                  setCalendarMonth(0);
+                  setCalendarYear((y) => y + 1);
+                } else {
+                  setCalendarMonth((m) => m + 1);
+                }
+              }}
+            >
+              <Text style={[styles.calendarNav, { color: palette.text }]}>{">"}</Text>
+            </Pressable>
+          </View>
+          <View style={styles.calendarWeekRow}>
+            {["S", "M", "T", "W", "T", "F", "S"].map((w, idx) => (
+              <Text key={`${w}-${idx}`} style={[styles.calendarWeekLabel, { color: palette.muted }]}>{w}</Text>
+            ))}
+          </View>
+          <View style={styles.calendarGrid}>
+            {calendarDays.map((day, idx) => (
+              <Pressable key={`${day ?? "x"}-${idx}`} disabled={!day} onPress={() => day && selectDate(day)} style={[styles.calendarCell, !day ? { opacity: 0 } : null]}>
+                <Text style={{ color: palette.text }}>{day ?? ""}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.calendarActions}>
+            <Pressable
+              onPress={() => {
+                if (datePickerKey) setVal(datePickerKey, "");
+                setDatePickerKey(null);
+              }}
+              style={[styles.calendarActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            >
+              <Text style={{ color: palette.text, fontWeight: "700" }}>Clear</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (datePickerKey) setVal(datePickerKey, toYmd(new Date()));
+                setDatePickerKey(null);
+              }}
+              style={[styles.calendarActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            >
+              <Text style={{ color: palette.text, fontWeight: "700" }}>Today</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
     <Modal visible={!!fullscreenPhoto} transparent animationType="none" onRequestClose={closeFullscreen}>
       <Pressable style={styles.fullscreenBackdrop} onPress={closeFullscreen}>
         <Animated.View
@@ -858,6 +1214,14 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 4,
   },
+  locationMapPreview: {
+    width: "100%",
+    height: 180,
+    borderRadius: 8,
+    backgroundColor: "#dbe7f8",
+    marginTop: 4,
+    marginBottom: 4,
+  },
   muted: { color: "#6f809d" },
   photoPreviewCompact: { width: "100%", height: 160, borderRadius: 8, backgroundColor: "#e5e7eb" },
   photo: { width: "100%", height: 220, borderRadius: 8, backgroundColor: "#e5e7eb" },
@@ -870,6 +1234,78 @@ const styles = StyleSheet.create({
   workflowInlineDotDone: { backgroundColor: "#1d4ed8", borderColor: "#1d4ed8" },
   workflowInlineLabel: { marginTop: 2, fontSize: 10, color: "#64748b", fontWeight: "700" },
   workflowInlineLabelDone: { color: "#1e3a8a" },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(8,14,24,0.45)",
+    justifyContent: "center",
+    padding: 16,
+  },
+  pickerSheet: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    maxWidth: 520,
+    alignSelf: "center",
+  },
+  pickerTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  pickerItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  calendarHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  calendarNav: {
+    fontSize: 18,
+    fontWeight: "800",
+    width: 32,
+    textAlign: "center",
+  },
+  calendarWeekRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+  calendarWeekLabel: {
+    width: "14.28%",
+    textAlign: "center",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  calendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 2,
+  },
+  calendarCell: {
+    width: "14.28%",
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  calendarActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+    justifyContent: "flex-end",
+  },
+  calendarActionBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   fullscreenBackdrop: {
     flex: 1,
     backgroundColor: "transparent",
