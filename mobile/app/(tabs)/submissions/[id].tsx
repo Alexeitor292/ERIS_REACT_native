@@ -289,7 +289,7 @@ export default function SubmissionDetailScreen() {
   const calendarDays = useMemo(() => {
     const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
     const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
-    const cells: Array<number | null> = [];
+    const cells: (number | null)[] = [];
     for (let i = 0; i < firstDay; i += 1) cells.push(null);
     for (let d = 1; d <= daysInMonth; d += 1) cells.push(d);
     while (cells.length % 7 !== 0) cells.push(null);
