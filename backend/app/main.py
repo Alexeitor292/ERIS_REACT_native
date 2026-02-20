@@ -1,5 +1,8 @@
 import logging
 import json
+import re
+from urllib.parse import urlencode
+from urllib.request import urlopen
 from typing import Literal
 
 from fastapi import FastAPI, Depends, HTTPException, Path, status, Response, Request
@@ -145,6 +148,103 @@ def resolve_user_from_request_or_token(request: Request, db: Session, access_tok
         "email": user["email"],
         "full_name": user["full_name"],
         "roles": list(roles),
+    }
+
+
+def _safe_json_get(url: str, timeout: float = 6.0) -> dict | None:
+    try:
+        with urlopen(url, timeout=timeout) as resp:
+            payload = resp.read().decode("utf-8", errors="ignore")
+        data = json.loads(payload)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def _normalize_county(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    return re.sub(r"\s+County$", "", raw.strip(), flags=re.IGNORECASE) or None
+
+
+def _extract_route_from_text(text_value: str | None) -> str | None:
+    if not text_value:
+        return None
+    m = re.search(r"\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b", text_value, flags=re.IGNORECASE)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(\d{1,3})\b", text_value)
+    return m.group(1) if m else None
+
+
+def _reverse_geocode_arcgis(lat: float, lon: float) -> dict:
+    params = urlencode({"f": "pjson", "location": f"{lon},{lat}"})
+    url = f"https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?{params}"
+    data = _safe_json_get(url) or {}
+    address = data.get("address") if isinstance(data.get("address"), dict) else {}
+    county = _normalize_county(address.get("Subregion") or address.get("District"))
+    route = _extract_route_from_text(
+        address.get("ShortLabel") or address.get("LongLabel") or address.get("Match_addr")
+    )
+    return {
+        "county": county,
+        "route": route,
+        "source_reverse": "arcgis_world_geocoder" if address else None,
+    }
+
+
+def _query_postmile_layer(lat: float, lon: float) -> dict:
+    base = (settings.POSTMILE_FEATURE_LAYER_URL or "").strip().rstrip("/")
+    if not base:
+        return {}
+
+    out_fields = ",".join([
+        settings.POSTMILE_ROUTE_FIELD,
+        settings.POSTMILE_PM_FIELD,
+        settings.POSTMILE_COUNTY_FIELD,
+        settings.POSTMILE_DISTRICT_FIELD,
+    ])
+    params = urlencode(
+        {
+            "f": "pjson",
+            "where": settings.POSTMILE_WHERE,
+            "geometry": f"{lon},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "distance": str(max(1, int(settings.POSTMILE_SEARCH_DISTANCE_METERS))),
+            "units": "esriSRUnit_Meter",
+            "outFields": out_fields,
+            "returnGeometry": "false",
+            "resultRecordCount": "3",
+        }
+    )
+    data = _safe_json_get(f"{base}/query?{params}") or {}
+    features = data.get("features")
+    if not isinstance(features, list) or not features:
+        return {}
+    attrs = features[0].get("attributes")
+    if not isinstance(attrs, dict):
+        return {}
+
+    district = attrs.get(settings.POSTMILE_DISTRICT_FIELD)
+    district_value = None
+    if district is not None:
+        digits = re.sub(r"\D", "", str(district))
+        district_value = digits.zfill(2) if digits else str(district).strip()
+
+    route = attrs.get(settings.POSTMILE_ROUTE_FIELD)
+    post_mile = attrs.get(settings.POSTMILE_PM_FIELD)
+    county = attrs.get(settings.POSTMILE_COUNTY_FIELD)
+
+    return {
+        "district": district_value or None,
+        "county": _normalize_county(str(county)) if county is not None else None,
+        "route": str(route).strip() if route is not None and str(route).strip() else None,
+        "post_mile": str(post_mile).strip() if post_mile is not None and str(post_mile).strip() else None,
+        "source_postmile": "arcgis_postmile_layer",
     }
 
 
@@ -396,6 +496,33 @@ class GeometryResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/geo/enrich-point")
+def enrich_point(
+    lat: float,
+    lon: float,
+    user=Depends(get_current_user),
+):
+    if lat < -90 or lat > 90 or lon < -180 or lon > 180:
+        raise HTTPException(status_code=422, detail="Invalid latitude/longitude range")
+
+    reverse_info = _reverse_geocode_arcgis(lat, lon)
+    layer_info = _query_postmile_layer(lat, lon)
+
+    return {
+        "latitude": lat,
+        "longitude": lon,
+        "district": layer_info.get("district"),
+        "county": layer_info.get("county") or reverse_info.get("county"),
+        "route": layer_info.get("route") or reverse_info.get("route"),
+        "post_mile": layer_info.get("post_mile"),
+        "source": {
+            "reverse_geocode": reverse_info.get("source_reverse"),
+            "postmile_layer": layer_info.get("source_postmile"),
+            "requested_by_user_id": user["id"],
+        },
+    }
 
 
 @app.get("/gisa/lookups")

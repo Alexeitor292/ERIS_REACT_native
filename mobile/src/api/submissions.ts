@@ -67,3 +67,22 @@ export async function deleteSubmission(token: string, id: string) {
     token,
   });
 }
+
+export type GeoEnrichment = {
+  latitude: number;
+  longitude: number;
+  district?: string | null;
+  county?: string | null;
+  route?: string | null;
+  post_mile?: string | null;
+  source?: {
+    reverse_geocode?: string | null;
+    postmile_layer?: string | null;
+    requested_by_user_id?: number;
+  };
+};
+
+export async function enrichPoint(token: string, lat: number, lon: number) {
+  const q = `/geo/enrich-point?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}`;
+  return apiFetch<GeoEnrichment>(q, { token });
+}

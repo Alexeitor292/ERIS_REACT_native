@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable, FlatList, StyleSheet, Alert } from "react-native";
 import { router } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import * as Location from "expo-location";
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getToken, clearToken } from "../../../src/auth/tokenStore";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
+import { countyCodeFromNameOrCode, districtForCounty, routesForCounty } from "../../../src/utils/caltransLookups";
+import { enrichPoint, patchSubmission } from "../../../src/api/submissions";
 
 type SubmissionItem = {
   id: number;
@@ -47,11 +51,42 @@ export default function SubmissionsList() {
 
     try {
       const res = await apiFetch<{ submission_id: number }>("/submissions", { method: "POST", token });
+      const newId = String(res.submission_id);
+
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (permission.status === "granted") {
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+
+          const geo = await enrichPoint(token, lat, lon);
+          const countyCode = countyCodeFromNameOrCode(geo.county ?? "");
+          const district = geo.district ? String(geo.district).padStart(2, "0") : districtForCounty(countyCode);
+          const route = geo.route?.trim() || "";
+          const routeAllowed = countyCode ? routesForCounty(countyCode) : [];
+          const normalizedRoute = route && (routeAllowed.length === 0 || routeAllowed.includes(route)) ? route : "";
+
+          await patchSubmission(token, newId, {
+            latitude: lat,
+            longitude: lon,
+            county: countyCode ?? null,
+            district: district ?? null,
+            route: normalizedRoute || null,
+            post_mile: (geo.post_mile || "").trim() || null,
+          });
+        }
+      } catch {
+        // Non-blocking: draft still gets created even if enrichment fails.
+      }
+
       Alert.alert("Created", `Draft #${res.submission_id}`);
       await load();
       router.push({
         pathname: "/(tabs)/submissions/[id]",
-        params: { id: String(res.submission_id) },
+        params: { id: newId },
       });
     } catch (e: any) {
       if (isSessionExpiredError(e)) return;
@@ -69,7 +104,11 @@ export default function SubmissionsList() {
   }, []);
 
   return (
-    <View style={[styles.container, { backgroundColor: palette.bg, padding: compact ? 10 : 12 }]}>
+    <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, { backgroundColor: palette.bg }]}>
+      <View style={[styles.contentWrap, { padding: compact ? 10 : 12 }]}>
+      <Text style={[styles.title, { color: palette.text }]}>Submissions</Text>
+      <Text style={[styles.subtitle, { color: palette.muted }]}>Create, review, and track field reports.</Text>
+
       <View style={[styles.hero, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
         <Text style={[styles.heroTitle, { color: palette.text }]}>Field Submissions</Text>
         <Text style={[styles.heroSub, { color: palette.muted }]}>Capture, review, and track incidents with confidence.</Text>
@@ -120,12 +159,16 @@ export default function SubmissionsList() {
         )}
         ListEmptyComponent={<Text style={{ padding: 10, color: palette.muted }}>{loading ? "" : "No submissions yet."}</Text>}
       />
-    </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 12, gap: 10, backgroundColor: "#eef3fb" },
+  container: { flex: 1, backgroundColor: "#eef3fb" },
+  contentWrap: { flex: 1, padding: 12, gap: 10 },
+  title: { fontSize: 24, fontWeight: "800" },
+  subtitle: { marginTop: 2, marginBottom: 6, fontSize: 13 },
   hero: {
     borderRadius: 14,
     borderWidth: 1,

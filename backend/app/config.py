@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     JWT_ALG: str = Field(default="HS256")
     JWT_EXPIRES_MINUTES: int = Field(default=120)
 
+    # Optional ArcGIS enrichment (for route/postmile lookup)
+    POSTMILE_FEATURE_LAYER_URL: str | None = Field(default=None)
+    POSTMILE_ROUTE_FIELD: str = Field(default="ROUTE")
+    POSTMILE_PM_FIELD: str = Field(default="POSTMILE")
+    POSTMILE_COUNTY_FIELD: str = Field(default="COUNTY")
+    POSTMILE_DISTRICT_FIELD: str = Field(default="DISTRICT")
+    POSTMILE_WHERE: str = Field(default="1=1")
+    POSTMILE_SEARCH_DISTANCE_METERS: int = Field(default=120)
+
     # Dev-only seeding
     SEED_ADMIN: bool = Field(default=False)
     SEED_ADMIN_EMAIL: str = Field(default="admin@local")

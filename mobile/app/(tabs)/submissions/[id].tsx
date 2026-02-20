@@ -226,11 +226,12 @@ function CollapsibleSection({
   palette: { panel: string; border: string; text: string; muted: string };
   compact: boolean;
 }) {
+  const isIOS = Platform.OS === "ios";
   return (
-    <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+    <View style={[styles.section, isIOS ? styles.iosSection : null, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
       <Pressable onPress={onToggle} style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, { color: palette.text }]}>{title}</Text>
-        <Text style={[styles.sectionChevron, { color: palette.muted }]}>{open ? "v" : ">"}</Text>
+        <Text style={[styles.sectionChevron, { color: palette.muted }]}>{open ? (isIOS ? "⌄" : "v") : ">"}</Text>
       </Pressable>
       {open ? <View style={styles.sectionBody}>{children}</View> : null}
     </View>
@@ -271,6 +272,7 @@ export default function SubmissionDetailScreen() {
     observations: false,
   });
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+  const isIOS = Platform.OS === "ios";
   const compact = density === "compact";
   const fullscreenProgress = useRef(new Animated.Value(0)).current;
 
@@ -745,7 +747,12 @@ export default function SubmissionDetailScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.bg }}>
-    <ScrollView style={[styles.container, { backgroundColor: palette.bg }]} contentContainerStyle={[styles.contentWrap, { padding: compact ? 10 : 14, gap: compact ? 8 : 10 }]}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: palette.bg }]}
+      contentInsetAdjustmentBehavior={isIOS ? "automatic" : "never"}
+      keyboardDismissMode={isIOS ? "interactive" : "on-drag"}
+      contentContainerStyle={[styles.contentWrap, { padding: compact ? 10 : 14, gap: compact ? 8 : 10 }]}
+    >
       <Text style={[styles.title, { color: palette.text }]}>{buildSubmissionDescriptor({
         id: data.submission.id,
         created_at: data.submission.created_at,
@@ -1163,29 +1170,32 @@ export default function SubmissionDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#eef3fb" },
-  contentWrap: { padding: 14, gap: 10, paddingBottom: 28 },
+  container: { flex: 1, backgroundColor: Platform.OS === "ios" ? "#f2f2f7" : "#eef3fb" },
+  contentWrap: { padding: 14, gap: 10, paddingBottom: Platform.OS === "ios" ? 34 : 28 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "800", color: "#16253a" },
-  status: { marginTop: 4, marginBottom: 6, color: "#4b5f7f", fontWeight: "700" },
+  title: { fontSize: Platform.OS === "ios" ? 22 : 24, fontWeight: "800", color: "#16253a", letterSpacing: Platform.OS === "ios" ? 0.2 : 0 },
+  status: { marginTop: 4, marginBottom: 6, color: "#4b5f7f", fontWeight: Platform.OS === "ios" ? "600" : "700" },
   section: {
     backgroundColor: "#fff",
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: Platform.OS === "ios" ? 12 : 14,
+    borderWidth: Platform.OS === "ios" ? StyleSheet.hairlineWidth : 1,
     borderColor: "#d7e2f1",
     padding: 12,
     shadowColor: "#10233f",
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 1,
+    shadowOpacity: Platform.OS === "ios" ? 0.08 : 0.06,
+    shadowRadius: Platform.OS === "ios" ? 8 : 10,
+    elevation: Platform.OS === "ios" ? 0 : 1,
+  },
+  iosSection: {
+    marginHorizontal: 2,
   },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionBody: { marginTop: 4 },
-  sectionTitle: { fontWeight: "800", color: "#1b2a40", fontSize: 22 / 1.45, marginBottom: 4 },
-  sectionChevron: { fontSize: 16, color: "#6b7280", fontWeight: "700", marginBottom: 1 },
+  sectionTitle: { fontWeight: Platform.OS === "ios" ? "700" : "800", color: "#1b2a40", fontSize: Platform.OS === "ios" ? 23 / 1.45 : 22 / 1.45, marginBottom: 4 },
+  sectionChevron: { fontSize: Platform.OS === "ios" ? 18 : 16, color: "#6b7280", fontWeight: "700", marginBottom: 1 },
   labelRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  label: { color: "#465978", fontSize: 13, fontWeight: "700" },
+  label: { color: "#465978", fontSize: 13, fontWeight: Platform.OS === "ios" ? "600" : "700" },
   errorIcon: {
     width: 16,
     height: 16,
@@ -1196,16 +1206,25 @@ const styles = StyleSheet.create({
   },
   errorIconText: { color: "#fff", fontSize: 10, fontWeight: "800", lineHeight: 12 },
   errorText: { color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: "600" },
-  input: { borderWidth: 1, borderColor: "#ccd8ea", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, color: "#1b2a40", backgroundColor: "#fdfefe" },
+  input: {
+    borderWidth: Platform.OS === "ios" ? StyleSheet.hairlineWidth : 1,
+    borderColor: "#ccd8ea",
+    borderRadius: Platform.OS === "ios" ? 10 : 8,
+    paddingHorizontal: 10,
+    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+    color: "#1b2a40",
+    backgroundColor: Platform.OS === "ios" ? "#f7f8fc" : "#fdfefe",
+    fontSize: Platform.OS === "ios" ? 16 : 14,
+  },
   inputDisabled: { backgroundColor: "#f9fafb", color: "#6b7280" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   chip: { borderWidth: 1, borderColor: "#c8d5ea", borderRadius: 999, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#f9fbff" },
   chipOn: { backgroundColor: "#dbeafe", borderColor: "#1d4ed8" },
   chipText: { color: "#334155", fontSize: 12, fontWeight: "700" },
   chipTextOn: { color: "#1d4ed8" },
-  btnPrimary: { backgroundColor: "#1d4ed8", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  btnPrimary: { backgroundColor: "#1d4ed8", borderRadius: Platform.OS === "ios" ? 12 : 8, paddingVertical: Platform.OS === "ios" ? 12 : 10, alignItems: "center" },
   btnPrimaryText: { color: "#fff", fontWeight: "700" },
-  btnGhost: { borderWidth: 1, borderColor: "#c8d5ea", borderRadius: 8, paddingVertical: 10, alignItems: "center", backgroundColor: "#f8fbff", marginTop: 8 },
+  btnGhost: { borderWidth: Platform.OS === "ios" ? StyleSheet.hairlineWidth : 1, borderColor: "#c8d5ea", borderRadius: Platform.OS === "ios" ? 12 : 8, paddingVertical: Platform.OS === "ios" ? 12 : 10, alignItems: "center", backgroundColor: "#f8fbff", marginTop: 8 },
   btnGhostText: { color: "#1f2937", fontWeight: "700" },
   mapPreviewCard: {
     marginTop: 8,

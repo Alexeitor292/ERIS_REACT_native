@@ -1,17 +1,27 @@
 import { Stack } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-
+import { Platform } from "react-native";
 export default function SubmissionsStackLayout() {
-  const insets = useSafeAreaInsets();
-
   return (
     <Stack
       screenOptions={{
         headerTitleAlign: "center",
-        headerStatusBarHeight: insets.top,
+        headerBackTitleVisible: false,
+        ...(Platform.OS === "ios"
+          ? {
+              headerBackButtonDisplayMode: "minimal" as const,
+              headerShadowVisible: false,
+              headerLargeTitleShadowVisible: false,
+              headerTransparent: false,
+            }
+          : {}),
       }}
     >
-      <Stack.Screen name="index" options={{ title: "Submissions" }} />
+      <Stack.Screen
+        name="index"
+        options={{
+          headerShown: false,
+        }}
+      />
       <Stack.Screen name="[id]" options={{ title: "Submission" }} />
       <Stack.Screen name="map" options={{ title: "Map Editor" }} />
     </Stack>
