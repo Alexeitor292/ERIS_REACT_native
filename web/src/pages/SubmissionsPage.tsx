@@ -119,7 +119,7 @@ export default function SubmissionsPage() {
 
   return (
     <AppShell title="Submissions">
-      <div className="p-4 md:p-5">
+      <div className="flex h-full flex-col p-4 md:p-5">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           {summaryCards.map((c) => (
             <div key={c.label} className="rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-3">
@@ -175,13 +175,13 @@ export default function SubmissionsPage() {
           </div>
         )}
 
-        <div className="mt-4 overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--panel)]">
+        <div className="mt-4 flex-1 overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--panel)]">
           <table className="w-full table-fixed border-collapse">
             <colgroup>
               <col className="w-16" />
               <col className="w-56" />
               <col className="w-36" />
-              <col className="w-28" />
+              <col className="w-44" />
               <col className="w-56" />
               <col className="w-56" />
               <col className="w-28" />
@@ -241,32 +241,25 @@ export default function SubmissionsPage() {
                     <td className="px-4 py-3 text-right text-sm">
                       <div className="relative inline-flex items-center gap-2">
                         <Link
-                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-sm font-medium hover:brightness-95"
                           to={`/submissions/${s.id}`}
                         >
                           Open
                         </Link>
                         <button
                           onClick={() => setMenuOpenId((prev) => (prev === s.id ? null : s.id))}
-                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-sm font-medium leading-none hover:brightness-95"
                           aria-label="Submission options"
                           title="Submission options"
                         >
-                          ⋮
+                          {"\u22EE"}
                         </button>
                         {menuOpenId === s.id ? (
-                          <div className="absolute right-0 top-8 z-10 min-w-32 rounded-md border border-[var(--line)] bg-[var(--panel)] p-1 shadow-lg">
-                            <Link
-                              to={`/submissions/${s.id}`}
-                              className="block rounded px-2 py-1.5 text-left text-xs hover:bg-[var(--panel-soft)]"
-                              onClick={() => setMenuOpenId(null)}
-                            >
-                              Open details
-                            </Link>
+                          <div className="absolute right-0 top-full z-50 mt-2 min-w-32 rounded-md border border-[var(--line)] bg-[var(--panel)] p-1 shadow-lg">
                             {canDeleteSubmission(s) ? (
                               <button
                                 onClick={() => onDeleteSubmission(s)}
-                                className="block w-full rounded px-2 py-1.5 text-left text-xs text-red-600 hover:bg-[color:color-mix(in_oklab,var(--bad)_12%,transparent)]"
+                                className="block w-full rounded px-2.5 py-2 text-left text-sm text-red-600 hover:bg-[color:color-mix(in_oklab,var(--bad)_12%,transparent)]"
                               >
                                 Delete
                               </button>

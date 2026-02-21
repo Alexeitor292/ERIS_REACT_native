@@ -89,7 +89,7 @@ export default function AppShell({ title, children }: { title: string; children:
               Internal review portal for field submissions and attachments.
             </p>
           </div>
-          <div className="product-card overflow-hidden">{children}</div>
+          <div className="product-card h-full overflow-hidden">{children}</div>
         </main>
       </div>
 
