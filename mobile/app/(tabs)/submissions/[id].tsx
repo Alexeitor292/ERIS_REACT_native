@@ -10,6 +10,7 @@ import { getToken } from "../../../src/auth/tokenStore";
 import { getGisaLookups, getSubmission, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
+import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
 import {
   CALTRANS_COUNTIES,
   CALTRANS_DISTRICTS,
@@ -254,6 +255,7 @@ export default function SubmissionDetailScreen() {
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const [enrichmentHint, setEnrichmentHint] = useState("");
   const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
   const [countyPickerOpen, setCountyPickerOpen] = useState(false);
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
@@ -286,6 +288,10 @@ export default function SubmissionDetailScreen() {
   }, [form.latitude, form.longitude]);
 
   const countyRouteOptions = useMemo(() => routesForCounty(form.county), [form.county]);
+  const countiesForDistrict = useMemo(
+    () => (form.district ? CALTRANS_COUNTIES.filter((c) => c.district === form.district) : CALTRANS_COUNTIES),
+    [form.district]
+  );
   const countyLabelValue = useMemo(() => countyDisplayLabel(form.county), [form.county]);
 
   const calendarDays = useMemo(() => {
@@ -381,6 +387,32 @@ export default function SubmissionDetailScreen() {
     const next = new Date(calendarYear, calendarMonth, day);
     setVal(datePickerKey, toYmd(next));
     setDatePickerKey(null);
+  }
+
+  async function enrichRouteAndPostmile(lat: number, lon: number) {
+    try {
+      const geo = await enrichPointFromArcgisClient(lat, lon);
+      const countyCode = countyCodeFromNameOrCode(geo.county ?? "");
+      const district = geo.district ? String(geo.district).padStart(2, "0") : districtForCounty(countyCode);
+      const route = geo.route?.trim() || "";
+      const routeAllowed = countyCode ? routesForCounty(countyCode) : [];
+      const normalizedRoute = route && (routeAllowed.length === 0 || routeAllowed.includes(route)) ? route : "";
+
+      if (countyCode) setVal("county", countyCode);
+      if (district) setVal("district", district);
+      if (normalizedRoute) setVal("route", normalizedRoute);
+      if (geo.post_mile?.trim()) setVal("post_mile", geo.post_mile.trim());
+
+      if (geo.post_mile?.trim()) {
+        setEnrichmentHint("Route and postmile auto-filled from ArcGIS.");
+      } else if (normalizedRoute) {
+        setEnrichmentHint("Route auto-filled from ArcGIS. Postmile unavailable at this point.");
+      } else {
+        setEnrichmentHint("ArcGIS enrichment ran, but no nearby route/postmile match was found.");
+      }
+    } catch {
+      setEnrichmentHint("ArcGIS enrichment unavailable right now.");
+    }
   }
 
   function validateRequiredFields(): boolean {
@@ -576,6 +608,7 @@ export default function SubmissionDetailScreen() {
         setVal("latitude", String(lastKnown.coords.latitude));
         setVal("longitude", String(lastKnown.coords.longitude));
         await applyReverseGeocode(lastKnown.coords.latitude, lastKnown.coords.longitude);
+        await enrichRouteAndPostmile(lastKnown.coords.latitude, lastKnown.coords.longitude);
         usedImmediate = true;
       }
 
@@ -632,6 +665,7 @@ export default function SubmissionDetailScreen() {
         setVal("latitude", String(fresh.coords.latitude));
         setVal("longitude", String(fresh.coords.longitude));
         await applyReverseGeocode(fresh.coords.latitude, fresh.coords.longitude);
+        await enrichRouteAndPostmile(fresh.coords.latitude, fresh.coords.longitude);
         return;
       }
 
@@ -684,6 +718,16 @@ export default function SubmissionDetailScreen() {
     const hasLatLon = form.latitude.trim() && form.longitude.trim();
     if (hasLatLon) return;
     autofillLocation({ silent: true }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEditCandidate, form.latitude, form.longitude]);
+
+  useEffect(() => {
+    if (!canEditCandidate) return;
+    const lat = Number(form.latitude);
+    const lon = Number(form.longitude);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return;
+    if (form.route.trim() && form.post_mile.trim()) return;
+    enrichRouteAndPostmile(lat, lon).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEditCandidate, form.latitude, form.longitude]);
 
@@ -785,8 +829,8 @@ export default function SubmissionDetailScreen() {
           palette={palette}
           label="County *"
           value={countyLabelValue}
-          placeholder="Select county"
-          editable={canEdit}
+          placeholder={form.district ? "Select county" : "Select district first"}
+          editable={canEdit && !!form.district}
           onPress={() => setCountyPickerOpen(true)}
           error={fieldErrors.county}
         />
@@ -840,6 +884,9 @@ export default function SubmissionDetailScreen() {
           <Text style={[styles.muted, { color: palette.muted }]}>
             Geometry: {form.geometry_json.trim() ? "Available" : "None"}
           </Text>
+          {enrichmentHint ? (
+            <Text style={[styles.muted, { color: palette.muted }]}>{enrichmentHint}</Text>
+          ) : null}
         </Pressable>
         <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} error={fieldErrors.latitude} />
         <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
@@ -1002,7 +1049,25 @@ export default function SubmissionDetailScreen() {
                 key={d}
                 style={[styles.pickerItem, form.district === d ? { backgroundColor: palette.panelSoft } : null]}
                 onPress={() => {
-                  setVal("district", d);
+                  setForm((prev) => {
+                    const countyMatch = prev.county
+                      ? CALTRANS_COUNTIES.find((c) => c.code === prev.county)
+                      : null;
+                    const countyStillValid = !!countyMatch && countyMatch.district === d;
+                    const nextCounty = countyStillValid ? prev.county : "";
+                    const nextRoute =
+                      countyStillValid && prev.route && countyMatch?.routes.includes(prev.route)
+                        ? prev.route
+                        : "";
+                    return { ...prev, district: d, county: nextCounty, route: nextRoute };
+                  });
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.district;
+                    delete next.county;
+                    delete next.route;
+                    return next;
+                  });
                   setDistrictPickerOpen(false);
                 }}
               >
@@ -1018,8 +1083,13 @@ export default function SubmissionDetailScreen() {
       <Pressable style={styles.pickerBackdrop} onPress={() => setCountyPickerOpen(false)}>
         <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.pickerTitle, { color: palette.text }]}>Select County</Text>
+          {form.district ? (
+            <Text style={{ color: palette.muted, marginBottom: 6 }}>
+              Showing counties in District {form.district}
+            </Text>
+          ) : null}
           <ScrollView style={{ maxHeight: 340 }}>
-            {CALTRANS_COUNTIES.map((c) => (
+            {countiesForDistrict.map((c) => (
               <Pressable
                 key={c.code}
                 style={[styles.pickerItem, form.county === c.code ? { backgroundColor: palette.panelSoft } : null]}

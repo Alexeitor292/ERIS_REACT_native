@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { UiSettingsProvider, useUiSettings } from '@/src/ui/UiSettingsContext';
 
@@ -24,10 +25,12 @@ function AppNavigator() {
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <UiSettingsProvider>
-        <AppNavigator />
-      </UiSettingsProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <UiSettingsProvider>
+          <AppNavigator />
+        </UiSettingsProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

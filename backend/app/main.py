@@ -778,8 +778,14 @@ def delete_submission(
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
-    if get_submission_status(db, submission_id) != "DRAFT":
-        raise HTTPException(status_code=409, detail="Only DRAFT submissions can be deleted")
+    current_status = get_submission_status(db, submission_id)
+    if current_status == "DRAFT":
+        pass
+    elif not is_admin(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can delete submitted or reviewed submissions",
+        )
 
     try:
         db.execute(text("DELETE FROM submissions WHERE id = :sid"), {"sid": submission_id})

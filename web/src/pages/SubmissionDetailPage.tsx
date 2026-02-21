@@ -91,11 +91,16 @@ export default function SubmissionDetailPage() {
   const [shareCandidates, setShareCandidates] = useState<AdminUser[]>([]);
   const [sharedWith, setSharedWith] = useState<SharedUser[]>([]);
   const [geoBusy, setGeoBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
   const canAct = canReview && data?.submission.status === "SUBMITTED";
   const canManageSharing = !!me?.roles?.includes("ADMIN");
+  const canDeleteSubmission =
+    !!data?.submission &&
+    (me?.roles?.includes("ADMIN") ||
+      (data.submission.status === "DRAFT" && me?.id === data.submission.created_by_user_id));
   const tog = (arr: string[], code: string) => (arr.includes(code) ? arr.filter((x) => x !== code) : [...arr, code]);
 
   async function load() {
@@ -205,6 +210,25 @@ export default function SubmissionDetailPage() {
     }
   }
 
+  async function onDeleteSubmission() {
+    if (!data || !canDeleteSubmission) return;
+    const ok = window.confirm(
+      data.submission.status === "DRAFT"
+        ? "Delete this draft?"
+        : "Delete this submitted/reviewed record? This cannot be undone."
+    );
+    if (!ok) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api(`/submissions/${sid}`, { method: "DELETE" });
+      window.location.href = "/submissions";
+    } catch (e: any) {
+      setErr(e?.message ?? "Delete failed");
+      setBusy(false);
+    }
+  }
+
   async function autofillFromGps() {
     if (!canEdit || !navigator.geolocation) return;
     setGeoBusy(true);
@@ -276,6 +300,34 @@ export default function SubmissionDetailPage() {
             }) : `Case ${sid}`)}</h2>{data?.submission && <S s={data.submission.status} />}</div>
           </div>
           <div className="flex gap-2">
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((prev) => !prev)}
+                disabled={invalid}
+                className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95 disabled:opacity-60"
+                title="Submission options"
+              >
+                ⋮
+              </button>
+              {menuOpen ? (
+                <div className="absolute right-0 top-10 z-10 min-w-36 rounded-md border border-[var(--line)] bg-[var(--panel)] p-1 shadow-lg">
+                  <button
+                    onClick={load}
+                    className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-[var(--panel-soft)]"
+                  >
+                    Refresh
+                  </button>
+                  {canDeleteSubmission ? (
+                    <button
+                      onClick={onDeleteSubmission}
+                      className="block w-full rounded px-2 py-1.5 text-left text-xs text-red-600 hover:bg-[color:color-mix(in_oklab,var(--bad)_12%,transparent)]"
+                    >
+                      Delete
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
             <button onClick={load} disabled={busy || invalid} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95 disabled:opacity-60">Refresh</button>
             <button onClick={() => review("APPROVE")} disabled={busy || invalid || !canAct} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm text-white hover:brightness-95 disabled:opacity-60">Approve</button>
             <button onClick={() => review("REJECT")} disabled={busy || invalid || !canAct} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95 disabled:opacity-60">Reject</button>

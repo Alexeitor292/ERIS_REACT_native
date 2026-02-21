@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { Submission } from "../api/types";
 import AppShell from "../ui/AppShell";
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
+import { useAuth } from "../auth/AuthContext";
 
 type Status = Submission["status"];
 
@@ -27,11 +28,13 @@ function StatusChip({ status }: { status: Status }) {
 }
 
 export default function SubmissionsPage() {
+  const { me } = useAuth();
   const [items, setItems] = useState<Submission[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>("ALL");
   const [loading, setLoading] = useState(false);
+  const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
   async function load() {
     setErr(null);
@@ -49,6 +52,31 @@ export default function SubmissionsPage() {
   useEffect(() => {
     load();
   }, []);
+
+  function canDeleteSubmission(s: Submission): boolean {
+    const roles = new Set(me?.roles ?? []);
+    const isAdmin = roles.has("ADMIN");
+    const isOwner = me?.id === s.created_by_user_id;
+    if (s.status === "DRAFT") return isAdmin || !!isOwner;
+    return isAdmin;
+  }
+
+  async function onDeleteSubmission(s: Submission) {
+    const ok = window.confirm(
+      s.status === "DRAFT"
+        ? "Delete this draft?"
+        : "Delete this submitted/reviewed record? This cannot be undone."
+    );
+    if (!ok) return;
+    setErr(null);
+    try {
+      await api(`/submissions/${s.id}`, { method: "DELETE" });
+      setMenuOpenId(null);
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to delete");
+    }
+  }
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -211,12 +239,41 @@ export default function SubmissionsPage() {
                     <td className="px-4 py-3 text-sm text-muted tabular-nums">{s.created_at}</td>
                     <td className="px-4 py-3 text-sm text-muted tabular-nums">{s.submitted_at ?? "-"}</td>
                     <td className="px-4 py-3 text-right text-sm">
-                      <Link
-                        className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
-                        to={`/submissions/${s.id}`}
-                      >
-                        Open
-                      </Link>
+                      <div className="relative inline-flex items-center gap-2">
+                        <Link
+                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                          to={`/submissions/${s.id}`}
+                        >
+                          Open
+                        </Link>
+                        <button
+                          onClick={() => setMenuOpenId((prev) => (prev === s.id ? null : s.id))}
+                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                          aria-label="Submission options"
+                          title="Submission options"
+                        >
+                          ⋮
+                        </button>
+                        {menuOpenId === s.id ? (
+                          <div className="absolute right-0 top-8 z-10 min-w-32 rounded-md border border-[var(--line)] bg-[var(--panel)] p-1 shadow-lg">
+                            <Link
+                              to={`/submissions/${s.id}`}
+                              className="block rounded px-2 py-1.5 text-left text-xs hover:bg-[var(--panel-soft)]"
+                              onClick={() => setMenuOpenId(null)}
+                            >
+                              Open details
+                            </Link>
+                            {canDeleteSubmission(s) ? (
+                              <button
+                                onClick={() => onDeleteSubmission(s)}
+                                className="block w-full rounded px-2 py-1.5 text-left text-xs text-red-600 hover:bg-[color:color-mix(in_oklab,var(--bad)_12%,transparent)]"
+                              >
+                                Delete
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
