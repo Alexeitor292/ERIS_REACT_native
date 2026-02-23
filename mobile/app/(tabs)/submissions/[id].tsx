@@ -38,22 +38,27 @@ type SubmissionDetail = {
 };
 
 type FormState = Record<string, string> & { pavement_ground_cracks: "UNKNOWN" | "YES" | "NO"; indented_by_rocks: "UNKNOWN" | "YES" | "NO" };
+type DistrictContact = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  s_number: string;
+  phone: string;
+  cell_phone: string;
+};
 type FieldErrorMap = Partial<Record<keyof FormState, string>>;
 const EMPTY_FORM: FormState = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
   latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "",
   crack_length_ft: "", crack_horizontal_in: "", crack_vertical_in: "", crack_depth_in: "", settlement_in: "", bulge_in: "",
-  team_member1_last_name: "", team_member1_first_name: "", team_member1_s_number: "",
-  team_member2_last_name: "", team_member2_first_name: "", team_member2_s_number: "",
-  contact_phone_primary: "", contact_phone_secondary: "",
   failure_rock_fall: "", failure_topple: "", failure_slide: "", failure_spread: "", failure_flow: "", failure_compound: "", failure_erosion: "", failure_surficial_failure: "", failure_scoured_toe: "", failure_washout: "",
   distribution_advancing: "", distribution_retrogressive: "", distribution_enlarging: "", distribution_widening: "", distribution_moving: "", distribution_confined: "",
-  material_rock: "", material_bedding: "", material_joints: "", material_fractures: "",
+  material_rock: "", material_soil: "", material_bedding: "", material_joints: "", material_fractures: "",
   est_soil_pct: "", est_clay_pct: "", est_silt_pct: "", est_sand_pct: "", est_gravel_pct: "",
   water_dry: "", water_moist: "", water_wet: "", water_flowing: "", water_seep: "", water_spring: "",
   vegetation_trees: "", vegetation_bushes_shrubs: "", vegetation_groundcover: "",
   drainage_clogged_inlet: "", drainage_compromised_drains: "", drainage_surface_runoff: "", drainage_torrent_surge_flood: "",
-  impact_impacted_adj_utilities: "", impact_adj_utilities: "", impact_impacted_adj_properties: "", impact_adj_properties: "", impact_impacted_adj_structure: "", impact_adj_structure: "",
+  impact_impacted_adj_utilities: "", impact_maybe_adj_utilities: "", impact_adj_utilities: "", impact_impacted_adj_properties: "", impact_maybe_adj_properties: "", impact_adj_properties: "", impact_impacted_adj_structure: "", impact_maybe_adj_structure: "", impact_adj_structure: "",
   measure_slope_height_ft: "", measure_original_slope_deg: "", measure_landslide_width_ft: "", measure_landslide_length_ft: "", measure_main_scarp_height_ft: "", measure_landslide_slope_deg: "", measure_roadway_length_ft: "", measure_roadway_width_ft: "",
   observations_notes: "", geometry_json: "", pavement_ground_cracks: "UNKNOWN", indented_by_rocks: "UNKNOWN",
 };
@@ -107,6 +112,54 @@ function normalizeDownloadUrl(rawUrl: string, apiBaseUrl: string): string {
   } catch {
     return rawUrl;
   }
+}
+
+function createEmptyDistrictContact(): DistrictContact {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    first_name: "",
+    last_name: "",
+    s_number: "",
+    phone: "",
+    cell_phone: "",
+  };
+}
+
+function parseDistrictContacts(raw: string): DistrictContact[] {
+  const value = (raw || "").trim();
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => ({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      first_name: String(item?.first_name ?? ""),
+      last_name: String(item?.last_name ?? ""),
+      s_number: String(item?.s_number ?? ""),
+      phone: String(item?.phone ?? ""),
+      cell_phone: String(item?.cell_phone ?? ""),
+    }));
+  } catch {
+    return [
+      {
+        ...createEmptyDistrictContact(),
+        first_name: value,
+      },
+    ];
+  }
+}
+
+function serializeDistrictContacts(contacts: DistrictContact[]): string {
+  const normalized = contacts
+    .map((c) => ({
+      first_name: c.first_name.trim(),
+      last_name: c.last_name.trim(),
+      s_number: c.s_number.trim(),
+      phone: c.phone.trim(),
+      cell_phone: c.cell_phone.trim(),
+    }))
+    .filter((c) => Object.values(c).some((v) => !!v));
+  return normalized.length ? JSON.stringify(normalized) : "";
 }
 
 function Chip({
@@ -253,6 +306,30 @@ function CollapsibleSection({
   );
 }
 
+function DropdownBlock({
+  title,
+  open,
+  onToggle,
+  children,
+  palette,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  palette: { panel: string; border: string; text: string; muted: string };
+}) {
+  return (
+    <View style={[styles.dropdownBlock, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+      <Pressable onPress={onToggle} style={styles.dropdownBlockHeader}>
+        <Text style={[styles.dropdownBlockTitle, { color: palette.text }]}>{title}</Text>
+        <Text style={[styles.sectionChevron, { color: palette.muted }]}>{open ? "v" : ">"}</Text>
+      </Pressable>
+      {open ? <View style={{ marginTop: 6 }}>{children}</View> : null}
+    </View>
+  );
+}
+
 export default function SubmissionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation<any>();
@@ -267,6 +344,8 @@ export default function SubmissionDetailScreen() {
   const [immediateActions, setImmediateActions] = useState<string[]>([]);
   const [followUpActions, setFollowUpActions] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrorMap>({});
+  const [districtContacts, setDistrictContacts] = useState<DistrictContact[]>([]);
+  const [openDistrictContactIds, setOpenDistrictContactIds] = useState<Record<string, boolean>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>({});
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
@@ -283,12 +362,20 @@ export default function SubmissionDetailScreen() {
   const [openSections, setOpenSections] = useState({
     header: false,
     location: false,
-    incidentTypes: false,
-    roadwayStatus: false,
-    pavementSlope: false,
-    paperFields: false,
     actions: false,
     observations: false,
+  });
+  const [openPaperBlocks, setOpenPaperBlocks] = useState({
+    distributionMain: false,
+    highwayStatusMain: false,
+    incidentType: false,
+    distribution: false,
+    material: false,
+    waterContent: false,
+    pavementGroundStatus: false,
+    vegetation: false,
+    waterDrainage: false,
+    measurements: false,
   });
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const isIOS = Platform.OS === "ios";
@@ -351,6 +438,7 @@ export default function SubmissionDetailScreen() {
       ]);
       setMe(meRes); setData(subRes); setLookups(lookRes);
       const g = subRes.gisa || {};
+      const loadedDistrictContacts = parseDistrictContacts(g.district_contact ?? "");
       const countyCode = countyCodeFromNameOrCode(g.county ?? "");
       const districtValue = g.district ? String(g.district).padStart(2, "0") : (districtForCounty(countyCode) ?? "");
       setForm({
@@ -359,20 +447,19 @@ export default function SubmissionDetailScreen() {
         latitude: g.latitude != null ? String(g.latitude) : "", longitude: g.longitude != null ? String(g.longitude) : "",
         distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
-        team_member1_last_name: g.team_member1_last_name ?? "", team_member1_first_name: g.team_member1_first_name ?? "", team_member1_s_number: g.team_member1_s_number ?? "",
-        team_member2_last_name: g.team_member2_last_name ?? "", team_member2_first_name: g.team_member2_first_name ?? "", team_member2_s_number: g.team_member2_s_number ?? "",
-        contact_phone_primary: g.contact_phone_primary ?? "", contact_phone_secondary: g.contact_phone_secondary ?? "",
         failure_rock_fall: boolToYn(g.failure_rock_fall), failure_topple: boolToYn(g.failure_topple), failure_slide: boolToYn(g.failure_slide), failure_spread: boolToYn(g.failure_spread), failure_flow: boolToYn(g.failure_flow), failure_compound: boolToYn(g.failure_compound), failure_erosion: boolToYn(g.failure_erosion), failure_surficial_failure: boolToYn(g.failure_surficial_failure), failure_scoured_toe: boolToYn(g.failure_scoured_toe), failure_washout: boolToYn(g.failure_washout),
         distribution_advancing: boolToYn(g.distribution_advancing), distribution_retrogressive: boolToYn(g.distribution_retrogressive), distribution_enlarging: boolToYn(g.distribution_enlarging), distribution_widening: boolToYn(g.distribution_widening), distribution_moving: boolToYn(g.distribution_moving), distribution_confined: boolToYn(g.distribution_confined),
-        material_rock: boolToYn(g.material_rock), material_bedding: boolToYn(g.material_bedding), material_joints: boolToYn(g.material_joints), material_fractures: boolToYn(g.material_fractures),
+        material_rock: boolToYn(g.material_rock), material_soil: boolToYn(g.material_soil), material_bedding: boolToYn(g.material_bedding), material_joints: boolToYn(g.material_joints), material_fractures: boolToYn(g.material_fractures),
         est_soil_pct: g.est_soil_pct != null ? String(g.est_soil_pct) : "", est_clay_pct: g.est_clay_pct != null ? String(g.est_clay_pct) : "", est_silt_pct: g.est_silt_pct != null ? String(g.est_silt_pct) : "", est_sand_pct: g.est_sand_pct != null ? String(g.est_sand_pct) : "", est_gravel_pct: g.est_gravel_pct != null ? String(g.est_gravel_pct) : "",
         water_dry: boolToYn(g.water_dry), water_moist: boolToYn(g.water_moist), water_wet: boolToYn(g.water_wet), water_flowing: boolToYn(g.water_flowing), water_seep: boolToYn(g.water_seep), water_spring: boolToYn(g.water_spring),
         vegetation_trees: g.vegetation_trees ?? "", vegetation_bushes_shrubs: g.vegetation_bushes_shrubs ?? "", vegetation_groundcover: g.vegetation_groundcover ?? "",
         drainage_clogged_inlet: boolToYn(g.drainage_clogged_inlet), drainage_compromised_drains: boolToYn(g.drainage_compromised_drains), drainage_surface_runoff: boolToYn(g.drainage_surface_runoff), drainage_torrent_surge_flood: boolToYn(g.drainage_torrent_surge_flood),
-        impact_impacted_adj_utilities: boolToYn(g.impact_impacted_adj_utilities), impact_adj_utilities: g.impact_adj_utilities ?? "", impact_impacted_adj_properties: boolToYn(g.impact_impacted_adj_properties), impact_adj_properties: g.impact_adj_properties ?? "", impact_impacted_adj_structure: boolToYn(g.impact_impacted_adj_structure), impact_adj_structure: g.impact_adj_structure ?? "",
+        impact_impacted_adj_utilities: boolToYn(g.impact_impacted_adj_utilities), impact_maybe_adj_utilities: boolToYn(g.impact_maybe_adj_utilities), impact_adj_utilities: g.impact_adj_utilities ?? "", impact_impacted_adj_properties: boolToYn(g.impact_impacted_adj_properties), impact_maybe_adj_properties: boolToYn(g.impact_maybe_adj_properties), impact_adj_properties: g.impact_adj_properties ?? "", impact_impacted_adj_structure: boolToYn(g.impact_impacted_adj_structure), impact_maybe_adj_structure: boolToYn(g.impact_maybe_adj_structure), impact_adj_structure: g.impact_adj_structure ?? "",
         measure_slope_height_ft: g.measure_slope_height_ft != null ? String(g.measure_slope_height_ft) : "", measure_original_slope_deg: g.measure_original_slope_deg != null ? String(g.measure_original_slope_deg) : "", measure_landslide_width_ft: g.measure_landslide_width_ft != null ? String(g.measure_landslide_width_ft) : "", measure_landslide_length_ft: g.measure_landslide_length_ft != null ? String(g.measure_landslide_length_ft) : "", measure_main_scarp_height_ft: g.measure_main_scarp_height_ft != null ? String(g.measure_main_scarp_height_ft) : "", measure_landslide_slope_deg: g.measure_landslide_slope_deg != null ? String(g.measure_landslide_slope_deg) : "", measure_roadway_length_ft: g.measure_roadway_length_ft != null ? String(g.measure_roadway_length_ft) : "", measure_roadway_width_ft: g.measure_roadway_width_ft != null ? String(g.measure_roadway_width_ft) : "",
         observations_notes: g.observations_notes ?? "", geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "",
       });
+      setDistrictContacts(loadedDistrictContacts);
+      setOpenDistrictContactIds(Object.fromEntries(loadedDistrictContacts.map((c, idx) => [c.id, idx === 0])));
       setIncidentTypes(subRes.incident_types ?? []);
       setImmediateActions(subRes.actions?.immediate ?? []);
       setFollowUpActions(subRes.actions?.follow_up ?? []);
@@ -406,6 +493,47 @@ export default function SubmissionDetailScreen() {
   const toggle = (list: string[], code: string) => (list.includes(code) ? list.filter((x) => x !== code) : [...list, code]);
   const toggleSection = (key: keyof typeof openSections) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+  const togglePaperBlock = (key: keyof typeof openPaperBlocks) => {
+    setOpenPaperBlocks((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+  const contactDisplayName = (contact: DistrictContact, idx: number) => {
+    const full = `${contact.first_name} ${contact.last_name}`.trim();
+    return full || `Contact ${idx + 1}`;
+  };
+  const syncDistrictContacts = (nextContacts: DistrictContact[]) => {
+    setDistrictContacts(nextContacts);
+    setVal("district_contact", serializeDistrictContacts(nextContacts));
+  };
+  const addDistrictContact = () => {
+    if (!canEdit) return;
+    const nextContact = createEmptyDistrictContact();
+    syncDistrictContacts([...districtContacts, nextContact]);
+    setOpenDistrictContactIds((prev) => ({ ...prev, [nextContact.id]: true }));
+  };
+  const updateDistrictContact = (
+    idToUpdate: string,
+    field: "first_name" | "last_name" | "s_number" | "phone" | "cell_phone",
+    value: string
+  ) => {
+    if (!canEdit) return;
+    const next = districtContacts.map((contact) =>
+      contact.id === idToUpdate ? { ...contact, [field]: value } : contact
+    );
+    syncDistrictContacts(next);
+  };
+  const toggleDistrictContact = (idToToggle: string) => {
+    setOpenDistrictContactIds((prev) => ({ ...prev, [idToToggle]: !prev[idToToggle] }));
+  };
+  const removeDistrictContact = (idToRemove: string) => {
+    if (!canEdit) return;
+    const next = districtContacts.filter((contact) => contact.id !== idToRemove);
+    syncDistrictContacts(next);
+    setOpenDistrictContactIds((prev) => {
+      const updated = { ...prev };
+      delete updated[idToRemove];
+      return updated;
+    });
   };
 
   function openDatePicker(key: "report_date" | "date_incident_reported") {
@@ -503,17 +631,14 @@ export default function SubmissionDetailScreen() {
         latitude: f(form.latitude, "Latitude"), longitude: f(form.longitude, "Longitude"),
         distribution_code: n(form.distribution_code), highway_status_code: n(form.highway_status_code), lanes_closed_count: i(form.lanes_closed_count, "Lanes closed count"),
         pavement_ground_cracks: triToBool(form.pavement_ground_cracks), crack_length_ft: f(form.crack_length_ft, "Crack length"), crack_horizontal_in: f(form.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(form.crack_vertical_in, "Crack vertical"), crack_depth_in: f(form.crack_depth_in, "Crack depth"), settlement_in: f(form.settlement_in, "Settlement"), bulge_in: f(form.bulge_in, "Bulge"), indented_by_rocks: triToBool(form.indented_by_rocks),
-        team_member1_last_name: n(form.team_member1_last_name), team_member1_first_name: n(form.team_member1_first_name), team_member1_s_number: n(form.team_member1_s_number),
-        team_member2_last_name: n(form.team_member2_last_name), team_member2_first_name: n(form.team_member2_first_name), team_member2_s_number: n(form.team_member2_s_number),
-        contact_phone_primary: n(form.contact_phone_primary), contact_phone_secondary: n(form.contact_phone_secondary),
         failure_rock_fall: ynToBool(form.failure_rock_fall), failure_topple: ynToBool(form.failure_topple), failure_slide: ynToBool(form.failure_slide), failure_spread: ynToBool(form.failure_spread), failure_flow: ynToBool(form.failure_flow), failure_compound: ynToBool(form.failure_compound), failure_erosion: ynToBool(form.failure_erosion), failure_surficial_failure: ynToBool(form.failure_surficial_failure), failure_scoured_toe: ynToBool(form.failure_scoured_toe), failure_washout: ynToBool(form.failure_washout),
         distribution_advancing: ynToBool(form.distribution_advancing), distribution_retrogressive: ynToBool(form.distribution_retrogressive), distribution_enlarging: ynToBool(form.distribution_enlarging), distribution_widening: ynToBool(form.distribution_widening), distribution_moving: ynToBool(form.distribution_moving), distribution_confined: ynToBool(form.distribution_confined),
-        material_rock: ynToBool(form.material_rock), material_bedding: ynToBool(form.material_bedding), material_joints: ynToBool(form.material_joints), material_fractures: ynToBool(form.material_fractures),
+        material_rock: ynToBool(form.material_rock), material_soil: ynToBool(form.material_soil), material_bedding: ynToBool(form.material_bedding), material_joints: ynToBool(form.material_joints), material_fractures: ynToBool(form.material_fractures),
         est_soil_pct: f(form.est_soil_pct, "Estimated soil %"), est_clay_pct: f(form.est_clay_pct, "Estimated clay %"), est_silt_pct: f(form.est_silt_pct, "Estimated silt %"), est_sand_pct: f(form.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(form.est_gravel_pct, "Estimated gravel %"),
         water_dry: ynToBool(form.water_dry), water_moist: ynToBool(form.water_moist), water_wet: ynToBool(form.water_wet), water_flowing: ynToBool(form.water_flowing), water_seep: ynToBool(form.water_seep), water_spring: ynToBool(form.water_spring),
         vegetation_trees: n(form.vegetation_trees), vegetation_bushes_shrubs: n(form.vegetation_bushes_shrubs), vegetation_groundcover: n(form.vegetation_groundcover),
         drainage_clogged_inlet: ynToBool(form.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(form.drainage_compromised_drains), drainage_surface_runoff: ynToBool(form.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(form.drainage_torrent_surge_flood),
-        impact_impacted_adj_utilities: ynToBool(form.impact_impacted_adj_utilities), impact_adj_utilities: n(form.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(form.impact_impacted_adj_properties), impact_adj_properties: n(form.impact_adj_properties), impact_impacted_adj_structure: ynToBool(form.impact_impacted_adj_structure), impact_adj_structure: n(form.impact_adj_structure),
+        impact_impacted_adj_utilities: ynToBool(form.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(form.impact_maybe_adj_utilities), impact_adj_utilities: n(form.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(form.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(form.impact_maybe_adj_properties), impact_adj_properties: n(form.impact_adj_properties), impact_impacted_adj_structure: ynToBool(form.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(form.impact_maybe_adj_structure), impact_adj_structure: n(form.impact_adj_structure),
         measure_slope_height_ft: f(form.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(form.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(form.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(form.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(form.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(form.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(form.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(form.measure_roadway_width_ft, "Roadway width"),
         observations_notes: n(form.observations_notes), geometry_json: geometry,
       });
@@ -821,11 +946,84 @@ export default function SubmissionDetailScreen() {
     if (key && !eventDate[key]) eventDate[key] = ev.created_at;
   }
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
-  const materialKeys = ["material_rock", "material_bedding", "material_joints", "material_fractures"];
-  const impactKeys = ["impact_impacted_adj_utilities", "impact_impacted_adj_properties", "impact_impacted_adj_structure"];
+  const materialKeys = ["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures"];
+  const impactKeys = ["impact_impacted_adj_utilities", "impact_impacted_adj_properties", "impact_impacted_adj_structure", "impact_maybe_adj_utilities", "impact_maybe_adj_properties", "impact_maybe_adj_structure"];
   const anyFailureSelected = failureKeys.some((k) => form[k] === "YES");
   const anyMaterialSelected = materialKeys.some((k) => form[k] === "YES");
   const anyImpactSelected = impactKeys.some((k) => form[k] === "YES");
+  const materialRockSelected = form.material_rock === "YES";
+  const materialSoilSelected = form.material_soil === "YES";
+  const waterFlowingSelected = form.water_flowing === "YES";
+  const highwayLanesClosedSelected = form.highway_status_code === "LANES_CLOSED";
+  const closeHighwayEnabled = immediateActions.includes("CLOSE_ONE_DIRECTION") || immediateActions.includes("CLOSE_BOTH_DIRECTIONS");
+  const openHighwayTrafficSelected = immediateActions.includes("OPEN_HIGHWAY_TRAFFIC") || followUpActions.includes("OPEN_HIGHWAY_TRAFFIC");
+  const recommendedActions: { key: string; label: string; code?: string; immediate: boolean; followUp: boolean }[] = [
+    { key: "OPEN_HIGHWAY_TRAFFIC", label: "Open Highway Traffic", code: "OPEN_HIGHWAY_TRAFFIC", immediate: true, followUp: true },
+    { key: "CLOSE_HIGHWAY_SHOULDER", label: "Open Highway Shoulder", code: "CLOSE_HIGHWAY_SHOULDER", immediate: true, followUp: true },
+    { key: "CLOSE_HIGHWAY_PARENT", label: "Close Highway", immediate: true, followUp: false },
+    { key: "REMOVE_DEBRIS", label: "Remove Landslide Debris from the Highway", code: "REMOVE_DEBRIS", immediate: true, followUp: false },
+    { key: "PLACE_K_RAIL", label: "Place K-Rail or Fence", code: "PLACE_K_RAIL", immediate: true, followUp: false },
+    { key: "COVER_SLOPE_PLASTIC", label: "Cover Slope with Plastic", code: "COVER_SLOPE_PLASTIC", immediate: true, followUp: false },
+    { key: "DIVERT_SURFACE_WATER", label: "Divert Surface Water Runoff", code: "DIVERT_SURFACE_WATER", immediate: true, followUp: false },
+    { key: "REMOVE_CULVERT_BLOCKAGE", label: "Remove Culvert Blockage", code: "REMOVE_CULVERT_BLOCKAGE", immediate: true, followUp: false },
+    { key: "DEWATER", label: "Dewater with Pump, Trench, etc.", code: "DEWATER", immediate: true, followUp: false },
+    { key: "DEWATER_HORIZONTAL_DRAINS", label: "Dewater with Horizontal Drains", code: "DEWATER_HORIZONTAL_DRAINS", immediate: true, followUp: true },
+    { key: "TEMP_SHORING", label: "Construct Temporary Shoring", code: "TEMP_SHORING", immediate: true, followUp: true },
+    { key: "BUTTRESS_TOE", label: "Buttress Toe of Landslide", code: "BUTTRESS_TOE", immediate: true, followUp: true },
+    { key: "PLACE_ROCK_SLOPE_PROTECTION", label: "Place Rock Slope Protection (ref. Manual)", code: "PLACE_ROCK_SLOPE_PROTECTION", immediate: true, followUp: true },
+    { key: "ROUTINE_VISUAL_MONITOR", label: "Routine Visual Monitor", code: "ROUTINE_VISUAL_MONITOR", immediate: true, followUp: true },
+    { key: "RECONSTRUCT_SLOPE", label: "Reconstruct Slope to Original Condition", code: "RECONSTRUCT_SLOPE", immediate: true, followUp: true },
+    { key: "RECONSTRUCT_SLOPE_GEOSYNTHETICS", label: "Reconstruct Slope with Geosynthetics", code: "RECONSTRUCT_SLOPE_GEOSYNTHETICS", immediate: true, followUp: true },
+    { key: "REPAIR_CULVERT_DRAINAGE_PIPE", label: "Repair Culvert/Drainage Pipe", code: "REPAIR_CULVERT_DRAINAGE_PIPE", immediate: false, followUp: true },
+    { key: "EROSION_CONTROL", label: "Install Erosion Control - by Dist. Landscape", code: "EROSION_CONTROL", immediate: false, followUp: true },
+    { key: "SURVEY_SITE_DIST_SURVEY", label: "Survey the Site - by Dist. Survey", code: "SURVEY_SITE_DIST_SURVEY", immediate: false, followUp: true },
+    { key: "GEOLOGIC_MAPPING", label: "Perform Geological Mapping", code: "GEOLOGIC_MAPPING", immediate: false, followUp: true },
+    { key: "SUBSURFACE_EXPLORATION", label: "Perform Subsurface Exploration", code: "SUBSURFACE_EXPLORATION", immediate: false, followUp: true },
+    { key: "DETAILED_DESIGN_PLANS", label: "Perform Detailed Design & Produce Plans", code: "DETAILED_DESIGN_PLANS", immediate: false, followUp: true },
+  ];
+
+  const toggleActionByGroup = (code: string, group: "IMMEDIATE" | "FOLLOW_UP") => {
+    if (!canEdit) return;
+    if (group === "IMMEDIATE") {
+      setImmediateActions((prev) => (prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]));
+      return;
+    }
+    setFollowUpActions((prev) => (prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]));
+  };
+
+  const toggleCloseHighwayParent = () => {
+    if (!canEdit) return;
+    if (closeHighwayEnabled) {
+      setImmediateActions((prev) => prev.filter((x) => x !== "CLOSE_ONE_DIRECTION" && x !== "CLOSE_BOTH_DIRECTIONS"));
+      return;
+    }
+    setImmediateActions((prev) => (prev.includes("CLOSE_ONE_DIRECTION") ? prev : [...prev, "CLOSE_ONE_DIRECTION"]));
+  };
+
+  const toggleCloseHighwayDirection = (code: "CLOSE_ONE_DIRECTION" | "CLOSE_BOTH_DIRECTIONS") => {
+    if (!canEdit) return;
+    setImmediateActions((prev) => {
+      const base = prev.filter((x) => x !== "CLOSE_ONE_DIRECTION" && x !== "CLOSE_BOTH_DIRECTIONS");
+      if (prev.includes(code)) return base;
+      return [...base, code];
+    });
+  };
+  const setImpactSelection = (
+    impactedKey: "impact_impacted_adj_utilities" | "impact_impacted_adj_properties" | "impact_impacted_adj_structure",
+    maybeKey: "impact_maybe_adj_utilities" | "impact_maybe_adj_properties" | "impact_maybe_adj_structure",
+    target: "IMPACTED" | "MAYBE"
+  ) => {
+    if (!canEdit) return;
+    if (target === "IMPACTED") {
+      const next = form[impactedKey] === "YES" ? "" : "YES";
+      setVal(impactedKey as keyof FormState, next);
+      if (next === "YES") setVal(maybeKey as keyof FormState, "");
+      return;
+    }
+    const next = form[maybeKey] === "YES" ? "" : "YES";
+    setVal(maybeKey as keyof FormState, next);
+    if (next === "YES") setVal(impactedKey as keyof FormState, "");
+  };
 
   function previewSource(photoId: number) {
     const queryToken = encodeURIComponent(token || "");
@@ -888,7 +1086,7 @@ export default function SubmissionDetailScreen() {
         })}
       </Text>
       <Text style={[styles.status, { color: palette.muted }]}>Status: {data.submission.status}</Text>
-        <CollapsibleSection title="Header Info" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
+        <CollapsibleSection title="GISA Header" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
         <SelectField
           palette={palette}
           label="Report Date (YYYY-MM-DD)"
@@ -937,7 +1135,47 @@ export default function SubmissionDetailScreen() {
           onPress={() => openDatePicker("date_incident_reported")}
           error={fieldErrors.date_incident_reported}
         />
-        <Field palette={palette} label="District Contact" value={form.district_contact} editable={canEdit} onChangeText={(v) => setVal("district_contact", v)} error={fieldErrors.district_contact} />
+        <Text style={styles.label}>District Contacts</Text>
+        {districtContacts.length === 0 ? (
+          <Text style={[styles.muted, { marginTop: 6, color: palette.muted }]}>No district contacts added yet.</Text>
+        ) : (
+          districtContacts.map((contact, idx) => {
+            const isOpen = !!openDistrictContactIds[contact.id];
+            return (
+              <View key={contact.id} style={[styles.contactCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+                <Pressable style={styles.contactCardHeader} onPress={() => toggleDistrictContact(contact.id)}>
+                  <Text style={[styles.contactCardTitle, { color: palette.text }]}>{contactDisplayName(contact, idx)}</Text>
+                  <Text style={[styles.sectionChevron, { color: palette.muted }]}>{isOpen ? "v" : ">"}</Text>
+                </Pressable>
+                {isOpen ? (
+                  <View style={{ marginTop: 6 }}>
+                    <Field palette={palette} label="First Name" value={contact.first_name} editable={canEdit} onChangeText={(v) => updateDistrictContact(contact.id, "first_name", v)} />
+                    <Field palette={palette} label="Last Name" value={contact.last_name} editable={canEdit} onChangeText={(v) => updateDistrictContact(contact.id, "last_name", v)} />
+                    <Field palette={palette} label="S Number" value={contact.s_number} editable={canEdit} onChangeText={(v) => updateDistrictContact(contact.id, "s_number", v)} />
+                    <Field palette={palette} label="Phone" value={contact.phone} editable={canEdit} onChangeText={(v) => updateDistrictContact(contact.id, "phone", v)} />
+                    <Field palette={palette} label="Cell Phone" value={contact.cell_phone} editable={canEdit} onChangeText={(v) => updateDistrictContact(contact.id, "cell_phone", v)} />
+                    {canEdit ? (
+                      <Pressable
+                        style={[styles.btnGhost, { marginTop: 10, borderColor: palette.border, backgroundColor: palette.panel }]}
+                        onPress={() => removeDistrictContact(contact.id)}
+                      >
+                        <Text style={[styles.btnGhostText, { color: palette.danger }]}>Remove Contact</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+        {fieldErrors.district_contact ? <Text style={styles.errorText}>{fieldErrors.district_contact}</Text> : null}
+        <Pressable
+          style={[styles.btnGhost, { marginTop: 10, borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+          onPress={addDistrictContact}
+          disabled={!canEdit}
+        >
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Add District Contact</Text>
+        </Pressable>
       </CollapsibleSection>
 
       <CollapsibleSection title="Location" open={openSections.location} onToggle={() => toggleSection("location")} palette={palette} compact={compact}>
@@ -974,114 +1212,206 @@ export default function SubmissionDetailScreen() {
         <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Incident Types" open={openSections.incidentTypes} onToggle={() => toggleSection("incidentTypes")} palette={palette} compact={compact}>
-        <View style={styles.chips}>
-          {lookups.incident_types.map((o) => (
-            <Chip key={o.code} label={o.label} palette={palette} active={incidentTypes.includes(o.code)} disabled={!canEdit} onPress={() => canEdit && setIncidentTypes((p) => toggle(p, o.code))} />
-          ))}
-        </View>
-      </CollapsibleSection>
+      <View>
+        <View style={{ gap: compact ? 8 : 10 }}>
+        <DropdownBlock title="Distribution" open={openPaperBlocks.distributionMain} onToggle={() => togglePaperBlock("distributionMain")} palette={palette}>
+          <View style={styles.chips}>
+            {lookups.distribution.map((o) => (
+              <Chip key={o.code} label={o.label} palette={palette} active={form.distribution_code === o.code} disabled={!canEdit} onPress={() => canEdit && setVal("distribution_code", form.distribution_code === o.code ? "" : o.code)} />
+            ))}
+          </View>
+        </DropdownBlock>
 
-      <CollapsibleSection title="Roadway Status" open={openSections.roadwayStatus} onToggle={() => toggleSection("roadwayStatus")} palette={palette} compact={compact}>
-        <Text style={styles.label}>Distribution</Text>
-        <View style={styles.chips}>
-          {lookups.distribution.map((o) => (
-            <Chip key={o.code} label={o.label} palette={palette} active={form.distribution_code === o.code} disabled={!canEdit} onPress={() => canEdit && setVal("distribution_code", form.distribution_code === o.code ? "" : o.code)} />
-          ))}
-        </View>
-        <Text style={styles.label}>Highway Status</Text>
-        <View style={styles.chips}>
-          {lookups.highway_status.map((o) => (
-            <Chip key={o.code} label={o.label} palette={palette} active={form.highway_status_code === o.code} disabled={!canEdit} onPress={() => canEdit && setVal("highway_status_code", form.highway_status_code === o.code ? "" : o.code)} />
-          ))}
-        </View>
-        <Field palette={palette} label="Lane(s) Closed Count" value={form.lanes_closed_count} editable={canEdit} keyboardType="number-pad" onChangeText={(v) => setVal("lanes_closed_count", v)} error={fieldErrors.lanes_closed_count} />
-      </CollapsibleSection>
+        <DropdownBlock title="Highway Status" open={openPaperBlocks.highwayStatusMain} onToggle={() => togglePaperBlock("highwayStatusMain")} palette={palette}>
+          <View style={styles.chips}>
+            {lookups.highway_status.map((o) => (
+              <Chip
+                key={o.code}
+                label={o.label}
+                palette={palette}
+                active={form.highway_status_code === o.code}
+                disabled={!canEdit}
+                onPress={() => {
+                  if (!canEdit) return;
+                  const next = form.highway_status_code === o.code ? "" : o.code;
+                  setVal("highway_status_code", next);
+                  if (next !== "LANES_CLOSED") setVal("lanes_closed_count", "");
+                }}
+              />
+            ))}
+          </View>
+          {highwayLanesClosedSelected ? (
+            <Field
+              palette={palette}
+              label="Lane(s) Closed Count"
+              value={form.lanes_closed_count}
+              editable={canEdit}
+              keyboardType="number-pad"
+              onChangeText={(v) => setVal("lanes_closed_count", v)}
+              error={fieldErrors.lanes_closed_count}
+            />
+          ) : null}
+        </DropdownBlock>
 
-      <CollapsibleSection title="Pavement / Slope Condition" open={openSections.pavementSlope} onToggle={() => toggleSection("pavementSlope")} palette={palette} compact={compact}>
-        <Text style={styles.label}>Pavement/Ground Cracks</Text>
-        <View style={styles.chips}>{(["YES", "NO", "UNKNOWN"] as const).map((c) => <Chip key={c} label={c} palette={palette} active={form.pavement_ground_cracks === c} disabled={!canEdit} onPress={() => canEdit && setVal("pavement_ground_cracks", c)} />)}</View>
-        <Field palette={palette} label="Crack Length (ft)" value={form.crack_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_length_ft", v)} error={fieldErrors.crack_length_ft} />
-        <Field palette={palette} label="Crack Horizontal (in)" value={form.crack_horizontal_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_horizontal_in", v)} error={fieldErrors.crack_horizontal_in} />
-        <Field palette={palette} label="Crack Vertical (in)" value={form.crack_vertical_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_vertical_in", v)} error={fieldErrors.crack_vertical_in} />
-        <Field palette={palette} label="Crack Depth (in)" value={form.crack_depth_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_depth_in", v)} error={fieldErrors.crack_depth_in} />
-        <Field palette={palette} label="Settlement (in)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
-        <Field palette={palette} label="Bulge (in)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
-        <Text style={styles.label}>Indented by Rocks</Text>
-        <View style={styles.chips}>{(["YES", "NO", "UNKNOWN"] as const).map((c) => <Chip key={c} label={c} palette={palette} active={form.indented_by_rocks === c} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", c)} />)}</View>
-      </CollapsibleSection>
-
-      <CollapsibleSection title="GISA Paper Fields" open={openSections.paperFields} onToggle={() => toggleSection("paperFields")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Team Member 1 - Last Name" value={form.team_member1_last_name} editable={canEdit} onChangeText={(v) => setVal("team_member1_last_name", v)} />
-        <Field palette={palette} label="Team Member 1 - First Name" value={form.team_member1_first_name} editable={canEdit} onChangeText={(v) => setVal("team_member1_first_name", v)} />
-        <Field palette={palette} label="Team Member 1 - S Number" value={form.team_member1_s_number} editable={canEdit} onChangeText={(v) => setVal("team_member1_s_number", v)} />
-        <Field palette={palette} label="Team Member 2 - Last Name" value={form.team_member2_last_name} editable={canEdit} onChangeText={(v) => setVal("team_member2_last_name", v)} />
-        <Field palette={palette} label="Team Member 2 - First Name" value={form.team_member2_first_name} editable={canEdit} onChangeText={(v) => setVal("team_member2_first_name", v)} />
-        <Field palette={palette} label="Team Member 2 - S Number" value={form.team_member2_s_number} editable={canEdit} onChangeText={(v) => setVal("team_member2_s_number", v)} />
-        <Field palette={palette} label="Primary Phone" value={form.contact_phone_primary} editable={canEdit} onChangeText={(v) => setVal("contact_phone_primary", v)} />
-        <Field palette={palette} label="Secondary Phone" value={form.contact_phone_secondary} editable={canEdit} onChangeText={(v) => setVal("contact_phone_secondary", v)} />
-
-        <Text style={styles.label}>Failure Types</Text>
-        <View style={styles.chips}>
-          {[
-            ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
-            ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surficial Failure"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
-          ].map(([key, label]) => (
-            <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
-          ))}
-        </View>
+        <DropdownBlock title="Incident Type" open={openPaperBlocks.incidentType} onToggle={() => togglePaperBlock("incidentType")} palette={palette}>
+          <View style={styles.chips}>
+            {[
+              ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
+              ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surficial Failure"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
+            ].map(([key, label]) => (
+              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+            ))}
+          </View>
+        </DropdownBlock>
 
         {anyFailureSelected ? (
           <>
-            <Text style={styles.label}>Distribution (Paper Multi-Select)</Text>
-            <View style={styles.chips}>
-              {[["distribution_advancing", "Advancing"], ["distribution_retrogressive", "Retrogressive"], ["distribution_enlarging", "Enlarging"], ["distribution_widening", "Widening"], ["distribution_moving", "Moving"], ["distribution_confined", "Confined"]].map(([key, label]) => (
-                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
-              ))}
-            </View>
-
-            <Text style={styles.label}>Material</Text>
-            <View style={styles.chips}>
-              {[["material_rock", "Rock"], ["material_bedding", "Bedding"], ["material_joints", "Joints"], ["material_fractures", "Fractures"]].map(([key, label]) => (
-                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
-              ))}
-            </View>
+            <DropdownBlock title="Distribution" open={openPaperBlocks.distribution} onToggle={() => togglePaperBlock("distribution")} palette={palette}>
+              <View style={styles.chips}>
+                {[["distribution_advancing", "Advancing"], ["distribution_retrogressive", "Retrogressive"], ["distribution_enlarging", "Enlarging"], ["distribution_widening", "Widening"], ["distribution_moving", "Moving"], ["distribution_confined", "Confined"]].map(([key, label]) => (
+                  <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+                ))}
+              </View>
+            </DropdownBlock>
           </>
         ) : null}
 
-        {anyMaterialSelected ? (
-          <>
-            <Field palette={palette} label="Estimated Soil %" value={form.est_soil_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_soil_pct", v)} />
-            <Field palette={palette} label="Estimated Clay %" value={form.est_clay_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_clay_pct", v)} />
-            <Field palette={palette} label="Estimated Silt %" value={form.est_silt_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_silt_pct", v)} />
-            <Field palette={palette} label="Estimated Sand %" value={form.est_sand_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_sand_pct", v)} />
-            <Field palette={palette} label="Estimated Gravel %" value={form.est_gravel_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_gravel_pct", v)} />
-            <Text style={styles.label}>Water Content</Text>
+        <DropdownBlock title="Material" open={openPaperBlocks.material} onToggle={() => togglePaperBlock("material")} palette={palette}>
+          <View style={styles.chips}>
+            {[["material_rock", "Rock"], ["material_soil", "Soil"]].map(([key, label]) => (
+              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+            ))}
+          </View>
+          {materialRockSelected ? (
             <View style={styles.chips}>
-              {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"], ["water_seep", "Seep"], ["water_spring", "Spring"]].map(([key, label]) => (
+              {[["material_bedding", "Bedding"], ["material_joints", "Joints"], ["material_fractures", "Fractures"]].map(([key, label]) => (
                 <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
               ))}
             </View>
-          </>
-        ) : null}
+          ) : null}
+          {materialSoilSelected ? (
+            <View>
+              <Field palette={palette} label="Clay Est %" value={form.est_clay_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_clay_pct", v)} />
+              <Field palette={palette} label="Silt Est %" value={form.est_silt_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_silt_pct", v)} />
+              <Field palette={palette} label="Sand Est %" value={form.est_sand_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_sand_pct", v)} />
+              <Field palette={palette} label="Gravel Est %" value={form.est_gravel_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_gravel_pct", v)} />
+            </View>
+          ) : null}
+        </DropdownBlock>
 
-        <Field palette={palette} label="Vegetation - Trees" value={form.vegetation_trees} editable={canEdit} onChangeText={(v) => setVal("vegetation_trees", v)} />
-        <Field palette={palette} label="Vegetation - Bushes/Shrubs" value={form.vegetation_bushes_shrubs} editable={canEdit} onChangeText={(v) => setVal("vegetation_bushes_shrubs", v)} />
-        <Field palette={palette} label="Vegetation - Groundcover" value={form.vegetation_groundcover} editable={canEdit} onChangeText={(v) => setVal("vegetation_groundcover", v)} />
+        <DropdownBlock title="Pavement / Ground Status" open={openPaperBlocks.pavementGroundStatus} onToggle={() => togglePaperBlock("pavementGroundStatus")} palette={palette}>
+          <Text style={styles.label}>Pavement/Ground Cracks</Text>
+          <View style={styles.chips}>
+            {(["YES", "NO", "UNKNOWN"] as const).map((c) => (
+              <Chip
+                key={`cracks-${c}`}
+                label={c}
+                palette={palette}
+                active={form.pavement_ground_cracks === c}
+                disabled={!canEdit}
+                onPress={() => {
+                  if (!canEdit) return;
+                  setVal("pavement_ground_cracks", c);
+                  if (c !== "YES") {
+                    setVal("crack_length_ft", "");
+                    setVal("crack_horizontal_in", "");
+                    setVal("crack_vertical_in", "");
+                    setVal("crack_depth_in", "");
+                    setVal("settlement_in", "");
+                    setVal("bulge_in", "");
+                  }
+                }}
+              />
+            ))}
+          </View>
+          {form.pavement_ground_cracks === "YES" ? (
+            <>
+              <Field palette={palette} label="Length (feet)" value={form.crack_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_length_ft", v)} error={fieldErrors.crack_length_ft} />
+              <Field palette={palette} label="Horizontal Disp (inches)" value={form.crack_horizontal_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_horizontal_in", v)} error={fieldErrors.crack_horizontal_in} />
+              <Field palette={palette} label="Vertical Disp (inches)" value={form.crack_vertical_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_vertical_in", v)} error={fieldErrors.crack_vertical_in} />
+              <Field palette={palette} label="Depth of Crack (inches)" value={form.crack_depth_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_depth_in", v)} error={fieldErrors.crack_depth_in} />
+              <Field palette={palette} label="Settlement (inches)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
+              <Field palette={palette} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
+            </>
+          ) : null}
+          <Text style={styles.label}>Indented by Rocks</Text>
+          <View style={styles.chips}>
+            {(["YES", "NO", "UNKNOWN"] as const).map((c) => (
+              <Chip key={`paper-${c}`} label={c} palette={palette} active={form.indented_by_rocks === c} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", c)} />
+            ))}
+          </View>
+        </DropdownBlock>
 
-        <Text style={styles.label}>Water / Drainage</Text>
-        <View style={styles.chips}>
-          {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, label]) => (
-            <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+        <DropdownBlock title="Vegetation on Slope" open={openPaperBlocks.vegetation} onToggle={() => togglePaperBlock("vegetation")} palette={palette}>
+          <Field palette={palette} label="Trees Coverage %" value={form.vegetation_trees} editable={canEdit} onChangeText={(v) => setVal("vegetation_trees", v)} />
+          <Field palette={palette} label="Bushes/Shrubs Coverage %" value={form.vegetation_bushes_shrubs} editable={canEdit} onChangeText={(v) => setVal("vegetation_bushes_shrubs", v)} />
+          <Field palette={palette} label="Groundcover Coverage %" value={form.vegetation_groundcover} editable={canEdit} onChangeText={(v) => setVal("vegetation_groundcover", v)} />
+        </DropdownBlock>
+
+        <DropdownBlock title="Water / Drainage" open={openPaperBlocks.waterDrainage} onToggle={() => togglePaperBlock("waterDrainage")} palette={palette}>
+          <View style={styles.chips}>
+            {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, label]) => (
+              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+            ))}
+          </View>
+          <View style={[styles.recommendedHeaderRow, { marginTop: 10 }]}>
+            <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>Impacted</Text>
+            <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>May be Impacted</Text>
+            <View style={styles.recommendedLabelSpacer} />
+          </View>
+          {[
+            ["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"],
+            ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"],
+            ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"],
+          ].map(([impactedKey, maybeKey, label]) => (
+            <View key={label} style={styles.recommendedRow}>
+              <Pressable
+                style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: form[impactedKey] === "YES" ? palette.primary : palette.panel }]}
+                onPress={() => setImpactSelection(impactedKey as any, maybeKey as any, "IMPACTED")}
+                disabled={!canEdit}
+              />
+              <Pressable
+                style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: form[maybeKey] === "YES" ? palette.primary : palette.panel }]}
+                onPress={() => setImpactSelection(impactedKey as any, maybeKey as any, "MAYBE")}
+                disabled={!canEdit}
+              />
+              <Text style={[styles.recommendedLabel, { color: palette.text }]}>{label}</Text>
+            </View>
           ))}
-        </View>
+        </DropdownBlock>
 
-        <Text style={styles.label}>Adjacent Impacts</Text>
-        <View style={styles.chips}>
-          {[["impact_impacted_adj_utilities", "Impacted Utilities"], ["impact_impacted_adj_properties", "Impacted Properties"], ["impact_impacted_adj_structure", "Impacted Structures"]].map(([key, label]) => (
-            <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
-          ))}
-        </View>
+        <DropdownBlock title="Water Content" open={openPaperBlocks.waterContent} onToggle={() => togglePaperBlock("waterContent")} palette={palette}>
+          <View style={styles.chips}>
+            {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"]].map(([key, label]) => (
+              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+            ))}
+            <Chip
+              key="water_flowing"
+              label="Flowing"
+              palette={palette}
+              active={form.water_flowing === "YES"}
+              disabled={!canEdit}
+              onPress={() => {
+                if (!canEdit) return;
+                const next = form.water_flowing === "YES" ? "NO" : "YES";
+                setVal("water_flowing", next);
+                if (next !== "YES") {
+                  setVal("water_seep", "");
+                  setVal("water_spring", "");
+                }
+              }}
+            />
+          </View>
+          {waterFlowingSelected ? (
+            <View style={styles.childActionWrap}>
+              <View style={styles.chips}>
+                {[["water_seep", "Seep"], ["water_spring", "Spring"]].map(([key, label]) => (
+                  <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+                ))}
+              </View>
+            </View>
+          ) : null}
+        </DropdownBlock>
 
         {anyImpactSelected ? (
           <>
@@ -1092,7 +1422,7 @@ export default function SubmissionDetailScreen() {
         ) : null}
 
         {anyFailureSelected ? (
-          <>
+          <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
             <Field palette={palette} label="Slope Height (ft)" value={form.measure_slope_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_slope_height_ft", v)} />
             <Field palette={palette} label="Original Slope (deg)" value={form.measure_original_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_original_slope_deg", v)} />
             <Field palette={palette} label="Landslide Width (ft)" value={form.measure_landslide_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_width_ft", v)} />
@@ -1101,15 +1431,84 @@ export default function SubmissionDetailScreen() {
             <Field palette={palette} label="Landslide Slope (deg)" value={form.measure_landslide_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_slope_deg", v)} />
             <Field palette={palette} label="Roadway Length (ft)" value={form.measure_roadway_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_length_ft", v)} />
             <Field palette={palette} label="Roadway Width (ft)" value={form.measure_roadway_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_width_ft", v)} />
-          </>
+          </DropdownBlock>
         ) : null}
-      </CollapsibleSection>
+        </View>
+      </View>
 
-      <CollapsibleSection title="Actions" open={openSections.actions} onToggle={() => toggleSection("actions")} palette={palette} compact={compact}>
-        <Text style={styles.label}>Immediate</Text>
-        <View style={styles.chips}>{lookups.actions.immediate.map((o) => <Chip key={o.code} label={o.label} palette={palette} active={immediateActions.includes(o.code)} disabled={!canEdit} onPress={() => canEdit && setImmediateActions((p) => toggle(p, o.code))} />)}</View>
-        <Text style={styles.label}>Follow-Up</Text>
-        <View style={styles.chips}>{lookups.actions.follow_up.map((o) => <Chip key={o.code} label={o.label} palette={palette} active={followUpActions.includes(o.code)} disabled={!canEdit} onPress={() => canEdit && setFollowUpActions((p) => toggle(p, o.code))} />)}</View>
+      <CollapsibleSection title="Recommended Actions" open={openSections.actions} onToggle={() => toggleSection("actions")} palette={palette} compact={compact}>
+        <View style={styles.recommendedHeaderRow}>
+          <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>Immediate Actions</Text>
+          <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>Follow-up Actions</Text>
+          <View style={styles.recommendedLabelSpacer} />
+        </View>
+        {recommendedActions.map((item) => {
+          const immediateChecked = item.code ? immediateActions.includes(item.code) : closeHighwayEnabled;
+          const followUpChecked = item.code ? followUpActions.includes(item.code) : false;
+          return (
+            <View key={item.key}>
+              <View style={styles.recommendedRow}>
+                {item.immediate ? (
+                  <Pressable
+                    style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: immediateChecked ? palette.primary : palette.panel }]}
+                    onPress={() => {
+                      if (!canEdit) return;
+                      if (item.key === "CLOSE_HIGHWAY_PARENT") {
+                        toggleCloseHighwayParent();
+                        return;
+                      }
+                      if (item.code) toggleActionByGroup(item.code, "IMMEDIATE");
+                    }}
+                    disabled={!canEdit}
+                  />
+                ) : (
+                  <View style={styles.matrixCellSpacer} />
+                )}
+                {item.followUp ? (
+                  <Pressable
+                    style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: followUpChecked ? palette.primary : palette.panel }]}
+                    onPress={() => item.code && toggleActionByGroup(item.code, "FOLLOW_UP")}
+                    disabled={!canEdit || !item.code}
+                  />
+                ) : (
+                  <View style={styles.matrixCellSpacer} />
+                )}
+                <Text style={[styles.recommendedLabel, { color: palette.text }]}>{item.label}</Text>
+              </View>
+              {item.key === "OPEN_HIGHWAY_TRAFFIC" && openHighwayTrafficSelected ? (
+                <View style={styles.childActionWrap}>
+                  <Field
+                    palette={palette}
+                    label="Lanes"
+                    value={form.lanes_closed_count}
+                    editable={canEdit}
+                    keyboardType="number-pad"
+                    onChangeText={(v) => setVal("lanes_closed_count", v)}
+                    error={fieldErrors.lanes_closed_count}
+                  />
+                </View>
+              ) : null}
+              {item.key === "CLOSE_HIGHWAY_PARENT" && closeHighwayEnabled ? (
+                <View style={styles.childActionWrap}>
+                  <View style={styles.closeDirectionRow}>
+                    <Pressable
+                      style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: immediateActions.includes("CLOSE_ONE_DIRECTION") ? palette.primary : palette.panel }]}
+                      onPress={() => toggleCloseHighwayDirection("CLOSE_ONE_DIRECTION")}
+                      disabled={!canEdit}
+                    />
+                    <Text style={[styles.recommendedLabel, { color: palette.text }]}>One Direction</Text>
+                    <Pressable
+                      style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: immediateActions.includes("CLOSE_BOTH_DIRECTIONS") ? palette.primary : palette.panel, marginLeft: 14 }]}
+                      onPress={() => toggleCloseHighwayDirection("CLOSE_BOTH_DIRECTIONS")}
+                      disabled={!canEdit}
+                    />
+                    <Text style={[styles.recommendedLabel, { color: palette.text }]}>Both Directions</Text>
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
       </CollapsibleSection>
 
       <CollapsibleSection title="Observations" open={openSections.observations} onToggle={() => toggleSection("observations")} palette={palette} compact={compact}>
@@ -1499,6 +1898,89 @@ const styles = StyleSheet.create({
   workflowInlineDotDone: { backgroundColor: "#1d4ed8", borderColor: "#1d4ed8" },
   workflowInlineLabel: { marginTop: 2, fontSize: 10, color: "#64748b", fontWeight: "700" },
   workflowInlineLabelDone: { color: "#1e3a8a" },
+  recommendedHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  recommendedHeaderCell: {
+    width: 26,
+    marginRight: 10,
+    fontSize: 11,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  recommendedLabelSpacer: {
+    flex: 1,
+  },
+  recommendedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  matrixBox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    borderRadius: 4,
+    marginRight: 10,
+  },
+  matrixCellSpacer: {
+    width: 20,
+    height: 20,
+    marginRight: 10,
+  },
+  recommendedLabel: {
+    fontSize: 15,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  childActionWrap: {
+    marginLeft: 62,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  closeDirectionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  dropdownBlock: {
+    marginTop: 0,
+    borderWidth: Platform.OS === "ios" ? StyleSheet.hairlineWidth : 1,
+    borderRadius: Platform.OS === "ios" ? 12 : 14,
+    padding: Platform.OS === "ios" ? 10 : 12,
+    shadowColor: "#10233f",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: Platform.OS === "ios" ? 0.08 : 0.06,
+    shadowRadius: Platform.OS === "ios" ? 8 : 10,
+    elevation: Platform.OS === "ios" ? 0 : 1,
+  },
+  dropdownBlockHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dropdownBlockTitle: {
+    fontWeight: Platform.OS === "ios" ? "700" : "800",
+    fontSize: Platform.OS === "ios" ? 23 / 1.45 : 22 / 1.45,
+  },
+  contactCard: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+  },
+  contactCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  contactCardTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
   pickerBackdrop: {
     flex: 1,
     backgroundColor: "rgba(8,14,24,0.45)",

@@ -68,16 +68,25 @@ def startup():
             ) ENGINE=InnoDB
         """))
         db.commit()
+        cleanup_columns = [
+            "DROP COLUMN IF EXISTS team_member1_last_name",
+            "DROP COLUMN IF EXISTS team_member1_first_name",
+            "DROP COLUMN IF EXISTS team_member1_s_number",
+            "DROP COLUMN IF EXISTS team_member2_last_name",
+            "DROP COLUMN IF EXISTS team_member2_first_name",
+            "DROP COLUMN IF EXISTS team_member2_s_number",
+            "DROP COLUMN IF EXISTS contact_phone_primary",
+            "DROP COLUMN IF EXISTS contact_phone_secondary",
+        ]
+        for col_sql in cleanup_columns:
+            db.execute(text(f"ALTER TABLE submission_gisa {col_sql}"))
+        db.execute(text("""
+            ALTER TABLE submission_gisa
+            MODIFY COLUMN district_contact TEXT NULL
+        """))
+        db.commit()
         # Backfill/upgrade older DBs with explicit GISA paper-form columns.
         upgrade_columns = [
-            "ADD COLUMN IF NOT EXISTS team_member1_last_name VARCHAR(128) NULL",
-            "ADD COLUMN IF NOT EXISTS team_member1_first_name VARCHAR(128) NULL",
-            "ADD COLUMN IF NOT EXISTS team_member1_s_number VARCHAR(32) NULL",
-            "ADD COLUMN IF NOT EXISTS team_member2_last_name VARCHAR(128) NULL",
-            "ADD COLUMN IF NOT EXISTS team_member2_first_name VARCHAR(128) NULL",
-            "ADD COLUMN IF NOT EXISTS team_member2_s_number VARCHAR(32) NULL",
-            "ADD COLUMN IF NOT EXISTS contact_phone_primary VARCHAR(64) NULL",
-            "ADD COLUMN IF NOT EXISTS contact_phone_secondary VARCHAR(64) NULL",
             "ADD COLUMN IF NOT EXISTS failure_rock_fall TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS failure_topple TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS failure_slide TINYINT NOT NULL DEFAULT 0",
@@ -95,6 +104,7 @@ def startup():
             "ADD COLUMN IF NOT EXISTS distribution_moving TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS distribution_confined TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS material_rock TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS material_soil TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS material_bedding TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS material_joints TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS material_fractures TINYINT NOT NULL DEFAULT 0",
@@ -117,10 +127,13 @@ def startup():
             "ADD COLUMN IF NOT EXISTS drainage_surface_runoff TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS drainage_torrent_surge_flood TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS impact_impacted_adj_utilities TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS impact_maybe_adj_utilities TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS impact_adj_utilities VARCHAR(255) NULL",
             "ADD COLUMN IF NOT EXISTS impact_impacted_adj_properties TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS impact_maybe_adj_properties TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS impact_adj_properties VARCHAR(255) NULL",
             "ADD COLUMN IF NOT EXISTS impact_impacted_adj_structure TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS impact_maybe_adj_structure TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS impact_adj_structure VARCHAR(255) NULL",
             "ADD COLUMN IF NOT EXISTS measure_slope_height_ft DECIMAL(10,2) NULL",
             "ADD COLUMN IF NOT EXISTS measure_original_slope_deg DECIMAL(10,2) NULL",
@@ -133,6 +146,14 @@ def startup():
         ]
         for col_sql in upgrade_columns:
             db.execute(text(f"ALTER TABLE submission_gisa {col_sql}"))
+        db.execute(text("""
+            INSERT IGNORE INTO gisa_action_lut (code, label, action_group, sort_order) VALUES
+            ('DEWATER_HORIZONTAL_DRAINS','Dewater with horizontal drains','IMMEDIATE',105),
+            ('PLACE_ROCK_SLOPE_PROTECTION','Place rock slope protection (ref. manual)','IMMEDIATE',130),
+            ('RECONSTRUCT_SLOPE_GEOSYNTHETICS','Reconstruct slope with geosynthetics','FOLLOW_UP',25),
+            ('REPAIR_CULVERT_DRAINAGE_PIPE','Repair culvert/drainage pipe','FOLLOW_UP',28),
+            ('SURVEY_SITE_DIST_SURVEY','Survey site - district survey','FOLLOW_UP',35)
+        """))
         db.commit()
         seed_admin(db)
     except Exception as exc:
@@ -394,20 +415,17 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           pavement_ground_cracks,
           crack_length_ft, crack_horizontal_in, crack_vertical_in, crack_depth_in,
           settlement_in, bulge_in, indented_by_rocks,
-          team_member1_last_name, team_member1_first_name, team_member1_s_number,
-          team_member2_last_name, team_member2_first_name, team_member2_s_number,
-          contact_phone_primary, contact_phone_secondary,
           failure_rock_fall, failure_topple, failure_slide, failure_spread, failure_flow,
           failure_compound, failure_erosion, failure_surficial_failure, failure_scoured_toe, failure_washout,
           distribution_advancing, distribution_retrogressive, distribution_enlarging, distribution_widening, distribution_moving, distribution_confined,
-          material_rock, material_bedding, material_joints, material_fractures,
+          material_rock, material_soil, material_bedding, material_joints, material_fractures,
           est_soil_pct, est_clay_pct, est_silt_pct, est_sand_pct, est_gravel_pct,
           water_dry, water_moist, water_wet, water_flowing, water_seep, water_spring,
           vegetation_trees, vegetation_bushes_shrubs, vegetation_groundcover,
           drainage_clogged_inlet, drainage_compromised_drains, drainage_surface_runoff, drainage_torrent_surge_flood,
-          impact_impacted_adj_utilities, impact_adj_utilities,
-          impact_impacted_adj_properties, impact_adj_properties,
-          impact_impacted_adj_structure, impact_adj_structure,
+          impact_impacted_adj_utilities, impact_maybe_adj_utilities, impact_adj_utilities,
+          impact_impacted_adj_properties, impact_maybe_adj_properties, impact_adj_properties,
+          impact_impacted_adj_structure, impact_maybe_adj_structure, impact_adj_structure,
           measure_slope_height_ft, measure_original_slope_deg, measure_landslide_width_ft, measure_landslide_length_ft,
           measure_main_scarp_height_ft, measure_landslide_slope_deg, measure_roadway_length_ft, measure_roadway_width_ft,
           observations_notes, geometry_json,
@@ -618,15 +636,6 @@ class GisaDraftPatch(BaseModel):
     bulge_in: float | None = None
     indented_by_rocks: bool | None = None
 
-    team_member1_last_name: str | None = None
-    team_member1_first_name: str | None = None
-    team_member1_s_number: str | None = None
-    team_member2_last_name: str | None = None
-    team_member2_first_name: str | None = None
-    team_member2_s_number: str | None = None
-    contact_phone_primary: str | None = None
-    contact_phone_secondary: str | None = None
-
     failure_rock_fall: bool | None = None
     failure_topple: bool | None = None
     failure_slide: bool | None = None
@@ -646,6 +655,7 @@ class GisaDraftPatch(BaseModel):
     distribution_confined: bool | None = None
 
     material_rock: bool | None = None
+    material_soil: bool | None = None
     material_bedding: bool | None = None
     material_joints: bool | None = None
     material_fractures: bool | None = None
@@ -673,10 +683,13 @@ class GisaDraftPatch(BaseModel):
     drainage_torrent_surge_flood: bool | None = None
 
     impact_impacted_adj_utilities: bool | None = None
+    impact_maybe_adj_utilities: bool | None = None
     impact_adj_utilities: str | None = None
     impact_impacted_adj_properties: bool | None = None
+    impact_maybe_adj_properties: bool | None = None
     impact_adj_properties: str | None = None
     impact_impacted_adj_structure: bool | None = None
+    impact_maybe_adj_structure: bool | None = None
     impact_adj_structure: str | None = None
 
     measure_slope_height_ft: float | None = None
@@ -1209,12 +1222,10 @@ def replace_actions(
 
     def validate_action(code: str, group: str):
         row = db.execute(text("""
-            SELECT action_group FROM gisa_action_lut WHERE code=:c LIMIT 1
+            SELECT 1 FROM gisa_action_lut WHERE code=:c LIMIT 1
         """), {"c": code}).scalar()
         if not row:
             raise HTTPException(status_code=400, detail=f"Invalid action: {code}")
-        if str(row).upper() != group:
-            raise HTTPException(status_code=400, detail=f"Action {code} not allowed in group {group}")
 
     for c in payload.immediate:
         validate_action(c, "IMMEDIATE")

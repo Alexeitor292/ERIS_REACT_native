@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     ea VARCHAR(16) NULL,
     project_id VARCHAR(32) NULL,
     date_incident_reported DATE NULL,
-    district_contact VARCHAR(255) NULL,
+    district_contact TEXT NULL,
 
     latitude DECIMAL(10,7) NULL,
     longitude DECIMAL(10,7) NULL,
@@ -205,16 +205,6 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     settlement_in DECIMAL(10,2) NULL,
     bulge_in DECIMAL(10,2) NULL,
     indented_by_rocks TINYINT NOT NULL DEFAULT 0,
-
-    -- GISA paper-form parity fields (explicit columns, no generic blob)
-    team_member1_last_name VARCHAR(128) NULL,
-    team_member1_first_name VARCHAR(128) NULL,
-    team_member1_s_number VARCHAR(32) NULL,
-    team_member2_last_name VARCHAR(128) NULL,
-    team_member2_first_name VARCHAR(128) NULL,
-    team_member2_s_number VARCHAR(32) NULL,
-    contact_phone_primary VARCHAR(64) NULL,
-    contact_phone_secondary VARCHAR(64) NULL,
 
     failure_rock_fall TINYINT NOT NULL DEFAULT 0,
     failure_topple TINYINT NOT NULL DEFAULT 0,
@@ -235,6 +225,7 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     distribution_confined TINYINT NOT NULL DEFAULT 0,
 
     material_rock TINYINT NOT NULL DEFAULT 0,
+    material_soil TINYINT NOT NULL DEFAULT 0,
     material_bedding TINYINT NOT NULL DEFAULT 0,
     material_joints TINYINT NOT NULL DEFAULT 0,
     material_fractures TINYINT NOT NULL DEFAULT 0,
@@ -262,10 +253,13 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     drainage_torrent_surge_flood TINYINT NOT NULL DEFAULT 0,
 
     impact_impacted_adj_utilities TINYINT NOT NULL DEFAULT 0,
+    impact_maybe_adj_utilities TINYINT NOT NULL DEFAULT 0,
     impact_adj_utilities VARCHAR(255) NULL,
     impact_impacted_adj_properties TINYINT NOT NULL DEFAULT 0,
+    impact_maybe_adj_properties TINYINT NOT NULL DEFAULT 0,
     impact_adj_properties VARCHAR(255) NULL,
     impact_impacted_adj_structure TINYINT NOT NULL DEFAULT 0,
+    impact_maybe_adj_structure TINYINT NOT NULL DEFAULT 0,
     impact_adj_structure VARCHAR(255) NULL,
 
     measure_slope_height_ft DECIMAL(10,2) NULL,
@@ -369,12 +363,17 @@ INSERT IGNORE INTO gisa_action_lut (code, label, action_group, sort_order) VALUE
 ('DIVERT_SURFACE_WATER','Divert surface water','IMMEDIATE',80),
 ('REMOVE_CULVERT_BLOCKAGE','Remove culvert blockage','IMMEDIATE',90),
 ('DEWATER','Dewater','IMMEDIATE',100),
+('DEWATER_HORIZONTAL_DRAINS','Dewater with horizontal drains','IMMEDIATE',105),
 ('TEMP_SHORING','Construct temporary shoring','IMMEDIATE',110),
 ('BUTTRESS_TOE','Buttress toe','IMMEDIATE',120),
+('PLACE_ROCK_SLOPE_PROTECTION','Place rock slope protection (ref. manual)','IMMEDIATE',130),
 
 ('ROUTINE_VISUAL_MONITOR','Routine visual monitor','FOLLOW_UP',10),
 ('RECONSTRUCT_SLOPE','Reconstruct slope','FOLLOW_UP',20),
+('RECONSTRUCT_SLOPE_GEOSYNTHETICS','Reconstruct slope with geosynthetics','FOLLOW_UP',25),
+('REPAIR_CULVERT_DRAINAGE_PIPE','Repair culvert/drainage pipe','FOLLOW_UP',28),
 ('EROSION_CONTROL','Install erosion control','FOLLOW_UP',30),
+('SURVEY_SITE_DIST_SURVEY','Survey site - district survey','FOLLOW_UP',35),
 ('GEOLOGIC_MAPPING','Perform geologic mapping','FOLLOW_UP',40),
 ('SUBSURFACE_EXPLORATION','Perform subsurface exploration','FOLLOW_UP',50),
 ('DETAILED_DESIGN_PLANS','Detailed design & plans','FOLLOW_UP',60);
