@@ -53,6 +53,31 @@ export async function getGisaLookups(token: string) {
   return apiFetch("/gisa/lookups", { token });
 }
 
+export type GisaPdfResponse = {
+  submission_id: number;
+  attachment_id: number;
+  file_name: string;
+  content_type: string;
+  file_size_bytes: number;
+  sha256: string;
+  download_url: string;
+  expires_seconds: number;
+  uploaded_at?: string;
+};
+
+export async function generateSubmissionGisaPdf(token: string, id: string) {
+  return apiFetch<GisaPdfResponse>(`/submissions/${id}/gisa/pdf`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function getSubmissionGisaPdf(token: string, id: string) {
+  return apiFetch<GisaPdfResponse>(`/submissions/${id}/gisa/pdf`, {
+    token,
+  });
+}
+
 export async function patchSubmissionTitle(token: string, id: string, title: string | null) {
   return apiFetch(`/submissions/${id}/title`, {
     method: "PATCH",

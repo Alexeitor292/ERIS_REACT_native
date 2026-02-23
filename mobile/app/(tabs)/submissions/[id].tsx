@@ -7,7 +7,7 @@ import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathnam
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseCandidates, getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { getGisaLookups, getSubmission, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
+import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
@@ -656,8 +656,40 @@ export default function SubmissionDetailScreen() {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
     setBusy(true);
-    try { await submitSubmission(token, id); Alert.alert("Submitted", "Sent for review."); await load(); }
-    catch (err: any) { if (isSessionExpiredError(err)) return; Alert.alert("Submit failed", err?.message ?? "Unable to submit"); }
+    try {
+      await submitSubmission(token, id);
+      Alert.alert("Submitted", "Sent for review.");
+      await load();
+    }
+    catch (err: any) {
+      if (isSessionExpiredError(err)) return;
+      const raw = String(err?.message ?? "Unable to submit");
+      let detail = raw;
+      const jsonMatch = raw.match(/:\s*(\{.*\})\s*$/);
+      if (jsonMatch?.[1]) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          if (parsed?.detail) detail = String(parsed.detail);
+        } catch {}
+      }
+      const missingMatch = detail.match(/missing required fields \[([^\]]+)\]/i);
+      if (missingMatch?.[1]) {
+        const missing = missingMatch[1]
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+        if (missing.length === 1 && missing[0].toLowerCase() === "photo") {
+          Alert.alert("Cannot Submit Yet", "Please upload at least one photo before submitting.");
+          return;
+        }
+        Alert.alert(
+          "Cannot Submit Yet",
+          `Please complete required items before submitting: ${missing.join(", ")}.`
+        );
+        return;
+      }
+      Alert.alert("Submit failed", detail || "Unable to submit");
+    }
     finally { setBusy(false); }
   }
 
@@ -1041,6 +1073,36 @@ export default function SubmissionDetailScreen() {
     }
   }
 
+  async function generateGisaPdf() {
+    if (!token || !id) return;
+    setBusy(true);
+    try {
+      const resp = await generateSubmissionGisaPdf(token, id);
+      const url = normalizeDownloadUrl(resp.download_url, apiBaseUrl);
+      await Linking.openURL(url);
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
+      Alert.alert("PDF generation failed", err?.message ?? "Unable to generate GISA PDF");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openLatestGisaPdf() {
+    if (!token || !id) return;
+    setBusy(true);
+    try {
+      const resp = await getSubmissionGisaPdf(token, id);
+      const url = normalizeDownloadUrl(resp.download_url, apiBaseUrl);
+      await Linking.openURL(url);
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
+      Alert.alert("No PDF yet", "Generate the GISA PDF first, then open it.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openFullscreen(photoId: number, name: string) {
     const source = previewSource(photoId);
     if (!source?.uri) return;
@@ -1330,10 +1392,10 @@ export default function SubmissionDetailScreen() {
               <Field palette={palette} label="Horizontal Disp (inches)" value={form.crack_horizontal_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_horizontal_in", v)} error={fieldErrors.crack_horizontal_in} />
               <Field palette={palette} label="Vertical Disp (inches)" value={form.crack_vertical_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_vertical_in", v)} error={fieldErrors.crack_vertical_in} />
               <Field palette={palette} label="Depth of Crack (inches)" value={form.crack_depth_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_depth_in", v)} error={fieldErrors.crack_depth_in} />
-              <Field palette={palette} label="Settlement (inches)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
-              <Field palette={palette} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
             </>
           ) : null}
+          <Field palette={palette} label="Settlement (inches)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
+          <Field palette={palette} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
           <Text style={styles.label}>Indented by Rocks</Text>
           <View style={styles.chips}>
             {(["YES", "NO", "UNKNOWN"] as const).map((c) => (
@@ -1403,12 +1465,10 @@ export default function SubmissionDetailScreen() {
             />
           </View>
           {waterFlowingSelected ? (
-            <View style={styles.childActionWrap}>
-              <View style={styles.chips}>
-                {[["water_seep", "Seep"], ["water_spring", "Spring"]].map(([key, label]) => (
-                  <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
-                ))}
-              </View>
+            <View style={styles.chips}>
+              {[["water_seep", "Seep"], ["water_spring", "Spring"]].map(([key, label]) => (
+                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              ))}
             </View>
           ) : null}
         </DropdownBlock>
@@ -1560,6 +1620,24 @@ export default function SubmissionDetailScreen() {
           </View>
         </View>
       ) : null}
+
+      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+        <Text style={styles.sectionTitle}>GISA PDF</Text>
+        <Pressable
+          style={[styles.btnPrimary, { backgroundColor: palette.primary }]}
+          onPress={generateGisaPdf}
+          disabled={busy}
+        >
+          <Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Generate GISA PDF"}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+          onPress={openLatestGisaPdf}
+          disabled={busy}
+        >
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Open Latest GISA PDF"}</Text>
+        </Pressable>
+      </View>
 
       <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>Photos</Text>

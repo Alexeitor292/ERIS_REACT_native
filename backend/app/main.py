@@ -1,6 +1,9 @@
 import logging
 import json
 import re
+import textwrap
+import hashlib
+from io import BytesIO
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from typing import Literal
@@ -10,12 +13,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 from .db import SessionLocal, get_db
 from .config import settings
 from .auth import verify_password, create_access_token, decode_token
 from .deps import get_current_user, require_roles
-from .storage import ensure_bucket, make_object_key, put_object_stream, presign_get, get_object_bytes
+from .storage import ensure_bucket, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes
 from .seed import seed_admin
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
@@ -513,6 +518,139 @@ def validate_submit_ready(db: Session, submission_id: int) -> None:
             status_code=409,
             detail=f"Cannot submit: missing required fields [{', '.join(missing)}]",
         )
+
+
+def _format_yn(value) -> str:
+    return "Yes" if bool(value) else "No"
+
+
+def _lookup_map(db: Session, table_name: str) -> dict[str, str]:
+    rows = db.execute(text(f"""
+        SELECT code, label
+        FROM {table_name}
+    """)).mappings().all()
+    return {str(r["code"]): str(r["label"]) for r in rows}
+
+
+def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
+    sub = db.execute(text("""
+        SELECT id, status, title, created_at, updated_at
+        FROM submissions
+        WHERE id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    gisa = get_gisa(db, submission_id)
+    if not gisa:
+        raise HTTPException(status_code=409, detail="GISA data missing. Save draft first.")
+
+    incident_codes = get_gisa_incident_types(db, submission_id)
+    actions = get_gisa_actions(db, submission_id)
+    inc_map = _lookup_map(db, "gisa_incident_type_lut")
+    act_map = _lookup_map(db, "gisa_action_lut")
+
+    district_contacts: list[str] = []
+    raw_contacts = gisa.get("district_contact")
+    if isinstance(raw_contacts, str) and raw_contacts.strip():
+        try:
+            parsed = json.loads(raw_contacts)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if not isinstance(item, dict):
+                        continue
+                    first_name = str(item.get("first_name") or "").strip()
+                    last_name = str(item.get("last_name") or "").strip()
+                    s_number = str(item.get("s_number") or "").strip()
+                    phone = str(item.get("phone") or "").strip()
+                    cell_phone = str(item.get("cell_phone") or "").strip()
+                    name = " ".join([p for p in [first_name, last_name] if p]).strip()
+                    details = ", ".join([p for p in [f"S#: {s_number}" if s_number else "", f"Phone: {phone}" if phone else "", f"Cell: {cell_phone}" if cell_phone else ""] if p])
+                    if name or details:
+                        district_contacts.append(f"{name}{(' - ' + details) if details else ''}")
+            elif raw_contacts.strip():
+                district_contacts.append(raw_contacts.strip())
+        except Exception:
+            district_contacts.append(raw_contacts.strip())
+
+    def val(k: str, default: str = "") -> str:
+        v = gisa.get(k)
+        if v is None:
+            return default
+        return str(v)
+
+    immediate_labels = [act_map.get(code, code) for code in actions.get("immediate", [])]
+    follow_up_labels = [act_map.get(code, code) for code in actions.get("follow_up", [])]
+    incident_labels = [inc_map.get(code, code) for code in incident_codes]
+
+    lines: list[str] = [
+        "ERIS - GISA Report",
+        f"Submission ID: {sub['id']}    Status: {sub['status']}",
+        f"Title: {sub['title'] or ''}",
+        f"Created: {sub['created_at']}    Updated: {sub['updated_at']}",
+        "",
+        "GISA Header",
+        f"Report Date: {val('report_date')}",
+        f"District: {val('district')}    County: {val('county')}",
+        f"Route: {val('route')}    Post Mile: {val('post_mile')}",
+        f"EA: {val('ea')}    Project ID: {val('project_id')}",
+        f"Date Incident Reported: {val('date_incident_reported')}",
+        f"Latitude: {val('latitude')}    Longitude: {val('longitude')}",
+        "",
+        "District Contacts",
+    ]
+    if district_contacts:
+        for c in district_contacts:
+            lines.append(f"- {c}")
+    else:
+        lines.append("- None")
+
+    lines.extend([
+        "",
+        "Classification",
+        f"Distribution: {val('distribution_code')}    Highway Status: {val('highway_status_code')}",
+        f"Lanes Closed Count: {val('lanes_closed_count')}",
+        f"Incident Types: {', '.join(incident_labels) if incident_labels else 'None'}",
+        "",
+        "Pavement / Ground Status",
+        f"Pavement/Ground Cracks: {_format_yn(gisa.get('pavement_ground_cracks'))}",
+        f"Length (ft): {val('crack_length_ft')}    Horizontal Disp (in): {val('crack_horizontal_in')}",
+        f"Vertical Disp (in): {val('crack_vertical_in')}    Depth (in): {val('crack_depth_in')}",
+        f"Settlement (in): {val('settlement_in')}    Bulge (in): {val('bulge_in')}",
+        f"Indented by Rocks: {_format_yn(gisa.get('indented_by_rocks'))}",
+        "",
+        "Recommended Actions",
+        f"Immediate: {', '.join(immediate_labels) if immediate_labels else 'None'}",
+        f"Follow-up: {', '.join(follow_up_labels) if follow_up_labels else 'None'}",
+        "",
+        "Observations",
+        val("observations_notes", "(none)"),
+    ])
+
+    pdf_io = BytesIO()
+    c = canvas.Canvas(pdf_io, pagesize=letter)
+    width, height = letter
+    margin_x = 36
+    top = height - 36
+    bottom = 36
+    line_h = 13
+    wrap_chars = 112
+    y = top
+
+    c.setFont("Helvetica", 10)
+    for line in lines:
+        wrapped = textwrap.wrap(line, width=wrap_chars) if line else [""]
+        for wline in wrapped:
+            if y < bottom:
+                c.showPage()
+                c.setFont("Helvetica", 10)
+                y = top
+            c.drawString(margin_x, y, wline)
+            y -= line_h
+
+    c.save()
+    return pdf_io.getvalue()
 
 
 # ----------------------------
@@ -1441,6 +1579,151 @@ def replace_submission_permissions(
 # ----------------------------
 # Attachment download URLs
 # ----------------------------
+
+@app.post("/submissions/{submission_id}/gisa/pdf")
+def generate_submission_gisa_pdf(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_view_submission(submission_id, db, user)
+
+    pdf_bytes = _render_gisa_pdf_bytes(db, submission_id)
+    filename = f"gisa-{submission_id}.pdf"
+    content_type = "application/pdf"
+    bucket = settings.MINIO_BUCKET
+    sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+
+    existing = db.execute(text("""
+        SELECT a.id, a.storage_key, a.storage_bucket
+        FROM attachment_links al
+        JOIN attachments a ON a.id = al.attachment_id
+        WHERE al.submission_id = :sid
+          AND al.kind = 'DOC'
+          AND a.file_name = :fname
+        ORDER BY a.id DESC
+        LIMIT 1
+    """), {"sid": submission_id, "fname": filename}).mappings().first()
+
+    try:
+        if existing:
+            attachment_id = int(existing["id"])
+            object_key = str(existing["storage_key"] or "").strip() or make_object_key(filename)
+            put_object_bytes(
+                object_key=object_key,
+                data=pdf_bytes,
+                content_type=content_type,
+                bucket=bucket,
+            )
+            db.execute(text("""
+                UPDATE attachments
+                SET created_by_user_id = :uid,
+                    storage_provider = 'minio',
+                    storage_bucket = :bucket,
+                    storage_key = :storage_key,
+                    file_name = :file_name,
+                    mime_type = :mime_type,
+                    file_size_bytes = :size_bytes,
+                    sha256 = :sha256,
+                    uploaded_at = NOW()
+                WHERE id = :aid
+            """), {
+                "uid": user["id"],
+                "bucket": bucket,
+                "storage_key": object_key,
+                "file_name": filename,
+                "mime_type": content_type,
+                "size_bytes": len(pdf_bytes),
+                "sha256": sha256,
+                "aid": attachment_id,
+            })
+        else:
+            object_key = make_object_key(filename)
+            put_object_bytes(
+                object_key=object_key,
+                data=pdf_bytes,
+                content_type=content_type,
+                bucket=bucket,
+            )
+            db.execute(text("""
+                INSERT INTO attachments (
+                    created_by_user_id, storage_provider, storage_bucket, storage_key,
+                    file_name, mime_type, file_size_bytes, sha256, uploaded_at
+                ) VALUES (
+                    :uid, 'minio', :bucket, :storage_key,
+                    :file_name, :mime_type, :size_bytes, :sha256, NOW()
+                )
+            """), {
+                "uid": user["id"],
+                "bucket": bucket,
+                "storage_key": object_key,
+                "file_name": filename,
+                "mime_type": content_type,
+                "size_bytes": len(pdf_bytes),
+                "sha256": sha256,
+            })
+            attachment_id = int(db.execute(text("SELECT LAST_INSERT_ID()")).scalar())
+            next_sort = db.execute(text("""
+                SELECT COALESCE(MAX(sort_order), -1) + 1
+                FROM attachment_links
+                WHERE submission_id = :sid
+            """), {"sid": submission_id}).scalar()
+            db.execute(text("""
+                INSERT INTO attachment_links (submission_id, attachment_id, kind, sort_order)
+                VALUES (:sid, :aid, 'DOC', :sort_order)
+            """), {"sid": submission_id, "aid": attachment_id, "sort_order": int(next_sort or 0)})
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {exc}")
+
+    return {
+        "submission_id": submission_id,
+        "attachment_id": attachment_id,
+        "file_name": filename,
+        "content_type": content_type,
+        "file_size_bytes": len(pdf_bytes),
+        "sha256": sha256,
+        "download_url": presign_get(object_key, bucket=bucket, expires_seconds=900),
+        "expires_seconds": 900,
+    }
+
+
+@app.get("/submissions/{submission_id}/gisa/pdf")
+def get_submission_gisa_pdf(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_view_submission(submission_id, db, user)
+    filename = f"gisa-{submission_id}.pdf"
+
+    row = db.execute(text("""
+        SELECT a.id, a.file_name, a.mime_type, a.file_size_bytes, a.sha256, a.storage_bucket, a.storage_key, a.uploaded_at
+        FROM attachment_links al
+        JOIN attachments a ON a.id = al.attachment_id
+        WHERE al.submission_id = :sid
+          AND al.kind = 'DOC'
+          AND a.file_name = :fname
+        ORDER BY a.id DESC
+        LIMIT 1
+    """), {"sid": submission_id, "fname": filename}).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="No generated GISA PDF found for this submission")
+
+    return {
+        "submission_id": submission_id,
+        "attachment_id": int(row["id"]),
+        "file_name": row["file_name"],
+        "content_type": row["mime_type"],
+        "file_size_bytes": row["file_size_bytes"],
+        "sha256": row["sha256"],
+        "uploaded_at": row["uploaded_at"],
+        "download_url": presign_get(str(row["storage_key"]), bucket=row["storage_bucket"], expires_seconds=900),
+        "expires_seconds": 900,
+    }
 
 @app.get("/attachments/{attachment_id}/download-url")
 def attachment_download_url(
