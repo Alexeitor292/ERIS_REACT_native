@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, FlatList, StyleSheet, Alert, TextInput, Modal, ScrollView } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import { router } from "expo-router";
@@ -46,6 +46,15 @@ export default function SubmissionListScreen({ mode }: Props) {
   const [permissionsSaving, setPermissionsSaving] = useState(false);
   const [readerIds, setReaderIds] = useState<number[]>([]);
   const [editorIds, setEditorIds] = useState<number[]>([]);
+  const swipeableRefs = useRef<Record<number, Swipeable | null>>({});
+  const openSwipeableIdRef = useRef<number | null>(null);
+
+  const closeOpenSwipeable = useCallback(() => {
+    const openId = openSwipeableIdRef.current;
+    if (openId == null) return;
+    swipeableRefs.current[openId]?.close();
+    openSwipeableIdRef.current = null;
+  }, []);
 
   const load = useCallback(async () => {
     const token = await getToken();
@@ -111,7 +120,7 @@ export default function SubmissionListScreen({ mode }: Props) {
       Alert.alert("Created", `Draft #${res.submission_id}`);
       await load();
       router.push({
-        pathname: "/(tabs)/submissions/[id]",
+        pathname: "/(tabs)/drafts/[id]",
         params: { id: newId },
       });
     } catch (e: any) {
@@ -121,6 +130,7 @@ export default function SubmissionListScreen({ mode }: Props) {
   }
 
   async function onDelete(item: SubmissionItem) {
+    closeOpenSwipeable();
     const token = await getToken();
     if (!token) return;
 
@@ -138,6 +148,7 @@ export default function SubmissionListScreen({ mode }: Props) {
   }
 
   async function openPermissions(item: SubmissionItem) {
+    closeOpenSwipeable();
     const token = await getToken();
     if (!token) return;
     setPermissionsFor(item);
@@ -284,12 +295,13 @@ export default function SubmissionListScreen({ mode }: Props) {
             const canDeleteThis = canDelete(item);
             const card = (
               <Pressable
-                onPress={() =>
+                onPress={() => {
+                  closeOpenSwipeable();
                   router.push({
-                    pathname: "/(tabs)/submissions/[id]",
+                    pathname: item.status === "DRAFT" || item.status === "REJECTED" ? "/(tabs)/drafts/[id]" : "/(tabs)/submissions/[id]",
                     params: { id: String(item.id) },
-                  })
-                }
+                  });
+                }}
                 style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}
               >
                 <Text style={[styles.cardTitle, { color: palette.text }]}> 
@@ -328,19 +340,40 @@ export default function SubmissionListScreen({ mode }: Props) {
 
             return (
               <Swipeable
+                ref={(ref) => {
+                  swipeableRefs.current[item.id] = ref;
+                }}
+                friction={1.8}
+                rightThreshold={24}
                 overshootRight={false}
+                onSwipeableWillOpen={() => {
+                  const currentlyOpen = openSwipeableIdRef.current;
+                  if (currentlyOpen != null && currentlyOpen !== item.id) {
+                    swipeableRefs.current[currentlyOpen]?.close();
+                  }
+                  openSwipeableIdRef.current = item.id;
+                }}
+                onSwipeableWillClose={() => {
+                  if (openSwipeableIdRef.current === item.id) {
+                    openSwipeableIdRef.current = null;
+                  }
+                }}
                 renderRightActions={() => (
                   <View style={styles.swipeActionWrap}>
                     <Pressable
                       style={[styles.actionBtn, { backgroundColor: palette.primary }]}
-                      onPress={() => openPermissions(item)}
+                      onPress={() => {
+                        closeOpenSwipeable();
+                        openPermissions(item);
+                      }}
                     >
                       <Text style={styles.actionText}>Access</Text>
                     </Pressable>
                     {canDeleteThis ? (
                       <Pressable
                         style={[styles.actionBtn, { backgroundColor: "#b91c1c" }]}
-                        onPress={() =>
+                        onPress={() => {
+                          closeOpenSwipeable();
                           Alert.alert(
                             "Delete Draft",
                             "Delete this draft? This cannot be undone.",
@@ -352,8 +385,8 @@ export default function SubmissionListScreen({ mode }: Props) {
                                 onPress: () => onDelete(item),
                               },
                             ]
-                          )
-                        }
+                          );
+                        }}
                         disabled={busyDeleteId === item.id}
                       >
                         <Text style={styles.actionText}>{busyDeleteId === item.id ? "..." : "Delete"}</Text>
@@ -371,6 +404,8 @@ export default function SubmissionListScreen({ mode }: Props) {
               {loading ? "" : isDraftMode ? "No drafts yet." : "No submitted records yet."}
             </Text>
           }
+          onTouchStart={closeOpenSwipeable}
+          onScrollBeginDrag={closeOpenSwipeable}
         />
       </View>
 

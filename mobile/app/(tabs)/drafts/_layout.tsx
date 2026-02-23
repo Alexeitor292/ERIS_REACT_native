@@ -1,6 +1,7 @@
 import { Stack } from "expo-router";
 import { Platform } from "react-native";
-export default function SubmissionsStackLayout() {
+
+export default function DraftsStackLayout() {
   return (
     <Stack
       screenOptions={{
@@ -15,14 +16,8 @@ export default function SubmissionsStackLayout() {
           : {}),
       }}
     >
-      <Stack.Screen
-        name="index"
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen name="[id]" options={{ title: "Submission" }} />
-      <Stack.Screen name="map" options={{ title: "Map Editor" }} />
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="[id]" options={{ title: "Draft" }} />
     </Stack>
   );
 }

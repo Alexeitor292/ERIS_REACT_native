@@ -68,6 +68,72 @@ def startup():
             ) ENGINE=InnoDB
         """))
         db.commit()
+        # Backfill/upgrade older DBs with explicit GISA paper-form columns.
+        upgrade_columns = [
+            "ADD COLUMN IF NOT EXISTS team_member1_last_name VARCHAR(128) NULL",
+            "ADD COLUMN IF NOT EXISTS team_member1_first_name VARCHAR(128) NULL",
+            "ADD COLUMN IF NOT EXISTS team_member1_s_number VARCHAR(32) NULL",
+            "ADD COLUMN IF NOT EXISTS team_member2_last_name VARCHAR(128) NULL",
+            "ADD COLUMN IF NOT EXISTS team_member2_first_name VARCHAR(128) NULL",
+            "ADD COLUMN IF NOT EXISTS team_member2_s_number VARCHAR(32) NULL",
+            "ADD COLUMN IF NOT EXISTS contact_phone_primary VARCHAR(64) NULL",
+            "ADD COLUMN IF NOT EXISTS contact_phone_secondary VARCHAR(64) NULL",
+            "ADD COLUMN IF NOT EXISTS failure_rock_fall TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_topple TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_slide TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_spread TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_flow TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_compound TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_erosion TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_surficial_failure TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_scoured_toe TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS failure_washout TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS distribution_advancing TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS distribution_retrogressive TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS distribution_enlarging TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS distribution_widening TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS distribution_moving TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS distribution_confined TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS material_rock TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS material_bedding TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS material_joints TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS material_fractures TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS est_soil_pct DECIMAL(5,2) NULL",
+            "ADD COLUMN IF NOT EXISTS est_clay_pct DECIMAL(5,2) NULL",
+            "ADD COLUMN IF NOT EXISTS est_silt_pct DECIMAL(5,2) NULL",
+            "ADD COLUMN IF NOT EXISTS est_sand_pct DECIMAL(5,2) NULL",
+            "ADD COLUMN IF NOT EXISTS est_gravel_pct DECIMAL(5,2) NULL",
+            "ADD COLUMN IF NOT EXISTS water_dry TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS water_moist TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS water_wet TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS water_flowing TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS water_seep TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS water_spring TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS vegetation_trees VARCHAR(255) NULL",
+            "ADD COLUMN IF NOT EXISTS vegetation_bushes_shrubs VARCHAR(255) NULL",
+            "ADD COLUMN IF NOT EXISTS vegetation_groundcover VARCHAR(255) NULL",
+            "ADD COLUMN IF NOT EXISTS drainage_clogged_inlet TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS drainage_compromised_drains TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS drainage_surface_runoff TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS drainage_torrent_surge_flood TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS impact_impacted_adj_utilities TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS impact_adj_utilities VARCHAR(255) NULL",
+            "ADD COLUMN IF NOT EXISTS impact_impacted_adj_properties TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS impact_adj_properties VARCHAR(255) NULL",
+            "ADD COLUMN IF NOT EXISTS impact_impacted_adj_structure TINYINT NOT NULL DEFAULT 0",
+            "ADD COLUMN IF NOT EXISTS impact_adj_structure VARCHAR(255) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_slope_height_ft DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_original_slope_deg DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_landslide_width_ft DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_landslide_length_ft DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_main_scarp_height_ft DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_landslide_slope_deg DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_roadway_length_ft DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS measure_roadway_width_ft DECIMAL(10,2) NULL",
+        ]
+        for col_sql in upgrade_columns:
+            db.execute(text(f"ALTER TABLE submission_gisa {col_sql}"))
+        db.commit()
         seed_admin(db)
     except Exception as exc:
         if settings.ENV.lower() == "dev":
@@ -328,6 +394,22 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           pavement_ground_cracks,
           crack_length_ft, crack_horizontal_in, crack_vertical_in, crack_depth_in,
           settlement_in, bulge_in, indented_by_rocks,
+          team_member1_last_name, team_member1_first_name, team_member1_s_number,
+          team_member2_last_name, team_member2_first_name, team_member2_s_number,
+          contact_phone_primary, contact_phone_secondary,
+          failure_rock_fall, failure_topple, failure_slide, failure_spread, failure_flow,
+          failure_compound, failure_erosion, failure_surficial_failure, failure_scoured_toe, failure_washout,
+          distribution_advancing, distribution_retrogressive, distribution_enlarging, distribution_widening, distribution_moving, distribution_confined,
+          material_rock, material_bedding, material_joints, material_fractures,
+          est_soil_pct, est_clay_pct, est_silt_pct, est_sand_pct, est_gravel_pct,
+          water_dry, water_moist, water_wet, water_flowing, water_seep, water_spring,
+          vegetation_trees, vegetation_bushes_shrubs, vegetation_groundcover,
+          drainage_clogged_inlet, drainage_compromised_drains, drainage_surface_runoff, drainage_torrent_surge_flood,
+          impact_impacted_adj_utilities, impact_adj_utilities,
+          impact_impacted_adj_properties, impact_adj_properties,
+          impact_impacted_adj_structure, impact_adj_structure,
+          measure_slope_height_ft, measure_original_slope_deg, measure_landslide_width_ft, measure_landslide_length_ft,
+          measure_main_scarp_height_ft, measure_landslide_slope_deg, measure_roadway_length_ft, measure_roadway_width_ft,
           observations_notes, geometry_json,
           updated_by_user_id, created_at, updated_at
         FROM submission_gisa
@@ -535,6 +617,76 @@ class GisaDraftPatch(BaseModel):
     settlement_in: float | None = None
     bulge_in: float | None = None
     indented_by_rocks: bool | None = None
+
+    team_member1_last_name: str | None = None
+    team_member1_first_name: str | None = None
+    team_member1_s_number: str | None = None
+    team_member2_last_name: str | None = None
+    team_member2_first_name: str | None = None
+    team_member2_s_number: str | None = None
+    contact_phone_primary: str | None = None
+    contact_phone_secondary: str | None = None
+
+    failure_rock_fall: bool | None = None
+    failure_topple: bool | None = None
+    failure_slide: bool | None = None
+    failure_spread: bool | None = None
+    failure_flow: bool | None = None
+    failure_compound: bool | None = None
+    failure_erosion: bool | None = None
+    failure_surficial_failure: bool | None = None
+    failure_scoured_toe: bool | None = None
+    failure_washout: bool | None = None
+
+    distribution_advancing: bool | None = None
+    distribution_retrogressive: bool | None = None
+    distribution_enlarging: bool | None = None
+    distribution_widening: bool | None = None
+    distribution_moving: bool | None = None
+    distribution_confined: bool | None = None
+
+    material_rock: bool | None = None
+    material_bedding: bool | None = None
+    material_joints: bool | None = None
+    material_fractures: bool | None = None
+
+    est_soil_pct: float | None = None
+    est_clay_pct: float | None = None
+    est_silt_pct: float | None = None
+    est_sand_pct: float | None = None
+    est_gravel_pct: float | None = None
+
+    water_dry: bool | None = None
+    water_moist: bool | None = None
+    water_wet: bool | None = None
+    water_flowing: bool | None = None
+    water_seep: bool | None = None
+    water_spring: bool | None = None
+
+    vegetation_trees: str | None = None
+    vegetation_bushes_shrubs: str | None = None
+    vegetation_groundcover: str | None = None
+
+    drainage_clogged_inlet: bool | None = None
+    drainage_compromised_drains: bool | None = None
+    drainage_surface_runoff: bool | None = None
+    drainage_torrent_surge_flood: bool | None = None
+
+    impact_impacted_adj_utilities: bool | None = None
+    impact_adj_utilities: str | None = None
+    impact_impacted_adj_properties: bool | None = None
+    impact_adj_properties: str | None = None
+    impact_impacted_adj_structure: bool | None = None
+    impact_adj_structure: str | None = None
+
+    measure_slope_height_ft: float | None = None
+    measure_original_slope_deg: float | None = None
+    measure_landslide_width_ft: float | None = None
+    measure_landslide_length_ft: float | None = None
+    measure_main_scarp_height_ft: float | None = None
+    measure_landslide_slope_deg: float | None = None
+    measure_roadway_length_ft: float | None = None
+    measure_roadway_width_ft: float | None = None
 
     observations_notes: str | None = None
     geometry_json: dict | None = None

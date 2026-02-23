@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import { useFocusEffect, useLocalSearchParams, router, useNavigation } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseCandidates, getApiBaseUrl } from "../../../src/api/baseUrl";
@@ -43,6 +43,18 @@ const EMPTY_FORM: FormState = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
   latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "",
   crack_length_ft: "", crack_horizontal_in: "", crack_vertical_in: "", crack_depth_in: "", settlement_in: "", bulge_in: "",
+  team_member1_last_name: "", team_member1_first_name: "", team_member1_s_number: "",
+  team_member2_last_name: "", team_member2_first_name: "", team_member2_s_number: "",
+  contact_phone_primary: "", contact_phone_secondary: "",
+  failure_rock_fall: "", failure_topple: "", failure_slide: "", failure_spread: "", failure_flow: "", failure_compound: "", failure_erosion: "", failure_surficial_failure: "", failure_scoured_toe: "", failure_washout: "",
+  distribution_advancing: "", distribution_retrogressive: "", distribution_enlarging: "", distribution_widening: "", distribution_moving: "", distribution_confined: "",
+  material_rock: "", material_bedding: "", material_joints: "", material_fractures: "",
+  est_soil_pct: "", est_clay_pct: "", est_silt_pct: "", est_sand_pct: "", est_gravel_pct: "",
+  water_dry: "", water_moist: "", water_wet: "", water_flowing: "", water_seep: "", water_spring: "",
+  vegetation_trees: "", vegetation_bushes_shrubs: "", vegetation_groundcover: "",
+  drainage_clogged_inlet: "", drainage_compromised_drains: "", drainage_surface_runoff: "", drainage_torrent_surge_flood: "",
+  impact_impacted_adj_utilities: "", impact_adj_utilities: "", impact_impacted_adj_properties: "", impact_adj_properties: "", impact_impacted_adj_structure: "", impact_adj_structure: "",
+  measure_slope_height_ft: "", measure_original_slope_deg: "", measure_landslide_width_ft: "", measure_landslide_length_ft: "", measure_main_scarp_height_ft: "", measure_landslide_slope_deg: "", measure_roadway_length_ft: "", measure_roadway_width_ft: "",
   observations_notes: "", geometry_json: "", pavement_ground_cracks: "UNKNOWN", indented_by_rocks: "UNKNOWN",
 };
 
@@ -51,6 +63,8 @@ const f = (v: string, name: string) => { if (!v.trim()) return null; const x = N
 const i = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${name} must be a whole number`); return x; };
 const triToBool = (v: "UNKNOWN" | "YES" | "NO") => (v === "YES" ? true : false);
 const boolToTri = (v: any) => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
+const ynToBool = (v: string) => (v === "YES" ? true : v === "NO" ? false : null);
+const boolToYn = (v: any) => (v === true ? "YES" : v === false ? "NO" : "");
 const isPlayServicesUnavailableError = (msg: string) =>
   /LocationServices\.API is not available|SERVICE_INVALID|Google Play services/i.test(msg);
 
@@ -242,6 +256,7 @@ function CollapsibleSection({
 export default function SubmissionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation<any>();
+  const pathname = usePathname();
   const { palette, density } = useUiSettings();
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<UserInfo | null>(null);
@@ -271,6 +286,7 @@ export default function SubmissionDetailScreen() {
     incidentTypes: false,
     roadwayStatus: false,
     pavementSlope: false,
+    paperFields: false,
     actions: false,
     observations: false,
   });
@@ -343,6 +359,18 @@ export default function SubmissionDetailScreen() {
         latitude: g.latitude != null ? String(g.latitude) : "", longitude: g.longitude != null ? String(g.longitude) : "",
         distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
+        team_member1_last_name: g.team_member1_last_name ?? "", team_member1_first_name: g.team_member1_first_name ?? "", team_member1_s_number: g.team_member1_s_number ?? "",
+        team_member2_last_name: g.team_member2_last_name ?? "", team_member2_first_name: g.team_member2_first_name ?? "", team_member2_s_number: g.team_member2_s_number ?? "",
+        contact_phone_primary: g.contact_phone_primary ?? "", contact_phone_secondary: g.contact_phone_secondary ?? "",
+        failure_rock_fall: boolToYn(g.failure_rock_fall), failure_topple: boolToYn(g.failure_topple), failure_slide: boolToYn(g.failure_slide), failure_spread: boolToYn(g.failure_spread), failure_flow: boolToYn(g.failure_flow), failure_compound: boolToYn(g.failure_compound), failure_erosion: boolToYn(g.failure_erosion), failure_surficial_failure: boolToYn(g.failure_surficial_failure), failure_scoured_toe: boolToYn(g.failure_scoured_toe), failure_washout: boolToYn(g.failure_washout),
+        distribution_advancing: boolToYn(g.distribution_advancing), distribution_retrogressive: boolToYn(g.distribution_retrogressive), distribution_enlarging: boolToYn(g.distribution_enlarging), distribution_widening: boolToYn(g.distribution_widening), distribution_moving: boolToYn(g.distribution_moving), distribution_confined: boolToYn(g.distribution_confined),
+        material_rock: boolToYn(g.material_rock), material_bedding: boolToYn(g.material_bedding), material_joints: boolToYn(g.material_joints), material_fractures: boolToYn(g.material_fractures),
+        est_soil_pct: g.est_soil_pct != null ? String(g.est_soil_pct) : "", est_clay_pct: g.est_clay_pct != null ? String(g.est_clay_pct) : "", est_silt_pct: g.est_silt_pct != null ? String(g.est_silt_pct) : "", est_sand_pct: g.est_sand_pct != null ? String(g.est_sand_pct) : "", est_gravel_pct: g.est_gravel_pct != null ? String(g.est_gravel_pct) : "",
+        water_dry: boolToYn(g.water_dry), water_moist: boolToYn(g.water_moist), water_wet: boolToYn(g.water_wet), water_flowing: boolToYn(g.water_flowing), water_seep: boolToYn(g.water_seep), water_spring: boolToYn(g.water_spring),
+        vegetation_trees: g.vegetation_trees ?? "", vegetation_bushes_shrubs: g.vegetation_bushes_shrubs ?? "", vegetation_groundcover: g.vegetation_groundcover ?? "",
+        drainage_clogged_inlet: boolToYn(g.drainage_clogged_inlet), drainage_compromised_drains: boolToYn(g.drainage_compromised_drains), drainage_surface_runoff: boolToYn(g.drainage_surface_runoff), drainage_torrent_surge_flood: boolToYn(g.drainage_torrent_surge_flood),
+        impact_impacted_adj_utilities: boolToYn(g.impact_impacted_adj_utilities), impact_adj_utilities: g.impact_adj_utilities ?? "", impact_impacted_adj_properties: boolToYn(g.impact_impacted_adj_properties), impact_adj_properties: g.impact_adj_properties ?? "", impact_impacted_adj_structure: boolToYn(g.impact_impacted_adj_structure), impact_adj_structure: g.impact_adj_structure ?? "",
+        measure_slope_height_ft: g.measure_slope_height_ft != null ? String(g.measure_slope_height_ft) : "", measure_original_slope_deg: g.measure_original_slope_deg != null ? String(g.measure_original_slope_deg) : "", measure_landslide_width_ft: g.measure_landslide_width_ft != null ? String(g.measure_landslide_width_ft) : "", measure_landslide_length_ft: g.measure_landslide_length_ft != null ? String(g.measure_landslide_length_ft) : "", measure_main_scarp_height_ft: g.measure_main_scarp_height_ft != null ? String(g.measure_main_scarp_height_ft) : "", measure_landslide_slope_deg: g.measure_landslide_slope_deg != null ? String(g.measure_landslide_slope_deg) : "", measure_roadway_length_ft: g.measure_roadway_length_ft != null ? String(g.measure_roadway_length_ft) : "", measure_roadway_width_ft: g.measure_roadway_width_ft != null ? String(g.measure_roadway_width_ft) : "",
         observations_notes: g.observations_notes ?? "", geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "",
       });
       setIncidentTypes(subRes.incident_types ?? []);
@@ -475,6 +503,18 @@ export default function SubmissionDetailScreen() {
         latitude: f(form.latitude, "Latitude"), longitude: f(form.longitude, "Longitude"),
         distribution_code: n(form.distribution_code), highway_status_code: n(form.highway_status_code), lanes_closed_count: i(form.lanes_closed_count, "Lanes closed count"),
         pavement_ground_cracks: triToBool(form.pavement_ground_cracks), crack_length_ft: f(form.crack_length_ft, "Crack length"), crack_horizontal_in: f(form.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(form.crack_vertical_in, "Crack vertical"), crack_depth_in: f(form.crack_depth_in, "Crack depth"), settlement_in: f(form.settlement_in, "Settlement"), bulge_in: f(form.bulge_in, "Bulge"), indented_by_rocks: triToBool(form.indented_by_rocks),
+        team_member1_last_name: n(form.team_member1_last_name), team_member1_first_name: n(form.team_member1_first_name), team_member1_s_number: n(form.team_member1_s_number),
+        team_member2_last_name: n(form.team_member2_last_name), team_member2_first_name: n(form.team_member2_first_name), team_member2_s_number: n(form.team_member2_s_number),
+        contact_phone_primary: n(form.contact_phone_primary), contact_phone_secondary: n(form.contact_phone_secondary),
+        failure_rock_fall: ynToBool(form.failure_rock_fall), failure_topple: ynToBool(form.failure_topple), failure_slide: ynToBool(form.failure_slide), failure_spread: ynToBool(form.failure_spread), failure_flow: ynToBool(form.failure_flow), failure_compound: ynToBool(form.failure_compound), failure_erosion: ynToBool(form.failure_erosion), failure_surficial_failure: ynToBool(form.failure_surficial_failure), failure_scoured_toe: ynToBool(form.failure_scoured_toe), failure_washout: ynToBool(form.failure_washout),
+        distribution_advancing: ynToBool(form.distribution_advancing), distribution_retrogressive: ynToBool(form.distribution_retrogressive), distribution_enlarging: ynToBool(form.distribution_enlarging), distribution_widening: ynToBool(form.distribution_widening), distribution_moving: ynToBool(form.distribution_moving), distribution_confined: ynToBool(form.distribution_confined),
+        material_rock: ynToBool(form.material_rock), material_bedding: ynToBool(form.material_bedding), material_joints: ynToBool(form.material_joints), material_fractures: ynToBool(form.material_fractures),
+        est_soil_pct: f(form.est_soil_pct, "Estimated soil %"), est_clay_pct: f(form.est_clay_pct, "Estimated clay %"), est_silt_pct: f(form.est_silt_pct, "Estimated silt %"), est_sand_pct: f(form.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(form.est_gravel_pct, "Estimated gravel %"),
+        water_dry: ynToBool(form.water_dry), water_moist: ynToBool(form.water_moist), water_wet: ynToBool(form.water_wet), water_flowing: ynToBool(form.water_flowing), water_seep: ynToBool(form.water_seep), water_spring: ynToBool(form.water_spring),
+        vegetation_trees: n(form.vegetation_trees), vegetation_bushes_shrubs: n(form.vegetation_bushes_shrubs), vegetation_groundcover: n(form.vegetation_groundcover),
+        drainage_clogged_inlet: ynToBool(form.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(form.drainage_compromised_drains), drainage_surface_runoff: ynToBool(form.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(form.drainage_torrent_surge_flood),
+        impact_impacted_adj_utilities: ynToBool(form.impact_impacted_adj_utilities), impact_adj_utilities: n(form.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(form.impact_impacted_adj_properties), impact_adj_properties: n(form.impact_adj_properties), impact_impacted_adj_structure: ynToBool(form.impact_impacted_adj_structure), impact_adj_structure: n(form.impact_adj_structure),
+        measure_slope_height_ft: f(form.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(form.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(form.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(form.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(form.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(form.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(form.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(form.measure_roadway_width_ft, "Roadway width"),
         observations_notes: n(form.observations_notes), geometry_json: geometry,
       });
       await replaceIncidentTypes(token, id, incidentTypes);
@@ -737,7 +777,7 @@ export default function SubmissionDetailScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEditCandidate, form.latitude, form.longitude]);
 
-  const draftEntryStatus = data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED";
+  const draftEntryStatus = pathname.startsWith("/drafts/");
   useLayoutEffect(() => {
     if (!data) return;
     navigation.setOptions({
@@ -768,7 +808,7 @@ export default function SubmissionDetailScreen() {
   const roles = new Set(me.roles || []);
   const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && !!data.submission.can_edit;
   const canReview = data.submission.status === "SUBMITTED" && (roles.has("REVIEWER") || roles.has("ADMIN"));
-  const isDraftEntry = data.submission.status === "DRAFT" || data.submission.status === "REJECTED";
+  const isDraftEntry = draftEntryStatus;
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
   const stepOrder = data.submission.status === "REJECTED"
     ? ["DRAFT", "SUBMITTED", "REJECTED"]
@@ -780,6 +820,12 @@ export default function SubmissionDetailScreen() {
     const key = String(ev.to_status || ev.event_type || "").toUpperCase();
     if (key && !eventDate[key]) eventDate[key] = ev.created_at;
   }
+  const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
+  const materialKeys = ["material_rock", "material_bedding", "material_joints", "material_fractures"];
+  const impactKeys = ["impact_impacted_adj_utilities", "impact_impacted_adj_properties", "impact_impacted_adj_structure"];
+  const anyFailureSelected = failureKeys.some((k) => form[k] === "YES");
+  const anyMaterialSelected = materialKeys.some((k) => form[k] === "YES");
+  const anyImpactSelected = impactKeys.some((k) => form[k] === "YES");
 
   function previewSource(photoId: number) {
     const queryToken = encodeURIComponent(token || "");
@@ -963,6 +1009,100 @@ export default function SubmissionDetailScreen() {
         <Field palette={palette} label="Bulge (in)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
         <Text style={styles.label}>Indented by Rocks</Text>
         <View style={styles.chips}>{(["YES", "NO", "UNKNOWN"] as const).map((c) => <Chip key={c} label={c} palette={palette} active={form.indented_by_rocks === c} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", c)} />)}</View>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="GISA Paper Fields" open={openSections.paperFields} onToggle={() => toggleSection("paperFields")} palette={palette} compact={compact}>
+        <Field palette={palette} label="Team Member 1 - Last Name" value={form.team_member1_last_name} editable={canEdit} onChangeText={(v) => setVal("team_member1_last_name", v)} />
+        <Field palette={palette} label="Team Member 1 - First Name" value={form.team_member1_first_name} editable={canEdit} onChangeText={(v) => setVal("team_member1_first_name", v)} />
+        <Field palette={palette} label="Team Member 1 - S Number" value={form.team_member1_s_number} editable={canEdit} onChangeText={(v) => setVal("team_member1_s_number", v)} />
+        <Field palette={palette} label="Team Member 2 - Last Name" value={form.team_member2_last_name} editable={canEdit} onChangeText={(v) => setVal("team_member2_last_name", v)} />
+        <Field palette={palette} label="Team Member 2 - First Name" value={form.team_member2_first_name} editable={canEdit} onChangeText={(v) => setVal("team_member2_first_name", v)} />
+        <Field palette={palette} label="Team Member 2 - S Number" value={form.team_member2_s_number} editable={canEdit} onChangeText={(v) => setVal("team_member2_s_number", v)} />
+        <Field palette={palette} label="Primary Phone" value={form.contact_phone_primary} editable={canEdit} onChangeText={(v) => setVal("contact_phone_primary", v)} />
+        <Field palette={palette} label="Secondary Phone" value={form.contact_phone_secondary} editable={canEdit} onChangeText={(v) => setVal("contact_phone_secondary", v)} />
+
+        <Text style={styles.label}>Failure Types</Text>
+        <View style={styles.chips}>
+          {[
+            ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
+            ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surficial Failure"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
+          ].map(([key, label]) => (
+            <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+          ))}
+        </View>
+
+        {anyFailureSelected ? (
+          <>
+            <Text style={styles.label}>Distribution (Paper Multi-Select)</Text>
+            <View style={styles.chips}>
+              {[["distribution_advancing", "Advancing"], ["distribution_retrogressive", "Retrogressive"], ["distribution_enlarging", "Enlarging"], ["distribution_widening", "Widening"], ["distribution_moving", "Moving"], ["distribution_confined", "Confined"]].map(([key, label]) => (
+                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              ))}
+            </View>
+
+            <Text style={styles.label}>Material</Text>
+            <View style={styles.chips}>
+              {[["material_rock", "Rock"], ["material_bedding", "Bedding"], ["material_joints", "Joints"], ["material_fractures", "Fractures"]].map(([key, label]) => (
+                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        {anyMaterialSelected ? (
+          <>
+            <Field palette={palette} label="Estimated Soil %" value={form.est_soil_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_soil_pct", v)} />
+            <Field palette={palette} label="Estimated Clay %" value={form.est_clay_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_clay_pct", v)} />
+            <Field palette={palette} label="Estimated Silt %" value={form.est_silt_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_silt_pct", v)} />
+            <Field palette={palette} label="Estimated Sand %" value={form.est_sand_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_sand_pct", v)} />
+            <Field palette={palette} label="Estimated Gravel %" value={form.est_gravel_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_gravel_pct", v)} />
+            <Text style={styles.label}>Water Content</Text>
+            <View style={styles.chips}>
+              {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"], ["water_seep", "Seep"], ["water_spring", "Spring"]].map(([key, label]) => (
+                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        <Field palette={palette} label="Vegetation - Trees" value={form.vegetation_trees} editable={canEdit} onChangeText={(v) => setVal("vegetation_trees", v)} />
+        <Field palette={palette} label="Vegetation - Bushes/Shrubs" value={form.vegetation_bushes_shrubs} editable={canEdit} onChangeText={(v) => setVal("vegetation_bushes_shrubs", v)} />
+        <Field palette={palette} label="Vegetation - Groundcover" value={form.vegetation_groundcover} editable={canEdit} onChangeText={(v) => setVal("vegetation_groundcover", v)} />
+
+        <Text style={styles.label}>Water / Drainage</Text>
+        <View style={styles.chips}>
+          {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, label]) => (
+            <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+          ))}
+        </View>
+
+        <Text style={styles.label}>Adjacent Impacts</Text>
+        <View style={styles.chips}>
+          {[["impact_impacted_adj_utilities", "Impacted Utilities"], ["impact_impacted_adj_properties", "Impacted Properties"], ["impact_impacted_adj_structure", "Impacted Structures"]].map(([key, label]) => (
+            <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+          ))}
+        </View>
+
+        {anyImpactSelected ? (
+          <>
+            <Field palette={palette} label="Adjacent Utilities Details" value={form.impact_adj_utilities} editable={canEdit} onChangeText={(v) => setVal("impact_adj_utilities", v)} />
+            <Field palette={palette} label="Adjacent Properties Details" value={form.impact_adj_properties} editable={canEdit} onChangeText={(v) => setVal("impact_adj_properties", v)} />
+            <Field palette={palette} label="Adjacent Structures Details" value={form.impact_adj_structure} editable={canEdit} onChangeText={(v) => setVal("impact_adj_structure", v)} />
+          </>
+        ) : null}
+
+        {anyFailureSelected ? (
+          <>
+            <Field palette={palette} label="Slope Height (ft)" value={form.measure_slope_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_slope_height_ft", v)} />
+            <Field palette={palette} label="Original Slope (deg)" value={form.measure_original_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_original_slope_deg", v)} />
+            <Field palette={palette} label="Landslide Width (ft)" value={form.measure_landslide_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_width_ft", v)} />
+            <Field palette={palette} label="Landslide Length (ft)" value={form.measure_landslide_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_length_ft", v)} />
+            <Field palette={palette} label="Main Scarp Height (ft)" value={form.measure_main_scarp_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_main_scarp_height_ft", v)} />
+            <Field palette={palette} label="Landslide Slope (deg)" value={form.measure_landslide_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_slope_deg", v)} />
+            <Field palette={palette} label="Roadway Length (ft)" value={form.measure_roadway_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_length_ft", v)} />
+            <Field palette={palette} label="Roadway Width (ft)" value={form.measure_roadway_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_width_ft", v)} />
+          </>
+        ) : null}
       </CollapsibleSection>
 
       <CollapsibleSection title="Actions" open={openSections.actions} onToggle={() => toggleSection("actions")} palette={palette} compact={compact}>
