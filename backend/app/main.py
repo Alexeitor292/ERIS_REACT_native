@@ -54,6 +54,20 @@ def startup():
     # Seed admin only if ENV=dev and SEED_ADMIN=true
     db = SessionLocal()
     try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS submission_editors (
+                submission_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                granted_by_user_id BIGINT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (submission_id, user_id),
+                CONSTRAINT fk_edit_submission FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+                CONSTRAINT fk_edit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                CONSTRAINT fk_edit_granted_by FOREIGN KEY (granted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                INDEX idx_edit_user (user_id)
+            ) ENGINE=InnoDB
+        """))
+        db.commit()
         seed_admin(db)
     except Exception as exc:
         if settings.ENV.lower() == "dev":
@@ -80,7 +94,13 @@ def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
                 FROM submission_visibility v
                 WHERE v.submission_id = s.id AND v.user_id = :uid
                 LIMIT 1
-            ) AS has_grant
+            ) AS has_view_grant,
+            EXISTS(
+                SELECT 1
+                FROM submission_editors e
+                WHERE e.submission_id = s.id AND e.user_id = :uid
+                LIMIT 1
+            ) AS has_edit_grant
         FROM submissions s
         WHERE s.id = :sid
         LIMIT 1
@@ -92,11 +112,56 @@ def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
     if int(row["owner_id"]) == int(user["id"]):
         return True
 
-    return bool(row["has_grant"])
+    return bool(row["has_view_grant"]) or bool(row["has_edit_grant"])
 
 def require_can_view_submission(submission_id: int, db: Session, user: dict) -> None:
     if not can_view_submission(db, user=user, submission_id=submission_id):
         raise HTTPException(status_code=403, detail="Not allowed to view this submission")
+
+def can_edit_submission(db: Session, *, user: dict, submission_id: int) -> bool:
+    if is_admin(user):
+        return True
+
+    row = db.execute(text("""
+        SELECT
+            s.created_by_user_id AS owner_id,
+            EXISTS(
+                SELECT 1
+                FROM submission_editors e
+                WHERE e.submission_id = s.id AND e.user_id = :uid
+                LIMIT 1
+            ) AS has_edit_grant
+        FROM submissions s
+        WHERE s.id = :sid
+        LIMIT 1
+    """), {"sid": submission_id, "uid": user["id"]}).mappings().first()
+
+    if not row:
+        return False
+    if int(row["owner_id"]) == int(user["id"]):
+        return True
+    return bool(row["has_edit_grant"])
+
+def require_can_edit_submission(submission_id: int, db: Session, user: dict) -> None:
+    if not can_edit_submission(db, user=user, submission_id=submission_id):
+        raise HTTPException(status_code=403, detail="Not allowed to edit this submission")
+
+def can_manage_submission_permissions(db: Session, *, user: dict, submission_id: int) -> bool:
+    if is_admin(user):
+        return True
+    owner = db.execute(text("""
+        SELECT created_by_user_id
+        FROM submissions
+        WHERE id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).scalar()
+    if owner is None:
+        return False
+    return int(owner) == int(user["id"])
+
+def require_can_manage_submission_permissions(submission_id: int, db: Session, user: dict) -> None:
+    if not can_manage_submission_permissions(db, user=user, submission_id=submission_id):
+        raise HTTPException(status_code=403, detail="Only owner/admin can manage permissions")
 
 def get_submission_status(db: Session, submission_id: int) -> str:
     status_value = db.execute(text("""
@@ -437,6 +502,10 @@ class ReviewAction(BaseModel):
 class ShareRequest(BaseModel):
     user_id: int = Field(..., ge=1)
 
+class SubmissionPermissionsReplace(BaseModel):
+    reader_user_ids: list[int] = []
+    editor_user_ids: list[int] = []
+
 class SubmissionTitlePatch(BaseModel):
     title: str | None = Field(default=None, max_length=255)
 
@@ -672,7 +741,7 @@ def list_submissions(
         return {"items": [dict(r) for r in rows]}
 
     params["uid"] = user["id"]
-    where_clause = "WHERE s.created_by_user_id = :uid OR v.user_id IS NOT NULL"
+    where_clause = "WHERE s.created_by_user_id = :uid OR v.user_id IS NOT NULL OR e.user_id IS NOT NULL"
     if status:
         where_clause = f"{where_clause} AND s.status = :status"
 
@@ -683,6 +752,8 @@ def list_submissions(
         FROM submissions s
         LEFT JOIN submission_visibility v
           ON v.submission_id = s.id AND v.user_id = :uid
+        LEFT JOIN submission_editors e
+          ON e.submission_id = s.id AND e.user_id = :uid
         LEFT JOIN submission_gisa g ON g.submission_id = s.id
         """ + where_clause + """
         ORDER BY s.id DESC
@@ -736,7 +807,11 @@ def get_submission(
     photo_items = [dict(a) for a in attachments if str(a["kind"]).upper() == "PHOTO"]
 
     return {
-        "submission": dict(sub),
+        "submission": {
+            **dict(sub),
+            "can_edit": can_edit_submission(db, user=user, submission_id=submission_id),
+            "can_manage_permissions": can_manage_submission_permissions(db, user=user, submission_id=submission_id),
+        },
         "gisa": gisa,
         "incident_types": incident_types,
         "actions": actions,
@@ -753,7 +828,7 @@ def patch_submission_title(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
-    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    require_can_edit_submission(submission_id, db, user)
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
         raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
@@ -779,12 +854,10 @@ def delete_submission(
 ):
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
     current_status = get_submission_status(db, submission_id)
-    if current_status == "DRAFT":
-        pass
-    elif not is_admin(user):
+    if current_status != "DRAFT":
         raise HTTPException(
-            status_code=403,
-            detail="Only admins can delete submitted or reviewed submissions",
+            status_code=409,
+            detail="Only DRAFT submissions can be deleted",
         )
 
     try:
@@ -832,8 +905,7 @@ def put_submission_geometry(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
-    # Only owner/admin can edit
-    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    require_can_edit_submission(submission_id, db, user)
 
     # Only DRAFT/REJECTED editable
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
@@ -885,7 +957,7 @@ def patch_gisa(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
-    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    require_can_edit_submission(submission_id, db, user)
 
     current_status = get_submission_status(db, submission_id)
     if current_status not in {"DRAFT", "REJECTED"}:
@@ -948,7 +1020,7 @@ def replace_incident_types(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
-    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    require_can_edit_submission(submission_id, db, user)
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
         raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
@@ -979,7 +1051,7 @@ def replace_actions(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
 ):
-    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    require_can_edit_submission(submission_id, db, user)
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
         raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
@@ -1025,8 +1097,9 @@ def share_submission(
     submission_id: int = Path(..., ge=1),
     payload: ShareRequest = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["ADMIN"]))
+    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
 ):
+    require_can_manage_submission_permissions(submission_id, db, user)
     exists = db.execute(text("SELECT 1 FROM submissions WHERE id=:sid"), {"sid": submission_id}).scalar()
     if not exists:
         raise HTTPException(status_code=404, detail="Submission not found")
@@ -1053,8 +1126,9 @@ def unshare_submission(
     submission_id: int = Path(..., ge=1),
     user_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["ADMIN"]))
+    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
 ):
+    require_can_manage_submission_permissions(submission_id, db, user)
     try:
         db.execute(text("""
             DELETE FROM submission_visibility
@@ -1071,8 +1145,9 @@ def unshare_submission(
 def list_shared_with(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["ADMIN"]))
+    user=Depends(get_current_user)
 ):
+    require_can_view_submission(submission_id, db, user)
     rows = db.execute(text("""
         SELECT v.user_id, u.email, u.full_name, v.granted_by_user_id, v.created_at
         FROM submission_visibility v
@@ -1082,6 +1157,123 @@ def list_shared_with(
     """), {"sid": submission_id}).mappings().all()
 
     return {"items": [dict(r) for r in rows]}
+
+
+@app.get("/submissions/{submission_id}/permissions")
+def get_submission_permissions(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_view_submission(submission_id, db, user)
+    owner = db.execute(text("""
+        SELECT u.id, u.email, u.full_name
+        FROM submissions s
+        JOIN users u ON u.id = s.created_by_user_id
+        WHERE s.id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    readers = db.execute(text("""
+        SELECT v.user_id, u.email, u.full_name
+        FROM submission_visibility v
+        JOIN users u ON u.id = v.user_id
+        WHERE v.submission_id = :sid
+        ORDER BY u.full_name ASC, u.email ASC
+    """), {"sid": submission_id}).mappings().all()
+
+    editors = db.execute(text("""
+        SELECT e.user_id, u.email, u.full_name
+        FROM submission_editors e
+        JOIN users u ON u.id = e.user_id
+        WHERE e.submission_id = :sid
+        ORDER BY u.full_name ASC, u.email ASC
+    """), {"sid": submission_id}).mappings().all()
+
+    can_manage = can_manage_submission_permissions(db, user=user, submission_id=submission_id)
+    available_users: list[dict] = []
+    if can_manage:
+        available_users = [dict(r) for r in db.execute(text("""
+            SELECT id, email, full_name
+            FROM users
+            WHERE is_active = 1 AND id <> :owner_id
+            ORDER BY full_name ASC, email ASC
+            LIMIT 500
+        """), {"owner_id": int(owner["id"])}).mappings().all()]
+
+    return {
+        "owner": dict(owner),
+        "readers": [dict(r) for r in readers],
+        "editors": [dict(r) for r in editors],
+        "can_manage": can_manage,
+        "available_users": available_users,
+    }
+
+
+@app.put("/submissions/{submission_id}/permissions")
+def replace_submission_permissions(
+    submission_id: int = Path(..., ge=1),
+    payload: SubmissionPermissionsReplace = ...,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+):
+    require_can_manage_submission_permissions(submission_id, db, user)
+
+    owner_id = db.execute(text("""
+        SELECT created_by_user_id
+        FROM submissions
+        WHERE id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).scalar()
+    if owner_id is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    reader_ids = sorted({int(x) for x in (payload.reader_user_ids or []) if int(x) > 0})
+    editor_ids = sorted({int(x) for x in (payload.editor_user_ids or []) if int(x) > 0})
+
+    if int(owner_id) in reader_ids:
+        reader_ids.remove(int(owner_id))
+    if int(owner_id) in editor_ids:
+        editor_ids.remove(int(owner_id))
+
+    target_ids = sorted(set(reader_ids + editor_ids))
+    if target_ids:
+        placeholders = ",".join([f":u{i}" for i in range(len(target_ids))])
+        params = {f"u{i}": uid for i, uid in enumerate(target_ids)}
+        rows = db.execute(text(f"""
+            SELECT id
+            FROM users
+            WHERE is_active = 1 AND id IN ({placeholders})
+        """), params).scalars().all()
+        existing = {int(x) for x in rows}
+        missing = [uid for uid in target_ids if uid not in existing]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Unknown or inactive user ids: {missing}")
+
+    try:
+        db.execute(text("DELETE FROM submission_visibility WHERE submission_id = :sid"), {"sid": submission_id})
+        db.execute(text("DELETE FROM submission_editors WHERE submission_id = :sid"), {"sid": submission_id})
+
+        for uid in reader_ids:
+            db.execute(text("""
+                INSERT INTO submission_visibility (submission_id, user_id, granted_by_user_id)
+                VALUES (:sid, :uid, :granted_by)
+            """), {"sid": submission_id, "uid": uid, "granted_by": user["id"]})
+
+        for uid in editor_ids:
+            db.execute(text("""
+                INSERT INTO submission_editors (submission_id, user_id, granted_by_user_id)
+                VALUES (:sid, :uid, :granted_by)
+            """), {"sid": submission_id, "uid": uid, "granted_by": user["id"]})
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"ok": True, "reader_user_ids": reader_ids, "editor_user_ids": editor_ids}
 
 # ----------------------------
 # Attachment download URLs
@@ -1189,7 +1381,7 @@ def submit(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
 ):
-    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
+    require_can_edit_submission(submission_id, db, user)
     validate_submit_ready(db, submission_id)
 
     current_status = get_submission_status(db, submission_id)

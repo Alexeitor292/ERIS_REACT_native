@@ -1,4 +1,6 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useRef } from "react";
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 
@@ -22,9 +24,25 @@ function Choice({
 
 export default function SettingsScreen() {
   const { themeMode, accent, density, setThemeMode, setAccent, setDensity, palette } = useUiSettings();
+  const entrance = useRef(new Animated.Value(22)).current;
+  const fade = useRef(new Animated.Value(0)).current;
+
+  useFocusEffect(
+    useRef(() => {
+      entrance.setValue(28);
+      fade.setValue(0);
+      const anim = Animated.parallel([
+        Animated.timing(entrance, { toValue: 0, duration: 260, useNativeDriver: true }),
+        Animated.timing(fade, { toValue: 1, duration: 240, useNativeDriver: true }),
+      ]);
+      anim.start();
+      return () => anim.stop();
+    }).current
+  );
 
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={[styles.container, { backgroundColor: palette.bg }]}>
+      <Animated.View style={[{ flex: 1, opacity: fade, transform: [{ translateX: entrance }] }]}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: palette.text }]}>Display Settings</Text>
         <Text style={[styles.subtitle, { color: palette.muted }]}>
@@ -62,6 +80,7 @@ export default function SettingsScreen() {
           </View>
         </View>
       </ScrollView>
+      </Animated.View>
     </SafeAreaView>
   );
 }

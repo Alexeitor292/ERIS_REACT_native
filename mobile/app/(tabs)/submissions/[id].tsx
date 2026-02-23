@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import { useLocalSearchParams, router } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, router, useNavigation } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseCandidates, getApiBaseUrl } from "../../../src/api/baseUrl";
@@ -29,7 +29,7 @@ type Lookups = {
   actions: { immediate: OptionItem[]; follow_up: OptionItem[] };
 };
 type SubmissionDetail = {
-  submission: { id: number; created_by_user_id: number; title?: string | null; status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED"; created_at: string; updated_at: string; submitted_at?: string | null; reviewed_at?: string | null; review_comment?: string | null };
+  submission: { id: number; created_by_user_id: number; title?: string | null; status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED"; created_at: string; updated_at: string; submitted_at?: string | null; reviewed_at?: string | null; review_comment?: string | null; can_edit?: boolean; can_manage_permissions?: boolean };
   gisa: any | null;
   incident_types: string[];
   actions: { immediate: string[]; follow_up: string[] };
@@ -241,6 +241,7 @@ function CollapsibleSection({
 
 export default function SubmissionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const navigation = useNavigation<any>();
   const { palette, density } = useUiSettings();
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<UserInfo | null>(null);
@@ -359,6 +360,11 @@ export default function SubmissionDetailScreen() {
   }, [token, id, hydratePhotoUrls]);
 
   useEffect(() => { load(); }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const setVal = (k: keyof FormState, v: any) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -711,7 +717,7 @@ export default function SubmissionDetailScreen() {
     !!data &&
     !!me &&
     (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") &&
-    (me.roles?.includes("ADMIN") || (me.roles?.includes("FIELD_WORKER") && me.id === data.submission.created_by_user_id));
+    !!data.submission.can_edit;
 
   useEffect(() => {
     if (!canEditCandidate) return;
@@ -731,11 +737,38 @@ export default function SubmissionDetailScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEditCandidate, form.latitude, form.longitude]);
 
+  const draftEntryStatus = data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED";
+  useLayoutEffect(() => {
+    if (!data) return;
+    navigation.setOptions({
+      title: draftEntryStatus ? "Draft" : "Submission",
+      gestureEnabled: !draftEntryStatus,
+      headerLeft: draftEntryStatus
+        ? () => (
+            <Pressable onPress={() => router.replace("/(tabs)/drafts")} style={{ paddingHorizontal: 6, paddingVertical: 2 }}>
+              <Text style={{ color: palette.primary, fontWeight: "700" }}>Back</Text>
+            </Pressable>
+          )
+        : undefined,
+    });
+  }, [data, draftEntryStatus, navigation, palette.primary]);
+
+  useEffect(() => {
+    if (!data || !draftEntryStatus) return;
+    const unsub = navigation.addListener("beforeRemove", (e: any) => {
+      const actionType = String(e?.data?.action?.type || "");
+      if (!["GO_BACK", "POP", "POP_TO_TOP"].includes(actionType)) return;
+      e.preventDefault();
+      router.replace("/(tabs)/drafts");
+    });
+    return unsub;
+  }, [data, draftEntryStatus, navigation]);
+
   if (!token || loading || !data || !lookups || !me) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
   const roles = new Set(me.roles || []);
-  const isOwner = me.id === data.submission.created_by_user_id;
-  const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && (roles.has("ADMIN") || (roles.has("FIELD_WORKER") && isOwner));
+  const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && !!data.submission.can_edit;
   const canReview = data.submission.status === "SUBMITTED" && (roles.has("REVIEWER") || roles.has("ADMIN"));
+  const isDraftEntry = data.submission.status === "DRAFT" || data.submission.status === "REJECTED";
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
   const stepOrder = data.submission.status === "REJECTED"
     ? ["DRAFT", "SUBMITTED", "REJECTED"]
@@ -797,14 +830,17 @@ export default function SubmissionDetailScreen() {
       keyboardDismissMode={isIOS ? "interactive" : "on-drag"}
       contentContainerStyle={[styles.contentWrap, { padding: compact ? 10 : 14, gap: compact ? 8 : 10 }]}
     >
-      <Text style={[styles.title, { color: palette.text }]}>{buildSubmissionDescriptor({
-        id: data.submission.id,
-        created_at: data.submission.created_at,
-        district: form.district || data.gisa?.district,
-        county: form.county || data.gisa?.county,
-        route: form.route || data.gisa?.route,
-        post_mile: form.post_mile || data.gisa?.post_mile,
-      })}</Text>
+      <Text style={[styles.title, { color: palette.text }]}>{isDraftEntry ? "Draft" : "Submission"}</Text>
+      <Text style={[styles.muted, { color: palette.muted }]}>
+        {buildSubmissionDescriptor({
+          id: data.submission.id,
+          created_at: data.submission.created_at,
+          district: form.district || data.gisa?.district,
+          county: form.county || data.gisa?.county,
+          route: form.route || data.gisa?.route,
+          post_mile: form.post_mile || data.gisa?.post_mile,
+        })}
+      </Text>
       <Text style={[styles.status, { color: palette.muted }]}>Status: {data.submission.status}</Text>
         <CollapsibleSection title="Header Info" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
         <SelectField

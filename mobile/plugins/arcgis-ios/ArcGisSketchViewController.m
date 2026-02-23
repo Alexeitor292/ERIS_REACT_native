@@ -24,39 +24,15 @@
 - (void)viewDidLoad {
   [super viewDidLoad];
 
-  self.view.backgroundColor = [UIColor systemBackgroundColor];
-  self.title = @"ArcGIS Sketch";
+  self.view.backgroundColor = [UIColor blackColor];
+  self.title = @"";
 
-  AGSBasemap *basemap = [[AGSBasemap alloc] initWithStyle:AGSBasemapStyleArcGISStreets];
+  AGSBasemap *basemap = [[AGSBasemap alloc] initWithStyle:AGSBasemapStyleArcGISImagery];
   AGSMap *map = [[AGSMap alloc] initWithBasemap:basemap];
   self.mapView = [[AGSMapView alloc] initWithFrame:CGRectZero];
   self.mapView.translatesAutoresizingMaskIntoConstraints = NO;
   self.mapView.map = map;
   [self.view addSubview:self.mapView];
-
-  UILabel *help = [[UILabel alloc] initWithFrame:CGRectZero];
-  help.translatesAutoresizingMaskIntoConstraints = NO;
-  help.numberOfLines = 0;
-  help.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-  help.text = @"Tap map to add polygon points. Drag vertices to reshape. Use Undo/Redo, then Done to save.";
-  [self.view addSubview:help];
-
-  UIStackView *stackContainer = [[UIStackView alloc] initWithFrame:CGRectZero];
-  stackContainer.translatesAutoresizingMaskIntoConstraints = NO;
-  stackContainer.axis = UILayoutConstraintAxisVertical;
-  stackContainer.distribution = UIStackViewDistributionFillEqually;
-  stackContainer.spacing = 8;
-  [self.view addSubview:stackContainer];
-
-  UIStackView *editStack = [[UIStackView alloc] initWithFrame:CGRectZero];
-  editStack.axis = UILayoutConstraintAxisHorizontal;
-  editStack.distribution = UIStackViewDistributionFillEqually;
-  editStack.spacing = 8;
-
-  UIStackView *mapStack = [[UIStackView alloc] initWithFrame:CGRectZero];
-  mapStack.axis = UILayoutConstraintAxisHorizontal;
-  mapStack.distribution = UIStackViewDistributionFillEqually;
-  mapStack.spacing = 8;
 
   self.undoStack = [NSMutableArray array];
   self.redoStack = [NSMutableArray array];
@@ -66,51 +42,63 @@
     @(AGSBasemapStyleArcGISImagery)
   ];
   self.basemapTitles = @[ @"Streets", @"Topographic", @"Imagery" ];
-  self.basemapIndex = 0;
+  self.basemapIndex = 2;
   self.applyingHistory = NO;
   self.hasObservedGeometry = NO;
 
-  UIButton *undoButton = [self buttonWithTitle:@"Undo" action:@selector(onUndo)];
-  UIButton *redoButton = [self buttonWithTitle:@"Redo" action:@selector(onRedo)];
-  UIButton *clearButton = [self buttonWithTitle:@"Clear" action:@selector(onClear)];
-  UIButton *cancelButton = [self buttonWithTitle:@"Cancel" action:@selector(onCancel)];
-  UIButton *doneButton = [self buttonWithTitle:@"Done" action:@selector(onDone)];
-  self.basemapButton = [self buttonWithTitle:@"Layer: Streets" action:@selector(onBasemap)];
-  UIButton *myLocationButton = [self buttonWithTitle:@"My Location" action:@selector(onMyLocation)];
-  UIButton *homeButton = [self buttonWithTitle:@"Home" action:@selector(onHome)];
-  UIButton *zoomInButton = [self buttonWithTitle:@"Zoom +" action:@selector(onZoomIn)];
-  UIButton *zoomOutButton = [self buttonWithTitle:@"Zoom -" action:@selector(onZoomOut)];
+  UIButton *zoomInButton = [self overlayButtonWithTitle:@"+" action:@selector(onZoomIn)];
+  UIButton *zoomOutButton = [self overlayButtonWithTitle:@"-" action:@selector(onZoomOut)];
+  UIButton *homeButton = [self overlayButtonWithTitle:@"Home" action:@selector(onHome)];
+  UIButton *myLocationButton = [self overlayButtonWithTitle:@"Locate" action:@selector(onMyLocation)];
+  self.basemapButton = [self overlayButtonWithTitle:@"Basemap" action:@selector(onBasemap)];
+  UIButton *toolingButton = [self overlayButtonWithTitle:@"Tools" action:@selector(onTooling)];
+  UIButton *undoButton = [self overlayButtonWithTitle:@"Undo" action:@selector(onUndo)];
+  UIButton *redoButton = [self overlayButtonWithTitle:@"Redo" action:@selector(onRedo)];
+  UIButton *clearButton = [self overlayButtonWithTitle:@"Clear" action:@selector(onClear)];
+  UIButton *doneButton = [self overlayButtonWithTitle:@"Save" action:@selector(onDone)];
 
-  [editStack addArrangedSubview:undoButton];
-  [editStack addArrangedSubview:redoButton];
-  [editStack addArrangedSubview:clearButton];
-  [editStack addArrangedSubview:cancelButton];
-  [editStack addArrangedSubview:doneButton];
+  UIStackView *leftTop = [[UIStackView alloc] initWithArrangedSubviews:@[ zoomInButton, zoomOutButton ]];
+  leftTop.translatesAutoresizingMaskIntoConstraints = NO;
+  leftTop.axis = UILayoutConstraintAxisVertical;
+  leftTop.spacing = 6;
+  [self.view addSubview:leftTop];
 
-  [mapStack addArrangedSubview:self.basemapButton];
-  [mapStack addArrangedSubview:myLocationButton];
-  [mapStack addArrangedSubview:homeButton];
-  [mapStack addArrangedSubview:zoomInButton];
-  [mapStack addArrangedSubview:zoomOutButton];
+  UIStackView *leftMid = [[UIStackView alloc] initWithArrangedSubviews:@[ homeButton, myLocationButton ]];
+  leftMid.translatesAutoresizingMaskIntoConstraints = NO;
+  leftMid.axis = UILayoutConstraintAxisVertical;
+  leftMid.spacing = 6;
+  [self.view addSubview:leftMid];
 
-  [stackContainer addArrangedSubview:editStack];
-  [stackContainer addArrangedSubview:mapStack];
+  UIStackView *rightTop = [[UIStackView alloc] initWithArrangedSubviews:@[ self.basemapButton, toolingButton ]];
+  rightTop.translatesAutoresizingMaskIntoConstraints = NO;
+  rightTop.axis = UILayoutConstraintAxisVertical;
+  rightTop.spacing = 6;
+  [self.view addSubview:rightTop];
+
+  UIStackView *rightBottom = [[UIStackView alloc] initWithArrangedSubviews:@[ undoButton, redoButton, clearButton, doneButton ]];
+  rightBottom.translatesAutoresizingMaskIntoConstraints = NO;
+  rightBottom.axis = UILayoutConstraintAxisHorizontal;
+  rightBottom.spacing = 6;
+  [self.view addSubview:rightBottom];
 
   UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
-    [help.topAnchor constraintEqualToAnchor:guide.topAnchor constant:10],
-    [help.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:12],
-    [help.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-12],
-
-    [stackContainer.topAnchor constraintEqualToAnchor:help.bottomAnchor constant:10],
-    [stackContainer.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:12],
-    [stackContainer.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-12],
-    [stackContainer.heightAnchor constraintEqualToConstant:84],
-
-    [self.mapView.topAnchor constraintEqualToAnchor:stackContainer.bottomAnchor constant:10],
+    [self.mapView.topAnchor constraintEqualToAnchor:guide.topAnchor],
     [self.mapView.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor],
     [self.mapView.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor],
     [self.mapView.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor],
+
+    [leftTop.topAnchor constraintEqualToAnchor:guide.topAnchor constant:10],
+    [leftTop.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:10],
+
+    [leftMid.topAnchor constraintEqualToAnchor:leftTop.bottomAnchor constant:40],
+    [leftMid.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:10],
+
+    [rightTop.topAnchor constraintEqualToAnchor:guide.topAnchor constant:10],
+    [rightTop.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-10],
+
+    [rightBottom.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-10],
+    [rightBottom.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-10],
   ]];
 
   self.sketchEditor = [[AGSSketchEditor alloc] init];
@@ -130,15 +118,44 @@
   [self pushCurrentGeometryToUndo];
 }
 
-- (UIButton *)buttonWithTitle:(NSString *)title action:(SEL)selector {
+- (UIButton *)overlayButtonWithTitle:(NSString *)title action:(SEL)selector {
   UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
   [button setTitle:title forState:UIControlStateNormal];
   button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-  button.layer.cornerRadius = 8;
+  [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+  button.layer.cornerRadius = 6;
   button.layer.borderWidth = 1;
-  button.layer.borderColor = [UIColor systemGray4Color].CGColor;
+  button.layer.borderColor = [UIColor colorWithRed:0.20 green:0.23 blue:0.31 alpha:1.0].CGColor;
+  button.backgroundColor = [UIColor colorWithRed:0.07 green:0.09 blue:0.12 alpha:0.80];
+  button.contentEdgeInsets = UIEdgeInsetsMake(7, 10, 7, 10);
   [button addTarget:self action:selector forControlEvents:UIControlEventTouchUpInside];
   return button;
+}
+
+- (void)onTooling {
+  UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Sketch Tooling"
+                                                                 message:nil
+                                                          preferredStyle:UIAlertControllerStyleActionSheet];
+  __weak typeof(self) weakSelf = self;
+  [sheet addAction:[UIAlertAction actionWithTitle:@"Start Polygon"
+                                            style:UIAlertActionStyleDefault
+                                          handler:^(__unused UIAlertAction *action) {
+                                            [weakSelf.sketchEditor startWithCreationMode:AGSSketchCreationModePolygon];
+                                          }]];
+  [sheet addAction:[UIAlertAction actionWithTitle:@"Clear"
+                                            style:UIAlertActionStyleDefault
+                                          handler:^(__unused UIAlertAction *action) {
+                                            [weakSelf onClear];
+                                          }]];
+  [sheet addAction:[UIAlertAction actionWithTitle:@"Save + Close"
+                                            style:UIAlertActionStyleDefault
+                                          handler:^(__unused UIAlertAction *action) {
+                                            [weakSelf onDone];
+                                          }]];
+  [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                            style:UIAlertActionStyleCancel
+                                          handler:nil]];
+  [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (BOOL)startEditingExistingGeometry {
@@ -154,7 +171,6 @@
     return NO;
   }
   NSDictionary *json = (NSDictionary *)parsed;
-  // If seed geometry is only a point, start fresh polygon creation instead.
   NSArray *rings = json[@"rings"];
   if (![rings isKindOfClass:[NSArray class]] || rings.count == 0) {
     return NO;
@@ -214,7 +230,6 @@
 - (void)startLocationDisplay {
   self.mapView.locationDisplay.autoPanMode = AGSLocationDisplayAutoPanModeOff;
   [self.mapView.locationDisplay startWithCompletion:^(NSError *_Nullable error) {
-    // Keep sketch usable even if location display fails.
     (void)error;
   }];
 }
@@ -227,7 +242,7 @@
   AGSBasemapStyle style = (AGSBasemapStyle)self.basemapStyles[self.basemapIndex].integerValue;
   self.mapView.map.basemap = [[AGSBasemap alloc] initWithStyle:style];
   NSString *title = self.basemapTitles[self.basemapIndex];
-  [self.basemapButton setTitle:[NSString stringWithFormat:@"Layer: %@", title] forState:UIControlStateNormal];
+  [self toast:[NSString stringWithFormat:@"Layer: %@", title]];
 }
 
 - (void)onMyLocation {

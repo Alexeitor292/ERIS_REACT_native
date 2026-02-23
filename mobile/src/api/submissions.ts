@@ -68,6 +68,37 @@ export async function deleteSubmission(token: string, id: string) {
   });
 }
 
+export type SubmissionPermissionUser = {
+  id?: number;
+  user_id?: number;
+  email: string;
+  full_name: string;
+};
+
+export type SubmissionPermissions = {
+  owner: { id: number; email: string; full_name: string };
+  readers: { user_id: number; email: string; full_name: string }[];
+  editors: { user_id: number; email: string; full_name: string }[];
+  can_manage: boolean;
+  available_users: { id: number; email: string; full_name: string }[];
+};
+
+export async function getSubmissionPermissions(token: string, id: string) {
+  return apiFetch<SubmissionPermissions>(`/submissions/${id}/permissions`, { token });
+}
+
+export async function replaceSubmissionPermissions(
+  token: string,
+  id: string,
+  payload: { reader_user_ids: number[]; editor_user_ids: number[] }
+) {
+  return apiFetch(`/submissions/${id}/permissions`, {
+    method: "PUT",
+    token,
+    body: payload,
+  });
+}
+
 export type GeoEnrichment = {
   latitude: number;
   longitude: number;

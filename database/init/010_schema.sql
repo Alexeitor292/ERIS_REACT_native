@@ -126,6 +126,18 @@ CREATE TABLE IF NOT EXISTS submission_visibility (
     INDEX idx_vis_user (user_id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS submission_editors (
+    submission_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    granted_by_user_id BIGINT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (submission_id, user_id),
+    CONSTRAINT fk_edit_submission FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_edit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_edit_granted_by FOREIGN KEY (granted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX idx_edit_user (user_id)
+) ENGINE=InnoDB;
+
 -- ============================================================
 -- CLEAN: remove any legacy table if it exists
 -- ============================================================
