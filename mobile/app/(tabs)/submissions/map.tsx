@@ -91,36 +91,6 @@ function geoJsonToEsriJsonString(geometryJson: Geo): string | null {
   }
 }
 
-function buildGisaPatch(existing: any, geometryJson: any) {
-  const g = existing ?? {};
-  return {
-    report_date: g.report_date ?? null,
-    district: g.district ?? null,
-    county: g.county ?? null,
-    route: g.route ?? null,
-    post_mile: g.post_mile ?? null,
-    ea: g.ea ?? null,
-    project_id: g.project_id ?? null,
-    date_incident_reported: g.date_incident_reported ?? null,
-    district_contact: g.district_contact ?? null,
-    latitude: g.latitude ?? null,
-    longitude: g.longitude ?? null,
-    distribution_code: g.distribution_code ?? null,
-    highway_status_code: g.highway_status_code ?? null,
-    lanes_closed_count: g.lanes_closed_count ?? null,
-    pavement_ground_cracks: g.pavement_ground_cracks ?? false,
-    crack_length_ft: g.crack_length_ft ?? null,
-    crack_horizontal_in: g.crack_horizontal_in ?? null,
-    crack_vertical_in: g.crack_vertical_in ?? null,
-    crack_depth_in: g.crack_depth_in ?? null,
-    settlement_in: g.settlement_in ?? null,
-    bulge_in: g.bulge_in ?? null,
-    indented_by_rocks: g.indented_by_rocks ?? false,
-    observations_notes: g.observations_notes ?? null,
-    geometry_json: geometryJson,
-  };
-}
-
 export default function MapScreen() {
   const { palette } = useUiSettings();
   const { id, latitude, longitude } = useLocalSearchParams<{
@@ -134,7 +104,6 @@ export default function MapScreen() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [baseGisa, setBaseGisa] = useState<any>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [launched, setLaunched] = useState(false);
   const launchInFlight = useRef(false);
@@ -168,7 +137,6 @@ export default function MapScreen() {
       const roles = new Set(me.roles ?? []);
       const editable = (roles.has("FIELD_WORKER") || roles.has("ADMIN")) && sub.submission.status === "DRAFT";
       setCanEdit(editable);
-      setBaseGisa(sub.gisa ?? {});
       if (!editable) {
         throw new Error("Only DRAFT submissions can be edited.");
       }
@@ -211,7 +179,7 @@ export default function MapScreen() {
           if (!bridge?.getSketchGeometry) return;
           const geom = await bridge.getSketchGeometry();
           if (cancelled || !geom) return;
-          await patchSubmission(token, submissionId, buildGisaPatch(baseGisa, geom));
+          await patchSubmission(token, submissionId, { geometry_json: geom });
           if (cancelled) return;
           Alert.alert("Saved", "Geometry updated on this submission.");
           router.back();
@@ -222,7 +190,7 @@ export default function MapScreen() {
       return () => {
         cancelled = true;
       };
-    }, [launched, token, submissionId, canEdit, baseGisa])
+    }, [launched, token, submissionId, canEdit])
   );
 
   return (

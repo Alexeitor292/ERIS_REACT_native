@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
+import * as SecureStore from "expo-secure-store";
+import { useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseCandidates, getApiBaseUrl } from "../../../src/api/baseUrl";
@@ -46,7 +47,21 @@ type DistrictContact = {
   phone: string;
   cell_phone: string;
 };
+type DraftEditorState = {
+  form: FormState;
+  incidentTypes: string[];
+  immediateActions: string[];
+  followUpActions: string[];
+  districtContacts: DistrictContact[];
+};
+type DraftLocalCache = DraftEditorState & {
+  version: number;
+  submission_id: string;
+  saved_at: string;
+  server_updated_at?: string | null;
+};
 type FieldErrorMap = Partial<Record<keyof FormState, string>>;
+const DRAFT_LOCAL_CACHE_VERSION = 1;
 const EMPTY_FORM: FormState = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
   latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "",
@@ -160,6 +175,65 @@ function serializeDistrictContacts(contacts: DistrictContact[]): string {
     }))
     .filter((c) => Object.values(c).some((v) => !!v));
   return normalized.length ? JSON.stringify(normalized) : "";
+}
+
+function draftCacheKey(submissionId: string): string {
+  return `draft_local_cache:${submissionId}`;
+}
+
+async function getDraftCache(key: string): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(key);
+  } catch {
+    return null;
+  }
+}
+
+async function setDraftCache(key: string, value: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(key, value);
+  } catch {}
+}
+
+async function removeDraftCache(key: string): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch {}
+}
+
+function normalizeCachedForm(raw: any): FormState {
+  const next: FormState = { ...EMPTY_FORM, ...(raw || {}) };
+  next.pavement_ground_cracks =
+    raw?.pavement_ground_cracks === "YES" || raw?.pavement_ground_cracks === "NO" || raw?.pavement_ground_cracks === "UNKNOWN"
+      ? raw.pavement_ground_cracks
+      : "UNKNOWN";
+  next.indented_by_rocks =
+    raw?.indented_by_rocks === "YES" || raw?.indented_by_rocks === "NO" || raw?.indented_by_rocks === "UNKNOWN"
+      ? raw.indented_by_rocks
+      : "UNKNOWN";
+  return next;
+}
+
+function normalizeCachedContacts(raw: any): DistrictContact[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => ({
+    id: String(item?.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+    first_name: String(item?.first_name ?? ""),
+    last_name: String(item?.last_name ?? ""),
+    s_number: String(item?.s_number ?? ""),
+    phone: String(item?.phone ?? ""),
+    cell_phone: String(item?.cell_phone ?? ""),
+  }));
+}
+
+function normalizeCachedEditorState(raw: any): DraftEditorState {
+  return {
+    form: normalizeCachedForm(raw?.form),
+    incidentTypes: Array.isArray(raw?.incidentTypes) ? raw.incidentTypes.map((x: any) => String(x)) : [],
+    immediateActions: Array.isArray(raw?.immediateActions) ? raw.immediateActions.map((x: any) => String(x)) : [],
+    followUpActions: Array.isArray(raw?.followUpActions) ? raw.followUpActions.map((x: any) => String(x)) : [],
+    districtContacts: normalizeCachedContacts(raw?.districtContacts),
+  };
 }
 
 function Chip({
@@ -369,7 +443,6 @@ export default function SubmissionDetailScreen() {
     distributionMain: false,
     highwayStatusMain: false,
     incidentType: false,
-    distribution: false,
     material: false,
     waterContent: false,
     pavementGroundStatus: false,
@@ -381,6 +454,9 @@ export default function SubmissionDetailScreen() {
   const isIOS = Platform.OS === "ios";
   const compact = density === "compact";
   const fullscreenProgress = useRef(new Animated.Value(0)).current;
+  const cacheHydratedRef = useRef(false);
+  const suppressCacheWriteRef = useRef(false);
+  const serverSnapshotRef = useRef<string>("");
 
   const mapPreviewUrl = useMemo(() => {
     const lat = Number(form.latitude);
@@ -416,6 +492,31 @@ export default function SubmissionDetailScreen() {
     })().catch(() => { Alert.alert("Auth error", "Please log in again."); router.replace("/(auth)/login"); });
   }, []);
 
+  const buildEditorState = useCallback(
+    (overrides?: Partial<DraftEditorState>): DraftEditorState => ({
+      form: overrides?.form ?? form,
+      incidentTypes: overrides?.incidentTypes ?? incidentTypes,
+      immediateActions: overrides?.immediateActions ?? immediateActions,
+      followUpActions: overrides?.followUpActions ?? followUpActions,
+      districtContacts: overrides?.districtContacts ?? districtContacts,
+    }),
+    [form, incidentTypes, immediateActions, followUpActions, districtContacts]
+  );
+
+  const applyEditorState = useCallback((state: DraftEditorState) => {
+    setForm(state.form);
+    setIncidentTypes(state.incidentTypes);
+    setImmediateActions(state.immediateActions);
+    setFollowUpActions(state.followUpActions);
+    setDistrictContacts(state.districtContacts);
+    setOpenDistrictContactIds(Object.fromEntries(state.districtContacts.map((c, idx) => [c.id, idx === 0])));
+  }, []);
+
+  const clearDraftLocalCache = useCallback(async () => {
+    if (!id) return;
+    await removeDraftCache(draftCacheKey(id));
+  }, [id]);
+
   const hydratePhotoUrls = useCallback(async (authToken: string, photos: { id: number }[]) => {
     const next: Record<number, string> = {};
     await Promise.all(photos.map(async (p) => {
@@ -441,7 +542,7 @@ export default function SubmissionDetailScreen() {
       const loadedDistrictContacts = parseDistrictContacts(g.district_contact ?? "");
       const countyCode = countyCodeFromNameOrCode(g.county ?? "");
       const districtValue = g.district ? String(g.district).padStart(2, "0") : (districtForCounty(countyCode) ?? "");
-      setForm({
+      const loadedForm: FormState = {
         ...EMPTY_FORM,
         report_date: g.report_date ?? "", district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: g.post_mile ?? "", ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
         latitude: g.latitude != null ? String(g.latitude) : "", longitude: g.longitude != null ? String(g.longitude) : "",
@@ -457,12 +558,70 @@ export default function SubmissionDetailScreen() {
         impact_impacted_adj_utilities: boolToYn(g.impact_impacted_adj_utilities), impact_maybe_adj_utilities: boolToYn(g.impact_maybe_adj_utilities), impact_adj_utilities: g.impact_adj_utilities ?? "", impact_impacted_adj_properties: boolToYn(g.impact_impacted_adj_properties), impact_maybe_adj_properties: boolToYn(g.impact_maybe_adj_properties), impact_adj_properties: g.impact_adj_properties ?? "", impact_impacted_adj_structure: boolToYn(g.impact_impacted_adj_structure), impact_maybe_adj_structure: boolToYn(g.impact_maybe_adj_structure), impact_adj_structure: g.impact_adj_structure ?? "",
         measure_slope_height_ft: g.measure_slope_height_ft != null ? String(g.measure_slope_height_ft) : "", measure_original_slope_deg: g.measure_original_slope_deg != null ? String(g.measure_original_slope_deg) : "", measure_landslide_width_ft: g.measure_landslide_width_ft != null ? String(g.measure_landslide_width_ft) : "", measure_landslide_length_ft: g.measure_landslide_length_ft != null ? String(g.measure_landslide_length_ft) : "", measure_main_scarp_height_ft: g.measure_main_scarp_height_ft != null ? String(g.measure_main_scarp_height_ft) : "", measure_landslide_slope_deg: g.measure_landslide_slope_deg != null ? String(g.measure_landslide_slope_deg) : "", measure_roadway_length_ft: g.measure_roadway_length_ft != null ? String(g.measure_roadway_length_ft) : "", measure_roadway_width_ft: g.measure_roadway_width_ft != null ? String(g.measure_roadway_width_ft) : "",
         observations_notes: g.observations_notes ?? "", geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "",
-      });
-      setDistrictContacts(loadedDistrictContacts);
-      setOpenDistrictContactIds(Object.fromEntries(loadedDistrictContacts.map((c, idx) => [c.id, idx === 0])));
-      setIncidentTypes(subRes.incident_types ?? []);
-      setImmediateActions(subRes.actions?.immediate ?? []);
-      setFollowUpActions(subRes.actions?.follow_up ?? []);
+      };
+      const loadedState: DraftEditorState = {
+        form: loadedForm,
+        districtContacts: loadedDistrictContacts,
+        incidentTypes: subRes.incident_types ?? [],
+        immediateActions: subRes.actions?.immediate ?? [],
+        followUpActions: subRes.actions?.follow_up ?? [],
+      };
+
+      suppressCacheWriteRef.current = true;
+      applyEditorState(loadedState);
+      serverSnapshotRef.current = JSON.stringify(loadedState);
+
+      const isDraftEditable =
+        (subRes.submission.status === "DRAFT" || subRes.submission.status === "REJECTED") &&
+        !!subRes.submission.can_edit;
+      if (isDraftEditable && id) {
+        try {
+          const rawCache = await getDraftCache(draftCacheKey(id));
+          if (rawCache) {
+            const parsed = JSON.parse(rawCache);
+            if (Number(parsed?.version) === DRAFT_LOCAL_CACHE_VERSION) {
+              const cachedState = normalizeCachedEditorState(parsed);
+              const cachedSnapshot = JSON.stringify(cachedState);
+              if (cachedSnapshot !== serverSnapshotRef.current) {
+                const shouldRestore = await new Promise<boolean>((resolve) => {
+                  Alert.alert(
+                    "Unsaved Local Changes",
+                    "Restore unsaved changes stored on this device for this draft?",
+                    [
+                      {
+                        text: "Discard Local",
+                        style: "destructive",
+                        onPress: () => resolve(false),
+                      },
+                      {
+                        text: "Restore",
+                        onPress: () => resolve(true),
+                      },
+                    ],
+                    { cancelable: false }
+                  );
+                });
+                if (shouldRestore) {
+                  applyEditorState(cachedState);
+                } else {
+                  await removeDraftCache(draftCacheKey(id));
+                }
+              } else {
+                await removeDraftCache(draftCacheKey(id));
+              }
+            } else {
+              await removeDraftCache(draftCacheKey(id));
+            }
+          }
+        } catch {}
+      } else if (id) {
+        await removeDraftCache(draftCacheKey(id));
+      }
+
+      setTimeout(() => {
+        suppressCacheWriteRef.current = false;
+        cacheHydratedRef.current = true;
+      }, 0);
       setFieldErrors({});
       setReviewComment(subRes.submission.review_comment ?? "");
       await hydratePhotoUrls(token, subRes.photos ?? []);
@@ -475,11 +634,47 @@ export default function SubmissionDetailScreen() {
   }, [token, id, hydratePhotoUrls]);
 
   useEffect(() => { load(); }, [load]);
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load])
-  );
+
+  useEffect(() => {
+    if (!id || !data || loading) return;
+    if (!cacheHydratedRef.current || suppressCacheWriteRef.current) return;
+    const isDraftEditable =
+      (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") &&
+      !!data.submission.can_edit;
+    if (!isDraftEditable) return;
+
+    const editorState = buildEditorState();
+    const snapshot = JSON.stringify(editorState);
+    const key = draftCacheKey(id);
+
+    if (serverSnapshotRef.current && snapshot === serverSnapshotRef.current) {
+      removeDraftCache(key).catch(() => {});
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const payload: DraftLocalCache = {
+        version: DRAFT_LOCAL_CACHE_VERSION,
+        submission_id: String(id),
+        saved_at: new Date().toISOString(),
+        server_updated_at: data.submission.updated_at ?? null,
+        ...editorState,
+      };
+      setDraftCache(key, JSON.stringify(payload)).catch(() => {});
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [
+    id,
+    data,
+    loading,
+    form,
+    incidentTypes,
+    immediateActions,
+    followUpActions,
+    districtContacts,
+    buildEditorState,
+  ]);
 
   const setVal = (k: keyof FormState, v: any) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -645,6 +840,7 @@ export default function SubmissionDetailScreen() {
       await replaceIncidentTypes(token, id, incidentTypes);
       await replaceActions(token, id, { immediate: immediateActions, follow_up: followUpActions });
       Alert.alert("Saved", "Draft saved.");
+      await clearDraftLocalCache();
       await load();
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
@@ -659,6 +855,7 @@ export default function SubmissionDetailScreen() {
     try {
       await submitSubmission(token, id);
       Alert.alert("Submitted", "Sent for review.");
+      await clearDraftLocalCache();
       await load();
     }
     catch (err: any) {
@@ -979,10 +1176,8 @@ export default function SubmissionDetailScreen() {
   }
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
   const materialKeys = ["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures"];
-  const impactKeys = ["impact_impacted_adj_utilities", "impact_impacted_adj_properties", "impact_impacted_adj_structure", "impact_maybe_adj_utilities", "impact_maybe_adj_properties", "impact_maybe_adj_structure"];
   const anyFailureSelected = failureKeys.some((k) => form[k] === "YES");
   const anyMaterialSelected = materialKeys.some((k) => form[k] === "YES");
-  const anyImpactSelected = impactKeys.some((k) => form[k] === "YES");
   const materialRockSelected = form.material_rock === "YES";
   const materialSoilSelected = form.material_soil === "YES";
   const waterFlowingSelected = form.water_flowing === "YES";
@@ -1245,7 +1440,7 @@ export default function SubmissionDetailScreen() {
           style={[styles.mapPreviewCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
           onPress={() =>
             router.push({
-              pathname: "/(tabs)/submissions/map",
+              pathname: (isDraftEntry ? "/(tabs)/drafts/map" : "/(tabs)/submissions/map") as any,
               params: {
                 id: String(id ?? ""),
                 latitude: form.latitude,
@@ -1325,18 +1520,6 @@ export default function SubmissionDetailScreen() {
             ))}
           </View>
         </DropdownBlock>
-
-        {anyFailureSelected ? (
-          <>
-            <DropdownBlock title="Distribution" open={openPaperBlocks.distribution} onToggle={() => togglePaperBlock("distribution")} palette={palette}>
-              <View style={styles.chips}>
-                {[["distribution_advancing", "Advancing"], ["distribution_retrogressive", "Retrogressive"], ["distribution_enlarging", "Enlarging"], ["distribution_widening", "Widening"], ["distribution_moving", "Moving"], ["distribution_confined", "Confined"]].map(([key, label]) => (
-                  <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
-                ))}
-              </View>
-            </DropdownBlock>
-          </>
-        ) : null}
 
         <DropdownBlock title="Material" open={openPaperBlocks.material} onToggle={() => togglePaperBlock("material")} palette={palette}>
           <View style={styles.chips}>
@@ -1472,14 +1655,6 @@ export default function SubmissionDetailScreen() {
             </View>
           ) : null}
         </DropdownBlock>
-
-        {anyImpactSelected ? (
-          <>
-            <Field palette={palette} label="Adjacent Utilities Details" value={form.impact_adj_utilities} editable={canEdit} onChangeText={(v) => setVal("impact_adj_utilities", v)} />
-            <Field palette={palette} label="Adjacent Properties Details" value={form.impact_adj_properties} editable={canEdit} onChangeText={(v) => setVal("impact_adj_properties", v)} />
-            <Field palette={palette} label="Adjacent Structures Details" value={form.impact_adj_structure} editable={canEdit} onChangeText={(v) => setVal("impact_adj_structure", v)} />
-          </>
-        ) : null}
 
         {anyFailureSelected ? (
           <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
