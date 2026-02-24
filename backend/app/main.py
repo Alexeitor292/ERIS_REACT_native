@@ -732,7 +732,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     # Header/form top rows (write only field values, no extra labels/metadata)
     # Anchor-based placement: use label positions from the template itself.
     # Values are drawn in the corresponding boxes above labels.
-    y_above = 20.0
+    # Slightly tighter vertical offset so values sit centered in the top-row boxes.
+    y_above = 17.0
     # Row 1
     ok = draw_from_anchor("Date", 0, 2, y_above, val("report_date"))
     ok &= draw_from_anchor("District", 0, 2, y_above, val("district"))
@@ -886,10 +887,13 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     # Impacted / May be impacted matrix
     draw_check(266, 442, is_on("impact_impacted_adj_utilities"))
     draw_check(309, 442, is_on("impact_maybe_adj_utilities"))
+    draw_txt(338, 442, val("impact_adj_utilities"), 7)
     draw_check(266, 460, is_on("impact_impacted_adj_properties"))
     draw_check(309, 460, is_on("impact_maybe_adj_properties"))
+    draw_txt(338, 460, val("impact_adj_properties"), 7)
     draw_check(266, 478, is_on("impact_impacted_adj_structure"))
     draw_check(309, 478, is_on("impact_maybe_adj_structure"))
+    draw_txt(338, 478, val("impact_adj_structure"), 7)
 
     # Recommended actions matrix
     action_rows = [
