@@ -575,6 +575,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     actions = get_gisa_actions(db, submission_id)
     immediate = set(actions.get("immediate", []))
     follow_up = set(actions.get("follow_up", []))
+    incident_type_codes = set(get_gisa_incident_types(db, submission_id))
 
     def val(k: str, default: str = "") -> str:
         v = gisa.get(k)
@@ -583,7 +584,21 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         return str(v)
 
     def is_on(k: str) -> bool:
-        return bool(gisa.get(k))
+        v = gisa.get(k)
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        if isinstance(v, (int, float)):
+            return v != 0
+        if isinstance(v, str):
+            t = v.strip().lower()
+            if t in {"", "0", "false", "no", "n", "off", "unknown"}:
+                return False
+            if t in {"1", "true", "yes", "y", "on"}:
+                return True
+            return False
+        return bool(v)
 
     template_candidates = [
         FilePath(__file__).resolve().parents[1] / "assets" / "GISA001.pdf",
@@ -657,17 +672,39 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         c.setFont("Helvetica-Bold", 9)
         c.drawString(px, py, "X")
 
-    # Header/meta values
-    draw_txt(10, 16, f"Submission {sub['id']}")
-    draw_txt(95, 16, f"Status: {sub['status']}")
-    draw_txt(10, 29, f"Report Date: {val('report_date')}")
-    draw_txt(145, 29, f"District: {val('district')}")
-    draw_txt(235, 29, f"County: {val('county')}")
-    draw_txt(320, 29, f"Route: {val('route')}")
-    draw_txt(395, 29, f"Post Mile: {val('post_mile')}")
-    draw_txt(10, 42, f"EA: {val('ea')}  Project ID: {val('project_id')}")
-    draw_txt(220, 42, f"Incident Date: {val('date_incident_reported')}")
-    draw_txt(10, 55, f"Lat/Lon: {val('latitude')}, {val('longitude')}")
+    # Header/form top rows (write only field values, no extra labels/metadata)
+    draw_txt(18, 29, val("report_date"))
+    draw_txt(124, 29, val("district"))
+    draw_txt(194, 29, val("county"))
+    draw_txt(258, 29, val("route"))
+    draw_txt(332, 29, val("post_mile"))
+    draw_txt(392, 29, val("ea"))
+    draw_txt(448, 29, val("project_id"))
+    draw_txt(530, 29, val("date_incident_reported"), 7)
+
+    draw_txt(33, 55, val("latitude"))
+    draw_txt(130, 55, val("longitude"))
+
+    # District contact rows (from serialized JSON list)
+    raw_contacts = val("district_contact")
+    contacts: list[dict] = []
+    if raw_contacts:
+        try:
+            parsed = json.loads(raw_contacts)
+            if isinstance(parsed, list):
+                contacts = [x for x in parsed if isinstance(x, dict)]
+        except Exception:
+            contacts = []
+    c1 = contacts[0] if len(contacts) > 0 else {}
+    c2 = contacts[1] if len(contacts) > 1 else {}
+    draw_txt(300, 55, c1.get("last_name", ""))
+    draw_txt(390, 55, c1.get("first_name", ""))
+    draw_txt(518, 55, c1.get("s_number", ""))
+    draw_txt(48, 81, c2.get("last_name", ""))
+    draw_txt(146, 81, c2.get("first_name", ""))
+    draw_txt(226, 81, c2.get("s_number", ""))
+    draw_txt(366, 81, c2.get("phone", ""))
+    draw_txt(500, 81, c2.get("cell_phone", ""))
 
     # Incident Type (left column)
     incident_rows = [
@@ -683,7 +720,19 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         ("failure_washout", 270),
     ]
     for key, top in incident_rows:
-        draw_check(12, top, is_on(key))
+        code_match = {
+            "failure_rock_fall": "ROCK_FALL",
+            "failure_topple": "TOPPLE",
+            "failure_slide": "SLIDE",
+            "failure_spread": "SPREAD",
+            "failure_flow": "FLOW",
+            "failure_compound": "COMPOUND",
+            "failure_erosion": "EROSION",
+            "failure_surficial_failure": "SURFICIAL_SLOUGHING",
+            "failure_scoured_toe": "SCOURED_TOE",
+            "failure_washout": "WASHOUT",
+        }[key]
+        draw_check(12, top, is_on(key) or (code_match in incident_type_codes))
 
     # Distribution (middle-left column)
     distribution_rows = [
@@ -809,26 +858,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     draw_txt(170, 720, val("measure_roadway_length_ft"))
     draw_txt(170, 746, val("measure_roadway_width_ft"))
 
-    # Observations and contact line
-    raw_contacts = val("district_contact")
-    contact_display = raw_contacts
-    if raw_contacts:
-        try:
-            parsed = json.loads(raw_contacts)
-            if isinstance(parsed, list):
-                names: list[str] = []
-                for item in parsed:
-                    if not isinstance(item, dict):
-                        continue
-                    name = " ".join([str(item.get("first_name") or "").strip(), str(item.get("last_name") or "").strip()]).strip()
-                    if name:
-                        names.append(name)
-                if names:
-                    contact_display = "; ".join(names)
-        except Exception:
-            pass
-    draw_txt(10, 760, f"Contact(s): {contact_display}", 7)
-    draw_txt(10, 776, f"Notes: {val('observations_notes')}", 7)
+    # Notes
+    draw_txt(18, 776, val("observations_notes"), 7)
 
     c.save()
     overlay_io.seek(0)
