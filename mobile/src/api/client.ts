@@ -53,6 +53,9 @@ export async function apiFetch<T = any>(
   }
 
   if (!res.ok) {
+    if (res.status >= 500) {
+      throw new Error("Internal server error. Please try again later.");
+    }
     const text = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
   }

@@ -39,11 +39,15 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
 
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
-    try {
-      const j = await res.json();
-      msg = j?.detail || j?.message || msg;
-    } catch {
-      // ignore
+    if (res.status >= 500) {
+      msg = "Internal server error. Please try again later.";
+    } else {
+      try {
+        const j = await res.json();
+        msg = j?.detail || j?.message || msg;
+      } catch {
+        // ignore
+      }
     }
     throw new Error(msg);
   }

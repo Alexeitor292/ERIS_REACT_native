@@ -3,13 +3,14 @@ import json
 import re
 import hashlib
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path as FilePath
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from typing import Literal
 
 from fastapi import FastAPI, Depends, HTTPException, Path, status, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -31,6 +32,7 @@ from .permissions import is_admin, is_reviewer, is_field_worker, require_is_owne
 
 app = FastAPI(title="ERIS React Native Prototype API")
 logger = logging.getLogger("eris.api")
+GENERIC_SERVER_ERROR_DETAIL = "Internal server error"
 
 app.include_router(dev_router)
 app.include_router(admin_users_router)
@@ -43,6 +45,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(HTTPException)
+async def eris_http_exception_handler(request: Request, exc: HTTPException):
+    if int(exc.status_code) >= 500:
+        logger.error(
+            "HTTPException status=%s method=%s path=%s",
+            exc.status_code,
+            request.method,
+            request.url.path,
+            exc_info=exc,
+        )
+        return JSONResponse(status_code=exc.status_code, content={"detail": GENERIC_SERVER_ERROR_DETAIL})
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def eris_unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "Unhandled exception method=%s path=%s",
+        request.method,
+        request.url.path,
+        exc_info=exc,
+    )
+    return JSONResponse(status_code=500, content={"detail": GENERIC_SERVER_ERROR_DETAIL})
 
 
 @app.on_event("startup")
@@ -560,16 +586,19 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         return bool(gisa.get(k))
 
     template_candidates = [
-        Path(__file__).resolve().parents[1] / "assets" / "GISA001.pdf",
-        Path(r"c:\Users\juana\OneDrive\Documents\ERIS\ERIS\GISA001.pdf"),
+        FilePath(__file__).resolve().parents[1] / "assets" / "GISA001.pdf",
+        FilePath(r"c:\Users\juana\OneDrive\Documents\ERIS\ERIS\GISA001.pdf"),
     ]
     template_path = next((p for p in template_candidates if p.exists()), None)
     if not template_path:
-        raise HTTPException(status_code=500, detail="GISA001 template PDF not found on server")
+        attempted = [str(p) for p in template_candidates]
+        logger.error("GISA template PDF missing. attempted_paths=%s", attempted)
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
 
     base_reader = PdfReader(str(template_path))
     if not base_reader.pages:
-        raise HTTPException(status_code=500, detail="GISA001 template has no pages")
+        logger.error("GISA template PDF has no pages. path=%s", str(template_path))
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
     base_page = base_reader.pages[0]
     width = 612.0
     height = 792.0
@@ -1760,7 +1789,14 @@ def generate_submission_gisa_pdf(
 ):
     require_can_view_submission(submission_id, db, user)
 
-    pdf_bytes = _render_gisa_pdf_bytes(db, submission_id)
+    try:
+        pdf_bytes = _render_gisa_pdf_bytes(db, submission_id)
+    except HTTPException as exc:
+        logger.exception("GISA PDF render failed (HTTPException) submission_id=%s user_id=%s detail=%s", submission_id, user.get("id"), exc.detail)
+        raise
+    except Exception:
+        logger.exception("GISA PDF render failed (unexpected) submission_id=%s user_id=%s", submission_id, user.get("id"))
+        raise
     filename = f"gisa-{submission_id}.pdf"
     content_type = "application/pdf"
     bucket = settings.MINIO_BUCKET
@@ -1846,9 +1882,18 @@ def generate_submission_gisa_pdf(
             """), {"sid": submission_id, "aid": attachment_id, "sort_order": int(next_sort or 0)})
 
         db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {exc}")
+        logger.error(
+            "Failed to store generated PDF submission_id=%s user_id=%s",
+            submission_id,
+            user.get("id"),
+            exc_info=exc,
+        )
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
 
     return {
         "submission_id": submission_id,
