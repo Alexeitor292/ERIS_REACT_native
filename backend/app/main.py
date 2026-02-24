@@ -673,17 +673,22 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         c.drawString(px, py, "X")
 
     # Header/form top rows (write only field values, no extra labels/metadata)
-    draw_txt(18, 29, val("report_date"))
-    draw_txt(124, 29, val("district"))
-    draw_txt(194, 29, val("county"))
-    draw_txt(258, 29, val("route"))
-    draw_txt(332, 29, val("post_mile"))
-    draw_txt(392, 29, val("ea"))
-    draw_txt(448, 29, val("project_id"))
-    draw_txt(530, 29, val("date_incident_reported"), 7)
+    # Tuned to center values inside the printed boxes on the flattened template.
+    row1_top = 34
+    row2_top = 61
+    row3_top = 87
 
-    draw_txt(33, 55, val("latitude"))
-    draw_txt(130, 55, val("longitude"))
+    draw_txt(18, row1_top, val("report_date"))
+    draw_txt(124, row1_top, val("district"))
+    draw_txt(194, row1_top, val("county"))
+    draw_txt(258, row1_top, val("route"))
+    draw_txt(332, row1_top, val("post_mile"))
+    draw_txt(392, row1_top, val("ea"))
+    draw_txt(448, row1_top, val("project_id"))
+    draw_txt(530, row1_top, val("date_incident_reported"), 7)
+
+    draw_txt(33, row2_top, val("latitude"))
+    draw_txt(130, row2_top, val("longitude"))
 
     # District contact rows (from serialized JSON list)
     raw_contacts = val("district_contact")
@@ -697,14 +702,14 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             contacts = []
     c1 = contacts[0] if len(contacts) > 0 else {}
     c2 = contacts[1] if len(contacts) > 1 else {}
-    draw_txt(300, 55, c1.get("last_name", ""))
-    draw_txt(390, 55, c1.get("first_name", ""))
-    draw_txt(518, 55, c1.get("s_number", ""))
-    draw_txt(48, 81, c2.get("last_name", ""))
-    draw_txt(146, 81, c2.get("first_name", ""))
-    draw_txt(226, 81, c2.get("s_number", ""))
-    draw_txt(366, 81, c2.get("phone", ""))
-    draw_txt(500, 81, c2.get("cell_phone", ""))
+    draw_txt(300, row2_top, c1.get("last_name", ""))
+    draw_txt(390, row2_top, c1.get("first_name", ""))
+    draw_txt(518, row2_top, c1.get("s_number", ""))
+    draw_txt(48, row3_top, c2.get("last_name", ""))
+    draw_txt(146, row3_top, c2.get("first_name", ""))
+    draw_txt(226, row3_top, c2.get("s_number", ""))
+    draw_txt(366, row3_top, c2.get("phone", ""))
+    draw_txt(500, row3_top, c2.get("cell_phone", ""))
 
     # Incident Type (left column)
     incident_rows = [
