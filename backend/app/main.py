@@ -587,6 +587,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     template_candidates = [
         FilePath(__file__).resolve().parents[1] / "assets" / "GISA001.pdf",
+        FilePath(__file__).resolve().parents[2] / "mobile" / "assets" / "GISA001.pdf",
         FilePath(r"c:\Users\juana\OneDrive\Documents\ERIS\ERIS\GISA001.pdf"),
     ]
     template_path = next((p for p in template_candidates if p.exists()), None)
@@ -600,6 +601,23 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         logger.error("GISA template PDF has no pages. path=%s", str(template_path))
         raise HTTPException(status_code=500, detail="Failed to generate PDF")
     base_page = base_reader.pages[0]
+    # Guardrail: XFA templates render as a fallback "Please wait..." page in pypdf.
+    # We cannot position overlays on the real form until the template is flattened to static PDF.
+    root = base_reader.trailer.get("/Root")
+    if hasattr(root, "get_object"):
+        root = root.get_object()
+    acro_form = root.get("/AcroForm") if isinstance(root, dict) else None
+    if hasattr(acro_form, "get_object"):
+        acro_form = acro_form.get_object()
+    first_page_text = (base_page.extract_text() or "").lower()
+    has_xfa = bool(isinstance(acro_form, dict) and acro_form.get("/XFA"))
+    has_placeholder = "please wait..." in first_page_text and "adobe reader" in first_page_text
+    if has_xfa or has_placeholder:
+        logger.error(
+            "Unsupported XFA GISA template detected at %s. Replace with a flattened/static PDF copy of GISA001.",
+            str(template_path),
+        )
+        raise HTTPException(status_code=500, detail="Failed to generate PDF")
     width = 612.0
     height = 792.0
 
@@ -801,7 +819,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     base_page.merge_page(overlay_page)
     out_writer = PdfWriter()
-    out_writer.add_page(base_page)
+    for page in base_reader.pages:
+        out_writer.add_page(page)
     out_io = BytesIO()
     out_writer.write(out_io)
     return out_io.getvalue()
