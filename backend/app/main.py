@@ -674,18 +674,18 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     # Header/form top rows (write only field values, no extra labels/metadata)
     # Tuned to center values inside the printed boxes on the flattened template.
-    row1_top = 29
-    row2_top = 54
+    row1_top = 24
+    row2_top = 52
     row3_top = 81
 
-    draw_txt(18, row1_top, val("report_date"))
-    draw_txt(124, row1_top, val("district"))
-    draw_txt(194, row1_top, val("county"))
-    draw_txt(258, row1_top, val("route"))
-    draw_txt(332, row1_top, val("post_mile"))
-    draw_txt(392, row1_top, val("ea"))
-    draw_txt(448, row1_top, val("project_id"))
-    draw_txt(530, row1_top, val("date_incident_reported"), 7)
+    draw_txt(6, row1_top, val("report_date"))
+    draw_txt(110, row1_top, val("district"))
+    draw_txt(180, row1_top, val("county"))
+    draw_txt(244, row1_top, val("route"))
+    draw_txt(318, row1_top, val("post_mile"))
+    draw_txt(378, row1_top, val("ea"))
+    draw_txt(434, row1_top, val("project_id"))
+    draw_txt(516, row1_top, val("date_incident_reported"), 7)
 
     draw_txt(24, row2_top, val("latitude"))
     draw_txt(130, row2_top, val("longitude"))
