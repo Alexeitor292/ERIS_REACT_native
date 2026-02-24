@@ -624,21 +624,38 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     overlay_io = BytesIO()
     c = canvas.Canvas(overlay_io, pagesize=(width, height))
 
-    def yy(top_from_page_top: float) -> float:
-        return height - top_from_page_top
+    # Placement calibration for the current flattened GISA template.
+    # The original coordinate map was authored against a different rendering,
+    # so we normalize all x/y draws through this affine transform.
+    x_scale = 0.95
+    x_offset = 8.0
+    y_scale = 0.85
+    y_offset = 60.0
+
+    def map_xy(x: float, top_from_page_top: float) -> tuple[float, float]:
+        nx = (x * x_scale) + x_offset
+        ny_top = (top_from_page_top * y_scale) + y_offset
+        # Convert to reportlab bottom-left origin
+        return nx, (height - ny_top)
 
     def draw_txt(x: float, top: float, text_value, size: int = 8):
         s = str(text_value or "").strip()
         if not s:
             return
+        px, py = map_xy(x, top)
+        if py < 0 or py > height:
+            return
         c.setFont("Helvetica", size)
-        c.drawString(x, yy(top), s)
+        c.drawString(px, py, s)
 
     def draw_check(x: float, top: float, checked: bool):
         if not checked:
             return
+        px, py = map_xy(x, top)
+        if py < 0 or py > height:
+            return
         c.setFont("Helvetica-Bold", 9)
-        c.drawString(x, yy(top), "X")
+        c.drawString(px, py, "X")
 
     # Header/meta values
     draw_txt(10, 16, f"Submission {sub['id']}")
