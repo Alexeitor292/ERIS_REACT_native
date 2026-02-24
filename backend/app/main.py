@@ -1,9 +1,9 @@
 import logging
 import json
 import re
-import textwrap
 import hashlib
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from typing import Literal
@@ -13,8 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from pypdf import PdfReader, PdfWriter
 
 from .db import SessionLocal, get_db
 from .config import settings
@@ -546,33 +546,9 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     if not gisa:
         raise HTTPException(status_code=409, detail="GISA data missing. Save draft first.")
 
-    incident_codes = get_gisa_incident_types(db, submission_id)
     actions = get_gisa_actions(db, submission_id)
-    inc_map = _lookup_map(db, "gisa_incident_type_lut")
-    act_map = _lookup_map(db, "gisa_action_lut")
-
-    district_contacts: list[str] = []
-    raw_contacts = gisa.get("district_contact")
-    if isinstance(raw_contacts, str) and raw_contacts.strip():
-        try:
-            parsed = json.loads(raw_contacts)
-            if isinstance(parsed, list):
-                for item in parsed:
-                    if not isinstance(item, dict):
-                        continue
-                    first_name = str(item.get("first_name") or "").strip()
-                    last_name = str(item.get("last_name") or "").strip()
-                    s_number = str(item.get("s_number") or "").strip()
-                    phone = str(item.get("phone") or "").strip()
-                    cell_phone = str(item.get("cell_phone") or "").strip()
-                    name = " ".join([p for p in [first_name, last_name] if p]).strip()
-                    details = ", ".join([p for p in [f"S#: {s_number}" if s_number else "", f"Phone: {phone}" if phone else "", f"Cell: {cell_phone}" if cell_phone else ""] if p])
-                    if name or details:
-                        district_contacts.append(f"{name}{(' - ' + details) if details else ''}")
-            elif raw_contacts.strip():
-                district_contacts.append(raw_contacts.strip())
-        except Exception:
-            district_contacts.append(raw_contacts.strip())
+    immediate = set(actions.get("immediate", []))
+    follow_up = set(actions.get("follow_up", []))
 
     def val(k: str, default: str = "") -> str:
         v = gisa.get(k)
@@ -580,77 +556,226 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             return default
         return str(v)
 
-    immediate_labels = [act_map.get(code, code) for code in actions.get("immediate", [])]
-    follow_up_labels = [act_map.get(code, code) for code in actions.get("follow_up", [])]
-    incident_labels = [inc_map.get(code, code) for code in incident_codes]
+    def is_on(k: str) -> bool:
+        return bool(gisa.get(k))
 
-    lines: list[str] = [
-        "ERIS - GISA Report",
-        f"Submission ID: {sub['id']}    Status: {sub['status']}",
-        f"Title: {sub['title'] or ''}",
-        f"Created: {sub['created_at']}    Updated: {sub['updated_at']}",
-        "",
-        "GISA Header",
-        f"Report Date: {val('report_date')}",
-        f"District: {val('district')}    County: {val('county')}",
-        f"Route: {val('route')}    Post Mile: {val('post_mile')}",
-        f"EA: {val('ea')}    Project ID: {val('project_id')}",
-        f"Date Incident Reported: {val('date_incident_reported')}",
-        f"Latitude: {val('latitude')}    Longitude: {val('longitude')}",
-        "",
-        "District Contacts",
+    template_candidates = [
+        Path(__file__).resolve().parents[1] / "assets" / "GISA001.pdf",
+        Path(r"c:\Users\juana\OneDrive\Documents\ERIS\ERIS\GISA001.pdf"),
     ]
-    if district_contacts:
-        for c in district_contacts:
-            lines.append(f"- {c}")
-    else:
-        lines.append("- None")
+    template_path = next((p for p in template_candidates if p.exists()), None)
+    if not template_path:
+        raise HTTPException(status_code=500, detail="GISA001 template PDF not found on server")
 
-    lines.extend([
-        "",
-        "Classification",
-        f"Distribution: {val('distribution_code')}    Highway Status: {val('highway_status_code')}",
-        f"Lanes Closed Count: {val('lanes_closed_count')}",
-        f"Incident Types: {', '.join(incident_labels) if incident_labels else 'None'}",
-        "",
-        "Pavement / Ground Status",
-        f"Pavement/Ground Cracks: {_format_yn(gisa.get('pavement_ground_cracks'))}",
-        f"Length (ft): {val('crack_length_ft')}    Horizontal Disp (in): {val('crack_horizontal_in')}",
-        f"Vertical Disp (in): {val('crack_vertical_in')}    Depth (in): {val('crack_depth_in')}",
-        f"Settlement (in): {val('settlement_in')}    Bulge (in): {val('bulge_in')}",
-        f"Indented by Rocks: {_format_yn(gisa.get('indented_by_rocks'))}",
-        "",
-        "Recommended Actions",
-        f"Immediate: {', '.join(immediate_labels) if immediate_labels else 'None'}",
-        f"Follow-up: {', '.join(follow_up_labels) if follow_up_labels else 'None'}",
-        "",
-        "Observations",
-        val("observations_notes", "(none)"),
-    ])
+    base_reader = PdfReader(str(template_path))
+    if not base_reader.pages:
+        raise HTTPException(status_code=500, detail="GISA001 template has no pages")
+    base_page = base_reader.pages[0]
+    width = 612.0
+    height = 792.0
 
-    pdf_io = BytesIO()
-    c = canvas.Canvas(pdf_io, pagesize=letter)
-    width, height = letter
-    margin_x = 36
-    top = height - 36
-    bottom = 36
-    line_h = 13
-    wrap_chars = 112
-    y = top
+    overlay_io = BytesIO()
+    c = canvas.Canvas(overlay_io, pagesize=(width, height))
 
-    c.setFont("Helvetica", 10)
-    for line in lines:
-        wrapped = textwrap.wrap(line, width=wrap_chars) if line else [""]
-        for wline in wrapped:
-            if y < bottom:
-                c.showPage()
-                c.setFont("Helvetica", 10)
-                y = top
-            c.drawString(margin_x, y, wline)
-            y -= line_h
+    def yy(top_from_page_top: float) -> float:
+        return height - top_from_page_top
+
+    def draw_txt(x: float, top: float, text_value, size: int = 8):
+        s = str(text_value or "").strip()
+        if not s:
+            return
+        c.setFont("Helvetica", size)
+        c.drawString(x, yy(top), s)
+
+    def draw_check(x: float, top: float, checked: bool):
+        if not checked:
+            return
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(x, yy(top), "X")
+
+    # Header/meta values
+    draw_txt(10, 16, f"Submission {sub['id']}")
+    draw_txt(95, 16, f"Status: {sub['status']}")
+    draw_txt(10, 29, f"Report Date: {val('report_date')}")
+    draw_txt(145, 29, f"District: {val('district')}")
+    draw_txt(235, 29, f"County: {val('county')}")
+    draw_txt(320, 29, f"Route: {val('route')}")
+    draw_txt(395, 29, f"Post Mile: {val('post_mile')}")
+    draw_txt(10, 42, f"EA: {val('ea')}  Project ID: {val('project_id')}")
+    draw_txt(220, 42, f"Incident Date: {val('date_incident_reported')}")
+    draw_txt(10, 55, f"Lat/Lon: {val('latitude')}, {val('longitude')}")
+
+    # Incident Type (left column)
+    incident_rows = [
+        ("failure_rock_fall", 108),
+        ("failure_topple", 126),
+        ("failure_slide", 144),
+        ("failure_spread", 162),
+        ("failure_flow", 180),
+        ("failure_compound", 198),
+        ("failure_erosion", 216),
+        ("failure_surficial_failure", 234),
+        ("failure_scoured_toe", 252),
+        ("failure_washout", 270),
+    ]
+    for key, top in incident_rows:
+        draw_check(12, top, is_on(key))
+
+    # Distribution (middle-left column)
+    distribution_rows = [
+        ("distribution_advancing", "ADVANCING", 108),
+        ("distribution_retrogressive", "RETROGRESSING", 126),
+        ("distribution_enlarging", "ENLARGING", 144),
+        ("distribution_widening", "WIDENING", 162),
+        ("distribution_moving", "MOVING", 180),
+        ("distribution_confined", "CONFINED", 198),
+    ]
+    for key, code, top in distribution_rows:
+        draw_check(138, top, is_on(key) or val("distribution_code") == code)
+
+    # Highway status
+    highway_code = val("highway_status_code")
+    draw_check(266, 108, highway_code == "OPEN")
+    draw_check(266, 126, highway_code == "SHOULDER_CLOSED")
+    draw_check(266, 144, highway_code == "LANES_CLOSED")
+    draw_txt(318, 145, val("lanes_closed_count"))
+    draw_check(266, 162, highway_code == "ONE_WAY_CLOSED")
+    draw_check(266, 180, highway_code == "TWO_WAY_CLOSED")
+
+    # Material + Soil estimates
+    draw_check(12, 292, is_on("material_rock"))
+    draw_check(12, 310, is_on("material_bedding"))
+    draw_check(12, 328, is_on("material_joints"))
+    draw_check(12, 346, is_on("material_fractures"))
+    draw_check(92, 292, is_on("material_soil"))
+    draw_txt(108, 292, val("est_soil_pct"))
+    draw_txt(108, 310, val("est_clay_pct"))
+    draw_txt(108, 328, val("est_silt_pct"))
+    draw_txt(108, 346, val("est_sand_pct"))
+    draw_txt(108, 364, val("est_gravel_pct"))
+
+    # Water content
+    draw_check(188, 292, is_on("water_dry"))
+    draw_check(188, 310, is_on("water_moist"))
+    draw_check(188, 328, is_on("water_wet"))
+    draw_check(188, 346, is_on("water_flowing"))
+    draw_check(206, 364, is_on("water_seep"))
+    draw_check(206, 382, is_on("water_spring"))
+
+    # Pavement / Ground Status
+    draw_check(266, 218, is_on("pavement_ground_cracks"))
+    draw_txt(315, 218, val("crack_length_ft"))
+    draw_txt(315, 236, val("crack_horizontal_in"))
+    draw_txt(315, 254, val("crack_vertical_in"))
+    draw_txt(315, 272, val("crack_depth_in"))
+    draw_txt(315, 290, val("settlement_in"))
+    draw_txt(315, 308, val("bulge_in"))
+    draw_check(265, 326, is_on("indented_by_rocks"))
+
+    # Vegetation on slope
+    draw_txt(98, 419, val("vegetation_trees"))
+    draw_txt(98, 447, val("vegetation_bushes_shrubs"))
+    draw_txt(98, 475, val("vegetation_groundcover"))
+
+    # Water / Drainage
+    draw_check(266, 364, is_on("drainage_clogged_inlet"))
+    draw_check(266, 382, is_on("drainage_compromised_drains"))
+    draw_check(266, 400, is_on("drainage_surface_runoff"))
+    draw_check(266, 418, is_on("drainage_torrent_surge_flood"))
+
+    # Impacted / May be impacted matrix
+    draw_check(266, 442, is_on("impact_impacted_adj_utilities"))
+    draw_check(309, 442, is_on("impact_maybe_adj_utilities"))
+    draw_check(266, 460, is_on("impact_impacted_adj_properties"))
+    draw_check(309, 460, is_on("impact_maybe_adj_properties"))
+    draw_check(266, 478, is_on("impact_impacted_adj_structure"))
+    draw_check(309, 478, is_on("impact_maybe_adj_structure"))
+
+    # Recommended actions matrix
+    action_rows = [
+        ("OPEN_HIGHWAY_TRAFFIC", True, True, 108),
+        ("CLOSE_HIGHWAY_SHOULDER", True, True, 126),
+        ("CLOSE_HIGHWAY_PARENT", True, False, 144),
+        ("REMOVE_DEBRIS", True, False, 162),
+        ("PLACE_K_RAIL", True, False, 180),
+        ("COVER_SLOPE_PLASTIC", True, False, 198),
+        ("DIVERT_SURFACE_WATER", True, False, 216),
+        ("REMOVE_CULVERT_BLOCKAGE", True, False, 234),
+        ("DEWATER", True, False, 252),
+        ("DEWATER_HORIZONTAL_DRAINS", True, True, 270),
+        ("TEMP_SHORING", True, True, 288),
+        ("BUTTRESS_TOE", True, True, 306),
+        ("PLACE_ROCK_SLOPE_PROTECTION", True, True, 324),
+        ("ROUTINE_VISUAL_MONITOR", True, True, 342),
+        ("RECONSTRUCT_SLOPE", True, True, 360),
+        ("RECONSTRUCT_SLOPE_GEOSYNTHETICS", True, True, 378),
+        ("REPAIR_CULVERT_DRAINAGE_PIPE", False, True, 396),
+        ("EROSION_CONTROL", False, True, 414),
+        ("SURVEY_SITE_DIST_SURVEY", False, True, 432),
+        ("GEOLOGIC_MAPPING", False, True, 450),
+        ("SUBSURFACE_EXPLORATION", False, True, 468),
+        ("DETAILED_DESIGN_PLANS", False, True, 486),
+    ]
+    for code, allow_immediate, allow_follow, top in action_rows:
+        imm_selected = False
+        fol_selected = False
+        if code == "CLOSE_HIGHWAY_PARENT":
+            imm_selected = ("CLOSE_ONE_DIRECTION" in immediate) or ("CLOSE_BOTH_DIRECTIONS" in immediate)
+        else:
+            imm_selected = code in immediate
+        if code != "CLOSE_HIGHWAY_PARENT":
+            fol_selected = code in follow_up
+        if allow_immediate:
+            draw_check(442, top, imm_selected)
+        if allow_follow:
+            draw_check(468, top, fol_selected)
+
+    # Child controls for unique actions
+    draw_txt(540, 108, val("lanes_closed_count"))  # Open Highway Traffic lanes
+    draw_check(542, 144, "CLOSE_ONE_DIRECTION" in immediate)
+    draw_check(578, 144, "CLOSE_BOTH_DIRECTIONS" in immediate)
+
+    # Measurements
+    draw_txt(137, 564, val("measure_slope_height_ft"))
+    draw_txt(137, 590, val("measure_original_slope_deg"))
+    draw_txt(137, 616, val("measure_landslide_width_ft"))
+    draw_txt(137, 642, val("measure_landslide_length_ft"))
+    draw_txt(137, 668, val("measure_main_scarp_height_ft"))
+    draw_txt(137, 694, val("measure_landslide_slope_deg"))
+    draw_txt(170, 720, val("measure_roadway_length_ft"))
+    draw_txt(170, 746, val("measure_roadway_width_ft"))
+
+    # Observations and contact line
+    raw_contacts = val("district_contact")
+    contact_display = raw_contacts
+    if raw_contacts:
+        try:
+            parsed = json.loads(raw_contacts)
+            if isinstance(parsed, list):
+                names: list[str] = []
+                for item in parsed:
+                    if not isinstance(item, dict):
+                        continue
+                    name = " ".join([str(item.get("first_name") or "").strip(), str(item.get("last_name") or "").strip()]).strip()
+                    if name:
+                        names.append(name)
+                if names:
+                    contact_display = "; ".join(names)
+        except Exception:
+            pass
+    draw_txt(10, 760, f"Contact(s): {contact_display}", 7)
+    draw_txt(10, 776, f"Notes: {val('observations_notes')}", 7)
 
     c.save()
-    return pdf_io.getvalue()
+    overlay_io.seek(0)
+    overlay_page = PdfReader(overlay_io).pages[0]
+
+    base_page.merge_page(overlay_page)
+    out_writer = PdfWriter()
+    out_writer.add_page(base_page)
+    out_io = BytesIO()
+    out_writer.write(out_io)
+    return out_io.getvalue()
 
 
 # ----------------------------

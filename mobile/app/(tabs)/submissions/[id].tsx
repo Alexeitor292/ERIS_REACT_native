@@ -520,10 +520,7 @@ export default function SubmissionDetailScreen() {
   const hydratePhotoUrls = useCallback(async (authToken: string, photos: { id: number }[]) => {
     const next: Record<number, string> = {};
     await Promise.all(photos.map(async (p) => {
-      try {
-        const r = await apiFetch<{ download_url: string }>(`/attachments/${p.id}/download-url`, { token: authToken });
-        next[p.id] = normalizeDownloadUrl(r.download_url, apiBaseUrl);
-      } catch {}
+      next[p.id] = `${apiBaseUrl}/attachments/${p.id}/content?access_token=${encodeURIComponent(authToken)}`;
     }));
     setPhotoUrls(next);
   }, [apiBaseUrl]);
@@ -1273,7 +1270,7 @@ export default function SubmissionDetailScreen() {
     setBusy(true);
     try {
       const resp = await generateSubmissionGisaPdf(token, id);
-      const url = normalizeDownloadUrl(resp.download_url, apiBaseUrl);
+      const url = `${apiBaseUrl}/attachments/${resp.attachment_id}/content?access_token=${encodeURIComponent(token)}`;
       await Linking.openURL(url);
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
@@ -1288,7 +1285,7 @@ export default function SubmissionDetailScreen() {
     setBusy(true);
     try {
       const resp = await getSubmissionGisaPdf(token, id);
-      const url = normalizeDownloadUrl(resp.download_url, apiBaseUrl);
+      const url = `${apiBaseUrl}/attachments/${resp.attachment_id}/content?access_token=${encodeURIComponent(token)}`;
       await Linking.openURL(url);
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
