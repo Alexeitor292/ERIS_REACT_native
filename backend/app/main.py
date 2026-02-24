@@ -639,9 +639,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     overlay_io = BytesIO()
     c = canvas.Canvas(overlay_io, pagesize=(width, height))
 
-    # Placement calibration for the current flattened GISA template.
-    # The original coordinate map was authored against a different rendering,
-    # so we normalize all x/y draws through this affine transform.
+    # Placement calibration for the body of the form (legacy coordinate map).
+    # Top/header rows use anchor-based placement from template text geometry.
     x_scale = 0.95
     x_offset = 8.0
     y_scale = 0.85
@@ -663,6 +662,15 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         c.setFont("Helvetica", size)
         c.drawString(px, py, s)
 
+    def draw_txt_pt(x: float, y: float, text_value, size: int = 8):
+        s = str(text_value or "").strip()
+        if not s:
+            return
+        if y < 0 or y > height:
+            return
+        c.setFont("Helvetica", size)
+        c.drawString(x, y, s)
+
     def draw_check(x: float, top: float, checked: bool):
         if not checked:
             return
@@ -672,23 +680,72 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         c.setFont("Helvetica-Bold", 9)
         c.drawString(px, py, "X")
 
+    def extract_text_anchors(page) -> dict[str, list[tuple[float, float]]]:
+        labels = {
+            "Date",
+            "District",
+            "County",
+            "Route",
+            "Post Mile",
+            "EA (6 digits)",
+            "Project ID (10 digits)",
+            "Date Incident Reported",
+            "Latitude",
+            "Longitude",
+            "District Contact",
+            "Last Name",
+            "First Name",
+            "S Number",
+            "Phone",
+            "Cell Phone",
+        }
+        out: dict[str, list[tuple[float, float]]] = {k: [] for k in labels}
+
+        def visitor(text, cm, tm, font_dict, font_size):
+            raw = str(text or "").strip()
+            if not raw:
+                return
+            norm = " ".join(raw.split())
+            if norm not in labels:
+                return
+            # Convert text space to PDF user space (points)
+            x = (tm[4] * cm[0]) + (tm[5] * cm[2]) + cm[4]
+            y = (tm[4] * cm[1]) + (tm[5] * cm[3]) + cm[5]
+            out[norm].append((float(x), float(y)))
+
+        page.extract_text(visitor_text=visitor)
+        for k, pts in out.items():
+            # Top-most first; tie-break left-most first.
+            out[k] = sorted(pts, key=lambda p: (-p[1], p[0]))
+        return out
+
+    anchors = extract_text_anchors(base_page)
+
+    def draw_from_anchor(label: str, occurrence: int, x_pad: float, y_above_label: float, text_value, size: int = 8) -> bool:
+        pts = anchors.get(label) or []
+        if occurrence >= len(pts):
+            return False
+        ax, ay = pts[occurrence]
+        draw_txt_pt(ax + x_pad, ay + y_above_label, text_value, size=size)
+        return True
+
     # Header/form top rows (write only field values, no extra labels/metadata)
-    # Tuned to center values inside the printed boxes on the flattened template.
-    row1_top = 24
-    row2_top = 52
-    row3_top = 81
+    # Anchor-based placement: use label positions from the template itself.
+    # Values are drawn in the corresponding boxes above labels.
+    y_above = 20.0
+    # Row 1
+    ok = draw_from_anchor("Date", 0, 2, y_above, val("report_date"))
+    ok &= draw_from_anchor("District", 0, 2, y_above, val("district"))
+    ok &= draw_from_anchor("County", 0, 2, y_above, val("county"))
+    ok &= draw_from_anchor("Route", 0, 2, y_above, val("route"))
+    ok &= draw_from_anchor("Post Mile", 0, 2, y_above, val("post_mile"))
+    ok &= draw_from_anchor("EA (6 digits)", 0, 2, y_above, val("ea"))
+    ok &= draw_from_anchor("Project ID (10 digits)", 0, 2, y_above, val("project_id"))
+    ok &= draw_from_anchor("Date Incident Reported", 0, 2, y_above, val("date_incident_reported"), size=7)
 
-    draw_txt(6, row1_top, val("report_date"))
-    draw_txt(110, row1_top, val("district"))
-    draw_txt(180, row1_top, val("county"))
-    draw_txt(244, row1_top, val("route"))
-    draw_txt(318, row1_top, val("post_mile"))
-    draw_txt(378, row1_top, val("ea"))
-    draw_txt(434, row1_top, val("project_id"))
-    draw_txt(516, row1_top, val("date_incident_reported"), 7)
-
-    draw_txt(24, row2_top, val("latitude"))
-    draw_txt(130, row2_top, val("longitude"))
+    # Row 2
+    ok &= draw_from_anchor("Latitude", 0, -10, y_above, val("latitude"))
+    ok &= draw_from_anchor("Longitude", 0, 2, y_above, val("longitude"))
 
     # District contact rows (from serialized JSON list)
     raw_contacts = val("district_contact")
@@ -702,14 +759,39 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             contacts = []
     c1 = contacts[0] if len(contacts) > 0 else {}
     c2 = contacts[1] if len(contacts) > 1 else {}
-    draw_txt(300, row2_top, c1.get("last_name", ""))
-    draw_txt(390, row2_top, c1.get("first_name", ""))
-    draw_txt(518, row2_top, c1.get("s_number", ""))
-    draw_txt(48, row3_top, c2.get("last_name", ""))
-    draw_txt(146, row3_top, c2.get("first_name", ""))
-    draw_txt(226, row3_top, c2.get("s_number", ""))
-    draw_txt(366, row3_top, c2.get("phone", ""))
-    draw_txt(500, row3_top, c2.get("cell_phone", ""))
+    ok &= draw_from_anchor("Last Name", 0, 2, y_above, c1.get("last_name", ""))
+    ok &= draw_from_anchor("First Name", 0, 2, y_above, c1.get("first_name", ""))
+    ok &= draw_from_anchor("S Number", 0, 2, y_above, c1.get("s_number", ""))
+    # Row 3 (second contact)
+    ok &= draw_from_anchor("Last Name", 1, 2, y_above, c2.get("last_name", ""))
+    ok &= draw_from_anchor("First Name", 1, 2, y_above, c2.get("first_name", ""))
+    ok &= draw_from_anchor("S Number", 1, 2, y_above, c2.get("s_number", ""))
+    ok &= draw_from_anchor("Phone", 0, 2, y_above, c2.get("phone", ""))
+    ok &= draw_from_anchor("Cell Phone", 0, 2, y_above, c2.get("cell_phone", ""))
+
+    # Fallback: if anchors fail for any reason, keep approximate hardcoded placement.
+    if not ok:
+        row1_top = 24
+        row2_top = 52
+        row3_top = 81
+        draw_txt(6, row1_top, val("report_date"))
+        draw_txt(110, row1_top, val("district"))
+        draw_txt(180, row1_top, val("county"))
+        draw_txt(244, row1_top, val("route"))
+        draw_txt(318, row1_top, val("post_mile"))
+        draw_txt(378, row1_top, val("ea"))
+        draw_txt(434, row1_top, val("project_id"))
+        draw_txt(516, row1_top, val("date_incident_reported"), 7)
+        draw_txt(24, row2_top, val("latitude"))
+        draw_txt(130, row2_top, val("longitude"))
+        draw_txt(300, row2_top, c1.get("last_name", ""))
+        draw_txt(390, row2_top, c1.get("first_name", ""))
+        draw_txt(518, row2_top, c1.get("s_number", ""))
+        draw_txt(48, row3_top, c2.get("last_name", ""))
+        draw_txt(146, row3_top, c2.get("first_name", ""))
+        draw_txt(226, row3_top, c2.get("s_number", ""))
+        draw_txt(366, row3_top, c2.get("phone", ""))
+        draw_txt(500, row3_top, c2.get("cell_phone", ""))
 
     # Incident Type (left column)
     incident_rows = [
