@@ -588,13 +588,13 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     template_candidates = [
         FilePath(__file__).resolve().parents[1] / "assets" / "GISA001.pdf",
         FilePath(__file__).resolve().parents[2] / "mobile" / "assets" / "GISA001.pdf",
-        FilePath(r"c:\Users\juana\OneDrive\Documents\ERIS\ERIS\GISA001.pdf"),
     ]
     template_path = next((p for p in template_candidates if p.exists()), None)
     if not template_path:
         attempted = [str(p) for p in template_candidates]
         logger.error("GISA template PDF missing. attempted_paths=%s", attempted)
         raise HTTPException(status_code=500, detail="Failed to generate PDF")
+    logger.info("GISA template PDF selected path=%s", str(template_path))
 
     base_reader = PdfReader(str(template_path))
     if not base_reader.pages:
