@@ -38,7 +38,7 @@ type SubmissionDetail = {
   workflow_events: { id: number; event_type: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }[];
 };
 
-type FormState = Record<string, string> & { pavement_ground_cracks: "UNKNOWN" | "YES" | "NO"; indented_by_rocks: "UNKNOWN" | "YES" | "NO" };
+type FormState = Record<string, string> & { pavement_ground_cracks: "" | "YES" | "NO"; indented_by_rocks: "" | "YES" | "NO" };
 type DistrictContact = {
   id: string;
   first_name: string;
@@ -75,22 +75,22 @@ const EMPTY_FORM: FormState = {
   drainage_clogged_inlet: "", drainage_compromised_drains: "", drainage_surface_runoff: "", drainage_torrent_surge_flood: "",
   impact_impacted_adj_utilities: "", impact_maybe_adj_utilities: "", impact_adj_utilities: "", impact_impacted_adj_properties: "", impact_maybe_adj_properties: "", impact_adj_properties: "", impact_impacted_adj_structure: "", impact_maybe_adj_structure: "", impact_adj_structure: "",
   measure_slope_height_ft: "", measure_original_slope_deg: "", measure_landslide_width_ft: "", measure_landslide_length_ft: "", measure_main_scarp_height_ft: "", measure_landslide_slope_deg: "", measure_roadway_length_ft: "", measure_roadway_width_ft: "",
-  observations_notes: "", geometry_json: "", pavement_ground_cracks: "UNKNOWN", indented_by_rocks: "UNKNOWN",
+  observations_notes: "", geometry_json: "", pavement_ground_cracks: "", indented_by_rocks: "",
 };
 
 const n = (v: string) => (v.trim() ? v.trim() : null);
 const f = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${name} must be numeric`); return x; };
 const i = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${name} must be a whole number`); return x; };
-const triToBool = (v: "UNKNOWN" | "YES" | "NO") =>
+const triToBool = (v: "" | "YES" | "NO") =>
   v === "YES" ? true : v === "NO" ? false : null;
 const normalizeBool = (v: any): boolean | null => {
   if (v === true || v === 1 || v === "1") return true;
   if (v === false || v === 0 || v === "0") return false;
   return null;
 };
-const boolToTri = (v: any) => {
+const boolToTri = (v: any): "" | "YES" | "NO" => {
   const b = normalizeBool(v);
-  return b === true ? "YES" : b === false ? "NO" : "UNKNOWN";
+  return b === true ? "YES" : b === false ? "NO" : "";
 };
 const ynToBool = (v: string) => (v === "YES" ? true : v === "NO" ? false : null);
 const boolToYn = (v: any) => {
@@ -216,13 +216,9 @@ async function removeDraftCache(key: string): Promise<void> {
 function normalizeCachedForm(raw: any): FormState {
   const next: FormState = { ...EMPTY_FORM, ...(raw || {}) };
   next.pavement_ground_cracks =
-    raw?.pavement_ground_cracks === "YES" || raw?.pavement_ground_cracks === "NO" || raw?.pavement_ground_cracks === "UNKNOWN"
-      ? raw.pavement_ground_cracks
-      : "UNKNOWN";
+    raw?.pavement_ground_cracks === "YES" || raw?.pavement_ground_cracks === "NO" ? raw.pavement_ground_cracks : "";
   next.indented_by_rocks =
-    raw?.indented_by_rocks === "YES" || raw?.indented_by_rocks === "NO" || raw?.indented_by_rocks === "UNKNOWN"
-      ? raw.indented_by_rocks
-      : "UNKNOWN";
+    raw?.indented_by_rocks === "YES" || raw?.indented_by_rocks === "NO" ? raw.indented_by_rocks : "";
   return next;
 }
 
@@ -239,13 +235,84 @@ function normalizeCachedContacts(raw: any): DistrictContact[] {
 }
 
 function normalizeCachedEditorState(raw: any): DraftEditorState {
+  const normalizedForm = enforceFormBusinessRules(normalizeCachedForm(raw?.form));
   return {
-    form: normalizeCachedForm(raw?.form),
+    form: normalizedForm,
     incidentTypes: Array.isArray(raw?.incidentTypes) ? raw.incidentTypes.map((x: any) => String(x)) : [],
     immediateActions: Array.isArray(raw?.immediateActions) ? raw.immediateActions.map((x: any) => String(x)) : [],
     followUpActions: Array.isArray(raw?.followUpActions) ? raw.followUpActions.map((x: any) => String(x)) : [],
     districtContacts: normalizeCachedContacts(raw?.districtContacts),
   };
+}
+
+function enforceFormBusinessRules(input: FormState): FormState {
+  const next: FormState = { ...input };
+
+  const incidentKeys = [
+    "failure_rock_fall",
+    "failure_topple",
+    "failure_slide",
+    "failure_spread",
+    "failure_flow",
+    "failure_compound",
+    "failure_erosion",
+    "failure_surficial_failure",
+    "failure_scoured_toe",
+    "failure_washout",
+  ] as const;
+  const selectedIncident = incidentKeys.find((k) => next[k] === "YES");
+  incidentKeys.forEach((k) => {
+    next[k] = k === selectedIncident ? "YES" : "NO";
+  });
+
+  const materialPrimary = next.material_rock === "YES" ? "material_rock" : next.material_soil === "YES" ? "material_soil" : null;
+  next.material_rock = materialPrimary === "material_rock" ? "YES" : "NO";
+  next.material_soil = materialPrimary === "material_soil" ? "YES" : "NO";
+  if (materialPrimary === "material_rock") {
+    const rockSubs = ["material_bedding", "material_joints", "material_fractures"] as const;
+    const selectedSub = rockSubs.find((k) => next[k] === "YES");
+    rockSubs.forEach((k) => {
+      next[k] = k === selectedSub ? "YES" : "NO";
+    });
+    next.est_clay_pct = "";
+    next.est_silt_pct = "";
+    next.est_sand_pct = "";
+    next.est_gravel_pct = "";
+  } else {
+    next.material_bedding = "NO";
+    next.material_joints = "NO";
+    next.material_fractures = "NO";
+  }
+
+  if (next.pavement_ground_cracks !== "YES" && next.pavement_ground_cracks !== "NO") next.pavement_ground_cracks = "";
+  if (next.indented_by_rocks !== "YES" && next.indented_by_rocks !== "NO") next.indented_by_rocks = "";
+
+  const drainageKeys = [
+    "drainage_clogged_inlet",
+    "drainage_compromised_drains",
+    "drainage_surface_runoff",
+    "drainage_torrent_surge_flood",
+  ] as const;
+  const selectedDrainage = drainageKeys.find((k) => next[k] === "YES");
+  drainageKeys.forEach((k) => {
+    next[k] = k === selectedDrainage ? "YES" : "NO";
+  });
+
+  const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"] as const;
+  const selectedWater = baseWaterKeys.find((k) => next[k] === "YES");
+  baseWaterKeys.forEach((k) => {
+    next[k] = k === selectedWater ? "YES" : "NO";
+  });
+  if (next.water_flowing === "YES") {
+    const flowingSub = next.water_seep === "YES" ? "water_seep" : next.water_spring === "YES" ? "water_spring" : null;
+    next.water_seep = flowingSub === "water_seep" ? "YES" : "NO";
+    next.water_spring = flowingSub === "water_spring" ? "YES" : "NO";
+  } else {
+    next.water_seep = "NO";
+    next.water_spring = "NO";
+  }
+
+  return next;
 }
 
 function Chip({
@@ -568,10 +635,11 @@ export default function SubmissionDetailScreen() {
         measure_slope_height_ft: g.measure_slope_height_ft != null ? String(g.measure_slope_height_ft) : "", measure_original_slope_deg: g.measure_original_slope_deg != null ? String(g.measure_original_slope_deg) : "", measure_landslide_width_ft: g.measure_landslide_width_ft != null ? String(g.measure_landslide_width_ft) : "", measure_landslide_length_ft: g.measure_landslide_length_ft != null ? String(g.measure_landslide_length_ft) : "", measure_main_scarp_height_ft: g.measure_main_scarp_height_ft != null ? String(g.measure_main_scarp_height_ft) : "", measure_landslide_slope_deg: g.measure_landslide_slope_deg != null ? String(g.measure_landslide_slope_deg) : "", measure_roadway_length_ft: g.measure_roadway_length_ft != null ? String(g.measure_roadway_length_ft) : "", measure_roadway_width_ft: g.measure_roadway_width_ft != null ? String(g.measure_roadway_width_ft) : "",
         observations_notes: g.observations_notes ?? "", geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "",
       };
+      const normalizedLoadedForm = enforceFormBusinessRules(loadedForm);
       const loadedState: DraftEditorState = {
-        form: loadedForm,
+        form: normalizedLoadedForm,
         districtContacts: loadedDistrictContacts,
-        incidentTypes: subRes.incident_types ?? [],
+        incidentTypes: incidentTypesFromFormState(normalizedLoadedForm),
         immediateActions: subRes.actions?.immediate ?? [],
         followUpActions: subRes.actions?.follow_up ?? [],
       };
@@ -836,10 +904,12 @@ export default function SubmissionDetailScreen() {
   async function saveDraft() {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
+    const normalizedForm = enforceFormBusinessRules(form);
+    setForm(normalizedForm);
     let geometry: any = null;
-    if (form.geometry_json.trim()) {
+    if (normalizedForm.geometry_json.trim()) {
       try {
-        geometry = JSON.parse(form.geometry_json);
+        geometry = JSON.parse(normalizedForm.geometry_json);
       } catch {
         setFieldErrors((prev) => ({ ...prev, geometry_json: "Geometry JSON is invalid." }));
         setOpenSections((prev) => ({ ...prev, location: true }));
@@ -850,23 +920,23 @@ export default function SubmissionDetailScreen() {
     setBusy(true);
     try {
       await patchSubmission(token, id, {
-        report_date: n(form.report_date), district: n(form.district), county: n(form.county), route: n(form.route), post_mile: n(form.post_mile), ea: n(form.ea), project_id: n(form.project_id), date_incident_reported: n(form.date_incident_reported), district_contact: n(form.district_contact),
-        latitude: f(form.latitude, "Latitude"), longitude: f(form.longitude, "Longitude"),
-        distribution_code: n(form.distribution_code), highway_status_code: n(form.highway_status_code), lanes_closed_count: i(form.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(form.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
-        pavement_ground_cracks: triToBool(form.pavement_ground_cracks), crack_length_ft: f(form.crack_length_ft, "Crack length"), crack_horizontal_in: f(form.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(form.crack_vertical_in, "Crack vertical"), crack_depth_in: f(form.crack_depth_in, "Crack depth"), settlement_in: f(form.settlement_in, "Settlement"), bulge_in: f(form.bulge_in, "Bulge"), indented_by_rocks: triToBool(form.indented_by_rocks),
-        failure_rock_fall: ynToBool(form.failure_rock_fall), failure_topple: ynToBool(form.failure_topple), failure_slide: ynToBool(form.failure_slide), failure_spread: ynToBool(form.failure_spread), failure_flow: ynToBool(form.failure_flow), failure_compound: ynToBool(form.failure_compound), failure_erosion: ynToBool(form.failure_erosion), failure_surficial_failure: ynToBool(form.failure_surficial_failure), failure_scoured_toe: ynToBool(form.failure_scoured_toe), failure_washout: ynToBool(form.failure_washout),
-        distribution_advancing: ynToBool(form.distribution_advancing), distribution_retrogressive: ynToBool(form.distribution_retrogressive), distribution_enlarging: ynToBool(form.distribution_enlarging), distribution_widening: ynToBool(form.distribution_widening), distribution_moving: ynToBool(form.distribution_moving), distribution_confined: ynToBool(form.distribution_confined),
-        material_rock: ynToBool(form.material_rock), material_soil: ynToBool(form.material_soil), material_bedding: ynToBool(form.material_bedding), material_joints: ynToBool(form.material_joints), material_fractures: ynToBool(form.material_fractures),
-        est_soil_pct: f(form.est_soil_pct, "Estimated soil %"), est_clay_pct: f(form.est_clay_pct, "Estimated clay %"), est_silt_pct: f(form.est_silt_pct, "Estimated silt %"), est_sand_pct: f(form.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(form.est_gravel_pct, "Estimated gravel %"),
-        water_dry: ynToBool(form.water_dry), water_moist: ynToBool(form.water_moist), water_wet: ynToBool(form.water_wet), water_flowing: ynToBool(form.water_flowing), water_seep: ynToBool(form.water_seep), water_spring: ynToBool(form.water_spring),
-        vegetation_trees: n(form.vegetation_trees), vegetation_bushes_shrubs: n(form.vegetation_bushes_shrubs), vegetation_groundcover: n(form.vegetation_groundcover),
-        drainage_clogged_inlet: ynToBool(form.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(form.drainage_compromised_drains), drainage_surface_runoff: ynToBool(form.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(form.drainage_torrent_surge_flood),
-        impact_impacted_adj_utilities: ynToBool(form.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(form.impact_maybe_adj_utilities), impact_adj_utilities: n(form.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(form.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(form.impact_maybe_adj_properties), impact_adj_properties: n(form.impact_adj_properties), impact_impacted_adj_structure: ynToBool(form.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(form.impact_maybe_adj_structure), impact_adj_structure: n(form.impact_adj_structure),
-        measure_slope_height_ft: f(form.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(form.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(form.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(form.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(form.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(form.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(form.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(form.measure_roadway_width_ft, "Roadway width"),
-        observations_notes: n(form.observations_notes), geometry_json: geometry,
+        report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: n(normalizedForm.route), post_mile: n(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
+        latitude: f(normalizedForm.latitude, "Latitude"), longitude: f(normalizedForm.longitude, "Longitude"),
+        distribution_code: n(normalizedForm.distribution_code), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
+        pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
+        failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout),
+        distribution_advancing: ynToBool(normalizedForm.distribution_advancing), distribution_retrogressive: ynToBool(normalizedForm.distribution_retrogressive), distribution_enlarging: ynToBool(normalizedForm.distribution_enlarging), distribution_widening: ynToBool(normalizedForm.distribution_widening), distribution_moving: ynToBool(normalizedForm.distribution_moving), distribution_confined: ynToBool(normalizedForm.distribution_confined),
+        material_rock: ynToBool(normalizedForm.material_rock), material_soil: ynToBool(normalizedForm.material_soil), material_bedding: ynToBool(normalizedForm.material_bedding), material_joints: ynToBool(normalizedForm.material_joints), material_fractures: ynToBool(normalizedForm.material_fractures),
+        est_soil_pct: f(normalizedForm.est_soil_pct, "Estimated soil %"), est_clay_pct: f(normalizedForm.est_clay_pct, "Estimated clay %"), est_silt_pct: f(normalizedForm.est_silt_pct, "Estimated silt %"), est_sand_pct: f(normalizedForm.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(normalizedForm.est_gravel_pct, "Estimated gravel %"),
+        water_dry: ynToBool(normalizedForm.water_dry), water_moist: ynToBool(normalizedForm.water_moist), water_wet: ynToBool(normalizedForm.water_wet), water_flowing: ynToBool(normalizedForm.water_flowing), water_seep: ynToBool(normalizedForm.water_seep), water_spring: ynToBool(normalizedForm.water_spring),
+        vegetation_trees: n(normalizedForm.vegetation_trees), vegetation_bushes_shrubs: n(normalizedForm.vegetation_bushes_shrubs), vegetation_groundcover: n(normalizedForm.vegetation_groundcover),
+        drainage_clogged_inlet: ynToBool(normalizedForm.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(normalizedForm.drainage_compromised_drains), drainage_surface_runoff: ynToBool(normalizedForm.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(normalizedForm.drainage_torrent_surge_flood),
+        impact_impacted_adj_utilities: ynToBool(normalizedForm.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(normalizedForm.impact_maybe_adj_utilities), impact_adj_utilities: n(normalizedForm.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(normalizedForm.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(normalizedForm.impact_maybe_adj_properties), impact_adj_properties: n(normalizedForm.impact_adj_properties), impact_impacted_adj_structure: ynToBool(normalizedForm.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(normalizedForm.impact_maybe_adj_structure), impact_adj_structure: n(normalizedForm.impact_adj_structure),
+        measure_slope_height_ft: f(normalizedForm.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(normalizedForm.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(normalizedForm.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(normalizedForm.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(normalizedForm.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(normalizedForm.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(normalizedForm.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(normalizedForm.measure_roadway_width_ft, "Roadway width"),
+        observations_notes: n(normalizedForm.observations_notes), geometry_json: geometry,
       });
       // Source of truth is the visible form chips; keep API payload derived from form.
-      const incidentItems = incidentTypesFromFormState(form);
+      const incidentItems = incidentTypesFromFormState(normalizedForm);
       await replaceIncidentTypes(token, id, incidentItems);
       await replaceActions(token, id, { immediate: immediateActions, follow_up: followUpActions });
       Alert.alert("Saved", "Draft saved.");
@@ -1206,6 +1276,8 @@ export default function SubmissionDetailScreen() {
   }
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
   const materialKeys = ["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures"];
+  const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
+  const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"];
   const anyFailureSelected = failureKeys.some((k) => form[k] === "YES");
   const anyMaterialSelected = materialKeys.some((k) => form[k] === "YES");
   const materialRockSelected = form.material_rock === "YES";
@@ -1238,6 +1310,80 @@ export default function SubmissionDetailScreen() {
     { key: "SUBSURFACE_EXPLORATION", label: "Perform Subsurface Exploration", code: "SUBSURFACE_EXPLORATION", immediate: false, followUp: true },
     { key: "DETAILED_DESIGN_PLANS", label: "Perform Detailed Design & Produce Plans", code: "DETAILED_DESIGN_PLANS", immediate: false, followUp: true },
   ];
+
+  const selectSingleIncidentType = (key: string) => {
+    if (!canEdit) return;
+    const nextVal = form[key] === "YES" ? "NO" : "YES";
+    const reset: Partial<FormState> = {};
+    Object.keys(INCIDENT_TYPE_CODE_BY_FORM_KEY).forEach((k) => {
+      reset[k as keyof FormState] = k === key ? nextVal : "NO";
+    });
+    setForm((prev) => ({ ...prev, ...reset }));
+    const nextCode = INCIDENT_TYPE_CODE_BY_FORM_KEY[key];
+    setIncidentTypes(nextVal === "YES" && nextCode ? [nextCode] : []);
+  };
+
+  const selectMaterialPrimary = (key: "material_rock" | "material_soil") => {
+    if (!canEdit) return;
+    const selecting = form[key] !== "YES";
+    if (!selecting) {
+      setVal("material_rock", "NO");
+      setVal("material_soil", "NO");
+      setVal("material_bedding", "NO");
+      setVal("material_joints", "NO");
+      setVal("material_fractures", "NO");
+      setVal("est_clay_pct", "");
+      setVal("est_silt_pct", "");
+      setVal("est_sand_pct", "");
+      setVal("est_gravel_pct", "");
+      return;
+    }
+    if (key === "material_rock") {
+      setVal("material_rock", "YES");
+      setVal("material_soil", "NO");
+      setVal("est_clay_pct", "");
+      setVal("est_silt_pct", "");
+      setVal("est_sand_pct", "");
+      setVal("est_gravel_pct", "");
+    } else {
+      setVal("material_soil", "YES");
+      setVal("material_rock", "NO");
+      setVal("material_bedding", "NO");
+      setVal("material_joints", "NO");
+      setVal("material_fractures", "NO");
+    }
+  };
+
+  const selectRockSubtype = (key: "material_bedding" | "material_joints" | "material_fractures") => {
+    if (!canEdit || form.material_rock !== "YES") return;
+    const selecting = form[key] !== "YES";
+    setVal("material_bedding", key === "material_bedding" && selecting ? "YES" : "NO");
+    setVal("material_joints", key === "material_joints" && selecting ? "YES" : "NO");
+    setVal("material_fractures", key === "material_fractures" && selecting ? "YES" : "NO");
+  };
+
+  const selectSingleDrainage = (key: string) => {
+    if (!canEdit) return;
+    const selecting = form[key] !== "YES";
+    drainageKeys.forEach((k) => setVal(k as keyof FormState, k === key && selecting ? "YES" : "NO"));
+  };
+
+  const selectBaseWaterContent = (key: string) => {
+    if (!canEdit) return;
+    const selecting = form[key] !== "YES";
+    baseWaterKeys.forEach((k) => setVal(k as keyof FormState, k === key && selecting ? "YES" : "NO"));
+    if (!selecting || key !== "water_flowing") {
+      setVal("water_seep", "NO");
+      setVal("water_spring", "NO");
+    }
+  };
+
+  const selectFlowingSubtype = (key: "water_seep" | "water_spring") => {
+    if (!canEdit || form.water_flowing !== "YES") return;
+    const selecting = form[key] !== "YES";
+    setVal("water_seep", key === "water_seep" && selecting ? "YES" : "NO");
+    setVal("water_spring", key === "water_spring" && selecting ? "YES" : "NO");
+  };
 
   const toggleActionByGroup = (code: string, group: "IMMEDIATE" | "FOLLOW_UP") => {
     if (!canEdit) return;
@@ -1572,17 +1718,7 @@ export default function SubmissionDetailScreen() {
                 palette={palette}
                 active={form[key] === "YES"}
                 disabled={!canEdit}
-                onPress={() => {
-                  if (!canEdit) return;
-                  const next = form[key] === "YES" ? "NO" : "YES";
-                  setVal(key as keyof FormState, next);
-                  const code = INCIDENT_TYPE_CODE_BY_FORM_KEY[key];
-                  if (!code) return;
-                  setIncidentTypes((prev) => {
-                    if (next === "YES") return prev.includes(code) ? prev : [...prev, code];
-                    return prev.filter((x) => x !== code);
-                  });
-                }}
+                onPress={() => selectSingleIncidentType(key)}
               />
             ))}
           </View>
@@ -1591,13 +1727,13 @@ export default function SubmissionDetailScreen() {
         <DropdownBlock title="Material" open={openPaperBlocks.material} onToggle={() => togglePaperBlock("material")} palette={palette}>
           <View style={styles.chips}>
             {[["material_rock", "Rock"], ["material_soil", "Soil"]].map(([key, label]) => (
-              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => selectMaterialPrimary(key as "material_rock" | "material_soil")} />
             ))}
           </View>
           {materialRockSelected ? (
             <View style={styles.chips}>
               {[["material_bedding", "Bedding"], ["material_joints", "Joints"], ["material_fractures", "Fractures"]].map(([key, label]) => (
-                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => selectRockSubtype(key as "material_bedding" | "material_joints" | "material_fractures")} />
               ))}
             </View>
           ) : null}
@@ -1614,7 +1750,7 @@ export default function SubmissionDetailScreen() {
         <DropdownBlock title="Pavement / Ground Status" open={openPaperBlocks.pavementGroundStatus} onToggle={() => togglePaperBlock("pavementGroundStatus")} palette={palette}>
           <Text style={styles.label}>Pavement/Ground Cracks</Text>
           <View style={styles.chips}>
-            {(["YES", "NO", "UNKNOWN"] as const).map((c) => (
+            {(["YES", "NO"] as const).map((c) => (
               <Chip
                 key={`cracks-${c}`}
                 label={c}
@@ -1648,7 +1784,7 @@ export default function SubmissionDetailScreen() {
           <Field palette={palette} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
           <Text style={styles.label}>Indented by Rocks</Text>
           <View style={styles.chips}>
-            {(["YES", "NO", "UNKNOWN"] as const).map((c) => (
+            {(["YES", "NO"] as const).map((c) => (
               <Chip key={`paper-${c}`} label={c} palette={palette} active={form.indented_by_rocks === c} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", c)} />
             ))}
           </View>
@@ -1663,7 +1799,7 @@ export default function SubmissionDetailScreen() {
         <DropdownBlock title="Water / Drainage" open={openPaperBlocks.waterDrainage} onToggle={() => togglePaperBlock("waterDrainage")} palette={palette}>
           <View style={styles.chips}>
             {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, label]) => (
-              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => selectSingleDrainage(key)} />
             ))}
           </View>
           <View style={[styles.recommendedHeaderRow, { marginTop: 10 }]}>
@@ -1695,7 +1831,7 @@ export default function SubmissionDetailScreen() {
         <DropdownBlock title="Water Content" open={openPaperBlocks.waterContent} onToggle={() => togglePaperBlock("waterContent")} palette={palette}>
           <View style={styles.chips}>
             {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"]].map(([key, label]) => (
-              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => selectBaseWaterContent(key)} />
             ))}
             <Chip
               key="water_flowing"
@@ -1703,21 +1839,13 @@ export default function SubmissionDetailScreen() {
               palette={palette}
               active={form.water_flowing === "YES"}
               disabled={!canEdit}
-              onPress={() => {
-                if (!canEdit) return;
-                const next = form.water_flowing === "YES" ? "NO" : "YES";
-                setVal("water_flowing", next);
-                if (next !== "YES") {
-                  setVal("water_seep", "");
-                  setVal("water_spring", "");
-                }
-              }}
+              onPress={() => selectBaseWaterContent("water_flowing")}
             />
           </View>
           {waterFlowingSelected ? (
             <View style={styles.chips}>
               {[["water_seep", "Seep"], ["water_spring", "Spring"]].map(([key, label]) => (
-                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => selectFlowingSubtype(key as "water_seep" | "water_spring")} />
               ))}
             </View>
           ) : null}

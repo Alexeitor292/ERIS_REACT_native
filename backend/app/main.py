@@ -2359,6 +2359,70 @@ def patch_gisa(
         if key in provided and provided[key] is None:
             provided.pop(key, None)
 
+    def _to_bool(v):
+        if v is True or v == 1 or v == "1":
+            return True
+        if v is False or v == 0 or v == "0":
+            return False
+        return None
+
+    def normalize_single_choice(group: list[str]) -> None:
+        touched = [k for k in group if k in provided]
+        if not touched:
+            return
+        selected = [k for k in group if _to_bool(provided.get(k)) is True]
+        keep = selected[0] if selected else None
+        for k in group:
+            provided[k] = (k == keep)
+
+    # Incident Type: exactly one option selected at a time.
+    normalize_single_choice([
+        "failure_rock_fall",
+        "failure_topple",
+        "failure_slide",
+        "failure_spread",
+        "failure_flow",
+        "failure_compound",
+        "failure_erosion",
+        "failure_surficial_failure",
+        "failure_scoured_toe",
+        "failure_washout",
+    ])
+
+    # Material: one of Rock/Soil; and if Rock then one of Bedding/Joints/Fractures.
+    if any(k in provided for k in ["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures"]):
+        normalize_single_choice(["material_rock", "material_soil"])
+        rock_selected = _to_bool(provided.get("material_rock")) is True
+        if rock_selected:
+            normalize_single_choice(["material_bedding", "material_joints", "material_fractures"])
+            provided["est_soil_pct"] = None
+            provided["est_clay_pct"] = None
+            provided["est_silt_pct"] = None
+            provided["est_sand_pct"] = None
+            provided["est_gravel_pct"] = None
+        else:
+            provided["material_bedding"] = False
+            provided["material_joints"] = False
+            provided["material_fractures"] = False
+
+    # Water/Drainage: only one drainage option can be selected.
+    normalize_single_choice([
+        "drainage_clogged_inlet",
+        "drainage_compromised_drains",
+        "drainage_surface_runoff",
+        "drainage_torrent_surge_flood",
+    ])
+
+    # Water Content: one of Dry/Moist/Wet/Flowing. If Flowing, then one of Seep/Spring.
+    if any(k in provided for k in ["water_dry", "water_moist", "water_wet", "water_flowing", "water_seep", "water_spring"]):
+        normalize_single_choice(["water_dry", "water_moist", "water_wet", "water_flowing"])
+        flowing_selected = _to_bool(provided.get("water_flowing")) is True
+        if flowing_selected:
+            normalize_single_choice(["water_seep", "water_spring"])
+        else:
+            provided["water_seep"] = False
+            provided["water_spring"] = False
+
     # NOTE:
     # `distribution_code` / `highway_status_code` must allow explicit clear.
     # Clients send null when user deselects a chip; dropping null here prevents
@@ -2421,14 +2485,19 @@ def replace_incident_types(
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
         raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
+    # Business rule: Incident Type is single-select.
+    items = list(dict.fromkeys(payload.items))
+    if len(items) > 1:
+        raise HTTPException(status_code=400, detail="Incident Type allows only one selection")
+
     # Validate codes exist
-    for code in payload.items:
+    for code in items:
         ok = db.execute(text("SELECT 1 FROM gisa_incident_type_lut WHERE code=:c LIMIT 1"), {"c": code}).scalar()
         if not ok:
             raise HTTPException(status_code=400, detail=f"Invalid incident type: {code}")
     try:
         db.execute(text("DELETE FROM submission_gisa_incident_types WHERE submission_id=:sid"), {"sid": submission_id})
-        for code in payload.items:
+        for code in items:
             db.execute(text("""
                 INSERT INTO submission_gisa_incident_types (submission_id, incident_type_code)
                 VALUES (:sid, :code)
