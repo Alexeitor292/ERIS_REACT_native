@@ -64,7 +64,7 @@ type FieldErrorMap = Partial<Record<keyof FormState, string>>;
 const DRAFT_LOCAL_CACHE_VERSION = 1;
 const EMPTY_FORM: FormState = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
-  latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "",
+  latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
   crack_length_ft: "", crack_horizontal_in: "", crack_vertical_in: "", crack_depth_in: "", settlement_in: "", bulge_in: "",
   failure_rock_fall: "", failure_topple: "", failure_slide: "", failure_spread: "", failure_flow: "", failure_compound: "", failure_erosion: "", failure_surficial_failure: "", failure_scoured_toe: "", failure_washout: "",
   distribution_advancing: "", distribution_retrogressive: "", distribution_enlarging: "", distribution_widening: "", distribution_moving: "", distribution_confined: "",
@@ -555,7 +555,7 @@ export default function SubmissionDetailScreen() {
         ...EMPTY_FORM,
         report_date: g.report_date ?? "", district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: g.post_mile ?? "", ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
         latitude: g.latitude != null ? String(g.latitude) : "", longitude: g.longitude != null ? String(g.longitude) : "",
-        distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "",
+        distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "", open_highway_traffic_lanes_count: g.open_highway_traffic_lanes_count != null ? String(g.open_highway_traffic_lanes_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
         failure_rock_fall: boolToYn(g.failure_rock_fall), failure_topple: boolToYn(g.failure_topple), failure_slide: boolToYn(g.failure_slide), failure_spread: boolToYn(g.failure_spread), failure_flow: boolToYn(g.failure_flow), failure_compound: boolToYn(g.failure_compound), failure_erosion: boolToYn(g.failure_erosion), failure_surficial_failure: boolToYn(g.failure_surficial_failure), failure_scoured_toe: boolToYn(g.failure_scoured_toe), failure_washout: boolToYn(g.failure_washout),
         distribution_advancing: boolToYn(g.distribution_advancing), distribution_retrogressive: boolToYn(g.distribution_retrogressive), distribution_enlarging: boolToYn(g.distribution_enlarging), distribution_widening: boolToYn(g.distribution_widening), distribution_moving: boolToYn(g.distribution_moving), distribution_confined: boolToYn(g.distribution_confined),
@@ -852,7 +852,7 @@ export default function SubmissionDetailScreen() {
       await patchSubmission(token, id, {
         report_date: n(form.report_date), district: n(form.district), county: n(form.county), route: n(form.route), post_mile: n(form.post_mile), ea: n(form.ea), project_id: n(form.project_id), date_incident_reported: n(form.date_incident_reported), district_contact: n(form.district_contact),
         latitude: f(form.latitude, "Latitude"), longitude: f(form.longitude, "Longitude"),
-        distribution_code: n(form.distribution_code), highway_status_code: n(form.highway_status_code), lanes_closed_count: i(form.lanes_closed_count, "Lanes closed count"),
+        distribution_code: n(form.distribution_code), highway_status_code: n(form.highway_status_code), lanes_closed_count: i(form.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(form.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
         pavement_ground_cracks: triToBool(form.pavement_ground_cracks), crack_length_ft: f(form.crack_length_ft, "Crack length"), crack_horizontal_in: f(form.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(form.crack_vertical_in, "Crack vertical"), crack_depth_in: f(form.crack_depth_in, "Crack depth"), settlement_in: f(form.settlement_in, "Settlement"), bulge_in: f(form.bulge_in, "Bulge"), indented_by_rocks: triToBool(form.indented_by_rocks),
         failure_rock_fall: ynToBool(form.failure_rock_fall), failure_topple: ynToBool(form.failure_topple), failure_slide: ynToBool(form.failure_slide), failure_spread: ynToBool(form.failure_spread), failure_flow: ynToBool(form.failure_flow), failure_compound: ynToBool(form.failure_compound), failure_erosion: ynToBool(form.failure_erosion), failure_surficial_failure: ynToBool(form.failure_surficial_failure), failure_scoured_toe: ynToBool(form.failure_scoured_toe), failure_washout: ynToBool(form.failure_washout),
         distribution_advancing: ynToBool(form.distribution_advancing), distribution_retrogressive: ynToBool(form.distribution_retrogressive), distribution_enlarging: ynToBool(form.distribution_enlarging), distribution_widening: ynToBool(form.distribution_widening), distribution_moving: ynToBool(form.distribution_moving), distribution_confined: ynToBool(form.distribution_confined),
@@ -1242,10 +1242,30 @@ export default function SubmissionDetailScreen() {
   const toggleActionByGroup = (code: string, group: "IMMEDIATE" | "FOLLOW_UP") => {
     if (!canEdit) return;
     if (group === "IMMEDIATE") {
-      setImmediateActions((prev) => (prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]));
+      setImmediateActions((prev) => {
+        const next = prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code];
+        if (
+          code === "OPEN_HIGHWAY_TRAFFIC" &&
+          !next.includes("OPEN_HIGHWAY_TRAFFIC") &&
+          !followUpActions.includes("OPEN_HIGHWAY_TRAFFIC")
+        ) {
+          setVal("open_highway_traffic_lanes_count", "");
+        }
+        return next;
+      });
       return;
     }
-    setFollowUpActions((prev) => (prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]));
+    setFollowUpActions((prev) => {
+      const next = prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code];
+      if (
+        code === "OPEN_HIGHWAY_TRAFFIC" &&
+        !next.includes("OPEN_HIGHWAY_TRAFFIC") &&
+        !immediateActions.includes("OPEN_HIGHWAY_TRAFFIC")
+      ) {
+        setVal("open_highway_traffic_lanes_count", "");
+      }
+      return next;
+    });
   };
 
   const toggleCloseHighwayParent = () => {
@@ -1762,11 +1782,11 @@ export default function SubmissionDetailScreen() {
                   <Field
                     palette={palette}
                     label="Lanes"
-                    value={form.lanes_closed_count}
+                    value={form.open_highway_traffic_lanes_count}
                     editable={canEdit}
                     keyboardType="number-pad"
-                    onChangeText={(v) => setVal("lanes_closed_count", v)}
-                    error={fieldErrors.lanes_closed_count}
+                    onChangeText={(v) => setVal("open_highway_traffic_lanes_count", v)}
+                    error={fieldErrors.open_highway_traffic_lanes_count}
                   />
                 </View>
               ) : null}
