@@ -709,6 +709,24 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         c.line(px + inset, py - inset, right_x - inset, bottom_y + inset)
         c.line(px + inset, bottom_y + inset, right_x - inset, py - inset)
 
+    def draw_check_tight_pt(
+        x: float,
+        y_top: float,
+        checked: bool,
+        *,
+        size: float = 8.0,
+        inset: float = 1.2,
+    ):
+        if not checked:
+            return
+        if y_top < 0 or y_top > height:
+            return
+        right_x = x + size
+        bottom_y = y_top - size
+        c.setLineWidth(1.0)
+        c.line(x + inset, y_top - inset, right_x - inset, bottom_y + inset)
+        c.line(x + inset, bottom_y + inset, right_x - inset, y_top - inset)
+
     def extract_text_anchors(page) -> dict[str, list[tuple[float, float]]]:
         labels = {
             "Date",
@@ -752,7 +770,31 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             out[k] = sorted(pts, key=lambda p: (-p[1], p[0]))
         return out
 
+    def extract_all_text_positions(page) -> list[tuple[str, float, float]]:
+        out: list[tuple[str, float, float]] = []
+
+        def visitor(text, cm, tm, font_dict, font_size):
+            raw = str(text or "").strip()
+            if not raw:
+                return
+            norm = " ".join(raw.split())
+            x = (tm[4] * cm[0]) + (tm[5] * cm[2]) + cm[4]
+            y = (tm[4] * cm[1]) + (tm[5] * cm[3]) + cm[5]
+            out.append((norm, float(x), float(y)))
+
+        page.extract_text(visitor_text=visitor)
+        out.sort(key=lambda t: (-t[2], t[1]))
+        return out
+
     anchors = extract_text_anchors(base_page)
+    all_text_positions = extract_all_text_positions(base_page)
+
+    def find_text_anchor_prefix(prefix: str) -> tuple[float, float] | None:
+        p = prefix.strip().lower()
+        for txt, x, y in all_text_positions:
+            if txt.lower().startswith(p):
+                return (x, y)
+        return None
 
     # Calibrate map_xy from real template anchors (fallback to defaults above).
     # Design coordinates are in the same top-origin coordinate space used below.
@@ -966,31 +1008,32 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     draw_txt(338, 478, val("impact_adj_structure"), 7)
 
     # Recommended actions matrix
+    # Anchor checks to the printed row labels to prevent transform drift.
     action_rows = [
-        ("OPEN_HIGHWAY_TRAFFIC", True, True, 108),
-        ("CLOSE_HIGHWAY_SHOULDER", True, True, 126),
-        ("CLOSE_HIGHWAY_PARENT", True, False, 144),
-        ("REMOVE_DEBRIS", True, False, 162),
-        ("PLACE_K_RAIL", True, False, 180),
-        ("COVER_SLOPE_PLASTIC", True, False, 198),
-        ("DIVERT_SURFACE_WATER", True, False, 216),
-        ("REMOVE_CULVERT_BLOCKAGE", True, False, 234),
-        ("DEWATER", True, False, 252),
-        ("DEWATER_HORIZONTAL_DRAINS", True, True, 270),
-        ("TEMP_SHORING", True, True, 288),
-        ("BUTTRESS_TOE", True, True, 306),
-        ("PLACE_ROCK_SLOPE_PROTECTION", True, True, 324),
-        ("ROUTINE_VISUAL_MONITOR", True, True, 342),
-        ("RECONSTRUCT_SLOPE", True, True, 360),
-        ("RECONSTRUCT_SLOPE_GEOSYNTHETICS", True, True, 378),
-        ("REPAIR_CULVERT_DRAINAGE_PIPE", False, True, 396),
-        ("EROSION_CONTROL", False, True, 414),
-        ("SURVEY_SITE_DIST_SURVEY", False, True, 432),
-        ("GEOLOGIC_MAPPING", False, True, 450),
-        ("SUBSURFACE_EXPLORATION", False, True, 468),
-        ("DETAILED_DESIGN_PLANS", False, True, 486),
+        ("OPEN_HIGHWAY_TRAFFIC", "Open Highway Traffic", True, True),
+        ("CLOSE_HIGHWAY_SHOULDER", "Open Highway Shoulder", True, True),
+        ("CLOSE_HIGHWAY_PARENT", "Close Highway", True, False),
+        ("REMOVE_DEBRIS", "Remove Landslide Debris from the Highway", True, False),
+        ("PLACE_K_RAIL", "Place K-Rail or Fence", True, False),
+        ("COVER_SLOPE_PLASTIC", "Cover Slope with Plastic", True, False),
+        ("DIVERT_SURFACE_WATER", "Divert Surface Water Runoff", True, False),
+        ("REMOVE_CULVERT_BLOCKAGE", "Remove Culvert Blockage", True, False),
+        ("DEWATER", "Dewater with Pump, Trench, etc.", True, False),
+        ("DEWATER_HORIZONTAL_DRAINS", "Dewater with Horizontal Drains", True, True),
+        ("TEMP_SHORING", "Construct Temporary Shoring", True, True),
+        ("BUTTRESS_TOE", "Buttress Toe of Landslide", True, True),
+        ("PLACE_ROCK_SLOPE_PROTECTION", "Place Rock Slope Protection", True, True),
+        ("ROUTINE_VISUAL_MONITOR", "Routine Visual Monitor", True, True),
+        ("RECONSTRUCT_SLOPE", "Reconstruct Slope to Original Condition", True, True),
+        ("RECONSTRUCT_SLOPE_GEOSYNTHETICS", "Reconstruct Slope with Geosynthetics", True, True),
+        ("REPAIR_CULVERT_DRAINAGE_PIPE", "Repair Culvert/Drainage Pipe", False, True),
+        ("EROSION_CONTROL", "Install Erosion Control", False, True),
+        ("SURVEY_SITE_DIST_SURVEY", "Survey the Site - by Dist. Survey", False, True),
+        ("GEOLOGIC_MAPPING", "Perform Geological Mapping", False, True),
+        ("SUBSURFACE_EXPLORATION", "Perform Subsurface Exploration", False, True),
+        ("DETAILED_DESIGN_PLANS", "Perform Detailed Design & Produce Plans", False, True),
     ]
-    for code, allow_immediate, allow_follow, top in action_rows:
+    for code, label_prefix, allow_immediate, allow_follow in action_rows:
         imm_selected = False
         fol_selected = False
         if code == "CLOSE_HIGHWAY_PARENT":
@@ -999,16 +1042,25 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             imm_selected = code in immediate
         if code != "CLOSE_HIGHWAY_PARENT":
             fol_selected = code in follow_up
+        row_anchor = find_text_anchor_prefix(label_prefix)
+        if not row_anchor:
+            continue
+        ax, ay = row_anchor
+        y_top = ay + 6.0
         if allow_immediate:
-            draw_check_tight(468, top + 7, imm_selected)
+            draw_check_tight_pt(ax - 80.0, y_top, imm_selected)
         if allow_follow:
-            draw_check_tight(494, top + 7, fol_selected)
+            draw_check_tight_pt(ax - 54.0, y_top, fol_selected)
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
     draw_txt(540, 108, val("open_highway_traffic_lanes_count"))  # Open Highway Traffic lanes
-    draw_check_tight(566, 150, "CLOSE_ONE_DIRECTION" in immediate)
-    draw_check_tight(602, 150, "CLOSE_BOTH_DIRECTIONS" in immediate)
+    one_anchor = find_text_anchor_prefix("One")
+    both_anchor = find_text_anchor_prefix("Both Directions")
+    if one_anchor:
+        draw_check_tight_pt(one_anchor[0] - 14.0, one_anchor[1] + 6.0, "CLOSE_ONE_DIRECTION" in immediate)
+    if both_anchor:
+        draw_check_tight_pt(both_anchor[0] - 14.0, both_anchor[1] + 6.0, "CLOSE_BOTH_DIRECTIONS" in immediate)
 
     # Measurements
     draw_txt(137, 564, val("measure_slope_height_ft"))
