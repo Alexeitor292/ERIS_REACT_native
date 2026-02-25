@@ -798,7 +798,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         out.sort(key=lambda t: (-t[2], t[1]))
         return out
 
-    def extract_checkbox_rects(page) -> list[tuple[float, float, float, float]]:
+    def extract_rects(page) -> list[tuple[float, float, float, float]]:
         """
         Extract checkbox rectangles from vector path ops.
 
@@ -841,16 +841,14 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
                 pts = points[:]
                 if pts[0] == pts[-1]:
                     pts = pts[:-1]
-                if len(pts) != 4:
-                    return
                 xs = sorted({round(p[0], 3) for p in pts})
                 ys = sorted({round(p[1], 3) for p in pts})
                 if len(xs) != 2 or len(ys) != 2:
                     return
                 w = float(abs(xs[1] - xs[0]))
                 h = float(abs(ys[1] - ys[0]))
-                # Checkbox-like bounds in PDF points.
-                if 8.0 <= w <= 25.0 and 8.0 <= h <= 25.0:
+                # Keep plausible form boxes/frames; filter out lines.
+                if w >= 6.0 and h >= 6.0:
                     rects.append((float(xs[0]), float(ys[0]), w, h))
 
             def flush_path(paint: bool) -> None:
@@ -899,7 +897,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
                     ry = min(ys)
                     rw = max(xs) - rx
                     rh = max(ys) - ry
-                    if 8.0 <= rw <= 25.0 and 8.0 <= rh <= 25.0:
+                    if rw >= 6.0 and rh >= 6.0:
                         rects.append((rx, ry, rw, rh))
                 elif operator in (b"S", b"s", b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*"):
                     flush_path(paint=True)
@@ -924,7 +922,21 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     anchors = extract_text_anchors(base_page)
     all_text_positions = extract_all_text_positions(base_page)
-    checkbox_rects = extract_checkbox_rects(base_page)
+    all_rects = extract_rects(base_page)
+    checkbox_rects = [
+        r for r in all_rects
+        if 8.0 <= r[2] <= 25.0 and 8.0 <= r[3] <= 25.0
+    ]
+    text_rects = [
+        r for r in all_rects
+        if 9.0 <= r[3] <= 26.0 and r[2] >= 25.0
+    ]
+    logger.info(
+        "GISA rect extraction all=%d checkbox=%d text=%d",
+        len(all_rects),
+        len(checkbox_rects),
+        len(text_rects),
+    )
 
     def find_text_anchor_prefix(prefix: str) -> tuple[float, float] | None:
         p = prefix.strip().lower()
@@ -972,24 +984,52 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         draw_txt_pt(ax + x_pad, ay + y_above_label, text_value, size=size)
         return True
 
-    # Header/form top rows (write only field values, no extra labels/metadata)
-    # Anchor-based placement: use label positions from the template itself.
-    # Values are drawn in the corresponding boxes above labels.
-    # Lower values a bit so header text sits inside the boxes on mobile viewers.
+    # Header/form top rows (prefer rectangle-based text placement).
     y_above = 14.0
+    ok = True
     # Row 1
-    ok = draw_from_anchor("Date", 0, -12, y_above, val("report_date"))
-    ok &= draw_from_anchor("District", 0, 2, y_above, val("district"))
-    ok &= draw_from_anchor("County", 0, 2, y_above, val("county"))
-    ok &= draw_from_anchor("Route", 0, 2, y_above, val("route"))
-    ok &= draw_from_anchor("Post Mile", 0, 2, y_above, val("post_mile"))
-    ok &= draw_from_anchor("EA (6 digits)", 0, 2, y_above, val("ea"))
-    ok &= draw_from_anchor("Project ID (10 digits)", 0, 2, y_above, val("project_id"))
-    ok &= draw_from_anchor("Date Incident Reported", 0, 2, y_above, val("date_incident_reported"), size=7)
+    ok &= (
+        draw_value_from_prefix_rect("Date", val("report_date"), relation="above", align="center", size=7, x_window=70, y_window=34)
+        or draw_from_anchor("Date", 0, -12, y_above, val("report_date"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("District", val("district"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("District", 0, 2, y_above, val("district"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("County", val("county"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("County", 0, 2, y_above, val("county"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Route", val("route"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("Route", 0, 2, y_above, val("route"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Post Mile", val("post_mile"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("Post Mile", 0, 2, y_above, val("post_mile"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("EA (6 digits)", val("ea"), relation="above", align="center", size=7, x_window=90, y_window=34)
+        or draw_from_anchor("EA (6 digits)", 0, 2, y_above, val("ea"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Project ID (10 digits)", val("project_id"), relation="above", align="center", size=7, x_window=95, y_window=34)
+        or draw_from_anchor("Project ID (10 digits)", 0, 2, y_above, val("project_id"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Date Incident Reported", val("date_incident_reported"), relation="above", align="center", size=6, x_window=85, y_window=34)
+        or draw_from_anchor("Date Incident Reported", 0, 2, y_above, val("date_incident_reported"), size=7)
+    )
 
     # Row 2
-    ok &= draw_from_anchor("Latitude", 0, -10, y_above, val("latitude"))
-    ok &= draw_from_anchor("Longitude", 0, 2, y_above, val("longitude"))
+    ok &= (
+        draw_value_from_prefix_rect("Latitude", val("latitude"), relation="above", align="left", x_window=90, y_window=34)
+        or draw_from_anchor("Latitude", 0, -10, y_above, val("latitude"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Longitude", val("longitude"), relation="above", align="left", x_window=90, y_window=34)
+        or draw_from_anchor("Longitude", 0, 2, y_above, val("longitude"))
+    )
 
     # District contact rows (from serialized JSON list)
     raw_contacts = val("district_contact")
@@ -1003,17 +1043,41 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             contacts = []
     c1 = contacts[0] if len(contacts) > 0 else {}
     c2 = contacts[1] if len(contacts) > 1 else {}
-    ok &= draw_from_anchor("Last Name", 0, 2, y_above, c1.get("last_name", ""))
-    ok &= draw_from_anchor("First Name", 0, 2, y_above, c1.get("first_name", ""))
-    ok &= draw_from_anchor("S Number", 0, 2, y_above, c1.get("s_number", ""))
+    ok &= (
+        draw_value_from_prefix_rect("Last Name", c1.get("last_name", ""), occurrence=0, relation="above", x_window=110, y_window=34)
+        or draw_from_anchor("Last Name", 0, 2, y_above, c1.get("last_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("First Name", c1.get("first_name", ""), occurrence=0, relation="above", x_window=110, y_window=34)
+        or draw_from_anchor("First Name", 0, 2, y_above, c1.get("first_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("S Number", c1.get("s_number", ""), occurrence=0, relation="above", align="center", x_window=110, y_window=34)
+        or draw_from_anchor("S Number", 0, 2, y_above, c1.get("s_number", ""))
+    )
     # Row 3 (second contact)
-    ok &= draw_from_anchor("Last Name", 1, 2, y_above, c2.get("last_name", ""))
-    ok &= draw_from_anchor("First Name", 1, 2, y_above, c2.get("first_name", ""))
-    ok &= draw_from_anchor("S Number", 1, 2, y_above, c2.get("s_number", ""))
+    ok &= (
+        draw_value_from_prefix_rect("Last Name", c2.get("last_name", ""), occurrence=1, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("Last Name", 1, 2, y_above, c2.get("last_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("First Name", c2.get("first_name", ""), occurrence=1, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("First Name", 1, 2, y_above, c2.get("first_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("S Number", c2.get("s_number", ""), occurrence=1, relation="above", align="center", x_window=120, y_window=34)
+        or draw_from_anchor("S Number", 1, 2, y_above, c2.get("s_number", ""))
+    )
     c_phone = c1.get("phone", "")
     c_cell = c1.get("cell_phone", "")
-    ok &= draw_from_anchor("Phone", 0, 2, y_above, c_phone)
-    ok &= draw_from_anchor("Cell Phone", 0, 2, y_above, c_cell)
+    ok &= (
+        draw_value_from_prefix_rect("Phone", c_phone, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("Phone", 0, 2, y_above, c_phone)
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Cell Phone", c_cell, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("Cell Phone", 0, 2, y_above, c_cell)
+    )
 
     # Fallback: if anchors fail for any reason, keep approximate hardcoded placement.
     if not ok:
@@ -1093,6 +1157,104 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         draw_check_in_rect_pt(boxes[idx], checked)
         return True
 
+    def draw_text_in_rect_pt(
+        rect: tuple[float, float, float, float],
+        text_value,
+        *,
+        size: int = 8,
+        align: str = "left",
+        pad: float = 2.0,
+    ) -> bool:
+        s = str(text_value or "").strip()
+        if not s:
+            return False
+        rx, ry, rw, rh = rect
+        if rw <= 0 or rh <= 0:
+            return False
+        c.setFont("Helvetica", size)
+        baseline = ry + max(1.0, (rh - size) * 0.5)
+        if align == "center":
+            tw = c.stringWidth(s, "Helvetica", size)
+            x = rx + max(pad, (rw - tw) * 0.5)
+        elif align == "right":
+            tw = c.stringWidth(s, "Helvetica", size)
+            x = rx + max(pad, rw - tw - pad)
+        else:
+            x = rx + pad
+        c.drawString(x, baseline, s)
+        return True
+
+    def nearest_text_rect_for_anchor(
+        ax: float,
+        ay: float,
+        *,
+        relation: str = "above",
+        x_window: float = 180.0,
+        y_window: float = 50.0,
+    ) -> tuple[float, float, float, float] | None:
+        cands: list[tuple[float, tuple[float, float, float, float]]] = []
+        for r in text_rects:
+            rx, ry, rw, rh = r
+            cx = rx + (rw * 0.5)
+            cy = ry + (rh * 0.5)
+            ok = False
+            dx = 0.0
+            dy = 0.0
+            if relation == "above":
+                ok = (cy > ay) and (cy - ay <= y_window) and (abs(cx - ax) <= x_window)
+                dx = abs(cx - ax)
+                dy = (cy - ay) if cy > ay else 9999.0
+            elif relation == "right":
+                ok = (rx > ax) and (rx - ax <= x_window) and (abs(cy - ay) <= y_window)
+                dx = (rx - ax) if rx > ax else 9999.0
+                dy = abs(cy - ay)
+            elif relation == "left":
+                right = rx + rw
+                ok = (right < ax) and (ax - right <= x_window) and (abs(cy - ay) <= y_window)
+                dx = (ax - right) if right < ax else 9999.0
+                dy = abs(cy - ay)
+            elif relation == "same_row":
+                ok = abs(cy - ay) <= y_window and abs(cx - ax) <= x_window
+                dx = abs(cx - ax)
+                dy = abs(cy - ay)
+            if ok:
+                cands.append(((dy * 4.0) + dx + (rw * 0.001), r))
+        if not cands:
+            return None
+        cands.sort(key=lambda t: t[0])
+        return cands[0][1]
+
+    def draw_value_from_prefix_rect(
+        prefix: str,
+        text_value,
+        *,
+        occurrence: int = 0,
+        relation: str = "above",
+        align: str = "left",
+        size: int = 8,
+        x_window: float = 180.0,
+        y_window: float = 50.0,
+        pad: float = 2.0,
+    ) -> bool:
+        p = prefix.strip().lower()
+        hits: list[tuple[float, float]] = []
+        for txt, x, y in all_text_positions:
+            if txt.lower().startswith(p):
+                hits.append((x, y))
+        if occurrence >= len(hits):
+            return False
+        ax, ay = hits[occurrence]
+        rect = nearest_text_rect_for_anchor(
+            ax,
+            ay,
+            relation=relation,
+            x_window=x_window,
+            y_window=y_window,
+        )
+        if not rect:
+            return False
+        return draw_text_in_rect_pt(rect, text_value, size=size, align=align, pad=pad)
+
     # Incident Type (left column) - rectangle detected checkboxes
     incident_rows = [
         ("failure_rock_fall", "ROCK_FALL", "(Rock) Fall"),
@@ -1136,7 +1298,10 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     draw_check_for_prefix("Lane(s) Closed", highway_code == "LANES_CLOSED", x_window=160.0)
     # Only render Highway Status lane count when Lane(s) Closed is selected.
     if highway_code == "LANES_CLOSED":
-        draw_txt(352, 146, val("lanes_closed_count"))
+        (
+            draw_value_from_prefix_rect("Lane(s) Closed", val("lanes_closed_count"), relation="right", align="center", x_window=120, y_window=14)
+            or draw_txt(352, 146, val("lanes_closed_count"))
+        )
     draw_check_for_prefix("One-way Closed", highway_code == "ONE_WAY_CLOSED", x_window=160.0)
     draw_check_for_prefix("Two-way Closed", highway_code == "TWO_WAY_CLOSED", x_window=160.0)
 
@@ -1162,20 +1327,47 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     # Pavement / Ground Status (checkboxes via rectangle detection)
     draw_check_for_prefix("Pavement/Ground Cracks", is_on("pavement_ground_cracks"), x_window=140.0)
-    draw_txt(315, 218, val("crack_length_ft"))
-    draw_txt(315, 236, val("crack_horizontal_in"))
-    draw_txt(315, 254, val("crack_vertical_in"))
-    draw_txt(315, 272, val("crack_depth_in"))
+    (
+        draw_value_from_prefix_rect("feet, Length", val("crack_length_ft"), relation="left", align="center", x_window=100, y_window=12)
+        or draw_txt(315, 218, val("crack_length_ft"))
+    )
+    (
+        draw_value_from_prefix_rect("inches, Horizontal Disp.", val("crack_horizontal_in"), relation="left", align="center", x_window=120, y_window=12)
+        or draw_txt(315, 236, val("crack_horizontal_in"))
+    )
+    (
+        draw_value_from_prefix_rect("inches, Vertical Disp.", val("crack_vertical_in"), relation="left", align="center", x_window=120, y_window=12)
+        or draw_txt(315, 254, val("crack_vertical_in"))
+    )
+    (
+        draw_value_from_prefix_rect("inches, Depth of Crack", val("crack_depth_in"), relation="left", align="center", x_window=120, y_window=12)
+        or draw_txt(315, 272, val("crack_depth_in"))
+    )
     # Settlement/Bulge rows are one row lower than crack-depth on this template.
-    draw_txt(315, 308, val("settlement_in"))
-    draw_txt(315, 326, val("bulge_in"))
+    (
+        draw_value_from_prefix_rect("Settlement", val("settlement_in"), relation="right", align="center", x_window=100, y_window=14)
+        or draw_txt(315, 308, val("settlement_in"))
+    )
+    (
+        draw_value_from_prefix_rect("Bulge", val("bulge_in"), relation="right", align="center", x_window=100, y_window=14)
+        or draw_txt(315, 326, val("bulge_in"))
+    )
     draw_check_for_prefix("Indented by Rocks", is_on("indented_by_rocks"), x_window=140.0)
 
     # Vegetation on slope
     # Coverage values belong in the right-side "Coverage %" column boxes.
-    draw_txt(145, 423, val("vegetation_trees"))
-    draw_txt(145, 447, val("vegetation_bushes_shrubs"))
-    draw_txt(145, 471, val("vegetation_groundcover"))
+    (
+        draw_value_from_prefix_rect("Trees", val("vegetation_trees"), relation="right", align="center", x_window=130, y_window=16)
+        or draw_txt(145, 423, val("vegetation_trees"))
+    )
+    (
+        draw_value_from_prefix_rect("Bushes/Shrubs", val("vegetation_bushes_shrubs"), relation="right", align="center", x_window=130, y_window=16)
+        or draw_txt(145, 447, val("vegetation_bushes_shrubs"))
+    )
+    (
+        draw_value_from_prefix_rect("Groundcover", val("vegetation_groundcover"), relation="right", align="center", x_window=130, y_window=16)
+        or draw_txt(145, 471, val("vegetation_groundcover"))
+    )
 
     # Water / Drainage (checkboxes via rectangle detection)
     draw_check_for_prefix("Clogged Inlet", is_on("drainage_clogged_inlet"), x_window=150.0)
@@ -1245,7 +1437,10 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
-    draw_txt(540, 108, val("open_highway_traffic_lanes_count"))  # Open Highway Traffic lanes
+    (
+        draw_value_from_prefix_rect("Open Highway Traffic", val("open_highway_traffic_lanes_count"), relation="right", align="center", x_window=220, y_window=12)
+        or draw_txt(540, 108, val("open_highway_traffic_lanes_count"))
+    )  # Open Highway Traffic lanes
     one_anchor = find_text_anchor_prefix("One")
     both_anchor = find_text_anchor_prefix("Both Directions")
     if one_anchor:
@@ -1258,17 +1453,44 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             draw_check_in_rect_pt(bboxes[-1], "CLOSE_BOTH_DIRECTIONS" in immediate)
 
     # Measurements
-    draw_txt(137, 564, val("measure_slope_height_ft"))
-    draw_txt(137, 590, val("measure_original_slope_deg"))
-    draw_txt(137, 616, val("measure_landslide_width_ft"))
-    draw_txt(137, 642, val("measure_landslide_length_ft"))
-    draw_txt(137, 668, val("measure_main_scarp_height_ft"))
-    draw_txt(137, 694, val("measure_landslide_slope_deg"))
-    draw_txt(170, 720, val("measure_roadway_length_ft"))
-    draw_txt(170, 746, val("measure_roadway_width_ft"))
+    (
+        draw_value_from_prefix_rect("Slope Height, ft (H)", val("measure_slope_height_ft"), relation="right", align="center", x_window=170, y_window=14)
+        or draw_txt(137, 564, val("measure_slope_height_ft"))
+    )
+    (
+        draw_value_from_prefix_rect("Original Slope, deg", val("measure_original_slope_deg"), relation="right", align="center", x_window=170, y_window=14)
+        or draw_txt(137, 590, val("measure_original_slope_deg"))
+    )
+    (
+        draw_value_from_prefix_rect("Landslide Width, ft", val("measure_landslide_width_ft"), relation="right", align="center", x_window=170, y_window=14)
+        or draw_txt(137, 616, val("measure_landslide_width_ft"))
+    )
+    (
+        draw_value_from_prefix_rect("Landslide Length (ft", val("measure_landslide_length_ft"), relation="right", align="center", x_window=170, y_window=14)
+        or draw_txt(137, 642, val("measure_landslide_length_ft"))
+    )
+    (
+        draw_value_from_prefix_rect("Main Scarp Height, ft", val("measure_main_scarp_height_ft"), relation="right", align="center", x_window=170, y_window=14)
+        or draw_txt(137, 668, val("measure_main_scarp_height_ft"))
+    )
+    (
+        draw_value_from_prefix_rect("Landslide Slope, deg", val("measure_landslide_slope_deg"), relation="right", align="center", x_window=170, y_window=14)
+        or draw_txt(137, 694, val("measure_landslide_slope_deg"))
+    )
+    (
+        draw_value_from_prefix_rect("Length of Roadway Encroached, ft", val("measure_roadway_length_ft"), relation="right", align="center", x_window=220, y_window=14)
+        or draw_txt(170, 720, val("measure_roadway_length_ft"))
+    )
+    (
+        draw_value_from_prefix_rect("Width of Roadway Encroached, ft", val("measure_roadway_width_ft"), relation="right", align="center", x_window=220, y_window=14)
+        or draw_txt(170, 746, val("measure_roadway_width_ft"))
+    )
 
     # Notes
-    draw_txt(18, 776, val("observations_notes"), 7)
+    (
+        draw_value_from_prefix_rect("Notes:", val("observations_notes"), relation="right", align="left", size=7, x_window=520, y_window=18, pad=2.0)
+        or draw_txt(18, 776, val("observations_notes"), 7)
+    )
 
     c.save()
     overlay_io.seek(0)
