@@ -690,6 +690,25 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         c.line(left_x + inset, top_y - inset, right_x - inset, bottom_y + inset)
         c.line(left_x + inset, bottom_y + inset, right_x - inset, top_y - inset)
 
+    def draw_check_tight(
+        x: float,
+        top: float,
+        checked: bool,
+        *,
+        size: float = 8.0,
+        inset: float = 1.2,
+    ):
+        if not checked:
+            return
+        px, py = map_xy(x, top)
+        if py < 0 or py > height:
+            return
+        right_x = px + size
+        bottom_y = py - size
+        c.setLineWidth(1.0)
+        c.line(px + inset, py - inset, right_x - inset, bottom_y + inset)
+        c.line(px + inset, bottom_y + inset, right_x - inset, py - inset)
+
     def extract_text_anchors(page) -> dict[str, list[tuple[float, float]]]:
         labels = {
             "Date",
@@ -981,15 +1000,15 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         if code != "CLOSE_HIGHWAY_PARENT":
             fol_selected = code in follow_up
         if allow_immediate:
-            draw_check(468, top + 9, imm_selected)
+            draw_check_tight(468, top + 7, imm_selected)
         if allow_follow:
-            draw_check(494, top + 9, fol_selected)
+            draw_check_tight(494, top + 7, fol_selected)
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
     draw_txt(540, 108, val("open_highway_traffic_lanes_count"))  # Open Highway Traffic lanes
-    draw_check(566, 152, "CLOSE_ONE_DIRECTION" in immediate)
-    draw_check(602, 152, "CLOSE_BOTH_DIRECTIONS" in immediate)
+    draw_check_tight(566, 150, "CLOSE_ONE_DIRECTION" in immediate)
+    draw_check_tight(602, 150, "CLOSE_BOTH_DIRECTIONS" in immediate)
 
     # Measurements
     draw_txt(137, 564, val("measure_slope_height_ft"))
