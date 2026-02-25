@@ -974,7 +974,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     ]
     text_rects = [
         r for r in all_rects
-        if 9.0 <= r[3] <= 26.0 and r[2] >= 25.0
+        # Include taller input rectangles (e.g., the OHT "Lanes" box can exceed 26pt high).
+        if 9.0 <= r[3] <= 44.0 and 25.0 <= r[2] <= 260.0
     ]
     logger.info(
         "GISA rect extraction all=%d checkbox=%d text=%d",
@@ -1078,7 +1079,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         x_window: float = 280.0,
         y_tol: float = 10.0,
         min_w: float = 30.0,
-        max_w: float = 120.0,
+        max_w: float = 220.0,
     ) -> tuple[float, float, float, float] | None:
         # Find an input-style text rectangle to the right on the same row.
         cands: list[tuple[float, tuple[float, float, float, float]]] = []
@@ -1601,10 +1602,27 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     lanes_drawn = False
     oht_anchor = find_text_anchor_prefix("Open Highway Traffic")
     if oht_anchor:
-        oht_box = row_text_box_right_of_label(oht_anchor[0], oht_anchor[1], x_window=320.0, y_tol=10.0)
-        if oht_box is not None:
+        # Prefer the text-input box on the same row before the "Lanes" label.
+        lane_labels: list[tuple[float, float]] = []
+        for txt, tx, ty in all_text_positions:
+            if txt.strip().lower() == "lanes" and tx > oht_anchor[0] and abs(ty - oht_anchor[1]) <= 16.0:
+                lane_labels.append((tx, ty))
+        lane_box: tuple[float, float, float, float] | None = None
+        if lane_labels:
+            lane_labels.sort(key=lambda p: (abs(p[1] - oht_anchor[1]), p[0]))
+            lx, ly = lane_labels[0]
+            lane_box = nearest_text_rect_for_anchor(
+                lx,
+                ly,
+                relation="left",
+                x_window=180.0,
+                y_window=16.0,
+            )
+        if lane_box is None:
+            lane_box = row_text_box_right_of_label(oht_anchor[0], oht_anchor[1], x_window=340.0, y_tol=12.0)
+        if lane_box is not None:
             lanes_drawn = draw_text_in_rect_pt(
-                oht_box,
+                lane_box,
                 val("open_highway_traffic_lanes_count"),
                 align="center",
             )
