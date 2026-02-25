@@ -127,19 +127,18 @@ function monthLabel(year: number, month: number): string {
   return new Date(year, month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
-function normalizeDownloadUrl(rawUrl: string, apiBaseUrl: string): string {
-  try {
-    const u = new URL(rawUrl);
-    const badHosts = new Set(["host.docker.internal", "127.0.0.1", "localhost"]);
-    if (!badHosts.has(u.hostname.toLowerCase())) return rawUrl;
-
-    const api = new URL(apiBaseUrl);
-    u.hostname = api.hostname;
-    return u.toString();
-  } catch {
-    return rawUrl;
-  }
-}
+const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
+  failure_rock_fall: "ROCK_FALL",
+  failure_topple: "TOPPLE",
+  failure_slide: "SLIDE",
+  failure_spread: "SPREAD",
+  failure_flow: "FLOW",
+  failure_compound: "COMPOUND",
+  failure_erosion: "EROSION",
+  failure_surficial_failure: "SURFICIAL_SLOUGHING",
+  failure_scoured_toe: "SCOURED_TOE",
+  failure_washout: "WASHOUT",
+};
 
 function createEmptyDistrictContact(): DistrictContact {
   return {
@@ -529,6 +528,7 @@ export default function SubmissionDetailScreen() {
     waterDrainage: false,
     measurements: false,
   });
+  const [activeStep, setActiveStep] = useState(0);
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const isIOS = Platform.OS === "ios";
   const compact = density === "compact";
@@ -589,6 +589,12 @@ export default function SubmissionDetailScreen() {
     setFollowUpActions(state.followUpActions);
     setDistrictContacts(state.districtContacts);
     setOpenDistrictContactIds(Object.fromEntries(state.districtContacts.map((c, idx) => [c.id, idx === 0])));
+  }, []);
+
+  const incidentTypesFromFormState = useCallback((state: FormState): string[] => {
+    return Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
+      .filter(([k]) => (state as any)[k] === "YES")
+      .map(([, code]) => code);
   }, []);
 
   const clearDraftLocalCache = useCallback(async () => {
@@ -708,7 +714,7 @@ export default function SubmissionDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [token, id, hydratePhotoUrls]);
+  }, [token, id, hydratePhotoUrls, applyEditorState, incidentTypesFromFormState]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -762,13 +768,15 @@ export default function SubmissionDetailScreen() {
       return next;
     });
   };
-  const toggle = (list: string[], code: string) => (list.includes(code) ? list.filter((x) => x !== code) : [...list, code]);
   const toggleSection = (key: keyof typeof openSections) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
   const togglePaperBlock = (key: keyof typeof openPaperBlocks) => {
     setOpenPaperBlocks((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+  const FORM_STEPS = ["Header", "GISA Body", "Assessment", "Gallery"] as const;
+  const goNextStep = () => setActiveStep((prev) => Math.min(prev + 1, FORM_STEPS.length - 1));
+  const goPrevStep = () => setActiveStep((prev) => Math.max(prev - 1, 0));
   const contactDisplayName = (contact: DistrictContact, idx: number) => {
     const full = `${contact.first_name} ${contact.last_name}`.trim();
     return full || `Contact ${idx + 1}`;
@@ -880,25 +888,6 @@ export default function SubmissionDetailScreen() {
       return false;
     }
     return true;
-  }
-
-  const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
-    failure_rock_fall: "ROCK_FALL",
-    failure_topple: "TOPPLE",
-    failure_slide: "SLIDE",
-    failure_spread: "SPREAD",
-    failure_flow: "FLOW",
-    failure_compound: "COMPOUND",
-    failure_erosion: "EROSION",
-    failure_surficial_failure: "SURFICIAL_SLOUGHING",
-    failure_scoured_toe: "SCOURED_TOE",
-    failure_washout: "WASHOUT",
-  };
-
-  function incidentTypesFromFormState(state: FormState): string[] {
-    return Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
-      .filter(([k]) => (state as any)[k] === "YES")
-      .map(([, code]) => code);
   }
 
   async function saveDraft() {
@@ -1275,11 +1264,9 @@ export default function SubmissionDetailScreen() {
     if (key && !eventDate[key]) eventDate[key] = ev.created_at;
   }
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
-  const materialKeys = ["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures"];
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"];
   const anyFailureSelected = failureKeys.some((k) => form[k] === "YES");
-  const anyMaterialSelected = materialKeys.some((k) => form[k] === "YES");
   const materialRockSelected = form.material_rock === "YES";
   const materialSoilSelected = form.material_soil === "YES";
   const waterFlowingSelected = form.water_flowing === "YES";
@@ -1314,11 +1301,13 @@ export default function SubmissionDetailScreen() {
   const selectSingleIncidentType = (key: string) => {
     if (!canEdit) return;
     const nextVal = form[key] === "YES" ? "NO" : "YES";
-    const reset: Partial<FormState> = {};
-    Object.keys(INCIDENT_TYPE_CODE_BY_FORM_KEY).forEach((k) => {
-      reset[k as keyof FormState] = k === key ? nextVal : "NO";
+    setForm((prev) => {
+      const next = { ...prev };
+      Object.keys(INCIDENT_TYPE_CODE_BY_FORM_KEY).forEach((k) => {
+        next[k] = k === key ? nextVal : "NO";
+      });
+      return next;
     });
-    setForm((prev) => ({ ...prev, ...reset }));
     const nextCode = INCIDENT_TYPE_CODE_BY_FORM_KEY[key];
     setIncidentTypes(nextVal === "YES" && nextCode ? [nextCode] : []);
   };
@@ -1539,6 +1528,23 @@ export default function SubmissionDetailScreen() {
         })}
       </Text>
       <Text style={[styles.status, { color: palette.muted }]}>Status: {data.submission.status}</Text>
+      <View style={styles.stepTabsRow}>
+        {FORM_STEPS.map((step, idx) => (
+          <Pressable
+            key={step}
+            onPress={() => setActiveStep(idx)}
+            style={[
+              styles.stepTab,
+              idx === activeStep ? [styles.stepTabActive, { borderColor: palette.primary }] : [styles.stepTabInactive, { borderColor: palette.border }],
+            ]}
+          >
+            <Text style={[styles.stepTabIndex, { color: idx <= activeStep ? palette.primary : palette.muted }]}>{idx + 1}</Text>
+            <Text style={[styles.stepTabLabel, { color: idx === activeStep ? palette.text : palette.muted }]}>{step}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={[styles.muted, { color: palette.muted }]}>Step {activeStep + 1} of {FORM_STEPS.length}</Text>
+      <View style={activeStep === 0 ? undefined : styles.hidden}>
         <CollapsibleSection title="GISA Header" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
         <SelectField
           palette={palette}
@@ -1664,8 +1670,14 @@ export default function SubmissionDetailScreen() {
         <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} error={fieldErrors.latitude} />
         <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
       </CollapsibleSection>
+      <View style={styles.stepNavRow}>
+        <View style={styles.stepNavSpacer} />
+        <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
+          <Text style={styles.btnPrimaryText}>Continue</Text>
+        </Pressable>
+      </View>
 
-      <View>
+      <View style={activeStep === 1 ? undefined : styles.hidden}>
         <View style={{ gap: compact ? 8 : 10 }}>
         <DropdownBlock title="Distribution" open={openPaperBlocks.distributionMain} onToggle={() => togglePaperBlock("distributionMain")} palette={palette}>
           <View style={styles.chips}>
@@ -1865,7 +1877,9 @@ export default function SubmissionDetailScreen() {
         ) : null}
         </View>
       </View>
+      </View>
 
+      <View style={activeStep === 2 ? undefined : styles.hidden}>
       <CollapsibleSection title="Recommended Actions" open={openSections.actions} onToggle={() => toggleSection("actions")} palette={palette} compact={compact}>
         <View style={styles.recommendedHeaderRow}>
           <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>Immediate Actions</Text>
@@ -1945,10 +1959,19 @@ export default function SubmissionDetailScreen() {
         <Field palette={palette} label="Notes" value={form.observations_notes} editable={canEdit} multiline onChangeText={(v) => setVal("observations_notes", v)} error={fieldErrors.observations_notes} />
       </CollapsibleSection>
 
-      {canEdit ? (
+      <View style={styles.stepNavRow}>
+        <Pressable style={[styles.btnGhost, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Back</Text>
+        </Pressable>
+        <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
+          <Text style={styles.btnPrimaryText}>Continue</Text>
+        </Pressable>
+      </View>
+      </View>
+
+      {activeStep === 3 && canEdit && (
           <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
-            <Text style={styles.sectionTitle}>Draft Actions</Text>
-            <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary }]} onPress={saveDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Save Draft"}</Text></Pressable>
+            <Text style={styles.sectionTitle}>Submission</Text>
           <Pressable style={[styles.btnPrimary, { backgroundColor: palette.success, marginTop: 8 }]} onPress={submitDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : (data.submission.status === "REJECTED" ? "Resubmit for Review" : "Submit for Review")}</Text></Pressable>
           <Pressable style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={pickPhoto} disabled={busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text></Pressable>
           <Text style={[styles.label, { marginTop: 12 }]}>Latest Photo Preview</Text>
@@ -1978,9 +2001,9 @@ export default function SubmissionDetailScreen() {
             </View>
           )}
         </View>
-      ) : null}
+      )}
 
-      {canReview ? (
+      {activeStep === 2 && canReview && (
         <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
           <Text style={styles.sectionTitle}>Reviewer Decision</Text>
           <Field palette={palette} label="Review Comment" value={reviewComment} editable={!busy} multiline onChangeText={setReviewComment} />
@@ -1989,9 +2012,9 @@ export default function SubmissionDetailScreen() {
             <Pressable style={[styles.btnPrimary, { flex: 1, backgroundColor: palette.danger }]} onPress={() => review("REJECT")} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Reject"}</Text></Pressable>
           </View>
         </View>
-      ) : null}
+      )}
 
-      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+      <View style={[styles.section, activeStep === 3 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>GISA PDF</Text>
         <Pressable
           style={[styles.btnPrimary, { backgroundColor: palette.primary }]}
@@ -2009,7 +2032,7 @@ export default function SubmissionDetailScreen() {
         </Pressable>
       </View>
 
-      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+      <View style={[styles.section, activeStep === 3 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>Photos</Text>
         {data.photos.length === 0 ? <Text style={styles.muted}>No photos uploaded.</Text> : data.photos.map((p) => (
           <View key={p.id} style={{ marginTop: 8 }}>
@@ -2036,7 +2059,14 @@ export default function SubmissionDetailScreen() {
         ))}
       </View>
 
-      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+      <View style={[styles.stepNavRow, activeStep === 3 ? null : styles.hidden]}>
+        <Pressable style={[styles.btnGhost, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Back</Text>
+        </Pressable>
+        <View style={styles.stepNavSpacer} />
+      </View>
+
+      <View style={[styles.section, activeStep === 2 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>Workflow Status</Text>
         <View style={styles.workflowInlineWrap}>
           <View style={styles.workflowInlineTrack} />
@@ -2061,7 +2091,22 @@ export default function SubmissionDetailScreen() {
           {stepOrder[currentStepIdx] || data.submission.status} {eventDate[stepOrder[currentStepIdx]] ? `• ${eventDate[stepOrder[currentStepIdx]]}` : ""}
         </Text>
       </View>
+      <View style={[styles.stepNavRow, activeStep === 2 ? null : styles.hidden]}>
+        <Pressable style={[styles.btnGhost, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Back</Text>
+        </Pressable>
+        <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
+          <Text style={styles.btnPrimaryText}>Continue</Text>
+        </Pressable>
+      </View>
     </ScrollView>
+    {canEdit ? (
+      <View style={[styles.stickyFooter, { borderColor: palette.border, backgroundColor: palette.panel }]}>
+        <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary }]} onPress={saveDraft} disabled={busy}>
+          <Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Save Draft"}</Text>
+        </Pressable>
+      </View>
+    ) : null}
     <Modal visible={districtPickerOpen} transparent animationType="fade" onRequestClose={() => setDistrictPickerOpen(false)}>
       <Pressable style={styles.pickerBackdrop} onPress={() => setDistrictPickerOpen(false)}>
         <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
@@ -2264,7 +2309,7 @@ export default function SubmissionDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Platform.OS === "ios" ? "#f2f2f7" : "#eef3fb" },
-  contentWrap: { padding: 14, gap: 10, paddingBottom: Platform.OS === "ios" ? 34 : 28 },
+  contentWrap: { padding: 14, gap: 10, paddingBottom: Platform.OS === "ios" ? 120 : 108 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   title: { fontSize: Platform.OS === "ios" ? 22 : 24, fontWeight: "800", color: "#16253a", letterSpacing: Platform.OS === "ios" ? 0.2 : 0 },
   status: { marginTop: 4, marginBottom: 6, color: "#4b5f7f", fontWeight: Platform.OS === "ios" ? "600" : "700" },
@@ -2346,6 +2391,46 @@ const styles = StyleSheet.create({
   workflowInlineDotDone: { backgroundColor: "#1d4ed8", borderColor: "#1d4ed8" },
   workflowInlineLabel: { marginTop: 2, fontSize: 10, color: "#64748b", fontWeight: "700" },
   workflowInlineLabelDone: { color: "#1e3a8a" },
+  hidden: { display: "none" },
+  stepTabsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 4,
+  },
+  stepTab: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minWidth: 74,
+  },
+  stepTabActive: { backgroundColor: "#dbeafe" },
+  stepTabInactive: { backgroundColor: "#f8fafc" },
+  stepTabIndex: { fontSize: 11, fontWeight: "800" },
+  stepTabLabel: { fontSize: 12, fontWeight: "700", marginTop: 2 },
+  stepNavRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  stepNavBtn: {
+    flex: 1,
+  },
+  stepNavSpacer: {
+    flex: 1,
+  },
+  stickyFooter: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === "ios" ? 28 : 14,
+    borderTopWidth: 1,
+  },
   recommendedHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
