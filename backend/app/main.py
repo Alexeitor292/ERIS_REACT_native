@@ -1071,6 +1071,26 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         cands.sort(key=lambda r: r[0])
         return cands
 
+    def row_text_box_right_of_label(
+        ax: float,
+        ay: float,
+        *,
+        x_window: float = 280.0,
+        y_tol: float = 10.0,
+        min_w: float = 30.0,
+        max_w: float = 120.0,
+    ) -> tuple[float, float, float, float] | None:
+        # Find an input-style text rectangle to the right on the same row.
+        cands: list[tuple[float, tuple[float, float, float, float]]] = []
+        for rx, ry, rw, rh in text_rects:
+            cy = ry + (rh * 0.5)
+            if abs(cy - ay) <= y_tol and rx > ax and (rx - ax) <= x_window and min_w <= rw <= max_w:
+                cands.append((rx - ax, (rx, ry, rw, rh)))
+        if not cands:
+            return None
+        cands.sort(key=lambda t: t[0])
+        return cands[0][1]
+
     def row_boxes_for_prefix(
         label_prefix: str,
         *,
@@ -1503,12 +1523,26 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         boxes = row_boxes_left_of_label(ax, ay)
         # Some long-label rows can miss one box with narrow window; retry wider.
         if allow_immediate and allow_follow and len(boxes) < 2:
-            boxes = row_boxes_left_of_label(ax, ay, x_window=220.0, y_tol=10.0)
+            boxes = row_boxes_left_of_label(ax, ay, x_window=260.0, y_tol=10.0)
         # Some rows have two checkbox columns (immediate + follow-up),
         # while others have only one. Resolve rectangles per row type.
         if allow_immediate and allow_follow:
             follow_rect = boxes[-1] if len(boxes) >= 1 else None
             immediate_rect = boxes[-2] if len(boxes) >= 2 else None
+            # If only one column was found, try to recover the missing immediate box.
+            if follow_rect is not None and immediate_rect is None:
+                fx = follow_rect[0]
+                fcy = follow_rect[1] + (follow_rect[3] * 0.5)
+                left_cands: list[tuple[float, tuple[float, float, float, float]]] = []
+                for r2 in checkbox_rects:
+                    rx2, ry2, rw2, rh2 = r2
+                    cy2 = ry2 + (rh2 * 0.5)
+                    dx = fx - rx2
+                    if abs(cy2 - fcy) <= 10.0 and 20.0 <= dx <= 110.0:
+                        left_cands.append((dx, r2))
+                if left_cands:
+                    left_cands.sort(key=lambda t: t[0])
+                    immediate_rect = left_cands[0][1]
         elif allow_immediate and not allow_follow:
             immediate_rect = boxes[-1] if len(boxes) >= 1 else None
             follow_rect = None
@@ -1527,16 +1561,30 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
-    (
-        draw_value_from_prefix_rect("Open Highway Traffic", val("open_highway_traffic_lanes_count"), relation="right", align="center", x_window=220, y_window=12)
-        or draw_txt(540, 108, val("open_highway_traffic_lanes_count"))
-    )  # Open Highway Traffic lanes
+    # Open Highway Traffic lanes (row-level text-box detection, fallback to anchor-based).
+    lanes_drawn = False
+    oht_anchor = find_text_anchor_prefix("Open Highway Traffic")
+    if oht_anchor:
+        oht_box = row_text_box_right_of_label(oht_anchor[0], oht_anchor[1], x_window=320.0, y_tol=10.0)
+        if oht_box is not None:
+            lanes_drawn = draw_text_in_rect_pt(oht_box, val("open_highway_traffic_lanes_count"), align="center")
+    if not lanes_drawn:
+        lanes_drawn = draw_value_from_prefix_rect(
+            "Open Highway Traffic",
+            val("open_highway_traffic_lanes_count"),
+            relation="right",
+            align="center",
+            x_window=320,
+            y_window=18,
+        )
+    if not lanes_drawn:
+        draw_txt(540, 108, val("open_highway_traffic_lanes_count"))
     # Must match the "Close Highway" child options, not "One-way Closed" in Highway Status.
     one_anchor = find_text_anchor_exact("One")
     both_anchor = find_text_anchor_prefix("Both Directions")
     if one_anchor:
-        # Limit x-range to the Close Highway area so we never target Highway Status column.
-        oboxes = row_boxes_by_y(one_anchor[1], x_min=240.0, x_max=360.0, y_tol=8.0)
+        # Exact anchor + left-of-label ensures we target the "One" option checkbox.
+        oboxes = row_boxes_left_of_label(one_anchor[0], one_anchor[1], x_window=90.0, y_tol=8.0)
         if oboxes:
             draw_check_in_rect_pt(oboxes[-1], "CLOSE_ONE_DIRECTION" in immediate)
     if both_anchor:
