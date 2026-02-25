@@ -1072,21 +1072,38 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         cands.sort(key=lambda r: r[0])
         return cands
 
-    def row_text_box_right_of_label(
-        ax: float,
-        ay: float,
-        *,
-        x_window: float = 280.0,
-        y_tol: float = 10.0,
-        min_w: float = 30.0,
-        max_w: float = 220.0,
+    def find_oht_lanes_rect(
+        oht_anchor: tuple[float, float],
     ) -> tuple[float, float, float, float] | None:
-        # Find an input-style text rectangle to the right on the same row.
+        # Resolve the exact "Open Highway Traffic ... [box] Lanes" field using geometry, not hardcoded coords.
+        ox, oy = oht_anchor
+        lane_labels: list[tuple[float, float]] = []
+        for txt, tx, ty in all_text_positions:
+            if txt.strip().lower() == "lanes" and tx > (ox + 120.0) and abs(ty - oy) <= 16.0:
+                lane_labels.append((tx, ty))
+        if not lane_labels:
+            return None
+        lane_labels.sort(key=lambda p: (abs(p[1] - oy), p[0]))
+        lx, ly = lane_labels[0]
+        row_mid_x = ox + ((lx - ox) * 0.5)
+
+        # Candidate input rectangles near the row, immediately left of the "Lanes" text.
         cands: list[tuple[float, tuple[float, float, float, float]]] = []
-        for rx, ry, rw, rh in text_rects:
+        for rx, ry, rw, rh in all_rects:
             cy = ry + (rh * 0.5)
-            if abs(cy - ay) <= y_tol and rx > ax and (rx - ax) <= x_window and min_w <= rw <= max_w:
-                cands.append((rx - ax, (rx, ry, rw, rh)))
+            right = rx + rw
+            gap = lx - right
+            if not (35.0 <= rw <= 130.0 and 12.0 <= rh <= 44.0):
+                continue
+            if abs(cy - ly) > 14.0:
+                continue
+            if not (-4.0 <= gap <= 34.0):
+                continue
+            # Keep the match on the right side of the Open Highway Traffic row text.
+            if rx < row_mid_x:
+                continue
+            score = (abs(cy - ly) * 4.0) + abs(gap)
+            cands.append((score, (rx, ry, rw, rh)))
         if not cands:
             return None
         cands.sort(key=lambda t: t[0])
@@ -1598,35 +1615,18 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
-    # Open Highway Traffic lanes (row-level text-box detection, fallback to anchor-based).
+    # Open Highway Traffic lanes (strict row-level text-box detection).
     lanes_drawn = False
     oht_anchor = find_text_anchor_prefix("Open Highway Traffic")
     if oht_anchor:
-        # Prefer the text-input box on the same row before the "Lanes" label.
-        lane_labels: list[tuple[float, float]] = []
-        for txt, tx, ty in all_text_positions:
-            if txt.strip().lower() == "lanes" and tx > oht_anchor[0] and abs(ty - oht_anchor[1]) <= 16.0:
-                lane_labels.append((tx, ty))
-        lane_box: tuple[float, float, float, float] | None = None
-        if lane_labels:
-            lane_labels.sort(key=lambda p: (abs(p[1] - oht_anchor[1]), p[0]))
-            lx, ly = lane_labels[0]
-            lane_box = nearest_text_rect_for_anchor(
-                lx,
-                ly,
-                relation="left",
-                x_window=180.0,
-                y_window=16.0,
-            )
-        if lane_box is None:
-            lane_box = row_text_box_right_of_label(oht_anchor[0], oht_anchor[1], x_window=340.0, y_tol=12.0)
+        lane_box = find_oht_lanes_rect(oht_anchor)
         if lane_box is not None:
             lanes_drawn = draw_text_in_rect_pt(
                 lane_box,
                 val("open_highway_traffic_lanes_count"),
                 align="center",
             )
-    # No hardcoded fallback: only draw when the correct Open Highway Traffic lanes box is detected.
+    # No fallback: only draw when the correct Open Highway Traffic lanes box is detected.
     # Must match the "Close Highway" child options, not "One-way Closed" in Highway Status.
     one_anchor = find_text_anchor_exact("One")
     both_anchor = find_text_anchor_prefix("Both Directions")
