@@ -1626,8 +1626,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
                 val("open_highway_traffic_lanes_count"),
                 align="center",
             )
-    if not lanes_drawn:
-        draw_txt(540, 108, val("open_highway_traffic_lanes_count"))
+    # No hardcoded fallback: only draw when the correct Open Highway Traffic lanes box is detected.
     # Must match the "Close Highway" child options, not "One-way Closed" in Highway Status.
     one_anchor = find_text_anchor_exact("One")
     both_anchor = find_text_anchor_prefix("Both Directions")
