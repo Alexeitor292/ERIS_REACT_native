@@ -166,6 +166,7 @@ def startup():
             "ADD COLUMN IF NOT EXISTS impact_impacted_adj_structure TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS impact_maybe_adj_structure TINYINT NOT NULL DEFAULT 0",
             "ADD COLUMN IF NOT EXISTS impact_adj_structure VARCHAR(255) NULL",
+            "ADD COLUMN IF NOT EXISTS open_highway_traffic_lanes_count INT NULL",
             "ADD COLUMN IF NOT EXISTS measure_slope_height_ft DECIMAL(10,2) NULL",
             "ADD COLUMN IF NOT EXISTS measure_original_slope_deg DECIMAL(10,2) NULL",
             "ADD COLUMN IF NOT EXISTS measure_landslide_width_ft DECIMAL(10,2) NULL",
@@ -442,7 +443,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           report_date, district, county, route, post_mile, ea, project_id,
           date_incident_reported, district_contact,
           latitude, longitude,
-          distribution_code, highway_status_code, lanes_closed_count,
+          distribution_code, highway_status_code, lanes_closed_count, open_highway_traffic_lanes_count,
           pavement_ground_cracks,
           crack_length_ft, crack_horizontal_in, crack_vertical_in, crack_depth_in,
           settlement_in, bulge_in, indented_by_rocks,
@@ -732,10 +733,10 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     # Header/form top rows (write only field values, no extra labels/metadata)
     # Anchor-based placement: use label positions from the template itself.
     # Values are drawn in the corresponding boxes above labels.
-    # Slightly tighter vertical offset so values sit centered in the top-row boxes.
-    y_above = 17.0
+    # Lower values a bit so header text sits inside the boxes on mobile viewers.
+    y_above = 14.0
     # Row 1
-    ok = draw_from_anchor("Date", 0, 2, y_above, val("report_date"))
+    ok = draw_from_anchor("Date", 0, -6, y_above, val("report_date"))
     ok &= draw_from_anchor("District", 0, 2, y_above, val("district"))
     ok &= draw_from_anchor("County", 0, 2, y_above, val("county"))
     ok &= draw_from_anchor("Route", 0, 2, y_above, val("route"))
@@ -839,7 +840,9 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     draw_check(266, 108, highway_code == "OPEN")
     draw_check(266, 126, highway_code == "SHOULDER_CLOSED")
     draw_check(266, 144, highway_code == "LANES_CLOSED")
-    draw_txt(318, 145, val("lanes_closed_count"))
+    # Only render Highway Status lane count when Lane(s) Closed is selected.
+    if highway_code == "LANES_CLOSED":
+        draw_txt(318, 145, val("lanes_closed_count"))
     draw_check(266, 162, highway_code == "ONE_WAY_CLOSED")
     draw_check(266, 180, highway_code == "TWO_WAY_CLOSED")
 
@@ -935,7 +938,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             draw_check(468, top, fol_selected)
 
     # Child controls for unique actions
-    draw_txt(540, 108, val("lanes_closed_count"))  # Open Highway Traffic lanes
+    # Separate field from Highway Status lane closure count.
+    draw_txt(540, 108, val("open_highway_traffic_lanes_count"))  # Open Highway Traffic lanes
     draw_check(542, 144, "CLOSE_ONE_DIRECTION" in immediate)
     draw_check(578, 144, "CLOSE_BOTH_DIRECTIONS" in immediate)
 
@@ -1076,6 +1080,7 @@ class GisaDraftPatch(BaseModel):
     distribution_code: str | None = None
     highway_status_code: str | None = None
     lanes_closed_count: int | None = None
+    open_highway_traffic_lanes_count: int | None = None
 
     pavement_ground_cracks: bool | None = None
     crack_length_ft: float | None = None
