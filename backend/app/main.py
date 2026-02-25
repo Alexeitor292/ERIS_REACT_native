@@ -1604,6 +1604,28 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         oht_box = row_text_box_right_of_label(oht_anchor[0], oht_anchor[1], x_window=320.0, y_tol=10.0)
         if oht_box is not None:
             lanes_drawn = draw_text_in_rect_pt(oht_box, val("open_highway_traffic_lanes_count"), align="center")
+        if not lanes_drawn:
+            # Fallback: locate the "Lanes" label on the same row and target the box just to its left.
+            lane_labels: list[tuple[float, float]] = []
+            for txt, tx, ty in all_text_positions:
+                if txt.strip().lower() == "lanes" and tx > oht_anchor[0] and abs(ty - oht_anchor[1]) <= 14.0:
+                    lane_labels.append((tx, ty))
+            if lane_labels:
+                lane_labels.sort(key=lambda p: (abs(p[1] - oht_anchor[1]), p[0]))
+                lx, ly = lane_labels[0]
+                lbox = nearest_text_rect_for_anchor(
+                    lx,
+                    ly,
+                    relation="left",
+                    x_window=160.0,
+                    y_window=14.0,
+                )
+                if lbox is not None:
+                    lanes_drawn = draw_text_in_rect_pt(
+                        lbox,
+                        val("open_highway_traffic_lanes_count"),
+                        align="center",
+                    )
     if not lanes_drawn:
         lanes_drawn = draw_value_from_prefix_rect(
             "Open Highway Traffic",
