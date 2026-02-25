@@ -81,7 +81,8 @@ const EMPTY_FORM: FormState = {
 const n = (v: string) => (v.trim() ? v.trim() : null);
 const f = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${name} must be numeric`); return x; };
 const i = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${name} must be a whole number`); return x; };
-const triToBool = (v: "UNKNOWN" | "YES" | "NO") => (v === "YES" ? true : false);
+const triToBool = (v: "UNKNOWN" | "YES" | "NO") =>
+  v === "YES" ? true : v === "NO" ? false : null;
 const boolToTri = (v: any) => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
 const ynToBool = (v: string) => (v === "YES" ? true : v === "NO" ? false : null);
 const boolToYn = (v: any) => (v === true ? "YES" : v === false ? "NO" : "");
@@ -802,6 +803,25 @@ export default function SubmissionDetailScreen() {
     return true;
   }
 
+  const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
+    failure_rock_fall: "ROCK_FALL",
+    failure_topple: "TOPPLE",
+    failure_slide: "SLIDE",
+    failure_spread: "SPREAD",
+    failure_flow: "FLOW",
+    failure_compound: "COMPOUND",
+    failure_erosion: "EROSION",
+    failure_surficial_failure: "SURFICIAL_SLOUGHING",
+    failure_scoured_toe: "SCOURED_TOE",
+    failure_washout: "WASHOUT",
+  };
+
+  function incidentTypesFromFormState(state: FormState): string[] {
+    return Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
+      .filter(([k]) => (state as any)[k] === "YES")
+      .map(([, code]) => code);
+  }
+
   async function saveDraft() {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
@@ -834,7 +854,9 @@ export default function SubmissionDetailScreen() {
         measure_slope_height_ft: f(form.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(form.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(form.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(form.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(form.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(form.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(form.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(form.measure_roadway_width_ft, "Roadway width"),
         observations_notes: n(form.observations_notes), geometry_json: geometry,
       });
-      await replaceIncidentTypes(token, id, incidentTypes);
+      // Source of truth is the visible form chips; keep API payload derived from form.
+      const incidentItems = incidentTypesFromFormState(form);
+      await replaceIncidentTypes(token, id, incidentItems);
       await replaceActions(token, id, { immediate: immediateActions, follow_up: followUpActions });
       Alert.alert("Saved", "Draft saved.");
       await clearDraftLocalCache();
@@ -1513,7 +1535,24 @@ export default function SubmissionDetailScreen() {
               ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
               ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surficial Failure"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
             ].map(([key, label]) => (
-              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => canEdit && setVal(key as keyof FormState, form[key] === "YES" ? "NO" : "YES")} />
+              <Chip
+                key={key}
+                label={label}
+                palette={palette}
+                active={form[key] === "YES"}
+                disabled={!canEdit}
+                onPress={() => {
+                  if (!canEdit) return;
+                  const next = form[key] === "YES" ? "NO" : "YES";
+                  setVal(key as keyof FormState, next);
+                  const code = INCIDENT_TYPE_CODE_BY_FORM_KEY[key];
+                  if (!code) return;
+                  setIncidentTypes((prev) => {
+                    if (next === "YES") return prev.includes(code) ? prev : [...prev, code];
+                    return prev.filter((x) => x !== code);
+                  });
+                }}
+              />
             ))}
           </View>
         </DropdownBlock>
