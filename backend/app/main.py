@@ -981,15 +981,15 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         if code != "CLOSE_HIGHWAY_PARENT":
             fol_selected = code in follow_up
         if allow_immediate:
-            draw_check(472, top + 12, imm_selected)
+            draw_check(468, top + 9, imm_selected)
         if allow_follow:
-            draw_check(498, top + 12, fol_selected)
+            draw_check(494, top + 9, fol_selected)
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
     draw_txt(540, 108, val("open_highway_traffic_lanes_count"))  # Open Highway Traffic lanes
-    draw_check(570, 156, "CLOSE_ONE_DIRECTION" in immediate)
-    draw_check(606, 156, "CLOSE_BOTH_DIRECTIONS" in immediate)
+    draw_check(566, 152, "CLOSE_ONE_DIRECTION" in immediate)
+    draw_check(602, 152, "CLOSE_BOTH_DIRECTIONS" in immediate)
 
     # Measurements
     draw_txt(137, 564, val("measure_slope_height_ft"))
