@@ -1039,79 +1039,75 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         draw_txt(366, row3_top, c1.get("phone", ""))
         draw_txt(500, row3_top, c1.get("cell_phone", ""))
 
-    # Incident Type (left column)
+    # Incident Type (left column) - rectangle detected checkboxes
     incident_rows = [
-        ("failure_rock_fall", 108),
-        ("failure_topple", 126),
-        ("failure_slide", 144),
-        ("failure_spread", 162),
-        ("failure_flow", 180),
-        ("failure_compound", 198),
-        ("failure_erosion", 216),
-        ("failure_surficial_failure", 234),
-        ("failure_scoured_toe", 252),
-        ("failure_washout", 270),
+        ("failure_rock_fall", "ROCK_FALL", "(Rock) Fall"),
+        ("failure_topple", "TOPPLE", "Topple"),
+        ("failure_slide", "SLIDE", "Slide"),
+        ("failure_spread", "SPREAD", "Spread"),
+        ("failure_flow", "FLOW", "Flow"),
+        ("failure_compound", "COMPOUND", "Compound"),
+        ("failure_erosion", "EROSION", "Erosion"),
+        ("failure_surficial_failure", "SURFICIAL_SLOUGHING", "Surficial Sloughing"),
+        ("failure_scoured_toe", "SCOURED_TOE", "Scoured Toe"),
+        ("failure_washout", "WASHOUT", "Washout"),
     ]
-    for key, top in incident_rows:
-        code_match = {
-            "failure_rock_fall": "ROCK_FALL",
-            "failure_topple": "TOPPLE",
-            "failure_slide": "SLIDE",
-            "failure_spread": "SPREAD",
-            "failure_flow": "FLOW",
-            "failure_compound": "COMPOUND",
-            "failure_erosion": "EROSION",
-            "failure_surficial_failure": "SURFICIAL_SLOUGHING",
-            "failure_scoured_toe": "SCOURED_TOE",
-            "failure_washout": "WASHOUT",
-        }[key]
-        draw_check(15, top, is_on(key) or (code_match in incident_type_codes))
+    for key, code_match, label_prefix in incident_rows:
+        draw_check_for_prefix(
+            label_prefix,
+            is_on(key) or (code_match in incident_type_codes),
+            x_window=160.0,
+        )
 
-    # Distribution (middle-left column)
+    # Distribution (middle-left column) - rectangle detected checkboxes
     distribution_rows = [
-        ("distribution_advancing", "ADVANCING", 108),
-        ("distribution_retrogressive", "RETROGRESSING", 126),
-        ("distribution_enlarging", "ENLARGING", 144),
-        ("distribution_widening", "WIDENING", 162),
-        ("distribution_moving", "MOVING", 180),
-        ("distribution_confined", "CONFINED", 198),
+        ("distribution_advancing", "ADVANCING", "Advancing"),
+        ("distribution_retrogressive", "RETROGRESSING", "Retrogressing"),
+        ("distribution_enlarging", "ENLARGING", "Enlarging"),
+        ("distribution_widening", "WIDENING", "Widening"),
+        ("distribution_moving", "MOVING", "Moving"),
+        ("distribution_confined", "CONFINED", "Confined"),
     ]
-    for key, code, top in distribution_rows:
-        draw_check(141, top, is_on(key) or val("distribution_code") == code)
+    for key, code, label_prefix in distribution_rows:
+        draw_check_for_prefix(
+            label_prefix,
+            is_on(key) or val("distribution_code") == code,
+            x_window=170.0,
+        )
 
-    # Highway status
+    # Highway status - rectangle detected checkboxes
     highway_code = val("highway_status_code")
-    draw_check(269, 108, highway_code == "OPEN")
-    draw_check(269, 126, highway_code == "SHOULDER_CLOSED")
-    draw_check(269, 144, highway_code == "LANES_CLOSED")
+    draw_check_for_prefix("Open", highway_code == "OPEN", x_window=160.0)
+    draw_check_for_prefix("Shoulder Closed", highway_code == "SHOULDER_CLOSED", x_window=160.0)
+    draw_check_for_prefix("Lane(s) Closed", highway_code == "LANES_CLOSED", x_window=160.0)
     # Only render Highway Status lane count when Lane(s) Closed is selected.
     if highway_code == "LANES_CLOSED":
         draw_txt(352, 146, val("lanes_closed_count"))
-    draw_check(269, 162, highway_code == "ONE_WAY_CLOSED")
-    draw_check(269, 180, highway_code == "TWO_WAY_CLOSED")
+    draw_check_for_prefix("One-way Closed", highway_code == "ONE_WAY_CLOSED", x_window=160.0)
+    draw_check_for_prefix("Two-way Closed", highway_code == "TWO_WAY_CLOSED", x_window=160.0)
 
-    # Material + Soil estimates
-    draw_check(12, 292, is_on("material_rock"))
-    draw_check(12, 310, is_on("material_bedding"))
-    draw_check(12, 328, is_on("material_joints"))
-    draw_check(12, 346, is_on("material_fractures"))
-    draw_check(92, 292, is_on("material_soil"))
+    # Material + Soil estimates (checkboxes via rectangle detection)
+    draw_check_for_prefix("Rock", is_on("material_rock"), x_window=120.0)
+    draw_check_for_prefix("Bedding", is_on("material_bedding"), x_window=120.0)
+    draw_check_for_prefix("Joints", is_on("material_joints"), x_window=120.0)
+    draw_check_for_prefix("Fractures", is_on("material_fractures"), x_window=120.0)
+    draw_check_for_prefix("Soil", is_on("material_soil"), x_window=120.0)
     draw_txt(108, 292, val("est_soil_pct"))
     draw_txt(108, 310, val("est_clay_pct"))
     draw_txt(108, 328, val("est_silt_pct"))
     draw_txt(108, 346, val("est_sand_pct"))
     draw_txt(108, 364, val("est_gravel_pct"))
 
-    # Water content
-    draw_check(188, 292, is_on("water_dry"))
-    draw_check(188, 310, is_on("water_moist"))
-    draw_check(188, 328, is_on("water_wet"))
-    draw_check(188, 346, is_on("water_flowing"))
-    draw_check(206, 364, is_on("water_seep"))
-    draw_check(206, 382, is_on("water_spring"))
+    # Water content (checkboxes via rectangle detection)
+    draw_check_for_prefix("Dry", is_on("water_dry"), x_window=120.0)
+    draw_check_for_prefix("Moist", is_on("water_moist"), x_window=120.0)
+    draw_check_for_prefix("Wet", is_on("water_wet"), x_window=120.0)
+    draw_check_for_prefix("Flowing", is_on("water_flowing"), x_window=120.0)
+    draw_check_for_prefix("Seep", is_on("water_seep"), x_window=120.0)
+    draw_check_for_prefix("Spring", is_on("water_spring"), x_window=120.0)
 
-    # Pavement / Ground Status
-    draw_check(266, 218, is_on("pavement_ground_cracks"))
+    # Pavement / Ground Status (checkboxes via rectangle detection)
+    draw_check_for_prefix("Pavement/Ground Cracks", is_on("pavement_ground_cracks"), x_window=140.0)
     draw_txt(315, 218, val("crack_length_ft"))
     draw_txt(315, 236, val("crack_horizontal_in"))
     draw_txt(315, 254, val("crack_vertical_in"))
@@ -1119,7 +1115,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     # Settlement/Bulge rows are one row lower than crack-depth on this template.
     draw_txt(315, 308, val("settlement_in"))
     draw_txt(315, 326, val("bulge_in"))
-    draw_check(265, 344, is_on("indented_by_rocks"))
+    draw_check_for_prefix("Indented by Rocks", is_on("indented_by_rocks"), x_window=140.0)
 
     # Vegetation on slope
     # Coverage values belong in the right-side "Coverage %" column boxes.
@@ -1127,21 +1123,21 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     draw_txt(145, 447, val("vegetation_bushes_shrubs"))
     draw_txt(145, 471, val("vegetation_groundcover"))
 
-    # Water / Drainage
-    draw_check(266, 364, is_on("drainage_clogged_inlet"))
-    draw_check(266, 382, is_on("drainage_compromised_drains"))
-    draw_check(266, 400, is_on("drainage_surface_runoff"))
-    draw_check(266, 418, is_on("drainage_torrent_surge_flood"))
+    # Water / Drainage (checkboxes via rectangle detection)
+    draw_check_for_prefix("Clogged Inlet", is_on("drainage_clogged_inlet"), x_window=150.0)
+    draw_check_for_prefix("Compromised Drains", is_on("drainage_compromised_drains"), x_window=150.0)
+    draw_check_for_prefix("Surface Runoff", is_on("drainage_surface_runoff"), x_window=150.0)
+    draw_check_for_prefix("Torrent, Surge, Flood", is_on("drainage_torrent_surge_flood"), x_window=150.0)
 
-    # Impacted / May be impacted matrix
-    draw_check(266, 442, is_on("impact_impacted_adj_utilities"))
-    draw_check(309, 442, is_on("impact_maybe_adj_utilities"))
+    # Impacted / May be impacted matrix (two checkboxes per row)
+    draw_check_for_prefix("Adjacent Utilities", is_on("impact_impacted_adj_utilities"), from_right=1, x_window=170.0)
+    draw_check_for_prefix("Adjacent Utilities", is_on("impact_maybe_adj_utilities"), from_right=0, x_window=170.0)
     draw_txt(338, 442, val("impact_adj_utilities"), 7)
-    draw_check(266, 460, is_on("impact_impacted_adj_properties"))
-    draw_check(309, 460, is_on("impact_maybe_adj_properties"))
+    draw_check_for_prefix("Adjacent Properties", is_on("impact_impacted_adj_properties"), from_right=1, x_window=170.0)
+    draw_check_for_prefix("Adjacent Properties", is_on("impact_maybe_adj_properties"), from_right=0, x_window=170.0)
     draw_txt(338, 460, val("impact_adj_properties"), 7)
-    draw_check(266, 478, is_on("impact_impacted_adj_structure"))
-    draw_check(309, 478, is_on("impact_maybe_adj_structure"))
+    draw_check_for_prefix("Adjacent Structures", is_on("impact_impacted_adj_structure"), from_right=1, x_window=170.0)
+    draw_check_for_prefix("Adjacent Structures", is_on("impact_maybe_adj_structure"), from_right=0, x_window=170.0)
     draw_txt(338, 478, val("impact_adj_structure"), 7)
 
     # Recommended actions matrix
@@ -1170,15 +1166,59 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         ("SUBSURFACE_EXPLORATION", "Perform Subsurface Exploration", False, True),
         ("DETAILED_DESIGN_PLANS", "Perform Detailed Design & Produce Plans", False, True),
     ]
-    def row_boxes_left_of_label(ax: float, ay: float) -> list[tuple[float, float, float, float]]:
+    def row_boxes_left_of_label(
+        ax: float,
+        ay: float,
+        *,
+        x_window: float = 120.0,
+        y_tol: float = 8.0,
+    ) -> list[tuple[float, float, float, float]]:
         # Match checkbox rectangles around the label baseline, then keep those to the left.
         cands: list[tuple[float, float, float, float]] = []
         for rx, ry, rw, rh in checkbox_rects:
             cy = ry + (rh * 0.5)
-            if abs(cy - ay) <= 8.0 and rx < ax and (ax - rx) <= 120.0:
+            if abs(cy - ay) <= y_tol and rx < ax and (ax - rx) <= x_window:
                 cands.append((rx, ry, rw, rh))
         cands.sort(key=lambda r: r[0])
         return cands
+
+    def row_boxes_for_prefix(
+        label_prefix: str,
+        *,
+        occurrence: int = 0,
+        x_window: float = 140.0,
+        y_tol: float = 8.0,
+    ) -> list[tuple[float, float, float, float]]:
+        p = label_prefix.strip().lower()
+        matches: list[tuple[float, float]] = []
+        for txt, x, y in all_text_positions:
+            if txt.lower().startswith(p):
+                matches.append((x, y))
+        if occurrence >= len(matches):
+            return []
+        ax, ay = matches[occurrence]
+        return row_boxes_left_of_label(ax, ay, x_window=x_window, y_tol=y_tol)
+
+    def draw_check_for_prefix(
+        label_prefix: str,
+        checked: bool,
+        *,
+        occurrence: int = 0,
+        from_right: int = 0,
+        x_window: float = 140.0,
+        y_tol: float = 8.0,
+    ) -> bool:
+        boxes = row_boxes_for_prefix(
+            label_prefix,
+            occurrence=occurrence,
+            x_window=x_window,
+            y_tol=y_tol,
+        )
+        if not boxes:
+            return False
+        idx = max(0, len(boxes) - 1 - from_right)
+        draw_check_in_rect_pt(boxes[idx], checked)
+        return True
 
     for code, label_prefix, allow_immediate, allow_follow in action_rows:
         imm_selected = False
