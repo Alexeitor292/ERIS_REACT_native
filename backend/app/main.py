@@ -1475,8 +1475,20 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             continue
         ax, ay = row_anchor
         boxes = row_boxes_left_of_label(ax, ay)
-        follow_rect = boxes[-1] if len(boxes) >= 1 else None
-        immediate_rect = boxes[-2] if len(boxes) >= 2 else None
+        # Some rows have two checkbox columns (immediate + follow-up),
+        # while others have only one. Resolve rectangles per row type.
+        if allow_immediate and allow_follow:
+            follow_rect = boxes[-1] if len(boxes) >= 1 else None
+            immediate_rect = boxes[-2] if len(boxes) >= 2 else None
+        elif allow_immediate and not allow_follow:
+            immediate_rect = boxes[-1] if len(boxes) >= 1 else None
+            follow_rect = None
+        elif allow_follow and not allow_immediate:
+            follow_rect = boxes[-1] if len(boxes) >= 1 else None
+            immediate_rect = None
+        else:
+            follow_rect = None
+            immediate_rect = None
         if allow_immediate:
             if immediate_rect:
                 draw_check_in_rect_pt(immediate_rect, imm_selected)

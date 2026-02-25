@@ -1544,7 +1544,7 @@ export default function SubmissionDetailScreen() {
           <View style={styles.chips}>
             {[
               ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
-              ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surficial Failure"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
+              ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surfacial Sloughing"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
             ].map(([key, label]) => (
               <Chip
                 key={key}
