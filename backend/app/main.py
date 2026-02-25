@@ -990,6 +990,16 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
                 return (x, y)
         return None
 
+    def find_text_anchor_exact(text: str, *, occurrence: int = 0) -> tuple[float, float] | None:
+        target = text.strip().lower()
+        hits: list[tuple[float, float]] = []
+        for txt, x, y in all_text_positions:
+            if txt.strip().lower() == target:
+                hits.append((x, y))
+        if occurrence >= len(hits):
+            return None
+        return hits[occurrence]
+
     # Calibrate map_xy from real template anchors (fallback to defaults above).
     # Design coordinates are in the same top-origin coordinate space used below.
     def anchor_point(label: str, occurrence: int = 0) -> tuple[float, float] | None:
@@ -1041,6 +1051,22 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         for rx, ry, rw, rh in checkbox_rects:
             cy = ry + (rh * 0.5)
             if abs(cy - ay) <= y_tol and rx < ax and (ax - rx) <= x_window:
+                cands.append((rx, ry, rw, rh))
+        cands.sort(key=lambda r: r[0])
+        return cands
+
+    def row_boxes_by_y(
+        ay: float,
+        *,
+        x_min: float,
+        x_max: float,
+        y_tol: float = 8.0,
+    ) -> list[tuple[float, float, float, float]]:
+        # Restrict to a horizontal band and x-range. Useful where label text is ambiguous.
+        cands: list[tuple[float, float, float, float]] = []
+        for rx, ry, rw, rh in checkbox_rects:
+            cy = ry + (rh * 0.5)
+            if abs(cy - ay) <= y_tol and x_min <= rx <= x_max:
                 cands.append((rx, ry, rw, rh))
         cands.sort(key=lambda r: r[0])
         return cands
@@ -1475,6 +1501,9 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             continue
         ax, ay = row_anchor
         boxes = row_boxes_left_of_label(ax, ay)
+        # Some long-label rows can miss one box with narrow window; retry wider.
+        if allow_immediate and allow_follow and len(boxes) < 2:
+            boxes = row_boxes_left_of_label(ax, ay, x_window=220.0, y_tol=10.0)
         # Some rows have two checkbox columns (immediate + follow-up),
         # while others have only one. Resolve rectangles per row type.
         if allow_immediate and allow_follow:
@@ -1502,10 +1531,12 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         draw_value_from_prefix_rect("Open Highway Traffic", val("open_highway_traffic_lanes_count"), relation="right", align="center", x_window=220, y_window=12)
         or draw_txt(540, 108, val("open_highway_traffic_lanes_count"))
     )  # Open Highway Traffic lanes
-    one_anchor = find_text_anchor_prefix("One")
+    # Must match the "Close Highway" child options, not "One-way Closed" in Highway Status.
+    one_anchor = find_text_anchor_exact("One")
     both_anchor = find_text_anchor_prefix("Both Directions")
     if one_anchor:
-        oboxes = row_boxes_left_of_label(one_anchor[0], one_anchor[1])
+        # Limit x-range to the Close Highway area so we never target Highway Status column.
+        oboxes = row_boxes_by_y(one_anchor[1], x_min=240.0, x_max=360.0, y_tol=8.0)
         if oboxes:
             draw_check_in_rect_pt(oboxes[-1], "CLOSE_ONE_DIRECTION" in immediate)
     if both_anchor:
@@ -2299,10 +2330,6 @@ def replace_incident_types(
         ok = db.execute(text("SELECT 1 FROM gisa_incident_type_lut WHERE code=:c LIMIT 1"), {"c": code}).scalar()
         if not ok:
             raise HTTPException(status_code=400, detail=f"Invalid incident type: {code}")
-    # Defensive guard: preserve existing values when clients accidentally send an empty list.
-    if len(payload.items) == 0:
-        return {"submission_id": submission_id, "incident_types": get_gisa_incident_types(db, submission_id)}
-
     try:
         db.execute(text("DELETE FROM submission_gisa_incident_types WHERE submission_id=:sid"), {"sid": submission_id})
         for code in payload.items:
