@@ -678,8 +678,17 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         px, py = map_xy(x, top)
         if py < 0 or py > height:
             return
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(px, py, "X")
+        # Draw a geometric X centered in the checkbox to avoid font-baseline drift.
+        # Coordinates are interpreted as checkbox top-left in template space.
+        size = 10.0
+        inset = 2.0
+        top_y = py
+        left_x = px
+        right_x = left_x + size
+        bottom_y = top_y - size
+        c.setLineWidth(1.1)
+        c.line(left_x + inset, top_y - inset, right_x - inset, bottom_y + inset)
+        c.line(left_x + inset, bottom_y + inset, right_x - inset, top_y - inset)
 
     def extract_text_anchors(page) -> dict[str, list[tuple[float, float]]]:
         labels = {
