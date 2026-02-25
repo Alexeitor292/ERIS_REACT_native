@@ -1039,6 +1039,60 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         draw_txt(366, row3_top, c1.get("phone", ""))
         draw_txt(500, row3_top, c1.get("cell_phone", ""))
 
+    def row_boxes_left_of_label(
+        ax: float,
+        ay: float,
+        *,
+        x_window: float = 120.0,
+        y_tol: float = 8.0,
+    ) -> list[tuple[float, float, float, float]]:
+        # Match checkbox rectangles around the label baseline, then keep those to the left.
+        cands: list[tuple[float, float, float, float]] = []
+        for rx, ry, rw, rh in checkbox_rects:
+            cy = ry + (rh * 0.5)
+            if abs(cy - ay) <= y_tol and rx < ax and (ax - rx) <= x_window:
+                cands.append((rx, ry, rw, rh))
+        cands.sort(key=lambda r: r[0])
+        return cands
+
+    def row_boxes_for_prefix(
+        label_prefix: str,
+        *,
+        occurrence: int = 0,
+        x_window: float = 140.0,
+        y_tol: float = 8.0,
+    ) -> list[tuple[float, float, float, float]]:
+        p = label_prefix.strip().lower()
+        matches: list[tuple[float, float]] = []
+        for txt, x, y in all_text_positions:
+            if txt.lower().startswith(p):
+                matches.append((x, y))
+        if occurrence >= len(matches):
+            return []
+        ax, ay = matches[occurrence]
+        return row_boxes_left_of_label(ax, ay, x_window=x_window, y_tol=y_tol)
+
+    def draw_check_for_prefix(
+        label_prefix: str,
+        checked: bool,
+        *,
+        occurrence: int = 0,
+        from_right: int = 0,
+        x_window: float = 140.0,
+        y_tol: float = 8.0,
+    ) -> bool:
+        boxes = row_boxes_for_prefix(
+            label_prefix,
+            occurrence=occurrence,
+            x_window=x_window,
+            y_tol=y_tol,
+        )
+        if not boxes:
+            return False
+        idx = max(0, len(boxes) - 1 - from_right)
+        draw_check_in_rect_pt(boxes[idx], checked)
+        return True
+
     # Incident Type (left column) - rectangle detected checkboxes
     incident_rows = [
         ("failure_rock_fall", "ROCK_FALL", "(Rock) Fall"),
@@ -1166,60 +1220,6 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         ("SUBSURFACE_EXPLORATION", "Perform Subsurface Exploration", False, True),
         ("DETAILED_DESIGN_PLANS", "Perform Detailed Design & Produce Plans", False, True),
     ]
-    def row_boxes_left_of_label(
-        ax: float,
-        ay: float,
-        *,
-        x_window: float = 120.0,
-        y_tol: float = 8.0,
-    ) -> list[tuple[float, float, float, float]]:
-        # Match checkbox rectangles around the label baseline, then keep those to the left.
-        cands: list[tuple[float, float, float, float]] = []
-        for rx, ry, rw, rh in checkbox_rects:
-            cy = ry + (rh * 0.5)
-            if abs(cy - ay) <= y_tol and rx < ax and (ax - rx) <= x_window:
-                cands.append((rx, ry, rw, rh))
-        cands.sort(key=lambda r: r[0])
-        return cands
-
-    def row_boxes_for_prefix(
-        label_prefix: str,
-        *,
-        occurrence: int = 0,
-        x_window: float = 140.0,
-        y_tol: float = 8.0,
-    ) -> list[tuple[float, float, float, float]]:
-        p = label_prefix.strip().lower()
-        matches: list[tuple[float, float]] = []
-        for txt, x, y in all_text_positions:
-            if txt.lower().startswith(p):
-                matches.append((x, y))
-        if occurrence >= len(matches):
-            return []
-        ax, ay = matches[occurrence]
-        return row_boxes_left_of_label(ax, ay, x_window=x_window, y_tol=y_tol)
-
-    def draw_check_for_prefix(
-        label_prefix: str,
-        checked: bool,
-        *,
-        occurrence: int = 0,
-        from_right: int = 0,
-        x_window: float = 140.0,
-        y_tol: float = 8.0,
-    ) -> bool:
-        boxes = row_boxes_for_prefix(
-            label_prefix,
-            occurrence=occurrence,
-            x_window=x_window,
-            y_tol=y_tol,
-        )
-        if not boxes:
-            return False
-        idx = max(0, len(boxes) - 1 - from_right)
-        draw_check_in_rect_pt(boxes[idx], checked)
-        return True
-
     for code, label_prefix, allow_immediate, allow_follow in action_rows:
         imm_selected = False
         fol_selected = False
