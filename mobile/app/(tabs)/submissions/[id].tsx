@@ -83,9 +83,20 @@ const f = (v: string, name: string) => { if (!v.trim()) return null; const x = N
 const i = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${name} must be a whole number`); return x; };
 const triToBool = (v: "UNKNOWN" | "YES" | "NO") =>
   v === "YES" ? true : v === "NO" ? false : null;
-const boolToTri = (v: any) => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
+const normalizeBool = (v: any): boolean | null => {
+  if (v === true || v === 1 || v === "1") return true;
+  if (v === false || v === 0 || v === "0") return false;
+  return null;
+};
+const boolToTri = (v: any) => {
+  const b = normalizeBool(v);
+  return b === true ? "YES" : b === false ? "NO" : "UNKNOWN";
+};
 const ynToBool = (v: string) => (v === "YES" ? true : v === "NO" ? false : null);
-const boolToYn = (v: any) => (v === true ? "YES" : v === false ? "NO" : "");
+const boolToYn = (v: any) => {
+  const b = normalizeBool(v);
+  return b === true ? "YES" : b === false ? "NO" : "";
+};
 const isPlayServicesUnavailableError = (msg: string) =>
   /LocationServices\.API is not available|SERVICE_INVALID|Google Play services/i.test(msg);
 

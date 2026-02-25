@@ -476,6 +476,51 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
             d["geometry_json"] = json.loads(d["geometry_json"])
         except Exception:
             pass
+    # Normalize MySQL/MariaDB tinyint(1) values to JSON booleans for API consistency.
+    bool_fields = {
+        "pavement_ground_cracks",
+        "indented_by_rocks",
+        "failure_rock_fall",
+        "failure_topple",
+        "failure_slide",
+        "failure_spread",
+        "failure_flow",
+        "failure_compound",
+        "failure_erosion",
+        "failure_surficial_failure",
+        "failure_scoured_toe",
+        "failure_washout",
+        "distribution_advancing",
+        "distribution_retrogressive",
+        "distribution_enlarging",
+        "distribution_widening",
+        "distribution_moving",
+        "distribution_confined",
+        "material_rock",
+        "material_soil",
+        "material_bedding",
+        "material_joints",
+        "material_fractures",
+        "water_dry",
+        "water_moist",
+        "water_wet",
+        "water_flowing",
+        "water_seep",
+        "water_spring",
+        "drainage_clogged_inlet",
+        "drainage_compromised_drains",
+        "drainage_surface_runoff",
+        "drainage_torrent_surge_flood",
+        "impact_impacted_adj_utilities",
+        "impact_maybe_adj_utilities",
+        "impact_impacted_adj_properties",
+        "impact_maybe_adj_properties",
+        "impact_impacted_adj_structure",
+        "impact_maybe_adj_structure",
+    }
+    for key in bool_fields:
+        if key in d and d[key] is not None:
+            d[key] = bool(d[key])
     return d
 
 def get_gisa_incident_types(db: Session, submission_id: int) -> list[str]:
