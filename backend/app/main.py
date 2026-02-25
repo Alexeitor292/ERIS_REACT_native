@@ -771,7 +771,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     # Lower values a bit so header text sits inside the boxes on mobile viewers.
     y_above = 14.0
     # Row 1
-    ok = draw_from_anchor("Date", 0, -16, y_above, val("report_date"))
+    ok = draw_from_anchor("Date", 0, -12, y_above, val("report_date"))
     ok &= draw_from_anchor("District", 0, 2, y_above, val("district"))
     ok &= draw_from_anchor("County", 0, 2, y_above, val("county"))
     ok &= draw_from_anchor("Route", 0, 2, y_above, val("route"))
@@ -858,7 +858,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             "failure_scoured_toe": "SCOURED_TOE",
             "failure_washout": "WASHOUT",
         }[key]
-        draw_check(12, top, is_on(key) or (code_match in incident_type_codes))
+        draw_check(15, top, is_on(key) or (code_match in incident_type_codes))
 
     # Distribution (middle-left column)
     distribution_rows = [
@@ -870,18 +870,18 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         ("distribution_confined", "CONFINED", 198),
     ]
     for key, code, top in distribution_rows:
-        draw_check(138, top, is_on(key) or val("distribution_code") == code)
+        draw_check(141, top, is_on(key) or val("distribution_code") == code)
 
     # Highway status
     highway_code = val("highway_status_code")
-    draw_check(266, 108, highway_code == "OPEN")
-    draw_check(266, 126, highway_code == "SHOULDER_CLOSED")
-    draw_check(266, 144, highway_code == "LANES_CLOSED")
+    draw_check(269, 108, highway_code == "OPEN")
+    draw_check(269, 126, highway_code == "SHOULDER_CLOSED")
+    draw_check(269, 144, highway_code == "LANES_CLOSED")
     # Only render Highway Status lane count when Lane(s) Closed is selected.
     if highway_code == "LANES_CLOSED":
-        draw_txt(318, 145, val("lanes_closed_count"))
-    draw_check(266, 162, highway_code == "ONE_WAY_CLOSED")
-    draw_check(266, 180, highway_code == "TWO_WAY_CLOSED")
+        draw_txt(352, 146, val("lanes_closed_count"))
+    draw_check(269, 162, highway_code == "ONE_WAY_CLOSED")
+    draw_check(269, 180, highway_code == "TWO_WAY_CLOSED")
 
     # Material + Soil estimates
     draw_check(12, 292, is_on("material_rock"))
@@ -916,9 +916,9 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     # Vegetation on slope
     # Coverage values belong in the right-side "Coverage %" column boxes.
-    draw_txt(145, 419, val("vegetation_trees"))
+    draw_txt(145, 423, val("vegetation_trees"))
     draw_txt(145, 447, val("vegetation_bushes_shrubs"))
-    draw_txt(145, 475, val("vegetation_groundcover"))
+    draw_txt(145, 471, val("vegetation_groundcover"))
 
     # Water / Drainage
     draw_check(266, 364, is_on("drainage_clogged_inlet"))
@@ -972,15 +972,15 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         if code != "CLOSE_HIGHWAY_PARENT":
             fol_selected = code in follow_up
         if allow_immediate:
-            draw_check(442, top, imm_selected)
+            draw_check(456, top + 8, imm_selected)
         if allow_follow:
-            draw_check(468, top, fol_selected)
+            draw_check(482, top + 8, fol_selected)
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
     draw_txt(540, 108, val("open_highway_traffic_lanes_count"))  # Open Highway Traffic lanes
-    draw_check(542, 144, "CLOSE_ONE_DIRECTION" in immediate)
-    draw_check(578, 144, "CLOSE_BOTH_DIRECTIONS" in immediate)
+    draw_check(556, 152, "CLOSE_ONE_DIRECTION" in immediate)
+    draw_check(592, 152, "CLOSE_BOTH_DIRECTIONS" in immediate)
 
     # Measurements
     draw_txt(137, 564, val("measure_slope_height_ft"))
