@@ -984,125 +984,6 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         draw_txt_pt(ax + x_pad, ay + y_above_label, text_value, size=size)
         return True
 
-    # Header/form top rows (prefer rectangle-based text placement).
-    y_above = 14.0
-    ok = True
-    # Row 1
-    ok &= (
-        draw_value_from_prefix_rect("Date", val("report_date"), relation="above", align="center", size=7, x_window=70, y_window=34)
-        or draw_from_anchor("Date", 0, -12, y_above, val("report_date"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("District", val("district"), relation="above", align="center", x_window=70, y_window=34)
-        or draw_from_anchor("District", 0, 2, y_above, val("district"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("County", val("county"), relation="above", align="center", x_window=70, y_window=34)
-        or draw_from_anchor("County", 0, 2, y_above, val("county"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("Route", val("route"), relation="above", align="center", x_window=70, y_window=34)
-        or draw_from_anchor("Route", 0, 2, y_above, val("route"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("Post Mile", val("post_mile"), relation="above", align="center", x_window=70, y_window=34)
-        or draw_from_anchor("Post Mile", 0, 2, y_above, val("post_mile"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("EA (6 digits)", val("ea"), relation="above", align="center", size=7, x_window=90, y_window=34)
-        or draw_from_anchor("EA (6 digits)", 0, 2, y_above, val("ea"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("Project ID (10 digits)", val("project_id"), relation="above", align="center", size=7, x_window=95, y_window=34)
-        or draw_from_anchor("Project ID (10 digits)", 0, 2, y_above, val("project_id"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("Date Incident Reported", val("date_incident_reported"), relation="above", align="center", size=6, x_window=85, y_window=34)
-        or draw_from_anchor("Date Incident Reported", 0, 2, y_above, val("date_incident_reported"), size=7)
-    )
-
-    # Row 2
-    ok &= (
-        draw_value_from_prefix_rect("Latitude", val("latitude"), relation="above", align="left", x_window=90, y_window=34)
-        or draw_from_anchor("Latitude", 0, -10, y_above, val("latitude"))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("Longitude", val("longitude"), relation="above", align="left", x_window=90, y_window=34)
-        or draw_from_anchor("Longitude", 0, 2, y_above, val("longitude"))
-    )
-
-    # District contact rows (from serialized JSON list)
-    raw_contacts = val("district_contact")
-    contacts: list[dict] = []
-    if raw_contacts:
-        try:
-            parsed = json.loads(raw_contacts)
-            if isinstance(parsed, list):
-                contacts = [x for x in parsed if isinstance(x, dict)]
-        except Exception:
-            contacts = []
-    c1 = contacts[0] if len(contacts) > 0 else {}
-    c2 = contacts[1] if len(contacts) > 1 else {}
-    ok &= (
-        draw_value_from_prefix_rect("Last Name", c1.get("last_name", ""), occurrence=0, relation="above", x_window=110, y_window=34)
-        or draw_from_anchor("Last Name", 0, 2, y_above, c1.get("last_name", ""))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("First Name", c1.get("first_name", ""), occurrence=0, relation="above", x_window=110, y_window=34)
-        or draw_from_anchor("First Name", 0, 2, y_above, c1.get("first_name", ""))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("S Number", c1.get("s_number", ""), occurrence=0, relation="above", align="center", x_window=110, y_window=34)
-        or draw_from_anchor("S Number", 0, 2, y_above, c1.get("s_number", ""))
-    )
-    # Row 3 (second contact)
-    ok &= (
-        draw_value_from_prefix_rect("Last Name", c2.get("last_name", ""), occurrence=1, relation="above", x_window=120, y_window=34)
-        or draw_from_anchor("Last Name", 1, 2, y_above, c2.get("last_name", ""))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("First Name", c2.get("first_name", ""), occurrence=1, relation="above", x_window=120, y_window=34)
-        or draw_from_anchor("First Name", 1, 2, y_above, c2.get("first_name", ""))
-    )
-    ok &= (
-        draw_value_from_prefix_rect("S Number", c2.get("s_number", ""), occurrence=1, relation="above", align="center", x_window=120, y_window=34)
-        or draw_from_anchor("S Number", 1, 2, y_above, c2.get("s_number", ""))
-    )
-    c_phone = c1.get("phone", "")
-    c_cell = c1.get("cell_phone", "")
-    ok &= (
-        draw_value_from_prefix_rect("Phone", c_phone, relation="above", x_window=120, y_window=34)
-        or draw_from_anchor("Phone", 0, 2, y_above, c_phone)
-    )
-    ok &= (
-        draw_value_from_prefix_rect("Cell Phone", c_cell, relation="above", x_window=120, y_window=34)
-        or draw_from_anchor("Cell Phone", 0, 2, y_above, c_cell)
-    )
-
-    # Fallback: if anchors fail for any reason, keep approximate hardcoded placement.
-    if not ok:
-        row1_top = 24
-        row2_top = 52
-        row3_top = 81
-        draw_txt(6, row1_top, val("report_date"))
-        draw_txt(110, row1_top, val("district"))
-        draw_txt(180, row1_top, val("county"))
-        draw_txt(244, row1_top, val("route"))
-        draw_txt(318, row1_top, val("post_mile"))
-        draw_txt(378, row1_top, val("ea"))
-        draw_txt(434, row1_top, val("project_id"))
-        draw_txt(516, row1_top, val("date_incident_reported"), 7)
-        draw_txt(24, row2_top, val("latitude"))
-        draw_txt(130, row2_top, val("longitude"))
-        draw_txt(300, row2_top, c1.get("last_name", ""))
-        draw_txt(390, row2_top, c1.get("first_name", ""))
-        draw_txt(518, row2_top, c1.get("s_number", ""))
-        draw_txt(48, row3_top, c2.get("last_name", ""))
-        draw_txt(146, row3_top, c2.get("first_name", ""))
-        draw_txt(226, row3_top, c2.get("s_number", ""))
-        draw_txt(366, row3_top, c1.get("phone", ""))
-        draw_txt(500, row3_top, c1.get("cell_phone", ""))
-
     def row_boxes_left_of_label(
         ax: float,
         ay: float,
@@ -1254,6 +1135,125 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         if not rect:
             return False
         return draw_text_in_rect_pt(rect, text_value, size=size, align=align, pad=pad)
+
+    # Header/form top rows (prefer rectangle-based text placement).
+    y_above = 14.0
+    ok = True
+    # Row 1
+    ok &= (
+        draw_value_from_prefix_rect("Date", val("report_date"), relation="above", align="center", size=7, x_window=70, y_window=34)
+        or draw_from_anchor("Date", 0, -12, y_above, val("report_date"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("District", val("district"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("District", 0, 2, y_above, val("district"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("County", val("county"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("County", 0, 2, y_above, val("county"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Route", val("route"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("Route", 0, 2, y_above, val("route"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Post Mile", val("post_mile"), relation="above", align="center", x_window=70, y_window=34)
+        or draw_from_anchor("Post Mile", 0, 2, y_above, val("post_mile"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("EA (6 digits)", val("ea"), relation="above", align="center", size=7, x_window=90, y_window=34)
+        or draw_from_anchor("EA (6 digits)", 0, 2, y_above, val("ea"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Project ID (10 digits)", val("project_id"), relation="above", align="center", size=7, x_window=95, y_window=34)
+        or draw_from_anchor("Project ID (10 digits)", 0, 2, y_above, val("project_id"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Date Incident Reported", val("date_incident_reported"), relation="above", align="center", size=6, x_window=85, y_window=34)
+        or draw_from_anchor("Date Incident Reported", 0, 2, y_above, val("date_incident_reported"), size=7)
+    )
+
+    # Row 2
+    ok &= (
+        draw_value_from_prefix_rect("Latitude", val("latitude"), relation="above", align="left", x_window=90, y_window=34)
+        or draw_from_anchor("Latitude", 0, -10, y_above, val("latitude"))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Longitude", val("longitude"), relation="above", align="left", x_window=90, y_window=34)
+        or draw_from_anchor("Longitude", 0, 2, y_above, val("longitude"))
+    )
+
+    # District contact rows (from serialized JSON list)
+    raw_contacts = val("district_contact")
+    contacts: list[dict] = []
+    if raw_contacts:
+        try:
+            parsed = json.loads(raw_contacts)
+            if isinstance(parsed, list):
+                contacts = [x for x in parsed if isinstance(x, dict)]
+        except Exception:
+            contacts = []
+    c1 = contacts[0] if len(contacts) > 0 else {}
+    c2 = contacts[1] if len(contacts) > 1 else {}
+    ok &= (
+        draw_value_from_prefix_rect("Last Name", c1.get("last_name", ""), occurrence=0, relation="above", x_window=110, y_window=34)
+        or draw_from_anchor("Last Name", 0, 2, y_above, c1.get("last_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("First Name", c1.get("first_name", ""), occurrence=0, relation="above", x_window=110, y_window=34)
+        or draw_from_anchor("First Name", 0, 2, y_above, c1.get("first_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("S Number", c1.get("s_number", ""), occurrence=0, relation="above", align="center", x_window=110, y_window=34)
+        or draw_from_anchor("S Number", 0, 2, y_above, c1.get("s_number", ""))
+    )
+    # Row 3 (second contact)
+    ok &= (
+        draw_value_from_prefix_rect("Last Name", c2.get("last_name", ""), occurrence=1, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("Last Name", 1, 2, y_above, c2.get("last_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("First Name", c2.get("first_name", ""), occurrence=1, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("First Name", 1, 2, y_above, c2.get("first_name", ""))
+    )
+    ok &= (
+        draw_value_from_prefix_rect("S Number", c2.get("s_number", ""), occurrence=1, relation="above", align="center", x_window=120, y_window=34)
+        or draw_from_anchor("S Number", 1, 2, y_above, c2.get("s_number", ""))
+    )
+    c_phone = c1.get("phone", "")
+    c_cell = c1.get("cell_phone", "")
+    ok &= (
+        draw_value_from_prefix_rect("Phone", c_phone, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("Phone", 0, 2, y_above, c_phone)
+    )
+    ok &= (
+        draw_value_from_prefix_rect("Cell Phone", c_cell, relation="above", x_window=120, y_window=34)
+        or draw_from_anchor("Cell Phone", 0, 2, y_above, c_cell)
+    )
+
+    # Fallback: if anchors fail for any reason, keep approximate hardcoded placement.
+    if not ok:
+        row1_top = 24
+        row2_top = 52
+        row3_top = 81
+        draw_txt(6, row1_top, val("report_date"))
+        draw_txt(110, row1_top, val("district"))
+        draw_txt(180, row1_top, val("county"))
+        draw_txt(244, row1_top, val("route"))
+        draw_txt(318, row1_top, val("post_mile"))
+        draw_txt(378, row1_top, val("ea"))
+        draw_txt(434, row1_top, val("project_id"))
+        draw_txt(516, row1_top, val("date_incident_reported"), 7)
+        draw_txt(24, row2_top, val("latitude"))
+        draw_txt(130, row2_top, val("longitude"))
+        draw_txt(300, row2_top, c1.get("last_name", ""))
+        draw_txt(390, row2_top, c1.get("first_name", ""))
+        draw_txt(518, row2_top, c1.get("s_number", ""))
+        draw_txt(48, row3_top, c2.get("last_name", ""))
+        draw_txt(146, row3_top, c2.get("first_name", ""))
+        draw_txt(226, row3_top, c2.get("s_number", ""))
+        draw_txt(366, row3_top, c1.get("phone", ""))
+        draw_txt(500, row3_top, c1.get("cell_phone", ""))
 
     # Incident Type (left column) - rectangle detected checkboxes
     incident_rows = [
