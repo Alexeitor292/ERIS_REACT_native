@@ -799,19 +799,128 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         return out
 
     def extract_checkbox_rects(page) -> list[tuple[float, float, float, float]]:
+        """
+        Extract checkbox rectangles from vector path ops.
+
+        This template does not emit `re` operators for most checkboxes; instead it
+        draws box outlines with path ops (`m/l/h`) followed by paint ops (`S`/`f`).
+        We therefore parse path segments and recover axis-aligned rectangles.
+        """
         rects: list[tuple[float, float, float, float]] = []
         try:
             content = ContentStream(page.get_contents(), page.pdf)
+
+            subpaths: list[list[tuple[float, float]]] = []
+            current_path: list[tuple[float, float]] = []
+            # PDF CTM in affine form: [a b c d e f]
+            ctm: tuple[float, float, float, float, float, float] = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            ctm_stack: list[tuple[float, float, float, float, float, float]] = []
+
+            def mul_affine(
+                m1: tuple[float, float, float, float, float, float],
+                m2: tuple[float, float, float, float, float, float],
+            ) -> tuple[float, float, float, float, float, float]:
+                a1, b1, c1, d1, e1, f1 = m1
+                a2, b2, c2, d2, e2, f2 = m2
+                return (
+                    (a1 * a2) + (c1 * b2),
+                    (b1 * a2) + (d1 * b2),
+                    (a1 * c2) + (c1 * d2),
+                    (b1 * c2) + (d1 * d2),
+                    (a1 * e2) + (c1 * f2) + e1,
+                    (b1 * e2) + (d1 * f2) + f1,
+                )
+
+            def tx_point(x: float, y: float) -> tuple[float, float]:
+                a, b, c_, d, e, f = ctm
+                return ((a * x) + (c_ * y) + e, (b * x) + (d * y) + f)
+
+            def maybe_add_rect_from_points(points: list[tuple[float, float]]) -> None:
+                if not points or len(points) < 4:
+                    return
+                pts = points[:]
+                if pts[0] == pts[-1]:
+                    pts = pts[:-1]
+                if len(pts) != 4:
+                    return
+                xs = sorted({round(p[0], 3) for p in pts})
+                ys = sorted({round(p[1], 3) for p in pts})
+                if len(xs) != 2 or len(ys) != 2:
+                    return
+                w = float(abs(xs[1] - xs[0]))
+                h = float(abs(ys[1] - ys[0]))
+                # Checkbox-like bounds in PDF points.
+                if 8.0 <= w <= 25.0 and 8.0 <= h <= 25.0:
+                    rects.append((float(xs[0]), float(ys[0]), w, h))
+
+            def flush_path(paint: bool) -> None:
+                nonlocal subpaths, current_path
+                if current_path:
+                    subpaths.append(current_path)
+                    current_path = []
+                if paint:
+                    for sp in subpaths:
+                        maybe_add_rect_from_points(sp)
+                subpaths = []
+
             for operands, operator in content.operations:
-                if operator != b"re" or len(operands) != 4:
+                if operator == b"q":
+                    ctm_stack.append(ctm)
                     continue
-                x, y, w, h = [float(v) for v in operands]
-                # Keep likely checkbox rectangles only.
-                if 9.0 <= w <= 22.0 and 9.0 <= h <= 22.0:
-                    rects.append((x, y, w, h))
+                if operator == b"Q":
+                    if ctm_stack:
+                        ctm = ctm_stack.pop()
+                    continue
+                if operator == b"cm" and len(operands) == 6:
+                    cm_op = tuple(float(v) for v in operands)
+                    ctm = mul_affine(cm_op, ctm)
+                    continue
+
+                if operator == b"m" and len(operands) >= 2:
+                    if current_path:
+                        subpaths.append(current_path)
+                    current_path = [tx_point(float(operands[0]), float(operands[1]))]
+                elif operator == b"l" and len(operands) >= 2:
+                    if current_path:
+                        current_path.append(tx_point(float(operands[0]), float(operands[1])))
+                elif operator == b"h":
+                    if current_path:
+                        current_path.append(current_path[0])
+                elif operator == b"re" and len(operands) == 4:
+                    x, y, w, h = [float(v) for v in operands]
+                    # Transform all 4 corners through CTM then compute axis-aligned bbox.
+                    p1 = tx_point(x, y)
+                    p2 = tx_point(x + w, y)
+                    p3 = tx_point(x + w, y + h)
+                    p4 = tx_point(x, y + h)
+                    xs = [p1[0], p2[0], p3[0], p4[0]]
+                    ys = [p1[1], p2[1], p3[1], p4[1]]
+                    rx = min(xs)
+                    ry = min(ys)
+                    rw = max(xs) - rx
+                    rh = max(ys) - ry
+                    if 8.0 <= rw <= 25.0 and 8.0 <= rh <= 25.0:
+                        rects.append((rx, ry, rw, rh))
+                elif operator in (b"S", b"s", b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*"):
+                    flush_path(paint=True)
+                elif operator == b"n":
+                    flush_path(paint=False)
+
         except Exception:
             return []
-        return rects
+
+        # Deduplicate near-identical inner/outer outlines.
+        dedup: dict[tuple[int, int, int, int], tuple[float, float, float, float]] = {}
+        for x, y, w, h in rects:
+            key = (int(round(x * 2)), int(round(y * 2)), int(round(w * 2)), int(round(h * 2)))
+            # Keep the larger rectangle if nearly identical keys collide.
+            prev = dedup.get(key)
+            if not prev or (w * h) > (prev[2] * prev[3]):
+                dedup[key] = (x, y, w, h)
+
+        out = list(dedup.values())
+        out.sort(key=lambda r: (r[1], r[0]))
+        return out
 
     anchors = extract_text_anchors(base_page)
     all_text_positions = extract_all_text_positions(base_page)
