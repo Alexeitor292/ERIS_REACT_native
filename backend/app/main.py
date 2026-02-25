@@ -1302,23 +1302,27 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     # Incident Type (left column) - rectangle detected checkboxes
     incident_rows = [
-        ("failure_rock_fall", "ROCK_FALL", "(Rock) Fall"),
-        ("failure_topple", "TOPPLE", "Topple"),
-        ("failure_slide", "SLIDE", "Slide"),
-        ("failure_spread", "SPREAD", "Spread"),
-        ("failure_flow", "FLOW", "Flow"),
-        ("failure_compound", "COMPOUND", "Compound"),
-        ("failure_erosion", "EROSION", "Erosion"),
-        ("failure_surficial_failure", "SURFICIAL_SLOUGHING", "Surficial Sloughing"),
-        ("failure_scoured_toe", "SCOURED_TOE", "Scoured Toe"),
-        ("failure_washout", "WASHOUT", "Washout"),
+        ("failure_rock_fall", "ROCK_FALL", ["(Rock) Fall"]),
+        ("failure_topple", "TOPPLE", ["Topple"]),
+        ("failure_slide", "SLIDE", ["Slide"]),
+        ("failure_spread", "SPREAD", ["Spread"]),
+        ("failure_flow", "FLOW", ["Flow"]),
+        ("failure_compound", "COMPOUND", ["Compound"]),
+        ("failure_erosion", "EROSION", ["Erosion"]),
+        # Template text can vary between "Surficial" and "Surfacial".
+        ("failure_surficial_failure", "SURFICIAL_SLOUGHING", ["Surficial Sloughing", "Surfacial Sloughing"]),
+        ("failure_scoured_toe", "SCOURED_TOE", ["Scoured Toe"]),
+        ("failure_washout", "WASHOUT", ["Washout"]),
     ]
-    for key, code_match, label_prefix in incident_rows:
-        draw_check_for_prefix(
-            label_prefix,
-            is_on(key) or (code_match in incident_type_codes),
-            x_window=160.0,
-        )
+    for key, code_match, label_prefixes in incident_rows:
+        checked = is_on(key) or (code_match in incident_type_codes)
+        if not checked:
+            continue
+        placed = False
+        for label_prefix in label_prefixes:
+            placed = draw_check_for_prefix(label_prefix, True, x_window=160.0)
+            if placed:
+                break
 
     # Distribution (middle-left column) - rectangle detected checkboxes
     distribution_rows = [
@@ -2216,12 +2220,10 @@ def patch_gisa(
         if key in provided and provided[key] is None:
             provided.pop(key, None)
 
-    # Same protection for lookup codes: avoid resetting to "unknown"/blank when
-    # client sends null as part of partial draft payloads.
-    nullable_code_fields = {"distribution_code", "highway_status_code"}
-    for key in nullable_code_fields:
-        if key in provided and provided[key] is None:
-            provided.pop(key, None)
+    # NOTE:
+    # `distribution_code` / `highway_status_code` must allow explicit clear.
+    # Clients send null when user deselects a chip; dropping null here prevents
+    # unselect from persisting and causes stale values to reappear on reload.
 
     if "geometry_json" in provided and provided["geometry_json"] is not None:
         provided["geometry_json"] = json.dumps(provided["geometry_json"])
