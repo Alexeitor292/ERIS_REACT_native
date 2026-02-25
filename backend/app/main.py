@@ -2123,8 +2123,9 @@ def patch_gisa(
     if not provided:
         return {"submission_id": submission_id, "gisa": get_gisa(db, submission_id)}
 
-    # UI may send null for unchecked boolean chips; DB columns are NOT NULL TINYINT.
-    # Normalize null -> False so "unchecked" persists safely.
+    # PATCH semantics: treat null as "no change" for NOT NULL boolean fields.
+    # Some clients send nullable booleans in draft payloads; coercing null->False
+    # causes unintended checkbox wipes on Save Draft.
     boolean_not_null_fields = {
         "pavement_ground_cracks",
         "indented_by_rocks",
@@ -2166,9 +2167,16 @@ def patch_gisa(
         "impact_impacted_adj_structure",
         "impact_maybe_adj_structure",
     }
-    for key in boolean_not_null_fields:
+    for key in list(boolean_not_null_fields):
         if key in provided and provided[key] is None:
-            provided[key] = False
+            provided.pop(key, None)
+
+    # Same protection for lookup codes: avoid resetting to "unknown"/blank when
+    # client sends null as part of partial draft payloads.
+    nullable_code_fields = {"distribution_code", "highway_status_code"}
+    for key in nullable_code_fields:
+        if key in provided and provided[key] is None:
+            provided.pop(key, None)
 
     if "geometry_json" in provided and provided["geometry_json"] is not None:
         provided["geometry_json"] = json.dumps(provided["geometry_json"])
@@ -2232,6 +2240,9 @@ def replace_incident_types(
         ok = db.execute(text("SELECT 1 FROM gisa_incident_type_lut WHERE code=:c LIMIT 1"), {"c": code}).scalar()
         if not ok:
             raise HTTPException(status_code=400, detail=f"Invalid incident type: {code}")
+    # Defensive guard: preserve existing values when clients accidentally send an empty list.
+    if len(payload.items) == 0:
+        return {"submission_id": submission_id, "incident_types": get_gisa_incident_types(db, submission_id)}
 
     try:
         db.execute(text("DELETE FROM submission_gisa_incident_types WHERE submission_id=:sid"), {"sid": submission_id})
