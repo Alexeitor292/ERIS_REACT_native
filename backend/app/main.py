@@ -1033,6 +1033,12 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         ("SUBSURFACE_EXPLORATION", "Perform Subsurface Exploration", False, True),
         ("DETAILED_DESIGN_PLANS", "Perform Detailed Design & Produce Plans", False, True),
     ]
+    imm_header = find_text_anchor_prefix("Immediate")
+    fol_header = find_text_anchor_prefix("Follow-up")
+    col_gap = None
+    if imm_header and fol_header:
+        col_gap = fol_header[0] - imm_header[0]
+
     for code, label_prefix, allow_immediate, allow_follow in action_rows:
         imm_selected = False
         fol_selected = False
@@ -1047,10 +1053,17 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             continue
         ax, ay = row_anchor
         y_top = ay + 6.0
+        # Place follow-up box immediately left of row label.
+        follow_x = ax - 20.0
+        # Derive immediate column from header spacing when available.
+        if col_gap is not None:
+            immediate_x = follow_x - col_gap
+        else:
+            immediate_x = ax - 46.0
         if allow_immediate:
-            draw_check_tight_pt(ax - 80.0, y_top, imm_selected)
+            draw_check_tight_pt(immediate_x, y_top, imm_selected)
         if allow_follow:
-            draw_check_tight_pt(ax - 54.0, y_top, fol_selected)
+            draw_check_tight_pt(follow_x, y_top, fol_selected)
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
