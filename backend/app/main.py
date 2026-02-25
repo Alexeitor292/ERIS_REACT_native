@@ -1091,6 +1091,27 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         cands.sort(key=lambda t: t[0])
         return cands[0][1]
 
+    def rect_center_x(rect: tuple[float, float, float, float]) -> float:
+        return rect[0] + (rect[2] * 0.5)
+
+    def pick_box_nearest_x(
+        boxes: list[tuple[float, float, float, float]],
+        target_x: float,
+        *,
+        exclude_idx: set[int] | None = None,
+    ) -> tuple[int, tuple[float, float, float, float]] | None:
+        ex = exclude_idx or set()
+        cands: list[tuple[float, int, tuple[float, float, float, float]]] = []
+        for i, b in enumerate(boxes):
+            if i in ex:
+                continue
+            cands.append((abs(rect_center_x(b) - target_x), i, b))
+        if not cands:
+            return None
+        cands.sort(key=lambda t: t[0])
+        _, idx, rect = cands[0]
+        return (idx, rect)
+
     def row_boxes_for_prefix(
         label_prefix: str,
         *,
@@ -1507,6 +1528,19 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         ("SUBSURFACE_EXPLORATION", "Perform Subsurface Exploration", False, True),
         ("DETAILED_DESIGN_PLANS", "Perform Detailed Design & Produce Plans", False, True),
     ]
+    # Calibrate action columns from the first action row when possible:
+    # expected order is [Immediate, Follow-up] from left to right.
+    action_immediate_x: float | None = None
+    action_followup_x: float | None = None
+    sample_anchor = find_text_anchor_prefix("Open Highway Traffic")
+    if sample_anchor:
+        sboxes = row_boxes_left_of_label(sample_anchor[0], sample_anchor[1], x_window=320.0, y_tol=10.0)
+        if len(sboxes) >= 2:
+            # Use the two rightmost boxes to avoid accidental captures from other sections.
+            pair = sboxes[-2:]
+            pair.sort(key=lambda r: r[0])
+            action_immediate_x = rect_center_x(pair[0])
+            action_followup_x = rect_center_x(pair[1])
     for code, label_prefix, allow_immediate, allow_follow in action_rows:
         imm_selected = False
         fol_selected = False
@@ -1520,29 +1554,31 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         if not row_anchor:
             continue
         ax, ay = row_anchor
-        boxes = row_boxes_left_of_label(ax, ay)
+        boxes = row_boxes_left_of_label(ax, ay, x_window=320.0, y_tol=10.0)
         # Some long-label rows can miss one box with narrow window; retry wider.
         if allow_immediate and allow_follow and len(boxes) < 2:
             boxes = row_boxes_left_of_label(ax, ay, x_window=260.0, y_tol=10.0)
         # Some rows have two checkbox columns (immediate + follow-up),
         # while others have only one. Resolve rectangles per row type.
         if allow_immediate and allow_follow:
-            follow_rect = boxes[-1] if len(boxes) >= 1 else None
-            immediate_rect = boxes[-2] if len(boxes) >= 2 else None
-            # If only one column was found, try to recover the missing immediate box.
-            if follow_rect is not None and immediate_rect is None:
-                fx = follow_rect[0]
-                fcy = follow_rect[1] + (follow_rect[3] * 0.5)
-                left_cands: list[tuple[float, tuple[float, float, float, float]]] = []
-                for r2 in checkbox_rects:
-                    rx2, ry2, rw2, rh2 = r2
-                    cy2 = ry2 + (rh2 * 0.5)
-                    dx = fx - rx2
-                    if abs(cy2 - fcy) <= 10.0 and 20.0 <= dx <= 110.0:
-                        left_cands.append((dx, r2))
-                if left_cands:
-                    left_cands.sort(key=lambda t: t[0])
-                    immediate_rect = left_cands[0][1]
+            immediate_rect = None
+            follow_rect = None
+            if boxes:
+                if action_immediate_x is not None and action_followup_x is not None:
+                    # Deterministic per-column routing.
+                    used: set[int] = set()
+                    pick_imm = pick_box_nearest_x(boxes, action_immediate_x, exclude_idx=used)
+                    if pick_imm is not None:
+                        used.add(pick_imm[0])
+                        immediate_rect = pick_imm[1]
+                    pick_fol = pick_box_nearest_x(boxes, action_followup_x, exclude_idx=used)
+                    if pick_fol is not None:
+                        used.add(pick_fol[0])
+                        follow_rect = pick_fol[1]
+                else:
+                    # Fallback to positional ordering.
+                    follow_rect = boxes[-1] if len(boxes) >= 1 else None
+                    immediate_rect = boxes[-2] if len(boxes) >= 2 else None
         elif allow_immediate and not allow_follow:
             immediate_rect = boxes[-1] if len(boxes) >= 1 else None
             follow_rect = None
