@@ -771,7 +771,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     # Lower values a bit so header text sits inside the boxes on mobile viewers.
     y_above = 14.0
     # Row 1
-    ok = draw_from_anchor("Date", 0, -12, y_above, val("report_date"))
+    ok = draw_from_anchor("Date", 0, -16, y_above, val("report_date"))
     ok &= draw_from_anchor("District", 0, 2, y_above, val("district"))
     ok &= draw_from_anchor("County", 0, 2, y_above, val("county"))
     ok &= draw_from_anchor("Route", 0, 2, y_above, val("route"))
@@ -803,8 +803,10 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     ok &= draw_from_anchor("Last Name", 1, 2, y_above, c2.get("last_name", ""))
     ok &= draw_from_anchor("First Name", 1, 2, y_above, c2.get("first_name", ""))
     ok &= draw_from_anchor("S Number", 1, 2, y_above, c2.get("s_number", ""))
-    ok &= draw_from_anchor("Phone", 0, 2, y_above, c2.get("phone", ""))
-    ok &= draw_from_anchor("Cell Phone", 0, 2, y_above, c2.get("cell_phone", ""))
+    c_phone = c1.get("phone", "")
+    c_cell = c1.get("cell_phone", "")
+    ok &= draw_from_anchor("Phone", 0, 2, y_above, c_phone)
+    ok &= draw_from_anchor("Cell Phone", 0, 2, y_above, c_cell)
 
     # Fallback: if anchors fail for any reason, keep approximate hardcoded placement.
     if not ok:
@@ -827,8 +829,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         draw_txt(48, row3_top, c2.get("last_name", ""))
         draw_txt(146, row3_top, c2.get("first_name", ""))
         draw_txt(226, row3_top, c2.get("s_number", ""))
-        draw_txt(366, row3_top, c2.get("phone", ""))
-        draw_txt(500, row3_top, c2.get("cell_phone", ""))
+        draw_txt(366, row3_top, c1.get("phone", ""))
+        draw_txt(500, row3_top, c1.get("cell_phone", ""))
 
     # Incident Type (left column)
     incident_rows = [
@@ -907,14 +909,16 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     draw_txt(315, 236, val("crack_horizontal_in"))
     draw_txt(315, 254, val("crack_vertical_in"))
     draw_txt(315, 272, val("crack_depth_in"))
-    draw_txt(315, 290, val("settlement_in"))
-    draw_txt(315, 308, val("bulge_in"))
-    draw_check(265, 326, is_on("indented_by_rocks"))
+    # Settlement/Bulge rows are one row lower than crack-depth on this template.
+    draw_txt(315, 308, val("settlement_in"))
+    draw_txt(315, 326, val("bulge_in"))
+    draw_check(265, 344, is_on("indented_by_rocks"))
 
     # Vegetation on slope
-    draw_txt(98, 419, val("vegetation_trees"))
-    draw_txt(98, 447, val("vegetation_bushes_shrubs"))
-    draw_txt(98, 475, val("vegetation_groundcover"))
+    # Coverage values belong in the right-side "Coverage %" column boxes.
+    draw_txt(145, 419, val("vegetation_trees"))
+    draw_txt(145, 447, val("vegetation_bushes_shrubs"))
+    draw_txt(145, 475, val("vegetation_groundcover"))
 
     # Water / Drainage
     draw_check(266, 364, is_on("drainage_clogged_inlet"))
