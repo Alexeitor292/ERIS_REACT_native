@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from reportlab.pdfgen import canvas
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import ContentStream
 
 from .db import SessionLocal, get_db
 from .config import settings
@@ -727,6 +728,17 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         c.line(x + inset, y_top - inset, right_x - inset, bottom_y + inset)
         c.line(x + inset, bottom_y + inset, right_x - inset, y_top - inset)
 
+    def draw_check_in_rect_pt(rect: tuple[float, float, float, float], checked: bool):
+        if not checked:
+            return
+        rx, ry, rw, rh = rect
+        if rw <= 0 or rh <= 0:
+            return
+        inset = max(1.0, min(rw, rh) * 0.18)
+        c.setLineWidth(1.0)
+        c.line(rx + inset, ry + inset, rx + rw - inset, ry + rh - inset)
+        c.line(rx + inset, ry + rh - inset, rx + rw - inset, ry + inset)
+
     def extract_text_anchors(page) -> dict[str, list[tuple[float, float]]]:
         labels = {
             "Date",
@@ -786,8 +798,24 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         out.sort(key=lambda t: (-t[2], t[1]))
         return out
 
+    def extract_checkbox_rects(page) -> list[tuple[float, float, float, float]]:
+        rects: list[tuple[float, float, float, float]] = []
+        try:
+            content = ContentStream(page.get_contents(), page.pdf)
+            for operands, operator in content.operations:
+                if operator != b"re" or len(operands) != 4:
+                    continue
+                x, y, w, h = [float(v) for v in operands]
+                # Keep likely checkbox rectangles only.
+                if 9.0 <= w <= 22.0 and 9.0 <= h <= 22.0:
+                    rects.append((x, y, w, h))
+        except Exception:
+            return []
+        return rects
+
     anchors = extract_text_anchors(base_page)
     all_text_positions = extract_all_text_positions(base_page)
+    checkbox_rects = extract_checkbox_rects(base_page)
 
     def find_text_anchor_prefix(prefix: str) -> tuple[float, float] | None:
         p = prefix.strip().lower()
@@ -1033,11 +1061,15 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         ("SUBSURFACE_EXPLORATION", "Perform Subsurface Exploration", False, True),
         ("DETAILED_DESIGN_PLANS", "Perform Detailed Design & Produce Plans", False, True),
     ]
-    imm_header = find_text_anchor_prefix("Immediate")
-    fol_header = find_text_anchor_prefix("Follow-up")
-    col_gap = None
-    if imm_header and fol_header:
-        col_gap = fol_header[0] - imm_header[0]
+    def row_boxes_left_of_label(ax: float, ay: float) -> list[tuple[float, float, float, float]]:
+        # Match checkbox rectangles around the label baseline, then keep those to the left.
+        cands: list[tuple[float, float, float, float]] = []
+        for rx, ry, rw, rh in checkbox_rects:
+            cy = ry + (rh * 0.5)
+            if abs(cy - ay) <= 8.0 and rx < ax and (ax - rx) <= 120.0:
+                cands.append((rx, ry, rw, rh))
+        cands.sort(key=lambda r: r[0])
+        return cands
 
     for code, label_prefix, allow_immediate, allow_follow in action_rows:
         imm_selected = False
@@ -1052,18 +1084,15 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
         if not row_anchor:
             continue
         ax, ay = row_anchor
-        y_top = ay + 6.0
-        # Place follow-up box immediately left of row label.
-        follow_x = ax - 20.0
-        # Derive immediate column from header spacing when available.
-        if col_gap is not None:
-            immediate_x = follow_x - col_gap
-        else:
-            immediate_x = ax - 46.0
+        boxes = row_boxes_left_of_label(ax, ay)
+        follow_rect = boxes[-1] if len(boxes) >= 1 else None
+        immediate_rect = boxes[-2] if len(boxes) >= 2 else None
         if allow_immediate:
-            draw_check_tight_pt(immediate_x, y_top, imm_selected)
+            if immediate_rect:
+                draw_check_in_rect_pt(immediate_rect, imm_selected)
         if allow_follow:
-            draw_check_tight_pt(follow_x, y_top, fol_selected)
+            if follow_rect:
+                draw_check_in_rect_pt(follow_rect, fol_selected)
 
     # Child controls for unique actions
     # Separate field from Highway Status lane closure count.
@@ -1071,9 +1100,13 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     one_anchor = find_text_anchor_prefix("One")
     both_anchor = find_text_anchor_prefix("Both Directions")
     if one_anchor:
-        draw_check_tight_pt(one_anchor[0] - 14.0, one_anchor[1] + 6.0, "CLOSE_ONE_DIRECTION" in immediate)
+        oboxes = row_boxes_left_of_label(one_anchor[0], one_anchor[1])
+        if oboxes:
+            draw_check_in_rect_pt(oboxes[-1], "CLOSE_ONE_DIRECTION" in immediate)
     if both_anchor:
-        draw_check_tight_pt(both_anchor[0] - 14.0, both_anchor[1] + 6.0, "CLOSE_BOTH_DIRECTIONS" in immediate)
+        bboxes = row_boxes_left_of_label(both_anchor[0], both_anchor[1])
+        if bboxes:
+            draw_check_in_rect_pt(bboxes[-1], "CLOSE_BOTH_DIRECTIONS" in immediate)
 
     # Measurements
     draw_txt(137, 564, val("measure_slope_height_ft"))
