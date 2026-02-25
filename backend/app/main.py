@@ -640,8 +640,8 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     overlay_io = BytesIO()
     c = canvas.Canvas(overlay_io, pagesize=(width, height))
 
-    # Placement calibration for the body of the form (legacy coordinate map).
-    # Top/header rows use anchor-based placement from template text geometry.
+    # Body placement is calibrated against label anchors extracted from the template.
+    # This avoids manual pixel nudging when template render characteristics vary.
     x_scale = 0.95
     x_offset = 8.0
     y_scale = 0.85
@@ -699,6 +699,10 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
             "S Number",
             "Phone",
             "Cell Phone",
+            # Body calibration anchors
+            "Incident Type",
+            "Highway Status",
+            "Measurements",
         }
         out: dict[str, list[tuple[float, float]]] = {k: [] for k in labels}
 
@@ -722,6 +726,37 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
 
     anchors = extract_text_anchors(base_page)
 
+    # Calibrate map_xy from real template anchors (fallback to defaults above).
+    # Design coordinates are in the same top-origin coordinate space used below.
+    def anchor_point(label: str, occurrence: int = 0) -> tuple[float, float] | None:
+        pts = anchors.get(label) or []
+        if occurrence >= len(pts):
+            return None
+        return pts[occurrence]
+
+    # X calibration: Incident Type (left) -> Highway Status (middle)
+    ax1 = anchor_point("Incident Type")
+    ax2 = anchor_point("Highway Status")
+    if ax1 and ax2 and abs(266.0 - 12.0) > 1e-6:
+        x_scale = (ax2[0] - ax1[0]) / (266.0 - 12.0)
+        x_offset = ax1[0] - (12.0 * x_scale)
+
+    # Y calibration (top-from-page-top): Incident Type (upper body) -> Measurements (lower body)
+    ay1 = anchor_point("Incident Type")
+    ay2 = anchor_point("Measurements")
+    if ay1 and ay2 and abs(555.0 - 96.0) > 1e-6:
+        top1 = height - ay1[1]
+        top2 = height - ay2[1]
+        y_scale = (top2 - top1) / (555.0 - 96.0)
+        y_offset = top1 - (96.0 * y_scale)
+    logger.info(
+        "GISA body calibration x_scale=%.6f x_offset=%.3f y_scale=%.6f y_offset=%.3f",
+        x_scale,
+        x_offset,
+        y_scale,
+        y_offset,
+    )
+
     def draw_from_anchor(label: str, occurrence: int, x_pad: float, y_above_label: float, text_value, size: int = 8) -> bool:
         pts = anchors.get(label) or []
         if occurrence >= len(pts):
@@ -736,7 +771,7 @@ def _render_gisa_pdf_bytes(db: Session, submission_id: int) -> bytes:
     # Lower values a bit so header text sits inside the boxes on mobile viewers.
     y_above = 14.0
     # Row 1
-    ok = draw_from_anchor("Date", 0, -6, y_above, val("report_date"))
+    ok = draw_from_anchor("Date", 0, -12, y_above, val("report_date"))
     ok &= draw_from_anchor("District", 0, 2, y_above, val("district"))
     ok &= draw_from_anchor("County", 0, 2, y_above, val("county"))
     ok &= draw_from_anchor("Route", 0, 2, y_above, val("route"))
