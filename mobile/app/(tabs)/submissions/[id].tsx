@@ -112,6 +112,18 @@ const boolToYn = (v: any) => {
 };
 const isPlayServicesUnavailableError = (msg: string) =>
   /LocationServices\.API is not available|SERVICE_INVALID|Google Play services/i.test(msg);
+const isIosPhotosAccessError = (msg: string) =>
+  /PHPhotosErrorDomain|error 3164/i.test(msg);
+
+function inferAttachmentKind(name: string, mimeType: string): "PHOTO" | "VIDEO" | "DOC" {
+  const mime = (mimeType || "").toLowerCase();
+  if (mime.startsWith("image/")) return "PHOTO";
+  if (mime.startsWith("video/")) return "VIDEO";
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (["jpg", "jpeg", "png", "heic", "heif", "gif", "webp"].includes(ext)) return "PHOTO";
+  if (["mp4", "mov", "m4v", "avi", "mkv", "webm"].includes(ext)) return "VIDEO";
+  return "DOC";
+}
 
 function tryExtractRouteFromAddressLine(text: string): string | null {
   const m = text.match(/\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\b/);
@@ -1050,8 +1062,37 @@ export default function SubmissionDetailScreen() {
 
   async function pickAndUploadAttachment(sectionKey?: string | null) {
     if (!token || !id) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.85 });
-    if (result.canceled) return;
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "Permission required",
+          "Photo library access is required to upload files. Please allow access in Settings."
+        );
+        return;
+      }
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images", "videos"],
+        quality: 0.85,
+        allowsMultipleSelection: false,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      if (isIosPhotosAccessError(msg)) {
+        Alert.alert(
+          "Photo library error",
+          "iOS could not load that item from Photos. Please try another video, or use Files/imported media if available."
+        );
+        return;
+      } else {
+        Alert.alert("Picker failed", msg || "Unable to open photo library.");
+        return;
+      }
+    }
+
+    if (result.canceled || !result.assets?.length) return;
     const asset = result.assets[0];
     const uri = asset.uri;
     const guessedName = asset.fileName || uri.split("/").pop() || "attachment.bin";
@@ -1063,8 +1104,7 @@ export default function SubmissionDetailScreen() {
       else if (ext === "mp4") mimeType = "video/mp4";
       else if (ext === "mov") mimeType = "video/quicktime";
     }
-    const kind: "PHOTO" | "VIDEO" | "DOC" =
-      mimeType.startsWith("image/") ? "PHOTO" : mimeType.startsWith("video/") ? "VIDEO" : "DOC";
+    const kind = inferAttachmentKind(guessedName, mimeType);
 
     setBusy(true);
     try {
@@ -1085,8 +1125,72 @@ export default function SubmissionDetailScreen() {
     finally { setBusy(false); }
   }
 
+  async function pickAndUploadDocument(sectionKey?: string | null) {
+    if (!token || !id) return;
+    let DocumentPicker: any = null;
+    try {
+      const dynamicImport = new Function("m", "return import(m)") as (moduleName: string) => Promise<any>;
+      DocumentPicker = await dynamicImport("expo-document-picker");
+    } catch {
+      Alert.alert(
+        "Module missing",
+        "expo-document-picker is required for CAD/PDF/doc uploads. Run: npx expo install expo-document-picker"
+      );
+      return;
+    }
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      const uri = String(asset.uri || "").trim();
+      if (!uri) {
+        Alert.alert("File picker error", "Selected file is missing URI.");
+        return;
+      }
+      const name = String(asset.name || "attachment.bin");
+      const mimeType = String(asset.mimeType || "application/octet-stream");
+      const kind = inferAttachmentKind(name, mimeType);
+
+      setBusy(true);
+      try {
+        await uploadSubmissionAttachment(
+          token,
+          id,
+          { uri, name, type: mimeType },
+          { sectionKey: sectionKey ?? null, kind }
+        );
+        await load();
+      } catch (err: any) {
+        if (isSessionExpiredError(err)) return;
+        Alert.alert("Upload failed", String(err?.message ?? err ?? "Unable to upload selected file."));
+      } finally {
+        setBusy(false);
+      }
+    } catch (err: any) {
+      Alert.alert("File picker failed", String(err?.message ?? err ?? "Unable to open file picker."));
+    }
+  }
+
+  function promptUploadSource(sectionKey?: string | null) {
+    Alert.alert("Upload Source", "Choose where to pick the file from.", [
+      { text: "Gallery", onPress: () => { pickAndUploadAttachment(sectionKey).catch(() => {}); } },
+      { text: "Files (CAD/PDF/etc)", onPress: () => { pickAndUploadDocument(sectionKey).catch(() => {}); } },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
   async function pickPhoto() {
-    await pickAndUploadAttachment(null);
+    try {
+      promptUploadSource(null);
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      Alert.alert("Upload failed", msg || "Unable to pick/upload media.");
+    }
   }
 
   async function autofillLocation(opts?: { silent?: boolean }) {
@@ -2063,7 +2167,7 @@ export default function SubmissionDetailScreen() {
           </View>
           <Pressable
             style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-            onPress={() => pickAndUploadAttachment(selectedSectionKey)}
+            onPress={() => promptUploadSource(selectedSectionKey)}
             disabled={!canEdit || busy}
           >
             <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Files"}</Text>
@@ -2093,7 +2197,7 @@ export default function SubmissionDetailScreen() {
             />
             <Pressable
               style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-              onPress={() => pickAndUploadAttachment(item.key)}
+              onPress={() => promptUploadSource(item.key)}
               disabled={!canEdit || busy}
             >
               <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Files"}</Text>
@@ -2125,7 +2229,7 @@ export default function SubmissionDetailScreen() {
           <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
             <Text style={styles.sectionTitle}>Submission</Text>
           <Pressable style={[styles.btnPrimary, { backgroundColor: palette.success, marginTop: 8 }]} onPress={submitDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : (data.submission.status === "REJECTED" ? "Resubmit for Review" : "Submit for Review")}</Text></Pressable>
-          <Pressable style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={pickPhoto} disabled={busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text></Pressable>
+          <Pressable style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={pickPhoto} disabled={busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Media / File"}</Text></Pressable>
           <Text style={[styles.label, { marginTop: 12 }]}>Latest Photo Preview</Text>
           {!latestPhoto ? (
             <Text style={[styles.muted, { marginTop: 6 }]}>No photo uploaded yet.</Text>
