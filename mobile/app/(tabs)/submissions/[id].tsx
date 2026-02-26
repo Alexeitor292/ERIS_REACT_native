@@ -123,8 +123,29 @@ function toYmd(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+function ymdFromTimestamp(value?: string | null): string {
+  if (!value) return "";
+  const m = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m?.[1]) return m[1];
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return toYmd(parsed);
+}
+
 function monthLabel(year: number, month: number): string {
   return new Date(year, month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function isDarkHexColor(value?: string | null): boolean {
+  if (!value) return false;
+  const hex = value.replace("#", "").trim();
+  const normalized = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return false;
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance < 0.45;
 }
 
 const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
@@ -362,7 +383,7 @@ function Field({
   editable: boolean;
   multiline?: boolean;
   keyboardType?: "default" | "numeric" | "decimal-pad" | "number-pad";
-  palette?: { muted: string; border: string; panel: string; text: string };
+  palette?: { muted: string; border: string; panel: string; panelSoft: string; text: string };
   error?: string;
 }) {
   return (
@@ -375,7 +396,7 @@ function Field({
           </View>
         ) : null}
       </View>
-      <TextInput value={value} onChangeText={onChangeText} editable={editable} multiline={multiline} keyboardType={keyboardType ?? "default"} style={[styles.input, { borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"), backgroundColor: palette?.panel ?? "#fdfefe", color: palette?.text ?? "#1b2a40" }, multiline ? { minHeight: 90, textAlignVertical: "top" } : null, !editable ? styles.inputDisabled : null]} />
+      <TextInput value={value} onChangeText={onChangeText} editable={editable} multiline={multiline} keyboardType={keyboardType ?? "default"} style={[styles.input, { borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"), backgroundColor: palette?.panelSoft ?? "#f7f8fc", color: palette?.text ?? "#1b2a40" }, multiline ? { minHeight: 90, textAlignVertical: "top" } : null, !editable ? { opacity: 0.85 } : null]} />
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
@@ -395,7 +416,7 @@ function SelectField({
   placeholder: string;
   editable: boolean;
   onPress: () => void;
-  palette?: { muted: string; border: string; panel: string; text: string };
+  palette?: { muted: string; border: string; panel: string; panelSoft: string; text: string };
   error?: string;
 }) {
   const textValue = value.trim() || placeholder;
@@ -416,7 +437,7 @@ function SelectField({
           styles.input,
           {
             borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"),
-            backgroundColor: palette?.panel ?? "#fdfefe",
+            backgroundColor: palette?.panelSoft ?? "#f7f8fc",
             opacity: editable ? 1 : 0.7,
             justifyContent: "center",
           },
@@ -486,7 +507,19 @@ export default function SubmissionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation<any>();
   const pathname = usePathname();
-  const { palette, density } = useUiSettings();
+  const { palette: basePalette, density } = useUiSettings();
+  const palette = useMemo(() => {
+    if (!isDarkHexColor(basePalette?.bg)) return basePalette;
+    return {
+      ...basePalette,
+      panel: "#132746",
+      panelSoft: "#1b355d",
+      border: "#3b5a88",
+      text: "#f4f8ff",
+      muted: "#c0d1f0",
+    };
+  }, [basePalette]);
+  const isDarkTheme = useMemo(() => isDarkHexColor(palette.bg), [palette.bg]);
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<UserInfo | null>(null);
   const [lookups, setLookups] = useState<Lookups | null>(null);
@@ -626,7 +659,7 @@ export default function SubmissionDetailScreen() {
       const districtValue = g.district ? String(g.district).padStart(2, "0") : (districtForCounty(countyCode) ?? "");
       const loadedForm: FormState = {
         ...EMPTY_FORM,
-        report_date: g.report_date ?? "", district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: g.post_mile ?? "", ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
+        report_date: g.report_date ?? ymdFromTimestamp(subRes.submission.created_at), district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: g.post_mile ?? "", ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
         latitude: g.latitude != null ? String(g.latitude) : "", longitude: g.longitude != null ? String(g.longitude) : "",
         distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "", open_highway_traffic_lanes_count: g.open_highway_traffic_lanes_count != null ? String(g.open_highway_traffic_lanes_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
@@ -857,7 +890,7 @@ export default function SubmissionDetailScreen() {
     }
   }
 
-  function validateRequiredFields(): boolean {
+  const validateRequiredFields = useCallback((): boolean => {
     const nextErrors: FieldErrorMap = {};
     const required: { key: keyof FormState; label: string; section: keyof typeof openSections }[] = [
       { key: "district", label: "District", section: "header" },
@@ -888,9 +921,9 @@ export default function SubmissionDetailScreen() {
       return false;
     }
     return true;
-  }
+  }, [form]);
 
-  async function saveDraft() {
+  const saveDraft = useCallback(async () => {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
     const normalizedForm = enforceFormBusinessRules(form);
@@ -935,7 +968,17 @@ export default function SubmissionDetailScreen() {
       if (isSessionExpiredError(err)) return;
       Alert.alert("Save failed", err?.message ?? "Unable to save");
     } finally { setBusy(false); }
-  }
+  }, [
+    token,
+    id,
+    validateRequiredFields,
+    form,
+    incidentTypesFromFormState,
+    immediateActions,
+    followUpActions,
+    clearDraftLocalCache,
+    load,
+  ]);
 
   async function submitDraft() {
     if (!token || !id) return;
@@ -1233,8 +1276,22 @@ export default function SubmissionDetailScreen() {
             </Pressable>
           )
         : undefined,
+      headerRight:
+        draftEntryStatus && canEditCandidate
+          ? () => (
+              <Pressable
+                onPress={() => {
+                  if (!busy) saveDraft();
+                }}
+                style={{ paddingHorizontal: 6, paddingVertical: 2, opacity: busy ? 0.6 : 1 }}
+                disabled={busy}
+              >
+                <Text style={{ color: palette.primary, fontWeight: "700" }}>{busy ? "Saving..." : "Save"}</Text>
+              </Pressable>
+            )
+          : undefined,
     });
-  }, [data, draftEntryStatus, navigation, palette.primary]);
+  }, [data, draftEntryStatus, navigation, palette.primary, canEditCandidate, busy, saveDraft]);
 
   useEffect(() => {
     if (!data || !draftEntryStatus) return;
@@ -1253,16 +1310,7 @@ export default function SubmissionDetailScreen() {
   const canReview = data.submission.status === "SUBMITTED" && (roles.has("REVIEWER") || roles.has("ADMIN"));
   const isDraftEntry = draftEntryStatus;
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
-  const stepOrder = data.submission.status === "REJECTED"
-    ? ["DRAFT", "SUBMITTED", "REJECTED"]
-    : ["DRAFT", "SUBMITTED", "APPROVED"];
-  const currentStepIdx = stepOrder.indexOf(data.submission.status);
   const submissionUpdatedAt = data?.submission.updated_at ?? "";
-  const eventDate: Record<string, string> = {};
-  for (const ev of data.workflow_events || []) {
-    const key = String(ev.to_status || ev.event_type || "").toUpperCase();
-    if (key && !eventDate[key]) eventDate[key] = ev.created_at;
-  }
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"];
@@ -1535,7 +1583,21 @@ export default function SubmissionDetailScreen() {
             onPress={() => setActiveStep(idx)}
             style={[
               styles.stepTab,
-              idx === activeStep ? [styles.stepTabActive, { borderColor: palette.primary }] : [styles.stepTabInactive, { borderColor: palette.border }],
+              idx === activeStep
+                ? [
+                    styles.stepTabActive,
+                    {
+                      borderColor: palette.primary,
+                      backgroundColor: isDarkTheme ? palette.panelSoft : "#dbeafe",
+                    },
+                  ]
+                : [
+                    styles.stepTabInactive,
+                    {
+                      borderColor: palette.border,
+                      backgroundColor: isDarkTheme ? palette.panel : "#f8fafc",
+                    },
+                  ],
             ]}
           >
             <Text style={[styles.stepTabIndex, { color: idx <= activeStep ? palette.primary : palette.muted }]}>{idx + 1}</Text>
@@ -1545,6 +1607,7 @@ export default function SubmissionDetailScreen() {
       </View>
       <Text style={[styles.muted, { color: palette.muted }]}>Step {activeStep + 1} of {FORM_STEPS.length}</Text>
       <View style={activeStep === 0 ? undefined : styles.hidden}>
+        <View style={styles.stepSectionStack}>
         <CollapsibleSection title="GISA Header" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
         <SelectField
           palette={palette}
@@ -1670,15 +1733,17 @@ export default function SubmissionDetailScreen() {
         <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} error={fieldErrors.latitude} />
         <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
       </CollapsibleSection>
-      <View style={styles.stepNavRow}>
-        <View style={styles.stepNavSpacer} />
-        <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
-          <Text style={styles.btnPrimaryText}>Continue</Text>
-        </Pressable>
+        <View style={styles.stepNavRow}>
+          <View style={styles.stepNavSpacer} />
+          <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
+            <Text style={styles.btnPrimaryText}>Continue</Text>
+          </Pressable>
+        </View>
+        </View>
       </View>
 
       <View style={activeStep === 1 ? undefined : styles.hidden}>
-        <View style={{ gap: compact ? 8 : 10 }}>
+        <View style={styles.stepSectionStack}>
         <DropdownBlock title="Distribution" open={openPaperBlocks.distributionMain} onToggle={() => togglePaperBlock("distributionMain")} palette={palette}>
           <View style={styles.chips}>
             {lookups.distribution.map((o) => (
@@ -1875,11 +1940,19 @@ export default function SubmissionDetailScreen() {
             <Field palette={palette} label="Roadway Width (ft)" value={form.measure_roadway_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_width_ft", v)} />
           </DropdownBlock>
         ) : null}
+        <View style={styles.stepNavRow}>
+          <Pressable style={[styles.btnGhost, styles.stepNavGhostBtn, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
+            <Text style={[styles.btnGhostText, { color: palette.text }]}>Previous</Text>
+          </Pressable>
+          <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
+            <Text style={styles.btnPrimaryText}>Continue</Text>
+          </Pressable>
         </View>
-      </View>
+        </View>
       </View>
 
       <View style={activeStep === 2 ? undefined : styles.hidden}>
+      <View style={styles.stepSectionStack}>
       <CollapsibleSection title="Recommended Actions" open={openSections.actions} onToggle={() => toggleSection("actions")} palette={palette} compact={compact}>
         <View style={styles.recommendedHeaderRow}>
           <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>Immediate Actions</Text>
@@ -1960,12 +2033,13 @@ export default function SubmissionDetailScreen() {
       </CollapsibleSection>
 
       <View style={styles.stepNavRow}>
-        <Pressable style={[styles.btnGhost, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>Back</Text>
+        <Pressable style={[styles.btnGhost, styles.stepNavGhostBtn, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Previous</Text>
         </Pressable>
         <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
           <Text style={styles.btnPrimaryText}>Continue</Text>
         </Pressable>
+      </View>
       </View>
       </View>
 
@@ -2058,55 +2132,7 @@ export default function SubmissionDetailScreen() {
           </View>
         ))}
       </View>
-
-      <View style={[styles.stepNavRow, activeStep === 3 ? null : styles.hidden]}>
-        <Pressable style={[styles.btnGhost, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>Back</Text>
-        </Pressable>
-        <View style={styles.stepNavSpacer} />
-      </View>
-
-      <View style={[styles.section, activeStep === 2 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
-        <Text style={styles.sectionTitle}>Workflow Status</Text>
-        <View style={styles.workflowInlineWrap}>
-          <View style={styles.workflowInlineTrack} />
-          <View
-            style={[
-              styles.workflowInlineProgress,
-              { width: `${((Math.max(0, currentStepIdx) + 1) / stepOrder.length) * 100}%` },
-            ]}
-          />
-          {stepOrder.map((step, idx) => {
-            const done = currentStepIdx >= idx;
-            const leftPct = (idx / (stepOrder.length - 1)) * 100;
-            return (
-              <View key={step} style={[styles.workflowInlinePointWrap, { left: `${leftPct}%` }]}>
-                <View style={[styles.workflowInlineDot, done ? styles.workflowInlineDotDone : null]} />
-                <Text style={[styles.workflowInlineLabel, done ? styles.workflowInlineLabelDone : null]}>{idx + 1}</Text>
-              </View>
-            );
-          })}
-        </View>
-        <Text style={[styles.muted, { marginTop: 6, color: palette.muted }]}>
-          {stepOrder[currentStepIdx] || data.submission.status} {eventDate[stepOrder[currentStepIdx]] ? `• ${eventDate[stepOrder[currentStepIdx]]}` : ""}
-        </Text>
-      </View>
-      <View style={[styles.stepNavRow, activeStep === 2 ? null : styles.hidden]}>
-        <Pressable style={[styles.btnGhost, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>Back</Text>
-        </Pressable>
-        <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
-          <Text style={styles.btnPrimaryText}>Continue</Text>
-        </Pressable>
-      </View>
     </ScrollView>
-    {canEdit ? (
-      <View style={[styles.stickyFooter, { borderColor: palette.border, backgroundColor: palette.panel }]}>
-        <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary }]} onPress={saveDraft} disabled={busy}>
-          <Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Save Draft"}</Text>
-        </Pressable>
-      </View>
-    ) : null}
     <Modal visible={districtPickerOpen} transparent animationType="fade" onRequestClose={() => setDistrictPickerOpen(false)}>
       <Pressable style={styles.pickerBackdrop} onPress={() => setDistrictPickerOpen(false)}>
         <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
@@ -2309,7 +2335,7 @@ export default function SubmissionDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Platform.OS === "ios" ? "#f2f2f7" : "#eef3fb" },
-  contentWrap: { padding: 14, gap: 10, paddingBottom: Platform.OS === "ios" ? 120 : 108 },
+  contentWrap: { padding: 14, gap: 10, paddingBottom: Platform.OS === "ios" ? 26 : 20 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   title: { fontSize: Platform.OS === "ios" ? 22 : 24, fontWeight: "800", color: "#16253a", letterSpacing: Platform.OS === "ios" ? 0.2 : 0 },
   status: { marginTop: 4, marginBottom: 6, color: "#4b5f7f", fontWeight: Platform.OS === "ios" ? "600" : "700" },
@@ -2354,7 +2380,6 @@ const styles = StyleSheet.create({
     backgroundColor: Platform.OS === "ios" ? "#f7f8fc" : "#fdfefe",
     fontSize: Platform.OS === "ios" ? 16 : 14,
   },
-  inputDisabled: { backgroundColor: "#f9fafb", color: "#6b7280" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   chip: { borderWidth: 1, borderColor: "#c8d5ea", borderRadius: 999, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#f9fbff" },
   chipOn: { backgroundColor: "#dbeafe", borderColor: "#1d4ed8" },
@@ -2383,14 +2408,6 @@ const styles = StyleSheet.create({
   photoPreviewCompact: { width: "100%", height: 160, borderRadius: 8, backgroundColor: "#e5e7eb" },
   photo: { width: "100%", height: 220, borderRadius: 8, backgroundColor: "#e5e7eb" },
   eventRow: { borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8, padding: 8, gap: 2, marginTop: 8 },
-  workflowInlineWrap: { marginTop: 8, height: 28, justifyContent: "center", position: "relative" },
-  workflowInlineTrack: { position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2, backgroundColor: "#cbd5e1" },
-  workflowInlineProgress: { position: "absolute", left: 0, height: 3, borderRadius: 2, backgroundColor: "#1d4ed8" },
-  workflowInlinePointWrap: { position: "absolute", top: -8, width: 22, marginLeft: -11, alignItems: "center" },
-  workflowInlineDot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1, borderColor: "#94a3b8", backgroundColor: "#fff" },
-  workflowInlineDotDone: { backgroundColor: "#1d4ed8", borderColor: "#1d4ed8" },
-  workflowInlineLabel: { marginTop: 2, fontSize: 10, color: "#64748b", fontWeight: "700" },
-  workflowInlineLabelDone: { color: "#1e3a8a" },
   hidden: { display: "none" },
   stepTabsRow: {
     flexDirection: "row",
@@ -2415,21 +2432,17 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 4,
   },
+  stepSectionStack: {
+    gap: 10,
+  },
   stepNavBtn: {
     flex: 1,
   },
+  stepNavGhostBtn: {
+    marginTop: 0,
+  },
   stepNavSpacer: {
     flex: 1,
-  },
-  stickyFooter: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === "ios" ? 28 : 14,
-    borderTopWidth: 1,
   },
   recommendedHeaderRow: {
     flexDirection: "row",
@@ -2481,6 +2494,7 @@ const styles = StyleSheet.create({
   },
   dropdownBlock: {
     marginTop: 0,
+    marginBottom: 0,
     borderWidth: Platform.OS === "ios" ? StyleSheet.hairlineWidth : 1,
     borderRadius: Platform.OS === "ios" ? 12 : 14,
     padding: Platform.OS === "ios" ? 10 : 12,
@@ -2615,4 +2629,5 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
+
 
