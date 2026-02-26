@@ -6,9 +6,9 @@ import * as SecureStore from "expo-secure-store";
 import { useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
-import { getApiBaseCandidates, getApiBaseUrl } from "../../../src/api/baseUrl";
+import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission } from "../../../src/api/submissions";
+import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment } from "../../../src/api/submissions";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
@@ -35,10 +35,14 @@ type SubmissionDetail = {
   incident_types: string[];
   actions: { immediate: string[]; follow_up: string[] };
   photos: { id: number; file_name: string; mime_type: string }[];
+  attachments?: { id: number; file_name: string; mime_type: string; kind?: string; section_key?: string | null }[];
   workflow_events: { id: number; event_type: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }[];
 };
 
-type FormState = Record<string, string> & { pavement_ground_cracks: "" | "YES" | "NO"; indented_by_rocks: "" | "YES" | "NO" };
+type FormState = Record<string, string> & {
+  pavement_ground_cracks: "" | "YES" | "NO";
+  indented_by_rocks: "" | "YES" | "NO";
+};
 type DistrictContact = {
   id: string;
   first_name: string;
@@ -75,8 +79,17 @@ const EMPTY_FORM: FormState = {
   drainage_clogged_inlet: "", drainage_compromised_drains: "", drainage_surface_runoff: "", drainage_torrent_surge_flood: "",
   impact_impacted_adj_utilities: "", impact_maybe_adj_utilities: "", impact_adj_utilities: "", impact_impacted_adj_properties: "", impact_maybe_adj_properties: "", impact_adj_properties: "", impact_impacted_adj_structure: "", impact_maybe_adj_structure: "", impact_adj_structure: "",
   measure_slope_height_ft: "", measure_original_slope_deg: "", measure_landslide_width_ft: "", measure_landslide_length_ft: "", measure_main_scarp_height_ft: "", measure_landslide_slope_deg: "", measure_roadway_length_ft: "", measure_roadway_width_ft: "",
+  record_of_event_notes: "", maintenance_history_notes: "", geotechnical_assessment_notes: "", recommendations_notes: "", sketchpad_notes: "",
   observations_notes: "", geometry_json: "", pavement_ground_cracks: "", indented_by_rocks: "",
 };
+
+const MEMO_SECTIONS = [
+  { key: "record_of_event", label: "Record of Event", field: "record_of_event_notes" },
+  { key: "maintenance_history", label: "Maintenance History", field: "maintenance_history_notes" },
+  { key: "observation", label: "Observation", field: "observations_notes" },
+  { key: "geotechnical_assessment", label: "Geotechnical Assessment", field: "geotechnical_assessment_notes" },
+  { key: "recommendations", label: "Recommendations", field: "recommendations_notes" },
+] as const;
 
 const n = (v: string) => (v.trim() ? v.trim() : null);
 const f = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${name} must be numeric`); return x; };
@@ -534,6 +547,7 @@ export default function SubmissionDetailScreen() {
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>({});
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
+  const [selectedSectionKey, setSelectedSectionKey] = useState<string>(MEMO_SECTIONS[0].key);
   const [reviewComment, setReviewComment] = useState("");
   const [enrichmentHint, setEnrichmentHint] = useState("");
   const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
@@ -548,6 +562,7 @@ export default function SubmissionDetailScreen() {
     header: false,
     location: false,
     actions: false,
+    engineerMemo: false,
     observations: false,
   });
   const [openPaperBlocks, setOpenPaperBlocks] = useState({
@@ -635,9 +650,9 @@ export default function SubmissionDetailScreen() {
     await removeDraftCache(draftCacheKey(id));
   }, [id]);
 
-  const hydratePhotoUrls = useCallback(async (authToken: string, photos: { id: number }[]) => {
+  const hydrateAttachmentUrls = useCallback(async (authToken: string, files: { id: number }[]) => {
     const next: Record<number, string> = {};
-    await Promise.all(photos.map(async (p) => {
+    await Promise.all(files.map(async (p) => {
       next[p.id] = `${apiBaseUrl}/attachments/${p.id}/content?access_token=${encodeURIComponent(authToken)}`;
     }));
     setPhotoUrls(next);
@@ -672,6 +687,7 @@ export default function SubmissionDetailScreen() {
         drainage_clogged_inlet: boolToYn(g.drainage_clogged_inlet), drainage_compromised_drains: boolToYn(g.drainage_compromised_drains), drainage_surface_runoff: boolToYn(g.drainage_surface_runoff), drainage_torrent_surge_flood: boolToYn(g.drainage_torrent_surge_flood),
         impact_impacted_adj_utilities: boolToYn(g.impact_impacted_adj_utilities), impact_maybe_adj_utilities: boolToYn(g.impact_maybe_adj_utilities), impact_adj_utilities: g.impact_adj_utilities ?? "", impact_impacted_adj_properties: boolToYn(g.impact_impacted_adj_properties), impact_maybe_adj_properties: boolToYn(g.impact_maybe_adj_properties), impact_adj_properties: g.impact_adj_properties ?? "", impact_impacted_adj_structure: boolToYn(g.impact_impacted_adj_structure), impact_maybe_adj_structure: boolToYn(g.impact_maybe_adj_structure), impact_adj_structure: g.impact_adj_structure ?? "",
         measure_slope_height_ft: g.measure_slope_height_ft != null ? String(g.measure_slope_height_ft) : "", measure_original_slope_deg: g.measure_original_slope_deg != null ? String(g.measure_original_slope_deg) : "", measure_landslide_width_ft: g.measure_landslide_width_ft != null ? String(g.measure_landslide_width_ft) : "", measure_landslide_length_ft: g.measure_landslide_length_ft != null ? String(g.measure_landslide_length_ft) : "", measure_main_scarp_height_ft: g.measure_main_scarp_height_ft != null ? String(g.measure_main_scarp_height_ft) : "", measure_landslide_slope_deg: g.measure_landslide_slope_deg != null ? String(g.measure_landslide_slope_deg) : "", measure_roadway_length_ft: g.measure_roadway_length_ft != null ? String(g.measure_roadway_length_ft) : "", measure_roadway_width_ft: g.measure_roadway_width_ft != null ? String(g.measure_roadway_width_ft) : "",
+        record_of_event_notes: g.record_of_event_notes ?? "", maintenance_history_notes: g.maintenance_history_notes ?? "", geotechnical_assessment_notes: g.geotechnical_assessment_notes ?? "", recommendations_notes: g.recommendations_notes ?? "", sketchpad_notes: g.sketchpad_notes ?? "",
         observations_notes: g.observations_notes ?? "", geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "",
       };
       const normalizedLoadedForm = enforceFormBusinessRules(loadedForm);
@@ -740,14 +756,14 @@ export default function SubmissionDetailScreen() {
       }, 0);
       setFieldErrors({});
       setReviewComment(subRes.submission.review_comment ?? "");
-      await hydratePhotoUrls(token, subRes.photos ?? []);
+      await hydrateAttachmentUrls(token, subRes.attachments ?? subRes.photos ?? []);
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
       Alert.alert("Load failed", err?.message ?? "Unable to load submission");
     } finally {
       setLoading(false);
     }
-  }, [token, id, hydratePhotoUrls, applyEditorState, incidentTypesFromFormState]);
+  }, [token, id, hydrateAttachmentUrls, applyEditorState, incidentTypesFromFormState]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -897,6 +913,7 @@ export default function SubmissionDetailScreen() {
       { key: "county", label: "County", section: "header" },
       { key: "latitude", label: "Latitude", section: "location" },
       { key: "longitude", label: "Longitude", section: "location" },
+      { key: "geotechnical_assessment_notes", label: "Geotechnical Assessment", section: "engineerMemo" },
     ];
 
     const sectionsToOpen = new Set<keyof typeof openSections>();
@@ -955,6 +972,7 @@ export default function SubmissionDetailScreen() {
         drainage_clogged_inlet: ynToBool(normalizedForm.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(normalizedForm.drainage_compromised_drains), drainage_surface_runoff: ynToBool(normalizedForm.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(normalizedForm.drainage_torrent_surge_flood),
         impact_impacted_adj_utilities: ynToBool(normalizedForm.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(normalizedForm.impact_maybe_adj_utilities), impact_adj_utilities: n(normalizedForm.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(normalizedForm.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(normalizedForm.impact_maybe_adj_properties), impact_adj_properties: n(normalizedForm.impact_adj_properties), impact_impacted_adj_structure: ynToBool(normalizedForm.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(normalizedForm.impact_maybe_adj_structure), impact_adj_structure: n(normalizedForm.impact_adj_structure),
         measure_slope_height_ft: f(normalizedForm.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(normalizedForm.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(normalizedForm.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(normalizedForm.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(normalizedForm.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(normalizedForm.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(normalizedForm.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(normalizedForm.measure_roadway_width_ft, "Roadway width"),
+        record_of_event_notes: n(normalizedForm.record_of_event_notes), maintenance_history_notes: n(normalizedForm.maintenance_history_notes), geotechnical_assessment_notes: n(normalizedForm.geotechnical_assessment_notes), recommendations_notes: n(normalizedForm.recommendations_notes), sketchpad_notes: n(normalizedForm.sketchpad_notes),
         observations_notes: n(normalizedForm.observations_notes), geometry_json: geometry,
       });
       // Source of truth is the visible form chips; keep API payload derived from form.
@@ -1030,59 +1048,45 @@ export default function SubmissionDetailScreen() {
     finally { setBusy(false); }
   }
 
-  async function pickPhoto() {
+  async function pickAndUploadAttachment(sectionKey?: string | null) {
     if (!token || !id) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], quality: 0.85 });
     if (result.canceled) return;
     const asset = result.assets[0];
     const uri = asset.uri;
-    const guessedName = asset.fileName || uri.split("/").pop() || "photo.jpg";
-    const ext = (guessedName.split(".").pop() || "jpg").toLowerCase();
-    const mimeType = asset.mimeType || (ext === "png" ? "image/png" : "image/jpeg");
+    const guessedName = asset.fileName || uri.split("/").pop() || "attachment.bin";
+    const ext = (guessedName.split(".").pop() || "").toLowerCase();
+    let mimeType = asset.mimeType || "application/octet-stream";
+    if (!asset.mimeType) {
+      if (ext === "png") mimeType = "image/png";
+      else if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+      else if (ext === "mp4") mimeType = "video/mp4";
+      else if (ext === "mov") mimeType = "video/quicktime";
+    }
+    const kind: "PHOTO" | "VIDEO" | "DOC" =
+      mimeType.startsWith("image/") ? "PHOTO" : mimeType.startsWith("video/") ? "VIDEO" : "DOC";
 
     setBusy(true);
     try {
-      const baseCandidates = [apiBaseUrl, ...getApiBaseCandidates()]
-        .map((u) => u.replace(/\/+$/, ""))
-        .filter((u, idx, arr) => arr.indexOf(u) === idx);
-      let lastErr = "";
-      let ok = false;
-
-      for (const base of baseCandidates) {
-        const formData = new FormData();
-        formData.append("file", { uri, name: guessedName, type: mimeType } as any);
-        try {
-          const resp = await fetch(`${base}/submissions/${id}/photos`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          });
-          if (!resp.ok) {
-            lastErr = `${resp.status} ${await resp.text().catch(() => "")}`;
-            continue;
-          }
-          ok = true;
-          break;
-        } catch (err: any) {
-          lastErr = String(err?.message ?? err);
-        }
-      }
-
-      if (!ok) {
-        throw new Error(
-          `Could not reach upload endpoint. Last error: ${lastErr || "Network request failed"}.`
-        );
-      }
-
+      await uploadSubmissionAttachment(
+        token,
+        id,
+        { uri, name: guessedName, type: mimeType },
+        { sectionKey: sectionKey ?? null, kind }
+      );
       await load();
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
       Alert.alert(
-        "Photo upload failed",
+        "Upload failed",
         `${err?.message ?? "Unable to upload"}\n\nTip: For physical devices, set EXPO_PUBLIC_API_URL to your computer LAN IP (e.g. http://192.168.x.x:8000).`
       );
     }
     finally { setBusy(false); }
+  }
+
+  async function pickPhoto() {
+    await pickAndUploadAttachment(null);
   }
 
   async function autofillLocation(opts?: { silent?: boolean }) {
@@ -1309,7 +1313,12 @@ export default function SubmissionDetailScreen() {
   const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && !!data.submission.can_edit;
   const canReview = data.submission.status === "SUBMITTED" && (roles.has("REVIEWER") || roles.has("ADMIN"));
   const isDraftEntry = draftEntryStatus;
+  const allAttachments = data.attachments ?? data.photos;
+  const sectionAttachments = allAttachments.filter((a: any) => !!a.section_key);
+  const sectionAttachmentIds = new Set(sectionAttachments.map((a: any) => Number(a.id)));
+  const generalPhotos = data.photos.filter((p) => !sectionAttachmentIds.has(Number(p.id)));
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
+  const selectedSectionAttachments = sectionAttachments.filter((a: any) => a.section_key === selectedSectionKey);
   const submissionUpdatedAt = data?.submission.updated_at ?? "";
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
@@ -1498,6 +1507,15 @@ export default function SubmissionDetailScreen() {
       await Linking.openURL(url);
     } catch {
       Alert.alert("Preview unavailable", "Could not open image URL on this device.");
+    }
+  }
+
+  async function openFullscreenInDeviceEditor() {
+    if (!fullscreenPhoto?.uri) return;
+    try {
+      await Linking.openURL(fullscreenPhoto.uri);
+    } catch {
+      Alert.alert("Editor unavailable", "Could not open this image in a device editor.");
     }
   }
 
@@ -2028,8 +2046,68 @@ export default function SubmissionDetailScreen() {
         })}
       </CollapsibleSection>
 
-      <CollapsibleSection title="Observations" open={openSections.observations} onToggle={() => toggleSection("observations")} palette={palette} compact={compact}>
-        <Field palette={palette} label="Notes" value={form.observations_notes} editable={canEdit} multiline onChangeText={(v) => setVal("observations_notes", v)} error={fieldErrors.observations_notes} />
+      <CollapsibleSection title="Engineer Memo" open={openSections.engineerMemo} onToggle={() => toggleSection("engineerMemo")} palette={palette} compact={compact}>
+        <View style={{ marginBottom: 8 }}>
+          <Text style={styles.label}>Select Section</Text>
+          <View style={styles.chips}>
+            {MEMO_SECTIONS.map((s) => (
+              <Chip
+                key={s.key}
+                label={s.label}
+                palette={palette}
+                active={selectedSectionKey === s.key}
+                disabled={!canEdit}
+                onPress={() => setSelectedSectionKey(s.key)}
+              />
+            ))}
+          </View>
+          <Pressable
+            style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            onPress={() => pickAndUploadAttachment(selectedSectionKey)}
+            disabled={!canEdit || busy}
+          >
+            <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Files"}</Text>
+          </Pressable>
+          <Text style={[styles.muted, { marginTop: 6, color: palette.muted }]}>
+            Image/video picker is enabled. CAD/document picker can be added next.
+          </Text>
+          {selectedSectionAttachments.length ? selectedSectionAttachments.map((file: any) => (
+            <Pressable key={`section-attach-${file.id}`} style={styles.sectionAttachmentRow} onPress={() => openPhotoFallback(file.id)}>
+              <Text style={[styles.muted, { color: palette.muted }]}>{file.file_name}</Text>
+            </Pressable>
+          )) : (
+            <Text style={[styles.muted, { marginTop: 8, color: palette.muted }]}>No files attached to this section yet.</Text>
+          )}
+        </View>
+
+        {MEMO_SECTIONS.map((item) => (
+          <DropdownBlock key={item.key} title={item.label} open={selectedSectionKey === item.key} onToggle={() => setSelectedSectionKey(item.key)} palette={palette}>
+            <Field
+              palette={palette}
+              label={`${item.label} Notes`}
+              value={form[item.field]}
+              editable={canEdit}
+              multiline
+              onChangeText={(v) => setVal(item.field as keyof FormState, v)}
+              error={fieldErrors[item.field as keyof FormState]}
+            />
+            <Pressable
+              style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+              onPress={() => pickAndUploadAttachment(item.key)}
+              disabled={!canEdit || busy}
+            >
+              <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Files"}</Text>
+            </Pressable>
+          </DropdownBlock>
+        ))}
+        <Field
+          palette={palette}
+          label="Sketchpad Notes"
+          value={form.sketchpad_notes}
+          editable={canEdit}
+          multiline
+          onChangeText={(v) => setVal("sketchpad_notes", v)}
+        />
       </CollapsibleSection>
 
       <View style={styles.stepNavRow}>
@@ -2108,7 +2186,7 @@ export default function SubmissionDetailScreen() {
 
       <View style={[styles.section, activeStep === 3 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>Photos</Text>
-        {data.photos.length === 0 ? <Text style={styles.muted}>No photos uploaded.</Text> : data.photos.map((p) => (
+        {generalPhotos.length === 0 ? <Text style={styles.muted}>No general photos uploaded.</Text> : generalPhotos.map((p) => (
           <View key={p.id} style={{ marginTop: 8 }}>
             <Text style={{ fontWeight: "600", color: palette.text, marginBottom: 4 }}>{p.file_name}</Text>
             {!failedPreviewIds[p.id] ? (
@@ -2130,6 +2208,16 @@ export default function SubmissionDetailScreen() {
               </View>
             )}
           </View>
+        ))}
+      </View>
+
+      <View style={[styles.section, activeStep === 3 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+        <Text style={styles.sectionTitle}>Section Media</Text>
+        {sectionAttachments.length === 0 ? <Text style={styles.muted}>No section-tagged files uploaded.</Text> : sectionAttachments.map((file: any) => (
+          <Pressable key={`gallery-attach-${file.id}`} style={styles.sectionAttachmentRow} onPress={() => openPhotoFallback(file.id)}>
+            <Text style={{ fontWeight: "600", color: palette.text }}>{file.file_name}</Text>
+            <Text style={[styles.muted, { color: palette.muted }]}>{`${file.kind || "DOC"}${file.section_key ? ` • ${file.section_key}` : ""}`}</Text>
+          </Pressable>
         ))}
       </View>
     </ScrollView>
@@ -2324,6 +2412,9 @@ export default function SubmissionDetailScreen() {
                 resizeMode="contain"
               />
               <Text style={styles.fullscreenCaption}>{fullscreenPhoto.name}</Text>
+              <Pressable style={styles.fullscreenEditBtn} onPress={openFullscreenInDeviceEditor}>
+                <Text style={styles.fullscreenEditText}>Open in Device Editor</Text>
+              </Pressable>
             </>
           )}
         </Animated.View>
@@ -2408,6 +2499,14 @@ const styles = StyleSheet.create({
   photoPreviewCompact: { width: "100%", height: 160, borderRadius: 8, backgroundColor: "#e5e7eb" },
   photo: { width: "100%", height: 220, borderRadius: 8, backgroundColor: "#e5e7eb" },
   eventRow: { borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8, padding: 8, gap: 2, marginTop: 8 },
+  sectionAttachmentRow: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#d6e0ef",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
   hidden: { display: "none" },
   stepTabsRow: {
     flexDirection: "row",
@@ -2626,6 +2725,19 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: "#e5edff",
     fontSize: 13,
+    fontWeight: "700",
+  },
+  fullscreenEditBtn: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#93c5fd",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(15, 23, 42, 0.75)",
+  },
+  fullscreenEditText: {
+    color: "#dbeafe",
     fontWeight: "700",
   },
 });

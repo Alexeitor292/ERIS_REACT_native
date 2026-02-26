@@ -1,7 +1,41 @@
 import { apiFetch } from "./client";
+import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
 
 export async function getSubmission(token: string, id: string) {
   return apiFetch(`/submissions/${id}`, { token });
+}
+
+export async function uploadSubmissionAttachment(
+  token: string,
+  submissionId: string,
+  file: { uri: string; name: string; type: string },
+  opts?: { sectionKey?: string | null; kind?: "PHOTO" | "VIDEO" | "DOC" | "SKETCH" }
+) {
+  const params = new URLSearchParams();
+  if (opts?.sectionKey) params.set("section_key", opts.sectionKey);
+  if (opts?.kind) params.set("kind", opts.kind);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const baseCandidates = [getApiBaseUrl(), ...getApiBaseCandidates()]
+    .map((u) => u.replace(/\/+$/, ""))
+    .filter((u, idx, arr) => arr.indexOf(u) === idx);
+
+  let lastError = "Network request failed";
+  for (const base of baseCandidates) {
+    const formData = new FormData();
+    formData.append("file", file as any);
+    try {
+      const response = await fetch(`${base}/submissions/${submissionId}/attachments${suffix}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (response.ok) return response.json();
+      lastError = `${response.status} ${await response.text().catch(() => "")}`;
+    } catch (err: any) {
+      lastError = String(err?.message ?? err);
+    }
+  }
+  throw new Error(`Could not reach upload endpoint. Last error: ${lastError}.`);
 }
 
 export async function patchSubmission(token: string, id: string, patch: any) {

@@ -176,9 +176,18 @@ def startup():
             "ADD COLUMN IF NOT EXISTS measure_landslide_slope_deg DECIMAL(10,2) NULL",
             "ADD COLUMN IF NOT EXISTS measure_roadway_length_ft DECIMAL(10,2) NULL",
             "ADD COLUMN IF NOT EXISTS measure_roadway_width_ft DECIMAL(10,2) NULL",
+            "ADD COLUMN IF NOT EXISTS record_of_event_notes TEXT NULL",
+            "ADD COLUMN IF NOT EXISTS maintenance_history_notes TEXT NULL",
+            "ADD COLUMN IF NOT EXISTS geotechnical_assessment_notes TEXT NULL",
+            "ADD COLUMN IF NOT EXISTS recommendations_notes TEXT NULL",
+            "ADD COLUMN IF NOT EXISTS sketchpad_notes TEXT NULL",
         ]
         for col_sql in upgrade_columns:
             db.execute(text(f"ALTER TABLE submission_gisa {col_sql}"))
+        db.execute(text("""
+            ALTER TABLE attachment_links
+            ADD COLUMN IF NOT EXISTS section_key VARCHAR(64) NULL
+        """))
         db.execute(text("""
             INSERT IGNORE INTO gisa_action_lut (code, label, action_group, sort_order) VALUES
             ('DEWATER_HORIZONTAL_DRAINS','Dewater with horizontal drains','IMMEDIATE',105),
@@ -461,6 +470,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           impact_impacted_adj_structure, impact_maybe_adj_structure, impact_adj_structure,
           measure_slope_height_ft, measure_original_slope_deg, measure_landslide_width_ft, measure_landslide_length_ft,
           measure_main_scarp_height_ft, measure_landslide_slope_deg, measure_roadway_length_ft, measure_roadway_width_ft,
+          record_of_event_notes, maintenance_history_notes, geotechnical_assessment_notes, recommendations_notes, sketchpad_notes,
           observations_notes, geometry_json,
           updated_by_user_id, created_at, updated_at
         FROM submission_gisa
@@ -567,6 +577,8 @@ def validate_submit_ready(db: Session, submission_id: int) -> None:
         missing.append("latitude")
     if gisa.get("longitude") is None:
         missing.append("longitude")
+    if not str(gisa.get("geotechnical_assessment_notes") or "").strip():
+        missing.append("geotechnical_assessment")
 
     lat = gisa.get("latitude")
     lng = gisa.get("longitude")
@@ -1880,6 +1892,11 @@ class GisaDraftPatch(BaseModel):
     measure_roadway_length_ft: float | None = None
     measure_roadway_width_ft: float | None = None
 
+    record_of_event_notes: str | None = None
+    maintenance_history_notes: str | None = None
+    geotechnical_assessment_notes: str | None = None
+    recommendations_notes: str | None = None
+    sketchpad_notes: str | None = None
     observations_notes: str | None = None
     geometry_json: dict | None = None
 
@@ -2133,7 +2150,7 @@ def get_submission(
         SELECT a.id, a.file_name, a.mime_type, a.file_size_bytes,
                a.storage_provider, a.storage_bucket, a.storage_key,
                a.sha256, a.uploaded_at,
-               al.kind, al.sort_order
+               al.kind, al.sort_order, al.section_key
         FROM attachment_links al
         JOIN attachments a ON a.id = al.attachment_id
         WHERE al.submission_id = :sid
