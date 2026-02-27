@@ -20,14 +20,29 @@ function formatCreatedAt(createdAt?: string | null): string {
   });
 }
 
+function formatRoute(route?: string | null): string {
+  const raw = (route || "").trim();
+  if (!raw) return "?";
+  if (/^\d+$/.test(raw)) return raw.padStart(3, "0");
+  return raw;
+}
+
+function formatPostMile(postMile?: string | null): string {
+  const raw = (postMile || "").trim();
+  if (!raw) return "?";
+  const num = Number(raw);
+  if (Number.isNaN(num)) return raw;
+  return num.toFixed(2);
+}
+
 export function buildSubmissionDescriptor(parts: SubmissionLabelParts): string {
   const district = (parts.district || "?").trim() || "?";
   const county = (parts.county || "?").trim() || "?";
-  const route = (parts.route || "?").trim() || "?";
-  const postMile = (parts.post_mile || "?").trim() || "?";
+  const route = formatRoute(parts.route);
+  const postMile = formatPostMile(parts.post_mile);
   const when = formatCreatedAt(parts.created_at);
-  const base = `D${district}-${county}-R${route}-PM${postMile}`;
-  return when ? `${base} • ${when}` : base;
+  const base = `${district}-${county}-${route}-${postMile}`;
+  return when ? `${base} - ${when}` : base;
 }
 
 export function buildSubmissionDisplayTitle(parts: SubmissionLabelParts): string {
