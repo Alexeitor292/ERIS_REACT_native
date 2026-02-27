@@ -79,6 +79,14 @@ const triToBool = (v: Tri) => (v === "YES" ? true : v === "NO" ? false : null);
 const boolToTri = (v: unknown): Tri => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
 const nf = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${n} must be numeric`); return x; };
 const ni = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${n} must be whole number`); return x; };
+const DISTRIBUTION_ICON_SRC: Record<string, string> = {
+  ADVANCING: "/distribution-icons/advancing.bmp",
+  RETROGRESSING: "/distribution-icons/retrogressing.bmp",
+  ENLARGING: "/distribution-icons/enlarging.bmp",
+  WIDENING: "/distribution-icons/widening.bmp",
+  MOVING: "/distribution-icons/moving.bmp",
+  CONFINED: "/distribution-icons/confined.bmp",
+};
 
 function S({ s }: { s: string }) {
   const c = s === "APPROVED" ? "bg-[color:color-mix(in_oklab,var(--good)_16%,transparent)] text-[var(--good)] border-[color:color-mix(in_oklab,var(--good)_48%,transparent)]" : s === "REJECTED" ? "bg-[color:color-mix(in_oklab,var(--bad)_16%,transparent)] text-[var(--bad)] border-[color:color-mix(in_oklab,var(--bad)_48%,transparent)]" : s === "SUBMITTED" ? "bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)] border-[color:color-mix(in_oklab,var(--brand)_48%,transparent)]" : "bg-[var(--panel-soft)] text-[var(--ink)] border-[var(--line)]";
@@ -346,7 +354,7 @@ export default function SubmissionDetailPage() {
   const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
   const triFields: Array<[string, string]> = [
     ["failure_rock_fall","Rock Fall"],["failure_topple","Topple"],["failure_slide","Slide"],["failure_spread","Spread"],["failure_flow","Flow"],["failure_compound","Compound"],["failure_erosion","Erosion"],["failure_surficial_failure","Surficial Failure"],["failure_scoured_toe","Scoured Toe"],["failure_washout","Washout"],
-    ["distribution_advancing","Dist: Advancing"],["distribution_retrogressive","Dist: Retrogressive"],["distribution_enlarging","Dist: Enlarging"],["distribution_widening","Dist: Widening"],["distribution_moving","Dist: Moving"],["distribution_confined","Dist: Confined"],
+    ["distribution_advancing","◎ Dist: Advancing"],["distribution_retrogressive","◉ Dist: Retrogressive"],["distribution_enlarging","◌ Dist: Enlarging"],["distribution_widening","↔ Dist: Widening"],["distribution_moving","◔ Dist: Moving"],["distribution_confined","◍ Dist: Confined"],
     ["material_rock","Material Rock"],["material_soil","Material Soil"],["material_bedding","Rock Bedding"],["material_joints","Rock Joints"],["material_fractures","Rock Fractures"],
     ["water_dry","Water Dry"],["water_moist","Water Moist"],["water_wet","Water Wet"],["water_flowing","Water Flowing"],["water_seep","Water Seep"],["water_spring","Water Spring"],
     ["drainage_clogged_inlet","Drainage Clogged Inlet"],["drainage_compromised_drains","Drainage Compromised Drains"],["drainage_surface_runoff","Drainage Surface Runoff"],["drainage_torrent_surge_flood","Drainage Torrent/Surge/Flood"],
@@ -462,7 +470,30 @@ export default function SubmissionDetailPage() {
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Depth (in)" value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} />
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Settlement (in)" value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} />
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Bulge (in)" value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} />
-                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.distribution_code} onChange={(e)=>setDraft((d)=>({...d,distribution_code:e.target.value}))}><option value="">Distribution</option>{(lookups?.distribution??[]).map((x)=><option key={x.code} value={x.code}>{x.label}</option>)}</select>
+                  <div className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-2 text-sm">
+                    <div className="mb-1 text-xs text-muted">Distribution</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(lookups?.distribution ?? []).map((x) => {
+                        const active = draft.distribution_code === x.code;
+                        return (
+                          <button
+                            key={x.code}
+                            type="button"
+                            onClick={() => setDraft((d) => ({ ...d, distribution_code: active ? "" : x.code }))}
+                            className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${active ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_14%,transparent)] text-[var(--brand)]" : "border-[var(--line)] bg-[var(--panel-soft)] text-[var(--ink)]"}`}
+                          >
+                            <img
+                              src={DISTRIBUTION_ICON_SRC[x.code] ?? ""}
+                              alt=""
+                              aria-hidden
+                              className="h-4 w-4 object-contain"
+                            />
+                            <span>{x.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.highway_status_code} onChange={(e)=>setDraft((d)=>({...d,highway_status_code:e.target.value}))}><option value="">Highway Status</option>{(lookups?.highway_status??[]).map((x)=><option key={x.code} value={x.code}>{x.label}</option>)}</select>
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.pavement_ground_cracks} onChange={(e)=>setDraft((d)=>({...d,pavement_ground_cracks:e.target.value as Tri}))}><option value="UNKNOWN">Pavement Cracks: Unknown</option><option value="YES">Pavement Cracks: Yes</option><option value="NO">Pavement Cracks: No</option></select>
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.indented_by_rocks} onChange={(e)=>setDraft((d)=>({...d,indented_by_rocks:e.target.value as Tri}))}><option value="UNKNOWN">Indented by Rocks: Unknown</option><option value="YES">Indented by Rocks: Yes</option><option value="NO">Indented by Rocks: No</option></select>
