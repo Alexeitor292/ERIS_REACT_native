@@ -341,6 +341,18 @@ export default function SubmissionDetailPage() {
 
   useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid, canManageSharing]);
 
+  const box = "rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3";
+  const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
+  const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
+  const triFields: Array<[string, string]> = [
+    ["failure_rock_fall","Rock Fall"],["failure_topple","Topple"],["failure_slide","Slide"],["failure_spread","Spread"],["failure_flow","Flow"],["failure_compound","Compound"],["failure_erosion","Erosion"],["failure_surficial_failure","Surficial Failure"],["failure_scoured_toe","Scoured Toe"],["failure_washout","Washout"],
+    ["distribution_advancing","Dist: Advancing"],["distribution_retrogressive","Dist: Retrogressive"],["distribution_enlarging","Dist: Enlarging"],["distribution_widening","Dist: Widening"],["distribution_moving","Dist: Moving"],["distribution_confined","Dist: Confined"],
+    ["material_rock","Material Rock"],["material_soil","Material Soil"],["material_bedding","Rock Bedding"],["material_joints","Rock Joints"],["material_fractures","Rock Fractures"],
+    ["water_dry","Water Dry"],["water_moist","Water Moist"],["water_wet","Water Wet"],["water_flowing","Water Flowing"],["water_seep","Water Seep"],["water_spring","Water Spring"],
+    ["drainage_clogged_inlet","Drainage Clogged Inlet"],["drainage_compromised_drains","Drainage Compromised Drains"],["drainage_surface_runoff","Drainage Surface Runoff"],["drainage_torrent_surge_flood","Drainage Torrent/Surge/Flood"],
+    ["impact_impacted_adj_utilities","Impacted Utilities"],["impact_maybe_adj_utilities","Maybe Utilities"],["impact_impacted_adj_properties","Impacted Properties"],["impact_maybe_adj_properties","Maybe Properties"],["impact_impacted_adj_structure","Impacted Structures"],["impact_maybe_adj_structure","Maybe Structures"],
+  ];
+
   return (
     <AppShell title={invalid ? "Submission" : (data ? buildSubmissionDisplayTitle({
       id: data.submission.id,
@@ -408,7 +420,20 @@ export default function SubmissionDetailPage() {
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Form</h3>
                 <div className="mt-1 text-xs text-muted">{canEdit ? "Unified view/edit form." : "Unified read-only form."}</div>
                 <fieldset disabled={!canEdit} className="contents">
-                <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+                <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Location And ERIS Map</div>
+                    <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "Use GPS Autofill"}</button>
+                  </div>
+                  <SubmissionArcGisMap
+                    geojson={geom}
+                    location={{ latitude: draft.latitude ? Number(draft.latitude) : null, longitude: draft.longitude ? Number(draft.longitude) : null }}
+                    height={300}
+                  />
+                </div>
+                <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet Fields</div>
+                <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                   <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Report Date (YYYY-MM-DD)" value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
                   <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.district} onChange={(e)=>setDraft((d)=>({...d,district:e.target.value}))}>
                     <option value="">District</option>
@@ -478,8 +503,6 @@ export default function SubmissionDetailPage() {
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Roadway Length (ft)" value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} />
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Roadway Width (ft)" value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} />
                 </div>
-                <div className="mt-2">
-                  <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:opacity-60">{geoBusy ? "Detecting location..." : "Use GPS Autofill"}</button>
                 </div>
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={3} placeholder="Observations" value={draft.observations_notes} onChange={(e)=>setDraft((d)=>({...d,observations_notes:e.target.value}))} />
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Record of Event Notes" value={draft.record_of_event_notes} onChange={(e)=>setDraft((d)=>({...d,record_of_event_notes:e.target.value}))} />
