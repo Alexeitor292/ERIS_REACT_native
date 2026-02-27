@@ -87,6 +87,7 @@ const DISTRIBUTION_ICON_SRC: Record<string, string> = {
   MOVING: "/distribution-icons/moving.png",
   CONFINED: "/distribution-icons/confined.png",
 };
+const LANES_CLOSED_OPTIONS = Array.from({ length: 12 }, (_, idx) => String(idx + 1));
 
 function S({ s }: { s: string }) {
   const c = s === "APPROVED" ? "bg-[color:color-mix(in_oklab,var(--good)_16%,transparent)] text-[var(--good)] border-[color:color-mix(in_oklab,var(--good)_48%,transparent)]" : s === "REJECTED" ? "bg-[color:color-mix(in_oklab,var(--bad)_16%,transparent)] text-[var(--bad)] border-[color:color-mix(in_oklab,var(--bad)_48%,transparent)]" : s === "SUBMITTED" ? "bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)] border-[color:color-mix(in_oklab,var(--brand)_48%,transparent)]" : "bg-[var(--panel-soft)] text-[var(--ink)] border-[var(--line)]";
@@ -153,6 +154,27 @@ export default function SubmissionDetailPage() {
     (me?.roles?.includes("ADMIN") ||
       (data.submission.status === "DRAFT" && me?.id === data.submission.created_by_user_id));
   const tog = (arr: string[], code: string) => (arr.includes(code) ? arr.filter((x) => x !== code) : [...arr, code]);
+
+  function soilPercentValidationMessage(): string | null {
+    if (draft.material_soil !== "YES") return null;
+    const fields: Array<[string, string]> = [
+      ["est_clay_pct", "Clay"],
+      ["est_silt_pct", "Silt"],
+      ["est_sand_pct", "Sand"],
+      ["est_gravel_pct", "Gravel"],
+    ];
+    let total = 0;
+    for (const [key, label] of fields) {
+      const raw = String(draft[key] ?? "").trim();
+      const value = raw ? Number(raw) : 0;
+      if (Number.isNaN(value)) return `${label} percentage must be numeric.`;
+      total += value;
+    }
+    const delta = total - 100;
+    if (total === 100) return null;
+    const dir = delta > 0 ? "over" : "under";
+    return `Material Soil percentages must total 100%. Current total is ${total.toFixed(2)}% (${dir} by ${Math.abs(delta).toFixed(2)}%).`;
+  }
 
   async function load() {
     setBusy(true); setErr(null);
@@ -229,7 +251,14 @@ export default function SubmissionDetailPage() {
   }
 
   async function saveDraft() { setBusy(true); setErr(null); try { await persistDraft(); await load(); } catch (e: any) { setErr(e?.message ?? "Save failed"); setBusy(false); } }
-  async function submitDraft() { setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setErr(e?.message ?? "Submit failed"); setBusy(false); } }
+  async function submitDraft() {
+    const soilMsg = soilPercentValidationMessage();
+    if (soilMsg) {
+      setErr(soilMsg);
+      return;
+    }
+    setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setErr(e?.message ?? "Submit failed"); setBusy(false); }
+  }
   async function review(decision: "APPROVE" | "REJECT") { setBusy(true); setErr(null); try { await api(`/submissions/${sid}/review`, { method: "POST", body: JSON.stringify({ decision, comment: reviewNote.trim() || null }) }); await load(); } catch (e: any) { setErr(e?.message ?? "Review failed"); setBusy(false); } }
   async function searchShareCandidates() {
     if (!canManageSharing) return;
@@ -463,7 +492,12 @@ export default function SubmissionDetailPage() {
                   <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="District Contact" value={draft.district_contact} onChange={(e)=>setDraft((d)=>({...d,district_contact:e.target.value}))} />
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Latitude" value={draft.latitude} onChange={(e)=>setDraft((d)=>({...d,latitude:e.target.value}))} />
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Longitude" value={draft.longitude} onChange={(e)=>setDraft((d)=>({...d,longitude:e.target.value}))} />
-                  <input type="number" step="1" inputMode="numeric" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Lanes Closed Count" value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))} />
+                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
+                    <option value="">Lanes Closed Count</option>
+                    {LANES_CLOSED_OPTIONS.map((v) => (
+                      <option key={`lanes-closed-${v}`} value={v}>{v}</option>
+                    ))}
+                  </select>
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Length (ft)" value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} />
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Horizontal (in)" value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} />
                   <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Vertical (in)" value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} />
@@ -525,14 +559,18 @@ export default function SubmissionDetailPage() {
                   <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Vegetation Trees %" value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} />
                   <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Vegetation Bushes/Shrubs %" value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} />
                   <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Vegetation Groundcover %" value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Slope Height (ft)" value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Original Slope (deg)" value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Width (ft)" value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Length (ft)" value={draft.measure_landslide_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_length_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Main Scarp Height (ft)" value={draft.measure_main_scarp_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_main_scarp_height_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Slope (deg)" value={draft.measure_landslide_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_slope_deg:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Roadway Length (ft)" value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Roadway Width (ft)" value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} />
+                  <div className="col-span-1 lg:col-span-2 rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Measurements Diagram</div>
+                    <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-72 w-full object-contain" />
+                  </div>
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Slope Height, ft (H)" value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Original Slope, deg (α)" value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Width, ft (Wd)" value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Length, ft (Ld)" value={draft.measure_landslide_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_length_ft:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Main Scarp Height, ft (Hs)" value={draft.measure_main_scarp_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_main_scarp_height_ft:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Slope, deg (β)" value={draft.measure_landslide_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_slope_deg:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Length of Roadway Encroached, ft (Lr)" value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} />
+                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Width of Roadway Encroached, ft (Wr)" value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} />
                 </div>
                 </div>
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={3} placeholder="Observations" value={draft.observations_notes} onChange={(e)=>setDraft((d)=>({...d,observations_notes:e.target.value}))} />

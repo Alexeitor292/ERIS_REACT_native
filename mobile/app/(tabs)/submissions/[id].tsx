@@ -194,6 +194,7 @@ const DISTRIBUTION_ICON_SOURCE: Record<string, any> = {
   MOVING: require("../../../assets/distribution-icons/moving.png"),
   CONFINED: require("../../../assets/distribution-icons/confined.png"),
 };
+const LANDSLIDE_MEASURE_DIAGRAM = require("../../../assets/measurement/landslide.png");
 
 function createEmptyDistrictContact(): DistrictContact {
   return {
@@ -375,6 +376,7 @@ function Chip({
   onPress,
   disabled,
   palette,
+  iconLeft,
   iconRight,
 }: {
   label: string;
@@ -382,6 +384,7 @@ function Chip({
   onPress: () => void;
   disabled?: boolean;
   palette?: { primary: string; border: string; panelSoft: string; text: string };
+  iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
 }) {
   return (
@@ -399,6 +402,7 @@ function Chip({
       ]}
     >
       <View style={styles.chipInner}>
+        {iconLeft ? <View style={styles.chipIconWrap}>{iconLeft}</View> : null}
         <Text style={[styles.chipText, { color: palette?.text ?? "#334155" }, active ? [styles.chipTextOn, { color: palette?.primary ?? "#1d4ed8" }] : null]}>{label}</Text>
         {iconRight ? <View style={styles.chipIconWrap}>{iconRight}</View> : null}
       </View>
@@ -579,6 +583,7 @@ export default function SubmissionDetailScreen() {
   const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
   const [countyPickerOpen, setCountyPickerOpen] = useState(false);
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
+  const [lanesClosedPickerOpen, setLanesClosedPickerOpen] = useState(false);
   const [datePickerKey, setDatePickerKey] = useState<"report_date" | "date_incident_reported" | null>(null);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
@@ -966,6 +971,38 @@ export default function SubmissionDetailScreen() {
     return true;
   }, [form]);
 
+  const validateSoilPercentForSubmit = useCallback((): boolean => {
+    if (form.material_soil !== "YES") return true;
+    const fields: Array<[keyof FormState, string]> = [
+      ["est_clay_pct", "Clay"],
+      ["est_silt_pct", "Silt"],
+      ["est_sand_pct", "Sand"],
+      ["est_gravel_pct", "Gravel"],
+    ];
+    let total = 0;
+    for (const [key, label] of fields) {
+      const raw = String(form[key] ?? "").trim();
+      const value = raw ? Number(raw) : 0;
+      if (Number.isNaN(value)) {
+        setActiveStep(1);
+        setOpenPaperBlocks((prev) => ({ ...prev, material: true }));
+        Alert.alert("Cannot Submit Yet", `${label} percentage must be numeric.`);
+        return false;
+      }
+      total += value;
+    }
+    const delta = total - 100;
+    if (total === 100) return true;
+    const dir = delta > 0 ? "over" : "under";
+    setActiveStep(1);
+    setOpenPaperBlocks((prev) => ({ ...prev, material: true }));
+    Alert.alert(
+      "Cannot Submit Yet",
+      `Material Soil percentages must total 100%. Current total is ${total.toFixed(2)}% (${dir} by ${Math.abs(delta).toFixed(2)}%).`
+    );
+    return false;
+  }, [form]);
+
   const saveDraft = useCallback(async () => {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
@@ -1027,6 +1064,7 @@ export default function SubmissionDetailScreen() {
   async function submitDraft() {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
+    if (!validateSoilPercentForSubmit()) return;
     setBusy(true);
     try {
       await submitSubmission(token, id);
@@ -1890,7 +1928,7 @@ export default function SubmissionDetailScreen() {
                 active={form.distribution_code === o.code}
                 disabled={!canEdit}
                 onPress={() => canEdit && setVal("distribution_code", form.distribution_code === o.code ? "" : o.code)}
-                iconRight={
+                iconLeft={
                   DISTRIBUTION_ICON_SOURCE[o.code] ? (
                     <Image
                       source={DISTRIBUTION_ICON_SOURCE[o.code]}
@@ -1923,13 +1961,13 @@ export default function SubmissionDetailScreen() {
             ))}
           </View>
           {highwayLanesClosedSelected ? (
-            <Field
+            <SelectField
               palette={palette}
               label="Lane(s) Closed Count"
               value={form.lanes_closed_count}
+              placeholder="Select lanes closed"
               editable={canEdit}
-              keyboardType="number-pad"
-              onChangeText={(v) => setVal("lanes_closed_count", v)}
+              onPress={() => setLanesClosedPickerOpen(true)}
               error={fieldErrors.lanes_closed_count}
             />
           ) : null}
@@ -2082,14 +2120,17 @@ export default function SubmissionDetailScreen() {
 
         {anyFailureSelected ? (
           <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
-            <Field palette={palette} label="Slope Height (ft)" value={form.measure_slope_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_slope_height_ft", v)} />
-            <Field palette={palette} label="Original Slope (deg)" value={form.measure_original_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_original_slope_deg", v)} />
-            <Field palette={palette} label="Landslide Width (ft)" value={form.measure_landslide_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_width_ft", v)} />
-            <Field palette={palette} label="Landslide Length (ft)" value={form.measure_landslide_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_length_ft", v)} />
-            <Field palette={palette} label="Main Scarp Height (ft)" value={form.measure_main_scarp_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_main_scarp_height_ft", v)} />
-            <Field palette={palette} label="Landslide Slope (deg)" value={form.measure_landslide_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_slope_deg", v)} />
-            <Field palette={palette} label="Roadway Length (ft)" value={form.measure_roadway_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_length_ft", v)} />
-            <Field palette={palette} label="Roadway Width (ft)" value={form.measure_roadway_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_width_ft", v)} />
+            <View style={[styles.measurementDiagramWrap, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+              <Image source={LANDSLIDE_MEASURE_DIAGRAM} style={styles.measurementDiagram} resizeMode="contain" />
+            </View>
+            <Field palette={palette} label="Slope Height, ft (H)" value={form.measure_slope_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_slope_height_ft", v)} />
+            <Field palette={palette} label="Original Slope, deg (α)" value={form.measure_original_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_original_slope_deg", v)} />
+            <Field palette={palette} label="Landslide Width, ft (Wd)" value={form.measure_landslide_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_width_ft", v)} />
+            <Field palette={palette} label="Landslide Length, ft (Ld)" value={form.measure_landslide_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_length_ft", v)} />
+            <Field palette={palette} label="Main Scarp Height, ft (Hs)" value={form.measure_main_scarp_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_main_scarp_height_ft", v)} />
+            <Field palette={palette} label="Landslide Slope, deg (β)" value={form.measure_landslide_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_slope_deg", v)} />
+            <Field palette={palette} label="Length of Roadway Encroached, ft (Lr)" value={form.measure_roadway_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_length_ft", v)} />
+            <Field palette={palette} label="Width of Roadway Encroached, ft (Wr)" value={form.measure_roadway_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_width_ft", v)} />
           </DropdownBlock>
         ) : null}
         <View style={styles.stepNavRow}>
@@ -2451,6 +2492,28 @@ export default function SubmissionDetailScreen() {
       </Pressable>
     </Modal>
 
+    <Modal visible={lanesClosedPickerOpen} transparent animationType="fade" onRequestClose={() => setLanesClosedPickerOpen(false)}>
+      <Pressable style={styles.pickerBackdrop} onPress={() => setLanesClosedPickerOpen(false)}>
+        <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.pickerTitle, { color: palette.text }]}>Lane(s) Closed Count</Text>
+          <ScrollView style={{ maxHeight: 340 }}>
+            {Array.from({ length: 12 }, (_, idx) => String(idx + 1)).map((count) => (
+              <Pressable
+                key={count}
+                style={[styles.pickerItem, form.lanes_closed_count === count ? { backgroundColor: palette.panelSoft } : null]}
+                onPress={() => {
+                  setVal("lanes_closed_count", count);
+                  setLanesClosedPickerOpen(false);
+                }}
+              >
+                <Text style={{ color: palette.text, fontWeight: "600" }}>{count}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
     <Modal visible={!!datePickerKey} transparent animationType="fade" onRequestClose={() => setDatePickerKey(null)}>
       <Pressable style={styles.pickerBackdrop} onPress={() => setDatePickerKey(null)}>
         <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
@@ -2623,6 +2686,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     gap: 4,
+  },
+  measurementDiagramWrap: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 8,
+  },
+  measurementDiagram: {
+    width: "100%",
+    height: 220,
   },
   locationMapPreview: {
     width: "100%",
