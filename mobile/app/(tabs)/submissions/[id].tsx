@@ -186,6 +186,15 @@ const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
   failure_washout: "WASHOUT",
 };
 
+const DISTRIBUTION_ICON_SOURCE: Record<string, any> = {
+  ADVANCING: require("../../../assets/distribution-icons/advancing.png"),
+  RETROGRESSING: require("../../../assets/distribution-icons/retrogressing.png"),
+  ENLARGING: require("../../../assets/distribution-icons/enlarging.png"),
+  WIDENING: require("../../../assets/distribution-icons/widening.png"),
+  MOVING: require("../../../assets/distribution-icons/moving.png"),
+  CONFINED: require("../../../assets/distribution-icons/confined.png"),
+};
+
 function createEmptyDistrictContact(): DistrictContact {
   return {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -366,12 +375,14 @@ function Chip({
   onPress,
   disabled,
   palette,
+  iconRight,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
   disabled?: boolean;
   palette?: { primary: string; border: string; panelSoft: string; text: string };
+  iconRight?: React.ReactNode;
 }) {
   return (
     <Pressable
@@ -387,7 +398,10 @@ function Chip({
         disabled ? { opacity: 0.6 } : null,
       ]}
     >
-      <Text style={[styles.chipText, { color: palette?.text ?? "#334155" }, active ? [styles.chipTextOn, { color: palette?.primary ?? "#1d4ed8" }] : null]}>{label}</Text>
+      <View style={styles.chipInner}>
+        <Text style={[styles.chipText, { color: palette?.text ?? "#334155" }, active ? [styles.chipTextOn, { color: palette?.primary ?? "#1d4ed8" }] : null]}>{label}</Text>
+        {iconRight ? <View style={styles.chipIconWrap}>{iconRight}</View> : null}
+      </View>
     </Pressable>
   );
 }
@@ -1869,7 +1883,23 @@ export default function SubmissionDetailScreen() {
         <DropdownBlock title="Distribution" open={openPaperBlocks.distributionMain} onToggle={() => togglePaperBlock("distributionMain")} palette={palette}>
           <View style={styles.chips}>
             {lookups.distribution.map((o) => (
-              <Chip key={o.code} label={o.label} palette={palette} active={form.distribution_code === o.code} disabled={!canEdit} onPress={() => canEdit && setVal("distribution_code", form.distribution_code === o.code ? "" : o.code)} />
+              <Chip
+                key={o.code}
+                label={o.label}
+                palette={palette}
+                active={form.distribution_code === o.code}
+                disabled={!canEdit}
+                onPress={() => canEdit && setVal("distribution_code", form.distribution_code === o.code ? "" : o.code)}
+                iconRight={
+                  DISTRIBUTION_ICON_SOURCE[o.code] ? (
+                    <Image
+                      source={DISTRIBUTION_ICON_SOURCE[o.code]}
+                      style={styles.distributionIcon}
+                      resizeMode="contain"
+                    />
+                  ) : null
+                }
+              />
             ))}
           </View>
         </DropdownBlock>
@@ -2577,6 +2607,9 @@ const styles = StyleSheet.create({
   },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   chip: { borderWidth: 1, borderColor: "#c8d5ea", borderRadius: 999, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#f9fbff" },
+  chipInner: { flexDirection: "row", alignItems: "center", gap: 6 },
+  chipIconWrap: { width: 18, height: 18, alignItems: "center", justifyContent: "center" },
+  distributionIcon: { width: 18, height: 18 },
   chipOn: { backgroundColor: "#dbeafe", borderColor: "#1d4ed8" },
   chipText: { color: "#334155", fontSize: 12, fontWeight: "700" },
   chipTextOn: { color: "#1d4ed8" },

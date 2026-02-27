@@ -80,12 +80,12 @@ const boolToTri = (v: unknown): Tri => (v === true ? "YES" : v === false ? "NO" 
 const nf = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${n} must be numeric`); return x; };
 const ni = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${n} must be whole number`); return x; };
 const DISTRIBUTION_ICON_SRC: Record<string, string> = {
-  ADVANCING: "/distribution-icons/advancing.bmp",
-  RETROGRESSING: "/distribution-icons/retrogressing.bmp",
-  ENLARGING: "/distribution-icons/enlarging.bmp",
-  WIDENING: "/distribution-icons/widening.bmp",
-  MOVING: "/distribution-icons/moving.bmp",
-  CONFINED: "/distribution-icons/confined.bmp",
+  ADVANCING: "/distribution-icons/advancing.png",
+  RETROGRESSING: "/distribution-icons/retrogressing.png",
+  ENLARGING: "/distribution-icons/enlarging.png",
+  WIDENING: "/distribution-icons/widening.png",
+  MOVING: "/distribution-icons/moving.png",
+  CONFINED: "/distribution-icons/confined.png",
 };
 
 function S({ s }: { s: string }) {
@@ -480,15 +480,15 @@ export default function SubmissionDetailPage() {
                             key={x.code}
                             type="button"
                             onClick={() => setDraft((d) => ({ ...d, distribution_code: active ? "" : x.code }))}
-                            className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${active ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_14%,transparent)] text-[var(--brand)]" : "border-[var(--line)] bg-[var(--panel-soft)] text-[var(--ink)]"}`}
+                            className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]"}`}
                           >
+                            <span>{x.label}</span>
                             <img
                               src={DISTRIBUTION_ICON_SRC[x.code] ?? ""}
                               alt=""
                               aria-hidden
-                              className="h-4 w-4 object-contain"
+                              className="h-6 w-6 object-contain"
                             />
-                            <span>{x.label}</span>
                           </button>
                         );
                       })}
