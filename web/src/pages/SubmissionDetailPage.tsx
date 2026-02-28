@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type ReactNode } from "react";
+﻿import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail } from "../api/types";
@@ -8,7 +8,7 @@ import { getToken } from "../auth/token";
 import { appConfig } from "../config";
 import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
-import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, districtForCounty } from "../utils/caltransLookups";
+import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 
 type Tri = "UNKNOWN" | "YES" | "NO";
 type Draft = Record<string, string> & {
@@ -88,6 +88,39 @@ const DISTRIBUTION_ICON_SRC: Record<string, string> = {
   CONFINED: "/distribution-icons/confined.png",
 };
 const LANES_CLOSED_OPTIONS = Array.from({ length: 12 }, (_, idx) => String(idx + 1));
+const DASHBOARD_LAYOUT_KEY = "eris_submission_layout_v1";
+const DASHBOARD_DEFAULT_ORDER = [
+  "report_header",
+  "location",
+  "distribution",
+  "highway_status",
+  "incident_type",
+  "material",
+  "pavement_ground_status",
+  "vegetation_on_slope",
+  "water_drainage",
+  "water_content",
+  "measurements",
+] as const;
+type DashboardCardId = (typeof DASHBOARD_DEFAULT_ORDER)[number];
+type DashboardCardLayout = { colSpan: number; rowSpan: number };
+type DashboardLayoutState = {
+  order: DashboardCardId[];
+  sizes: Record<DashboardCardId, DashboardCardLayout>;
+};
+const DASHBOARD_DEFAULT_SIZES: Record<DashboardCardId, DashboardCardLayout> = {
+  report_header: { colSpan: 8, rowSpan: 1 },
+  location: { colSpan: 4, rowSpan: 1 },
+  distribution: { colSpan: 6, rowSpan: 1 },
+  highway_status: { colSpan: 6, rowSpan: 1 },
+  incident_type: { colSpan: 6, rowSpan: 1 },
+  material: { colSpan: 6, rowSpan: 1 },
+  pavement_ground_status: { colSpan: 6, rowSpan: 1 },
+  vegetation_on_slope: { colSpan: 6, rowSpan: 1 },
+  water_drainage: { colSpan: 6, rowSpan: 1 },
+  water_content: { colSpan: 6, rowSpan: 1 },
+  measurements: { colSpan: 6, rowSpan: 1 },
+};
 const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
   failure_rock_fall: "ROCK_FALL",
   failure_topple: "TOPPLE",
@@ -133,6 +166,14 @@ function tryExtractRoute(addressText: string): string | null {
   return m?.[1] ?? null;
 }
 
+function normalizeDistrictValue(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const n = Number(raw);
+  if (!Number.isNaN(n) && Number.isInteger(n) && n >= 1 && n <= 12) return String(n);
+  return raw;
+}
+
 export default function SubmissionDetailPage() {
   const { id } = useParams();
   const sid = Number(id);
@@ -156,6 +197,12 @@ export default function SubmissionDetailPage() {
   const [sharedWith, setSharedWith] = useState<SharedUser[]>([]);
   const [geoBusy, setGeoBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [layoutMode, setLayoutMode] = useState(false);
+  const [draggingCardId, setDraggingCardId] = useState<DashboardCardId | null>(null);
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => ({
+    order: [...DASHBOARD_DEFAULT_ORDER],
+    sizes: { ...DASHBOARD_DEFAULT_SIZES },
+  }));
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
@@ -166,6 +213,41 @@ export default function SubmissionDetailPage() {
     (me?.roles?.includes("ADMIN") ||
       (data.submission.status === "DRAFT" && me?.id === data.submission.created_by_user_id));
   const tog = (arr: string[], code: string) => (arr.includes(code) ? arr.filter((x) => x !== code) : [...arr, code]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DASHBOARD_LAYOUT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<DashboardLayoutState>;
+      const order = Array.isArray(parsed.order)
+        ? parsed.order.filter((x): x is DashboardCardId => DASHBOARD_DEFAULT_ORDER.includes(x as DashboardCardId))
+        : [];
+      const mergedOrder = [
+        ...order,
+        ...DASHBOARD_DEFAULT_ORDER.filter((id) => !order.includes(id)),
+      ] as DashboardCardId[];
+      const sizes: Record<DashboardCardId, DashboardCardLayout> = { ...DASHBOARD_DEFAULT_SIZES };
+      for (const id of DASHBOARD_DEFAULT_ORDER) {
+        const next = parsed.sizes?.[id];
+        if (!next) continue;
+        sizes[id] = {
+          colSpan: Math.min(12, Math.max(3, Number(next.colSpan) || DASHBOARD_DEFAULT_SIZES[id].colSpan)),
+          rowSpan: Math.min(4, Math.max(1, Number(next.rowSpan) || DASHBOARD_DEFAULT_SIZES[id].rowSpan)),
+        };
+      }
+      setDashboardLayout({ order: mergedOrder, sizes });
+    } catch {
+      // ignore malformed saved layout
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DASHBOARD_LAYOUT_KEY, JSON.stringify(dashboardLayout));
+    } catch {
+      // ignore
+    }
+  }, [dashboardLayout]);
 
   function soilPercentValidationMessage(): string | null {
     if (draft.material_soil !== "YES") return null;
@@ -203,7 +285,15 @@ export default function SubmissionDetailPage() {
       const gisa: any = d.gisa || {};
       setDraft({
         ...EMPTY,
-        report_date: t(gisa.report_date), district: t(gisa.district), county: t(gisa.county), route: t(gisa.route), post_mile: t(gisa.post_mile), ea: t(gisa.ea), project_id: t(gisa.project_id), date_incident_reported: t(gisa.date_incident_reported), district_contact: t(gisa.district_contact),
+        report_date: t(gisa.report_date),
+        district: normalizeDistrictValue(gisa.district) || normalizeDistrictValue(districtForCounty(gisa.county)),
+        county: countyNameFromNameOrCode(gisa.county) ?? t(gisa.county),
+        route: t(gisa.route),
+        post_mile: t(gisa.post_mile),
+        ea: t(gisa.ea),
+        project_id: t(gisa.project_id),
+        date_incident_reported: t(gisa.date_incident_reported),
+        district_contact: t(gisa.district_contact),
         latitude: t(gisa.latitude), longitude: t(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
         pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
         failure_rock_fall: boolToTri(gisa.failure_rock_fall), failure_topple: boolToTri(gisa.failure_topple), failure_slide: boolToTri(gisa.failure_slide), failure_spread: boolToTri(gisa.failure_spread), failure_flow: boolToTri(gisa.failure_flow), failure_compound: boolToTri(gisa.failure_compound), failure_erosion: boolToTri(gisa.failure_erosion), failure_surficial_failure: boolToTri(gisa.failure_surficial_failure), failure_scoured_toe: boolToTri(gisa.failure_scoured_toe), failure_washout: boolToTri(gisa.failure_washout),
@@ -394,6 +484,7 @@ export default function SubmissionDetailPage() {
   const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
   const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
   const chip = "rounded-full border px-2.5 py-1 text-xs";
+  const layoutBtn = "rounded border border-[var(--line)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[10px]";
   const ynChip = (active: boolean) => (active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]");
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"] as const;
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"] as const;
@@ -404,6 +495,67 @@ export default function SubmissionDetailPage() {
   const waterFlowingSelected = draft.water_flowing === "YES";
   const highwayLanesClosedSelected = draft.highway_status_code === "LANES_CLOSED";
   const openHighwayTrafficSelected = imm.includes("OPEN_HIGHWAY_TRAFFIC") || fol.includes("OPEN_HIGHWAY_TRAFFIC");
+  const countyOptions = draft.district ? countiesForDistrict(draft.district) : CALIFORNIA_COUNTIES;
+  const routeOptions = routesForDistrictCounty(draft.district, draft.county);
+  const visibleCardIds: DashboardCardId[] = anyFailureSelected
+    ? [...DASHBOARD_DEFAULT_ORDER]
+    : DASHBOARD_DEFAULT_ORDER.filter((x) => x !== "measurements");
+  const orderedVisibleCardIds: DashboardCardId[] = [
+    ...dashboardLayout.order.filter((id) => visibleCardIds.includes(id)),
+    ...visibleCardIds.filter((id) => !dashboardLayout.order.includes(id)),
+  ];
+
+  const moveCardBefore = (dragId: DashboardCardId, dropId: DashboardCardId) => {
+    if (dragId === dropId) return;
+    setDashboardLayout((prev) => {
+      const nextOrder = prev.order.filter((id) => id !== dragId);
+      const idx = nextOrder.indexOf(dropId);
+      if (idx < 0) nextOrder.push(dragId);
+      else nextOrder.splice(idx, 0, dragId);
+      return { ...prev, order: nextOrder as DashboardCardId[] };
+    });
+  };
+  const adjustCardSize = (id: DashboardCardId, axis: "col" | "row", delta: number) => {
+    setDashboardLayout((prev) => {
+      const cur = prev.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
+      const next: DashboardCardLayout = {
+        colSpan: axis === "col" ? Math.min(12, Math.max(3, cur.colSpan + delta)) : cur.colSpan,
+        rowSpan: axis === "row" ? Math.min(4, Math.max(1, cur.rowSpan + delta)) : cur.rowSpan,
+      };
+      return { ...prev, sizes: { ...prev.sizes, [id]: next } };
+    });
+  };
+  const cardFrameProps = (id: DashboardCardId) => ({
+    className: `${box} relative ${layoutMode ? "cursor-move" : ""}`,
+    style: {
+      gridColumn: `span ${dashboardLayout.sizes[id]?.colSpan ?? DASHBOARD_DEFAULT_SIZES[id].colSpan}`,
+      gridRow: `span ${dashboardLayout.sizes[id]?.rowSpan ?? DASHBOARD_DEFAULT_SIZES[id].rowSpan}`,
+      order: dashboardLayout.order.indexOf(id),
+    } as CSSProperties,
+    draggable: layoutMode,
+    onDragStart: () => setDraggingCardId(id),
+    onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
+      if (!layoutMode) return;
+      e.preventDefault();
+    },
+    onDrop: (e: React.DragEvent<HTMLDivElement>) => {
+      if (!layoutMode) return;
+      e.preventDefault();
+      if (draggingCardId) moveCardBefore(draggingCardId, id);
+      setDraggingCardId(null);
+    },
+    onDragEnd: () => setDraggingCardId(null),
+  });
+  const layoutTools = (id: DashboardCardId) =>
+    layoutMode ? (
+      <div className="absolute right-2 top-2 z-[1] flex items-center gap-1 rounded border border-[var(--line)] bg-[var(--panel)]/90 p-1">
+        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "col", -1)}>W-</button>
+        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "col", 1)}>W+</button>
+        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "row", -1)}>H-</button>
+        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "row", 1)}>H+</button>
+        <span className="text-[10px] text-muted">drag</span>
+      </div>
+    ) : null;
 
   const selectSingleIncidentType = (key: typeof failureKeys[number]) => {
     if (!canEdit) return;
@@ -625,9 +777,26 @@ export default function SubmissionDetailPage() {
                   />
                 </div>
                 <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet Layout</div>
-                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
-                    <div className={`${box} lg:col-span-8`}>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet Layout</div>
+                    <div className="flex items-center gap-2">
+                      {layoutMode ? (
+                        <button
+                          type="button"
+                          onClick={() => setDashboardLayout({ order: [...DASHBOARD_DEFAULT_ORDER], sizes: { ...DASHBOARD_DEFAULT_SIZES } })}
+                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
+                        >
+                          Reset Layout
+                        </button>
+                      ) : null}
+                      <button type="button" onClick={() => setLayoutMode((v) => !v)} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs">
+                        {layoutMode ? "Done Layout" : "Customize Layout"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 lg:auto-rows-[minmax(120px,auto)] lg:grid-cols-12 lg:grid-flow-dense">
+                    <div {...cardFrameProps("report_header")}>
+                      {layoutTools("report_header")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Report Header</div>
                       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                         <div>
@@ -640,25 +809,54 @@ export default function SubmissionDetailPage() {
                         </div>
                         <div>
                           <label className={label}>District</label>
-                          <select className={input} value={draft.district} onChange={(e)=>setDraft((d)=>({...d,district:e.target.value}))}>
+                          <select
+                            className={input}
+                            value={draft.district}
+                            onChange={(e) =>
+                              setDraft((d) => {
+                                const district = e.target.value;
+                                const nextCountyOptions = countiesForDistrict(district);
+                                const county = nextCountyOptions.includes(d.county) ? d.county : "";
+                                const nextRouteOptions = routesForDistrictCounty(district, county);
+                                const route = nextRouteOptions.includes(d.route) ? d.route : "";
+                                return { ...d, district, county, route };
+                              })
+                            }
+                          >
                             <option value="">Select district</option>
                             {CALTRANS_DISTRICTS.map((d) => <option key={d} value={d}>{`District ${d}`}</option>)}
                           </select>
                         </div>
                         <div>
                           <label className={label}>County</label>
-                          <select className={input} value={draft.county} onChange={(e)=>{
-                            const county = e.target.value;
-                            const district = districtForCounty(county);
-                            setDraft((d)=>({...d,county,district:district ?? d.district}));
-                          }}>
+                          <select
+                            className={input}
+                            value={draft.county}
+                            onChange={(e) =>
+                              setDraft((d) => {
+                                const county = e.target.value;
+                                const routeChoices = routesForDistrictCounty(d.district, county);
+                                const route = routeChoices.includes(d.route) ? d.route : "";
+                                return { ...d, county, route };
+                              })
+                            }
+                            disabled={!draft.district}
+                          >
                             <option value="">Select county</option>
-                            {CALIFORNIA_COUNTIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                            {countyOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                           </select>
                         </div>
                         <div>
                           <label className={label}>Highway (Route)</label>
-                          <input className={input} inputMode="numeric" pattern="[0-9]*" value={draft.route} onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))} />
+                          <select
+                            className={input}
+                            value={draft.route}
+                            onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))}
+                            disabled={!draft.district || !draft.county}
+                          >
+                            <option value="">Select route</option>
+                            {routeOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
                         </div>
                         <div>
                           <label className={label}>Post Mile</label>
@@ -679,7 +877,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-4`}>
+                    <div {...cardFrameProps("location")}>
+                      {layoutTools("location")}
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Location</div>
                         <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "GPS Autofill"}</button>
@@ -696,7 +895,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("distribution")}>
+                      {layoutTools("distribution")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Distribution</div>
                       <label className={label}>Distribution</label>
                       <div className="mb-2 flex flex-wrap gap-2">
@@ -717,7 +917,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("highway_status")}>
+                      {layoutTools("highway_status")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Highway Status</div>
                       <label className={label}>Highway Status</label>
                       <div className="mb-2 flex flex-wrap gap-2">
@@ -749,7 +950,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("incident_type")}>
+                      {layoutTools("incident_type")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Incident Type</div>
                       <div className="grid grid-cols-2 gap-2">
                         {[
@@ -761,7 +963,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("material")}>
+                      {layoutTools("material")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Material</div>
                       <div className="mb-2 flex gap-2">
                         <button type="button" onClick={() => selectMaterialPrimary("material_rock")} className={`${chip} ${ynChip(materialRockSelected)}`}>Rock</button>
@@ -784,7 +987,8 @@ export default function SubmissionDetailPage() {
                       ) : null}
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("pavement_ground_status")}>
+                      {layoutTools("pavement_ground_status")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Pavement / Ground Status</div>
                       <label className={label}>Pavement/Ground Cracks</label>
                       <div className="mb-2 flex gap-2">
@@ -816,7 +1020,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("vegetation_on_slope")}>
+                      {layoutTools("vegetation_on_slope")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Vegetation on Slope</div>
                       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                         <div><label className={label}>Trees Coverage %</label><input className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
@@ -825,7 +1030,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("water_drainage")}>
+                      {layoutTools("water_drainage")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water / Drainage</div>
                       <div className="mb-2 flex flex-wrap gap-2">
                         {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, text]) => (
@@ -846,7 +1052,8 @@ export default function SubmissionDetailPage() {
                       </div>
                     </div>
 
-                    <div className={`${box} lg:col-span-6`}>
+                    <div {...cardFrameProps("water_content")}>
+                      {layoutTools("water_content")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water Content</div>
                       <div className="mb-2 flex flex-wrap gap-2">
                         {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"]].map(([key, text]) => (
@@ -862,7 +1069,8 @@ export default function SubmissionDetailPage() {
                     </div>
 
                     {anyFailureSelected ? (
-                      <div className={`${box} lg:col-span-6`}>
+                      <div {...cardFrameProps("measurements")}>
+                        {layoutTools("measurements")}
                         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Measurements</div>
                         <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
                           <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
@@ -972,4 +1180,6 @@ export default function SubmissionDetailPage() {
     </AppShell>
   );
 }
+
+
 
