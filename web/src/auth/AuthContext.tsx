@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
-import { getToken, setToken, clearToken } from "./token";
+import { getToken, setToken, clearToken, getTokenExpiryMs } from "./token";
 
 import type { Me } from "../api/types";
 
@@ -43,11 +43,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setMe(null);
   }
 
+  function onSessionExpired() {
+    clearToken();
+    setTokenState(null);
+    setMe(null);
+    try {
+      sessionStorage.setItem("eris_session_expired", "1");
+    } catch {
+      // ignore
+    }
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+  }
+
   useEffect(() => {
     // On first load, if token exists try fetch /auth/me
     if (token) refreshMe().catch(() => logout());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const check = () => {
+      const liveToken = getToken();
+      if (!liveToken) return;
+      const expMs = getTokenExpiryMs(liveToken);
+      if (expMs == null) return;
+      if (Date.now() >= expMs) {
+        onSessionExpired();
+        return;
+      }
+      const msUntilExpire = Math.max(expMs - Date.now(), 0);
+      timer = setTimeout(check, msUntilExpire + 50);
+    };
+
+    check();
+    const onVisible = () => check();
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [token]);
 
   const value = useMemo(() => ({ me, token, login, logout, refreshMe }), [me, token]);
 

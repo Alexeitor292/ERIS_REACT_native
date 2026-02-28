@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native";
-import { Stack } from "expo-router";
+import { Stack, router, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
+import { AppState } from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
+import { clearToken, getToken, getTokenExpiryMs, setSessionExpiredNotice } from "@/src/auth/tokenStore";
 import AnimatedSplash from "@/src/ui/AnimatedSplash";
 import { UiSettingsProvider, useUiSettings } from "@/src/ui/UiSettingsContext";
 
@@ -14,6 +16,50 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AppNavigator() {
   const { scheme } = useUiSettings();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const inAuthArea = (path: string) => path.startsWith("/(auth)");
+
+    const check = async () => {
+      if (cancelled) return;
+      const token = await getToken();
+      if (!token) {
+        if (!inAuthArea(pathname)) {
+          router.replace("/(auth)/login");
+        }
+        return;
+      }
+      const expMs = getTokenExpiryMs(token);
+      if (expMs == null) return;
+      if (Date.now() >= expMs) {
+        await clearToken();
+        await setSessionExpiredNotice();
+        if (!inAuthArea(pathname)) {
+          router.replace("/(auth)/login");
+        }
+        return;
+      }
+      const msUntilExpire = Math.max(expMs - Date.now(), 0);
+      timer = setTimeout(() => {
+        check().catch(() => {});
+      }, msUntilExpire + 50);
+    };
+
+    check().catch(() => {});
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") check().catch(() => {});
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      sub.remove();
+    };
+  }, [pathname]);
 
   return (
     <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
