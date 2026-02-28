@@ -121,6 +121,19 @@ const DASHBOARD_DEFAULT_SIZES: Record<DashboardCardId, DashboardCardLayout> = {
   water_content: { colSpan: 6, rowSpan: 1 },
   measurements: { colSpan: 6, rowSpan: 1 },
 };
+const DASHBOARD_CARD_TITLES: Record<DashboardCardId, string> = {
+  report_header: "Report Header",
+  location: "Location",
+  distribution: "Distribution",
+  highway_status: "Highway Status",
+  incident_type: "Incident Type",
+  material: "Material",
+  pavement_ground_status: "Pavement / Ground Status",
+  vegetation_on_slope: "Vegetation on Slope",
+  water_drainage: "Water / Drainage",
+  water_content: "Water Content",
+  measurements: "Measurements",
+};
 const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
   failure_rock_fall: "ROCK_FALL",
   failure_topple: "TOPPLE",
@@ -174,6 +187,15 @@ function normalizeDistrictValue(value: unknown): string {
   return raw;
 }
 
+function reorderCards(order: DashboardCardId[], dragId: DashboardCardId, overId: DashboardCardId): DashboardCardId[] {
+  if (dragId === overId) return [...order];
+  const next = order.filter((id) => id !== dragId);
+  const overIndex = next.indexOf(overId);
+  if (overIndex < 0) next.push(dragId);
+  else next.splice(overIndex, 0, dragId);
+  return next;
+}
+
 export default function SubmissionDetailPage() {
   const { id } = useParams();
   const sid = Number(id);
@@ -198,7 +220,23 @@ export default function SubmissionDetailPage() {
   const [geoBusy, setGeoBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState(false);
-  const [draggingCardId, setDraggingCardId] = useState<DashboardCardId | null>(null);
+  const [dragState, setDragState] = useState<{
+    id: DashboardCardId;
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    active: boolean;
+    overId: DashboardCardId | null;
+  } | null>(null);
+  const [resizeState, setResizeState] = useState<{
+    id: DashboardCardId;
+    mode: "x" | "y" | "xy";
+    startX: number;
+    startY: number;
+    startCol: number;
+    startRow: number;
+  } | null>(null);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => ({
     order: [...DASHBOARD_DEFAULT_ORDER],
     sizes: { ...DASHBOARD_DEFAULT_SIZES },
@@ -484,7 +522,6 @@ export default function SubmissionDetailPage() {
   const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
   const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
   const chip = "rounded-full border px-2.5 py-1 text-xs";
-  const layoutBtn = "rounded border border-[var(--line)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[10px]";
   const ynChip = (active: boolean) => (active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]");
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"] as const;
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"] as const;
@@ -500,61 +537,98 @@ export default function SubmissionDetailPage() {
   const visibleCardIds: DashboardCardId[] = anyFailureSelected
     ? [...DASHBOARD_DEFAULT_ORDER]
     : DASHBOARD_DEFAULT_ORDER.filter((x) => x !== "measurements");
+  const previewOrder = dragState?.active && dragState.overId
+    ? reorderCards(dashboardLayout.order, dragState.id, dragState.overId)
+    : dashboardLayout.order;
   const orderedVisibleCardIds: DashboardCardId[] = [
-    ...dashboardLayout.order.filter((id) => visibleCardIds.includes(id)),
-    ...visibleCardIds.filter((id) => !dashboardLayout.order.includes(id)),
+    ...previewOrder.filter((id) => visibleCardIds.includes(id)),
+    ...visibleCardIds.filter((id) => !previewOrder.includes(id)),
   ];
 
-  const moveCardBefore = (dragId: DashboardCardId, dropId: DashboardCardId) => {
-    if (dragId === dropId) return;
-    setDashboardLayout((prev) => {
-      const nextOrder = prev.order.filter((id) => id !== dragId);
-      const idx = nextOrder.indexOf(dropId);
-      if (idx < 0) nextOrder.push(dragId);
-      else nextOrder.splice(idx, 0, dragId);
-      return { ...prev, order: nextOrder as DashboardCardId[] };
-    });
+  const startDragCard = (id: DashboardCardId, e: React.MouseEvent) => {
+    if (!layoutMode || e.button !== 0) return;
+    e.preventDefault();
+    setDragState({ id, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false, overId: null });
   };
-  const adjustCardSize = (id: DashboardCardId, axis: "col" | "row", delta: number) => {
-    setDashboardLayout((prev) => {
-      const cur = prev.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
-      const next: DashboardCardLayout = {
-        colSpan: axis === "col" ? Math.min(12, Math.max(3, cur.colSpan + delta)) : cur.colSpan,
-        rowSpan: axis === "row" ? Math.min(4, Math.max(1, cur.rowSpan + delta)) : cur.rowSpan,
-      };
-      return { ...prev, sizes: { ...prev.sizes, [id]: next } };
-    });
+  const startResizeCard = (id: DashboardCardId, mode: "x" | "y" | "xy", e: React.MouseEvent) => {
+    if (!layoutMode || e.button !== 0) return;
+    e.preventDefault();
+    const cur = dashboardLayout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
+    setResizeState({ id, mode, startX: e.clientX, startY: e.clientY, startCol: cur.colSpan, startRow: cur.rowSpan });
   };
-  const cardFrameProps = (id: DashboardCardId) => ({
-    className: `${box} relative ${layoutMode ? "cursor-move" : ""}`,
-    style: {
-      gridColumn: `span ${dashboardLayout.sizes[id]?.colSpan ?? DASHBOARD_DEFAULT_SIZES[id].colSpan}`,
-      gridRow: `span ${dashboardLayout.sizes[id]?.rowSpan ?? DASHBOARD_DEFAULT_SIZES[id].rowSpan}`,
-      order: dashboardLayout.order.indexOf(id),
-    } as CSSProperties,
-    draggable: layoutMode,
-    onDragStart: () => setDraggingCardId(id),
-    onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
-      if (!layoutMode) return;
-      e.preventDefault();
-    },
-    onDrop: (e: React.DragEvent<HTMLDivElement>) => {
-      if (!layoutMode) return;
-      e.preventDefault();
-      if (draggingCardId) moveCardBefore(draggingCardId, id);
-      setDraggingCardId(null);
-    },
-    onDragEnd: () => setDraggingCardId(null),
-  });
+
+  useEffect(() => {
+    if (!layoutMode) return;
+    const onMove = (e: MouseEvent) => {
+      if (resizeState) {
+        const dx = e.clientX - resizeState.startX;
+        const dy = e.clientY - resizeState.startY;
+        const colDelta = Math.round(dx / 80);
+        const rowDelta = Math.round(dy / 90);
+        setDashboardLayout((prev) => ({
+          ...prev,
+          sizes: {
+            ...prev.sizes,
+            [resizeState.id]: {
+              colSpan: Math.min(12, Math.max(3, resizeState.startCol + (resizeState.mode === "y" ? 0 : colDelta))),
+              rowSpan: Math.min(4, Math.max(1, resizeState.startRow + (resizeState.mode === "x" ? 0 : rowDelta))),
+            },
+          },
+        }));
+        return;
+      }
+      if (dragState) {
+        const moved = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > 6;
+        const targetEl = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-card-id]") as HTMLElement | null;
+        const targetId = (targetEl?.dataset?.cardId as DashboardCardId | undefined) ?? null;
+        setDragState((prev) => prev ? ({
+          ...prev,
+          x: e.clientX,
+          y: e.clientY,
+          active: prev.active || moved,
+          overId: targetId,
+        }) : prev);
+      }
+    };
+    const onUp = () => {
+      const overId = dragState?.overId ?? null;
+      if (dragState?.active && overId) {
+        setDashboardLayout((prev) => ({ ...prev, order: reorderCards(prev.order, dragState.id, overId) }));
+      }
+      setDragState(null);
+      setResizeState(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [layoutMode, dragState, resizeState]);
+
+  const cardFrameProps = (id: DashboardCardId) => {
+    const isGhostTarget = dragState?.active && dragState.overId === id && dragState.id !== id;
+    const isDragging = dragState?.active && dragState.id === id;
+    return {
+      "data-card-id": id,
+      className: `${box} relative ${layoutMode ? "select-none pt-8" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
+      style: {
+        gridColumn: `span ${dashboardLayout.sizes[id]?.colSpan ?? DASHBOARD_DEFAULT_SIZES[id].colSpan}`,
+        gridRow: `span ${dashboardLayout.sizes[id]?.rowSpan ?? DASHBOARD_DEFAULT_SIZES[id].rowSpan}`,
+        order: orderedVisibleCardIds.indexOf(id),
+      } as CSSProperties,
+    };
+  };
   const layoutTools = (id: DashboardCardId) =>
     layoutMode ? (
-      <div className="absolute right-2 top-2 z-[1] flex items-center gap-1 rounded border border-[var(--line)] bg-[var(--panel)]/90 p-1">
-        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "col", -1)}>W-</button>
-        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "col", 1)}>W+</button>
-        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "row", -1)}>H-</button>
-        <button type="button" className={layoutBtn} onClick={() => adjustCardSize(id, "row", 1)}>H+</button>
-        <span className="text-[10px] text-muted">drag</span>
-      </div>
+      <>
+        <div className="absolute left-2 right-2 top-2 z-[2] h-6 cursor-grab rounded border border-dashed border-[var(--line)] bg-[var(--panel)]/70 px-2 text-[10px] leading-6 text-muted" onMouseDown={(e) => startDragCard(id, e)}>
+          Drag card
+        </div>
+        <div className="absolute bottom-0 right-0 top-0 z-[2] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "x", e)} />
+        <div className="absolute bottom-0 left-0 right-0 z-[2] h-2 cursor-ns-resize" onMouseDown={(e) => startResizeCard(id, "y", e)} />
+        <div className="absolute bottom-0 right-0 z-[3] h-4 w-4 cursor-nwse-resize bg-[var(--panel)]/80" onMouseDown={(e) => startResizeCard(id, "xy", e)} />
+      </>
     ) : null;
 
   const selectSingleIncidentType = (key: typeof failureKeys[number]) => {
@@ -1088,6 +1162,14 @@ export default function SubmissionDetailPage() {
                       </div>
                     ) : null}
                   </div>
+                  {layoutMode && dragState?.active ? (
+                    <div
+                      className="pointer-events-none fixed z-50 rounded-md border border-[var(--line)] bg-[var(--panel)]/95 px-2 py-1 text-xs shadow-lg"
+                      style={{ left: dragState.x + 14, top: dragState.y + 14 }}
+                    >
+                      Moving: {DASHBOARD_CARD_TITLES[dragState.id]}
+                    </div>
+                  ) : null}
                 </div>
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={3} placeholder="Observations" value={draft.observations_notes} onChange={(e)=>setDraft((d)=>({...d,observations_notes:e.target.value}))} />
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Record of Event Notes" value={draft.record_of_event_notes} onChange={(e)=>setDraft((d)=>({...d,record_of_event_notes:e.target.value}))} />
