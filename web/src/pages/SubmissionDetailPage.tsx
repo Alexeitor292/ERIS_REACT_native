@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+﻿import { useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail } from "../api/types";
@@ -381,15 +381,13 @@ export default function SubmissionDetailPage() {
   const box = "rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3";
   const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
   const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
-  const triFields: Array<[string, string]> = [
-    ["failure_rock_fall","Rock Fall"],["failure_topple","Topple"],["failure_slide","Slide"],["failure_spread","Spread"],["failure_flow","Flow"],["failure_compound","Compound"],["failure_erosion","Erosion"],["failure_surficial_failure","Surficial Failure"],["failure_scoured_toe","Scoured Toe"],["failure_washout","Washout"],
-    ["distribution_advancing","◎ Dist: Advancing"],["distribution_retrogressive","◉ Dist: Retrogressive"],["distribution_enlarging","◌ Dist: Enlarging"],["distribution_widening","↔ Dist: Widening"],["distribution_moving","◔ Dist: Moving"],["distribution_confined","◍ Dist: Confined"],
-    ["material_rock","Material Rock"],["material_soil","Material Soil"],["material_bedding","Rock Bedding"],["material_joints","Rock Joints"],["material_fractures","Rock Fractures"],
-    ["water_dry","Water Dry"],["water_moist","Water Moist"],["water_wet","Water Wet"],["water_flowing","Water Flowing"],["water_seep","Water Seep"],["water_spring","Water Spring"],
-    ["drainage_clogged_inlet","Drainage Clogged Inlet"],["drainage_compromised_drains","Drainage Compromised Drains"],["drainage_surface_runoff","Drainage Surface Runoff"],["drainage_torrent_surge_flood","Drainage Torrent/Surge/Flood"],
-    ["impact_impacted_adj_utilities","Impacted Utilities"],["impact_maybe_adj_utilities","Maybe Utilities"],["impact_impacted_adj_properties","Impacted Properties"],["impact_maybe_adj_properties","Maybe Properties"],["impact_impacted_adj_structure","Impacted Structures"],["impact_maybe_adj_structure","Maybe Structures"],
-  ];
-
+  const triSelect = (key: string, text: string) => (
+    <select key={key} className={input} value={draft[key]} onChange={(e)=>setDraft((d)=>({...d,[key]:e.target.value as Tri}))}>
+      <option value="UNKNOWN">{text}: Unknown</option>
+      <option value="YES">{text}: Yes</option>
+      <option value="NO">{text}: No</option>
+    </select>
+  );
   return (
     <AppShell title={invalid ? "Submission" : (data ? buildSubmissionDisplayTitle({
       id: data.submission.id,
@@ -420,7 +418,7 @@ export default function SubmissionDetailPage() {
                 className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95 disabled:opacity-60"
                 title="Submission options"
               >
-                ⋮
+                â‹®
               </button>
               {menuOpen ? (
                 <div className="absolute right-0 top-10 z-10 min-w-36 rounded-md border border-[var(--line)] bg-[var(--panel)] p-1 shadow-lg">
@@ -469,109 +467,294 @@ export default function SubmissionDetailPage() {
                   />
                 </div>
                 <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet Fields</div>
-                <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Report Date (YYYY-MM-DD)" value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
-                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.district} onChange={(e)=>setDraft((d)=>({...d,district:e.target.value}))}>
-                    <option value="">District</option>
-                    {CALTRANS_DISTRICTS.map((d) => <option key={d} value={d}>{`District ${d}`}</option>)}
-                  </select>
-                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.county} onChange={(e)=>{
-                    const county = e.target.value;
-                    const district = districtForCounty(county);
-                    setDraft((d)=>({...d,county,district:district ?? d.district}));
-                  }}>
-                    <option value="">County</option>
-                    {CALIFORNIA_COUNTIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Route" inputMode="numeric" pattern="[0-9]*" value={draft.route} onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Post Mile" value={draft.post_mile} onChange={(e)=>setDraft((d)=>({...d,post_mile:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="EA" value={draft.ea} onChange={(e)=>setDraft((d)=>({...d,ea:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Project ID" value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Date Incident Reported" value={draft.date_incident_reported} onChange={(e)=>setDraft((d)=>({...d,date_incident_reported:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="District Contact" value={draft.district_contact} onChange={(e)=>setDraft((d)=>({...d,district_contact:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Latitude" value={draft.latitude} onChange={(e)=>setDraft((d)=>({...d,latitude:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Longitude" value={draft.longitude} onChange={(e)=>setDraft((d)=>({...d,longitude:e.target.value}))} />
-                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
-                    <option value="">Lanes Closed Count</option>
-                    {LANES_CLOSED_OPTIONS.map((v) => (
-                      <option key={`lanes-closed-${v}`} value={v}>{v}</option>
-                    ))}
-                  </select>
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Length (ft)" value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Horizontal (in)" value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Vertical (in)" value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Crack Depth (in)" value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Settlement (in)" value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Bulge (in)" value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} />
-                  <div className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-2 text-sm">
-                    <div className="mb-1 text-xs text-muted">Distribution</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(lookups?.distribution ?? []).map((x) => {
-                        const active = draft.distribution_code === x.code;
-                        return (
-                          <button
-                            key={x.code}
-                            type="button"
-                            onClick={() => setDraft((d) => ({ ...d, distribution_code: active ? "" : x.code }))}
-                            className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]"}`}
-                          >
-                            <span>{x.label}</span>
-                            <img
-                              src={DISTRIBUTION_ICON_SRC[x.code] ?? ""}
-                              alt=""
-                              aria-hidden
-                              className="h-6 w-6 object-contain"
-                            />
-                          </button>
-                        );
-                      })}
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet Layout</div>
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+                    <div className={`${box} lg:col-span-8`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Report Header</div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <div>
+                          <label className={label}>Report Date (YYYY-MM-DD)</label>
+                          <input className={input} value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Date Incident Reported</label>
+                          <input className={input} value={draft.date_incident_reported} onChange={(e)=>setDraft((d)=>({...d,date_incident_reported:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>District</label>
+                          <select className={input} value={draft.district} onChange={(e)=>setDraft((d)=>({...d,district:e.target.value}))}>
+                            <option value="">Select district</option>
+                            {CALTRANS_DISTRICTS.map((d) => <option key={d} value={d}>{`District ${d}`}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={label}>County</label>
+                          <select className={input} value={draft.county} onChange={(e)=>{
+                            const county = e.target.value;
+                            const district = districtForCounty(county);
+                            setDraft((d)=>({...d,county,district:district ?? d.district}));
+                          }}>
+                            <option value="">Select county</option>
+                            {CALIFORNIA_COUNTIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={label}>Highway (Route)</label>
+                          <input className={input} inputMode="numeric" pattern="[0-9]*" value={draft.route} onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Post Mile</label>
+                          <input className={input} value={draft.post_mile} onChange={(e)=>setDraft((d)=>({...d,post_mile:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>EA</label>
+                          <input className={input} value={draft.ea} onChange={(e)=>setDraft((d)=>({...d,ea:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Project ID</label>
+                          <input className={input} value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className={label}>District Contact</label>
+                          <input className={input} value={draft.district_contact} onChange={(e)=>setDraft((d)=>({...d,district_contact:e.target.value}))} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-4`}>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Location</div>
+                        <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "GPS Autofill"}</button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                        <div>
+                          <label className={label}>Latitude</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.latitude} onChange={(e)=>setDraft((d)=>({...d,latitude:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Longitude</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.longitude} onChange={(e)=>setDraft((d)=>({...d,longitude:e.target.value}))} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Highway Status And Distress</div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <div>
+                          <label className={label}>Highway Status</label>
+                          <select className={input} value={draft.highway_status_code} onChange={(e)=>setDraft((d)=>({...d,highway_status_code:e.target.value}))}>
+                            <option value="">Select status</option>
+                            {(lookups?.highway_status??[]).map((x)=><option key={x.code} value={x.code}>{x.label}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={label}>Lane(s) Closed</label>
+                          <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
+                            <option value="">Select lanes closed</option>
+                            {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={label}>Open Highway Traffic Lanes</label>
+                          <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
+                        </div>
+                        <div>
+                          {triSelect("pavement_ground_cracks", "Pavement Cracks")}
+                        </div>
+                        <div>
+                          {triSelect("indented_by_rocks", "Indented by Rocks")}
+                        </div>
+                        <div>
+                          <label className={label}>Crack Length (ft)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Crack Horizontal (in)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Crack Vertical (in)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Crack Depth (in)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Settlement (in)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Bulge (in)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Distribution And Failure Type</div>
+                      <label className={label}>Distribution</label>
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {(lookups?.distribution ?? []).map((x) => {
+                          const active = draft.distribution_code === x.code;
+                          return (
+                            <button
+                              key={x.code}
+                              type="button"
+                              onClick={() => setDraft((d) => ({ ...d, distribution_code: active ? "" : x.code }))}
+                              className={`inline-flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]"}`}
+                            >
+                              <span>{x.label}</span>
+                              <img src={DISTRIBUTION_ICON_SRC[x.code] ?? ""} alt="" aria-hidden className="h-10 w-10 object-contain" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        {triSelect("distribution_advancing", "Distribution Advancing")}
+                        {triSelect("distribution_retrogressive", "Distribution Retrogressive")}
+                        {triSelect("distribution_enlarging", "Distribution Enlarging")}
+                        {triSelect("distribution_widening", "Distribution Widening")}
+                        {triSelect("distribution_moving", "Distribution Moving")}
+                        {triSelect("distribution_confined", "Distribution Confined")}
+                        {triSelect("failure_rock_fall", "Rock Fall")}
+                        {triSelect("failure_topple", "Topple")}
+                        {triSelect("failure_slide", "Slide")}
+                        {triSelect("failure_spread", "Spread")}
+                        {triSelect("failure_flow", "Flow")}
+                        {triSelect("failure_compound", "Compound")}
+                        {triSelect("failure_erosion", "Erosion")}
+                        {triSelect("failure_surficial_failure", "Surficial Failure")}
+                        {triSelect("failure_scoured_toe", "Scoured Toe")}
+                        {triSelect("failure_washout", "Washout")}
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Materials</div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        {triSelect("material_rock", "Material Rock")}
+                        {triSelect("material_soil", "Material Soil")}
+                        {triSelect("material_bedding", "Material Bedding")}
+                        {triSelect("material_joints", "Material Joints")}
+                        {triSelect("material_fractures", "Material Fractures")}
+                        <div>
+                          <label className={label}>Estimated Soil %</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.est_soil_pct} onChange={(e)=>setDraft((d)=>({...d,est_soil_pct:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Estimated Clay %</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.est_clay_pct} onChange={(e)=>setDraft((d)=>({...d,est_clay_pct:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Estimated Silt %</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.est_silt_pct} onChange={(e)=>setDraft((d)=>({...d,est_silt_pct:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Estimated Sand %</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.est_sand_pct} onChange={(e)=>setDraft((d)=>({...d,est_sand_pct:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Estimated Gravel %</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.est_gravel_pct} onChange={(e)=>setDraft((d)=>({...d,est_gravel_pct:e.target.value}))} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water, Drainage And Vegetation</div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        {triSelect("water_dry", "Water Dry")}
+                        {triSelect("water_moist", "Water Moist")}
+                        {triSelect("water_wet", "Water Wet")}
+                        {triSelect("water_flowing", "Water Flowing")}
+                        {triSelect("water_seep", "Water Seep")}
+                        {triSelect("water_spring", "Water Spring")}
+                        {triSelect("drainage_clogged_inlet", "Drainage Clogged Inlet")}
+                        {triSelect("drainage_compromised_drains", "Drainage Compromised Drains")}
+                        {triSelect("drainage_surface_runoff", "Drainage Surface Runoff")}
+                        {triSelect("drainage_torrent_surge_flood", "Drainage Torrent/Surge/Flood")}
+                        <div>
+                          <label className={label}>Vegetation Trees %</label>
+                          <input className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Vegetation Bushes/Shrubs %</label>
+                          <input className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className={label}>Vegetation Groundcover %</label>
+                          <input className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Adjacent Impacts</div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        {triSelect("impact_impacted_adj_utilities", "Impacted Adjacent Utilities")}
+                        {triSelect("impact_maybe_adj_utilities", "Maybe Adjacent Utilities")}
+                        <div className="md:col-span-2">
+                          <label className={label}>Adjacent Utilities Notes</label>
+                          <input className={input} value={draft.impact_adj_utilities} onChange={(e)=>setDraft((d)=>({...d,impact_adj_utilities:e.target.value}))} />
+                        </div>
+                        {triSelect("impact_impacted_adj_properties", "Impacted Adjacent Properties")}
+                        {triSelect("impact_maybe_adj_properties", "Maybe Adjacent Properties")}
+                        <div className="md:col-span-2">
+                          <label className={label}>Adjacent Properties Notes</label>
+                          <input className={input} value={draft.impact_adj_properties} onChange={(e)=>setDraft((d)=>({...d,impact_adj_properties:e.target.value}))} />
+                        </div>
+                        {triSelect("impact_impacted_adj_structure", "Impacted Adjacent Structures")}
+                        {triSelect("impact_maybe_adj_structure", "Maybe Adjacent Structures")}
+                        <div className="md:col-span-2">
+                          <label className={label}>Adjacent Structures Notes</label>
+                          <input className={input} value={draft.impact_adj_structure} onChange={(e)=>setDraft((d)=>({...d,impact_adj_structure:e.target.value}))} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Measurements</div>
+                      <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+                        <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
+                      </div>
+                      <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <div>
+                          <label className={label}>Slope Height, ft (H)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Original Slope, deg (alpha)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Landslide Width, ft (Wd)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Landslide Length, ft (Ld)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_length_ft:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Main Scarp Height, ft (Hs)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_main_scarp_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_main_scarp_height_ft:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Landslide Slope, deg (beta)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_slope_deg:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Length of Roadway Encroached, ft (Lr)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} />
+                        </div>
+                        <div>
+                          <label className={label}>Width of Roadway Encroached, ft (Wr)</label>
+                          <input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} />
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.highway_status_code} onChange={(e)=>setDraft((d)=>({...d,highway_status_code:e.target.value}))}><option value="">Highway Status</option>{(lookups?.highway_status??[]).map((x)=><option key={x.code} value={x.code}>{x.label}</option>)}</select>
-                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.pavement_ground_cracks} onChange={(e)=>setDraft((d)=>({...d,pavement_ground_cracks:e.target.value as Tri}))}><option value="UNKNOWN">Pavement Cracks: Unknown</option><option value="YES">Pavement Cracks: Yes</option><option value="NO">Pavement Cracks: No</option></select>
-                  <select className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft.indented_by_rocks} onChange={(e)=>setDraft((d)=>({...d,indented_by_rocks:e.target.value as Tri}))}><option value="UNKNOWN">Indented by Rocks: Unknown</option><option value="YES">Indented by Rocks: Yes</option><option value="NO">Indented by Rocks: No</option></select>
-                  <input type="number" step="1" inputMode="numeric" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Open Highway Traffic Lanes Count" value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
-                  {[
-                    ["failure_rock_fall","Rock Fall"],["failure_topple","Topple"],["failure_slide","Slide"],["failure_spread","Spread"],["failure_flow","Flow"],["failure_compound","Compound"],["failure_erosion","Erosion"],["failure_surficial_failure","Surficial Failure"],["failure_scoured_toe","Scoured Toe"],["failure_washout","Washout"],
-                    ["distribution_advancing","Distribution Advancing"],["distribution_retrogressive","Distribution Retrogressive"],["distribution_enlarging","Distribution Enlarging"],["distribution_widening","Distribution Widening"],["distribution_moving","Distribution Moving"],["distribution_confined","Distribution Confined"],
-                    ["material_rock","Material Rock"],["material_soil","Material Soil"],["material_bedding","Material Bedding"],["material_joints","Material Joints"],["material_fractures","Material Fractures"],
-                    ["water_dry","Water Dry"],["water_moist","Water Moist"],["water_wet","Water Wet"],["water_flowing","Water Flowing"],["water_seep","Water Seep"],["water_spring","Water Spring"],
-                    ["drainage_clogged_inlet","Drainage Clogged Inlet"],["drainage_compromised_drains","Drainage Compromised Drains"],["drainage_surface_runoff","Drainage Surface Runoff"],["drainage_torrent_surge_flood","Drainage Torrent/Surge/Flood"],
-                    ["impact_impacted_adj_utilities","Impacted Adjacent Utilities"],["impact_maybe_adj_utilities","Maybe Adjacent Utilities"],
-                    ["impact_impacted_adj_properties","Impacted Adjacent Properties"],["impact_maybe_adj_properties","Maybe Adjacent Properties"],
-                    ["impact_impacted_adj_structure","Impacted Adjacent Structures"],["impact_maybe_adj_structure","Maybe Adjacent Structures"],
-                  ].map(([key, label]) => (
-                    <select key={key} className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" value={draft[key]} onChange={(e)=>setDraft((d)=>({...d,[key]:e.target.value as Tri}))}>
-                      <option value="UNKNOWN">{label}: Unknown</option>
-                      <option value="YES">{label}: Yes</option>
-                      <option value="NO">{label}: No</option>
-                    </select>
-                  ))}
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Adjacent Utilities Notes" value={draft.impact_adj_utilities} onChange={(e)=>setDraft((d)=>({...d,impact_adj_utilities:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Adjacent Properties Notes" value={draft.impact_adj_properties} onChange={(e)=>setDraft((d)=>({...d,impact_adj_properties:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Adjacent Structures Notes" value={draft.impact_adj_structure} onChange={(e)=>setDraft((d)=>({...d,impact_adj_structure:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Estimated Soil %" value={draft.est_soil_pct} onChange={(e)=>setDraft((d)=>({...d,est_soil_pct:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Estimated Clay %" value={draft.est_clay_pct} onChange={(e)=>setDraft((d)=>({...d,est_clay_pct:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Estimated Silt %" value={draft.est_silt_pct} onChange={(e)=>setDraft((d)=>({...d,est_silt_pct:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Estimated Sand %" value={draft.est_sand_pct} onChange={(e)=>setDraft((d)=>({...d,est_sand_pct:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Estimated Gravel %" value={draft.est_gravel_pct} onChange={(e)=>setDraft((d)=>({...d,est_gravel_pct:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Vegetation Trees %" value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Vegetation Bushes/Shrubs %" value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} />
-                  <input className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Vegetation Groundcover %" value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} />
-                  <div className="col-span-1 lg:col-span-2 rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Measurements Diagram</div>
-                    <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-72 w-full object-contain" />
-                  </div>
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Slope Height, ft (H)" value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Original Slope, deg (α)" value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Width, ft (Wd)" value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Length, ft (Ld)" value={draft.measure_landslide_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_length_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Main Scarp Height, ft (Hs)" value={draft.measure_main_scarp_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_main_scarp_height_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Landslide Slope, deg (β)" value={draft.measure_landslide_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_slope_deg:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Length of Roadway Encroached, ft (Lr)" value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} />
-                  <input type="number" step="any" inputMode="decimal" className="rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" placeholder="Width of Roadway Encroached, ft (Wr)" value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} />
-                </div>
                 </div>
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={3} placeholder="Observations" value={draft.observations_notes} onChange={(e)=>setDraft((d)=>({...d,observations_notes:e.target.value}))} />
                 <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Record of Event Notes" value={draft.record_of_event_notes} onChange={(e)=>setDraft((d)=>({...d,record_of_event_notes:e.target.value}))} />
@@ -665,3 +848,4 @@ export default function SubmissionDetailPage() {
     </AppShell>
   );
 }
+
