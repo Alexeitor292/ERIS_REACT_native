@@ -697,69 +697,7 @@ export default function SubmissionDetailPage() {
                     </div>
 
                     <div className={`${box} lg:col-span-6`}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Highway Status And Distress</div>
-                      <label className={label}>Highway Status</label>
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {(lookups?.highway_status ?? []).map((x) => {
-                          const active = draft.highway_status_code === x.code;
-                          return (
-                            <button key={x.code} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))} className={`${chip} ${ynChip(active)}`}>
-                              {x.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                        {highwayLanesClosedSelected ? (
-                          <div>
-                            <label className={label}>Lane(s) Closed</label>
-                            <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
-                              <option value="">Select lanes closed</option>
-                              {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
-                            </select>
-                          </div>
-                        ) : null}
-                        {openHighwayTrafficSelected ? (
-                          <div>
-                            <label className={label}>Open Highway Traffic Lanes</label>
-                            <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
-                          </div>
-                        ) : null}
-                        <div className="md:col-span-2">
-                          <label className={label}>Pavement/Ground Cracks</label>
-                          <div className="flex gap-2">
-                            {(["YES", "NO"] as const).map((c) => (
-                              <button key={`crack-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, pavement_ground_cracks: c }))} className={`${chip} ${ynChip(draft.pavement_ground_cracks === c)}`}>
-                                {c}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        {draft.pavement_ground_cracks === "YES" ? (
-                          <>
-                            <div><label className={label}>Crack Length (ft)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} /></div>
-                            <div><label className={label}>Crack Horizontal (in)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} /></div>
-                            <div><label className={label}>Crack Vertical (in)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} /></div>
-                            <div><label className={label}>Crack Depth (in)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} /></div>
-                          </>
-                        ) : null}
-                        <div><label className={label}>Settlement (in)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} /></div>
-                        <div><label className={label}>Bulge (in)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} /></div>
-                        <div className="md:col-span-2">
-                          <label className={label}>Indented by Rocks</label>
-                          <div className="flex gap-2">
-                            {(["YES", "NO"] as const).map((c) => (
-                              <button key={`rock-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, indented_by_rocks: c }))} className={`${chip} ${ynChip(draft.indented_by_rocks === c)}`}>
-                                {c}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className={`${box} lg:col-span-6`}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Distribution And Failure Type</div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Distribution</div>
                       <label className={label}>Distribution</label>
                       <div className="mb-2 flex flex-wrap gap-2">
                         {(lookups?.distribution ?? []).map((x) => {
@@ -777,7 +715,42 @@ export default function SubmissionDetailPage() {
                           );
                         })}
                       </div>
-                      <label className={label}>Incident Type</label>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Highway Status</div>
+                      <label className={label}>Highway Status</label>
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {(lookups?.highway_status ?? []).map((x) => {
+                          const active = draft.highway_status_code === x.code;
+                          return (
+                            <button key={x.code} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))} className={`${chip} ${ynChip(active)}`}>
+                              {x.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        {highwayLanesClosedSelected ? (
+                          <div>
+                            <label className={label}>Lane(s) Closed Count</label>
+                            <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
+                              <option value="">Select lanes closed</option>
+                              {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
+                            </select>
+                          </div>
+                        ) : null}
+                        {openHighwayTrafficSelected ? (
+                          <div>
+                            <label className={label}>Open Highway Traffic Lanes</label>
+                            <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Incident Type</div>
                       <div className="grid grid-cols-2 gap-2">
                         {[
                           ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
@@ -789,7 +762,7 @@ export default function SubmissionDetailPage() {
                     </div>
 
                     <div className={`${box} lg:col-span-6`}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Materials</div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Material</div>
                       <div className="mb-2 flex gap-2">
                         <button type="button" onClick={() => selectMaterialPrimary("material_rock")} className={`${chip} ${ynChip(materialRockSelected)}`}>Rock</button>
                         <button type="button" onClick={() => selectMaterialPrimary("material_soil")} className={`${chip} ${ynChip(materialSoilSelected)}`}>Soil</button>
@@ -812,34 +785,53 @@ export default function SubmissionDetailPage() {
                     </div>
 
                     <div className={`${box} lg:col-span-6`}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water, Drainage And Vegetation</div>
-                      <label className={label}>Water / Drainage</label>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Pavement / Ground Status</div>
+                      <label className={label}>Pavement/Ground Cracks</label>
+                      <div className="mb-2 flex gap-2">
+                        {(["YES", "NO"] as const).map((c) => (
+                          <button key={`crack-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, pavement_ground_cracks: c }))} className={`${chip} ${ynChip(draft.pavement_ground_cracks === c)}`}>
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        {draft.pavement_ground_cracks === "YES" ? (
+                          <>
+                            <div><label className={label}>Length (feet)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} /></div>
+                            <div><label className={label}>Horizontal Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} /></div>
+                            <div><label className={label}>Vertical Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} /></div>
+                            <div><label className={label}>Depth of Crack (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} /></div>
+                          </>
+                        ) : null}
+                        <div><label className={label}>Settlement (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} /></div>
+                        <div><label className={label}>Bulge (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} /></div>
+                      </div>
+                      <label className={`${label} mt-2`}>Indented by Rocks</label>
+                      <div className="flex gap-2">
+                        {(["YES", "NO"] as const).map((c) => (
+                          <button key={`rock-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, indented_by_rocks: c }))} className={`${chip} ${ynChip(draft.indented_by_rocks === c)}`}>
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Vegetation on Slope</div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <div><label className={label}>Trees Coverage %</label><input className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
+                        <div><label className={label}>Bushes/Shrubs Coverage %</label><input className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
+                        <div className="md:col-span-2"><label className={label}>Groundcover Coverage %</label><input className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
+                      </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water / Drainage</div>
                       <div className="mb-2 flex flex-wrap gap-2">
                         {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, text]) => (
                           <button key={key} type="button" onClick={() => selectSingleDrainage(key as typeof drainageKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
                         ))}
                       </div>
-                      <label className={label}>Water Content</label>
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"]].map(([key, text]) => (
-                          <button key={key} type="button" onClick={() => selectBaseWaterContent(key as typeof baseWaterKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
-                        ))}
-                      </div>
-                      {waterFlowingSelected ? (
-                        <div className="mb-2 flex gap-2">
-                          <button type="button" onClick={() => selectFlowingSubtype("water_seep")} className={`${chip} ${ynChip(draft.water_seep === "YES")}`}>Seep</button>
-                          <button type="button" onClick={() => selectFlowingSubtype("water_spring")} className={`${chip} ${ynChip(draft.water_spring === "YES")}`}>Spring</button>
-                        </div>
-                      ) : null}
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                        <div><label className={label}>Vegetation Trees %</label><input className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
-                        <div><label className={label}>Vegetation Bushes/Shrubs %</label><input className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
-                        <div className="md:col-span-2"><label className={label}>Vegetation Groundcover %</label><input className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
-                      </div>
-                    </div>
-
-                    <div className={`${box} lg:col-span-6`}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Adjacent Impacts</div>
                       <div className="grid grid-cols-1 gap-2">
                         {[["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"], ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"], ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"]].map(([imp, may, text]) => (
                           <div key={text} className="grid grid-cols-[auto_auto_1fr] items-center gap-2">
@@ -852,6 +844,21 @@ export default function SubmissionDetailPage() {
                         <div><label className={label}>Adjacent Properties Notes</label><input className={input} value={draft.impact_adj_properties} onChange={(e)=>setDraft((d)=>({...d,impact_adj_properties:e.target.value}))} /></div>
                         <div><label className={label}>Adjacent Structures Notes</label><input className={input} value={draft.impact_adj_structure} onChange={(e)=>setDraft((d)=>({...d,impact_adj_structure:e.target.value}))} /></div>
                       </div>
+                    </div>
+
+                    <div className={`${box} lg:col-span-6`}>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water Content</div>
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"]].map(([key, text]) => (
+                          <button key={key} type="button" onClick={() => selectBaseWaterContent(key as typeof baseWaterKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
+                        ))}
+                      </div>
+                      {waterFlowingSelected ? (
+                        <div className="mb-2 flex gap-2">
+                          <button type="button" onClick={() => selectFlowingSubtype("water_seep")} className={`${chip} ${ynChip(draft.water_seep === "YES")}`}>Seep</button>
+                          <button type="button" onClick={() => selectFlowingSubtype("water_spring")} className={`${chip} ${ynChip(draft.water_spring === "YES")}`}>Spring</button>
+                        </div>
+                      ) : null}
                     </div>
 
                     {anyFailureSelected ? (
