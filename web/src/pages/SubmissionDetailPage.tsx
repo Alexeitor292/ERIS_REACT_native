@@ -123,6 +123,7 @@ const DASHBOARD_MAX_CARD_WIDTH = 1600;
 const DASHBOARD_MIN_CARD_HEIGHT = 150;
 const DASHBOARD_MAX_CARD_HEIGHT = 980;
 const DASHBOARD_LAYOUT_GAP = 12;
+const DASHBOARD_TIDY_SNAP = 8;
 const DASHBOARD_DEFAULT_SIZES: Record<DashboardCardId, DashboardCardLayout> = {
   report_header: { width: 960, height: 300 },
   location: { width: 460, height: 300 },
@@ -684,6 +685,49 @@ export default function SubmissionDetailPage() {
     ...visibleCardIds.filter((id) => !previewOrder.includes(id)),
   ];
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+  const tidyLayoutPositions = (
+    layout: DashboardLayoutState,
+    ids: DashboardCardId[],
+    canvasWidth: number
+  ): DashboardLayoutState => {
+    const placed: Array<{ id: DashboardCardId; x: number; y: number; w: number; h: number }> = [];
+    const nextPositions: Partial<Record<DashboardCardId, DashboardCardPosition>> = { ...layout.positions };
+    const sorted = [...ids].sort((a, b) => {
+      const pa = layout.positions[a] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
+      const pb = layout.positions[b] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
+      return pa.y - pb.y || pa.x - pb.x;
+    });
+
+    const overlaps = (x: number, y: number, w: number, h: number) =>
+      placed.some((p) => x < p.x + p.w && x + w > p.x && y < p.y + p.h && y + h > p.y);
+
+    for (const id of sorted) {
+      const size = layout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
+      const width = Math.min(size.width, Math.max(DASHBOARD_MIN_CARD_WIDTH, canvasWidth - DASHBOARD_LAYOUT_GAP * 2));
+      const height = size.height;
+      const base = layout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
+      let x = Math.round(base.x / DASHBOARD_TIDY_SNAP) * DASHBOARD_TIDY_SNAP;
+      let y = Math.round(base.y / DASHBOARD_TIDY_SNAP) * DASHBOARD_TIDY_SNAP;
+      x = clamp(x, DASHBOARD_LAYOUT_GAP, Math.max(DASHBOARD_LAYOUT_GAP, canvasWidth - width - DASHBOARD_LAYOUT_GAP));
+      y = Math.max(DASHBOARD_LAYOUT_GAP, y);
+
+      let safety = 0;
+      while (overlaps(x, y, width, height) && safety < 3000) {
+        if (x + width + DASHBOARD_LAYOUT_GAP <= canvasWidth - DASHBOARD_LAYOUT_GAP) {
+          x += DASHBOARD_LAYOUT_GAP;
+        } else {
+          x = DASHBOARD_LAYOUT_GAP;
+          y += DASHBOARD_LAYOUT_GAP;
+        }
+        safety += 1;
+      }
+
+      nextPositions[id] = { x, y };
+      placed.push({ id, x, y, w: width, h: height });
+    }
+
+    return { ...layout, positions: nextPositions };
+  };
 
   useEffect(() => {
     const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
@@ -1196,7 +1240,20 @@ export default function SubmissionDetailPage() {
                           Reset Layout
                         </button>
                       ) : null}
-                      <button type="button" onClick={() => setLayoutMode((v) => !v)} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (layoutMode) {
+                            const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
+                            setDashboardLayout((prev) => tidyLayoutPositions(prev, orderedVisibleCardIds, canvasWidth));
+                            setSelectedCardId(null);
+                            setLayoutMode(false);
+                            return;
+                          }
+                          setLayoutMode(true);
+                        }}
+                        className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
+                      >
                         {layoutMode ? "Done Layout" : "Customize Layout"}
                       </button>
                     </div>
