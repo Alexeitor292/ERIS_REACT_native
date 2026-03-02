@@ -54,6 +54,14 @@ type Draft = Record<string, string> & {
 };
 type SharedUser = { user_id: number; email: string; full_name: string; granted_by_user_id: number; created_at: string };
 type AdminUser = { id: number; email: string; full_name: string; is_active: boolean; roles: string[] };
+type DistrictContact = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  s_number: string;
+  phone: string;
+  cell_phone: string;
+};
 
 const EMPTY: Draft = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
@@ -194,6 +202,50 @@ function normalizeDistrictValue(value: unknown): string {
   return raw;
 }
 
+function districtContactRaw(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseDistrictContacts(raw: string): DistrictContact[] {
+  const text = String(raw ?? "").trim();
+  if (!text) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(parsed) ? parsed : typeof parsed === "object" && parsed !== null ? [parsed] : [];
+  return rows.map((item, idx) => {
+    const rec = item as Record<string, unknown>;
+    return {
+      id: `${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 7)}`,
+      first_name: String(rec.first_name ?? ""),
+      last_name: String(rec.last_name ?? ""),
+      s_number: String(rec.s_number ?? ""),
+      phone: String(rec.phone ?? ""),
+      cell_phone: String(rec.cell_phone ?? ""),
+    };
+  });
+}
+
+function serializeDistrictContacts(contacts: DistrictContact[]): string {
+  const normalized = contacts.map((c) => ({
+    first_name: c.first_name.trim(),
+    last_name: c.last_name.trim(),
+    s_number: c.s_number.trim(),
+    phone: c.phone.trim(),
+    cell_phone: c.cell_phone.trim(),
+  }));
+  return JSON.stringify(normalized);
+}
+
 function reorderCards(order: DashboardCardId[], dragId: DashboardCardId, overId: DashboardCardId): DashboardCardId[] {
   if (dragId === overId) return [...order];
   const next = order.filter((id) => id !== dragId);
@@ -220,6 +272,8 @@ export default function SubmissionDetailPage() {
   const [inc, setInc] = useState<string[]>([]);
   const [imm, setImm] = useState<string[]>([]);
   const [fol, setFol] = useState<string[]>([]);
+  const [districtContacts, setDistrictContacts] = useState<DistrictContact[]>([]);
+  const [openDistrictContactIds, setOpenDistrictContactIds] = useState<Record<string, boolean>>({});
   const [geom, setGeom] = useState<any | null>(null);
   const [shareQuery, setShareQuery] = useState("");
   const [shareCandidates, setShareCandidates] = useState<AdminUser[]>([]);
@@ -373,6 +427,8 @@ export default function SubmissionDetailPage() {
       setReviewNote(d.submission.review_comment ?? "");
       setGeom(geomRes?.geometry ?? d.gisa?.geometry_json ?? pointFromLatLon(d.gisa) ?? null);
       const gisa: any = d.gisa || {};
+      const districtContactText = districtContactRaw(gisa.district_contact);
+      const loadedDistrictContacts = parseDistrictContacts(districtContactText);
       setDraft({
         ...EMPTY,
         report_date: t(gisa.report_date),
@@ -383,7 +439,7 @@ export default function SubmissionDetailPage() {
         ea: t(gisa.ea),
         project_id: t(gisa.project_id),
         date_incident_reported: t(gisa.date_incident_reported),
-        district_contact: t(gisa.district_contact),
+        district_contact: districtContactText,
         latitude: t(gisa.latitude), longitude: t(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
         pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
         failure_rock_fall: boolToTri(gisa.failure_rock_fall), failure_topple: boolToTri(gisa.failure_topple), failure_slide: boolToTri(gisa.failure_slide), failure_spread: boolToTri(gisa.failure_spread), failure_flow: boolToTri(gisa.failure_flow), failure_compound: boolToTri(gisa.failure_compound), failure_erosion: boolToTri(gisa.failure_erosion), failure_surficial_failure: boolToTri(gisa.failure_surficial_failure), failure_scoured_toe: boolToTri(gisa.failure_scoured_toe), failure_washout: boolToTri(gisa.failure_washout),
@@ -398,6 +454,10 @@ export default function SubmissionDetailPage() {
         record_of_event_notes: t(gisa.record_of_event_notes), maintenance_history_notes: t(gisa.maintenance_history_notes), geotechnical_assessment_notes: t(gisa.geotechnical_assessment_notes), recommendations_notes: t(gisa.recommendations_notes), sketchpad_notes: t(gisa.sketchpad_notes),
         observations_notes: t(gisa.observations_notes), geometry_json: gisa.geometry_json ? JSON.stringify(gisa.geometry_json, null, 2) : "",
       });
+      setDistrictContacts(loadedDistrictContacts);
+      setOpenDistrictContactIds(
+        Object.fromEntries(loadedDistrictContacts.map((contact) => [contact.id, false]))
+      );
       setInc(d.incident_types ?? []);
       setImm(d.actions?.immediate ?? []);
       setFol(d.actions?.follow_up ?? []);
@@ -847,6 +907,52 @@ export default function SubmissionDetailPage() {
         <div data-layout-resize className="absolute bottom-0 left-0 z-[4] h-4 w-4 cursor-nesw-resize bg-[var(--panel)]/85" onMouseDown={(e) => startResizeCard(id, "bottomLeft", e)} />
       </>
     ) : null;
+  const contactDisplayName = (contact: DistrictContact, idx: number) => {
+    const full = `${contact.first_name} ${contact.last_name}`.trim();
+    return full || `Contact ${idx + 1}`;
+  };
+  const syncDistrictContacts = (nextContacts: DistrictContact[]) => {
+    setDistrictContacts(nextContacts);
+    setDraft((d) => ({ ...d, district_contact: serializeDistrictContacts(nextContacts) }));
+  };
+  const addDistrictContact = () => {
+    if (!canEdit) return;
+    const nextContact: DistrictContact = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      first_name: "",
+      last_name: "",
+      s_number: "",
+      phone: "",
+      cell_phone: "",
+    };
+    const nextContacts = [...districtContacts, nextContact];
+    syncDistrictContacts(nextContacts);
+    setOpenDistrictContactIds((prev) => ({ ...prev, [nextContact.id]: true }));
+  };
+  const updateDistrictContact = (
+    idToUpdate: string,
+    field: "first_name" | "last_name" | "s_number" | "phone" | "cell_phone",
+    value: string
+  ) => {
+    if (!canEdit) return;
+    const next = districtContacts.map((contact) =>
+      contact.id === idToUpdate ? { ...contact, [field]: value } : contact
+    );
+    syncDistrictContacts(next);
+  };
+  const toggleDistrictContact = (idToToggle: string) => {
+    setOpenDistrictContactIds((prev) => ({ ...prev, [idToToggle]: !prev[idToToggle] }));
+  };
+  const removeDistrictContact = (idToRemove: string) => {
+    if (!canEdit) return;
+    const next = districtContacts.filter((contact) => contact.id !== idToRemove);
+    syncDistrictContacts(next);
+    setOpenDistrictContactIds((prev) => {
+      const updated = { ...prev };
+      delete updated[idToRemove];
+      return updated;
+    });
+  };
 
   const selectSingleIncidentType = (key: typeof failureKeys[number]) => {
     if (!canEdit) return;
@@ -1181,8 +1287,74 @@ export default function SubmissionDetailPage() {
                           <input className={input} value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
                         </div>
                         <div className="col-span-full">
-                          <label className={label}>District Contact</label>
-                          <input className={input} value={draft.district_contact} onChange={(e)=>setDraft((d)=>({...d,district_contact:e.target.value}))} />
+                          <label className={label}>District Contacts</label>
+                          {districtContacts.length === 0 ? (
+                            <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
+                              No district contacts added yet.
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {districtContacts.map((contact, idx) => {
+                                const isOpen = !!openDistrictContactIds[contact.id];
+                                return (
+                                  <div key={contact.id} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+                                    <button
+                                      type="button"
+                                      className="flex w-full items-center justify-between rounded px-1 py-1 text-left hover:bg-[var(--panel)]"
+                                      onClick={() => toggleDistrictContact(contact.id)}
+                                    >
+                                      <span className="text-sm font-medium">{contactDisplayName(contact, idx)}</span>
+                                      <span className="text-xs text-muted">{isOpen ? "v" : ">"}</span>
+                                    </button>
+                                    {isOpen ? (
+                                      <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+                                        <div><label className={label}>First Name</label><input className={input} value={contact.first_name} onChange={(e) => updateDistrictContact(contact.id, "first_name", e.target.value)} disabled={!canEdit} /></div>
+                                        <div><label className={label}>Last Name</label><input className={input} value={contact.last_name} onChange={(e) => updateDistrictContact(contact.id, "last_name", e.target.value)} disabled={!canEdit} /></div>
+                                        <div><label className={label}>S Number</label><input className={input} value={contact.s_number} onChange={(e) => updateDistrictContact(contact.id, "s_number", e.target.value)} disabled={!canEdit} /></div>
+                                        <div><label className={label}>Phone</label><input className={input} value={contact.phone} onChange={(e) => updateDistrictContact(contact.id, "phone", e.target.value)} disabled={!canEdit} /></div>
+                                        <div><label className={label}>Cell Phone</label><input className={input} value={contact.cell_phone} onChange={(e) => updateDistrictContact(contact.id, "cell_phone", e.target.value)} disabled={!canEdit} /></div>
+                                        {canEdit ? (
+                                          <div className="col-span-full">
+                                            <button
+                                              type="button"
+                                              className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs text-red-700"
+                                              onClick={() => removeDistrictContact(contact.id)}
+                                            >
+                                              Remove Contact
+                                            </button>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {draft.district_contact.trim() && districtContacts.length === 0 ? (
+                            <details className="mt-2 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+                              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">
+                                Raw Contact Data
+                              </summary>
+                              <textarea
+                                className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-2 text-xs font-mono"
+                                rows={5}
+                                value={draft.district_contact}
+                                onChange={(e) => setDraft((d) => ({ ...d, district_contact: e.target.value }))}
+                                disabled={!canEdit}
+                              />
+                            </details>
+                          ) : null}
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={addDistrictContact}
+                              disabled={!canEdit}
+                              className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60"
+                            >
+                              Add District Contact
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
