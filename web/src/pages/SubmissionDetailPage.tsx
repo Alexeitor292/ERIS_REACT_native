@@ -186,7 +186,7 @@ function R({ l, v }: { l: string; v: unknown }) {
 }
 function Section({ title, children, open = false }: { title: string; children: ReactNode; open?: boolean }) {
   return (
-    <details className="rounded-md border border-[var(--line)] p-4" open={open}>
+    <details className="border-t border-[var(--line)]/60 py-3" open={open}>
       <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted select-none">{title}</summary>
       <div className="mt-3">{children}</div>
     </details>
@@ -1257,14 +1257,7 @@ export default function SubmissionDetailPage() {
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <Link className="text-sm underline text-muted" to="/submissions">{"<-"} Back to submissions</Link>
-            <div className="mt-2 flex items-center gap-2"><h2 className="text-lg font-semibold">{invalid ? "Invalid submission id" : (data ? buildSubmissionDisplayTitle({
-              id: data.submission.id,
-              created_at: data.submission.created_at,
-              district: data.gisa?.district,
-              county: data.gisa?.county,
-              route: data.gisa?.route,
-              post_mile: data.gisa?.post_mile,
-            }) : `Case ${sid}`)}</h2>{data?.submission && <S s={data.submission.status} />}</div>
+            {data?.submission ? <div className="mt-2"><S s={data.submission.status} /></div> : null}
           </div>
           <div className="flex gap-2">
             <div className="relative">
@@ -1306,10 +1299,8 @@ export default function SubmissionDetailPage() {
         {!invalid && !data && <div className="mt-4 text-sm text-muted">{busy ? "Loading..." : "No data."}</div>}
 
         {!invalid && data && (
-          <div className="mt-4 space-y-4">
-            <section className="rounded-xl surface-soft p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Form</h3>
-                <div className="mt-1 text-xs text-muted">{canEdit ? "Unified view/edit form." : "Unified read-only form."}</div>
+          <div className="mt-4 space-y-3">
+            <section className="pt-1">
                 <fieldset disabled={!canEdit} className="contents">
                 <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
