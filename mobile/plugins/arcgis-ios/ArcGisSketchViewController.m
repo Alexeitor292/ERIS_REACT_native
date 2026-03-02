@@ -16,6 +16,7 @@
 @property(nonatomic, strong) UIButton *basemapButton;
 @property(nonatomic, assign) BOOL applyingHistory;
 @property(nonatomic, assign) BOOL hasObservedGeometry;
+@property(nonatomic, assign) BOOL hasNotifiedClose;
 
 @end
 
@@ -26,6 +27,11 @@
 
   self.view.backgroundColor = [UIColor blackColor];
   self.title = @"";
+  self.navigationItem.leftBarButtonItem =
+      [[UIBarButtonItem alloc] initWithTitle:@"Back"
+                                       style:UIBarButtonItemStylePlain
+                                      target:self
+                                      action:@selector(onCancel)];
 
   AGSBasemap *basemap = [[AGSBasemap alloc] initWithStyle:AGSBasemapStyleArcGISImagery];
   AGSMap *map = [[AGSMap alloc] initWithBasemap:basemap];
@@ -45,6 +51,7 @@
   self.basemapIndex = 2;
   self.applyingHistory = NO;
   self.hasObservedGeometry = NO;
+  self.hasNotifiedClose = NO;
 
   UIButton *zoomInButton = [self overlayButtonWithTitle:@"+" action:@selector(onZoomIn)];
   UIButton *zoomOutButton = [self overlayButtonWithTitle:@"-" action:@selector(onZoomOut)];
@@ -116,6 +123,7 @@
   }
   [self centerFromInitialLocation];
   [self pushCurrentGeometryToUndo];
+  [self cacheCurrentSketchGeometry];
 }
 
 - (UIButton *)overlayButtonWithTitle:(NSString *)title action:(SEL)selector {
@@ -273,7 +281,10 @@
 }
 
 - (void)onClear {
+  NSLog(@"[ArcGisDebug] onClear");
   [self.sketchEditor startWithCreationMode:AGSSketchCreationModePolygon];
+  [ArcGisSketchStore setLatestGeoJson:nil];
+  [self.undoStack removeAllObjects];
   [self.redoStack removeAllObjects];
 }
 
@@ -303,35 +314,34 @@
 }
 
 - (void)onCancel {
-  [self dismissViewControllerAnimated:YES completion:nil];
+  [self dismissViewControllerAnimated:YES
+                           completion:^{
+                             [self notifyClosedOnce];
+                           }];
 }
 
 - (void)onDone {
-  AGSGeometry *geometry = self.sketchEditor.geometry;
-  if (geometry == nil) {
+  NSLog(@"[ArcGisDebug] onDone:start");
+  if ([self.sketchEditor respondsToSelector:@selector(stop)]) {
+    [self.sketchEditor stop];
+  }
+  [self cacheCurrentSketchGeometry];
+  NSString *json = [ArcGisSketchStore latestGeoJson];
+  if ((json == nil || json.length == 0) && self.undoStack.count > 0) {
+    NSDictionary *last = self.undoStack.lastObject;
+    json = [self geoJsonStringFromSnapshot:last];
+    [ArcGisSketchStore setLatestGeoJson:json];
+  }
+  if (json == nil || json.length == 0) {
+    NSLog(@"[ArcGisDebug] onDone:no-geometry");
     [self toast:@"Draw a polygon first."];
     return;
   }
-
-  AGSGeometry *wgs84 = [AGSGeometryEngine projectGeometry:geometry
-                                       toSpatialReference:AGSSpatialReference.WGS84];
-  NSError *jsonError = nil;
-  NSDictionary *jsonDict = [wgs84 toJSON:&jsonError];
-  if (jsonError != nil || jsonDict == nil) {
-    [self toast:@"Could not serialize sketch geometry."];
-    return;
-  }
-
-  NSError *stringError = nil;
-  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:&stringError];
-  if (stringError != nil || jsonData == nil) {
-    [self toast:@"Could not save sketch geometry."];
-    return;
-  }
-
-  NSString *json = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-  [ArcGisSketchStore setLatestGeoJson:json];
-  [self dismissViewControllerAnimated:YES completion:nil];
+  NSLog(@"[ArcGisDebug] onDone:geometry-length=%lu", (unsigned long)json.length);
+  [self dismissViewControllerAnimated:YES
+                           completion:^{
+                             [self notifyClosedOnce];
+                           }];
 }
 
 - (void)pushCurrentGeometryToUndo {
@@ -360,6 +370,41 @@
   return json;
 }
 
+- (NSString *)currentSketchGeoJsonString {
+  NSDictionary *snapshot = [self sketchGeometrySnapshot];
+  return [self geoJsonStringFromSnapshot:snapshot];
+}
+
+- (NSString *)geoJsonStringFromSnapshot:(NSDictionary *)snapshot {
+  if (snapshot == nil) {
+    return nil;
+  }
+  NSError *stringError = nil;
+  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:snapshot options:0 error:&stringError];
+  if (stringError != nil || jsonData == nil) {
+    return nil;
+  }
+  return [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+}
+
+- (void)cacheCurrentSketchGeometry {
+  NSString *json = [self currentSketchGeoJsonString];
+  NSLog(@"[ArcGisDebug] cacheCurrentSketchGeometry length=%lu", (unsigned long)(json != nil ? json.length : 0));
+  [ArcGisSketchStore setLatestGeoJson:json];
+}
+
+- (void)notifyClosedOnce {
+  if (self.hasNotifiedClose) {
+    return;
+  }
+  self.hasNotifiedClose = YES;
+  NSLog(@"[ArcGisDebug] notifyClosedOnce");
+  if (self.onClose != nil) {
+    self.onClose();
+    self.onClose = nil;
+  }
+}
+
 - (void)applyHistoryGeometry:(NSDictionary *)geometryJson {
   self.applyingHistory = YES;
   if (geometryJson == nil) {
@@ -385,6 +430,8 @@
   if (![keyPath isEqualToString:@"geometry"] || self.applyingHistory) {
     return;
   }
+  NSLog(@"[ArcGisDebug] observe geometry changed");
+  [self cacheCurrentSketchGeometry];
   [self pushCurrentGeometryToUndo];
   [self.redoStack removeAllObjects];
 }

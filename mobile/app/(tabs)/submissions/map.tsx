@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { getToken } from "../../../src/auth/tokenStore";
@@ -14,6 +14,7 @@ type Sub = {
   submission: { status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" };
   gisa: { geometry_json?: Geo } | null;
 };
+type GeometryResp = { submission_id: number; geometry: Geo | string | null };
 
 async function getArcGisBridge() {
   try {
@@ -91,6 +92,19 @@ function geoJsonToEsriJsonString(geometryJson: Geo): string | null {
   }
 }
 
+function normalizeGeometryValue(value: Geo | string | null | undefined): Geo {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? (parsed as Geo) : null;
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
+
 export default function MapScreen() {
   const { palette } = useUiSettings();
   const { id, latitude, longitude } = useLocalSearchParams<{
@@ -103,9 +117,6 @@ export default function MapScreen() {
   const [statusText, setStatusText] = useState("Opening ArcGIS map...");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [canEdit, setCanEdit] = useState(false);
-  const [launched, setLaunched] = useState(false);
   const launchInFlight = useRef(false);
 
   const launchNativeMap = useCallback(async () => {
@@ -113,6 +124,7 @@ export default function MapScreen() {
     launchInFlight.current = true;
     setError(null);
     try {
+      console.log("[ArcGisDebug] launchNativeMap:start", { submissionId, latitude, longitude });
       if (!submissionId) {
         Alert.alert("Missing submission id", "Please open map from a submission.");
         router.back();
@@ -123,25 +135,40 @@ export default function MapScreen() {
         router.replace("/(auth)/login");
         return;
       }
-      setToken(t);
 
       const bridge = await getArcGisBridge();
       if (!bridge?.isArcGisNativeAvailable?.()) {
         throw new Error("ArcGIS native module unavailable in this build.");
       }
+      if (bridge.clearSketch) {
+        console.log("[ArcGisDebug] clearSketch:before-open");
+        await bridge.clearSketch().catch(() => {});
+      }
 
-      const [me, sub] = await Promise.all([
+      const [me, sub, geomRes] = await Promise.all([
         apiFetch<Me>("/auth/me", { token: t }),
         getSubmission(t, submissionId) as Promise<Sub>,
+        apiFetch<GeometryResp>(`/submissions/${submissionId}/geometry`, { token: t }).catch(() => null),
       ]);
       const roles = new Set(me.roles ?? []);
       const editable = (roles.has("FIELD_WORKER") || roles.has("ADMIN")) && sub.submission.status === "DRAFT";
-      setCanEdit(editable);
+      console.log("[ArcGisDebug] launchNativeMap:auth-status", {
+        editable,
+        status: sub.submission.status,
+        roles: Array.from(roles),
+      });
       if (!editable) {
         throw new Error("Only DRAFT submissions can be edited.");
       }
 
-      const existingGeometry = sub.gisa?.geometry_json ?? null;
+      const existingGeometry =
+        normalizeGeometryValue(geomRes?.geometry) ??
+        normalizeGeometryValue(sub.gisa?.geometry_json) ??
+        null;
+      console.log("[ArcGisDebug] launchNativeMap:existing-geometry", {
+        hasGeometry: !!existingGeometry,
+        type: (existingGeometry as any)?.type ?? null,
+      });
       const seed = getSeedCoordinates(existingGeometry, latitude, longitude);
       if (seed && bridge.setInitialLocation) {
         await bridge.setInitialLocation(seed.lat, seed.lon);
@@ -152,13 +179,44 @@ export default function MapScreen() {
       }
 
       setStatusText("ArcGIS opened. Draw and save there.");
+      console.log("[ArcGisDebug] startSketchPolygon:open");
       await bridge.startSketchPolygon();
-      setLaunched(true);
+      console.log("[ArcGisDebug] startSketchPolygon:closed");
+      setStatusText("Reading sketch...");
+      const geom = await bridge.getSketchGeometry();
+      console.log("[ArcGisDebug] getSketchGeometry:result", {
+        hasGeom: !!geom,
+        type: geom?.type ?? null,
+      });
+      if (!geom) {
+        throw new Error("No sketch geometry found. Draw and save a sketch first.");
+      }
+
+      setStatusText("Saving sketch...");
+      console.log("[ArcGisDebug] patchSubmission:start");
+      await patchSubmission(t, submissionId, { geometry_json: geom });
+      console.log("[ArcGisDebug] patchSubmission:done");
+      const verify = await apiFetch<GeometryResp>(`/submissions/${submissionId}/geometry`, { token: t }).catch(() => null);
+      const verifiedGeom = normalizeGeometryValue(verify?.geometry);
+      console.log("[ArcGisDebug] verifyGeometry", {
+        hasVerifiedGeom: !!verifiedGeom,
+        type: (verifiedGeom as any)?.type ?? null,
+      });
+      if (!verifiedGeom) {
+        throw new Error("Sketch save could not be verified on the server. Please try again.");
+      }
+
+      if (bridge.clearSketch) {
+        await bridge.clearSketch().catch(() => {});
+      }
+      Alert.alert("Saved", "Geometry updated on this submission.");
+      router.back();
     } catch (e: any) {
       if (isSessionExpiredError(e)) return;
       const msg = String(e?.message ?? e);
+      console.log("[ArcGisDebug] launchNativeMap:error", { message: msg, raw: e });
       setError(msg);
-      setStatusText("Could not open ArcGIS.");
+      setStatusText("Sketch not saved.");
     } finally {
       setBusy(false);
       launchInFlight.current = false;
@@ -168,30 +226,6 @@ export default function MapScreen() {
   useEffect(() => {
     launchNativeMap().catch(() => {});
   }, [launchNativeMap]);
-
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      (async () => {
-        if (!launched || !token || !submissionId || !canEdit) return;
-        try {
-          const bridge = await getArcGisBridge();
-          if (!bridge?.getSketchGeometry) return;
-          const geom = await bridge.getSketchGeometry();
-          if (cancelled || !geom) return;
-          await patchSubmission(token, submissionId, { geometry_json: geom });
-          if (cancelled) return;
-          Alert.alert("Saved", "Geometry updated on this submission.");
-          router.back();
-        } catch {
-          // If user exits map without saving sketch, stay on this page.
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [launched, token, submissionId, canEdit])
-  );
 
   return (
     <View style={[styles.container, { backgroundColor: palette.bg }]}>

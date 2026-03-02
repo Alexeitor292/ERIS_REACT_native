@@ -103,23 +103,27 @@ const DASHBOARD_DEFAULT_ORDER = [
   "measurements",
 ] as const;
 type DashboardCardId = (typeof DASHBOARD_DEFAULT_ORDER)[number];
-type DashboardCardLayout = { colSpan: number; rowSpan: number };
+type DashboardCardLayout = { width: number; height: number };
 type DashboardLayoutState = {
   order: DashboardCardId[];
   sizes: Record<DashboardCardId, DashboardCardLayout>;
 };
+const DASHBOARD_MIN_CARD_WIDTH = 320;
+const DASHBOARD_MAX_CARD_WIDTH = 1600;
+const DASHBOARD_MIN_CARD_HEIGHT = 150;
+const DASHBOARD_MAX_CARD_HEIGHT = 980;
 const DASHBOARD_DEFAULT_SIZES: Record<DashboardCardId, DashboardCardLayout> = {
-  report_header: { colSpan: 8, rowSpan: 1 },
-  location: { colSpan: 4, rowSpan: 1 },
-  distribution: { colSpan: 6, rowSpan: 1 },
-  highway_status: { colSpan: 6, rowSpan: 1 },
-  incident_type: { colSpan: 6, rowSpan: 1 },
-  material: { colSpan: 6, rowSpan: 1 },
-  pavement_ground_status: { colSpan: 6, rowSpan: 1 },
-  vegetation_on_slope: { colSpan: 6, rowSpan: 1 },
-  water_drainage: { colSpan: 6, rowSpan: 1 },
-  water_content: { colSpan: 6, rowSpan: 1 },
-  measurements: { colSpan: 6, rowSpan: 1 },
+  report_header: { width: 960, height: 300 },
+  location: { width: 460, height: 300 },
+  distribution: { width: 680, height: 250 },
+  highway_status: { width: 680, height: 250 },
+  incident_type: { width: 680, height: 250 },
+  material: { width: 680, height: 250 },
+  pavement_ground_status: { width: 680, height: 320 },
+  vegetation_on_slope: { width: 680, height: 230 },
+  water_drainage: { width: 680, height: 310 },
+  water_content: { width: 680, height: 230 },
+  measurements: { width: 680, height: 400 },
 };
 const DASHBOARD_CARD_TITLES: Record<DashboardCardId, string> = {
   report_header: "Report Header",
@@ -236,8 +240,8 @@ export default function SubmissionDetailPage() {
     mode: "x" | "y" | "xy";
     startX: number;
     startY: number;
-    startCol: number;
-    startRow: number;
+    startWidth: number;
+    startHeight: number;
   } | null>(null);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => ({
     order: [...DASHBOARD_DEFAULT_ORDER],
@@ -268,11 +272,32 @@ export default function SubmissionDetailPage() {
       ] as DashboardCardId[];
       const sizes: Record<DashboardCardId, DashboardCardLayout> = { ...DASHBOARD_DEFAULT_SIZES };
       for (const id of DASHBOARD_DEFAULT_ORDER) {
-        const next = parsed.sizes?.[id];
+        const next = parsed.sizes?.[id] as any;
         if (!next) continue;
+        const legacyCol = Number(next.colSpan);
+        const legacyRow = Number(next.rowSpan);
+        if (!Number.isNaN(legacyCol) || !Number.isNaN(legacyRow)) {
+          sizes[id] = {
+            width: Math.min(
+              DASHBOARD_MAX_CARD_WIDTH,
+              Math.max(DASHBOARD_MIN_CARD_WIDTH, Math.round(((Number.isNaN(legacyCol) ? 6 : legacyCol) / 12) * 1400))
+            ),
+            height: Math.min(
+              DASHBOARD_MAX_CARD_HEIGHT,
+              Math.max(DASHBOARD_MIN_CARD_HEIGHT, Math.round((Number.isNaN(legacyRow) ? 1 : legacyRow) * 170))
+            ),
+          };
+          continue;
+        }
         sizes[id] = {
-          colSpan: Math.min(12, Math.max(3, Number(next.colSpan) || DASHBOARD_DEFAULT_SIZES[id].colSpan)),
-          rowSpan: Math.min(4, Math.max(1, Number(next.rowSpan) || DASHBOARD_DEFAULT_SIZES[id].rowSpan)),
+          width: Math.min(
+            DASHBOARD_MAX_CARD_WIDTH,
+            Math.max(DASHBOARD_MIN_CARD_WIDTH, Number(next.width) || DASHBOARD_DEFAULT_SIZES[id].width)
+          ),
+          height: Math.min(
+            DASHBOARD_MAX_CARD_HEIGHT,
+            Math.max(DASHBOARD_MIN_CARD_HEIGHT, Number(next.height) || DASHBOARD_DEFAULT_SIZES[id].height)
+          ),
         };
       }
       setDashboardLayout({ order: mergedOrder, sizes });
@@ -583,7 +608,7 @@ export default function SubmissionDetailPage() {
     if (!layoutMode || e.button !== 0) return;
     e.preventDefault();
     const cur = dashboardLayout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
-    setResizeState({ id, mode, startX: e.clientX, startY: e.clientY, startCol: cur.colSpan, startRow: cur.rowSpan });
+    setResizeState({ id, mode, startX: e.clientX, startY: e.clientY, startWidth: cur.width, startHeight: cur.height });
   };
 
   useEffect(() => {
@@ -592,15 +617,29 @@ export default function SubmissionDetailPage() {
       if (resizeState) {
         const dx = e.clientX - resizeState.startX;
         const dy = e.clientY - resizeState.startY;
-        const colDelta = Math.round(dx / 80);
-        const rowDelta = Math.round(dy / 90);
         setDashboardLayout((prev) => ({
           ...prev,
           sizes: {
             ...prev.sizes,
             [resizeState.id]: {
-              colSpan: Math.min(12, Math.max(3, resizeState.startCol + (resizeState.mode === "y" ? 0 : colDelta))),
-              rowSpan: Math.min(4, Math.max(1, resizeState.startRow + (resizeState.mode === "x" ? 0 : rowDelta))),
+              width: Math.round(
+                Math.min(
+                  DASHBOARD_MAX_CARD_WIDTH,
+                  Math.max(
+                    DASHBOARD_MIN_CARD_WIDTH,
+                    resizeState.startWidth + (resizeState.mode === "y" ? 0 : dx)
+                  )
+                )
+              ),
+              height: Math.round(
+                Math.min(
+                  DASHBOARD_MAX_CARD_HEIGHT,
+                  Math.max(
+                    DASHBOARD_MIN_CARD_HEIGHT,
+                    resizeState.startHeight + (resizeState.mode === "x" ? 0 : dy)
+                  )
+                )
+              ),
             },
           },
         }));
@@ -640,10 +679,11 @@ export default function SubmissionDetailPage() {
     const isDragging = dragState?.active && dragState.id === id;
     return {
       "data-card-id": id,
-      className: `${box} relative ${layoutMode ? "select-none pt-8" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
+      className: `${box} relative overflow-auto ${layoutMode ? "select-none pt-8" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
       style: {
-        gridColumn: `span ${dashboardLayout.sizes[id]?.colSpan ?? DASHBOARD_DEFAULT_SIZES[id].colSpan}`,
-        gridRow: `span ${dashboardLayout.sizes[id]?.rowSpan ?? DASHBOARD_DEFAULT_SIZES[id].rowSpan}`,
+        width: `min(100%, ${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px)`,
+        minHeight: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
+        flex: "0 1 auto",
         order: orderedVisibleCardIds.indexOf(id),
       } as CSSProperties,
     };
@@ -904,11 +944,11 @@ export default function SubmissionDetailPage() {
                       </button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 lg:auto-rows-[minmax(120px,auto)] lg:grid-cols-12 lg:grid-flow-dense">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-start">
                     <div {...cardFrameProps("report_header")}>
                       {layoutTools("report_header")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Report Header</div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
                         <div>
                           <label className={label}>Report Date (YYYY-MM-DD)</label>
                           <input className={input} value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
@@ -980,7 +1020,7 @@ export default function SubmissionDetailPage() {
                           <label className={label}>Project ID</label>
                           <input className={input} value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
                         </div>
-                        <div className="md:col-span-2">
+                        <div className="col-span-full">
                           <label className={label}>District Contact</label>
                           <input className={input} value={draft.district_contact} onChange={(e)=>setDraft((d)=>({...d,district_contact:e.target.value}))} />
                         </div>
@@ -1041,7 +1081,7 @@ export default function SubmissionDetailPage() {
                           );
                         })}
                       </div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
                         {highwayLanesClosedSelected ? (
                           <div>
                             <label className={label}>Lane(s) Closed Count</label>
@@ -1088,7 +1128,7 @@ export default function SubmissionDetailPage() {
                         </div>
                       ) : null}
                       {materialSoilSelected ? (
-                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
                           <div><label className={label}>Clay Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_clay_pct} onChange={(e)=>setDraft((d)=>({...d,est_clay_pct:e.target.value}))} /></div>
                           <div><label className={label}>Silt Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_silt_pct} onChange={(e)=>setDraft((d)=>({...d,est_silt_pct:e.target.value}))} /></div>
                           <div><label className={label}>Sand Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_sand_pct} onChange={(e)=>setDraft((d)=>({...d,est_sand_pct:e.target.value}))} /></div>
@@ -1108,7 +1148,7 @@ export default function SubmissionDetailPage() {
                           </button>
                         ))}
                       </div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
                         {draft.pavement_ground_cracks === "YES" ? (
                           <>
                             <div><label className={label}>Length (feet)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} /></div>
@@ -1133,10 +1173,10 @@ export default function SubmissionDetailPage() {
                     <div {...cardFrameProps("vegetation_on_slope")}>
                       {layoutTools("vegetation_on_slope")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Vegetation on Slope</div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
                         <div><label className={label}>Trees Coverage %</label><input className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
                         <div><label className={label}>Bushes/Shrubs Coverage %</label><input className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
-                        <div className="md:col-span-2"><label className={label}>Groundcover Coverage %</label><input className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
+                        <div className="col-span-full"><label className={label}>Groundcover Coverage %</label><input className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
                       </div>
                     </div>
 
@@ -1185,7 +1225,7 @@ export default function SubmissionDetailPage() {
                         <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
                           <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
                         </div>
-                        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
                           <div><label className={label}>Slope Height, ft (H)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} /></div>
                           <div><label className={label}>Original Slope, deg (alpha)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} /></div>
                           <div><label className={label}>Landslide Width, ft (Wd)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} /></div>

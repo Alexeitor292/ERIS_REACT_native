@@ -51,10 +51,19 @@ RCT_REMAP_METHOD(startSketchPolygon,
     }
 
     ArcGisSketchViewController *vc = [[ArcGisSketchViewController alloc] init];
+    __block BOOL didResolve = NO;
+    vc.onClose = ^{
+      if (didResolve) {
+        return;
+      }
+      didResolve = YES;
+      NSLog(@"[ArcGisDebug] startSketchPolygon:onClose resolve");
+      resolve(nil);
+    };
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    NSLog(@"[ArcGisDebug] startSketchPolygon:present");
     [root presentViewController:nav animated:YES completion:nil];
-    resolve(nil);
   });
 }
 
@@ -62,6 +71,7 @@ RCT_REMAP_METHOD(getSketchGeoJson,
                  getSketchGeoJsonWithResolver:(RCTPromiseResolveBlock)resolve
                  rejecterGetSketch:(RCTPromiseRejectBlock)reject) {
   NSString *json = [ArcGisSketchStore latestGeoJson];
+  NSLog(@"[ArcGisDebug] getSketchGeoJson length=%lu", (unsigned long)(json != nil ? json.length : 0));
   if (json == nil || json.length == 0) {
     reject(@"E_NO_SKETCH", @"No sketch geometry found. Draw and save a sketch first.", nil);
     return;
@@ -72,6 +82,7 @@ RCT_REMAP_METHOD(getSketchGeoJson,
 RCT_REMAP_METHOD(clearSketch,
                  clearSketchWithResolver:(RCTPromiseResolveBlock)resolve
                  rejecterClearSketch:(RCTPromiseRejectBlock)reject) {
+  NSLog(@"[ArcGisDebug] clearSketch");
   [ArcGisSketchStore setLatestGeoJson:nil];
   resolve(nil);
 }
