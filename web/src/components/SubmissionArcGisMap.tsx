@@ -8,6 +8,7 @@ import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import Point from "@arcgis/core/geometry/Point";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
+import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 import Home from "@arcgis/core/widgets/Home";
 import Locate from "@arcgis/core/widgets/Locate";
 import Compass from "@arcgis/core/widgets/Compass";
@@ -25,9 +26,52 @@ type Props = {
   geojson: any | null; // GeoJSON geometry object
   location?: { latitude: number | null; longitude: number | null } | null;
   height?: number;
+  editable?: boolean;
+  onGeometryChange?: (geometry: any | null) => void;
 };
 
-export default function SubmissionArcGisMap({ geojson, location = null, height = 320 }: Props) {
+function toGeoJsonGeometry(rawGeometry: any): any | null {
+  if (!rawGeometry) return null;
+
+  let geometry = rawGeometry;
+  if (geometry.spatialReference?.isWebMercator) {
+    try {
+      geometry = webMercatorUtils.webMercatorToGeographic(geometry) ?? geometry;
+    } catch {
+      // Keep source geometry if conversion fails.
+    }
+  }
+
+  const toPair = (coord: any): [number, number] => [Number(coord?.[0]), Number(coord?.[1])];
+  const mapCoords = (coords: any) =>
+    Array.isArray(coords) ? coords.map((coord: any) => toPair(coord)) : [];
+
+  switch (String(geometry.type || "").toLowerCase()) {
+    case "point":
+      return { type: "Point", coordinates: [Number(geometry.x), Number(geometry.y)] };
+    case "multipoint":
+      return { type: "MultiPoint", coordinates: mapCoords(geometry.points) };
+    case "polyline": {
+      const paths = Array.isArray(geometry.paths) ? geometry.paths.map((path: any) => mapCoords(path)) : [];
+      if (paths.length === 1) return { type: "LineString", coordinates: paths[0] };
+      return { type: "MultiLineString", coordinates: paths };
+    }
+    case "polygon": {
+      const rings = Array.isArray(geometry.rings) ? geometry.rings.map((ring: any) => mapCoords(ring)) : [];
+      return { type: "Polygon", coordinates: rings };
+    }
+    default:
+      return null;
+  }
+}
+
+export default function SubmissionArcGisMap({
+  geojson,
+  location = null,
+  height = 320,
+  editable = false,
+  onGeometryChange,
+}: Props) {
   const divRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<MapView | null>(null);
   const layerRef = useRef<GraphicsLayer | null>(null);
@@ -64,20 +108,7 @@ export default function SubmissionArcGisMap({ geojson, location = null, height =
     const legend = new Legend({ view });
     const measurement = new Measurement({ view });
     const coordinateConversion = new CoordinateConversion({ view });
-    const sketch = new Sketch({
-      view,
-      layer: graphicsLayer,
-      availableCreateTools: ["point", "polyline", "polygon", "rectangle", "circle"],
-      creationMode: "update",
-      visibleElements: {
-        selectionTools: {
-          "lasso-selection": true,
-          "rectangle-selection": true,
-        },
-        settingsMenu: true,
-        undoRedoMenu: true,
-      },
-    });
+    const subscriptions: Array<{ remove: () => void }> = [];
 
     const searchExpand = new Expand({ view, content: search, expandTooltip: "Search" });
     const basemapExpand = new Expand({
@@ -97,11 +128,6 @@ export default function SubmissionArcGisMap({ geojson, location = null, height =
       content: coordinateConversion,
       expandTooltip: "Coordinates",
     });
-    const sketchExpand = new Expand({
-      view,
-      content: sketch,
-      expandTooltip: "Draw and edit geometry",
-    });
 
     view.ui.add(home, "top-left");
     view.ui.add(locate, "top-left");
@@ -113,16 +139,73 @@ export default function SubmissionArcGisMap({ geojson, location = null, height =
     view.ui.add(legendExpand, "top-right");
     view.ui.add(measurementExpand, "bottom-right");
     view.ui.add(coordinatesExpand, "bottom-right");
-    view.ui.add(sketchExpand, "bottom-right");
+
+    if (editable) {
+      const sketch = new Sketch({
+        view,
+        layer: graphicsLayer,
+        availableCreateTools: ["point", "polyline", "polygon", "rectangle", "circle"],
+        creationMode: "update",
+        visibleElements: {
+          selectionTools: {
+            "lasso-selection": true,
+            "rectangle-selection": true,
+          },
+          settingsMenu: true,
+          undoRedoMenu: true,
+        },
+      });
+      const sketchExpand = new Expand({
+        view,
+        content: sketch,
+        expandTooltip: "Draw and edit geometry",
+      });
+      view.ui.add(sketchExpand, "bottom-right");
+
+      const currentSubmissionGraphic = () => {
+        const filtered = graphicsLayer.graphics
+          .toArray()
+          .filter((graphic) => !graphic.attributes?.__location_marker);
+        return filtered.length > 0 ? filtered[filtered.length - 1] : null;
+      };
+
+      subscriptions.push(
+        sketch.on("create", (event: any) => {
+          if (event.state !== "complete") return;
+          const createdGraphic = event.graphic;
+          graphicsLayer.graphics.toArray().forEach((graphic) => {
+            if (graphic === createdGraphic || graphic.attributes?.__location_marker) return;
+            graphicsLayer.remove(graphic);
+          });
+          onGeometryChange?.(toGeoJsonGeometry(createdGraphic?.geometry));
+        })
+      );
+
+      subscriptions.push(
+        sketch.on("update", (event: any) => {
+          if (event.state !== "complete") return;
+          const updatedGraphic = event.graphics?.[0] ?? currentSubmissionGraphic();
+          onGeometryChange?.(toGeoJsonGeometry(updatedGraphic?.geometry));
+        })
+      );
+
+      subscriptions.push(
+        sketch.on("delete", () => {
+          const remaining = currentSubmissionGraphic();
+          onGeometryChange?.(toGeoJsonGeometry(remaining?.geometry));
+        })
+      );
+    }
 
     viewRef.current = view;
 
     return () => {
+      subscriptions.forEach((sub) => sub.remove());
       layerRef.current = null;
       viewRef.current = null;
       view.destroy();
     };
-  }, []);
+  }, [editable, onGeometryChange]);
 
   const goToRecordedLocation = useCallback(() => {
     const view = viewRef.current;
@@ -211,6 +294,7 @@ export default function SubmissionArcGisMap({ geojson, location = null, height =
 
       const graphic = new Graphic({
         geometry: polygon,
+        attributes: { __submission_geometry: true },
         symbol: {
           type: "simple-fill",
           color: [220, 38, 38, 0.14],
@@ -230,6 +314,7 @@ export default function SubmissionArcGisMap({ geojson, location = null, height =
       });
       const graphic = new Graphic({
         geometry: line,
+        attributes: { __submission_geometry: true },
         symbol: {
           type: "simple-line",
           width: 3,
@@ -250,6 +335,7 @@ export default function SubmissionArcGisMap({ geojson, location = null, height =
       });
       const graphic = new Graphic({
         geometry: point,
+        attributes: { __submission_geometry: true },
         symbol: {
           type: "simple-marker",
           color: [20, 93, 203, 0.92],
@@ -317,6 +403,7 @@ export default function SubmissionArcGisMap({ geojson, location = null, height =
         });
         const locationGraphic = new Graphic({
           geometry: locationPoint,
+          attributes: { __location_marker: true },
           symbol: {
             type: "simple-marker",
             color: [37, 99, 235, 0.95],

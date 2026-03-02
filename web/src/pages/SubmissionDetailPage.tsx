@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail } from "../api/types";
@@ -218,6 +218,8 @@ export default function SubmissionDetailPage() {
   const [shareCandidates, setShareCandidates] = useState<AdminUser[]>([]);
   const [sharedWith, setSharedWith] = useState<SharedUser[]>([]);
   const [geoBusy, setGeoBusy] = useState(false);
+  const [geoSaveState, setGeoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [geoSaveMessage, setGeoSaveMessage] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState(false);
   const [dragState, setDragState] = useState<{
@@ -450,6 +452,33 @@ export default function SubmissionDetailPage() {
       setDownloading(null);
     }
   }
+
+  const onMapGeometryChange = useCallback(
+    async (nextGeometry: any | null) => {
+      setGeom(nextGeometry);
+      setDraft((d) => ({
+        ...d,
+        geometry_json: nextGeometry ? JSON.stringify(nextGeometry, null, 2) : "",
+      }));
+
+      if (!canEdit || invalid) return;
+
+      setGeoSaveState("saving");
+      setGeoSaveMessage(nextGeometry ? "Saving map geometry..." : "Clearing map geometry...");
+      try {
+        await api(`/submissions/${sid}/gisa`, {
+          method: "PATCH",
+          body: JSON.stringify({ geometry_json: nextGeometry }),
+        });
+        setGeoSaveState("saved");
+        setGeoSaveMessage(nextGeometry ? "Map geometry saved." : "Map geometry cleared.");
+      } catch (e: any) {
+        setGeoSaveState("error");
+        setGeoSaveMessage(e?.message ?? "Map geometry save failed.");
+      }
+    },
+    [canEdit, invalid, sid]
+  );
 
   async function onDeleteSubmission() {
     if (!data || !canDeleteSubmission) return;
@@ -802,7 +831,7 @@ export default function SubmissionDetailPage() {
                 className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95 disabled:opacity-60"
                 title="Submission options"
               >
-                â‹®
+                ...
               </button>
               {menuOpen ? (
                 <div className="absolute right-0 top-10 z-10 min-w-36 rounded-md border border-[var(--line)] bg-[var(--panel)] p-1 shadow-lg">
@@ -848,7 +877,14 @@ export default function SubmissionDetailPage() {
                     geojson={geom}
                     location={{ latitude: draft.latitude ? Number(draft.latitude) : null, longitude: draft.longitude ? Number(draft.longitude) : null }}
                     height={300}
+                    editable={canEdit}
+                    onGeometryChange={onMapGeometryChange}
                   />
+                  {geoSaveMessage ? (
+                    <div className={`mt-2 text-xs ${geoSaveState === "error" ? "text-red-700" : "text-muted"}`}>
+                      {geoSaveMessage}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
