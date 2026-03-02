@@ -97,6 +97,7 @@ const DISTRIBUTION_ICON_SRC: Record<string, string> = {
 };
 const LANES_CLOSED_OPTIONS = Array.from({ length: 12 }, (_, idx) => String(idx + 1));
 const DASHBOARD_LAYOUT_KEY = "eris_submission_layout_v1";
+const DASHBOARD_LAYOUT_PROFILES_KEY = "eris_submission_layout_profiles_v1";
 const DASHBOARD_DEFAULT_ORDER = [
   "report_header",
   "location",
@@ -125,17 +126,30 @@ const DASHBOARD_MAX_CARD_HEIGHT = 980;
 const DASHBOARD_LAYOUT_GAP = 12;
 const DASHBOARD_TIDY_SNAP = 8;
 const DASHBOARD_DEFAULT_SIZES: Record<DashboardCardId, DashboardCardLayout> = {
-  report_header: { width: 960, height: 300 },
-  location: { width: 460, height: 300 },
-  distribution: { width: 680, height: 250 },
-  highway_status: { width: 680, height: 250 },
-  incident_type: { width: 680, height: 250 },
-  material: { width: 680, height: 250 },
-  pavement_ground_status: { width: 680, height: 320 },
-  vegetation_on_slope: { width: 680, height: 230 },
-  water_drainage: { width: 680, height: 310 },
-  water_content: { width: 680, height: 230 },
-  measurements: { width: 680, height: 400 },
+  report_header: { width: 1052, height: 300 },
+  location: { width: 520, height: 300 },
+  distribution: { width: 520, height: 250 },
+  highway_status: { width: 520, height: 250 },
+  incident_type: { width: 520, height: 250 },
+  material: { width: 520, height: 250 },
+  pavement_ground_status: { width: 520, height: 360 },
+  vegetation_on_slope: { width: 520, height: 260 },
+  water_drainage: { width: 520, height: 470 },
+  water_content: { width: 520, height: 250 },
+  measurements: { width: 520, height: 470 },
+};
+const DASHBOARD_DEFAULT_POSITIONS: Partial<Record<DashboardCardId, DashboardCardPosition>> = {
+  report_header: { x: 12, y: 12 },
+  location: { x: 1076, y: 12 },
+  incident_type: { x: 12, y: 324 },
+  distribution: { x: 544, y: 324 },
+  highway_status: { x: 1076, y: 324 },
+  material: { x: 12, y: 586 },
+  water_content: { x: 544, y: 586 },
+  pavement_ground_status: { x: 1076, y: 586 },
+  vegetation_on_slope: { x: 12, y: 848 },
+  measurements: { x: 544, y: 848 },
+  water_drainage: { x: 1076, y: 958 },
 };
 const DASHBOARD_CARD_TITLES: Record<DashboardCardId, string> = {
   report_header: "Report Header",
@@ -256,6 +270,66 @@ function reorderCards(order: DashboardCardId[], dragId: DashboardCardId, overId:
   return next;
 }
 
+function buildDefaultDashboardLayout(): DashboardLayoutState {
+  return {
+    order: [...DASHBOARD_DEFAULT_ORDER],
+    sizes: { ...DASHBOARD_DEFAULT_SIZES },
+    positions: { ...DASHBOARD_DEFAULT_POSITIONS },
+  };
+}
+
+function normalizeDashboardLayout(raw: Partial<DashboardLayoutState> | null | undefined): DashboardLayoutState {
+  const base = buildDefaultDashboardLayout();
+  if (!raw) return base;
+  const order = Array.isArray(raw.order)
+    ? raw.order.filter((x): x is DashboardCardId => DASHBOARD_DEFAULT_ORDER.includes(x as DashboardCardId))
+    : [];
+  const mergedOrder = [
+    ...order,
+    ...DASHBOARD_DEFAULT_ORDER.filter((id) => !order.includes(id)),
+  ] as DashboardCardId[];
+  const sizes: Record<DashboardCardId, DashboardCardLayout> = { ...base.sizes };
+  for (const id of DASHBOARD_DEFAULT_ORDER) {
+    const next = (raw.sizes as any)?.[id];
+    if (!next) continue;
+    const legacyCol = Number(next.colSpan);
+    const legacyRow = Number(next.rowSpan);
+    if (!Number.isNaN(legacyCol) || !Number.isNaN(legacyRow)) {
+      sizes[id] = {
+        width: Math.min(
+          DASHBOARD_MAX_CARD_WIDTH,
+          Math.max(DASHBOARD_MIN_CARD_WIDTH, Math.round(((Number.isNaN(legacyCol) ? 6 : legacyCol) / 12) * 1400))
+        ),
+        height: Math.min(
+          DASHBOARD_MAX_CARD_HEIGHT,
+          Math.max(DASHBOARD_MIN_CARD_HEIGHT, Math.round((Number.isNaN(legacyRow) ? 1 : legacyRow) * 170))
+        ),
+      };
+      continue;
+    }
+    sizes[id] = {
+      width: Math.min(
+        DASHBOARD_MAX_CARD_WIDTH,
+        Math.max(DASHBOARD_MIN_CARD_WIDTH, Number(next.width) || base.sizes[id].width)
+      ),
+      height: Math.min(
+        DASHBOARD_MAX_CARD_HEIGHT,
+        Math.max(DASHBOARD_MIN_CARD_HEIGHT, Number(next.height) || base.sizes[id].height)
+      ),
+    };
+  }
+  const positions: Partial<Record<DashboardCardId, DashboardCardPosition>> = { ...base.positions };
+  for (const id of DASHBOARD_DEFAULT_ORDER) {
+    const next = (raw as any).positions?.[id];
+    if (!next) continue;
+    const x = Number(next.x);
+    const y = Number(next.y);
+    if (Number.isNaN(x) || Number.isNaN(y)) continue;
+    positions[id] = { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) };
+  }
+  return { order: mergedOrder, sizes, positions };
+}
+
 export default function SubmissionDetailPage() {
   const { id } = useParams();
   const sid = Number(id);
@@ -308,11 +382,11 @@ export default function SubmissionDetailPage() {
     startCardX: number;
     startCardY: number;
   } | null>(null);
-  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => ({
-    order: [...DASHBOARD_DEFAULT_ORDER],
-    sizes: { ...DASHBOARD_DEFAULT_SIZES },
-    positions: {},
-  }));
+  const [activeLayoutProfile, setActiveLayoutProfile] = useState("Default");
+  const [layoutProfiles, setLayoutProfiles] = useState<Record<string, DashboardLayoutState>>({
+    Default: buildDefaultDashboardLayout(),
+  });
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => buildDefaultDashboardLayout());
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
@@ -326,56 +400,44 @@ export default function SubmissionDetailPage() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(DASHBOARD_LAYOUT_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<DashboardLayoutState>;
-      const order = Array.isArray(parsed.order)
-        ? parsed.order.filter((x): x is DashboardCardId => DASHBOARD_DEFAULT_ORDER.includes(x as DashboardCardId))
-        : [];
-      const mergedOrder = [
-        ...order,
-        ...DASHBOARD_DEFAULT_ORDER.filter((id) => !order.includes(id)),
-      ] as DashboardCardId[];
-      const sizes: Record<DashboardCardId, DashboardCardLayout> = { ...DASHBOARD_DEFAULT_SIZES };
-      for (const id of DASHBOARD_DEFAULT_ORDER) {
-        const next = parsed.sizes?.[id] as any;
-        if (!next) continue;
-        const legacyCol = Number(next.colSpan);
-        const legacyRow = Number(next.rowSpan);
-        if (!Number.isNaN(legacyCol) || !Number.isNaN(legacyRow)) {
-          sizes[id] = {
-            width: Math.min(
-              DASHBOARD_MAX_CARD_WIDTH,
-              Math.max(DASHBOARD_MIN_CARD_WIDTH, Math.round(((Number.isNaN(legacyCol) ? 6 : legacyCol) / 12) * 1400))
-            ),
-            height: Math.min(
-              DASHBOARD_MAX_CARD_HEIGHT,
-              Math.max(DASHBOARD_MIN_CARD_HEIGHT, Math.round((Number.isNaN(legacyRow) ? 1 : legacyRow) * 170))
-            ),
-          };
-          continue;
-        }
-        sizes[id] = {
-          width: Math.min(
-            DASHBOARD_MAX_CARD_WIDTH,
-            Math.max(DASHBOARD_MIN_CARD_WIDTH, Number(next.width) || DASHBOARD_DEFAULT_SIZES[id].width)
-          ),
-          height: Math.min(
-            DASHBOARD_MAX_CARD_HEIGHT,
-            Math.max(DASHBOARD_MIN_CARD_HEIGHT, Number(next.height) || DASHBOARD_DEFAULT_SIZES[id].height)
-          ),
+      const baseProfiles: Record<string, DashboardLayoutState> = {
+        Default: buildDefaultDashboardLayout(),
+      };
+      const rawProfiles = localStorage.getItem(DASHBOARD_LAYOUT_PROFILES_KEY);
+      if (rawProfiles) {
+        const parsedProfiles = JSON.parse(rawProfiles) as {
+          active?: string;
+          profiles?: Record<string, Partial<DashboardLayoutState>>;
         };
+        const mergedProfiles: Record<string, DashboardLayoutState> = { ...baseProfiles };
+        for (const [name, profile] of Object.entries(parsedProfiles.profiles ?? {})) {
+          mergedProfiles[name] = normalizeDashboardLayout(profile);
+        }
+        const active = parsedProfiles.active && mergedProfiles[parsedProfiles.active]
+          ? parsedProfiles.active
+          : "Default";
+        setLayoutProfiles(mergedProfiles);
+        setActiveLayoutProfile(active);
+        setDashboardLayout(mergedProfiles[active]);
+        return;
       }
-      const positions: Partial<Record<DashboardCardId, DashboardCardPosition>> = {};
-      for (const id of DASHBOARD_DEFAULT_ORDER) {
-        const next = (parsed as any).positions?.[id];
-        if (!next) continue;
-        const x = Number(next.x);
-        const y = Number(next.y);
-        if (Number.isNaN(x) || Number.isNaN(y)) continue;
-        positions[id] = { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) };
+
+      const rawLegacy = localStorage.getItem(DASHBOARD_LAYOUT_KEY);
+      if (rawLegacy) {
+        const parsedLegacy = JSON.parse(rawLegacy) as Partial<DashboardLayoutState>;
+        const legacyLayout = normalizeDashboardLayout(parsedLegacy);
+        const mergedProfiles: Record<string, DashboardLayoutState> = {
+          ...baseProfiles,
+          "My Layout": legacyLayout,
+        };
+        setLayoutProfiles(mergedProfiles);
+        setActiveLayoutProfile("My Layout");
+        setDashboardLayout(legacyLayout);
+      } else {
+        setLayoutProfiles(baseProfiles);
+        setActiveLayoutProfile("Default");
+        setDashboardLayout(baseProfiles.Default);
       }
-      setDashboardLayout({ order: mergedOrder, sizes, positions });
     } catch {
       // ignore malformed saved layout
     }
@@ -388,6 +450,22 @@ export default function SubmissionDetailPage() {
       // ignore
     }
   }, [dashboardLayout]);
+  useEffect(() => {
+    setLayoutProfiles((prev) => ({ ...prev, [activeLayoutProfile]: dashboardLayout }));
+  }, [dashboardLayout, activeLayoutProfile]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        DASHBOARD_LAYOUT_PROFILES_KEY,
+        JSON.stringify({
+          active: activeLayoutProfile,
+          profiles: layoutProfiles,
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [layoutProfiles, activeLayoutProfile]);
   useEffect(() => {
     if (!layoutMode) {
       setSelectedCardId(null);
@@ -727,6 +805,33 @@ export default function SubmissionDetailPage() {
     }
 
     return { ...layout, positions: nextPositions };
+  };
+  const layoutProfileNames = Object.keys(layoutProfiles);
+  const loadLayoutProfile = (name: string) => {
+    const selected = layoutProfiles[name];
+    if (!selected) return;
+    const normalized = normalizeDashboardLayout(selected);
+    setActiveLayoutProfile(name);
+    setDashboardLayout(normalized);
+  };
+  const saveCurrentLayoutAsProfile = () => {
+    const input = window.prompt("Save layout as (profile name):", activeLayoutProfile === "Default" ? "My Layout" : activeLayoutProfile);
+    const name = (input ?? "").trim();
+    if (!name) return;
+    setLayoutProfiles((prev) => ({ ...prev, [name]: normalizeDashboardLayout(dashboardLayout) }));
+    setActiveLayoutProfile(name);
+  };
+  const deleteActiveLayoutProfile = () => {
+    if (activeLayoutProfile === "Default") return;
+    const ok = window.confirm(`Delete layout profile "${activeLayoutProfile}"?`);
+    if (!ok) return;
+    setLayoutProfiles((prev) => {
+      const next = { ...prev };
+      delete next[activeLayoutProfile];
+      return next;
+    });
+    setActiveLayoutProfile("Default");
+    setDashboardLayout(buildDefaultDashboardLayout());
   };
 
   useEffect(() => {
@@ -1227,13 +1332,39 @@ export default function SubmissionDetailPage() {
                 <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet Layout</div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      <select
+                        className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
+                        value={activeLayoutProfile}
+                        onChange={(e) => loadLayoutProfile(e.target.value)}
+                      >
+                        {layoutProfileNames.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={saveCurrentLayoutAsProfile}
+                        className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
+                      >
+                        Save As
+                      </button>
+                      {activeLayoutProfile !== "Default" ? (
+                        <button
+                          type="button"
+                          onClick={deleteActiveLayoutProfile}
+                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs text-red-700"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                       {layoutMode ? (
                         <button
                           type="button"
                           onClick={() => {
                             setSelectedCardId(null);
-                            setDashboardLayout({ order: [...DASHBOARD_DEFAULT_ORDER], sizes: { ...DASHBOARD_DEFAULT_SIZES }, positions: {} });
+                            const defaultLayout = buildDefaultDashboardLayout();
+                            setDashboardLayout(defaultLayout);
                           }}
                           className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
                         >
