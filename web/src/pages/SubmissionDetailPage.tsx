@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail } from "../api/types";
@@ -104,14 +104,17 @@ const DASHBOARD_DEFAULT_ORDER = [
 ] as const;
 type DashboardCardId = (typeof DASHBOARD_DEFAULT_ORDER)[number];
 type DashboardCardLayout = { width: number; height: number };
+type DashboardCardPosition = { x: number; y: number };
 type DashboardLayoutState = {
   order: DashboardCardId[];
   sizes: Record<DashboardCardId, DashboardCardLayout>;
+  positions: Partial<Record<DashboardCardId, DashboardCardPosition>>;
 };
 const DASHBOARD_MIN_CARD_WIDTH = 320;
 const DASHBOARD_MAX_CARD_WIDTH = 1600;
 const DASHBOARD_MIN_CARD_HEIGHT = 150;
 const DASHBOARD_MAX_CARD_HEIGHT = 980;
+const DASHBOARD_LAYOUT_GAP = 12;
 const DASHBOARD_DEFAULT_SIZES: Record<DashboardCardId, DashboardCardLayout> = {
   report_header: { width: 960, height: 300 },
   location: { width: 460, height: 300 },
@@ -226,11 +229,15 @@ export default function SubmissionDetailPage() {
   const [geoSaveMessage, setGeoSaveMessage] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState(false);
+  const layoutCanvasRef = useRef<HTMLDivElement | null>(null);
+  const [layoutCanvasHeight, setLayoutCanvasHeight] = useState(720);
   const [selectedCardId, setSelectedCardId] = useState<DashboardCardId | null>(null);
   const [dragState, setDragState] = useState<{
     id: DashboardCardId;
     startX: number;
     startY: number;
+    cardX: number;
+    cardY: number;
     x: number;
     y: number;
     active: boolean;
@@ -238,15 +245,18 @@ export default function SubmissionDetailPage() {
   } | null>(null);
   const [resizeState, setResizeState] = useState<{
     id: DashboardCardId;
-    mode: "x" | "y" | "xy";
+    mode: "right" | "left" | "bottom" | "bottomRight" | "bottomLeft";
     startX: number;
     startY: number;
     startWidth: number;
     startHeight: number;
+    startCardX: number;
+    startCardY: number;
   } | null>(null);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => ({
     order: [...DASHBOARD_DEFAULT_ORDER],
     sizes: { ...DASHBOARD_DEFAULT_SIZES },
+    positions: {},
   }));
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
@@ -301,7 +311,16 @@ export default function SubmissionDetailPage() {
           ),
         };
       }
-      setDashboardLayout({ order: mergedOrder, sizes });
+      const positions: Partial<Record<DashboardCardId, DashboardCardPosition>> = {};
+      for (const id of DASHBOARD_DEFAULT_ORDER) {
+        const next = (parsed as any).positions?.[id];
+        if (!next) continue;
+        const x = Number(next.x);
+        const y = Number(next.y);
+        if (Number.isNaN(x) || Number.isNaN(y)) continue;
+        positions[id] = { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) };
+      }
+      setDashboardLayout({ order: mergedOrder, sizes, positions });
     } catch {
       // ignore malformed saved layout
     }
@@ -604,17 +623,78 @@ export default function SubmissionDetailPage() {
     ...previewOrder.filter((id) => visibleCardIds.includes(id)),
     ...visibleCardIds.filter((id) => !previewOrder.includes(id)),
   ];
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+  useEffect(() => {
+    if (!layoutMode) return;
+    const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
+    setDashboardLayout((prev) => {
+      let x = DASHBOARD_LAYOUT_GAP;
+      let y = DASHBOARD_LAYOUT_GAP;
+      let rowHeight = 0;
+      let changed = false;
+      const nextPositions: Partial<Record<DashboardCardId, DashboardCardPosition>> = { ...prev.positions };
+      for (const id of orderedVisibleCardIds) {
+        if (nextPositions[id]) continue;
+        const cardSize = prev.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
+        const cardWidth = Math.min(cardSize.width, canvasWidth - DASHBOARD_LAYOUT_GAP * 2);
+        if (x + cardWidth > canvasWidth - DASHBOARD_LAYOUT_GAP && x > DASHBOARD_LAYOUT_GAP) {
+          x = DASHBOARD_LAYOUT_GAP;
+          y += rowHeight + DASHBOARD_LAYOUT_GAP;
+          rowHeight = 0;
+        }
+        nextPositions[id] = { x, y };
+        x += cardWidth + DASHBOARD_LAYOUT_GAP;
+        rowHeight = Math.max(rowHeight, cardSize.height);
+        changed = true;
+      }
+      if (!changed) return prev;
+      return { ...prev, positions: nextPositions };
+    });
+  }, [layoutMode, orderedVisibleCardIds]);
+
+  useEffect(() => {
+    if (!layoutMode) return;
+    let bottom = 620;
+    for (const id of orderedVisibleCardIds) {
+      const p = dashboardLayout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
+      const s = dashboardLayout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
+      bottom = Math.max(bottom, p.y + s.height + DASHBOARD_LAYOUT_GAP);
+    }
+    setLayoutCanvasHeight(bottom);
+  }, [layoutMode, orderedVisibleCardIds, dashboardLayout.positions, dashboardLayout.sizes]);
 
   const startDragCard = (id: DashboardCardId, e: React.MouseEvent) => {
     if (!layoutMode || e.button !== 0) return;
     e.preventDefault();
-    setDragState({ id, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, active: false, overId: null });
+    const p = dashboardLayout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
+    setDragState({
+      id,
+      startX: e.clientX,
+      startY: e.clientY,
+      cardX: p.x,
+      cardY: p.y,
+      x: e.clientX,
+      y: e.clientY,
+      active: false,
+      overId: null,
+    });
   };
-  const startResizeCard = (id: DashboardCardId, mode: "x" | "y" | "xy", e: React.MouseEvent) => {
+  const startResizeCard = (id: DashboardCardId, mode: "right" | "left" | "bottom" | "bottomRight" | "bottomLeft", e: React.MouseEvent) => {
     if (!layoutMode || e.button !== 0) return;
     e.preventDefault();
     const cur = dashboardLayout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
-    setResizeState({ id, mode, startX: e.clientX, startY: e.clientY, startWidth: cur.width, startHeight: cur.height });
+    const p = dashboardLayout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
+    setResizeState({
+      id,
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startWidth: cur.width,
+      startHeight: cur.height,
+      startCardX: p.x,
+      startCardY: p.y,
+    });
   };
 
   useEffect(() => {
@@ -623,52 +703,70 @@ export default function SubmissionDetailPage() {
       if (resizeState) {
         const dx = e.clientX - resizeState.startX;
         const dy = e.clientY - resizeState.startY;
+        const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
         setDashboardLayout((prev) => ({
           ...prev,
           sizes: {
             ...prev.sizes,
             [resizeState.id]: {
-              width: Math.round(
-                Math.min(
-                  DASHBOARD_MAX_CARD_WIDTH,
-                  Math.max(
-                    DASHBOARD_MIN_CARD_WIDTH,
-                    resizeState.startWidth + (resizeState.mode === "y" ? 0 : dx)
-                  )
-                )
-              ),
-              height: Math.round(
-                Math.min(
-                  DASHBOARD_MAX_CARD_HEIGHT,
-                  Math.max(
-                    DASHBOARD_MIN_CARD_HEIGHT,
-                    resizeState.startHeight + (resizeState.mode === "x" ? 0 : dy)
-                  )
-                )
-              ),
+              width: Math.round(clamp(
+                resizeState.mode === "left" || resizeState.mode === "bottomLeft"
+                  ? resizeState.startWidth - dx
+                  : resizeState.mode === "bottom"
+                    ? resizeState.startWidth
+                    : resizeState.startWidth + dx,
+                DASHBOARD_MIN_CARD_WIDTH,
+                DASHBOARD_MAX_CARD_WIDTH
+              )),
+              height: Math.round(clamp(
+                resizeState.mode === "right" || resizeState.mode === "left"
+                  ? resizeState.startHeight
+                  : resizeState.startHeight + dy,
+                DASHBOARD_MIN_CARD_HEIGHT,
+                DASHBOARD_MAX_CARD_HEIGHT
+              )),
             },
           },
+          positions:
+            resizeState.mode === "left" || resizeState.mode === "bottomLeft"
+              ? {
+                  ...prev.positions,
+                  [resizeState.id]: {
+                    x: Math.round(clamp(
+                      resizeState.startCardX + dx,
+                      0,
+                      Math.max(0, canvasWidth - DASHBOARD_MIN_CARD_WIDTH)
+                    )),
+                    y: resizeState.startCardY,
+                  },
+                }
+              : prev.positions,
         }));
         return;
       }
       if (dragState) {
         const moved = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > 6;
-        const targetEl = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-card-id]") as HTMLElement | null;
-        const targetId = (targetEl?.dataset?.cardId as DashboardCardId | undefined) ?? null;
+        const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
+        const size = dashboardLayout.sizes[dragState.id] ?? DASHBOARD_DEFAULT_SIZES[dragState.id];
+        const nextX = Math.round(clamp(dragState.cardX + (e.clientX - dragState.startX), 0, Math.max(0, canvasWidth - size.width)));
+        const nextY = Math.max(0, Math.round(dragState.cardY + (e.clientY - dragState.startY)));
+        setDashboardLayout((prev) => ({
+          ...prev,
+          positions: {
+            ...prev.positions,
+            [dragState.id]: { x: nextX, y: nextY },
+          },
+        }));
         setDragState((prev) => prev ? ({
           ...prev,
           x: e.clientX,
           y: e.clientY,
           active: prev.active || moved,
-          overId: targetId,
+          overId: null,
         }) : prev);
       }
     };
     const onUp = () => {
-      const overId = dragState?.overId ?? null;
-      if (dragState?.active && overId) {
-        setDashboardLayout((prev) => ({ ...prev, order: reorderCards(prev.order, dragState.id, overId) }));
-      }
       setDragState(null);
       setResizeState(null);
     };
@@ -678,7 +776,7 @@ export default function SubmissionDetailPage() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [layoutMode, dragState, resizeState]);
+  }, [layoutMode, dragState, resizeState, dashboardLayout.sizes]);
 
   const cardFrameProps = (id: DashboardCardId) => {
     const isGhostTarget = dragState?.active && dragState.overId === id && dragState.id !== id;
@@ -698,13 +796,24 @@ export default function SubmissionDetailPage() {
     };
     return {
       "data-card-id": id,
-      className: `${box} relative overflow-auto ${layoutMode ? "pt-8" : ""} ${layoutMode && isSelected ? "ring-2 ring-[var(--brand)]" : ""} ${layoutMode && isSelected ? "cursor-grab active:cursor-grabbing" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
+      className: `${box} relative overflow-auto ${layoutMode ? "pt-8" : ""} ${layoutMode && isSelected ? "ring-4 ring-[color:color-mix(in_oklab,var(--brand)_68%,transparent)] shadow-[0_0_0_2px_color-mix(in_oklab,var(--panel)_70%,transparent)]" : ""} ${layoutMode && isSelected ? "cursor-grab active:cursor-grabbing" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
       onMouseDown: onCardMouseDown,
       style: {
-        width: `min(100%, ${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px)`,
-        minHeight: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
-        flex: "0 1 auto",
-        order: orderedVisibleCardIds.indexOf(id),
+        ...(layoutMode
+          ? {
+              position: "absolute",
+              left: `${dashboardLayout.positions[id]?.x ?? DASHBOARD_LAYOUT_GAP}px`,
+              top: `${dashboardLayout.positions[id]?.y ?? DASHBOARD_LAYOUT_GAP}px`,
+              width: `${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px`,
+              height: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
+              zIndex: isSelected ? 20 : 1,
+            }
+          : {
+              width: `min(100%, ${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px)`,
+              minHeight: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
+              flex: "0 1 auto",
+              order: orderedVisibleCardIds.indexOf(id),
+            }),
       } as CSSProperties,
     };
   };
@@ -714,9 +823,11 @@ export default function SubmissionDetailPage() {
         <div className="pointer-events-none absolute left-2 right-2 top-2 z-[2] h-6 rounded border border-dashed border-[var(--line)] bg-[var(--panel)]/70 px-2 text-[10px] leading-6 text-muted">
           Selected: drag anywhere in this card
         </div>
-        <div data-layout-resize className="absolute bottom-0 right-0 top-0 z-[2] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "x", e)} />
-        <div data-layout-resize className="absolute bottom-0 left-0 right-0 z-[2] h-2 cursor-ns-resize" onMouseDown={(e) => startResizeCard(id, "y", e)} />
-        <div data-layout-resize className="absolute bottom-0 right-0 z-[3] h-4 w-4 cursor-nwse-resize bg-[var(--panel)]/80" onMouseDown={(e) => startResizeCard(id, "xy", e)} />
+        <div data-layout-resize className="absolute bottom-0 right-0 top-0 z-[3] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "right", e)} />
+        <div data-layout-resize className="absolute bottom-0 left-0 top-0 z-[3] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "left", e)} />
+        <div data-layout-resize className="absolute bottom-0 left-0 right-0 z-[3] h-2 cursor-ns-resize" onMouseDown={(e) => startResizeCard(id, "bottom", e)} />
+        <div data-layout-resize className="absolute bottom-0 right-0 z-[4] h-4 w-4 cursor-nwse-resize bg-[var(--panel)]/85" onMouseDown={(e) => startResizeCard(id, "bottomRight", e)} />
+        <div data-layout-resize className="absolute bottom-0 left-0 z-[4] h-4 w-4 cursor-nesw-resize bg-[var(--panel)]/85" onMouseDown={(e) => startResizeCard(id, "bottomLeft", e)} />
       </>
     ) : null;
 
@@ -953,7 +1064,10 @@ export default function SubmissionDetailPage() {
                       {layoutMode ? (
                         <button
                           type="button"
-                          onClick={() => setDashboardLayout({ order: [...DASHBOARD_DEFAULT_ORDER], sizes: { ...DASHBOARD_DEFAULT_SIZES } })}
+                          onClick={() => {
+                            setSelectedCardId(null);
+                            setDashboardLayout({ order: [...DASHBOARD_DEFAULT_ORDER], sizes: { ...DASHBOARD_DEFAULT_SIZES }, positions: {} });
+                          }}
                           className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
                         >
                           Reset Layout
@@ -967,7 +1081,13 @@ export default function SubmissionDetailPage() {
                   {layoutMode ? (
                     <div className="mb-2 text-xs text-muted">Click a container to select it, then drag anywhere inside to move. Resize handles appear only on the selected container.</div>
                   ) : null}
-                  <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-start">
+                  <div
+                    ref={layoutCanvasRef}
+                    className={layoutMode
+                      ? "relative min-h-[620px] rounded-md border border-dashed border-[var(--line)]/70 bg-[color:color-mix(in_oklab,var(--panel-soft)_65%,transparent)]"
+                      : "flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-start"}
+                    style={layoutMode ? { height: `${layoutCanvasHeight}px` } : undefined}
+                  >
                     <div {...cardFrameProps("report_header")}>
                       {layoutTools("report_header")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Report Header</div>
