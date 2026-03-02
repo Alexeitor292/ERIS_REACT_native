@@ -226,6 +226,7 @@ export default function SubmissionDetailPage() {
   const [geoSaveMessage, setGeoSaveMessage] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState(false);
+  const [selectedCardId, setSelectedCardId] = useState<DashboardCardId | null>(null);
   const [dragState, setDragState] = useState<{
     id: DashboardCardId;
     startX: number;
@@ -313,6 +314,11 @@ export default function SubmissionDetailPage() {
       // ignore
     }
   }, [dashboardLayout]);
+  useEffect(() => {
+    if (!layoutMode) {
+      setSelectedCardId(null);
+    }
+  }, [layoutMode]);
 
   function soilPercentValidationMessage(): string | null {
     if (draft.material_soil !== "YES") return null;
@@ -677,9 +683,23 @@ export default function SubmissionDetailPage() {
   const cardFrameProps = (id: DashboardCardId) => {
     const isGhostTarget = dragState?.active && dragState.overId === id && dragState.id !== id;
     const isDragging = dragState?.active && dragState.id === id;
+    const isSelected = selectedCardId === id;
+    const onCardMouseDown = (e: React.MouseEvent) => {
+      if (!layoutMode || e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-layout-resize]")) return;
+      if (!isSelected) {
+        setSelectedCardId(id);
+        return;
+      }
+      const interactive = target.closest("input, select, textarea, button, a, label, summary");
+      if (interactive) return;
+      startDragCard(id, e);
+    };
     return {
       "data-card-id": id,
-      className: `${box} relative overflow-auto ${layoutMode ? "select-none pt-8" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
+      className: `${box} relative overflow-auto ${layoutMode ? "pt-8" : ""} ${layoutMode && isSelected ? "ring-2 ring-[var(--brand)]" : ""} ${layoutMode && isSelected ? "cursor-grab active:cursor-grabbing" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
+      onMouseDown: onCardMouseDown,
       style: {
         width: `min(100%, ${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px)`,
         minHeight: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
@@ -689,14 +709,14 @@ export default function SubmissionDetailPage() {
     };
   };
   const layoutTools = (id: DashboardCardId) =>
-    layoutMode ? (
+    layoutMode && selectedCardId === id ? (
       <>
-        <div className="absolute left-2 right-2 top-2 z-[2] h-6 cursor-grab rounded border border-dashed border-[var(--line)] bg-[var(--panel)]/70 px-2 text-[10px] leading-6 text-muted" onMouseDown={(e) => startDragCard(id, e)}>
-          Drag card
+        <div className="pointer-events-none absolute left-2 right-2 top-2 z-[2] h-6 rounded border border-dashed border-[var(--line)] bg-[var(--panel)]/70 px-2 text-[10px] leading-6 text-muted">
+          Selected: drag anywhere in this card
         </div>
-        <div className="absolute bottom-0 right-0 top-0 z-[2] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "x", e)} />
-        <div className="absolute bottom-0 left-0 right-0 z-[2] h-2 cursor-ns-resize" onMouseDown={(e) => startResizeCard(id, "y", e)} />
-        <div className="absolute bottom-0 right-0 z-[3] h-4 w-4 cursor-nwse-resize bg-[var(--panel)]/80" onMouseDown={(e) => startResizeCard(id, "xy", e)} />
+        <div data-layout-resize className="absolute bottom-0 right-0 top-0 z-[2] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "x", e)} />
+        <div data-layout-resize className="absolute bottom-0 left-0 right-0 z-[2] h-2 cursor-ns-resize" onMouseDown={(e) => startResizeCard(id, "y", e)} />
+        <div data-layout-resize className="absolute bottom-0 right-0 z-[3] h-4 w-4 cursor-nwse-resize bg-[var(--panel)]/80" onMouseDown={(e) => startResizeCard(id, "xy", e)} />
       </>
     ) : null;
 
@@ -944,6 +964,9 @@ export default function SubmissionDetailPage() {
                       </button>
                     </div>
                   </div>
+                  {layoutMode ? (
+                    <div className="mb-2 text-xs text-muted">Click a container to select it, then drag anywhere inside to move. Resize handles appear only on the selected container.</div>
+                  ) : null}
                   <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-start">
                     <div {...cardFrameProps("report_header")}>
                       {layoutTools("report_header")}
