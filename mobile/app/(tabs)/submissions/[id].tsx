@@ -3,7 +3,7 @@ import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityInd
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
-import { useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
@@ -615,6 +615,7 @@ export default function SubmissionDetailScreen() {
   const cacheHydratedRef = useRef(false);
   const suppressCacheWriteRef = useRef(false);
   const serverSnapshotRef = useRef<string>("");
+  const refreshGeometryOnFocusRef = useRef(false);
 
   const mapPreviewUrl = useMemo(() => {
     const lat = Number(form.latitude);
@@ -797,6 +798,39 @@ export default function SubmissionDetailScreen() {
   }, [token, id, hydrateAttachmentUrls, applyEditorState, incidentTypesFromFormState]);
 
   useEffect(() => { load(); }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!refreshGeometryOnFocusRef.current) return;
+      refreshGeometryOnFocusRef.current = false;
+      if (!token || !id) return;
+
+      let cancelled = false;
+      (async () => {
+        try {
+          const latest = await getSubmission(token, id);
+          if (cancelled) return;
+          const geomText = latest.gisa?.geometry_json
+            ? JSON.stringify(latest.gisa.geometry_json, null, 2)
+            : "";
+          setData((prev) => (prev ? { ...prev, gisa: latest.gisa } : prev));
+          setForm((prev) => ({ ...prev, geometry_json: geomText }));
+          setFieldErrors((prev) => {
+            if (!prev.geometry_json) return prev;
+            const next = { ...prev };
+            delete next.geometry_json;
+            return next;
+          });
+        } catch {
+          // Keep current form state if refresh fails.
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [token, id])
+  );
 
   useEffect(() => {
     if (!id || !data || loading) return;
@@ -1464,6 +1498,18 @@ export default function SubmissionDetailScreen() {
     return unsub;
   }, [data, draftEntryStatus, navigation]);
 
+  const openMapEditor = useCallback(() => {
+    refreshGeometryOnFocusRef.current = true;
+    router.push({
+      pathname: (draftEntryStatus ? "/(tabs)/drafts/map" : "/(tabs)/submissions/map") as any,
+      params: {
+        id: String(id ?? ""),
+        latitude: form.latitude,
+        longitude: form.longitude,
+      },
+    });
+  }, [draftEntryStatus, form.latitude, form.longitude, id]);
+
   if (!token || loading || !data || !lookups || !me) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
   const roles = new Set(me.roles || []);
   const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && !!data.submission.can_edit;
@@ -1877,16 +1923,7 @@ export default function SubmissionDetailScreen() {
       <CollapsibleSection title="Location" open={openSections.location} onToggle={() => toggleSection("location")} palette={palette} compact={compact}>
         <Pressable
           style={[styles.mapPreviewCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-          onPress={() =>
-            router.push({
-              pathname: (isDraftEntry ? "/(tabs)/drafts/map" : "/(tabs)/submissions/map") as any,
-              params: {
-                id: String(id ?? ""),
-                latitude: form.latitude,
-                longitude: form.longitude,
-              },
-            })
-          }
+          onPress={openMapEditor}
           disabled={busy}
         >
           <Text style={[styles.label, { color: palette.muted }]}>Map Preview (Tap to Open)</Text>

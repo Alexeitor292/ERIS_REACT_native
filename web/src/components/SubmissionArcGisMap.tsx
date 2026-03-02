@@ -352,8 +352,8 @@ export default function SubmissionArcGisMap({
     let addedAnyGeometry = false;
 
     if (t === "polygon") {
-      const rings = geojson.coordinates?.[0];
-      if (rings?.length) addPolygon(rings);
+      const rings = geojson.coordinates;
+      if (Array.isArray(rings) && rings.length) addPolygon(rings);
       addedAnyGeometry = true;
     }
 
@@ -361,8 +361,7 @@ export default function SubmissionArcGisMap({
       const polygons = geojson.coordinates;
       if (Array.isArray(polygons)) {
         polygons.forEach((poly: any) => {
-          const rings = poly?.[0];
-          if (rings?.length) addPolygon(rings);
+          if (Array.isArray(poly) && poly.length) addPolygon(poly);
         });
         addedAnyGeometry = polygons.length > 0;
       }
