@@ -626,7 +626,6 @@ export default function SubmissionDetailPage() {
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
   useEffect(() => {
-    if (!layoutMode) return;
     const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
     setDashboardLayout((prev) => {
       let x = DASHBOARD_LAYOUT_GAP;
@@ -651,10 +650,9 @@ export default function SubmissionDetailPage() {
       if (!changed) return prev;
       return { ...prev, positions: nextPositions };
     });
-  }, [layoutMode, orderedVisibleCardIds]);
+  }, [orderedVisibleCardIds]);
 
   useEffect(() => {
-    if (!layoutMode) return;
     let bottom = 620;
     for (const id of orderedVisibleCardIds) {
       const p = dashboardLayout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
@@ -662,7 +660,7 @@ export default function SubmissionDetailPage() {
       bottom = Math.max(bottom, p.y + s.height + DASHBOARD_LAYOUT_GAP);
     }
     setLayoutCanvasHeight(bottom);
-  }, [layoutMode, orderedVisibleCardIds, dashboardLayout.positions, dashboardLayout.sizes]);
+  }, [orderedVisibleCardIds, dashboardLayout.positions, dashboardLayout.sizes]);
 
   const startDragCard = (id: DashboardCardId, e: React.MouseEvent) => {
     if (!layoutMode || e.button !== 0) return;
@@ -699,49 +697,72 @@ export default function SubmissionDetailPage() {
 
   useEffect(() => {
     if (!layoutMode) return;
+    const overlapsOtherCards = (
+      targetId: DashboardCardId,
+      targetX: number,
+      targetY: number,
+      targetW: number,
+      targetH: number,
+      layout: DashboardLayoutState
+    ) => {
+      for (const otherId of orderedVisibleCardIds) {
+        if (otherId === targetId) continue;
+        const op = layout.positions[otherId] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
+        const os = layout.sizes[otherId] ?? DASHBOARD_DEFAULT_SIZES[otherId];
+        const intersects =
+          targetX < op.x + os.width &&
+          targetX + targetW > op.x &&
+          targetY < op.y + os.height &&
+          targetY + targetH > op.y;
+        if (intersects) return true;
+      }
+      return false;
+    };
+
     const onMove = (e: MouseEvent) => {
       if (resizeState) {
         const dx = e.clientX - resizeState.startX;
         const dy = e.clientY - resizeState.startY;
         const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
-        setDashboardLayout((prev) => ({
-          ...prev,
-          sizes: {
-            ...prev.sizes,
-            [resizeState.id]: {
-              width: Math.round(clamp(
-                resizeState.mode === "left" || resizeState.mode === "bottomLeft"
-                  ? resizeState.startWidth - dx
-                  : resizeState.mode === "bottom"
-                    ? resizeState.startWidth
-                    : resizeState.startWidth + dx,
-                DASHBOARD_MIN_CARD_WIDTH,
-                DASHBOARD_MAX_CARD_WIDTH
-              )),
-              height: Math.round(clamp(
-                resizeState.mode === "right" || resizeState.mode === "left"
-                  ? resizeState.startHeight
-                  : resizeState.startHeight + dy,
-                DASHBOARD_MIN_CARD_HEIGHT,
-                DASHBOARD_MAX_CARD_HEIGHT
-              )),
+        setDashboardLayout((prev) => {
+          const startX = resizeState.startCardX;
+          const startY = resizeState.startCardY;
+          const startW = resizeState.startWidth;
+          const startH = resizeState.startHeight;
+          let nextX = startX;
+          let nextW = startW;
+          const startRight = startX + startW;
+
+          if (resizeState.mode === "left" || resizeState.mode === "bottomLeft") {
+            nextX = Math.round(clamp(startX + dx, 0, startRight - DASHBOARD_MIN_CARD_WIDTH));
+            nextW = Math.round(clamp(startRight - nextX, DASHBOARD_MIN_CARD_WIDTH, DASHBOARD_MAX_CARD_WIDTH));
+            nextX = Math.min(nextX, Math.max(0, canvasWidth - nextW));
+          } else if (resizeState.mode !== "bottom") {
+            nextW = Math.round(clamp(startW + dx, DASHBOARD_MIN_CARD_WIDTH, Math.min(DASHBOARD_MAX_CARD_WIDTH, canvasWidth - startX)));
+          }
+
+          const nextH = Math.round(clamp(
+            resizeState.mode === "left" || resizeState.mode === "right" ? startH : startH + dy,
+            DASHBOARD_MIN_CARD_HEIGHT,
+            DASHBOARD_MAX_CARD_HEIGHT
+          ));
+
+          if (overlapsOtherCards(resizeState.id, nextX, startY, nextW, nextH, prev)) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            sizes: {
+              ...prev.sizes,
+              [resizeState.id]: { width: nextW, height: nextH },
             },
-          },
-          positions:
-            resizeState.mode === "left" || resizeState.mode === "bottomLeft"
-              ? {
-                  ...prev.positions,
-                  [resizeState.id]: {
-                    x: Math.round(clamp(
-                      resizeState.startCardX + dx,
-                      0,
-                      Math.max(0, canvasWidth - DASHBOARD_MIN_CARD_WIDTH)
-                    )),
-                    y: resizeState.startCardY,
-                  },
-                }
-              : prev.positions,
-        }));
+            positions: {
+              ...prev.positions,
+              [resizeState.id]: { x: nextX, y: startY },
+            },
+          };
+        });
         return;
       }
       if (dragState) {
@@ -750,13 +771,18 @@ export default function SubmissionDetailPage() {
         const size = dashboardLayout.sizes[dragState.id] ?? DASHBOARD_DEFAULT_SIZES[dragState.id];
         const nextX = Math.round(clamp(dragState.cardX + (e.clientX - dragState.startX), 0, Math.max(0, canvasWidth - size.width)));
         const nextY = Math.max(0, Math.round(dragState.cardY + (e.clientY - dragState.startY)));
-        setDashboardLayout((prev) => ({
-          ...prev,
-          positions: {
-            ...prev.positions,
-            [dragState.id]: { x: nextX, y: nextY },
-          },
-        }));
+        setDashboardLayout((prev) => {
+          if (overlapsOtherCards(dragState.id, nextX, nextY, size.width, size.height, prev)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            positions: {
+              ...prev.positions,
+              [dragState.id]: { x: nextX, y: nextY },
+            },
+          };
+        });
         setDragState((prev) => prev ? ({
           ...prev,
           x: e.clientX,
@@ -776,7 +802,7 @@ export default function SubmissionDetailPage() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [layoutMode, dragState, resizeState, dashboardLayout.sizes]);
+  }, [layoutMode, dragState, resizeState, dashboardLayout.sizes, orderedVisibleCardIds]);
 
   const cardFrameProps = (id: DashboardCardId) => {
     const isGhostTarget = dragState?.active && dragState.overId === id && dragState.id !== id;
@@ -799,21 +825,12 @@ export default function SubmissionDetailPage() {
       className: `${box} relative overflow-auto ${layoutMode ? "pt-8" : ""} ${layoutMode && isSelected ? "ring-4 ring-[color:color-mix(in_oklab,var(--brand)_68%,transparent)] shadow-[0_0_0_2px_color-mix(in_oklab,var(--panel)_70%,transparent)]" : ""} ${layoutMode && isSelected ? "cursor-grab active:cursor-grabbing" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
       onMouseDown: onCardMouseDown,
       style: {
-        ...(layoutMode
-          ? {
-              position: "absolute",
-              left: `${dashboardLayout.positions[id]?.x ?? DASHBOARD_LAYOUT_GAP}px`,
-              top: `${dashboardLayout.positions[id]?.y ?? DASHBOARD_LAYOUT_GAP}px`,
-              width: `${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px`,
-              height: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
-              zIndex: isSelected ? 20 : 1,
-            }
-          : {
-              width: `min(100%, ${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px)`,
-              minHeight: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
-              flex: "0 1 auto",
-              order: orderedVisibleCardIds.indexOf(id),
-            }),
+        position: "absolute",
+        left: `${dashboardLayout.positions[id]?.x ?? DASHBOARD_LAYOUT_GAP}px`,
+        top: `${dashboardLayout.positions[id]?.y ?? DASHBOARD_LAYOUT_GAP}px`,
+        width: `${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px`,
+        height: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
+        zIndex: isSelected ? 20 : 1,
       } as CSSProperties,
     };
   };
@@ -1085,8 +1102,8 @@ export default function SubmissionDetailPage() {
                     ref={layoutCanvasRef}
                     className={layoutMode
                       ? "relative min-h-[620px] rounded-md border border-dashed border-[var(--line)]/70 bg-[color:color-mix(in_oklab,var(--panel-soft)_65%,transparent)]"
-                      : "flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-start"}
-                    style={layoutMode ? { height: `${layoutCanvasHeight}px` } : undefined}
+                      : "relative min-h-[620px] rounded-md"}
+                    style={{ height: `${layoutCanvasHeight}px` }}
                   >
                     <div {...cardFrameProps("report_header")}>
                       {layoutTools("report_header")}
