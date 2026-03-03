@@ -26,7 +26,7 @@ from .admin_users import router as admin_users_router
 from .photos import router as photos_router
 from .routes.auth import router as auth_router
 from .routes.gisa import router as gisa_router
-from .permissions import is_admin, is_reviewer, is_field_worker, require_is_owner_or_admin
+from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
 from .schemas.common import (
     GeometryResponse,
     GeometryUpsert,
@@ -53,7 +53,8 @@ app = FastAPI(title="ERIS React Native Prototype API")
 logger = logging.getLogger("eris.api")
 GENERIC_SERVER_ERROR_DETAIL = "Internal server error"
 
-app.include_router(dev_router)
+if settings.ENV.lower() == "dev":
+    app.include_router(dev_router)
 app.include_router(admin_users_router)
 app.include_router(photos_router)
 app.include_router(auth_router)

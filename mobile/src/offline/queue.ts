@@ -15,6 +15,14 @@ import {
 } from "./localDrafts";
 
 const OFFLINE_QUEUE_KEY = "offline_sync_queue_v1";
+const OFFLINE_QUEUE_META_KEY = "offline_sync_queue_meta_v2";
+const OFFLINE_QUEUE_PART_PREFIX = "offline_sync_queue_part_";
+const SECURESTORE_CHUNK_SIZE = 1800;
+
+type QueueStorageMeta = {
+  version: 2;
+  parts: number;
+};
 
 type QueueOpType =
   | "CREATE_SUBMISSION_FOR_LOCAL_DRAFT"
@@ -51,23 +59,96 @@ function makeId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function queuePartKey(idx: number): string {
+  return `${OFFLINE_QUEUE_PART_PREFIX}${idx}`;
+}
+
+function chunkText(value: string, size: number): string[] {
+  if (!value) return [""];
+  const chunks: string[] = [];
+  for (let i = 0; i < value.length; i += size) {
+    chunks.push(value.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function readQueueMeta(): Promise<QueueStorageMeta | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(OFFLINE_QUEUE_META_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== 2 || typeof parsed.parts !== "number" || parsed.parts < 0) {
+      return null;
+    }
+    return parsed as QueueStorageMeta;
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupQueueParts(fromIdx: number, toIdxExclusive: number): Promise<void> {
+  for (let i = fromIdx; i < toIdxExclusive; i += 1) {
+    try {
+      await SecureStore.deleteItemAsync(queuePartKey(i));
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+}
+
 async function readQueue(): Promise<OfflineQueueItem[]> {
   try {
-    const raw = await SecureStore.getItemAsync(OFFLINE_QUEUE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const meta = await readQueueMeta();
+    if (meta && meta.parts >= 0) {
+      const parts: string[] = [];
+      for (let i = 0; i < meta.parts; i += 1) {
+        const part = await SecureStore.getItemAsync(queuePartKey(i));
+        if (part == null) return [];
+        parts.push(part);
+      }
+      const raw = parts.join("");
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed as OfflineQueueItem[];
+    }
+
+    // Legacy v1 fallback and one-time migration.
+    const legacyRaw = await SecureStore.getItemAsync(OFFLINE_QUEUE_KEY);
+    if (!legacyRaw) return [];
+    const parsed = JSON.parse(legacyRaw);
     if (!Array.isArray(parsed)) return [];
-    return parsed as OfflineQueueItem[];
+    const items = parsed as OfflineQueueItem[];
+    await writeQueue(items);
+    return items;
   } catch {
     return [];
   }
 }
 
 async function writeQueue(items: OfflineQueueItem[]): Promise<void> {
+  const payload = JSON.stringify(items);
+  const chunks = chunkText(payload, SECURESTORE_CHUNK_SIZE);
+  const prevMeta = await readQueueMeta();
+  const prevParts = prevMeta?.parts ?? 0;
+
+  for (let i = 0; i < chunks.length; i += 1) {
+    await SecureStore.setItemAsync(queuePartKey(i), chunks[i]);
+  }
+  await SecureStore.setItemAsync(
+    OFFLINE_QUEUE_META_KEY,
+    JSON.stringify({ version: 2, parts: chunks.length } satisfies QueueStorageMeta)
+  );
+
+  if (prevParts > chunks.length) {
+    await cleanupQueueParts(chunks.length, prevParts);
+  }
+
+  // Clean legacy key after successful v2 write.
   try {
-    await SecureStore.setItemAsync(OFFLINE_QUEUE_KEY, JSON.stringify(items));
+    await SecureStore.deleteItemAsync(OFFLINE_QUEUE_KEY);
   } catch {
-    // ignore queue persistence failures
+    // ignore legacy cleanup failures
   }
 }
 

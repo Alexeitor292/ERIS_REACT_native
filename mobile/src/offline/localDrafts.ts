@@ -1,4 +1,4 @@
-import * as SecureStore from "expo-secure-store";
+import { deleteLargeItemAsync, getLargeItemAsync, setLargeItemAsync } from "./secureStoreLarge";
 
 const LOCAL_DRAFT_INDEX_KEY = "offline_local_drafts_index_v1";
 
@@ -7,14 +7,14 @@ export type LocalDraftEditorState = {
   incidentTypes: string[];
   immediateActions: string[];
   followUpActions: string[];
-  districtContacts: Array<{
+  districtContacts: {
     id: string;
     first_name: string;
     last_name: string;
     s_number: string;
     phone: string;
     cell_phone: string;
-  }>;
+  }[];
 };
 
 export type LocalDraftRecord = {
@@ -64,7 +64,7 @@ function normalizeIndexEntry(raw: any): LocalDraftIndexEntry | null {
 
 async function readIndex(): Promise<LocalDraftIndexEntry[]> {
   try {
-    const raw = await SecureStore.getItemAsync(LOCAL_DRAFT_INDEX_KEY);
+    const raw = await getLargeItemAsync(LOCAL_DRAFT_INDEX_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -77,7 +77,7 @@ async function readIndex(): Promise<LocalDraftIndexEntry[]> {
 }
 
 async function writeIndex(items: LocalDraftIndexEntry[]): Promise<void> {
-  await SecureStore.setItemAsync(LOCAL_DRAFT_INDEX_KEY, JSON.stringify(items));
+  await setLargeItemAsync(LOCAL_DRAFT_INDEX_KEY, JSON.stringify(items));
 }
 
 async function removeIndexEntry(localId: string): Promise<void> {
@@ -98,7 +98,7 @@ export async function listLocalDrafts(): Promise<LocalDraftIndexEntry[]> {
   let changed = false;
   for (const row of rows) {
     try {
-      const payload = await SecureStore.getItemAsync(localDraftKey(row.localId));
+      const payload = await getLargeItemAsync(localDraftKey(row.localId));
       if (payload) valid.push(row);
       else changed = true;
     } catch {
@@ -114,7 +114,7 @@ export async function listLocalDrafts(): Promise<LocalDraftIndexEntry[]> {
 export async function getLocalDraft(localId: string): Promise<LocalDraftRecord | null> {
   if (!isLocalDraftId(localId)) return null;
   try {
-    const raw = await SecureStore.getItemAsync(localDraftKey(localId));
+    const raw = await getLargeItemAsync(localDraftKey(localId));
     if (!raw) {
       await removeIndexEntry(localId);
       return null;
@@ -187,7 +187,7 @@ export async function createLocalDraft(editor: LocalDraftEditorState): Promise<L
     lastError: null,
     editor,
   };
-  await SecureStore.setItemAsync(localDraftKey(record.localId), JSON.stringify(record));
+  await setLargeItemAsync(localDraftKey(record.localId), JSON.stringify(record));
   await upsertIndexForRecord(record);
   return record;
 }
@@ -201,13 +201,13 @@ export async function saveLocalDraft(localId: string, patch: Partial<LocalDraftR
     localId: existing.localId,
     updatedAt: new Date().toISOString(),
   };
-  await SecureStore.setItemAsync(localDraftKey(localId), JSON.stringify(next));
+  await setLargeItemAsync(localDraftKey(localId), JSON.stringify(next));
   await upsertIndexForRecord(next);
 }
 
 export async function deleteLocalDraft(localId: string): Promise<void> {
   if (!isLocalDraftId(localId)) return;
-  await SecureStore.deleteItemAsync(localDraftKey(localId));
+  await deleteLargeItemAsync(localDraftKey(localId));
   await removeIndexEntry(localId);
 }
 

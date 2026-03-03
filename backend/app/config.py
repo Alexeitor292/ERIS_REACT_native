@@ -1,7 +1,6 @@
 from pathlib import Path
 from pydantic import Field, BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import os
 
 BASE_DIR = Path(__file__).resolve().parents[1]  # .../backend
 
@@ -36,11 +35,11 @@ class Settings(BaseSettings):
     DB_PASS: str  # REQUIRED
 
     # MinIO (keys required)
-    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
-    MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "eris-uploads")
-    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ROOT_USER", "minioadmin")
-    MINIO_SECRET_KEY: str = os.getenv("MINIO_ROOT_PASSWORD", "minio_root_password")
-    MINIO_PUBLIC_ENDPOINT: str | None = os.getenv("MINIO_PUBLIC_ENDPOINT") or None
+    MINIO_ENDPOINT: str = Field(default="http://localhost:9000")
+    MINIO_BUCKET: str = Field(default="eris-uploads")
+    MINIO_ACCESS_KEY: str = Field(default="minioadmin", validation_alias="MINIO_ROOT_USER")
+    MINIO_SECRET_KEY: str = Field(default="minio_root_password", validation_alias="MINIO_ROOT_PASSWORD")
+    MINIO_PUBLIC_ENDPOINT: str | None = Field(default=None)
 
     # JWT (required)
     JWT_SECRET: str  # REQUIRED

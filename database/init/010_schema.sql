@@ -145,35 +145,6 @@ CREATE TABLE IF NOT EXISTS submission_editors (
 DROP TABLE IF EXISTS submission_forms;
 
 -- ============================================================
--- GISA LOOKUP TABLES (FK-enforced controlled vocabularies)
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS gisa_incident_type_lut (
-    code VARCHAR(64) PRIMARY KEY,       -- e.g. ROCK_FALL
-    label VARCHAR(128) NOT NULL,
-    sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS gisa_distribution_lut (
-    code VARCHAR(64) PRIMARY KEY,       -- e.g. ADVANCING
-    label VARCHAR(128) NOT NULL,
-    sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS gisa_highway_status_lut (
-    code VARCHAR(64) PRIMARY KEY,       -- e.g. OPEN
-    label VARCHAR(128) NOT NULL,
-    sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS gisa_action_lut (
-    code VARCHAR(64) PRIMARY KEY,       -- e.g. PLACE_K_RAIL
-    label VARCHAR(255) NOT NULL,
-    action_group VARCHAR(16) NOT NULL,  -- IMMEDIATE | FOLLOW_UP
-    sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB;
-
--- ============================================================
 -- GISA DATA (1:1 + join tables)
 -- ============================================================
 
@@ -196,6 +167,7 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     distribution_code VARCHAR(64) NULL,
     highway_status_code VARCHAR(64) NULL,
     lanes_closed_count INT NULL,
+    open_highway_traffic_lanes_count INT NULL,
 
     pavement_ground_cracks TINYINT NOT NULL DEFAULT 0,
     crack_length_ft DECIMAL(10,2) NULL,
@@ -270,6 +242,12 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     measure_landslide_slope_deg DECIMAL(10,2) NULL,
     measure_roadway_length_ft DECIMAL(10,2) NULL,
     measure_roadway_width_ft DECIMAL(10,2) NULL,
+
+    record_of_event_notes TEXT NULL,
+    maintenance_history_notes TEXT NULL,
+    geotechnical_assessment_notes TEXT NULL,
+    recommendations_notes TEXT NULL,
+    sketchpad_notes TEXT NULL,
 
     observations_notes TEXT NULL,
     geometry_json JSON NULL,

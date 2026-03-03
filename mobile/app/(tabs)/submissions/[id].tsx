@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import * as SecureStore from "expo-secure-store";
 import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
@@ -19,6 +18,7 @@ import {
   saveLocalDraft,
 } from "../../../src/offline/localDrafts";
 import { readLookupsCache, writeLookupsCache } from "../../../src/offline/lookupsCache";
+import { deleteLargeItemAsync, getLargeItemAsync, setLargeItemAsync } from "../../../src/offline/secureStoreLarge";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
@@ -272,7 +272,7 @@ function draftCacheKey(submissionId: string): string {
 
 async function getDraftCache(key: string): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(key);
+    return await getLargeItemAsync(key);
   } catch {
     return null;
   }
@@ -280,13 +280,13 @@ async function getDraftCache(key: string): Promise<string | null> {
 
 async function setDraftCache(key: string, value: string): Promise<void> {
   try {
-    await SecureStore.setItemAsync(key, value);
+    await setLargeItemAsync(key, value);
   } catch {}
 }
 
 async function removeDraftCache(key: string): Promise<void> {
   try {
-    await SecureStore.deleteItemAsync(key);
+    await deleteLargeItemAsync(key);
   } catch {}
 }
 
@@ -1120,7 +1120,7 @@ export default function SubmissionDetailScreen() {
 
   const validateSoilPercentForSubmit = useCallback((): boolean => {
     if (form.material_soil !== "YES") return true;
-    const fields: Array<[keyof FormState, string]> = [
+    const fields: [keyof FormState, string][] = [
       ["est_clay_pct", "Clay"],
       ["est_silt_pct", "Silt"],
       ["est_sand_pct", "Sand"],
