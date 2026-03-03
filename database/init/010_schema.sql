@@ -113,6 +113,77 @@ CREATE TABLE IF NOT EXISTS attachment_links (
 ) ENGINE=InnoDB;
 
 -- ============================================================
+-- INCIDENTS (maintenance intake + assignment workflow)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS incidents (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    incident_type VARCHAR(64) NULL,
+    description TEXT NULL,
+    latitude DECIMAL(10,7) NOT NULL,
+    longitude DECIMAL(10,7) NOT NULL,
+    district VARCHAR(64) NULL,
+    county VARCHAR(64) NULL,
+    route VARCHAR(64) NULL,
+    post_mile VARCHAR(64) NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'NEW', -- NEW | IN_PROGRESS | RESOLVED
+    reporter_user_id BIGINT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    resolved_at DATETIME NULL,
+    resolved_by_user_id BIGINT NULL,
+    resolution_comment TEXT NULL,
+    CONSTRAINT fk_incident_reporter FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_incident_resolved_by FOREIGN KEY (resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_incidents_status (status),
+    INDEX idx_incidents_created (created_at),
+    INDEX idx_incidents_geo (latitude, longitude)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS incident_attachments (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    incident_id BIGINT NOT NULL,
+    attachment_id BIGINT NOT NULL,
+    kind VARCHAR(32) NOT NULL DEFAULT 'PHOTO', -- PHOTO | VIDEO | DOC | SKETCH
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_incident_attachments_incident FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+    CONSTRAINT fk_incident_attachments_attachment FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_incident_attachment (incident_id, attachment_id),
+    INDEX idx_incident_attachments_incident (incident_id),
+    INDEX idx_incident_attachments_kind (kind)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS incident_assignments (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    incident_id BIGINT NOT NULL,
+    assignee_user_id BIGINT NOT NULL,
+    assigned_by_user_id BIGINT NOT NULL,
+    assignment_mode VARCHAR(16) NOT NULL, -- CLAIM | ASSIGN
+    is_active TINYINT NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_inc_assign_incident FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+    CONSTRAINT fk_inc_assign_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_inc_assign_assigned_by FOREIGN KEY (assigned_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX idx_inc_assign_incident_active (incident_id, is_active),
+    INDEX idx_inc_assign_assignee (assignee_user_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS incident_submission_links (
+    incident_id BIGINT NOT NULL,
+    submission_id BIGINT NOT NULL,
+    linked_by_user_id BIGINT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (incident_id),
+    UNIQUE KEY uk_incident_submission_submission (submission_id),
+    CONSTRAINT fk_inc_sub_link_incident FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+    CONSTRAINT fk_inc_sub_link_submission FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_inc_sub_linked_by FOREIGN KEY (linked_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- ============================================================
 -- SUBMISSION VISIBILITY (explicit per-user view grants)
 -- ============================================================
 

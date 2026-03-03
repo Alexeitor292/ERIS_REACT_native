@@ -7,15 +7,23 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let appSub: { remove: () => void } | null = null;
 let inFlight = false;
 
-async function runSyncOnce() {
-  if (inFlight) return;
+export type OfflineSyncRunResult = {
+  processed: number;
+  remaining: number;
+  skipped: boolean;
+};
+
+async function runSyncOnce(): Promise<OfflineSyncRunResult> {
+  if (inFlight) return { processed: 0, remaining: 0, skipped: true };
   inFlight = true;
   try {
     const token = await getToken();
-    if (!token) return;
-    await flushOfflineQueue(token);
+    if (!token) return { processed: 0, remaining: 0, skipped: true };
+    const result = await flushOfflineQueue(token);
+    return { ...result, skipped: false };
   } catch {
     // swallow; loop will retry
+    return { processed: 0, remaining: 0, skipped: false };
   } finally {
     inFlight = false;
   }
@@ -50,6 +58,5 @@ export function stopOfflineSyncLoop() {
 }
 
 export async function triggerOfflineSyncNow() {
-  await runSyncOnce();
+  return runSyncOnce();
 }
-

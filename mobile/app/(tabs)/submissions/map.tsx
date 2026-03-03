@@ -7,6 +7,7 @@ import { getToken } from "../../../src/auth/tokenStore";
 import { getSubmission, patchSubmission } from "../../../src/api/submissions";
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
+import { getMapPreloadBySubmission } from "../../../src/offline/mapPreload";
 
 type Geo = Record<string, unknown> | null;
 type Me = { id: number; roles: string[] };
@@ -139,6 +140,13 @@ export default function MapScreen() {
       const bridge = await getArcGisBridge();
       if (!bridge?.isArcGisNativeAvailable?.()) {
         throw new Error("ArcGIS native module unavailable in this build.");
+      }
+      const numericSubmissionId = Number(submissionId);
+      if (!Number.isNaN(numericSubmissionId) && numericSubmissionId > 0) {
+        const preload = await getMapPreloadBySubmission(numericSubmissionId);
+        if (preload?.mmpkPath) {
+          await bridge.loadMmpk(preload.mmpkPath).catch(() => {});
+        }
       }
       if (bridge.clearSketch) {
         console.log("[ArcGisDebug] clearSketch:before-open");

@@ -8,6 +8,7 @@ import {
 } from "../api/submissions";
 import { apiFetch } from "../api/client";
 import {
+  getLocalDraft,
   isLocalDraftId,
   markLocalDraftError,
   markLocalDraftSynced,
@@ -53,6 +54,26 @@ export type OfflineQueueItem<T extends QueueOpType = QueueOpType> = {
   createdAt: string;
   attempts: number;
   lastError?: string;
+};
+
+export type OfflineQueueSummary = {
+  count: number;
+  firstItemType?: QueueOpType;
+  firstItemSubmissionId?: string | null;
+  firstItemLastError?: string | null;
+};
+
+export type OfflineQueueDiagnosis = {
+  count: number;
+  head?: {
+    type: QueueOpType;
+    submissionId: string | null;
+    resolvedSubmissionId: string | null;
+    attempts: number;
+    lastError: string | null;
+    localDraftExists: boolean | null;
+    localDraftServerId: string | null;
+  };
 };
 
 function makeId() {
@@ -183,6 +204,57 @@ export async function getOfflineQueueCount(): Promise<number> {
   return current.length;
 }
 
+export async function getOfflineQueueSummary(): Promise<OfflineQueueSummary> {
+  const current = await readQueue();
+  if (!current.length) return { count: 0 };
+  const first = current[0];
+  const submissionId =
+    String((first.payload as any)?.submissionId || (first.payload as any)?.localId || "").trim() || null;
+  return {
+    count: current.length,
+    firstItemType: first.type,
+    firstItemSubmissionId: submissionId,
+    firstItemLastError: first.lastError ?? null,
+  };
+}
+
+export async function clearOfflineQueue(): Promise<void> {
+  await writeQueue([]);
+}
+
+export async function diagnoseOfflineQueue(): Promise<OfflineQueueDiagnosis> {
+  const current = await readQueue();
+  if (!current.length) return { count: 0 };
+
+  const head = current[0];
+  const submissionId =
+    String((head.payload as any)?.submissionId || (head.payload as any)?.localId || "").trim() || null;
+  const resolvedSubmissionId = submissionId
+    ? await resolveServerSubmissionId(submissionId).catch(() => null)
+    : null;
+
+  let localDraftExists: boolean | null = null;
+  let localDraftServerId: string | null = null;
+  if (submissionId && isLocalDraftId(submissionId)) {
+    const local = await getLocalDraft(submissionId).catch(() => null);
+    localDraftExists = !!local;
+    localDraftServerId = local?.serverId ?? null;
+  }
+
+  return {
+    count: current.length,
+    head: {
+      type: head.type,
+      submissionId,
+      resolvedSubmissionId,
+      attempts: head.attempts ?? 0,
+      lastError: head.lastError ?? null,
+      localDraftExists,
+      localDraftServerId,
+    },
+  };
+}
+
 async function executeQueueItem(token: string, item: OfflineQueueItem): Promise<void> {
   const resolveSubmissionIdOrThrow = async (submissionId: string): Promise<string> => {
     const resolved = await resolveServerSubmissionId(submissionId);
@@ -197,6 +269,8 @@ async function executeQueueItem(token: string, item: OfflineQueueItem): Promise<
       const payload = item.payload as QueuePayloadMap["CREATE_SUBMISSION_FOR_LOCAL_DRAFT"];
       const localId = String(payload.localId || "");
       if (!isLocalDraftId(localId)) return;
+      const localDraft = await getLocalDraft(localId);
+      if (!localDraft) return;
       const existing = await resolveServerSubmissionId(localId);
       if (existing) return;
       const created = await apiFetch<{ submission_id: number }>("/submissions", { method: "POST", token });
@@ -270,6 +344,12 @@ export async function flushOfflineQueue(token: string): Promise<{ processed: num
           ""
         );
         if (isLocalDraftId(submissionId)) {
+          const localDraft = await getLocalDraft(submissionId).catch(() => null);
+          if (!localDraft) {
+            // Stale queue item for a deleted local draft; drop and continue.
+            processed += 1;
+            continue;
+          }
           await markLocalDraftError(submissionId, String(err?.message ?? err));
         }
         survivors.push({

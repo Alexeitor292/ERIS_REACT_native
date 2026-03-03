@@ -1,5 +1,13 @@
 export type Me = { id: number; email: string; full_name?: string; roles: string[] };
 
+export type AdminUser = {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  roles: string[];
+};
+
 export type Submission = {
   id: number;
   created_by_user_id: number;
@@ -95,4 +103,38 @@ export type SubmissionDetail = {
   photos: Attachment[];
   attachments: Attachment[];
   workflow_events: WorkflowEvent[];
+};
+
+export type IncidentStatus = "NEW" | "IN_PROGRESS" | "RESOLVED";
+
+export type IncidentAssignment = {
+  assignment_id: number;
+  assignee_user_id: number;
+  assigned_by_user_id: number;
+  assignment_mode: "CLAIM" | "ASSIGN";
+  assigned_at: string;
+  assignee_email: string;
+  assignee_name: string;
+};
+
+export type Incident = {
+  id: number;
+  title: string;
+  incident_type: string | null;
+  description: string | null;
+  latitude: number;
+  longitude: number;
+  district: string | null;
+  county: string | null;
+  route: string | null;
+  post_mile: string | null;
+  status: IncidentStatus;
+  reporter_user_id: number;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  resolved_by_user_id: number | null;
+  resolution_comment: string | null;
+  linked_submission_id: number | null;
+  assignment: IncidentAssignment | null;
 };

@@ -2,6 +2,7 @@ import { NativeModules } from "react-native";
 
 type ArcGisNativeModule = {
   loadMmpk(path: string): Promise<void>;
+  downloadMmpk(url: string): Promise<string>;
   setInitialLocation(latitude: number, longitude: number): Promise<void>;
   setInitialGeometry(esriJson: string): Promise<void>;
   startSketchPolygon(): Promise<void>;
@@ -26,6 +27,10 @@ function requireArcGisModule(): ArcGisNativeModule {
 
 export async function loadMmpk(path: string) {
   return requireArcGisModule().loadMmpk(path);
+}
+
+export async function downloadMmpk(url: string): Promise<string> {
+  return requireArcGisModule().downloadMmpk(url);
 }
 
 export async function setInitialLocation(latitude: number, longitude: number) {

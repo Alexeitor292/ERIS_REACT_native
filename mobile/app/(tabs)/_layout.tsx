@@ -16,6 +16,8 @@ export default function TabLayout() {
   const currentTabIndex = useMemo(() => {
     if (pathname === "/drafts") return 0;
     if (pathname === "/submissions") return 1;
+    if (pathname === "/incidents") return 2;
+    if (pathname === "/mission-center") return 3;
     return -1;
   }, [pathname]);
 
@@ -96,6 +98,22 @@ export default function TabLayout() {
         options={{
           title: "Submissions",
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="tray.full.fill" color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="incidents"
+        options={{
+          title: "Incidents",
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="exclamationmark.triangle.fill" color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="mission-center"
+        options={{
+          title: "Mission",
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="map.fill" color={color} />,
         }}
       />
 

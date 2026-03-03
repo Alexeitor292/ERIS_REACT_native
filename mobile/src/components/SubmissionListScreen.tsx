@@ -11,7 +11,14 @@ import { buildSubmissionDescriptor } from "../utils/submissionLabel";
 import { countyCodeFromNameOrCode, districtForCounty, routesForCounty } from "../utils/caltransLookups";
 import { deleteSubmission, getSubmissionPermissions, patchSubmission, replaceSubmissionPermissions, SubmissionPermissions } from "../api/submissions";
 import { enrichPointFromArcgisClient } from "../utils/arcgisEnrichment";
-import { getOfflineQueueCount } from "../offline/queue";
+import {
+  clearOfflineQueue,
+  diagnoseOfflineQueue,
+  getOfflineQueueCount,
+  getOfflineQueueSummary,
+  type OfflineQueueDiagnosis,
+  type OfflineQueueSummary,
+} from "../offline/queue";
 import { triggerOfflineSyncNow } from "../offline/syncLoop";
 import { createLocalDraft, deleteLocalDraft, getLocalDraft, isLocalDraftId, listLocalDrafts } from "../offline/localDrafts";
 
@@ -133,6 +140,11 @@ export default function SubmissionListScreen({ mode }: Props) {
       mounted = false;
       clearInterval(t);
     };
+  }, []);
+
+  const refreshPendingSyncCount = useCallback(async () => {
+    const count = await getOfflineQueueCount();
+    setPendingSyncCount(count);
   }, []);
 
   async function createDraft() {
@@ -354,7 +366,50 @@ export default function SubmissionListScreen({ mode }: Props) {
         </Text>
         {pendingSyncCount > 0 ? (
           <Pressable
-            onPress={() => triggerOfflineSyncNow().catch(() => {})}
+            onPress={async () => {
+              try {
+                const result = await triggerOfflineSyncNow();
+                await refreshPendingSyncCount();
+                if (result.skipped) {
+                  Alert.alert("Sync", "Unable to sync now. Please confirm you are signed in.");
+                  return;
+                }
+                if (result.remaining > 0) {
+                  const summary: OfflineQueueSummary = await getOfflineQueueSummary().catch(() => ({ count: result.remaining }));
+                  const diagnosis: OfflineQueueDiagnosis = await diagnoseOfflineQueue().catch(() => ({ count: result.remaining }));
+                  const head = diagnosis.head;
+                  const details = [
+                    `${result.remaining} queued change${result.remaining === 1 ? "" : "s"} still pending.`,
+                    summary.firstItemType ? `Next: ${summary.firstItemType}` : "",
+                    summary.firstItemSubmissionId ? `Submission: ${summary.firstItemSubmissionId}` : "",
+                    head ? `Attempts: ${head.attempts}` : "",
+                    head?.resolvedSubmissionId ? `Resolved Submission: ${head.resolvedSubmissionId}` : "",
+                    head?.localDraftExists === false ? "Local draft record: missing" : "",
+                    head?.localDraftExists === true && head.localDraftServerId ? `Local->Server ID: ${head.localDraftServerId}` : "",
+                    summary.firstItemLastError ? `Error: ${summary.firstItemLastError}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join("\n");
+                  Alert.alert("Sync Incomplete", details, [
+                    { text: "Keep Queue", style: "cancel" },
+                    {
+                      text: "Clear Pending",
+                      style: "destructive",
+                      onPress: async () => {
+                        await clearOfflineQueue().catch(() => {});
+                        await refreshPendingSyncCount().catch(() => {});
+                        Alert.alert("Sync Queue Cleared", "Pending offline changes were removed.");
+                      },
+                    },
+                  ]);
+                  return;
+                }
+                Alert.alert("Sync Complete", "Offline changes synced successfully.");
+              } catch {
+                await refreshPendingSyncCount().catch(() => {});
+                Alert.alert("Sync", "Retry failed. Please try again.");
+              }
+            }}
             style={[styles.syncBanner, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
           >
             <Text style={[styles.syncBannerText, { color: palette.text }]}>

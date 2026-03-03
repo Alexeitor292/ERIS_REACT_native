@@ -22,6 +22,67 @@ RCT_REMAP_METHOD(loadMmpk,
   resolve(nil);
 }
 
+RCT_REMAP_METHOD(downloadMmpk,
+                 downloadMmpk:(NSString *)urlString
+                 resolverDownloadMmpk:(RCTPromiseResolveBlock)resolve
+                 rejecterDownloadMmpk:(RCTPromiseRejectBlock)reject) {
+  if (urlString == nil || urlString.length == 0) {
+    reject(@"E_MMPK_URL", @"MMPK URL is empty.", nil);
+    return;
+  }
+  NSURL *url = [NSURL URLWithString:urlString];
+  if (url == nil) {
+    reject(@"E_MMPK_URL", @"MMPK URL is invalid.", nil);
+    return;
+  }
+
+  NSURLSessionDownloadTask *task =
+      [[NSURLSession sharedSession] downloadTaskWithURL:url
+                                      completionHandler:^(NSURL *_Nullable location,
+                                                          NSURLResponse *_Nullable response,
+                                                          NSError *_Nullable error) {
+    if (error != nil) {
+      reject(@"E_MMPK_DOWNLOAD", error.localizedDescription ?: @"Download failed.", error);
+      return;
+    }
+
+    NSHTTPURLResponse *http = [response isKindOfClass:[NSHTTPURLResponse class]]
+                                  ? (NSHTTPURLResponse *)response
+                                  : nil;
+    if (http != nil && (http.statusCode < 200 || http.statusCode >= 300)) {
+      NSString *msg = [NSString stringWithFormat:@"Failed to download MMPK: HTTP %ld", (long)http.statusCode];
+      reject(@"E_MMPK_HTTP", msg, nil);
+      return;
+    }
+    if (location == nil) {
+      reject(@"E_MMPK_DOWNLOAD", @"No file downloaded.", nil);
+      return;
+    }
+
+    NSError *fsError = nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSURL *docs = [[fm URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] firstObject];
+    NSURL *targetDir = [docs URLByAppendingPathComponent:@"arcgis-offline" isDirectory:YES];
+    [fm createDirectoryAtURL:targetDir withIntermediateDirectories:YES attributes:nil error:&fsError];
+    if (fsError != nil) {
+      reject(@"E_MMPK_FS", fsError.localizedDescription ?: @"Could not create target directory.", fsError);
+      return;
+    }
+
+    NSURL *targetFile = [targetDir URLByAppendingPathComponent:@"offline_map.mmpk"];
+    [fm removeItemAtURL:targetFile error:nil];
+    if (![fm moveItemAtURL:location toURL:targetFile error:&fsError]) {
+      reject(@"E_MMPK_FS", fsError.localizedDescription ?: @"Could not save downloaded MMPK.", fsError);
+      return;
+    }
+
+    NSString *savedPath = targetFile.path;
+    [ArcGisSketchStore setMmpkPath:savedPath];
+    resolve(savedPath);
+  }];
+  [task resume];
+}
+
 RCT_REMAP_METHOD(setInitialLocation,
                  setInitialLocation:(nonnull NSNumber *)latitude
                  longitude:(nonnull NSNumber *)longitude

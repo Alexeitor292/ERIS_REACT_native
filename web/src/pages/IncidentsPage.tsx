@@ -1,0 +1,393 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { api } from "../api/client";
+import type { AdminUser, Incident, IncidentStatus } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
+import AppShell from "../ui/AppShell";
+
+type IncidentCreateForm = {
+  title: string;
+  incident_type: string;
+  description: string;
+  latitude: string;
+  longitude: string;
+  district: string;
+  county: string;
+  route: string;
+  post_mile: string;
+};
+
+const EMPTY_FORM: IncidentCreateForm = {
+  title: "",
+  incident_type: "",
+  description: "",
+  latitude: "",
+  longitude: "",
+  district: "",
+  county: "",
+  route: "",
+  post_mile: "",
+};
+
+function statusBadgeClass(status: IncidentStatus) {
+  if (status === "NEW") return "border-red-500/40 bg-red-500/15 text-red-300";
+  if (status === "IN_PROGRESS") return "border-amber-500/50 bg-amber-500/15 text-amber-300";
+  return "border-emerald-500/40 bg-emerald-500/15 text-emerald-300";
+}
+
+export default function IncidentsPage() {
+  const { me } = useAuth();
+  const navigate = useNavigate();
+  const isAdmin = !!me?.roles?.includes("ADMIN");
+
+  const [items, setItems] = useState<Incident[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [assignByIncidentId, setAssignByIncidentId] = useState<Record<number, string>>({});
+  const [statusFilter, setStatusFilter] = useState<"ALL" | IncidentStatus>("ALL");
+  const [unclaimedOnly, setUnclaimedOnly] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<IncidentCreateForm>(EMPTY_FORM);
+
+  async function load() {
+    setBusy(true);
+    setError(null);
+    try {
+      const query = new URLSearchParams();
+      if (statusFilter !== "ALL") query.set("status", statusFilter);
+      if (unclaimedOnly) query.set("unclaimed_only", "true");
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      const res = await api<{ items: Incident[] }>(`/incidents${suffix}`);
+      setItems(res.items ?? []);
+
+      if (isAdmin) {
+        const usersRes = await api<{ items: AdminUser[] }>("/admin/users");
+        setUsers(usersRes.items ?? []);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load incidents.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, unclaimedOnly]);
+
+  const assignableUsers = useMemo(
+    () => users.filter((u) => u.is_active && (u.roles.includes("FIELD_WORKER") || u.roles.includes("ADMIN"))),
+    [users]
+  );
+
+  async function createIncident() {
+    if (!form.title.trim()) {
+      setError("Incident title is required.");
+      return;
+    }
+    const lat = Number(form.latitude);
+    const lon = Number(form.longitude);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) {
+      setError("Latitude and longitude must be valid numbers.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/incidents", {
+        method: "POST",
+        body: JSON.stringify({
+          title: form.title.trim(),
+          incident_type: form.incident_type.trim() || null,
+          description: form.description.trim() || null,
+          latitude: lat,
+          longitude: lon,
+          district: form.district.trim() || null,
+          county: form.county.trim() || null,
+          route: form.route.trim() || null,
+          post_mile: form.post_mile.trim() || null,
+        }),
+      });
+      setForm(EMPTY_FORM);
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to create incident.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function claimIncident(incidentId: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ linked_submission_id: number }>(`/incidents/${incidentId}/claim`, {
+        method: "POST",
+      });
+      await load();
+      if (res.linked_submission_id) navigate(`/submissions/${res.linked_submission_id}`);
+    } catch (e: any) {
+      setError(e?.message ?? "Claim failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function assignIncident(incidentId: number) {
+    const assignee = Number(assignByIncidentId[incidentId]);
+    if (!assignee) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ linked_submission_id: number }>(`/incidents/${incidentId}/assign`, {
+        method: "POST",
+        body: JSON.stringify({ assignee_user_id: assignee }),
+      });
+      await load();
+      if (res.linked_submission_id) navigate(`/submissions/${res.linked_submission_id}`);
+    } catch (e: any) {
+      setError(e?.message ?? "Assign failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unassignIncident(incidentId: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/incidents/${incidentId}/unassign`, { method: "POST" });
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Unassign failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resolveIncident(incidentId: number) {
+    const comment = prompt("Resolution comment (optional):") ?? "";
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/incidents/${incidentId}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ comment: comment.trim() || null }),
+      });
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Resolve failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AppShell title="Incidents">
+      <div className="flex h-full flex-col gap-4 p-4 md:p-5">
+        <div className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-3 md:grid-cols-3">
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="Title *"
+            value={form.title}
+            onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="Incident Type"
+            value={form.incident_type}
+            onChange={(e) => setForm((prev) => ({ ...prev, incident_type: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="Description"
+            value={form.description}
+            onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="Latitude *"
+            value={form.latitude}
+            onChange={(e) => setForm((prev) => ({ ...prev, latitude: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="Longitude *"
+            value={form.longitude}
+            onChange={(e) => setForm((prev) => ({ ...prev, longitude: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="District"
+            value={form.district}
+            onChange={(e) => setForm((prev) => ({ ...prev, district: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="County"
+            value={form.county}
+            onChange={(e) => setForm((prev) => ({ ...prev, county: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="Route"
+            value={form.route}
+            onChange={(e) => setForm((prev) => ({ ...prev, route: e.target.value }))}
+          />
+          <input
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            placeholder="Post Mile"
+            value={form.post_mile}
+            onChange={(e) => setForm((prev) => ({ ...prev, post_mile: e.target.value }))}
+          />
+          <button
+            onClick={createIncident}
+            disabled={busy}
+            className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60 md:col-span-3"
+          >
+            Create Incident
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="NEW">NEW</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="RESOLVED">RESOLVED</option>
+          </select>
+          <label className="inline-flex items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
+            <input type="checkbox" checked={unclaimedOnly} onChange={(e) => setUnclaimedOnly(e.target.checked)} />
+            Unclaimed Only
+          </label>
+          <button
+            onClick={load}
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm hover:brightness-95"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {error ? (
+          <div className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>
+        ) : null}
+
+        <div className="flex-1 overflow-auto rounded-xl border border-[var(--line)] bg-[var(--panel)]">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted">
+                <th className="px-3 py-2">ID</th>
+                <th className="px-3 py-2">Incident</th>
+                <th className="px-3 py-2">Location</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Assignment</th>
+                <th className="px-3 py-2">Linked Draft</th>
+                <th className="px-3 py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-6 text-sm text-muted" colSpan={7}>
+                    {busy ? "Loading incidents..." : "No incidents yet."}
+                  </td>
+                </tr>
+              ) : (
+                items.map((incident) => (
+                  <tr key={incident.id} className="border-b border-[var(--line)]/60 align-top">
+                    <td className="px-3 py-3 text-sm font-semibold">{incident.id}</td>
+                    <td className="px-3 py-3 text-sm">
+                      <div className="font-semibold">{incident.title}</div>
+                      <div className="text-xs text-muted">{incident.incident_type || "-"}</div>
+                    </td>
+                    <td className="px-3 py-3 text-sm text-muted">
+                      {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}
+                    </td>
+                    <td className="px-3 py-3 text-sm">
+                      <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass(incident.status)}`}>
+                        {incident.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-sm text-muted">
+                      {incident.assignment ? incident.assignment.assignee_name || incident.assignment.assignee_email : "Unassigned"}
+                    </td>
+                    <td className="px-3 py-3 text-sm">
+                      {incident.linked_submission_id ? (
+                        <button
+                          onClick={() => navigate(`/submissions/${incident.linked_submission_id}`)}
+                          className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                        >
+                          Open #{incident.linked_submission_id}
+                        </button>
+                      ) : (
+                        <span className="text-muted">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <div className="inline-flex flex-wrap justify-end gap-1.5">
+                        {incident.status === "NEW" && !incident.assignment ? (
+                          <button
+                            onClick={() => claimIncident(incident.id)}
+                            className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                          >
+                            Claim
+                          </button>
+                        ) : null}
+                        {isAdmin ? (
+                          <>
+                            <select
+                              value={assignByIncidentId[incident.id] ?? ""}
+                              onChange={(e) =>
+                                setAssignByIncidentId((prev) => ({ ...prev, [incident.id]: e.target.value }))
+                              }
+                              className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs"
+                            >
+                              <option value="">Assign user...</option>
+                              {assignableUsers.map((u) => (
+                                <option key={u.id} value={String(u.id)}>
+                                  {u.full_name}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => assignIncident(incident.id)}
+                              className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                            >
+                              Assign
+                            </button>
+                            <button
+                              onClick={() => unassignIncident(incident.id)}
+                              className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                            >
+                              Unassign
+                            </button>
+                          </>
+                        ) : null}
+                        {incident.status !== "RESOLVED" ? (
+                          <button
+                            onClick={() => resolveIncident(incident.id)}
+                            className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
+                          >
+                            Resolve
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+

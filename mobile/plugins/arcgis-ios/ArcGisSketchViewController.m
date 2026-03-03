@@ -8,6 +8,7 @@
 
 @property(nonatomic, strong) AGSMapView *mapView;
 @property(nonatomic, strong) AGSSketchEditor *sketchEditor;
+@property(nonatomic, strong) AGSMobileMapPackage *mobileMapPackage;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *undoStack;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *redoStack;
 @property(nonatomic, strong) NSArray<NSNumber *> *basemapStyles;
@@ -111,6 +112,7 @@
   self.sketchEditor = [[AGSSketchEditor alloc] init];
   [self configureSketchAppearance];
   self.mapView.sketchEditor = self.sketchEditor;
+  [self applyOfflineMapPackageIfAvailable];
   [self startLocationDisplay];
   [self.sketchEditor addObserver:self
                       forKeyPath:@"geometry"
@@ -124,6 +126,38 @@
   [self centerFromInitialLocation];
   [self pushCurrentGeometryToUndo];
   [self cacheCurrentSketchGeometry];
+}
+
+- (void)applyOfflineMapPackageIfAvailable {
+  NSString *rawPath = [[ArcGisSketchStore mmpkPath] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (rawPath == nil || rawPath.length == 0) {
+    return;
+  }
+  BOOL isDir = NO;
+  if (![[NSFileManager defaultManager] fileExistsAtPath:rawPath isDirectory:&isDir]) {
+    [self toast:@"Offline map package path not found."];
+    return;
+  }
+
+  NSURL *fileURL = [NSURL fileURLWithPath:rawPath];
+  self.mobileMapPackage = [[AGSMobileMapPackage alloc] initWithFileURL:fileURL];
+  __weak typeof(self) weakSelf = self;
+  [self.mobileMapPackage loadWithCompletion:^(NSError *_Nullable error) {
+    if (error != nil) {
+      [weakSelf toast:[NSString stringWithFormat:@"Offline map failed: %@", error.localizedDescription ?: @"Unknown error"]];
+      return;
+    }
+    if (weakSelf.mobileMapPackage.maps.count == 0) {
+      [weakSelf toast:@"Offline map package has no maps."];
+      return;
+    }
+    AGSMap *offlineMap = weakSelf.mobileMapPackage.maps.firstObject;
+    if (offlineMap != nil) {
+      weakSelf.mapView.map = offlineMap;
+      weakSelf.mapView.sketchEditor = weakSelf.sketchEditor;
+      [weakSelf toast:@"Offline map package loaded."];
+    }
+  }];
 }
 
 - (UIButton *)overlayButtonWithTitle:(NSString *)title action:(SEL)selector {

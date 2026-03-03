@@ -143,3 +143,23 @@ class GeometryResponse(BaseModel):
     geometry: dict | None
     srid: int | None = 4326
     source: str | None = None
+
+
+class IncidentCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    incident_type: str | None = Field(default=None, max_length=64)
+    description: str | None = None
+    latitude: float
+    longitude: float
+    district: str | None = Field(default=None, max_length=64)
+    county: str | None = Field(default=None, max_length=64)
+    route: str | None = Field(default=None, max_length=64)
+    post_mile: str | None = Field(default=None, max_length=64)
+
+
+class IncidentAssignRequest(BaseModel):
+    assignee_user_id: int = Field(..., ge=1)
+
+
+class IncidentResolveRequest(BaseModel):
+    comment: str | None = None

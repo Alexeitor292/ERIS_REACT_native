@@ -2,6 +2,7 @@ USE eris;
 
 INSERT INTO roles (name, description) VALUES
 ('FIELD_WORKER', 'Can create and submit field reports'),
+('MAINTENANCE', 'Can create maintenance incident reports'),
 ('REVIEWER', 'Can review submitted reports'),
 ('ADMIN', 'Can manage users, forms, and approvals')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
@@ -20,4 +21,4 @@ INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT u.id, r.id
 FROM users u
 JOIN roles r
-WHERE u.email='admin@local' AND r.name IN ('ADMIN', 'REVIEWER', 'FIELD_WORKER');
+WHERE u.email='admin@local' AND r.name IN ('ADMIN', 'REVIEWER', 'FIELD_WORKER', 'MAINTENANCE');

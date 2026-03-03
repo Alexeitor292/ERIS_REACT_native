@@ -1150,9 +1150,38 @@ export default function SubmissionDetailScreen() {
     return false;
   }, [form]);
 
+  const validateActionGroups = useCallback((): { ok: boolean; message?: string } => {
+    const immediateAllowed = new Set((lookups?.actions?.immediate ?? []).map((x: any) => String(x.code)));
+    const followUpAllowed = new Set((lookups?.actions?.follow_up ?? []).map((x: any) => String(x.code)));
+
+    const invalidImmediate = immediateActions.filter((code) => !immediateAllowed.has(String(code)));
+    const invalidFollowUp = followUpActions.filter((code) => !followUpAllowed.has(String(code)));
+    const wrongImmediate = immediateActions.filter((code) => followUpAllowed.has(String(code)));
+    const wrongFollowUp = followUpActions.filter((code) => immediateAllowed.has(String(code)));
+
+    const problems: string[] = [];
+    if (invalidImmediate.length) problems.push(`Immediate has unknown code(s): ${invalidImmediate.join(", ")}`);
+    if (invalidFollowUp.length) problems.push(`Follow-up has unknown code(s): ${invalidFollowUp.join(", ")}`);
+    if (wrongImmediate.length) problems.push(`Immediate has FOLLOW_UP code(s): ${wrongImmediate.join(", ")}`);
+    if (wrongFollowUp.length) problems.push(`Follow-up has IMMEDIATE code(s): ${wrongFollowUp.join(", ")}`);
+
+    if (problems.length) {
+      return {
+        ok: false,
+        message: `Action group mismatch detected.\n${problems.join("\n")}`,
+      };
+    }
+    return { ok: true };
+  }, [lookups, immediateActions, followUpActions]);
+
   const saveDraft = useCallback(async () => {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
+    const actionGroupValidation = validateActionGroups();
+    if (!actionGroupValidation.ok) {
+      Alert.alert("Cannot Save Yet", actionGroupValidation.message ?? "Action group mismatch detected.");
+      return;
+    }
     const normalizedForm = enforceFormBusinessRules(form);
     setForm(normalizedForm);
     let geometry: any = null;
@@ -1244,6 +1273,7 @@ export default function SubmissionDetailScreen() {
     token,
     id,
     validateRequiredFields,
+    validateActionGroups,
     form,
     incidentTypesFromFormState,
     immediateActions,
@@ -1744,7 +1774,6 @@ export default function SubmissionDetailScreen() {
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
   const selectedSectionAttachments = sectionAttachments.filter((a: any) => a.section_key === selectedSectionKey);
   const submissionUpdatedAt = data?.submission.updated_at ?? "";
-  const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"];
   const materialRockSelected = form.material_rock === "YES";
