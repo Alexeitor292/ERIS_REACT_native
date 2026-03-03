@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from passlib.context import CryptContext
-
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from .auth import hash_password as _hash_password
+from .auth import verify_password as _verify_password
 
 def hash_password(password: str) -> str:
-    return _pwd.hash(password)
+    return _hash_password(password)
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return _pwd.verify(password, password_hash)
+    return _verify_password(password, password_hash)

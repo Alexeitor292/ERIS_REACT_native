@@ -6,9 +6,9 @@ INSERT INTO roles (name, description) VALUES
 ('ADMIN', 'Can manage users, forms, and approvals')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
 
--- Example admin user (password_hash is placeholder; replace later with bcrypt)
+-- Example admin user (password: "password", hashed with argon2id)
 INSERT INTO users (email, full_name, password_hash, is_active)
-VALUES ('admin@local', 'Local Admin', '$2a$12$qIzA6pSh/E412Rexxnk9reuN9PFg8gqEcPc1lji9RCvuUFwQeu/eq', 1)
+VALUES ('admin@local', 'Local Admin', '$argon2id$v=19$m=65536,t=3,p=4$yGtVqjzsQ7NhszqjjQ34XA$q1k5GP/lHkwSdhCYoGYRCfj1ytWu9mDmHhYgb5BCvPU', 1)
 ON DUPLICATE KEY UPDATE
   full_name = VALUES(full_name),
   password_hash = VALUES(password_hash),

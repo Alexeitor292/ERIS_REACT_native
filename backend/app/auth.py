@@ -1,27 +1,24 @@
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
-from passlib.context import CryptContext
-from passlib.exc import UnknownHashError
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
-# Prefer argon2; allow verifying existing bcrypt hashes too
-pwd_context = CryptContext(
-    schemes=["argon2", "bcrypt"],
-    deprecated="auto",
-)
+_argon2 = PasswordHasher()
 
 def hash_password(password: str) -> str:
-    # Optional: enforce max length for safety
+    # Keep a strict cap to avoid abuse and unexpected memory/cpu costs.
     if len(password.encode("utf-8")) > 256:
         raise ValueError("Password too long")
-    return pwd_context.hash(password)
+    return _argon2.hash(password)
 
 def verify_password(password: str, password_hash: str) -> bool:
     try:
-        return pwd_context.verify(password, password_hash)
-    except UnknownHashError:
+        return _argon2.verify(password_hash, password)
+    except (VerifyMismatchError, InvalidHashError):
+        return False
+    except VerificationError:
         return False
     except Exception:
-        # if bcrypt backend is broken, don't crash login
         return False
 
 def create_access_token(*, subject: str, secret: str, alg: str, expires_minutes: int) -> str:
