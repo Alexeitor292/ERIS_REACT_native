@@ -1747,7 +1747,6 @@ export default function SubmissionDetailScreen() {
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"];
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"];
-  const anyFailureSelected = failureKeys.some((k) => form[k] === "YES");
   const materialRockSelected = form.material_rock === "YES";
   const materialSoilSelected = form.material_soil === "YES";
   const waterFlowingSelected = form.water_flowing === "YES";
@@ -2377,8 +2376,7 @@ export default function SubmissionDetailScreen() {
           ) : null}
         </DropdownBlock>
 
-        {anyFailureSelected ? (
-          <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
+        <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
             <View style={[styles.measurementDiagramWrap, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
               <Image source={LANDSLIDE_MEASURE_DIAGRAM} style={styles.measurementDiagram} resizeMode="contain" />
             </View>
@@ -2391,7 +2389,6 @@ export default function SubmissionDetailScreen() {
             <Field palette={palette} label="Length of Roadway Encroached, ft (Lr)" value={form.measure_roadway_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_length_ft", v)} />
             <Field palette={palette} label="Width of Roadway Encroached, ft (Wr)" value={form.measure_roadway_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_width_ft", v)} />
           </DropdownBlock>
-        ) : null}
         <View style={styles.stepNavRow}>
           <Pressable style={[styles.btnGhost, styles.stepNavGhostBtn, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
             <Text style={[styles.btnGhostText, { color: palette.text }]}>Previous</Text>

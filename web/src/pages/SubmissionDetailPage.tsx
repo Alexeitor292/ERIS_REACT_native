@@ -744,7 +744,6 @@ export default function SubmissionDetailPage() {
   const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"] as const;
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"] as const;
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"] as const;
-  const anyFailureSelected = failureKeys.some((k) => draft[k] === "YES");
   const materialRockSelected = draft.material_rock === "YES";
   const materialSoilSelected = draft.material_soil === "YES";
   const waterFlowingSelected = draft.water_flowing === "YES";
@@ -752,9 +751,7 @@ export default function SubmissionDetailPage() {
   const openHighwayTrafficSelected = imm.includes("OPEN_HIGHWAY_TRAFFIC") || fol.includes("OPEN_HIGHWAY_TRAFFIC");
   const countyOptions = draft.district ? countiesForDistrict(draft.district) : CALIFORNIA_COUNTIES;
   const routeOptions = routesForDistrictCounty(draft.district, draft.county);
-  const visibleCardIds: DashboardCardId[] = anyFailureSelected
-    ? [...DASHBOARD_DEFAULT_ORDER]
-    : DASHBOARD_DEFAULT_ORDER.filter((x) => x !== "measurements");
+  const visibleCardIds: DashboardCardId[] = [...DASHBOARD_DEFAULT_ORDER];
   const previewOrder = dragState?.active && dragState.overId
     ? reorderCards(dashboardLayout.order, dragState.id, dragState.overId)
     : dashboardLayout.order;
@@ -1729,8 +1726,7 @@ export default function SubmissionDetailPage() {
                       ) : null}
                     </div>
 
-                    {anyFailureSelected ? (
-                      <div {...cardFrameProps("measurements")}>
+                    <div {...cardFrameProps("measurements")}>
                         {layoutTools("measurements")}
                         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Measurements</div>
                         <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
@@ -1746,8 +1742,7 @@ export default function SubmissionDetailPage() {
                           <div><label className={label}>Length of Roadway Encroached, ft (Lr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} /></div>
                           <div><label className={label}>Width of Roadway Encroached, ft (Wr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} /></div>
                         </div>
-                      </div>
-                    ) : null}
+                    </div>
                   </div>
                   {layoutMode && dragState?.active ? (
                     <div
