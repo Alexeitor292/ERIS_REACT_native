@@ -101,13 +101,15 @@ CREATE TABLE IF NOT EXISTS attachment_links (
     submission_id BIGINT NOT NULL,
     attachment_id BIGINT NOT NULL,
     kind VARCHAR(32) NOT NULL DEFAULT 'PHOTO', -- PHOTO | VIDEO | DOC | SKETCH | MAP_SNAPSHOT
+    section_key VARCHAR(64) NULL,
     sort_order INT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_attachment_links_submission FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
     CONSTRAINT fk_attachment_links_attachment FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE,
     UNIQUE KEY uk_submission_attachment (submission_id, attachment_id),
     INDEX idx_attachment_links_submission (submission_id),
-    INDEX idx_attachment_links_kind (kind)
+    INDEX idx_attachment_links_kind (kind),
+    INDEX idx_attachment_links_section_key (section_key)
 ) ENGINE=InnoDB;
 
 -- ============================================================
