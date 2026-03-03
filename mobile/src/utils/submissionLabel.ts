@@ -1,5 +1,5 @@
 type SubmissionLabelParts = {
-  id: number;
+  id: number | string;
   created_at?: string | null;
   district?: string | null;
   county?: string | null;

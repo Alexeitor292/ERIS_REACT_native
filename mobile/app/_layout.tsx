@@ -11,6 +11,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { clearToken, getToken, getTokenExpiryMs, setSessionExpiredNotice } from "@/src/auth/tokenStore";
 import AnimatedSplash from "@/src/ui/AnimatedSplash";
 import { UiSettingsProvider, useUiSettings } from "@/src/ui/UiSettingsContext";
+import { startOfflineSyncLoop, stopOfflineSyncLoop } from "@/src/offline/syncLoop";
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -84,6 +85,13 @@ export default function RootLayout() {
       await SplashScreen.hideAsync().catch(() => {});
     };
     boot().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    startOfflineSyncLoop(12000);
+    return () => {
+      stopOfflineSyncLoop();
+    };
   }, []);
 
   const onSplashDone = useCallback(() => {

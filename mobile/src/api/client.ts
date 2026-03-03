@@ -1,6 +1,6 @@
 import { getApiBaseUrl } from "./baseUrl";
 import { router } from "expo-router";
-import { clearToken, setSessionExpiredNotice } from "../auth/tokenStore";
+import { clearToken, markOnlineAuthSuccess, setSessionExpiredNotice } from "../auth/tokenStore";
 
 export class SessionExpiredError extends Error {
   constructor() {
@@ -58,6 +58,9 @@ export async function apiFetch<T = any>(
     }
     const text = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+  if (opts.token) {
+    markOnlineAuthSuccess().catch(() => {});
   }
   return (await res.json()) as T;
 }

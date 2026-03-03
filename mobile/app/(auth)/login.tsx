@@ -14,9 +14,9 @@ export default function Login() {
 
   useEffect(() => {
     consumeSessionExpiredNotice()
-      .then((expired) => {
-        if (expired) {
-          Alert.alert("Session expired", "Session expired. Please sign in again.");
+      .then((message) => {
+        if (message) {
+          Alert.alert("Session expired", message);
         }
       })
       .catch(() => {});

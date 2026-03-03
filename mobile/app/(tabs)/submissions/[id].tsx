@@ -9,6 +9,16 @@ import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
 import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment } from "../../../src/api/submissions";
+import { enqueueOfflineOp } from "../../../src/offline/queue";
+import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
+import {
+  createLocalDraft,
+  deleteLocalDraft,
+  getLocalDraft,
+  isLocalDraftId,
+  saveLocalDraft,
+} from "../../../src/offline/localDrafts";
+import { readLookupsCache, writeLookupsCache } from "../../../src/offline/lookupsCache";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
@@ -28,6 +38,12 @@ type Lookups = {
   highway_status: OptionItem[];
   incident_types: OptionItem[];
   actions: { immediate: OptionItem[]; follow_up: OptionItem[] };
+};
+const EMPTY_LOOKUPS: Lookups = {
+  distribution: [],
+  highway_status: [],
+  incident_types: [],
+  actions: { immediate: [], follow_up: [] },
 };
 type SubmissionDetail = {
   submission: { id: number; created_by_user_id: number; title?: string | null; status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED"; created_at: string; updated_at: string; submitted_at?: string | null; reviewed_at?: string | null; review_comment?: string | null; can_edit?: boolean; can_manage_permissions?: boolean };
@@ -185,6 +201,11 @@ const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
   failure_scoured_toe: "SCOURED_TOE",
   failure_washout: "WASHOUT",
 };
+
+function isLikelyOfflineError(message: string): boolean {
+  const m = String(message || "");
+  return /network request failed|failed to fetch|could not reach upload endpoint|timeout|internal server error/i.test(m);
+}
 
 const DISTRIBUTION_ICON_SOURCE: Record<string, any> = {
   ADVANCING: require("../../../assets/distribution-icons/advancing.png"),
@@ -548,6 +569,7 @@ function DropdownBlock({
 
 export default function SubmissionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const isLocalId = useMemo(() => isLocalDraftId(String(id ?? "")), [id]);
   const navigation = useNavigation<any>();
   const pathname = usePathname();
   const { palette: basePalette, density } = useUiSettings();
@@ -679,6 +701,10 @@ export default function SubmissionDetailScreen() {
 
   const clearDraftLocalCache = useCallback(async () => {
     if (!id) return;
+    if (isLocalDraftId(id)) {
+      await deleteLocalDraft(id);
+      return;
+    }
     await removeDraftCache(draftCacheKey(id));
   }, [id]);
 
@@ -694,12 +720,76 @@ export default function SubmissionDetailScreen() {
     if (!token || !id) return;
     setLoading(true);
     try {
-      const [meRes, subRes, lookRes] = await Promise.all([
-        apiFetch<UserInfo>("/auth/me", { token }),
-        getSubmission(token, id) as Promise<SubmissionDetail>,
-        getGisaLookups(token) as Promise<Lookups>,
-      ]);
-      setMe(meRes); setData(subRes); setLookups(lookRes);
+      let lookRes: Lookups = EMPTY_LOOKUPS;
+      try {
+        lookRes = await (getGisaLookups(token) as Promise<Lookups>);
+        await writeLookupsCache(lookRes);
+      } catch {
+        const cached = await readLookupsCache<Lookups>();
+        lookRes = cached ?? EMPTY_LOOKUPS;
+      }
+      setLookups(lookRes);
+
+      let meRes: UserInfo = { id: 0, roles: [] };
+      try {
+        meRes = await apiFetch<UserInfo>("/auth/me", { token });
+      } catch {
+        // Keep local edit mode available even if /auth/me is temporarily unreachable.
+      }
+      setMe(meRes);
+
+      if (isLocalId) {
+        const local = await getLocalDraft(id);
+        if (!local) {
+          Alert.alert("Draft unavailable", "Local draft was not found on this device.");
+          router.replace("/(tabs)/drafts");
+          return;
+        }
+
+        const loadedState: DraftEditorState = {
+          form: enforceFormBusinessRules({ ...EMPTY_FORM, ...(local.editor?.form || {}) }),
+          districtContacts: normalizeCachedContacts(local.editor?.districtContacts),
+          incidentTypes: Array.isArray(local.editor?.incidentTypes) ? local.editor.incidentTypes : [],
+          immediateActions: Array.isArray(local.editor?.immediateActions) ? local.editor.immediateActions : [],
+          followUpActions: Array.isArray(local.editor?.followUpActions) ? local.editor.followUpActions : [],
+        };
+
+        suppressCacheWriteRef.current = true;
+        applyEditorState(loadedState);
+        serverSnapshotRef.current = JSON.stringify(loadedState);
+        setData({
+          submission: {
+            id: -1,
+            created_by_user_id: meRes.id,
+            title: null,
+            status: "DRAFT",
+            created_at: local.createdAt,
+            updated_at: local.updatedAt,
+            submitted_at: null,
+            reviewed_at: null,
+            review_comment: null,
+            can_edit: true,
+            can_manage_permissions: false,
+          },
+          gisa: null,
+          incident_types: loadedState.incidentTypes,
+          actions: { immediate: loadedState.immediateActions, follow_up: loadedState.followUpActions },
+          photos: [],
+          attachments: [],
+          workflow_events: [],
+        });
+        setTimeout(() => {
+          suppressCacheWriteRef.current = false;
+          cacheHydratedRef.current = true;
+        }, 0);
+        setFieldErrors({});
+        setReviewComment("");
+        setPhotoUrls({});
+        return;
+      }
+
+      const subRes = (await getSubmission(token, id)) as SubmissionDetail;
+      setData(subRes);
       const g = subRes.gisa || {};
       const loadedDistrictContacts = parseDistrictContacts(g.district_contact ?? "");
       const countyCode = countyCodeFromNameOrCode(g.county ?? "");
@@ -795,7 +885,7 @@ export default function SubmissionDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [token, id, hydrateAttachmentUrls, applyEditorState, incidentTypesFromFormState]);
+  }, [token, id, isLocalId, hydrateAttachmentUrls, applyEditorState, incidentTypesFromFormState]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -803,7 +893,7 @@ export default function SubmissionDetailScreen() {
     useCallback(() => {
       if (!refreshGeometryOnFocusRef.current) return;
       refreshGeometryOnFocusRef.current = false;
-      if (!token || !id) return;
+      if (!token || !id || isLocalId) return;
 
       let cancelled = false;
       (async () => {
@@ -829,7 +919,7 @@ export default function SubmissionDetailScreen() {
       return () => {
         cancelled = true;
       };
-    }, [token, id])
+    }, [token, id, isLocalId])
   );
 
   useEffect(() => {
@@ -842,6 +932,17 @@ export default function SubmissionDetailScreen() {
 
     const editorState = buildEditorState();
     const snapshot = JSON.stringify(editorState);
+    if (isLocalId) {
+      const timer = setTimeout(() => {
+        saveLocalDraft(id, {
+          editor: editorState as any,
+          serverUpdatedAt: null,
+          syncState: "LOCAL_ONLY",
+          lastError: null,
+        }).catch(() => {});
+      }, 250);
+      return () => clearTimeout(timer);
+    }
     const key = draftCacheKey(id);
 
     if (serverSnapshotRef.current && snapshot === serverSnapshotRef.current) {
@@ -871,6 +972,7 @@ export default function SubmissionDetailScreen() {
     followUpActions,
     districtContacts,
     buildEditorState,
+    isLocalId,
   ]);
 
   const setVal = (k: keyof FormState, v: any) => {
@@ -1054,26 +1156,57 @@ export default function SubmissionDetailScreen() {
       }
     }
     setBusy(true);
+    const patchPayload = {
+      report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: n(normalizedForm.route), post_mile: n(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
+      latitude: f(normalizedForm.latitude, "Latitude"), longitude: f(normalizedForm.longitude, "Longitude"),
+      distribution_code: n(normalizedForm.distribution_code), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
+      pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
+      failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout),
+      distribution_advancing: ynToBool(normalizedForm.distribution_advancing), distribution_retrogressive: ynToBool(normalizedForm.distribution_retrogressive), distribution_enlarging: ynToBool(normalizedForm.distribution_enlarging), distribution_widening: ynToBool(normalizedForm.distribution_widening), distribution_moving: ynToBool(normalizedForm.distribution_moving), distribution_confined: ynToBool(normalizedForm.distribution_confined),
+      material_rock: ynToBool(normalizedForm.material_rock), material_soil: ynToBool(normalizedForm.material_soil), material_bedding: ynToBool(normalizedForm.material_bedding), material_joints: ynToBool(normalizedForm.material_joints), material_fractures: ynToBool(normalizedForm.material_fractures),
+      est_soil_pct: f(normalizedForm.est_soil_pct, "Estimated soil %"), est_clay_pct: f(normalizedForm.est_clay_pct, "Estimated clay %"), est_silt_pct: f(normalizedForm.est_silt_pct, "Estimated silt %"), est_sand_pct: f(normalizedForm.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(normalizedForm.est_gravel_pct, "Estimated gravel %"),
+      water_dry: ynToBool(normalizedForm.water_dry), water_moist: ynToBool(normalizedForm.water_moist), water_wet: ynToBool(normalizedForm.water_wet), water_flowing: ynToBool(normalizedForm.water_flowing), water_seep: ynToBool(normalizedForm.water_seep), water_spring: ynToBool(normalizedForm.water_spring),
+      vegetation_trees: n(normalizedForm.vegetation_trees), vegetation_bushes_shrubs: n(normalizedForm.vegetation_bushes_shrubs), vegetation_groundcover: n(normalizedForm.vegetation_groundcover),
+      drainage_clogged_inlet: ynToBool(normalizedForm.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(normalizedForm.drainage_compromised_drains), drainage_surface_runoff: ynToBool(normalizedForm.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(normalizedForm.drainage_torrent_surge_flood),
+      impact_impacted_adj_utilities: ynToBool(normalizedForm.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(normalizedForm.impact_maybe_adj_utilities), impact_adj_utilities: n(normalizedForm.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(normalizedForm.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(normalizedForm.impact_maybe_adj_properties), impact_adj_properties: n(normalizedForm.impact_adj_properties), impact_impacted_adj_structure: ynToBool(normalizedForm.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(normalizedForm.impact_maybe_adj_structure), impact_adj_structure: n(normalizedForm.impact_adj_structure),
+      measure_slope_height_ft: f(normalizedForm.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(normalizedForm.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(normalizedForm.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(normalizedForm.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(normalizedForm.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(normalizedForm.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(normalizedForm.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(normalizedForm.measure_roadway_width_ft, "Roadway width"),
+      record_of_event_notes: n(normalizedForm.record_of_event_notes), maintenance_history_notes: n(normalizedForm.maintenance_history_notes), geotechnical_assessment_notes: n(normalizedForm.geotechnical_assessment_notes), recommendations_notes: n(normalizedForm.recommendations_notes), sketchpad_notes: n(normalizedForm.sketchpad_notes),
+      observations_notes: n(normalizedForm.observations_notes), geometry_json: geometry,
+    };
+    const incidentItems = incidentTypesFromFormState(normalizedForm);
+    if (isLocalId) {
+      try {
+        await saveLocalDraft(id, {
+          editor: {
+            form: normalizedForm,
+            incidentTypes: incidentItems,
+            immediateActions,
+            followUpActions,
+            districtContacts,
+          } as any,
+          syncState: "LOCAL_ONLY",
+          lastError: null,
+        });
+        await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
+        await enqueueOfflineOp("PATCH_SUBMISSION", { submissionId: id, patch: patchPayload });
+        await enqueueOfflineOp("REPLACE_INCIDENT_TYPES", { submissionId: id, items: incidentItems });
+        await enqueueOfflineOp("REPLACE_ACTIONS", {
+          submissionId: id,
+          immediate: immediateActions,
+          follow_up: followUpActions,
+        });
+        Alert.alert("Saved Offline", "Local draft saved and queued for automatic sync.");
+        triggerOfflineSyncNow().catch(() => {});
+      } catch (err: any) {
+        Alert.alert("Save failed", String(err?.message ?? err));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
-      await patchSubmission(token, id, {
-        report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: n(normalizedForm.route), post_mile: n(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
-        latitude: f(normalizedForm.latitude, "Latitude"), longitude: f(normalizedForm.longitude, "Longitude"),
-        distribution_code: n(normalizedForm.distribution_code), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
-        pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
-        failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout),
-        distribution_advancing: ynToBool(normalizedForm.distribution_advancing), distribution_retrogressive: ynToBool(normalizedForm.distribution_retrogressive), distribution_enlarging: ynToBool(normalizedForm.distribution_enlarging), distribution_widening: ynToBool(normalizedForm.distribution_widening), distribution_moving: ynToBool(normalizedForm.distribution_moving), distribution_confined: ynToBool(normalizedForm.distribution_confined),
-        material_rock: ynToBool(normalizedForm.material_rock), material_soil: ynToBool(normalizedForm.material_soil), material_bedding: ynToBool(normalizedForm.material_bedding), material_joints: ynToBool(normalizedForm.material_joints), material_fractures: ynToBool(normalizedForm.material_fractures),
-        est_soil_pct: f(normalizedForm.est_soil_pct, "Estimated soil %"), est_clay_pct: f(normalizedForm.est_clay_pct, "Estimated clay %"), est_silt_pct: f(normalizedForm.est_silt_pct, "Estimated silt %"), est_sand_pct: f(normalizedForm.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(normalizedForm.est_gravel_pct, "Estimated gravel %"),
-        water_dry: ynToBool(normalizedForm.water_dry), water_moist: ynToBool(normalizedForm.water_moist), water_wet: ynToBool(normalizedForm.water_wet), water_flowing: ynToBool(normalizedForm.water_flowing), water_seep: ynToBool(normalizedForm.water_seep), water_spring: ynToBool(normalizedForm.water_spring),
-        vegetation_trees: n(normalizedForm.vegetation_trees), vegetation_bushes_shrubs: n(normalizedForm.vegetation_bushes_shrubs), vegetation_groundcover: n(normalizedForm.vegetation_groundcover),
-        drainage_clogged_inlet: ynToBool(normalizedForm.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(normalizedForm.drainage_compromised_drains), drainage_surface_runoff: ynToBool(normalizedForm.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(normalizedForm.drainage_torrent_surge_flood),
-        impact_impacted_adj_utilities: ynToBool(normalizedForm.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(normalizedForm.impact_maybe_adj_utilities), impact_adj_utilities: n(normalizedForm.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(normalizedForm.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(normalizedForm.impact_maybe_adj_properties), impact_adj_properties: n(normalizedForm.impact_adj_properties), impact_impacted_adj_structure: ynToBool(normalizedForm.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(normalizedForm.impact_maybe_adj_structure), impact_adj_structure: n(normalizedForm.impact_adj_structure),
-        measure_slope_height_ft: f(normalizedForm.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(normalizedForm.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(normalizedForm.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(normalizedForm.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(normalizedForm.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(normalizedForm.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(normalizedForm.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(normalizedForm.measure_roadway_width_ft, "Roadway width"),
-        record_of_event_notes: n(normalizedForm.record_of_event_notes), maintenance_history_notes: n(normalizedForm.maintenance_history_notes), geotechnical_assessment_notes: n(normalizedForm.geotechnical_assessment_notes), recommendations_notes: n(normalizedForm.recommendations_notes), sketchpad_notes: n(normalizedForm.sketchpad_notes),
-        observations_notes: n(normalizedForm.observations_notes), geometry_json: geometry,
-      });
+      await patchSubmission(token, id, patchPayload);
       // Source of truth is the visible form chips; keep API payload derived from form.
-      const incidentItems = incidentTypesFromFormState(normalizedForm);
       await replaceIncidentTypes(token, id, incidentItems);
       await replaceActions(token, id, { immediate: immediateActions, follow_up: followUpActions });
       Alert.alert("Saved", "Draft saved.");
@@ -1081,7 +1214,20 @@ export default function SubmissionDetailScreen() {
       await load();
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
-      Alert.alert("Save failed", err?.message ?? "Unable to save");
+      const msg = String(err?.message ?? "Unable to save");
+      if (isLikelyOfflineError(msg)) {
+        await enqueueOfflineOp("PATCH_SUBMISSION", { submissionId: id, patch: patchPayload });
+        await enqueueOfflineOp("REPLACE_INCIDENT_TYPES", { submissionId: id, items: incidentItems });
+        await enqueueOfflineOp("REPLACE_ACTIONS", {
+          submissionId: id,
+          immediate: immediateActions,
+          follow_up: followUpActions,
+        });
+        Alert.alert("Saved Offline", "Changes were stored locally and will sync automatically once connectivity is back.");
+        triggerOfflineSyncNow().catch(() => {});
+      } else {
+        Alert.alert("Save failed", msg);
+      }
     } finally { setBusy(false); }
   }, [
     token,
@@ -1091,6 +1237,8 @@ export default function SubmissionDetailScreen() {
     incidentTypesFromFormState,
     immediateActions,
     followUpActions,
+    districtContacts,
+    isLocalId,
     clearDraftLocalCache,
     load,
   ]);
@@ -1099,6 +1247,13 @@ export default function SubmissionDetailScreen() {
     if (!token || !id) return;
     if (!validateRequiredFields()) return;
     if (!validateSoilPercentForSubmit()) return;
+    if (isLocalId) {
+      await saveDraft();
+      await enqueueOfflineOp("SUBMIT_SUBMISSION", { submissionId: id, comment: null });
+      Alert.alert("Queued For Submit", "This local draft will be submitted automatically when connectivity returns.");
+      triggerOfflineSyncNow().catch(() => {});
+      return;
+    }
     setBusy(true);
     try {
       await submitSubmission(token, id);
@@ -1109,6 +1264,12 @@ export default function SubmissionDetailScreen() {
     catch (err: any) {
       if (isSessionExpiredError(err)) return;
       const raw = String(err?.message ?? "Unable to submit");
+      if (isLikelyOfflineError(raw)) {
+        await enqueueOfflineOp("SUBMIT_SUBMISSION", { submissionId: id, comment: null });
+        Alert.alert("Queued For Submit", "Submission will be automatically sent when network connectivity returns.");
+        triggerOfflineSyncNow().catch(() => {});
+        return;
+      }
       let detail = raw;
       const jsonMatch = raw.match(/:\s*(\{.*\})\s*$/);
       if (jsonMatch?.[1]) {
@@ -1192,6 +1353,19 @@ export default function SubmissionDetailScreen() {
     }
     const kind = inferAttachmentKind(guessedName, mimeType);
 
+    if (isLocalId) {
+      await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
+      await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
+        submissionId: id,
+        file: { uri, name: guessedName, type: mimeType },
+        sectionKey: sectionKey ?? null,
+        kind,
+      });
+      Alert.alert("Upload Queued", "Attachment saved locally and will upload after sync.");
+      triggerOfflineSyncNow().catch(() => {});
+      return;
+    }
+
     setBusy(true);
     try {
       await uploadSubmissionAttachment(
@@ -1203,10 +1377,22 @@ export default function SubmissionDetailScreen() {
       await load();
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
-      Alert.alert(
-        "Upload failed",
-        `${err?.message ?? "Unable to upload"}\n\nTip: For physical devices, set EXPO_PUBLIC_API_URL to your computer LAN IP (e.g. http://192.168.x.x:8000).`
-      );
+      const msg = String(err?.message ?? "Unable to upload");
+      if (isLikelyOfflineError(msg)) {
+        await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
+          submissionId: id,
+          file: { uri, name: guessedName, type: mimeType },
+          sectionKey: sectionKey ?? null,
+          kind,
+        });
+        Alert.alert("Upload Queued", "Attachment was queued and will upload automatically when connectivity is restored.");
+        triggerOfflineSyncNow().catch(() => {});
+      } else {
+        Alert.alert(
+          "Upload failed",
+          `${msg}\n\nTip: For physical devices, set EXPO_PUBLIC_API_URL to your computer LAN IP (e.g. http://192.168.x.x:8000).`
+        );
+      }
     }
     finally { setBusy(false); }
   }
@@ -1242,6 +1428,19 @@ export default function SubmissionDetailScreen() {
       const mimeType = String(asset.mimeType || "application/octet-stream");
       const kind = inferAttachmentKind(name, mimeType);
 
+      if (isLocalId) {
+        await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
+        await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
+          submissionId: id,
+          file: { uri, name, type: mimeType },
+          sectionKey: sectionKey ?? null,
+          kind,
+        });
+        Alert.alert("Upload Queued", "File saved locally and will upload after sync.");
+        triggerOfflineSyncNow().catch(() => {});
+        return;
+      }
+
       setBusy(true);
       try {
         await uploadSubmissionAttachment(
@@ -1253,7 +1452,19 @@ export default function SubmissionDetailScreen() {
         await load();
       } catch (err: any) {
         if (isSessionExpiredError(err)) return;
-        Alert.alert("Upload failed", String(err?.message ?? err ?? "Unable to upload selected file."));
+        const msg = String(err?.message ?? err ?? "Unable to upload selected file.");
+        if (isLikelyOfflineError(msg)) {
+          await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
+            submissionId: id,
+            file: { uri, name, type: mimeType },
+            sectionKey: sectionKey ?? null,
+            kind,
+          });
+          Alert.alert("Upload Queued", "File was queued and will upload automatically when connectivity is restored.");
+          triggerOfflineSyncNow().catch(() => {});
+        } else {
+          Alert.alert("Upload failed", msg);
+        }
       } finally {
         setBusy(false);
       }
