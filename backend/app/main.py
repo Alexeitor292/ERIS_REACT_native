@@ -6,28 +6,46 @@ from io import BytesIO
 from pathlib import Path as FilePath
 from urllib.parse import urlencode
 from urllib.request import urlopen
-from typing import Literal
 
 from fastapi import FastAPI, Depends, HTTPException, Path, status, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from reportlab.pdfgen import canvas
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ContentStream
 
-from .db import SessionLocal, get_db
+from .db import get_db
 from .config import settings
-from .auth import verify_password, create_access_token, decode_token
+from .auth import decode_token
 from .deps import get_current_user, require_roles
 from .storage import ensure_bucket, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes
-from .seed import seed_admin
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
+from .routes.auth import router as auth_router
+from .routes.gisa import router as gisa_router
 from .permissions import is_admin, is_reviewer, is_field_worker, require_is_owner_or_admin
+from .schemas.common import (
+    GeometryResponse,
+    GeometryUpsert,
+    GisaDraftPatch,
+    ReplaceActions,
+    ReplaceIncidentTypes,
+    ReviewAction,
+    ShareRequest,
+    SubmissionCreate,
+    SubmissionPermissionsReplace,
+    SubmissionTitlePatch,
+    WorkflowAction,
+)
+from .services.gisa_validation import (
+    validate_action_code_group,
+    validate_distribution_code,
+    validate_highway_status_code,
+    validate_incident_type_codes,
+)
 
 
 
@@ -38,6 +56,8 @@ GENERIC_SERVER_ERROR_DETAIL = "Internal server error"
 app.include_router(dev_router)
 app.include_router(admin_users_router)
 app.include_router(photos_router)
+app.include_router(auth_router)
+app.include_router(gisa_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -82,129 +102,6 @@ def startup():
             logger.warning("MinIO not available during startup: %s", exc)
         else:
             raise
-
-    # Seed admin only if ENV=dev and SEED_ADMIN=true
-    db = SessionLocal()
-    try:
-        db.execute(text("""
-            CREATE TABLE IF NOT EXISTS submission_editors (
-                submission_id BIGINT NOT NULL,
-                user_id BIGINT NOT NULL,
-                granted_by_user_id BIGINT NOT NULL,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (submission_id, user_id),
-                CONSTRAINT fk_edit_submission FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
-                CONSTRAINT fk_edit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                CONSTRAINT fk_edit_granted_by FOREIGN KEY (granted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
-                INDEX idx_edit_user (user_id)
-            ) ENGINE=InnoDB
-        """))
-        db.commit()
-        cleanup_columns = [
-            "DROP COLUMN IF EXISTS team_member1_last_name",
-            "DROP COLUMN IF EXISTS team_member1_first_name",
-            "DROP COLUMN IF EXISTS team_member1_s_number",
-            "DROP COLUMN IF EXISTS team_member2_last_name",
-            "DROP COLUMN IF EXISTS team_member2_first_name",
-            "DROP COLUMN IF EXISTS team_member2_s_number",
-            "DROP COLUMN IF EXISTS contact_phone_primary",
-            "DROP COLUMN IF EXISTS contact_phone_secondary",
-        ]
-        for col_sql in cleanup_columns:
-            db.execute(text(f"ALTER TABLE submission_gisa {col_sql}"))
-        db.execute(text("""
-            ALTER TABLE submission_gisa
-            MODIFY COLUMN district_contact TEXT NULL
-        """))
-        db.commit()
-        # Backfill/upgrade older DBs with explicit GISA paper-form columns.
-        upgrade_columns = [
-            "ADD COLUMN IF NOT EXISTS failure_rock_fall TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_topple TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_slide TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_spread TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_flow TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_compound TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_erosion TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_surficial_failure TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_scoured_toe TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS failure_washout TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS distribution_advancing TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS distribution_retrogressive TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS distribution_enlarging TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS distribution_widening TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS distribution_moving TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS distribution_confined TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS material_rock TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS material_soil TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS material_bedding TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS material_joints TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS material_fractures TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS est_soil_pct DECIMAL(5,2) NULL",
-            "ADD COLUMN IF NOT EXISTS est_clay_pct DECIMAL(5,2) NULL",
-            "ADD COLUMN IF NOT EXISTS est_silt_pct DECIMAL(5,2) NULL",
-            "ADD COLUMN IF NOT EXISTS est_sand_pct DECIMAL(5,2) NULL",
-            "ADD COLUMN IF NOT EXISTS est_gravel_pct DECIMAL(5,2) NULL",
-            "ADD COLUMN IF NOT EXISTS water_dry TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS water_moist TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS water_wet TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS water_flowing TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS water_seep TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS water_spring TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS vegetation_trees VARCHAR(255) NULL",
-            "ADD COLUMN IF NOT EXISTS vegetation_bushes_shrubs VARCHAR(255) NULL",
-            "ADD COLUMN IF NOT EXISTS vegetation_groundcover VARCHAR(255) NULL",
-            "ADD COLUMN IF NOT EXISTS drainage_clogged_inlet TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS drainage_compromised_drains TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS drainage_surface_runoff TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS drainage_torrent_surge_flood TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS impact_impacted_adj_utilities TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS impact_maybe_adj_utilities TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS impact_adj_utilities VARCHAR(255) NULL",
-            "ADD COLUMN IF NOT EXISTS impact_impacted_adj_properties TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS impact_maybe_adj_properties TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS impact_adj_properties VARCHAR(255) NULL",
-            "ADD COLUMN IF NOT EXISTS impact_impacted_adj_structure TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS impact_maybe_adj_structure TINYINT NOT NULL DEFAULT 0",
-            "ADD COLUMN IF NOT EXISTS impact_adj_structure VARCHAR(255) NULL",
-            "ADD COLUMN IF NOT EXISTS open_highway_traffic_lanes_count INT NULL",
-            "ADD COLUMN IF NOT EXISTS measure_slope_height_ft DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS measure_original_slope_deg DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS measure_landslide_width_ft DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS measure_landslide_length_ft DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS measure_main_scarp_height_ft DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS measure_landslide_slope_deg DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS measure_roadway_length_ft DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS measure_roadway_width_ft DECIMAL(10,2) NULL",
-            "ADD COLUMN IF NOT EXISTS record_of_event_notes TEXT NULL",
-            "ADD COLUMN IF NOT EXISTS maintenance_history_notes TEXT NULL",
-            "ADD COLUMN IF NOT EXISTS geotechnical_assessment_notes TEXT NULL",
-            "ADD COLUMN IF NOT EXISTS recommendations_notes TEXT NULL",
-            "ADD COLUMN IF NOT EXISTS sketchpad_notes TEXT NULL",
-        ]
-        for col_sql in upgrade_columns:
-            db.execute(text(f"ALTER TABLE submission_gisa {col_sql}"))
-        db.execute(text("""
-            ALTER TABLE attachment_links
-            ADD COLUMN IF NOT EXISTS section_key VARCHAR(64) NULL
-        """))
-        db.execute(text("""
-            INSERT IGNORE INTO gisa_action_lut (code, label, action_group, sort_order) VALUES
-            ('DEWATER_HORIZONTAL_DRAINS','Dewater with horizontal drains','IMMEDIATE',105),
-            ('PLACE_ROCK_SLOPE_PROTECTION','Place rock slope protection (ref. manual)','IMMEDIATE',130),
-            ('RECONSTRUCT_SLOPE_GEOSYNTHETICS','Reconstruct slope with geosynthetics','FOLLOW_UP',25),
-            ('REPAIR_CULVERT_DRAINAGE_PIPE','Repair culvert/drainage pipe','FOLLOW_UP',28),
-            ('SURVEY_SITE_DIST_SURVEY','Survey site - district survey','FOLLOW_UP',35)
-        """))
-        db.commit()
-        seed_admin(db)
-    except Exception as exc:
-        if settings.ENV.lower() == "dev":
-            logger.warning("Database not available for seeding: %s", exc)
-        else:
-            raise
-    finally:
-        db.close()
 
 
 # ----------------------------
@@ -1771,163 +1668,6 @@ def transition_submission_concurrency_safe(
     return {"submission_id": submission_id, "from_status": from_status, "to_status": to_status}
 
 
-# ----------------------------
-# Schemas
-# ----------------------------
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-class SubmissionCreate(BaseModel):
-    title: str | None = Field(default=None, max_length=255)
-
-class WorkflowAction(BaseModel):
-    comment: str | None = None
-
-class ReviewAction(BaseModel):
-    decision: Literal["APPROVE", "REJECT"]
-    comment: str | None = None
-
-class ShareRequest(BaseModel):
-    user_id: int = Field(..., ge=1)
-
-class SubmissionPermissionsReplace(BaseModel):
-    reader_user_ids: list[int] = []
-    editor_user_ids: list[int] = []
-
-class SubmissionTitlePatch(BaseModel):
-    title: str | None = Field(default=None, max_length=255)
-
-class GisaDraftPatch(BaseModel):
-    report_date: str | None = None  # YYYY-MM-DD (keep as string to avoid timezone weirdness)
-    district: str | None = None
-    county: str | None = None
-    route: str | None = None
-    post_mile: str | None = None
-    ea: str | None = None
-    project_id: str | None = None
-    date_incident_reported: str | None = None
-    district_contact: str | None = None
-
-    latitude: float | None = None
-    longitude: float | None = None
-
-    distribution_code: str | None = None
-    highway_status_code: str | None = None
-    lanes_closed_count: int | None = None
-    open_highway_traffic_lanes_count: int | None = None
-
-    pavement_ground_cracks: bool | None = None
-    crack_length_ft: float | None = None
-    crack_horizontal_in: float | None = None
-    crack_vertical_in: float | None = None
-    crack_depth_in: float | None = None
-    settlement_in: float | None = None
-    bulge_in: float | None = None
-    indented_by_rocks: bool | None = None
-
-    failure_rock_fall: bool | None = None
-    failure_topple: bool | None = None
-    failure_slide: bool | None = None
-    failure_spread: bool | None = None
-    failure_flow: bool | None = None
-    failure_compound: bool | None = None
-    failure_erosion: bool | None = None
-    failure_surficial_failure: bool | None = None
-    failure_scoured_toe: bool | None = None
-    failure_washout: bool | None = None
-
-    distribution_advancing: bool | None = None
-    distribution_retrogressive: bool | None = None
-    distribution_enlarging: bool | None = None
-    distribution_widening: bool | None = None
-    distribution_moving: bool | None = None
-    distribution_confined: bool | None = None
-
-    material_rock: bool | None = None
-    material_soil: bool | None = None
-    material_bedding: bool | None = None
-    material_joints: bool | None = None
-    material_fractures: bool | None = None
-
-    est_soil_pct: float | None = None
-    est_clay_pct: float | None = None
-    est_silt_pct: float | None = None
-    est_sand_pct: float | None = None
-    est_gravel_pct: float | None = None
-
-    water_dry: bool | None = None
-    water_moist: bool | None = None
-    water_wet: bool | None = None
-    water_flowing: bool | None = None
-    water_seep: bool | None = None
-    water_spring: bool | None = None
-
-    vegetation_trees: str | None = None
-    vegetation_bushes_shrubs: str | None = None
-    vegetation_groundcover: str | None = None
-
-    drainage_clogged_inlet: bool | None = None
-    drainage_compromised_drains: bool | None = None
-    drainage_surface_runoff: bool | None = None
-    drainage_torrent_surge_flood: bool | None = None
-
-    impact_impacted_adj_utilities: bool | None = None
-    impact_maybe_adj_utilities: bool | None = None
-    impact_adj_utilities: str | None = None
-    impact_impacted_adj_properties: bool | None = None
-    impact_maybe_adj_properties: bool | None = None
-    impact_adj_properties: str | None = None
-    impact_impacted_adj_structure: bool | None = None
-    impact_maybe_adj_structure: bool | None = None
-    impact_adj_structure: str | None = None
-
-    measure_slope_height_ft: float | None = None
-    measure_original_slope_deg: float | None = None
-    measure_landslide_width_ft: float | None = None
-    measure_landslide_length_ft: float | None = None
-    measure_main_scarp_height_ft: float | None = None
-    measure_landslide_slope_deg: float | None = None
-    measure_roadway_length_ft: float | None = None
-    measure_roadway_width_ft: float | None = None
-
-    record_of_event_notes: str | None = None
-    maintenance_history_notes: str | None = None
-    geotechnical_assessment_notes: str | None = None
-    recommendations_notes: str | None = None
-    sketchpad_notes: str | None = None
-    observations_notes: str | None = None
-    geometry_json: dict | None = None
-
-class ReplaceIncidentTypes(BaseModel):
-    items: list[str]
-
-class ReplaceActions(BaseModel):
-    immediate: list[str] = []
-    follow_up: list[str] = []
-
-class GeometryUpsert(BaseModel):
-    geometry: dict = Field(..., description="GeoJSON geometry object (Polygon/MultiPolygon/etc)")
-    srid: int = Field(default=4326, ge=1, le=999999)
-    source: str = Field(default="MOBILE_ARCGIS", max_length=64)
-
-class GeometryResponse(BaseModel):
-    submission_id: int
-    geometry: dict | None
-    srid: int | None = 4326
-    source: str | None = None
-
-
-# ----------------------------
-# Health
-# ----------------------------
-
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-
 @app.get("/geo/enrich-point")
 def enrich_point(
     lat: float,
@@ -1953,89 +1693,6 @@ def enrich_point(
             "requested_by_user_id": user["id"],
         },
     }
-
-
-@app.get("/gisa/lookups")
-def get_gisa_lookups(
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
-    distribution = db.execute(text("""
-        SELECT code, label, sort_order
-        FROM gisa_distribution_lut
-        ORDER BY sort_order ASC, code ASC
-    """)).mappings().all()
-
-    highway_status = db.execute(text("""
-        SELECT code, label, sort_order
-        FROM gisa_highway_status_lut
-        ORDER BY sort_order ASC, code ASC
-    """)).mappings().all()
-
-    incident_types = db.execute(text("""
-        SELECT code, label, sort_order
-        FROM gisa_incident_type_lut
-        ORDER BY sort_order ASC, code ASC
-    """)).mappings().all()
-
-    action_rows = db.execute(text("""
-        SELECT code, label, action_group, sort_order
-        FROM gisa_action_lut
-        ORDER BY action_group ASC, sort_order ASC, code ASC
-    """)).mappings().all()
-
-    immediate: list[dict] = []
-    follow_up: list[dict] = []
-    for row in action_rows:
-        item = dict(row)
-        if str(item.get("action_group", "")).upper() == "IMMEDIATE":
-            immediate.append(item)
-        else:
-            follow_up.append(item)
-
-    return {
-        "distribution": [dict(r) for r in distribution],
-        "highway_status": [dict(r) for r in highway_status],
-        "incident_types": [dict(r) for r in incident_types],
-        "actions": {
-            "immediate": immediate,
-            "follow_up": follow_up,
-        },
-        "requested_by_user_id": user["id"],
-    }
-
-
-# ----------------------------
-# Auth
-# ----------------------------
-
-@app.post("/auth/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    row = db.execute(text("""
-        SELECT id, email, password_hash, is_active
-        FROM users
-        WHERE email = :email
-        LIMIT 1
-    """), {"email": payload.email.strip().lower()}).mappings().first()
-
-    if not row or int(row["is_active"]) != 1:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    if not verify_password(payload.password, row["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    token = create_access_token(
-        subject=str(int(row["id"])),
-        secret=settings.JWT_SECRET,
-        alg=settings.JWT_ALG,
-        expires_minutes=settings.JWT_EXPIRES_MINUTES,
-    )
-    return {"access_token": token, "token_type": "bearer"}
-
-@app.get("/auth/me")
-def me(user=Depends(get_current_user)):
-    return user
-
 
 # ----------------------------
 # Submissions
@@ -2448,16 +2105,10 @@ def patch_gisa(
     if "geometry_json" in provided and provided["geometry_json"] is not None:
         provided["geometry_json"] = json.dumps(provided["geometry_json"])
 
-    # Validate FK-backed codes if provided
-    def ensure_exists(table: str, code: str):
-        ok = db.execute(text(f"SELECT 1 FROM {table} WHERE code=:c LIMIT 1"), {"c": code}).scalar()
-        if not ok:
-            raise HTTPException(status_code=400, detail=f"Invalid code: {code}")
-
     if provided.get("distribution_code"):
-        ensure_exists("gisa_distribution_lut", provided["distribution_code"])
+        validate_distribution_code(provided["distribution_code"])
     if provided.get("highway_status_code"):
-        ensure_exists("gisa_highway_status_lut", provided["highway_status_code"])
+        validate_highway_status_code(provided["highway_status_code"])
 
     try:
         exists = db.execute(text("""
@@ -2507,11 +2158,7 @@ def replace_incident_types(
     if len(items) > 1:
         raise HTTPException(status_code=400, detail="Incident Type allows only one selection")
 
-    # Validate codes exist
-    for code in items:
-        ok = db.execute(text("SELECT 1 FROM gisa_incident_type_lut WHERE code=:c LIMIT 1"), {"c": code}).scalar()
-        if not ok:
-            raise HTTPException(status_code=400, detail=f"Invalid incident type: {code}")
+    validate_incident_type_codes(items)
     try:
         db.execute(text("DELETE FROM submission_gisa_incident_types WHERE submission_id=:sid"), {"sid": submission_id})
         for code in items:
@@ -2538,11 +2185,7 @@ def replace_actions(
         raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
     def validate_action(code: str, group: str):
-        row = db.execute(text("""
-            SELECT 1 FROM gisa_action_lut WHERE code=:c LIMIT 1
-        """), {"c": code}).scalar()
-        if not row:
-            raise HTTPException(status_code=400, detail=f"Invalid action: {code}")
+        validate_action_code_group(code, group)
 
     for c in payload.immediate:
         validate_action(c, "IMMEDIATE")

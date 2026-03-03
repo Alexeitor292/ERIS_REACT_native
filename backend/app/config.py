@@ -56,11 +56,6 @@ class Settings(BaseSettings):
     POSTMILE_WHERE: str = Field(default="1=1")
     POSTMILE_SEARCH_DISTANCE_METERS: int = Field(default=120)
 
-    # Dev-only seeding
-    SEED_ADMIN: bool = Field(default=False)
-    SEED_ADMIN_EMAIL: str = Field(default="admin@local")
-    SEED_ADMIN_PASSWORD: str | None = Field(default=None)
-
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 

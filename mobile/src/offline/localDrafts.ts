@@ -38,7 +38,8 @@ type LocalDraftIndexEntry = {
 };
 
 function localDraftKey(localId: string): string {
-  return `offline_local_draft:${localId}`;
+  const safe = String(localId || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `offline_local_draft_${safe}`;
 }
 
 function makeLocalId(): string {
@@ -90,7 +91,24 @@ export function isLocalDraftId(id: string): boolean {
 }
 
 export async function listLocalDrafts(): Promise<LocalDraftIndexEntry[]> {
-  return readIndex();
+  const rows = await readIndex();
+  if (rows.length === 0) return rows;
+
+  const valid: LocalDraftIndexEntry[] = [];
+  let changed = false;
+  for (const row of rows) {
+    try {
+      const payload = await SecureStore.getItemAsync(localDraftKey(row.localId));
+      if (payload) valid.push(row);
+      else changed = true;
+    } catch {
+      changed = true;
+    }
+  }
+  if (changed) {
+    await writeIndex(valid);
+  }
+  return valid;
 }
 
 export async function getLocalDraft(localId: string): Promise<LocalDraftRecord | null> {

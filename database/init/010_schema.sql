@@ -283,11 +283,6 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     CONSTRAINT fk_gisa_updated_by
       FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
 
-    CONSTRAINT fk_gisa_distribution
-      FOREIGN KEY (distribution_code) REFERENCES gisa_distribution_lut(code) ON DELETE RESTRICT,
-    CONSTRAINT fk_gisa_highway_status
-      FOREIGN KEY (highway_status_code) REFERENCES gisa_highway_status_lut(code) ON DELETE RESTRICT,
-
     INDEX idx_gisa_district (district),
     INDEX idx_gisa_county (county),
     INDEX idx_gisa_route (route),
@@ -301,8 +296,6 @@ CREATE TABLE IF NOT EXISTS submission_gisa_incident_types (
     PRIMARY KEY (submission_id, incident_type_code),
     CONSTRAINT fk_gisa_inc_submission
       FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_gisa_inc_lut
-      FOREIGN KEY (incident_type_code) REFERENCES gisa_incident_type_lut(code) ON DELETE RESTRICT,
     INDEX idx_gisa_inc_type (incident_type_code)
 ) ENGINE=InnoDB;
 
@@ -314,66 +307,10 @@ CREATE TABLE IF NOT EXISTS submission_gisa_actions (
     PRIMARY KEY (submission_id, action_group, action_code),
     CONSTRAINT fk_gisa_actions_submission
       FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_gisa_actions_lut
-      FOREIGN KEY (action_code) REFERENCES gisa_action_lut(code) ON DELETE RESTRICT,
     INDEX idx_gisa_actions_group (action_group),
     INDEX idx_gisa_actions_code (action_code)
 ) ENGINE=InnoDB;
 
 -- ============================================================
--- SEED LOOKUP VALUES (GISA001 parity)
+-- LOOKUP VALUES ARE SERVED BY BACKEND CODE
 -- ============================================================
-
-INSERT IGNORE INTO gisa_incident_type_lut (code, label, sort_order) VALUES
-('ROCK_FALL','Rock Fall',10),
-('TOPPLE','Topple',20),
-('SLIDE','Slide',30),
-('SPREAD','Spread',40),
-('FLOW','Flow',50),
-('COMPOUND','Compound',60),
-('EROSION','Erosion',70),
-('SURFICIAL_SLOUGHING','Surficial Sloughing',80),
-('SCOURED_TOE','Scoured Toe',90),
-('WASHOUT','Washout',100);
-
-INSERT IGNORE INTO gisa_distribution_lut (code, label, sort_order) VALUES
-('ADVANCING','Advancing',10),
-('RETROGRESSING','Retrogressing',20),
-('ENLARGING','Enlarging',30),
-('WIDENING','Widening',40),
-('MOVING','Moving',50),
-('CONFINED','Confined',60);
-
-INSERT IGNORE INTO gisa_highway_status_lut (code, label, sort_order) VALUES
-('OPEN','Open',10),
-('SHOULDER_CLOSED','Shoulder Closed',20),
-('LANES_CLOSED','Lane(s) Closed',30),
-('ONE_WAY_CLOSED','One-way Closed',40),
-('TWO_WAY_CLOSED','Two-way Closed',50);
-
--- Actions: keep codes stable for analytics
-INSERT IGNORE INTO gisa_action_lut (code, label, action_group, sort_order) VALUES
-('OPEN_HIGHWAY_TRAFFIC','Open highway traffic','IMMEDIATE',10),
-('CLOSE_HIGHWAY_SHOULDER','Close highway shoulder','IMMEDIATE',20),
-('CLOSE_ONE_DIRECTION','Close highway one direction','IMMEDIATE',30),
-('CLOSE_BOTH_DIRECTIONS','Close highway both directions','IMMEDIATE',40),
-('REMOVE_DEBRIS','Remove landslide debris','IMMEDIATE',50),
-('PLACE_K_RAIL','Place K-rail or fence','IMMEDIATE',60),
-('COVER_SLOPE_PLASTIC','Cover slope with plastic','IMMEDIATE',70),
-('DIVERT_SURFACE_WATER','Divert surface water','IMMEDIATE',80),
-('REMOVE_CULVERT_BLOCKAGE','Remove culvert blockage','IMMEDIATE',90),
-('DEWATER','Dewater','IMMEDIATE',100),
-('DEWATER_HORIZONTAL_DRAINS','Dewater with horizontal drains','IMMEDIATE',105),
-('TEMP_SHORING','Construct temporary shoring','IMMEDIATE',110),
-('BUTTRESS_TOE','Buttress toe','IMMEDIATE',120),
-('PLACE_ROCK_SLOPE_PROTECTION','Place rock slope protection (ref. manual)','IMMEDIATE',130),
-
-('ROUTINE_VISUAL_MONITOR','Routine visual monitor','FOLLOW_UP',10),
-('RECONSTRUCT_SLOPE','Reconstruct slope','FOLLOW_UP',20),
-('RECONSTRUCT_SLOPE_GEOSYNTHETICS','Reconstruct slope with geosynthetics','FOLLOW_UP',25),
-('REPAIR_CULVERT_DRAINAGE_PIPE','Repair culvert/drainage pipe','FOLLOW_UP',28),
-('EROSION_CONTROL','Install erosion control','FOLLOW_UP',30),
-('SURVEY_SITE_DIST_SURVEY','Survey site - district survey','FOLLOW_UP',35),
-('GEOLOGIC_MAPPING','Perform geologic mapping','FOLLOW_UP',40),
-('SUBSURFACE_EXPLORATION','Perform subsurface exploration','FOLLOW_UP',50),
-('DETAILED_DESIGN_PLANS','Detailed design & plans','FOLLOW_UP',60);

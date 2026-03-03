@@ -12,10 +12,10 @@ import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmission
 import { enqueueOfflineOp } from "../../../src/offline/queue";
 import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
 import {
-  createLocalDraft,
   deleteLocalDraft,
   getLocalDraft,
   isLocalDraftId,
+  listLocalDrafts,
   saveLocalDraft,
 } from "../../../src/offline/localDrafts";
 import { readLookupsCache, writeLookupsCache } from "../../../src/offline/lookupsCache";
@@ -266,7 +266,8 @@ function serializeDistrictContacts(contacts: DistrictContact[]): string {
 }
 
 function draftCacheKey(submissionId: string): string {
-  return `draft_local_cache:${submissionId}`;
+  const safe = String(submissionId || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `draft_local_cache_${safe}`;
 }
 
 async function getDraftCache(key: string): Promise<string | null> {
@@ -568,7 +569,12 @@ function DropdownBlock({
 }
 
 export default function SubmissionDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const id = useMemo(() => {
+    const raw = params.id;
+    if (Array.isArray(raw)) return String(raw[0] ?? "");
+    return String(raw ?? "");
+  }, [params.id]);
   const isLocalId = useMemo(() => isLocalDraftId(String(id ?? "")), [id]);
   const navigation = useNavigation<any>();
   const pathname = usePathname();
@@ -741,7 +747,12 @@ export default function SubmissionDetailScreen() {
       if (isLocalId) {
         const local = await getLocalDraft(id);
         if (!local) {
-          Alert.alert("Draft unavailable", "Local draft was not found on this device.");
+          const knownLocalDrafts = await listLocalDrafts().catch(() => []);
+          const ids = knownLocalDrafts.map((x) => x.localId).join(", ");
+          Alert.alert(
+            "Draft unavailable",
+            `Local draft was not found on this device.\n\nid=${id}\nindex=${ids || "(none)"}`
+          );
           router.replace("/(tabs)/drafts");
           return;
         }
