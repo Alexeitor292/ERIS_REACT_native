@@ -8,6 +8,7 @@ import { getSubmission, patchSubmission } from "../../../src/api/submissions";
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { getMapPreloadBySubmission } from "../../../src/offline/mapPreload";
+import { readCachedArcgisRuntimeConfig } from "../../../src/offline/arcgisRuntimeConfig";
 
 type Geo = Record<string, unknown> | null;
 type Me = { id: number; roles: string[] };
@@ -140,6 +141,15 @@ export default function MapScreen() {
       const bridge = await getArcGisBridge();
       if (!bridge?.isArcGisNativeAvailable?.()) {
         throw new Error("ArcGIS native module unavailable in this build.");
+      }
+      const runtimeConfig = await readCachedArcgisRuntimeConfig().catch(() => null);
+      if (runtimeConfig?.runtime_enabled) {
+        if (runtimeConfig.api_key && bridge.setApiKey) {
+          await bridge.setApiKey(runtimeConfig.api_key).catch(() => {});
+        }
+        if (runtimeConfig.license_key && bridge.setLicenseKey) {
+          await bridge.setLicenseKey(runtimeConfig.license_key).catch(() => {});
+        }
       }
       const numericSubmissionId = Number(submissionId);
       if (!Number.isNaN(numericSubmissionId) && numericSubmissionId > 0) {

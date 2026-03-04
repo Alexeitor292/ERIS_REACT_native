@@ -12,6 +12,7 @@ import { clearToken, getToken, getTokenExpiryMs, setSessionExpiredNotice } from 
 import AnimatedSplash from "@/src/ui/AnimatedSplash";
 import { UiSettingsProvider, useUiSettings } from "@/src/ui/UiSettingsContext";
 import { startOfflineSyncLoop, stopOfflineSyncLoop } from "@/src/offline/syncLoop";
+import { syncArcgisRuntimeConfig } from "@/src/offline/arcgisRuntimeConfig";
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -91,6 +92,31 @@ export default function RootLayout() {
     startOfflineSyncLoop(12000);
     return () => {
       stopOfflineSyncLoop();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncRuntime = async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+        await syncArcgisRuntimeConfig(token);
+      } catch {
+        // Non-blocking: app can continue with existing cached config.
+      }
+    };
+
+    syncRuntime().catch(() => {});
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        syncRuntime().catch(() => {});
+      }
+    });
+    return () => {
+      cancelled = true;
+      sub.remove();
     };
   }, []);
 

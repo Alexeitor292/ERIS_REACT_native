@@ -1,10 +1,12 @@
 #import "ArcGisModule.h"
 
+#import <ArcGIS/ArcGIS.h>
 #import <React/RCTUtils.h>
 #import <UIKit/UIKit.h>
 
 #import "ArcGisSketchStore.h"
 #import "ArcGisSketchViewController.h"
+#import "ArcGisMissionCenterViewController.h"
 
 @implementation ArcGisModule
 
@@ -19,6 +21,35 @@ RCT_REMAP_METHOD(loadMmpk,
                  resolverLoadMmpk:(RCTPromiseResolveBlock)resolve
                  rejecterLoadMmpk:(RCTPromiseRejectBlock)reject) {
   [ArcGisSketchStore setMmpkPath:path];
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(setApiKey,
+                 setApiKey:(NSString *)apiKey
+                 resolverSetApiKey:(RCTPromiseResolveBlock)resolve
+                 rejecterSetApiKey:(RCTPromiseRejectBlock)reject) {
+  if (apiKey == nil || apiKey.length == 0) {
+    reject(@"E_ARCGIS_API_KEY", @"ArcGIS API key is empty.", nil);
+    return;
+  }
+  [AGSArcGISRuntimeEnvironment setAPIKey:apiKey];
+  resolve(nil);
+}
+
+RCT_REMAP_METHOD(setLicenseKey,
+                 setLicenseKey:(NSString *)licenseKey
+                 resolverSetLicenseKey:(RCTPromiseResolveBlock)resolve
+                 rejecterSetLicenseKey:(RCTPromiseRejectBlock)reject) {
+  if (licenseKey == nil || licenseKey.length == 0) {
+    reject(@"E_ARCGIS_LICENSE", @"ArcGIS license key is empty.", nil);
+    return;
+  }
+  NSError *error = nil;
+  BOOL ok = [AGSArcGISRuntimeEnvironment setLicenseKey:licenseKey error:&error];
+  if (!ok || error != nil) {
+    reject(@"E_ARCGIS_LICENSE", error.localizedDescription ?: @"ArcGIS license apply failed.", error);
+    return;
+  }
   resolve(nil);
 }
 
@@ -101,6 +132,14 @@ RCT_REMAP_METHOD(setInitialGeometry,
   resolve(nil);
 }
 
+RCT_REMAP_METHOD(setMissionIncidents,
+                 setMissionIncidents:(NSString *)incidentsJson
+                 resolverSetMissionIncidents:(RCTPromiseResolveBlock)resolve
+                 rejecterSetMissionIncidents:(RCTPromiseRejectBlock)reject) {
+  [ArcGisSketchStore setMissionIncidentsJson:incidentsJson];
+  resolve(nil);
+}
+
 RCT_REMAP_METHOD(startSketchPolygon,
                  startSketchPolygonWithResolver:(RCTPromiseResolveBlock)resolve
                  rejecterStartSketch:(RCTPromiseRejectBlock)reject) {
@@ -125,6 +164,24 @@ RCT_REMAP_METHOD(startSketchPolygon,
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     NSLog(@"[ArcGisDebug] startSketchPolygon:present");
     [root presentViewController:nav animated:YES completion:nil];
+  });
+}
+
+RCT_REMAP_METHOD(startMissionCenterMap,
+                 startMissionCenterMapWithResolver:(RCTPromiseResolveBlock)resolve
+                 rejecterStartMissionCenterMap:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *root = RCTPresentedViewController();
+    if (root == nil) {
+      reject(@"E_START_MISSION_MAP", @"No active view controller.", nil);
+      return;
+    }
+
+    ArcGisMissionCenterViewController *vc = [[ArcGisMissionCenterViewController alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [root presentViewController:nav animated:YES completion:nil];
+    resolve(nil);
   });
 }
 

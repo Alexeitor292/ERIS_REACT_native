@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     POSTMILE_WHERE: str = Field(default="1=1")
     POSTMILE_SEARCH_DISTANCE_METERS: int = Field(default=120)
 
+    # ArcGIS runtime configuration (backend-managed, no DB persistence)
+    ARCGIS_RUNTIME_ENABLED: bool = Field(default=False)
+    ARCGIS_API_KEY: str | None = Field(default=None)
+    ARCGIS_LICENSE_KEY: str | None = Field(default=None)
+    ARCGIS_LICENSE_EXPIRES_AT: str | None = Field(default=None)
+    ARCGIS_MMPK_URL: str | None = Field(default=None)
+    ARCGIS_CONFIG_OFFLINE_TTL_HOURS: int = Field(default=168)
+
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 

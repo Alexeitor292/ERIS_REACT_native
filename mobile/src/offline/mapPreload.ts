@@ -1,5 +1,6 @@
 import { ARCGIS_MMPK_PATH, ARCGIS_MMPK_URL } from "../config";
 import { getLargeItemAsync, setLargeItemAsync } from "./secureStoreLarge";
+import { readCachedArcgisRuntimeConfig } from "./arcgisRuntimeConfig";
 
 const MAP_PRELOAD_KEY = "offline_map_preload_registry_v1";
 
@@ -81,9 +82,12 @@ export async function queueIncidentMapPreload(params: {
     if (!bridge?.isArcGisNativeAvailable?.()) {
       throw new Error("ArcGIS native bridge unavailable.");
     }
+    const cachedRuntime = await readCachedArcgisRuntimeConfig();
+    const effectiveUrl = cachedRuntime?.mmpk_url || ARCGIS_MMPK_URL;
+
     let resolvedPath = ARCGIS_MMPK_PATH;
-    if (ARCGIS_MMPK_URL) {
-      resolvedPath = await bridge.downloadMmpk(ARCGIS_MMPK_URL);
+    if (effectiveUrl) {
+      resolvedPath = await bridge.downloadMmpk(effectiveUrl);
     }
     if (!resolvedPath) {
       throw new Error("Configure EXPO_PUBLIC_ARCGIS_MMPK_URL or EXPO_PUBLIC_ARCGIS_MMPK_PATH.");

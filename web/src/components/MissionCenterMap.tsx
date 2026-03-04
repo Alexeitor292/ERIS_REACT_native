@@ -33,13 +33,18 @@ export default function MissionCenterMap({
 
   useEffect(() => {
     esriConfig.assetsPath = "/assets";
+    const envApiKey = (import.meta as any)?.env?.VITE_ARCGIS_API_KEY;
+    if (envApiKey) {
+      esriConfig.apiKey = String(envApiKey);
+    }
     if (!mapElRef.current) return;
 
     const layer = new GraphicsLayer({ title: "Incidents" });
     layerRef.current = layer;
 
     const map = new Map({
-      basemap: "topo-vector",
+      // Prefer OSM so Mission Center remains visible without ArcGIS key wiring.
+      basemap: "osm",
       layers: [layer],
     });
 
@@ -48,6 +53,15 @@ export default function MissionCenterMap({
       map,
       center: [-119.4179, 36.7783],
       zoom: 6,
+    });
+
+    // Defensive fallback: if a styled basemap fails for any reason, force OSM.
+    view.when().catch(() => {
+      try {
+        view.map = new Map({ basemap: "osm", layers: [layer] });
+      } catch {
+        // ignore map fallback errors; graphics layer can still render
+      }
     });
 
     view.on("click", async (event) => {

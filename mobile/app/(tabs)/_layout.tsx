@@ -102,7 +102,7 @@ export default function TabLayout() {
       />
 
       <Tabs.Screen
-        name="incidents"
+        name="incidents/index"
         options={{
           title: "Incidents",
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="exclamationmark.triangle.fill" color={color} />,
@@ -110,10 +110,10 @@ export default function TabLayout() {
       />
 
       <Tabs.Screen
-        name="mission-center"
+        name="mission-center/index"
         options={{
           title: "Mission",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="map.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="globe.americas.fill" color={color} />,
         }}
       />
 

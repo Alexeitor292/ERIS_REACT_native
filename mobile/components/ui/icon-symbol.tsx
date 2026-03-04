@@ -17,6 +17,8 @@ const MAPPING = {
   'house.fill': 'home',
   'paperplane.fill': 'send',
   'tray.full.fill': 'inventory-2',
+  'exclamationmark.triangle.fill': 'warning',
+  'globe.americas.fill': 'public',
   'gearshape.fill': 'settings',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',

@@ -3,14 +3,20 @@ import { NativeModules } from "react-native";
 type ArcGisNativeModule = {
   loadMmpk(path: string): Promise<void>;
   downloadMmpk(url: string): Promise<string>;
+  setApiKey(apiKey: string): Promise<void>;
+  setLicenseKey(licenseKey: string): Promise<void>;
+  setMissionIncidents(incidentsJson: string): Promise<void>;
   setInitialLocation(latitude: number, longitude: number): Promise<void>;
   setInitialGeometry(esriJson: string): Promise<void>;
   startSketchPolygon(): Promise<void>;
+  startMissionCenterMap(): Promise<void>;
   getSketchGeoJson(): Promise<string>; // returns GeoJSON or Esri JSON geometry string
   clearSketch(): Promise<void>;
 };
 
 const { ArcGis } = NativeModules as { ArcGis: ArcGisNativeModule };
+
+type ArcGisMethodName = keyof ArcGisNativeModule;
 
 export function isArcGisNativeAvailable(): boolean {
   return !!ArcGis;
@@ -25,12 +31,38 @@ function requireArcGisModule(): ArcGisNativeModule {
   return ArcGis;
 }
 
+function hasMethod(name: ArcGisMethodName): boolean {
+  const mod = ArcGis as unknown as Record<string, unknown> | undefined;
+  return !!mod && typeof mod[name] === "function";
+}
+
+export function supportsMissionCenterMap(): boolean {
+  return hasMethod("setMissionIncidents") && hasMethod("startMissionCenterMap");
+}
+
 export async function loadMmpk(path: string) {
   return requireArcGisModule().loadMmpk(path);
 }
 
 export async function downloadMmpk(url: string): Promise<string> {
   return requireArcGisModule().downloadMmpk(url);
+}
+
+export async function setApiKey(apiKey: string) {
+  return requireArcGisModule().setApiKey(apiKey);
+}
+
+export async function setLicenseKey(licenseKey: string) {
+  return requireArcGisModule().setLicenseKey(licenseKey);
+}
+
+export async function setMissionIncidents(incidentsJson: string) {
+  if (!hasMethod("setMissionIncidents")) {
+    throw new Error(
+      "ArcGIS Mission Center method missing in this app build. Rebuild the app to include latest native ArcGIS module."
+    );
+  }
+  return requireArcGisModule().setMissionIncidents(incidentsJson);
 }
 
 export async function setInitialLocation(latitude: number, longitude: number) {
@@ -43,6 +75,15 @@ export async function setInitialGeometry(esriJson: string) {
 
 export async function startSketchPolygon() {
   return requireArcGisModule().startSketchPolygon();
+}
+
+export async function startMissionCenterMap() {
+  if (!hasMethod("startMissionCenterMap")) {
+    throw new Error(
+      "ArcGIS Mission Center launcher missing in this app build. Rebuild the app to include latest native ArcGIS module."
+    );
+  }
+  return requireArcGisModule().startMissionCenterMap();
 }
 
 export async function getSketchGeometry(): Promise<any> {

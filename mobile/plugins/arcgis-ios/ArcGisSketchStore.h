@@ -19,6 +19,9 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSNumber *)initialLongitude;
 + (void)setInitialLongitude:(nullable NSNumber *)value;
 
++ (nullable NSString *)missionIncidentsJson;
++ (void)setMissionIncidentsJson:(nullable NSString *)value;
+
 @end
 
 NS_ASSUME_NONNULL_END

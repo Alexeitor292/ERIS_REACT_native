@@ -25,6 +25,7 @@ from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
 from .routes.auth import router as auth_router
+from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .routes.incidents import router as incidents_router
 from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
@@ -59,6 +60,7 @@ if settings.ENV.lower() == "dev":
 app.include_router(admin_users_router)
 app.include_router(photos_router)
 app.include_router(auth_router)
+app.include_router(arcgis_router)
 app.include_router(gisa_router)
 app.include_router(incidents_router)
 
