@@ -7,7 +7,6 @@ import { router } from "expo-router";
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import {
-  claimIncident,
   createIncident,
   listIncidents,
   resolveIncident,
@@ -42,11 +41,12 @@ export default function IncidentsTabScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"ALL" | IncidentStatus>("ALL");
-  const [unclaimedOnly, setUnclaimedOnly] = useState(false);
 
   const [title, setTitle] = useState("");
   const [incidentType, setIncidentType] = useState("");
   const [description, setDescription] = useState("");
+  const [firstObservedAt, setFirstObservedAt] = useState("");
+  const [firstOccurredAt, setFirstOccurredAt] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [district, setDistrict] = useState("");
@@ -56,6 +56,7 @@ export default function IncidentsTabScreen() {
 
   const isAdmin = !!me?.roles?.includes("ADMIN");
   const isWorker = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "MAINTENANCE" || r === "ADMIN");
+  const canResolve = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN");
 
   const load = useCallback(async () => {
     const token = await getToken();
@@ -70,8 +71,8 @@ export default function IncidentsTabScreen() {
         apiFetch<{ id: number; roles: string[] }>("/auth/me", { token }),
         listIncidents(token, {
           status: statusFilter === "ALL" ? undefined : statusFilter,
-          unclaimedOnly,
           limit: 200,
+          scope: "mobile",
         }),
       ]);
       setMe(userRes);
@@ -92,7 +93,7 @@ export default function IncidentsTabScreen() {
     } finally {
       setBusy(false);
     }
-  }, [statusFilter, unclaimedOnly]);
+  }, [statusFilter]);
 
   useEffect(() => {
     load().catch(() => {});
@@ -115,6 +116,10 @@ export default function IncidentsTabScreen() {
       Alert.alert("Missing Title", "Incident title is required.");
       return;
     }
+    if (!firstObservedAt.trim()) {
+      Alert.alert("Missing Date", "First observed date/time is required.");
+      return;
+    }
     if (Number.isNaN(lat) || Number.isNaN(lon)) {
       Alert.alert("Invalid Coordinates", "Latitude and longitude must be numeric.");
       return;
@@ -127,6 +132,8 @@ export default function IncidentsTabScreen() {
         title: title.trim(),
         incident_type: incidentType.trim() || null,
         description: description.trim() || null,
+        first_observed_at: firstObservedAt.trim(),
+        first_occurred_at: firstOccurredAt.trim() || null,
         latitude: lat,
         longitude: lon,
         district: district.trim() || null,
@@ -137,6 +144,8 @@ export default function IncidentsTabScreen() {
       setTitle("");
       setIncidentType("");
       setDescription("");
+      setFirstObservedAt("");
+      setFirstOccurredAt("");
       setLatitude("");
       setLongitude("");
       setDistrict("");
@@ -163,37 +172,6 @@ export default function IncidentsTabScreen() {
       setLongitude(String(pos.coords.longitude));
     } catch (e: any) {
       Alert.alert("GPS Error", String(e?.message ?? e));
-    }
-  };
-
-  const onClaim = async (incidentId: number) => {
-    const token = await getToken();
-    if (!token) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await claimIncident(token, incidentId);
-      const incident = items.find((x) => x.id === incidentId);
-      if (incident && res.linked_submission_id) {
-        const preload = await queueIncidentMapPreload({
-          incidentId,
-          submissionId: res.linked_submission_id,
-          latitude: incident.latitude,
-          longitude: incident.longitude,
-        });
-        if (preload.status !== "READY") {
-          Alert.alert(
-            "Map Preload Pending",
-            preload.error || "Offline map package is not ready on this device yet."
-          );
-        }
-      }
-      await load();
-      openDraft(res.linked_submission_id ?? null);
-    } catch (e: any) {
-      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -271,7 +249,7 @@ export default function IncidentsTabScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
       <View style={styles.inner}>
         <Text style={[styles.title, { color: palette.text }]}>Incidents</Text>
-        <Text style={[styles.sub, { color: palette.muted }]}>Create incidents, claim unassigned work, and launch linked drafts.</Text>
+        <Text style={[styles.sub, { color: palette.muted }]}>Create incidents and process them through the assigned workflow.</Text>
 
         <View style={styles.statusRow}>
           <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("ALL")}>
@@ -285,12 +263,6 @@ export default function IncidentsTabScreen() {
           </Pressable>
           <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("RESOLVED")}>
             <Text style={{ color: palette.text }}>Resolved ({statusCounts.RESOLVED})</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.filterBtn, { borderColor: palette.border, backgroundColor: unclaimedOnly ? palette.primary : palette.panelSoft }]}
-            onPress={() => setUnclaimedOnly((v) => !v)}
-          >
-            <Text style={{ color: unclaimedOnly ? "#fff" : palette.text }}>Unclaimed</Text>
           </Pressable>
           <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => load()}>
             <Text style={{ color: palette.text }}>{busy ? "..." : "Refresh"}</Text>
@@ -320,6 +292,22 @@ export default function IncidentsTabScreen() {
               placeholderTextColor={palette.muted}
               value={description}
               onChangeText={setDescription}
+            />
+            <TextInput
+              style={[styles.input, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
+              placeholder="First Observed (YYYY-MM-DDTHH:mm:ss) *"
+              placeholderTextColor={palette.muted}
+              value={firstObservedAt}
+              onChangeText={setFirstObservedAt}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={[styles.input, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
+              placeholder="First Occurred (optional)"
+              placeholderTextColor={palette.muted}
+              value={firstOccurredAt}
+              onChangeText={setFirstOccurredAt}
+              autoCapitalize="none"
             />
             <View style={styles.row2}>
               <TextInput
@@ -406,6 +394,9 @@ export default function IncidentsTabScreen() {
                 <Text style={{ color: palette.muted, fontSize: 12 }}>
                   Assignee: {item.assignment?.assignee_name || item.assignment?.assignee_email || "Unassigned"}
                 </Text>
+                <Text style={{ color: palette.muted, fontSize: 12 }}>
+                  Stage: {item.current_stage}
+                </Text>
                 {!!item.linked_submission_id ? (
                   <Pressable
                     style={[styles.smallBtn, { borderColor: palette.border, marginTop: 8 }]}
@@ -417,11 +408,6 @@ export default function IncidentsTabScreen() {
                   </Pressable>
                 ) : null}
                 <View style={[styles.actions, { marginTop: 8 }]}>
-                  {item.status === "NEW" && !item.assignment ? (
-                    <Pressable style={[styles.smallBtn, { borderColor: palette.border }]} onPress={() => onClaim(item.id)}>
-                      <Text style={{ color: palette.text, fontWeight: "700" }}>Claim</Text>
-                    </Pressable>
-                  ) : null}
                   {isAdmin ? (
                     <>
                       <Pressable
@@ -435,7 +421,7 @@ export default function IncidentsTabScreen() {
                       </Pressable>
                     </>
                   ) : null}
-                  {item.status !== "RESOLVED" ? (
+                  {canResolve && item.status !== "RESOLVED" ? (
                     <Pressable style={[styles.smallBtn, { borderColor: palette.border }]} onPress={() => onResolve(item.id)}>
                       <Text style={{ color: palette.text, fontWeight: "700" }}>Resolve</Text>
                     </Pressable>

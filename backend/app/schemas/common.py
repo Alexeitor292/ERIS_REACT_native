@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -149,6 +150,8 @@ class IncidentCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     incident_type: str | None = Field(default=None, max_length=64)
     description: str | None = None
+    first_observed_at: datetime
+    first_occurred_at: datetime | None = None
     latitude: float
     longitude: float
     district: str | None = Field(default=None, max_length=64)
@@ -163,3 +166,15 @@ class IncidentAssignRequest(BaseModel):
 
 class IncidentResolveRequest(BaseModel):
     comment: str | None = None
+
+
+class IncidentCoordinatorForwardRequest(BaseModel):
+    comment: str | None = None
+
+
+class IncidentAssignBranchChiefRequest(BaseModel):
+    branch_chief_user_id: int = Field(..., ge=1)
+
+
+class IncidentAssignEngineerRequest(BaseModel):
+    engineer_user_id: int = Field(..., ge=1)

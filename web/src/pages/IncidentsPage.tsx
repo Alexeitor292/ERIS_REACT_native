@@ -10,6 +10,8 @@ type IncidentCreateForm = {
   title: string;
   incident_type: string;
   description: string;
+  first_observed_at: string;
+  first_occurred_at: string;
   latitude: string;
   longitude: string;
   district: string;
@@ -22,6 +24,8 @@ const EMPTY_FORM: IncidentCreateForm = {
   title: "",
   incident_type: "",
   description: "",
+  first_observed_at: "",
+  first_occurred_at: "",
   latitude: "",
   longitude: "",
   district: "",
@@ -87,6 +91,10 @@ export default function IncidentsPage() {
       setError("Incident title is required.");
       return;
     }
+    if (!form.first_observed_at.trim()) {
+      setError("First observed date/time is required.");
+      return;
+    }
     const lat = Number(form.latitude);
     const lon = Number(form.longitude);
     if (Number.isNaN(lat) || Number.isNaN(lon)) {
@@ -103,6 +111,8 @@ export default function IncidentsPage() {
           title: form.title.trim(),
           incident_type: form.incident_type.trim() || null,
           description: form.description.trim() || null,
+          first_observed_at: form.first_observed_at,
+          first_occurred_at: form.first_occurred_at.trim() || null,
           latitude: lat,
           longitude: lon,
           district: form.district.trim() || null,
@@ -115,22 +125,6 @@ export default function IncidentsPage() {
       await load();
     } catch (e: any) {
       setError(e?.message ?? "Failed to create incident.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function claimIncident(incidentId: number) {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await api<{ linked_submission_id: number }>(`/incidents/${incidentId}/claim`, {
-        method: "POST",
-      });
-      await load();
-      if (res.linked_submission_id) navigate(`/submissions/${res.linked_submission_id}`);
-    } catch (e: any) {
-      setError(e?.message ?? "Claim failed.");
     } finally {
       setBusy(false);
     }
@@ -206,6 +200,18 @@ export default function IncidentsPage() {
             placeholder="Description"
             value={form.description}
             onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+          />
+          <input
+            type="datetime-local"
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            value={form.first_observed_at}
+            onChange={(e) => setForm((prev) => ({ ...prev, first_observed_at: e.target.value }))}
+          />
+          <input
+            type="datetime-local"
+            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+            value={form.first_occurred_at}
+            onChange={(e) => setForm((prev) => ({ ...prev, first_occurred_at: e.target.value }))}
           />
           <input
             className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
@@ -332,14 +338,6 @@ export default function IncidentsPage() {
                     </td>
                     <td className="px-3 py-3 text-right">
                       <div className="inline-flex flex-wrap justify-end gap-1.5">
-                        {incident.status === "NEW" && !incident.assignment ? (
-                          <button
-                            onClick={() => claimIncident(incident.id)}
-                            className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95"
-                          >
-                            Claim
-                          </button>
-                        ) : null}
                         {isAdmin ? (
                           <>
                             <select
@@ -390,4 +388,3 @@ export default function IncidentsPage() {
     </AppShell>
   );
 }
-

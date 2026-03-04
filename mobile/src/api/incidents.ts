@@ -1,18 +1,28 @@
 import { apiFetch } from "./client";
 
 export type IncidentStatus = "NEW" | "IN_PROGRESS" | "RESOLVED";
+export type IncidentStage =
+  | "COORDINATOR_REVIEW"
+  | "OFFICE_CHIEF_REVIEW"
+  | "BRANCH_CHIEF_REVIEW"
+  | "ENGINEER_ASSIGNED"
+  | "RESOLVED";
 
 export type Incident = {
   id: number;
   title: string;
   incident_type: string | null;
   description: string | null;
+  first_observed_at: string;
+  first_occurred_at: string | null;
   latitude: number;
   longitude: number;
   district: string | null;
   county: string | null;
   route: string | null;
   post_mile: string | null;
+  office_code: string | null;
+  current_stage: IncidentStage;
   status: IncidentStatus;
   reporter_user_id: number;
   created_at: string;
@@ -26,6 +36,7 @@ export type Incident = {
     assignee_user_id: number;
     assigned_by_user_id: number;
     assignment_mode: "CLAIM" | "ASSIGN";
+    assignment_stage: "COORDINATOR" | "OFFICE_CHIEF" | "BRANCH_CHIEF" | "ENGINEER";
     assigned_at: string;
     assignee_email: string;
     assignee_name: string;
@@ -36,6 +47,8 @@ export type IncidentCreatePayload = {
   title: string;
   incident_type?: string | null;
   description?: string | null;
+  first_observed_at: string;
+  first_occurred_at?: string | null;
   latitude: number;
   longitude: number;
   district?: string | null;
@@ -46,18 +59,19 @@ export type IncidentCreatePayload = {
 
 export async function listIncidents(
   token: string,
-  opts: { status?: IncidentStatus; unclaimedOnly?: boolean; limit?: number } = {}
+  opts: { status?: IncidentStatus; unclaimedOnly?: boolean; limit?: number; scope?: "mobile" | "all" } = {}
 ) {
   const q = new URLSearchParams();
   if (opts.status) q.set("status", opts.status);
   if (opts.unclaimedOnly) q.set("unclaimed_only", "true");
   if (opts.limit) q.set("limit", String(opts.limit));
+  q.set("scope", opts.scope ?? "mobile");
   const suffix = q.toString() ? `?${q.toString()}` : "";
   return apiFetch<{ items: Incident[] }>(`/incidents${suffix}`, { token });
 }
 
 export async function missionCenterFeed(token: string) {
-  return apiFetch<{ items: Incident[] }>("/mission-center/incidents", { token });
+  return apiFetch<{ items: Incident[] }>("/mission-center/incidents?scope=mobile", { token });
 }
 
 export async function createIncident(token: string, payload: IncidentCreatePayload) {
@@ -83,6 +97,47 @@ export async function assignIncident(token: string, incidentId: number, assignee
   });
 }
 
+export async function forwardIncidentByCoordinator(token: string, incidentId: number, comment?: string | null) {
+  return apiFetch<{ incident_id: number; current_stage: IncidentStage; office_code: string | null }>(
+    `/incidents/${incidentId}/coordinator/forward`,
+    {
+      method: "POST",
+      token,
+      body: { comment: comment ?? null },
+    }
+  );
+}
+
+export async function assignIncidentToBranchChief(
+  token: string,
+  incidentId: number,
+  branchChiefUserId: number
+) {
+  return apiFetch<{ incident_id: number; current_stage: IncidentStage }>(
+    `/incidents/${incidentId}/office-chief/assign-branch`,
+    {
+      method: "POST",
+      token,
+      body: { branch_chief_user_id: branchChiefUserId },
+    }
+  );
+}
+
+export async function assignIncidentToEngineer(
+  token: string,
+  incidentId: number,
+  engineerUserId: number
+) {
+  return apiFetch<{ incident_id: number; linked_submission_id: number }>(
+    `/incidents/${incidentId}/branch-chief/assign-engineer`,
+    {
+      method: "POST",
+      token,
+      body: { engineer_user_id: engineerUserId },
+    }
+  );
+}
+
 export async function unassignIncident(token: string, incidentId: number) {
   return apiFetch<{ incident_id: number; status: IncidentStatus }>(`/incidents/${incidentId}/unassign`, {
     method: "POST",
@@ -97,4 +152,3 @@ export async function resolveIncident(token: string, incidentId: number, comment
     body: { comment: comment ?? null },
   });
 }
-

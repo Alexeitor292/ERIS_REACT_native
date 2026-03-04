@@ -106,11 +106,18 @@ export type SubmissionDetail = {
 };
 
 export type IncidentStatus = "NEW" | "IN_PROGRESS" | "RESOLVED";
+export type IncidentStage =
+  | "COORDINATOR_REVIEW"
+  | "OFFICE_CHIEF_REVIEW"
+  | "BRANCH_CHIEF_REVIEW"
+  | "ENGINEER_ASSIGNED"
+  | "RESOLVED";
 
 export type IncidentAssignment = {
   assignment_id: number;
   assignee_user_id: number;
   assigned_by_user_id: number;
+  assignment_stage: "COORDINATOR" | "OFFICE_CHIEF" | "BRANCH_CHIEF" | "ENGINEER";
   assignment_mode: "CLAIM" | "ASSIGN";
   assigned_at: string;
   assignee_email: string;
@@ -122,12 +129,16 @@ export type Incident = {
   title: string;
   incident_type: string | null;
   description: string | null;
+  first_observed_at: string;
+  first_occurred_at: string | null;
   latitude: number;
   longitude: number;
   district: string | null;
   county: string | null;
   route: string | null;
   post_mile: string | null;
+  office_code: string | null;
+  current_stage: IncidentStage;
   status: IncidentStatus;
   reporter_user_id: number;
   created_at: string;

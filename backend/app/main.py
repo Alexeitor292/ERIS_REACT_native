@@ -16,7 +16,7 @@ from reportlab.pdfgen import canvas
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ContentStream
 
-from .db import get_db
+from .db import SessionLocal, get_db
 from .config import settings
 from .auth import decode_token
 from .deps import get_current_user, require_roles
@@ -27,7 +27,7 @@ from .photos import router as photos_router
 from .routes.auth import router as auth_router
 from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
-from .routes.incidents import router as incidents_router
+from .routes.incidents import ensure_incident_runtime_schema, router as incidents_router
 from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
 from .schemas.common import (
     GeometryResponse,
@@ -107,6 +107,15 @@ def startup():
             logger.warning("MinIO not available during startup: %s", exc)
         else:
             raise
+    db = SessionLocal()
+    try:
+        ensure_incident_runtime_schema(db)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 # ----------------------------

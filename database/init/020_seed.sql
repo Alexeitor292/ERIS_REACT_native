@@ -3,6 +3,9 @@ USE eris;
 INSERT INTO roles (name, description) VALUES
 ('FIELD_WORKER', 'Can create and submit field reports'),
 ('MAINTENANCE', 'Can create maintenance incident reports'),
+('MAINT_COORDINATOR', 'Can triage maintenance incidents and forward to office chiefs'),
+('OFFICE_CHIEF', 'Can route incidents to branch chiefs'),
+('BRANCH_CHIEF', 'Can assign incidents to engineers'),
 ('REVIEWER', 'Can review submitted reports'),
 ('ADMIN', 'Can manage users, forms, and approvals')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
@@ -15,10 +18,45 @@ ON DUPLICATE KEY UPDATE
   password_hash = VALUES(password_hash),
   is_active = VALUES(is_active);
 
+-- Dev users (password: "password")
+INSERT INTO users (email, full_name, password_hash, is_active)
+VALUES
+  ('maintenance@local', 'Local Maintenance', '$argon2id$v=19$m=65536,t=3,p=4$yGtVqjzsQ7NhszqjjQ34XA$q1k5GP/lHkwSdhCYoGYRCfj1ytWu9mDmHhYgb5BCvPU', 1),
+  ('coordinator@local', 'Local Coordinator', '$argon2id$v=19$m=65536,t=3,p=4$yGtVqjzsQ7NhszqjjQ34XA$q1k5GP/lHkwSdhCYoGYRCfj1ytWu9mDmHhYgb5BCvPU', 1),
+  ('officechief@local', 'Local Office Chief', '$argon2id$v=19$m=65536,t=3,p=4$yGtVqjzsQ7NhszqjjQ34XA$q1k5GP/lHkwSdhCYoGYRCfj1ytWu9mDmHhYgb5BCvPU', 1),
+  ('branchchief@local', 'Local Branch Chief', '$argon2id$v=19$m=65536,t=3,p=4$yGtVqjzsQ7NhszqjjQ34XA$q1k5GP/lHkwSdhCYoGYRCfj1ytWu9mDmHhYgb5BCvPU', 1),
+  ('engineer@local', 'Local Engineer', '$argon2id$v=19$m=65536,t=3,p=4$yGtVqjzsQ7NhszqjjQ34XA$q1k5GP/lHkwSdhCYoGYRCfj1ytWu9mDmHhYgb5BCvPU', 1),
+  ('reviewer@local', 'Local Reviewer', '$argon2id$v=19$m=65536,t=3,p=4$yGtVqjzsQ7NhszqjjQ34XA$q1k5GP/lHkwSdhCYoGYRCfj1ytWu9mDmHhYgb5BCvPU', 1)
+ON DUPLICATE KEY UPDATE
+  full_name = VALUES(full_name),
+  password_hash = VALUES(password_hash),
+  is_active = VALUES(is_active);
+
 
 -- Give admin all roles
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT u.id, r.id
 FROM users u
 JOIN roles r
-WHERE u.email='admin@local' AND r.name IN ('ADMIN', 'REVIEWER', 'FIELD_WORKER', 'MAINTENANCE');
+WHERE u.email='admin@local' AND r.name IN (
+  'ADMIN',
+  'REVIEWER',
+  'FIELD_WORKER',
+  'MAINTENANCE',
+  'MAINT_COORDINATOR',
+  'OFFICE_CHIEF',
+  'BRANCH_CHIEF'
+);
+
+-- Dev role mapping (one primary role each)
+INSERT IGNORE INTO user_roles (user_id, role_id)
+SELECT u.id, r.id
+FROM users u
+JOIN roles r
+WHERE
+  (u.email='maintenance@local' AND r.name='MAINTENANCE') OR
+  (u.email='coordinator@local' AND r.name='MAINT_COORDINATOR') OR
+  (u.email='officechief@local' AND r.name='OFFICE_CHIEF') OR
+  (u.email='branchchief@local' AND r.name='BRANCH_CHIEF') OR
+  (u.email='engineer@local' AND r.name='FIELD_WORKER') OR
+  (u.email='reviewer@local' AND r.name='REVIEWER');

@@ -121,12 +121,16 @@ CREATE TABLE IF NOT EXISTS incidents (
     title VARCHAR(255) NOT NULL,
     incident_type VARCHAR(64) NULL,
     description TEXT NULL,
+    first_observed_at DATETIME NOT NULL,
+    first_occurred_at DATETIME NULL,
     latitude DECIMAL(10,7) NOT NULL,
     longitude DECIMAL(10,7) NOT NULL,
     district VARCHAR(64) NULL,
     county VARCHAR(64) NULL,
     route VARCHAR(64) NULL,
     post_mile VARCHAR(64) NULL,
+    office_code VARCHAR(16) NULL,
+    current_stage VARCHAR(32) NOT NULL DEFAULT 'COORDINATOR_REVIEW', -- COORDINATOR_REVIEW | OFFICE_CHIEF_REVIEW | BRANCH_CHIEF_REVIEW | ENGINEER_ASSIGNED | RESOLVED
     status VARCHAR(32) NOT NULL DEFAULT 'NEW', -- NEW | IN_PROGRESS | RESOLVED
     reporter_user_id BIGINT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -160,6 +164,7 @@ CREATE TABLE IF NOT EXISTS incident_assignments (
     incident_id BIGINT NOT NULL,
     assignee_user_id BIGINT NOT NULL,
     assigned_by_user_id BIGINT NOT NULL,
+    assignment_stage VARCHAR(32) NOT NULL DEFAULT 'ENGINEER', -- COORDINATOR | OFFICE_CHIEF | BRANCH_CHIEF | ENGINEER
     assignment_mode VARCHAR(16) NOT NULL, -- CLAIM | ASSIGN
     is_active TINYINT NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -168,7 +173,38 @@ CREATE TABLE IF NOT EXISTS incident_assignments (
     CONSTRAINT fk_inc_assign_assignee FOREIGN KEY (assignee_user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_inc_assign_assigned_by FOREIGN KEY (assigned_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
     INDEX idx_inc_assign_incident_active (incident_id, is_active),
-    INDEX idx_inc_assign_assignee (assignee_user_id)
+    INDEX idx_inc_assign_assignee (assignee_user_id),
+    INDEX idx_inc_assign_stage (assignment_stage)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS incident_routing_assignments (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    assignment_type VARCHAR(32) NOT NULL, -- DISTRICT_COORDINATOR | OFFICE_CHIEF | BRANCH_CHIEF
+    district VARCHAR(64) NULL,
+    office_code VARCHAR(16) NULL,
+    user_id BIGINT NOT NULL,
+    is_active TINYINT NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_inc_route_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_inc_route_unique (assignment_type, district, office_code, user_id),
+    INDEX idx_inc_route_lookup (assignment_type, district, office_code, is_active)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS incident_notifications (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    incident_id BIGINT NOT NULL,
+    recipient_user_id BIGINT NOT NULL,
+    channel VARCHAR(16) NOT NULL DEFAULT 'IN_APP', -- IN_APP | EMAIL | SMS
+    template_code VARCHAR(64) NOT NULL,
+    payload_json JSON NULL,
+    delivered_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_inc_notify_incident FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+    CONSTRAINT fk_inc_notify_recipient FOREIGN KEY (recipient_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_inc_notify_incident (incident_id),
+    INDEX idx_inc_notify_recipient (recipient_user_id),
+    INDEX idx_inc_notify_created (created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS incident_submission_links (

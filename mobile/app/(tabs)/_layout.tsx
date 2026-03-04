@@ -1,23 +1,60 @@
 import { Tabs, router, usePathname } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { clearToken } from "@/src/auth/tokenStore";
+import { clearToken, getToken } from "@/src/auth/tokenStore";
+import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
 
 export default function TabLayout() {
   const { palette, scheme } = useUiSettings();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
+  const [roles, setRoles] = useState<string[]>([]);
+  const [rolesLoaded, setRolesLoaded] = useState(false);
   const tabBaseHeight = 54;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadRoles = async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+        const me = await apiFetch<{ roles: string[] }>("/auth/me", { token });
+        if (!cancelled) setRoles(Array.isArray(me.roles) ? me.roles : []);
+      } catch (e) {
+        if (!isSessionExpiredError(e) && !cancelled) {
+          setRoles([]);
+        }
+      } finally {
+        if (!cancelled) setRolesLoaded(true);
+      }
+    };
+    loadRoles().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const roleSet = useMemo(() => new Set(roles), [roles]);
+  const canSeeDraftsSubmissions =
+    rolesLoaded && (roleSet.has("FIELD_WORKER") || roleSet.has("REVIEWER") || roleSet.has("ADMIN"));
+  const canSeeIncidents =
+    !rolesLoaded ||
+    roleSet.has("MAINTENANCE") ||
+    roleSet.has("MAINT_COORDINATOR") ||
+    roleSet.has("OFFICE_CHIEF") ||
+    roleSet.has("BRANCH_CHIEF") ||
+    roleSet.has("FIELD_WORKER") ||
+    roleSet.has("ADMIN");
+
   const currentTabIndex = useMemo(() => {
-    if (pathname === "/drafts") return 0;
-    if (pathname === "/submissions") return 1;
-    if (pathname === "/incidents") return 2;
-    if (pathname === "/mission-center") return 3;
+    if (pathname === "/incidents") return 0;
+    if (pathname === "/drafts") return 1;
+    if (pathname === "/submissions") return 2;
     return -1;
   }, [pathname]);
 
@@ -54,7 +91,7 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1 }}>
       <Tabs
-        initialRouteName="drafts"
+        initialRouteName="incidents/index"
         detachInactiveScreens={false}
         screenOptions={{
           tabBarActiveTintColor: palette.primary,
@@ -88,6 +125,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="drafts"
         options={{
+          href: canSeeDraftsSubmissions ? undefined : null,
           title: "Drafts",
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="doc.text.fill" color={color} />,
         }}
@@ -96,6 +134,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="submissions"
         options={{
+          href: canSeeDraftsSubmissions ? undefined : null,
           title: "Submissions",
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="tray.full.fill" color={color} />,
         }}
@@ -104,16 +143,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="incidents/index"
         options={{
+          href: canSeeIncidents ? undefined : null,
           title: "Incidents",
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="exclamationmark.triangle.fill" color={color} />,
-        }}
-      />
-
-      <Tabs.Screen
-        name="mission-center/index"
-        options={{
-          title: "Mission",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="globe.americas.fill" color={color} />,
         }}
       />
 
