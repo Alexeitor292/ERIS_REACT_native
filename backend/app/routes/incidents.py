@@ -65,6 +65,24 @@ def _normalized_post_mile_two_decimal(raw: str | None) -> str | None:
         return value
 
 
+def _location_display_name(
+    district: str | None,
+    county: str | None,
+    route: str | None,
+    post_mile: str | None,
+) -> str | None:
+    d = _normalize_text(district)
+    c = _normalize_text(county)
+    r = _normalize_text(route)
+    pm = _normalized_post_mile_two_decimal(post_mile)
+    parts = [p for p in [d, c, r, pm] if p]
+    if not parts:
+        return None
+    if d and c and r and pm:
+        return f"D{d} {c} R{r} PM {pm}"
+    return " / ".join(parts)
+
+
 def _office_for_district(raw_district: str | None) -> str | None:
     code = _normalized_district_code(raw_district)
     if not code:
@@ -144,12 +162,13 @@ def _create_or_select_location(
         text(
             """
             INSERT INTO incident_locations
-              (district, county, route, post_mile_raw, post_mile_norm, latitude, longitude)
+              (display_name, district, county, route, post_mile_raw, post_mile_norm, latitude, longitude)
             VALUES
-              (:district, :county, :route, :post_mile_raw, :post_mile_norm, :latitude, :longitude)
+              (:display_name, :district, :county, :route, :post_mile_raw, :post_mile_norm, :latitude, :longitude)
             """
         ),
         {
+            "display_name": _location_display_name(district, county, route, post_mile),
             "district": normalized_district,
             "county": normalized_county,
             "route": normalized_route,
@@ -182,6 +201,7 @@ def _incident_location_candidates(
             """
             SELECT
               il.id,
+              il.display_name,
               il.district,
               il.county,
               il.route,
@@ -228,6 +248,7 @@ def _incident_location_candidates(
     return [
         {
             "id": int(r["id"]),
+            "display_name": r["display_name"],
             "district": r["district"],
             "county": r["county"],
             "route": r["route"],
@@ -334,6 +355,7 @@ def ensure_incident_runtime_schema(db: Session) -> None:
         """
         CREATE TABLE IF NOT EXISTS incident_locations (
           id BIGINT PRIMARY KEY AUTO_INCREMENT,
+          display_name VARCHAR(255) NULL,
           district VARCHAR(64) NULL,
           county VARCHAR(64) NULL,
           route VARCHAR(64) NULL,
@@ -348,6 +370,10 @@ def ensure_incident_runtime_schema(db: Session) -> None:
           INDEX idx_incident_locations_geo (latitude, longitude),
           INDEX idx_incident_locations_lookup (district, county, route, post_mile_norm)
         ) ENGINE=InnoDB
+        """,
+        """
+        ALTER TABLE incident_locations
+          ADD COLUMN IF NOT EXISTS display_name VARCHAR(255) NULL
         """,
         """
         ALTER TABLE incidents
@@ -380,6 +406,10 @@ def ensure_incident_runtime_schema(db: Session) -> None:
         """
         ALTER TABLE incidents
           ADD COLUMN IF NOT EXISTS location_match_metadata JSON NULL
+        """,
+        """
+        ALTER TABLE incidents
+          MODIFY COLUMN title VARCHAR(255) NULL
         """,
         """
         ALTER TABLE incidents
@@ -814,9 +844,7 @@ def create_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
 ):
-    title = payload.title.strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="Title is required")
+    title = (payload.title or "").strip() or None
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
     route = _normalize_text(payload.route)

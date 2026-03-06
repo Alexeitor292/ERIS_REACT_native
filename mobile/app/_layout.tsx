@@ -3,7 +3,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native
 import { Stack, router, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
-import { AppState } from "react-native";
+import { AppState, Keyboard, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -120,6 +120,13 @@ export default function RootLayout() {
     };
   }, []);
 
+  useEffect(() => {
+    TextInput.defaultProps = {
+      ...(TextInput.defaultProps ?? {}),
+      keyboardAppearance: "dark",
+    };
+  }, []);
+
   const onSplashDone = useCallback(() => {
     setShowAnimatedSplash(false);
   }, []);
@@ -132,8 +139,12 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <UiSettingsProvider>
-          <AppNavigator />
-          {showAnimatedSplash ? <AnimatedSplash onDone={onSplashDone} /> : null}
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View style={{ flex: 1 }}>
+              <AppNavigator />
+              {showAnimatedSplash ? <AnimatedSplash onDone={onSplashDone} /> : null}
+            </View>
+          </TouchableWithoutFeedback>
         </UiSettingsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

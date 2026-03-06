@@ -10,7 +10,7 @@ export type IncidentStage =
 
 export type Incident = {
   id: number;
-  title: string;
+  title: string | null;
   incident_type: string | null;
   description: string | null;
   location_id: number | null;
@@ -49,7 +49,7 @@ export type Incident = {
 };
 
 export type IncidentCreatePayload = {
-  title: string;
+  title?: string | null;
   incident_type?: string | null;
   description?: string | null;
   first_observed_at: string;
@@ -64,6 +64,7 @@ export type IncidentCreatePayload = {
 
 export type IncidentLocationCandidate = {
   id: number;
+  display_name: string | null;
   district: string | null;
   county: string | null;
   route: string | null;

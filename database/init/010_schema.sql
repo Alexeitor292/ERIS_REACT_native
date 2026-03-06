@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS attachment_links (
 
 CREATE TABLE IF NOT EXISTS incident_locations (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    display_name VARCHAR(255) NULL,
     district VARCHAR(64) NULL,
     county VARCHAR(64) NULL,
     route VARCHAR(64) NULL,
@@ -135,7 +136,7 @@ CREATE TABLE IF NOT EXISTS incident_locations (
 
 CREATE TABLE IF NOT EXISTS incidents (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    title VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NULL,
     incident_type VARCHAR(64) NULL,
     description TEXT NULL,
     location_id BIGINT NULL,
