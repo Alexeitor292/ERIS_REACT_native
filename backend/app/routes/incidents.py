@@ -17,6 +17,7 @@ from ..schemas.common import (
     IncidentAssignRequest,
     IncidentCoordinatorForwardRequest,
     IncidentCreate,
+    IncidentRequestRevision,
     IncidentResolveRequest,
     IncidentLocationLinkRequest,
 )
@@ -1030,6 +1031,140 @@ def link_incident_location(
             "location_id": chosen_location_id,
             "location_match_status": new_status,
         }
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/incidents/{incident_id}/coordinator/request-revision")
+def coordinator_request_revision(
+    payload: IncidentRequestRevision,
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+):
+    incident = _incident_with_assignment(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if str(incident["status"]).upper() == "RESOLVED":
+        raise HTTPException(status_code=409, detail="Resolved incidents cannot be revised")
+    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
+        raise HTTPException(status_code=409, detail="Revision request is only allowed during coordinator review")
+
+    metadata = {
+        "mode": "REQUEST_REVISION",
+        "comment": (payload.comment or "").strip() or None,
+        "performed_by_user_id": int(user["id"]),
+    }
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE incidents
+                SET location_match_status = 'NEEDS_REVISION',
+                    location_reviewed_by_user_id = :reviewer,
+                    location_reviewed_at = NOW(),
+                    location_match_metadata = CAST(:metadata AS JSON),
+                    updated_at = NOW()
+                WHERE id = :iid
+                """
+            ),
+            {
+                "iid": incident_id,
+                "reviewer": int(user["id"]),
+                "metadata": json.dumps(metadata),
+            },
+        )
+        db.commit()
+        return {"incident_id": int(incident_id), "location_match_status": "NEEDS_REVISION"}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.patch("/incidents/{incident_id}")
+def maintenance_resubmit_incident(
+    payload: IncidentCreate,
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+):
+    incident = _incident_with_assignment(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if str(incident["status"]).upper() == "RESOLVED":
+        raise HTTPException(status_code=409, detail="Resolved incidents cannot be edited")
+
+    user_roles = set(user.get("roles") or [])
+    is_admin = "ADMIN" in user_roles
+    if not is_admin and int(incident["reporter_user_id"]) != int(user["id"]):
+        raise HTTPException(status_code=403, detail="Only the reporting maintenance worker can resubmit this incident")
+    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
+        raise HTTPException(status_code=409, detail="This incident is no longer in coordinator review")
+    if str(incident["location_match_status"] or "").upper() != "NEEDS_REVISION":
+        raise HTTPException(status_code=409, detail="This incident is not marked for revision")
+
+    district = _normalize_text(payload.district)
+    county = _normalize_text(payload.county)
+    route = _normalize_text(payload.route)
+    post_mile = _normalize_text(payload.post_mile)
+    if not (district and county and route and post_mile):
+        raise HTTPException(
+            status_code=400,
+            detail="district, county, route, and post_mile are required location fields",
+        )
+
+    office_code = _office_for_district(district)
+    metadata = {
+        "mode": "RESUBMITTED_BY_MAINTENANCE",
+        "performed_by_user_id": int(user["id"]),
+    }
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE incidents
+                SET title = :title,
+                    incident_type = :incident_type,
+                    description = :description,
+                    latitude = :lat,
+                    longitude = :lon,
+                    first_observed_at = :first_observed_at,
+                    first_occurred_at = :first_occurred_at,
+                    district = :district,
+                    county = :county,
+                    route = :route,
+                    post_mile = :post_mile,
+                    office_code = :office_code,
+                    location_id = NULL,
+                    location_match_status = 'PENDING_REVIEW',
+                    location_reviewed_by_user_id = NULL,
+                    location_reviewed_at = NULL,
+                    location_match_metadata = CAST(:metadata AS JSON),
+                    updated_at = NOW()
+                WHERE id = :iid
+                """
+            ),
+            {
+                "iid": incident_id,
+                "title": (payload.title or "").strip() or None,
+                "incident_type": (payload.incident_type or "").strip() or None,
+                "description": (payload.description or "").strip() or None,
+                "lat": payload.latitude,
+                "lon": payload.longitude,
+                "first_observed_at": payload.first_observed_at,
+                "first_occurred_at": payload.first_occurred_at,
+                "district": district,
+                "county": county,
+                "route": route,
+                "post_mile": post_mile,
+                "office_code": office_code,
+                "metadata": json.dumps(metadata),
+            },
+        )
+        db.commit()
+        row = _incident_with_assignment(db, incident_id)
+        return {"incident": _serialize_incident(dict(row))}
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc))

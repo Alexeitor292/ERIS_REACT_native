@@ -109,6 +109,14 @@ export async function createIncident(token: string, payload: IncidentCreatePaylo
   });
 }
 
+export async function updateIncident(token: string, incidentId: number, payload: IncidentCreatePayload) {
+  return apiFetch<{ incident: Incident }>(`/incidents/${incidentId}`, {
+    method: "PATCH",
+    token,
+    body: payload,
+  });
+}
+
 export async function getIncidentLocationCandidates(token: string, incidentId: number, limit = 8) {
   return apiFetch<{ incident_id: number; location_id: number | null; location_match_status: string | null; items: IncidentLocationCandidate[] }>(
     `/incidents/${incidentId}/location-candidates?limit=${limit}`,
@@ -149,6 +157,21 @@ export async function assignIncident(token: string, incidentId: number, assignee
 export async function forwardIncidentByCoordinator(token: string, incidentId: number, comment?: string | null) {
   return apiFetch<{ incident_id: number; current_stage: IncidentStage; office_code: string | null }>(
     `/incidents/${incidentId}/coordinator/forward`,
+    {
+      method: "POST",
+      token,
+      body: { comment: comment ?? null },
+    }
+  );
+}
+
+export async function requestIncidentRevisionByCoordinator(
+  token: string,
+  incidentId: number,
+  comment?: string | null
+) {
+  return apiFetch<{ incident_id: number; location_match_status: string }>(
+    `/incidents/${incidentId}/coordinator/request-revision`,
     {
       method: "POST",
       token,

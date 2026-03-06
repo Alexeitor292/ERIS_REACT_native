@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
-import { router, usePathname } from "expo-router";
+import { router, useLocalSearchParams, usePathname } from "expo-router";
 
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import {
   createIncident,
+  updateIncident,
   listIncidents,
   resolveIncident,
   assignIncident,
@@ -135,6 +136,7 @@ function statusBg(status: IncidentStatus) {
 export default function IncidentsTabScreen() {
   const { palette } = useUiSettings();
   const pathname = usePathname();
+  const params = useLocalSearchParams<{ incident_id?: string }>();
   const [me, setMe] = useState<{ id: number; roles: string[] } | null>(null);
   const [items, setItems] = useState<Incident[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -152,6 +154,8 @@ export default function IncidentsTabScreen() {
   const [county, setCounty] = useState("");
   const [routeValue, setRouteValue] = useState("");
   const [postMile, setPostMile] = useState("");
+  const [editingIncidentId, setEditingIncidentId] = useState<number | null>(null);
+  const [editingLocked, setEditingLocked] = useState(false);
   const [datePickerKey, setDatePickerKey] = useState<"firstObservedAt" | "firstOccurredAt" | null>(null);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
@@ -183,6 +187,10 @@ export default function IncidentsTabScreen() {
   const isAdmin = !!me?.roles?.includes("ADMIN");
   const isWorker = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "MAINTENANCE" || r === "ADMIN");
   const canResolve = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN");
+  const isMaintenanceWorkerMobile =
+    !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "MAINTENANCE") &&
+    !me?.roles?.some((r) => r === "MAINT_COORDINATOR" || r === "OFFICE_CHIEF" || r === "BRANCH_CHIEF" || r === "ADMIN");
+  const canEditIncidentInForm = editingIncidentId == null || !editingLocked;
   const isCreateRoute = pathname?.startsWith("/incidents/create") || pathname?.startsWith("/(tabs)/incidents/create");
 
   const load = useCallback(async () => {
@@ -233,6 +241,37 @@ export default function IncidentsTabScreen() {
       params: { id: String(linkedSubmissionId) },
     });
   };
+
+  const openIncidentFromTracking = (incident: Incident) => {
+    const incidentId = String(incident.id);
+    router.push({ pathname: "/(tabs)/incidents/create", params: { incident_id: incidentId } });
+  };
+
+  const hydrateEditingIncident = (incident: Incident) => {
+    const needsRevision = String(incident.location_match_status || "").toUpperCase() === "NEEDS_REVISION";
+    setEditingIncidentId(incident.id);
+    setEditingLocked(!needsRevision);
+    setDescription(incident.description || "");
+    setFirstObservedAt((incident.first_observed_at || "").slice(0, 10));
+    setFirstOccurredAt((incident.first_occurred_at || "").slice(0, 10));
+    setLatitude(Number.isFinite(incident.latitude) ? String(incident.latitude) : "");
+    setLongitude(Number.isFinite(incident.longitude) ? String(incident.longitude) : "");
+    setDistrict((incident.district || "").trim());
+    setCounty((incident.county || "").trim());
+    setRouteValue(normalizeRoute(incident.route || ""));
+    setPostMile((incident.post_mile || "").trim());
+  };
+
+  useEffect(() => {
+    if (!isCreateRoute) return;
+    const incidentIdRaw = typeof params.incident_id === "string" ? params.incident_id : "";
+    const incidentId = Number(incidentIdRaw);
+    if (!incidentIdRaw || Number.isNaN(incidentId) || incidentId <= 0) return;
+    const incident = items.find((x) => x.id === incidentId);
+    if (!incident) return;
+    if (editingIncidentId === incident.id) return;
+    hydrateEditingIncident(incident);
+  }, [editingIncidentId, isCreateRoute, items, params.incident_id]);
 
   const registerCreateField = (key: string, y: number) => {
     createFieldY.current[key] = y;
@@ -298,6 +337,8 @@ export default function IncidentsTabScreen() {
     setCounty("");
     setRouteValue("");
     setPostMile("");
+    setEditingIncidentId(null);
+    setEditingLocked(false);
   };
 
   const onConfirmClearForm = () => {
@@ -318,6 +359,10 @@ export default function IncidentsTabScreen() {
   const onCreate = async () => {
     const token = await getToken();
     if (!token) return;
+    if (!canEditIncidentInForm) {
+      router.replace("/(tabs)/incidents/track");
+      return;
+    }
     const lat = Number(latitude);
     const lon = Number(longitude);
     if (!firstObservedAt.trim()) {
@@ -336,7 +381,7 @@ export default function IncidentsTabScreen() {
     setBusy(true);
     setErr(null);
     try {
-      await createIncident(token, {
+      const payload = {
         description: description.trim() || null,
         first_observed_at: firstObservedAt.trim(),
         first_occurred_at: firstOccurredAt.trim() || null,
@@ -346,8 +391,14 @@ export default function IncidentsTabScreen() {
         county: county.trim(),
         route: routeValue.trim(),
         post_mile: postMile.trim(),
-      });
+      };
+      if (editingIncidentId) {
+        await updateIncident(token, editingIncidentId, payload);
+      } else {
+        await createIncident(token, payload);
+      }
       resetCreateForm();
+      router.replace("/(tabs)/incidents/track");
       await load();
     } catch (e: any) {
       if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
@@ -477,6 +528,19 @@ export default function IncidentsTabScreen() {
     };
   }, [items]);
 
+  const workerTrackingItems = useMemo(() => {
+    if (!isMaintenanceWorkerMobile) return items;
+    return items.filter((x) => String(x.current_stage || "").toUpperCase() === "COORDINATOR_REVIEW");
+  }, [isMaintenanceWorkerMobile, items]);
+
+  const workerReviewCounts = useMemo(() => {
+    const needsRevision = workerTrackingItems.filter(
+      (x) => String(x.location_match_status || "").toUpperCase() === "NEEDS_REVISION"
+    ).length;
+    const underReview = workerTrackingItems.length - needsRevision;
+    return { underReview, needsRevision };
+  }, [workerTrackingItems]);
+
   if (isCreateRoute && isWorker) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
@@ -488,8 +552,16 @@ export default function IncidentsTabScreen() {
             contentContainerStyle={styles.createScrollContent}
           >
             <View style={styles.innerCreate}>
-              <Text style={[styles.title, { color: palette.text }]}>Create Incident</Text>
-              <Text style={[styles.sub, { color: palette.muted }]}>Create an incident report and send it into workflow.</Text>
+              <Text style={[styles.title, { color: palette.text }]}>
+                {editingIncidentId ? (canEditIncidentInForm ? "Edit Incident" : "Incident Details") : "Create Incident"}
+              </Text>
+              <Text style={[styles.sub, { color: palette.muted }]}>
+                {editingIncidentId
+                  ? (canEditIncidentInForm
+                    ? "Requested updates by the maintenance coordinator. Edit and resubmit."
+                    : "Under review by the maintenance coordinator.")
+                  : "Create an incident report and send it into workflow."}
+              </Text>
 
               <View style={styles.formCard} testID="incident-create-card">
                 <View style={styles.row2}>
@@ -498,7 +570,7 @@ export default function IncidentsTabScreen() {
                       label="District *"
                       value={district}
                       placeholder="Select district"
-                      editable
+                      editable={canEditIncidentInForm}
                       onPress={() => setDistrictPickerOpen(true)}
                       palette={palette}
                     />
@@ -508,7 +580,7 @@ export default function IncidentsTabScreen() {
                       label="County *"
                       value={countyLabelValue}
                       placeholder={district ? "Select county" : "Select district first"}
-                      editable={!!district}
+                      editable={canEditIncidentInForm && !!district}
                       onPress={() => setCountyPickerOpen(true)}
                       palette={palette}
                     />
@@ -520,7 +592,7 @@ export default function IncidentsTabScreen() {
                       label="Route *"
                       value={routeValue}
                       placeholder={county ? "Select route" : "Select county first"}
-                      editable={!!county}
+                      editable={canEditIncidentInForm && !!county}
                       onPress={() => setRoutePickerOpen(true)}
                       palette={palette}
                     />
@@ -532,7 +604,7 @@ export default function IncidentsTabScreen() {
                         value={postMile}
                         onChangeText={setPostMile}
                         onFocus={() => scrollToCreateField("postMile")}
-                        editable
+                        editable={canEditIncidentInForm}
                         placeholder="Post Mile *"
                         palette={palette}
                       />
@@ -547,7 +619,7 @@ export default function IncidentsTabScreen() {
                         value={latitude}
                         onChangeText={setLatitude}
                         onFocus={() => scrollToCreateField("latitude")}
-                        editable
+                        editable={canEditIncidentInForm}
                         keyboardType="numeric"
                         placeholder="Latitude *"
                         palette={palette}
@@ -561,7 +633,7 @@ export default function IncidentsTabScreen() {
                         value={longitude}
                         onChangeText={setLongitude}
                         onFocus={() => scrollToCreateField("longitude")}
-                        editable
+                        editable={canEditIncidentInForm}
                         keyboardType="numeric"
                         placeholder="Longitude *"
                         palette={palette}
@@ -573,7 +645,7 @@ export default function IncidentsTabScreen() {
                   label="First Observed (YYYY-MM-DD) *"
                   value={firstObservedAt}
                   placeholder="Select date"
-                  editable
+                  editable={canEditIncidentInForm}
                   onPress={() => openIncidentDatePicker("firstObservedAt")}
                   palette={palette}
                 />
@@ -581,7 +653,7 @@ export default function IncidentsTabScreen() {
                   label="First Occurred (YYYY-MM-DD, optional)"
                   value={firstOccurredAt}
                   placeholder="Select date"
-                  editable
+                  editable={canEditIncidentInForm}
                   onPress={() => openIncidentDatePicker("firstOccurredAt")}
                   palette={palette}
                 />
@@ -591,21 +663,23 @@ export default function IncidentsTabScreen() {
                     value={description}
                     onChangeText={setDescription}
                     onFocus={() => scrollToCreateField("description")}
-                    editable
+                    editable={canEditIncidentInForm}
                     multiline
                     placeholder="Description"
                     palette={palette}
                   />
                 </View>
                 <View style={[styles.row2, styles.actionsRow]}>
-                  <Pressable style={[styles.btn, { borderColor: palette.border }]} onPress={onGpsAutofill}>
+                  <Pressable style={[styles.btn, { borderColor: palette.border }]} onPress={onGpsAutofill} disabled={!canEditIncidentInForm}>
                     <Text style={{ color: palette.text, fontWeight: "700" }}>GPS Autofill</Text>
                   </Pressable>
-                  <Pressable style={[styles.btn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={onConfirmClearForm} disabled={busy}>
+                  <Pressable style={[styles.btn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={onConfirmClearForm} disabled={busy || !canEditIncidentInForm}>
                     <Text style={{ color: palette.danger, fontWeight: "700" }}>Clear Incident</Text>
                   </Pressable>
                   <Pressable style={[styles.btn, { backgroundColor: palette.primary }]} onPress={onCreate} disabled={busy}>
-                    <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Working..." : "Create Incident"}</Text>
+                    <Text style={{ color: "#fff", fontWeight: "700" }}>
+                      {busy ? "Working..." : (editingIncidentId ? (canEditIncidentInForm ? "Resubmit Incident" : "Back to Tracking") : "Create Incident")}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -781,21 +855,37 @@ export default function IncidentsTabScreen() {
         <Text style={[styles.sub, { color: palette.muted }]}>Create incidents and process them through the assigned workflow.</Text>
 
         <View style={styles.statusRow}>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("ALL")}>
-            <Text style={{ color: palette.text }}>All ({items.length})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("NEW")}>
-            <Text style={{ color: palette.text }}>New ({statusCounts.NEW})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("IN_PROGRESS")}>
-            <Text style={{ color: palette.text }}>In-Progress ({statusCounts.IN_PROGRESS})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("RESOLVED")}>
-            <Text style={{ color: palette.text }}>Resolved ({statusCounts.RESOLVED})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => load()}>
-            <Text style={{ color: palette.text }}>{busy ? "..." : "Refresh"}</Text>
-          </Pressable>
+          {isMaintenanceWorkerMobile ? (
+            <>
+              <View style={[styles.filterBtn, { borderColor: palette.border }]}>
+                <Text style={{ color: palette.text }}>Under Review ({workerReviewCounts.underReview})</Text>
+              </View>
+              <View style={[styles.filterBtn, { borderColor: palette.border }]}>
+                <Text style={{ color: palette.text }}>Needs Revision ({workerReviewCounts.needsRevision})</Text>
+              </View>
+              <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => load()}>
+                <Text style={{ color: palette.text }}>{busy ? "..." : "Refresh"}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("ALL")}>
+                <Text style={{ color: palette.text }}>All ({items.length})</Text>
+              </Pressable>
+              <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("NEW")}>
+                <Text style={{ color: palette.text }}>New ({statusCounts.NEW})</Text>
+              </Pressable>
+              <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("IN_PROGRESS")}>
+                <Text style={{ color: palette.text }}>In-Progress ({statusCounts.IN_PROGRESS})</Text>
+              </Pressable>
+              <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("RESOLVED")}>
+                <Text style={{ color: palette.text }}>Resolved ({statusCounts.RESOLVED})</Text>
+              </Pressable>
+              <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => load()}>
+                <Text style={{ color: palette.text }}>{busy ? "..." : "Refresh"}</Text>
+              </Pressable>
+            </>
+          )}
         </View>
 
         {err ? (
@@ -805,20 +895,34 @@ export default function IncidentsTabScreen() {
         ) : null}
 
         <FlatList
-          data={items}
+          data={workerTrackingItems}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={{ paddingBottom: 30 }}
           renderItem={({ item }) => {
+            const needsRevision = String(item.location_match_status || "").toUpperCase() === "NEEDS_REVISION";
+            const workerBadge = needsRevision
+              ? { bg: "#450a0a", fg: "#fecaca", bd: "#b91c1c", label: "Needs Revision" }
+              : { bg: "#422006", fg: "#fde68a", bd: "#a16207", label: "Under Review" };
             const status = statusBg(item.status);
             const incidentTitle =
-              item.title?.trim() || `Incident at ${item.district ?? "Unknown district"}, ${item.route ?? "Unknown route"} (${item.post_mile ?? "PM ?"})`;
+              item.title?.trim() || `Incident ${item.district ?? "Unknown district"} / ${item.route ?? "Unknown route"} / PM ${item.post_mile ?? "?"}`;
             return (
-              <View style={[styles.card, { borderColor: palette.border, backgroundColor: palette.panel }]}>
+              <Pressable
+                style={[styles.card, { borderColor: palette.border, backgroundColor: palette.panel }]}
+                onPress={isMaintenanceWorkerMobile ? () => openIncidentFromTracking(item) : undefined}
+                disabled={!isMaintenanceWorkerMobile}
+              >
                 <View style={styles.cardHead}>
                   <Text style={[styles.cardTitle, { color: palette.text }]}>{incidentTitle}</Text>
-                  <Text style={[styles.badge, { backgroundColor: status.bg, color: status.fg, borderColor: status.bd }]}>
-                    {item.status}
-                  </Text>
+                  {isMaintenanceWorkerMobile ? (
+                    <Text style={[styles.badge, { backgroundColor: workerBadge.bg, color: workerBadge.fg, borderColor: workerBadge.bd }]}>
+                      {workerBadge.label}
+                    </Text>
+                  ) : (
+                    <Text style={[styles.badge, { backgroundColor: status.bg, color: status.fg, borderColor: status.bd }]}>
+                      {item.status}
+                    </Text>
+                  )}
                 </View>
                 <Text style={{ color: palette.muted, fontSize: 12 }}>
                   #{item.id} | {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}
@@ -827,7 +931,7 @@ export default function IncidentsTabScreen() {
                   Assignee: {item.assignment?.assignee_name || item.assignment?.assignee_email || "Unassigned"}
                 </Text>
                 <Text style={{ color: palette.muted, fontSize: 12 }}>
-                  Stage: {item.current_stage}
+                  Stage: {isMaintenanceWorkerMobile ? workerBadge.label : item.current_stage}
                 </Text>
                 {!!item.linked_submission_id ? (
                   <Pressable
@@ -853,17 +957,19 @@ export default function IncidentsTabScreen() {
                       </Pressable>
                     </>
                   ) : null}
-                  {canResolve && item.status !== "RESOLVED" ? (
+                  {canResolve && !isMaintenanceWorkerMobile && item.status !== "RESOLVED" ? (
                     <Pressable style={[styles.smallBtn, { borderColor: palette.border }]} onPress={() => onResolve(item.id)}>
                       <Text style={{ color: palette.text, fontWeight: "700" }}>Resolve</Text>
                     </Pressable>
                   ) : null}
                 </View>
-              </View>
+              </Pressable>
             );
           }}
           ListEmptyComponent={
-            <Text style={{ color: palette.muted, paddingVertical: 20 }}>{busy ? "Loading incidents..." : "No incidents yet."}</Text>
+            <Text style={{ color: palette.muted, paddingVertical: 20 }}>
+              {busy ? "Loading incidents..." : (isMaintenanceWorkerMobile ? "No incidents pending coordinator review." : "No incidents yet.")}
+            </Text>
           }
         />
       </View>

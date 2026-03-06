@@ -178,6 +178,10 @@ class IncidentLocationLinkRequest(BaseModel):
     comment: str | None = None
 
 
+class IncidentRequestRevision(BaseModel):
+    comment: str | None = None
+
+
 class IncidentAssignBranchChiefRequest(BaseModel):
     branch_chief_user_id: int = Field(..., ge=1)
 
