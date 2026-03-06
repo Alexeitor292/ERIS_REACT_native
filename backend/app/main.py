@@ -33,6 +33,7 @@ from .schemas.common import (
     GeometryResponse,
     GeometryUpsert,
     GisaDraftPatch,
+    NotifyCoordinatorAction,
     ReplaceActions,
     ReplaceIncidentTypes,
     ReviewAction,
@@ -2704,6 +2705,73 @@ def submit(
         )
         db.commit()
         return result
+    except Exception:
+        db.rollback()
+        raise
+
+
+@app.post("/submissions/{submission_id}/notify-coordinator")
+def notify_coordinator(
+    submission_id: int = Path(..., ge=1),
+    payload: NotifyCoordinatorAction = ...,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+):
+    require_can_edit_submission(submission_id, db, user)
+    current_status = get_submission_status(db, submission_id)
+    if current_status not in {"DRAFT", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can notify coordinator")
+
+    gisa = get_gisa(db, submission_id)
+    if not gisa:
+        raise HTTPException(status_code=409, detail="GISA data missing. Save draft first.")
+
+    missing: list[str] = []
+    if not str(gisa.get("district") or "").strip():
+        missing.append("district")
+    if not str(gisa.get("county") or "").strip():
+        missing.append("county")
+    if not str(gisa.get("route") or "").strip():
+        missing.append("route")
+    if not str(gisa.get("post_mile") or "").strip():
+        missing.append("post_mile")
+    if gisa.get("latitude") is None:
+        missing.append("latitude")
+    if gisa.get("longitude") is None:
+        missing.append("longitude")
+    if missing:
+        raise HTTPException(status_code=409, detail=f"Cannot notify coordinator: missing required fields [{', '.join(missing)}]")
+
+    actions = get_gisa_actions(db, submission_id)
+    immediate_actions = [str(x) for x in (actions.get("immediate") or []) if str(x).strip()]
+    if not immediate_actions:
+        raise HTTPException(status_code=409, detail="Select at least one Immediate Action before notifying coordinator.")
+
+    message = str(payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="Notification message is required.")
+
+    try:
+        db.execute(text("""
+            INSERT INTO submission_workflow_events
+              (submission_id, actor_user_id, event_type, from_status, to_status, comment)
+            VALUES
+              (:sid, :actor, 'COORDINATOR_NOTIFIED', :from_status, :to_status, :comment)
+        """), {
+            "sid": submission_id,
+            "actor": user["id"],
+            "from_status": current_status,
+            "to_status": current_status,
+            "comment": f"Immediate actions: {', '.join(immediate_actions)} | Message: {message}",
+        })
+        db.commit()
+        return {
+            "submission_id": submission_id,
+            "notified": True,
+            "status": current_status,
+            "immediate_actions": immediate_actions,
+            "message": message,
+        }
     except Exception:
         db.rollback()
         raise

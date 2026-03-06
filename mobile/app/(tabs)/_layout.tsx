@@ -129,24 +129,6 @@ export default function TabLayout() {
       />
 
       <Tabs.Screen
-        name="drafts"
-        options={{
-          href: canSeeDraftsSubmissions ? undefined : null,
-          title: "Drafts",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="doc.text.fill" color={color} />,
-        }}
-      />
-
-      <Tabs.Screen
-        name="submissions"
-        options={{
-          href: canSeeDraftsSubmissions ? undefined : null,
-          title: "Submissions",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="tray.full.fill" color={color} />,
-        }}
-      />
-
-      <Tabs.Screen
         name="incidents/create"
         options={{
           href: isMaintenanceWorker ? undefined : null,
@@ -163,14 +145,26 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="exclamationmark.triangle.fill" color={color} />,
         }}
       />
+
       <Tabs.Screen
-        name="incidents/index"
+        name="drafts"
         options={{
-          href: null,
+          href: canSeeDraftsSubmissions ? undefined : null,
+          title: "Drafts",
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="doc.text.fill" color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="submissions"
+        options={{
+          href: canSeeDraftsSubmissions ? undefined : null,
+          title: "Submissions",
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="tray.full.fill" color={color} />,
         }}
       />
       <Tabs.Screen
-        name="incidents"
+        name="incidents/index"
         options={{
           href: null,
         }}

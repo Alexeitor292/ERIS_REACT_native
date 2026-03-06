@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, Platform } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, LayoutAnimation, Platform, UIManager } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
@@ -7,7 +7,7 @@ import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathnam
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment } from "../../../src/api/submissions";
+import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment } from "../../../src/api/submissions";
 import { enqueueOfflineOp } from "../../../src/offline/queue";
 import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
 import {
@@ -104,7 +104,6 @@ const MEMO_SECTIONS = [
   { key: "maintenance_history", label: "Maintenance History", field: "maintenance_history_notes" },
   { key: "observation", label: "Observation", field: "observations_notes" },
   { key: "geotechnical_assessment", label: "Geotechnical Assessment", field: "geotechnical_assessment_notes" },
-  { key: "recommendations", label: "Recommendations", field: "recommendations_notes" },
 ] as const;
 
 const n = (v: string) => (v.trim() ? v.trim() : null);
@@ -605,18 +604,21 @@ export default function SubmissionDetailScreen() {
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>({});
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
-  const [selectedSectionKey, setSelectedSectionKey] = useState<string>(MEMO_SECTIONS[0].key);
+  const [selectedSectionKey, setSelectedSectionKey] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
   const [enrichmentHint, setEnrichmentHint] = useState("");
   const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
   const [countyPickerOpen, setCountyPickerOpen] = useState(false);
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
   const [lanesClosedPickerOpen, setLanesClosedPickerOpen] = useState(false);
+  const [immediateActionsPickerOpen, setImmediateActionsPickerOpen] = useState(false);
+  const [followUpActionsPickerOpen, setFollowUpActionsPickerOpen] = useState(false);
   const [datePickerKey, setDatePickerKey] = useState<"report_date" | "date_incident_reported" | null>(null);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [notifyMessage, setNotifyMessage] = useState("");
   const [openSections, setOpenSections] = useState({
     header: false,
     location: false,
@@ -660,6 +662,14 @@ export default function SubmissionDetailScreen() {
     [form.district]
   );
   const countyLabelValue = useMemo(() => countyDisplayLabel(form.county), [form.county]);
+
+  const toggleAssessmentSection = useCallback((key: string) => {
+    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setSelectedSectionKey((prev) => (prev === key ? null : key));
+  }, []);
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
@@ -1001,7 +1011,7 @@ export default function SubmissionDetailScreen() {
   const togglePaperBlock = (key: keyof typeof openPaperBlocks) => {
     setOpenPaperBlocks((prev) => ({ ...prev, [key]: !prev[key] }));
   };
-  const FORM_STEPS = ["Header", "GISA Body", "Assessment", "Gallery"] as const;
+  const FORM_STEPS = ["Header", "GISA Body", "Assessment", "Actions", "Gallery"] as const;
   const goNextStep = () => setActiveStep((prev) => Math.min(prev + 1, FORM_STEPS.length - 1));
   const goPrevStep = () => setActiveStep((prev) => Math.max(prev - 1, 0));
   const contactDisplayName = (contact: DistrictContact, idx: number) => {
@@ -1084,14 +1094,15 @@ export default function SubmissionDetailScreen() {
     }
   }
 
-  const validateRequiredFields = useCallback((): boolean => {
+  const validateDraftMinimumFields = useCallback((): boolean => {
     const nextErrors: FieldErrorMap = {};
     const required: { key: keyof FormState; label: string; section: keyof typeof openSections }[] = [
       { key: "district", label: "District", section: "header" },
       { key: "county", label: "County", section: "header" },
+      { key: "route", label: "Route", section: "header" },
+      { key: "post_mile", label: "Post Mile", section: "header" },
       { key: "latitude", label: "Latitude", section: "location" },
       { key: "longitude", label: "Longitude", section: "location" },
-      { key: "geotechnical_assessment_notes", label: "Geotechnical Assessment", section: "engineerMemo" },
     ];
 
     const sectionsToOpen = new Set<keyof typeof openSections>();
@@ -1117,6 +1128,18 @@ export default function SubmissionDetailScreen() {
     }
     return true;
   }, [form]);
+
+  const validateSubmitRequiredFields = useCallback((): boolean => {
+    if (!validateDraftMinimumFields()) return false;
+    if (!String(form.geotechnical_assessment_notes ?? "").trim()) {
+      setFieldErrors((prev) => ({ ...prev, geotechnical_assessment_notes: "Geotechnical Assessment is required." }));
+      setOpenSections((prev) => ({ ...prev, engineerMemo: true }));
+      setActiveStep(2);
+      Alert.alert("Cannot Submit Yet", "Geotechnical Assessment is required before submitting.");
+      return false;
+    }
+    return true;
+  }, [form.geotechnical_assessment_notes, validateDraftMinimumFields]);
 
   const validateSoilPercentForSubmit = useCallback((): boolean => {
     if (form.material_soil !== "YES") return true;
@@ -1174,13 +1197,13 @@ export default function SubmissionDetailScreen() {
     return { ok: true };
   }, [lookups, immediateActions, followUpActions]);
 
-  const saveDraft = useCallback(async () => {
-    if (!token || !id) return;
-    if (!validateRequiredFields()) return;
+  const saveDraft = useCallback(async (opts?: { silent?: boolean }): Promise<boolean> => {
+    if (!token || !id) return false;
+    if (!validateDraftMinimumFields()) return false;
     const actionGroupValidation = validateActionGroups();
     if (!actionGroupValidation.ok) {
       Alert.alert("Cannot Save Yet", actionGroupValidation.message ?? "Action group mismatch detected.");
-      return;
+      return false;
     }
     const normalizedForm = enforceFormBusinessRules(form);
     setForm(normalizedForm);
@@ -1192,7 +1215,7 @@ export default function SubmissionDetailScreen() {
         setFieldErrors((prev) => ({ ...prev, geometry_json: "Geometry JSON is invalid." }));
         setOpenSections((prev) => ({ ...prev, location: true }));
         Alert.alert("Almost there", "Please fix the highlighted Geometry JSON field.");
-        return;
+        return false;
       }
     }
     setBusy(true);
@@ -1235,25 +1258,27 @@ export default function SubmissionDetailScreen() {
           immediate: immediateActions,
           follow_up: followUpActions,
         });
-        Alert.alert("Saved Offline", "Local draft saved and queued for automatic sync.");
+        if (!opts?.silent) Alert.alert("Saved Offline", "Local draft saved and queued for automatic sync.");
         triggerOfflineSyncNow().catch(() => {});
       } catch (err: any) {
         Alert.alert("Save failed", String(err?.message ?? err));
+        return false;
       } finally {
         setBusy(false);
       }
-      return;
+      return true;
     }
     try {
       await patchSubmission(token, id, patchPayload);
       // Source of truth is the visible form chips; keep API payload derived from form.
       await replaceIncidentTypes(token, id, incidentItems);
       await replaceActions(token, id, { immediate: immediateActions, follow_up: followUpActions });
-      Alert.alert("Saved", "Draft saved.");
+      if (!opts?.silent) Alert.alert("Saved", "Draft saved.");
       await clearDraftLocalCache();
       await load();
+      return true;
     } catch (err: any) {
-      if (isSessionExpiredError(err)) return;
+      if (isSessionExpiredError(err)) return false;
       const msg = String(err?.message ?? "Unable to save");
       if (isLikelyOfflineError(msg)) {
         await enqueueOfflineOp("PATCH_SUBMISSION", { submissionId: id, patch: patchPayload });
@@ -1263,16 +1288,18 @@ export default function SubmissionDetailScreen() {
           immediate: immediateActions,
           follow_up: followUpActions,
         });
-        Alert.alert("Saved Offline", "Changes were stored locally and will sync automatically once connectivity is back.");
+        if (!opts?.silent) Alert.alert("Saved Offline", "Changes were stored locally and will sync automatically once connectivity is back.");
         triggerOfflineSyncNow().catch(() => {});
+        return true;
       } else {
         Alert.alert("Save failed", msg);
+        return false;
       }
     } finally { setBusy(false); }
   }, [
     token,
     id,
-    validateRequiredFields,
+    validateDraftMinimumFields,
     validateActionGroups,
     form,
     incidentTypesFromFormState,
@@ -1286,7 +1313,7 @@ export default function SubmissionDetailScreen() {
 
   async function submitDraft() {
     if (!token || !id) return;
-    if (!validateRequiredFields()) return;
+    if (!validateSubmitRequiredFields()) return;
     if (!validateSoilPercentForSubmit()) return;
     if (isLocalId) {
       await saveDraft();
@@ -1338,6 +1365,37 @@ export default function SubmissionDetailScreen() {
       Alert.alert("Submit failed", detail || "Unable to submit");
     }
     finally { setBusy(false); }
+  }
+
+  async function notifyCoordinatorNow() {
+    if (!token || !id) return;
+    if (isLocalId) {
+      Alert.alert("Save Required", "This must be a server draft before notifying the coordinator.");
+      return;
+    }
+    if (!immediateActions.length) {
+      Alert.alert("Immediate Action Required", "Select at least one Immediate Action before notifying.");
+      return;
+    }
+    const message = notifyMessage.trim();
+    if (!message) {
+      Alert.alert("Message Required", "Please add a justification message before notifying.");
+      return;
+    }
+    const saved = await saveDraft({ silent: true });
+    if (!saved) return;
+    setBusy(true);
+    try {
+      await notifyCoordinatorApi(token, id, message);
+      setNotifyMessage("");
+      Alert.alert("Coordinator Notified", "Immediate actions were sent to the maintenance coordinator.");
+      await load();
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
+      Alert.alert("Notify failed", String(err?.message ?? err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function review(decision: "APPROVE" | "REJECT") {
@@ -1770,9 +1828,9 @@ export default function SubmissionDetailScreen() {
   const allAttachments = data.attachments ?? data.photos;
   const sectionAttachments = allAttachments.filter((a: any) => !!a.section_key);
   const sectionAttachmentIds = new Set(sectionAttachments.map((a: any) => Number(a.id)));
-  const generalPhotos = data.photos.filter((p) => !sectionAttachmentIds.has(Number(p.id)));
+  const generalPhotos = data.photos;
+  const photoIdSet = new Set(data.photos.map((p) => Number(p.id)));
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
-  const selectedSectionAttachments = sectionAttachments.filter((a: any) => a.section_key === selectedSectionKey);
   const submissionUpdatedAt = data?.submission.updated_at ?? "";
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"];
@@ -1780,32 +1838,20 @@ export default function SubmissionDetailScreen() {
   const materialSoilSelected = form.material_soil === "YES";
   const waterFlowingSelected = form.water_flowing === "YES";
   const highwayLanesClosedSelected = form.highway_status_code === "LANES_CLOSED";
-  const closeHighwayEnabled = immediateActions.includes("CLOSE_ONE_DIRECTION") || immediateActions.includes("CLOSE_BOTH_DIRECTIONS");
   const openHighwayTrafficSelected = immediateActions.includes("OPEN_HIGHWAY_TRAFFIC") || followUpActions.includes("OPEN_HIGHWAY_TRAFFIC");
-  const recommendedActions: { key: string; label: string; code?: string; immediate: boolean; followUp: boolean }[] = [
-    { key: "OPEN_HIGHWAY_TRAFFIC", label: "Open Highway Traffic", code: "OPEN_HIGHWAY_TRAFFIC", immediate: true, followUp: true },
-    { key: "CLOSE_HIGHWAY_SHOULDER", label: "Open Highway Shoulder", code: "CLOSE_HIGHWAY_SHOULDER", immediate: true, followUp: true },
-    { key: "CLOSE_HIGHWAY_PARENT", label: "Close Highway", immediate: true, followUp: false },
-    { key: "REMOVE_DEBRIS", label: "Remove Landslide Debris from the Highway", code: "REMOVE_DEBRIS", immediate: true, followUp: false },
-    { key: "PLACE_K_RAIL", label: "Place K-Rail or Fence", code: "PLACE_K_RAIL", immediate: true, followUp: false },
-    { key: "COVER_SLOPE_PLASTIC", label: "Cover Slope with Plastic", code: "COVER_SLOPE_PLASTIC", immediate: true, followUp: false },
-    { key: "DIVERT_SURFACE_WATER", label: "Divert Surface Water Runoff", code: "DIVERT_SURFACE_WATER", immediate: true, followUp: false },
-    { key: "REMOVE_CULVERT_BLOCKAGE", label: "Remove Culvert Blockage", code: "REMOVE_CULVERT_BLOCKAGE", immediate: true, followUp: false },
-    { key: "DEWATER", label: "Dewater with Pump, Trench, etc.", code: "DEWATER", immediate: true, followUp: false },
-    { key: "DEWATER_HORIZONTAL_DRAINS", label: "Dewater with Horizontal Drains", code: "DEWATER_HORIZONTAL_DRAINS", immediate: true, followUp: true },
-    { key: "TEMP_SHORING", label: "Construct Temporary Shoring", code: "TEMP_SHORING", immediate: true, followUp: true },
-    { key: "BUTTRESS_TOE", label: "Buttress Toe of Landslide", code: "BUTTRESS_TOE", immediate: true, followUp: true },
-    { key: "PLACE_ROCK_SLOPE_PROTECTION", label: "Place Rock Slope Protection (ref. Manual)", code: "PLACE_ROCK_SLOPE_PROTECTION", immediate: true, followUp: true },
-    { key: "ROUTINE_VISUAL_MONITOR", label: "Routine Visual Monitor", code: "ROUTINE_VISUAL_MONITOR", immediate: true, followUp: true },
-    { key: "RECONSTRUCT_SLOPE", label: "Reconstruct Slope to Original Condition", code: "RECONSTRUCT_SLOPE", immediate: true, followUp: true },
-    { key: "RECONSTRUCT_SLOPE_GEOSYNTHETICS", label: "Reconstruct Slope with Geosynthetics", code: "RECONSTRUCT_SLOPE_GEOSYNTHETICS", immediate: true, followUp: true },
-    { key: "REPAIR_CULVERT_DRAINAGE_PIPE", label: "Repair Culvert/Drainage Pipe", code: "REPAIR_CULVERT_DRAINAGE_PIPE", immediate: false, followUp: true },
-    { key: "EROSION_CONTROL", label: "Install Erosion Control - by Dist. Landscape", code: "EROSION_CONTROL", immediate: false, followUp: true },
-    { key: "SURVEY_SITE_DIST_SURVEY", label: "Survey the Site - by Dist. Survey", code: "SURVEY_SITE_DIST_SURVEY", immediate: false, followUp: true },
-    { key: "GEOLOGIC_MAPPING", label: "Perform Geological Mapping", code: "GEOLOGIC_MAPPING", immediate: false, followUp: true },
-    { key: "SUBSURFACE_EXPLORATION", label: "Perform Subsurface Exploration", code: "SUBSURFACE_EXPLORATION", immediate: false, followUp: true },
-    { key: "DETAILED_DESIGN_PLANS", label: "Perform Detailed Design & Produce Plans", code: "DETAILED_DESIGN_PLANS", immediate: false, followUp: true },
-  ];
+  const immediateActionOptions = lookups.actions.immediate ?? [];
+  const followUpActionOptions = lookups.actions.follow_up ?? [];
+  const actionLabelByCode: Record<string, string> = {};
+  [...immediateActionOptions, ...followUpActionOptions].forEach((x) => {
+    actionLabelByCode[String(x.code)] = String(x.label || x.code);
+  });
+  const selectedImmediateLabel = immediateActions.length
+    ? immediateActions.map((code) => actionLabelByCode[code] ?? code).join(", ")
+    : "";
+  const selectedFollowUpLabel = followUpActions.length
+    ? followUpActions.map((code) => actionLabelByCode[code] ?? code).join(", ")
+    : "";
+  const canNotifyCoordinatorNow = canEdit && !isLocalId && immediateActions.length > 0;
 
   const selectSingleIncidentType = (key: string) => {
     if (!canEdit) return;
@@ -1887,46 +1933,12 @@ export default function SubmissionDetailScreen() {
     if (!canEdit) return;
     if (group === "IMMEDIATE") {
       setImmediateActions((prev) => {
-        const next = prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code];
-        if (
-          code === "OPEN_HIGHWAY_TRAFFIC" &&
-          !next.includes("OPEN_HIGHWAY_TRAFFIC") &&
-          !followUpActions.includes("OPEN_HIGHWAY_TRAFFIC")
-        ) {
-          setVal("open_highway_traffic_lanes_count", "");
-        }
-        return next;
+        return prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code];
       });
       return;
     }
     setFollowUpActions((prev) => {
-      const next = prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code];
-      if (
-        code === "OPEN_HIGHWAY_TRAFFIC" &&
-        !next.includes("OPEN_HIGHWAY_TRAFFIC") &&
-        !immediateActions.includes("OPEN_HIGHWAY_TRAFFIC")
-      ) {
-        setVal("open_highway_traffic_lanes_count", "");
-      }
-      return next;
-    });
-  };
-
-  const toggleCloseHighwayParent = () => {
-    if (!canEdit) return;
-    if (closeHighwayEnabled) {
-      setImmediateActions((prev) => prev.filter((x) => x !== "CLOSE_ONE_DIRECTION" && x !== "CLOSE_BOTH_DIRECTIONS"));
-      return;
-    }
-    setImmediateActions((prev) => (prev.includes("CLOSE_ONE_DIRECTION") ? prev : [...prev, "CLOSE_ONE_DIRECTION"]));
-  };
-
-  const toggleCloseHighwayDirection = (code: "CLOSE_ONE_DIRECTION" | "CLOSE_BOTH_DIRECTIONS") => {
-    if (!canEdit) return;
-    setImmediateActions((prev) => {
-      const base = prev.filter((x) => x !== "CLOSE_ONE_DIRECTION" && x !== "CLOSE_BOTH_DIRECTIONS");
-      if (prev.includes(code)) return base;
-      return [...base, code];
+      return prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code];
     });
   };
   const setImpactSelection = (
@@ -1969,6 +1981,46 @@ export default function SubmissionDetailScreen() {
     } catch {
       Alert.alert("Editor unavailable", "Could not open this image in a device editor.");
     }
+  }
+
+  function renderTaggedSectionMedia(sectionKey: string) {
+    const tagged = sectionAttachments.filter((a: any) => a.section_key === sectionKey);
+    return (
+      <View style={{ marginTop: 8 }}>
+        <Pressable
+          style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+          onPress={() => promptUploadSource(sectionKey)}
+          disabled={!canEdit || busy}
+        >
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text>
+        </Pressable>
+        {tagged.length ? (
+          tagged.map((file: any) => {
+            const isPhoto = photoIdSet.has(Number(file.id));
+            return (
+              <View key={`${sectionKey}-${file.id}`} style={styles.sectionAttachmentRow}>
+                <Text style={{ fontWeight: "600", color: palette.text }}>{file.file_name}</Text>
+                {isPhoto && !failedPreviewIds[file.id] ? (
+                  <Pressable onPress={() => openFullscreen(file.id, file.file_name)} style={{ marginTop: 6 }}>
+                    <Image
+                      source={previewSource(file.id)}
+                      style={styles.photoPreviewCompact}
+                      onError={() => setFailedPreviewIds((prev) => ({ ...prev, [file.id]: true }))}
+                    />
+                  </Pressable>
+                ) : (
+                  <Pressable onPress={() => openPhotoFallback(file.id)} style={{ marginTop: 6 }}>
+                    <Text style={[styles.muted, { color: palette.muted }]}>Open file</Text>
+                  </Pressable>
+                )}
+              </View>
+            );
+          })
+        ) : (
+          <Text style={[styles.muted, { marginTop: 8, color: palette.muted }]}>No photo uploaded for this section yet.</Text>
+        )}
+      </View>
+    );
   }
 
   async function generateGisaPdf() {
@@ -2071,7 +2123,14 @@ export default function SubmissionDetailScreen() {
             ]}
           >
             <Text style={[styles.stepTabIndex, { color: idx <= activeStep ? palette.primary : palette.muted }]}>{idx + 1}</Text>
-            <Text style={[styles.stepTabLabel, { color: idx === activeStep ? palette.text : palette.muted }]}>{step}</Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}
+              style={[styles.stepTabLabel, { color: idx === activeStep ? palette.text : palette.muted }]}
+            >
+              {step}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -2227,6 +2286,7 @@ export default function SubmissionDetailScreen() {
               />
             ))}
           </View>
+          {renderTaggedSectionMedia("distribution")}
         </DropdownBlock>
 
         <DropdownBlock title="Highway Status" open={openPaperBlocks.highwayStatusMain} onToggle={() => togglePaperBlock("highwayStatusMain")} palette={palette}>
@@ -2258,6 +2318,7 @@ export default function SubmissionDetailScreen() {
               error={fieldErrors.lanes_closed_count}
             />
           ) : null}
+          {renderTaggedSectionMedia("highway_status")}
         </DropdownBlock>
 
         <DropdownBlock title="Incident Type" open={openPaperBlocks.incidentType} onToggle={() => togglePaperBlock("incidentType")} palette={palette}>
@@ -2276,6 +2337,7 @@ export default function SubmissionDetailScreen() {
               />
             ))}
           </View>
+          {renderTaggedSectionMedia("incident_type")}
         </DropdownBlock>
 
         <DropdownBlock title="Material" open={openPaperBlocks.material} onToggle={() => togglePaperBlock("material")} palette={palette}>
@@ -2299,6 +2361,7 @@ export default function SubmissionDetailScreen() {
               <Field palette={palette} label="Gravel Est %" value={form.est_gravel_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_gravel_pct", v)} />
             </View>
           ) : null}
+          {renderTaggedSectionMedia("material")}
         </DropdownBlock>
 
         <DropdownBlock title="Pavement / Ground Status" open={openPaperBlocks.pavementGroundStatus} onToggle={() => togglePaperBlock("pavementGroundStatus")} palette={palette}>
@@ -2342,12 +2405,14 @@ export default function SubmissionDetailScreen() {
               <Chip key={`paper-${c}`} label={c} palette={palette} active={form.indented_by_rocks === c} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", c)} />
             ))}
           </View>
+          {renderTaggedSectionMedia("pavement_ground_status")}
         </DropdownBlock>
 
         <DropdownBlock title="Vegetation on Slope" open={openPaperBlocks.vegetation} onToggle={() => togglePaperBlock("vegetation")} palette={palette}>
           <Field palette={palette} label="Trees Coverage %" value={form.vegetation_trees} editable={canEdit} onChangeText={(v) => setVal("vegetation_trees", v)} />
           <Field palette={palette} label="Bushes/Shrubs Coverage %" value={form.vegetation_bushes_shrubs} editable={canEdit} onChangeText={(v) => setVal("vegetation_bushes_shrubs", v)} />
           <Field palette={palette} label="Groundcover Coverage %" value={form.vegetation_groundcover} editable={canEdit} onChangeText={(v) => setVal("vegetation_groundcover", v)} />
+          {renderTaggedSectionMedia("vegetation_slope")}
         </DropdownBlock>
 
         <DropdownBlock title="Water / Drainage" open={openPaperBlocks.waterDrainage} onToggle={() => togglePaperBlock("waterDrainage")} palette={palette}>
@@ -2361,7 +2426,7 @@ export default function SubmissionDetailScreen() {
             <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>May be Impacted</Text>
             <View style={styles.recommendedLabelSpacer} />
           </View>
-          {[
+          {[ 
             ["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"],
             ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"],
             ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"],
@@ -2380,6 +2445,7 @@ export default function SubmissionDetailScreen() {
               <Text style={[styles.recommendedLabel, { color: palette.text }]}>{label}</Text>
             </View>
           ))}
+          {renderTaggedSectionMedia("water_drainage")}
         </DropdownBlock>
 
         <DropdownBlock title="Water Content" open={openPaperBlocks.waterContent} onToggle={() => togglePaperBlock("waterContent")} palette={palette}>
@@ -2403,6 +2469,7 @@ export default function SubmissionDetailScreen() {
               ))}
             </View>
           ) : null}
+          {renderTaggedSectionMedia("water_content")}
         </DropdownBlock>
 
         <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
@@ -2417,6 +2484,7 @@ export default function SubmissionDetailScreen() {
             <Field palette={palette} label="Landslide Slope, deg (β)" value={form.measure_landslide_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_slope_deg", v)} />
             <Field palette={palette} label="Length of Roadway Encroached, ft (Lr)" value={form.measure_roadway_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_length_ft", v)} />
             <Field palette={palette} label="Width of Roadway Encroached, ft (Wr)" value={form.measure_roadway_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_roadway_width_ft", v)} />
+            {renderTaggedSectionMedia("measurements")}
           </DropdownBlock>
         <View style={styles.stepNavRow}>
           <Pressable style={[styles.btnGhost, styles.stepNavGhostBtn, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
@@ -2431,135 +2499,32 @@ export default function SubmissionDetailScreen() {
 
       <View style={activeStep === 2 ? undefined : styles.hidden}>
       <View style={styles.stepSectionStack}>
-      <CollapsibleSection title="Recommended Actions" open={openSections.actions} onToggle={() => toggleSection("actions")} palette={palette} compact={compact}>
-        <View style={styles.recommendedHeaderRow}>
-          <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>Immediate Actions</Text>
-          <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>Follow-up Actions</Text>
-          <View style={styles.recommendedLabelSpacer} />
-        </View>
-        {recommendedActions.map((item) => {
-          const immediateChecked = item.code ? immediateActions.includes(item.code) : closeHighwayEnabled;
-          const followUpChecked = item.code ? followUpActions.includes(item.code) : false;
-          return (
-            <View key={item.key}>
-              <View style={styles.recommendedRow}>
-                {item.immediate ? (
-                  <Pressable
-                    style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: immediateChecked ? palette.primary : palette.panel }]}
-                    onPress={() => {
-                      if (!canEdit) return;
-                      if (item.key === "CLOSE_HIGHWAY_PARENT") {
-                        toggleCloseHighwayParent();
-                        return;
-                      }
-                      if (item.code) toggleActionByGroup(item.code, "IMMEDIATE");
-                    }}
-                    disabled={!canEdit}
-                  />
-                ) : (
-                  <View style={styles.matrixCellSpacer} />
-                )}
-                {item.followUp ? (
-                  <Pressable
-                    style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: followUpChecked ? palette.primary : palette.panel }]}
-                    onPress={() => item.code && toggleActionByGroup(item.code, "FOLLOW_UP")}
-                    disabled={!canEdit || !item.code}
-                  />
-                ) : (
-                  <View style={styles.matrixCellSpacer} />
-                )}
-                <Text style={[styles.recommendedLabel, { color: palette.text }]}>{item.label}</Text>
-              </View>
-              {item.key === "OPEN_HIGHWAY_TRAFFIC" && openHighwayTrafficSelected ? (
-                <View style={styles.childActionWrap}>
-                  <Field
-                    palette={palette}
-                    label="Lanes"
-                    value={form.open_highway_traffic_lanes_count}
-                    editable={canEdit}
-                    keyboardType="number-pad"
-                    onChangeText={(v) => setVal("open_highway_traffic_lanes_count", v)}
-                    error={fieldErrors.open_highway_traffic_lanes_count}
-                  />
-                </View>
-              ) : null}
-              {item.key === "CLOSE_HIGHWAY_PARENT" && closeHighwayEnabled ? (
-                <View style={styles.childActionWrap}>
-                  <View style={styles.closeDirectionRow}>
-                    <Pressable
-                      style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: immediateActions.includes("CLOSE_ONE_DIRECTION") ? palette.primary : palette.panel }]}
-                      onPress={() => toggleCloseHighwayDirection("CLOSE_ONE_DIRECTION")}
-                      disabled={!canEdit}
-                    />
-                    <Text style={[styles.recommendedLabel, { color: palette.text }]}>One Direction</Text>
-                    <Pressable
-                      style={[styles.matrixBox, { borderColor: palette.border, backgroundColor: immediateActions.includes("CLOSE_BOTH_DIRECTIONS") ? palette.primary : palette.panel, marginLeft: 14 }]}
-                      onPress={() => toggleCloseHighwayDirection("CLOSE_BOTH_DIRECTIONS")}
-                      disabled={!canEdit}
-                    />
-                    <Text style={[styles.recommendedLabel, { color: palette.text }]}>Both Directions</Text>
-                  </View>
-                </View>
-              ) : null}
-            </View>
-          );
-        })}
-      </CollapsibleSection>
-
-      <CollapsibleSection title="Engineer Memo" open={openSections.engineerMemo} onToggle={() => toggleSection("engineerMemo")} palette={palette} compact={compact}>
-        <View style={{ marginBottom: 8 }}>
-          <Text style={styles.label}>Select Section</Text>
-          <View style={styles.chips}>
-            {MEMO_SECTIONS.map((s) => (
-              <Chip
-                key={s.key}
-                label={s.label}
-                palette={palette}
-                active={selectedSectionKey === s.key}
-                disabled={!canEdit}
-                onPress={() => setSelectedSectionKey(s.key)}
-              />
-            ))}
-          </View>
-          <Pressable
-            style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-            onPress={() => promptUploadSource(selectedSectionKey)}
-            disabled={!canEdit || busy}
-          >
-            <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Files"}</Text>
-          </Pressable>
-          <Text style={[styles.muted, { marginTop: 6, color: palette.muted }]}>
-            Image/video picker is enabled. CAD/document picker can be added next.
-          </Text>
-          {selectedSectionAttachments.length ? selectedSectionAttachments.map((file: any) => (
-            <Pressable key={`section-attach-${file.id}`} style={styles.sectionAttachmentRow} onPress={() => openPhotoFallback(file.id)}>
-              <Text style={[styles.muted, { color: palette.muted }]}>{file.file_name}</Text>
-            </Pressable>
-          )) : (
-            <Text style={[styles.muted, { marginTop: 8, color: palette.muted }]}>No files attached to this section yet.</Text>
-          )}
-        </View>
-
-        {MEMO_SECTIONS.map((item) => (
-          <DropdownBlock key={item.key} title={item.label} open={selectedSectionKey === item.key} onToggle={() => setSelectedSectionKey(item.key)} palette={palette}>
-            <Field
-              palette={palette}
-              label={`${item.label} Notes`}
-              value={form[item.field]}
-              editable={canEdit}
-              multiline
-              onChangeText={(v) => setVal(item.field as keyof FormState, v)}
-              error={fieldErrors[item.field as keyof FormState]}
-            />
-            <Pressable
-              style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-              onPress={() => promptUploadSource(item.key)}
-              disabled={!canEdit || busy}
-            >
-              <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Files"}</Text>
-            </Pressable>
-          </DropdownBlock>
-        ))}
+      {MEMO_SECTIONS.map((item) => (
+        <DropdownBlock
+          key={item.key}
+          title={item.label}
+          open={selectedSectionKey === item.key}
+          onToggle={() => toggleAssessmentSection(item.key)}
+          palette={palette}
+        >
+          <Field
+            palette={palette}
+            label={`${item.label} Notes`}
+            value={form[item.field]}
+            editable={canEdit}
+            multiline
+            onChangeText={(v) => setVal(item.field as keyof FormState, v)}
+            error={fieldErrors[item.field as keyof FormState]}
+          />
+          {renderTaggedSectionMedia(item.key)}
+        </DropdownBlock>
+      ))}
+      <DropdownBlock
+        title="Sketchpad"
+        open={selectedSectionKey === "sketchpad"}
+        onToggle={() => toggleAssessmentSection("sketchpad")}
+        palette={palette}
+      >
         <Field
           palette={palette}
           label="Sketchpad Notes"
@@ -2568,7 +2533,8 @@ export default function SubmissionDetailScreen() {
           multiline
           onChangeText={(v) => setVal("sketchpad_notes", v)}
         />
-      </CollapsibleSection>
+        {renderTaggedSectionMedia("sketchpad")}
+      </DropdownBlock>
 
       <View style={styles.stepNavRow}>
         <Pressable style={[styles.btnGhost, styles.stepNavGhostBtn, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
@@ -2581,7 +2547,77 @@ export default function SubmissionDetailScreen() {
       </View>
       </View>
 
-      {activeStep === 3 && canEdit && (
+      <View style={activeStep === 3 ? undefined : styles.hidden}>
+      <View style={styles.stepSectionStack}>
+      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+        <Text style={styles.sectionTitle}>Immediate Actions</Text>
+        <SelectField
+          palette={palette}
+          label="Immediate Actions"
+          value={selectedImmediateLabel}
+          placeholder="Select immediate actions"
+          editable={canEdit}
+          onPress={() => setImmediateActionsPickerOpen(true)}
+        />
+        {openHighwayTrafficSelected ? (
+          <Field
+            palette={palette}
+            label="Open Highway Traffic Lanes"
+            value={form.open_highway_traffic_lanes_count}
+            editable={canEdit}
+            keyboardType="number-pad"
+            onChangeText={(v) => setVal("open_highway_traffic_lanes_count", v)}
+            error={fieldErrors.open_highway_traffic_lanes_count}
+          />
+        ) : null}
+        {immediateActions.length > 0 ? (
+          <>
+            <Field
+              palette={palette}
+              label="Emergency Justification Message"
+              value={notifyMessage}
+              editable={canEdit && !isLocalId}
+              multiline
+              onChangeText={setNotifyMessage}
+            />
+            <Pressable
+              style={[styles.btnPrimary, { backgroundColor: palette.primary, marginTop: 8, opacity: canNotifyCoordinatorNow ? 1 : 0.65 }]}
+              onPress={notifyCoordinatorNow}
+              disabled={busy || !canNotifyCoordinatorNow}
+            >
+              <Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Notify Coordinator"}</Text>
+            </Pressable>
+            {!canNotifyCoordinatorNow ? (
+              <Text style={[styles.muted, { marginTop: 8, color: palette.muted }]}>
+                Save draft with required location fields to notify the coordinator.
+              </Text>
+            ) : null}
+          </>
+        ) : null}
+      </View>
+      <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+        <Text style={styles.sectionTitle}>Follow-up Actions</Text>
+        <SelectField
+          palette={palette}
+          label="Follow-up Actions"
+          value={selectedFollowUpLabel}
+          placeholder="Select follow-up actions"
+          editable={canEdit}
+          onPress={() => setFollowUpActionsPickerOpen(true)}
+        />
+      </View>
+      <View style={styles.stepNavRow}>
+        <Pressable style={[styles.btnGhost, styles.stepNavGhostBtn, styles.stepNavBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={goPrevStep}>
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Previous</Text>
+        </Pressable>
+        <Pressable style={[styles.btnPrimary, styles.stepNavBtn, { backgroundColor: palette.primary }]} onPress={goNextStep}>
+          <Text style={styles.btnPrimaryText}>Continue</Text>
+        </Pressable>
+      </View>
+      </View>
+      </View>
+
+      {activeStep === 4 && canEdit && (
           <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
             <Text style={styles.sectionTitle}>Submission</Text>
           <Pressable style={[styles.btnPrimary, { backgroundColor: palette.success, marginTop: 8 }]} onPress={submitDraft} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : (data.submission.status === "REJECTED" ? "Resubmit for Review" : "Submit for Review")}</Text></Pressable>
@@ -2615,7 +2651,7 @@ export default function SubmissionDetailScreen() {
         </View>
       )}
 
-      {activeStep === 2 && canReview && (
+      {activeStep === 3 && canReview && (
         <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
           <Text style={styles.sectionTitle}>Reviewer Decision</Text>
           <Field palette={palette} label="Review Comment" value={reviewComment} editable={!busy} multiline onChangeText={setReviewComment} />
@@ -2626,7 +2662,7 @@ export default function SubmissionDetailScreen() {
         </View>
       )}
 
-      <View style={[styles.section, activeStep === 3 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+      <View style={[styles.section, activeStep === 4 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>GISA PDF</Text>
         <Pressable
           style={[styles.btnPrimary, { backgroundColor: palette.primary }]}
@@ -2644,7 +2680,7 @@ export default function SubmissionDetailScreen() {
         </Pressable>
       </View>
 
-      <View style={[styles.section, activeStep === 3 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+      <View style={[styles.section, activeStep === 4 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>Photos</Text>
         {generalPhotos.length === 0 ? <Text style={styles.muted}>No general photos uploaded.</Text> : generalPhotos.map((p) => (
           <View key={p.id} style={{ marginTop: 8 }}>
@@ -2671,7 +2707,7 @@ export default function SubmissionDetailScreen() {
         ))}
       </View>
 
-      <View style={[styles.section, activeStep === 3 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+      <View style={[styles.section, activeStep === 4 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>Section Media</Text>
         {sectionAttachments.length === 0 ? <Text style={styles.muted}>No section-tagged files uploaded.</Text> : sectionAttachments.map((file: any) => (
           <Pressable key={`gallery-attach-${file.id}`} style={styles.sectionAttachmentRow} onPress={() => openPhotoFallback(file.id)}>
@@ -2795,6 +2831,58 @@ export default function SubmissionDetailScreen() {
               </Pressable>
             ))}
           </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={immediateActionsPickerOpen} transparent animationType="fade" onRequestClose={() => setImmediateActionsPickerOpen(false)}>
+      <Pressable style={styles.pickerBackdrop} onPress={() => setImmediateActionsPickerOpen(false)}>
+        <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.pickerTitle, { color: palette.text }]}>Immediate Actions</Text>
+          <ScrollView style={{ maxHeight: 340 }}>
+            {immediateActionOptions.map((item) => {
+              const checked = immediateActions.includes(item.code);
+              return (
+                <Pressable
+                  key={item.code}
+                  style={[styles.actionOptionRow, { borderColor: palette.border, backgroundColor: checked ? palette.panelSoft : palette.panel }]}
+                  onPress={() => toggleActionByGroup(item.code, "IMMEDIATE")}
+                >
+                  <View style={[styles.actionCheck, { borderColor: palette.border, backgroundColor: checked ? palette.primary : palette.panel }]} />
+                  <Text style={{ color: palette.text, flex: 1 }}>{item.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary, marginTop: 8 }]} onPress={() => setImmediateActionsPickerOpen(false)}>
+            <Text style={styles.btnPrimaryText}>Done</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={followUpActionsPickerOpen} transparent animationType="fade" onRequestClose={() => setFollowUpActionsPickerOpen(false)}>
+      <Pressable style={styles.pickerBackdrop} onPress={() => setFollowUpActionsPickerOpen(false)}>
+        <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.pickerTitle, { color: palette.text }]}>Follow-up Actions</Text>
+          <ScrollView style={{ maxHeight: 340 }}>
+            {followUpActionOptions.map((item) => {
+              const checked = followUpActions.includes(item.code);
+              return (
+                <Pressable
+                  key={item.code}
+                  style={[styles.actionOptionRow, { borderColor: palette.border, backgroundColor: checked ? palette.panelSoft : palette.panel }]}
+                  onPress={() => toggleActionByGroup(item.code, "FOLLOW_UP")}
+                >
+                  <View style={[styles.actionCheck, { borderColor: palette.border, backgroundColor: checked ? palette.primary : palette.panel }]} />
+                  <Text style={{ color: palette.text, flex: 1 }}>{item.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary, marginTop: 8 }]} onPress={() => setFollowUpActionsPickerOpen(false)}>
+            <Text style={styles.btnPrimaryText}>Done</Text>
+          </Pressable>
         </Pressable>
       </Pressable>
     </Modal>
@@ -3005,21 +3093,22 @@ const styles = StyleSheet.create({
   hidden: { display: "none" },
   stepTabsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    gap: 4,
     marginTop: 4,
   },
   stepTab: {
     borderWidth: 1,
     borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    minWidth: 74,
+    paddingHorizontal: 4,
+    paddingVertical: 7,
+    minWidth: 0,
+    flex: 1,
+    alignItems: "center",
   },
   stepTabActive: { backgroundColor: "#dbeafe" },
   stepTabInactive: { backgroundColor: "#f8fafc" },
   stepTabIndex: { fontSize: 11, fontWeight: "800" },
-  stepTabLabel: { fontSize: 12, fontWeight: "700", marginTop: 2 },
+  stepTabLabel: { fontSize: 12, fontWeight: "700", marginTop: 2, textAlign: "center", lineHeight: 13 },
   stepNavRow: {
     flexDirection: "row",
     gap: 8,
@@ -3145,6 +3234,22 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 8,
+  },
+  actionOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    marginBottom: 8,
+    gap: 8,
+  },
+  actionCheck: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1,
   },
   calendarHeaderRow: {
     flexDirection: "row",

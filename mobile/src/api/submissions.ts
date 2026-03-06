@@ -70,6 +70,18 @@ export async function submitSubmission(token: string, id: string, comment?: stri
   });
 }
 
+export async function notifyCoordinator(
+  token: string,
+  id: string,
+  message: string
+) {
+  return apiFetch(`/submissions/${id}/notify-coordinator`, {
+    method: "POST",
+    token,
+    body: { message },
+  });
+}
+
 export async function reviewSubmission(
   token: string,
   id: string,

@@ -17,6 +17,10 @@ class WorkflowAction(BaseModel):
     comment: str | None = None
 
 
+class NotifyCoordinatorAction(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
 class ReviewAction(BaseModel):
     decision: Literal["APPROVE", "REJECT"]
     comment: str | None = None
