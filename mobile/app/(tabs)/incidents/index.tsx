@@ -3,6 +3,7 @@ import { Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, Scro
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { router, useLocalSearchParams, usePathname } from "expo-router";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
@@ -120,6 +121,28 @@ function FormField({
 }
 
 const DISTRICT_OPTIONS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
+const REVISION_FIELDS = [
+  "district",
+  "county",
+  "route",
+  "post_mile",
+  "latitude",
+  "longitude",
+  "first_observed_at",
+  "first_occurred_at",
+  "description",
+] as const;
+
+function extractRevisionFields(metadata: unknown): string[] | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const raw = (metadata as { revision_fields?: unknown }).revision_fields;
+  if (!Array.isArray(raw)) return null;
+  const allowed = new Set<string>(REVISION_FIELDS as unknown as string[]);
+  const fields = raw
+    .map((x) => String(x || "").trim().toLowerCase())
+    .filter((x) => !!x && allowed.has(x));
+  return Array.from(new Set(fields));
+}
 
 function normalizeRoute(input: string): string {
   const digits = (input || "").trim().replace(/\D/g, "");
@@ -136,7 +159,7 @@ function statusBg(status: IncidentStatus) {
 export default function IncidentsTabScreen() {
   const { palette } = useUiSettings();
   const pathname = usePathname();
-  const params = useLocalSearchParams<{ incident_id?: string }>();
+  const params = useLocalSearchParams<{ id?: string; incident_id?: string }>();
   const [me, setMe] = useState<{ id: number; roles: string[] } | null>(null);
   const [items, setItems] = useState<Incident[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -156,6 +179,7 @@ export default function IncidentsTabScreen() {
   const [postMile, setPostMile] = useState("");
   const [editingIncidentId, setEditingIncidentId] = useState<number | null>(null);
   const [editingLocked, setEditingLocked] = useState(false);
+  const [revisionEditableFields, setRevisionEditableFields] = useState<string[] | null>(null);
   const [datePickerKey, setDatePickerKey] = useState<"firstObservedAt" | "firstOccurredAt" | null>(null);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
@@ -192,6 +216,8 @@ export default function IncidentsTabScreen() {
     !me?.roles?.some((r) => r === "MAINT_COORDINATOR" || r === "OFFICE_CHIEF" || r === "BRANCH_CHIEF" || r === "ADMIN");
   const canEditIncidentInForm = editingIncidentId == null || !editingLocked;
   const isCreateRoute = pathname?.startsWith("/incidents/create") || pathname?.startsWith("/(tabs)/incidents/create");
+  const isDetailRoute = /\/incidents\/\d+$/.test(pathname || "");
+  const isIncidentFormRoute = isCreateRoute || isDetailRoute;
 
   const load = useCallback(async () => {
     const token = await getToken();
@@ -244,13 +270,14 @@ export default function IncidentsTabScreen() {
 
   const openIncidentFromTracking = (incident: Incident) => {
     const incidentId = String(incident.id);
-    router.push({ pathname: "/(tabs)/incidents/create", params: { incident_id: incidentId } });
+    router.push({ pathname: "/(tabs)/incidents/[id]", params: { id: incidentId } });
   };
 
   const hydrateEditingIncident = (incident: Incident) => {
     const needsRevision = String(incident.location_match_status || "").toUpperCase() === "NEEDS_REVISION";
     setEditingIncidentId(incident.id);
     setEditingLocked(!needsRevision);
+    setRevisionEditableFields(needsRevision ? extractRevisionFields(incident.location_match_metadata) : null);
     setDescription(incident.description || "");
     setFirstObservedAt((incident.first_observed_at || "").slice(0, 10));
     setFirstOccurredAt((incident.first_occurred_at || "").slice(0, 10));
@@ -263,15 +290,22 @@ export default function IncidentsTabScreen() {
   };
 
   useEffect(() => {
-    if (!isCreateRoute) return;
-    const incidentIdRaw = typeof params.incident_id === "string" ? params.incident_id : "";
+    if (!isDetailRoute) return;
+    const incidentIdRaw = typeof params.id === "string" ? params.id : "";
     const incidentId = Number(incidentIdRaw);
     if (!incidentIdRaw || Number.isNaN(incidentId) || incidentId <= 0) return;
     const incident = items.find((x) => x.id === incidentId);
     if (!incident) return;
     if (editingIncidentId === incident.id) return;
     hydrateEditingIncident(incident);
-  }, [editingIncidentId, isCreateRoute, items, params.incident_id]);
+  }, [editingIncidentId, isDetailRoute, items, params.id]);
+
+  useEffect(() => {
+    if (!isCreateRoute) return;
+    setEditingIncidentId(null);
+    setEditingLocked(false);
+    setRevisionEditableFields(null);
+  }, [isCreateRoute]);
 
   const registerCreateField = (key: string, y: number) => {
     createFieldY.current[key] = y;
@@ -339,6 +373,14 @@ export default function IncidentsTabScreen() {
     setPostMile("");
     setEditingIncidentId(null);
     setEditingLocked(false);
+    setRevisionEditableFields(null);
+  };
+
+  const canEditField = (field: string) => {
+    if (!canEditIncidentInForm) return false;
+    if (!isDetailRoute) return true;
+    if (!revisionEditableFields || revisionEditableFields.length === 0) return true;
+    return revisionEditableFields.includes(field);
   };
 
   const onConfirmClearForm = () => {
@@ -359,7 +401,7 @@ export default function IncidentsTabScreen() {
   const onCreate = async () => {
     const token = await getToken();
     if (!token) return;
-    if (!canEditIncidentInForm) {
+    if (isDetailRoute && !canEditIncidentInForm) {
       router.replace("/(tabs)/incidents/track");
       return;
     }
@@ -398,7 +440,9 @@ export default function IncidentsTabScreen() {
         await createIncident(token, payload);
       }
       resetCreateForm();
-      router.replace("/(tabs)/incidents/track");
+      if (isDetailRoute) {
+        router.replace("/(tabs)/incidents/track");
+      }
       await load();
     } catch (e: any) {
       if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
@@ -541,27 +585,37 @@ export default function IncidentsTabScreen() {
     return { underReview, needsRevision };
   }, [workerTrackingItems]);
 
-  if (isCreateRoute && isWorker) {
+  if (isIncidentFormRoute && isWorker) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: palette.bg }]}
+        edges={isDetailRoute ? ["left", "right", "bottom"] : ["top", "left", "right", "bottom"]}
+      >
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <ScrollView
             ref={createScrollRef}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-            contentContainerStyle={styles.createScrollContent}
+            contentContainerStyle={[
+              styles.createScrollContent,
+              isDetailRoute ? { paddingBottom: 120 } : { paddingBottom: 28 },
+            ]}
           >
             <View style={styles.innerCreate}>
-              <Text style={[styles.title, { color: palette.text }]}>
-                {editingIncidentId ? (canEditIncidentInForm ? "Edit Incident" : "Incident Details") : "Create Incident"}
-              </Text>
-              <Text style={[styles.sub, { color: palette.muted }]}>
-                {editingIncidentId
-                  ? (canEditIncidentInForm
-                    ? "Requested updates by the maintenance coordinator. Edit and resubmit."
-                    : "Under review by the maintenance coordinator.")
-                  : "Create an incident report and send it into workflow."}
-              </Text>
+              {isDetailRoute ? (
+                <Pressable style={styles.backRow} onPress={() => router.replace("/(tabs)/incidents/track")}>
+                  <IconSymbol size={18} name="chevron.left" color={palette.primary} />
+                  <Text style={{ color: palette.primary, fontSize: 16, fontWeight: "700" }}>Track Incidents</Text>
+                </Pressable>
+              ) : null}
+              {!isDetailRoute ? (
+                <>
+                  <Text style={[styles.title, { color: palette.text }]}>Create Incident</Text>
+                  <Text style={[styles.sub, { color: palette.muted }]}>
+                    Create an incident report and send it into workflow.
+                  </Text>
+                </>
+              ) : null}
 
               <View style={styles.formCard} testID="incident-create-card">
                 <View style={styles.row2}>
@@ -570,7 +624,7 @@ export default function IncidentsTabScreen() {
                       label="District *"
                       value={district}
                       placeholder="Select district"
-                      editable={canEditIncidentInForm}
+                      editable={canEditField("district")}
                       onPress={() => setDistrictPickerOpen(true)}
                       palette={palette}
                     />
@@ -580,7 +634,7 @@ export default function IncidentsTabScreen() {
                       label="County *"
                       value={countyLabelValue}
                       placeholder={district ? "Select county" : "Select district first"}
-                      editable={canEditIncidentInForm && !!district}
+                      editable={canEditField("county") && !!district}
                       onPress={() => setCountyPickerOpen(true)}
                       palette={palette}
                     />
@@ -592,7 +646,7 @@ export default function IncidentsTabScreen() {
                       label="Route *"
                       value={routeValue}
                       placeholder={county ? "Select route" : "Select county first"}
-                      editable={canEditIncidentInForm && !!county}
+                      editable={canEditField("route") && !!county}
                       onPress={() => setRoutePickerOpen(true)}
                       palette={palette}
                     />
@@ -604,7 +658,7 @@ export default function IncidentsTabScreen() {
                         value={postMile}
                         onChangeText={setPostMile}
                         onFocus={() => scrollToCreateField("postMile")}
-                        editable={canEditIncidentInForm}
+                        editable={canEditField("post_mile")}
                         placeholder="Post Mile *"
                         palette={palette}
                       />
@@ -619,7 +673,7 @@ export default function IncidentsTabScreen() {
                         value={latitude}
                         onChangeText={setLatitude}
                         onFocus={() => scrollToCreateField("latitude")}
-                        editable={canEditIncidentInForm}
+                        editable={canEditField("latitude")}
                         keyboardType="numeric"
                         placeholder="Latitude *"
                         palette={palette}
@@ -633,7 +687,7 @@ export default function IncidentsTabScreen() {
                         value={longitude}
                         onChangeText={setLongitude}
                         onFocus={() => scrollToCreateField("longitude")}
-                        editable={canEditIncidentInForm}
+                        editable={canEditField("longitude")}
                         keyboardType="numeric"
                         placeholder="Longitude *"
                         palette={palette}
@@ -645,7 +699,7 @@ export default function IncidentsTabScreen() {
                   label="First Observed (YYYY-MM-DD) *"
                   value={firstObservedAt}
                   placeholder="Select date"
-                  editable={canEditIncidentInForm}
+                  editable={canEditField("first_observed_at")}
                   onPress={() => openIncidentDatePicker("firstObservedAt")}
                   palette={palette}
                 />
@@ -653,7 +707,7 @@ export default function IncidentsTabScreen() {
                   label="First Occurred (YYYY-MM-DD, optional)"
                   value={firstOccurredAt}
                   placeholder="Select date"
-                  editable={canEditIncidentInForm}
+                  editable={canEditField("first_occurred_at")}
                   onPress={() => openIncidentDatePicker("firstOccurredAt")}
                   palette={palette}
                 />
@@ -663,22 +717,26 @@ export default function IncidentsTabScreen() {
                     value={description}
                     onChangeText={setDescription}
                     onFocus={() => scrollToCreateField("description")}
-                    editable={canEditIncidentInForm}
+                    editable={canEditField("description")}
                     multiline
                     placeholder="Description"
                     palette={palette}
                   />
                 </View>
                 <View style={[styles.row2, styles.actionsRow]}>
-                  <Pressable style={[styles.btn, { borderColor: palette.border }]} onPress={onGpsAutofill} disabled={!canEditIncidentInForm}>
-                    <Text style={{ color: palette.text, fontWeight: "700" }}>GPS Autofill</Text>
-                  </Pressable>
-                  <Pressable style={[styles.btn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={onConfirmClearForm} disabled={busy || !canEditIncidentInForm}>
-                    <Text style={{ color: palette.danger, fontWeight: "700" }}>Clear Incident</Text>
-                  </Pressable>
+                  {!isDetailRoute ? (
+                    <>
+                      <Pressable style={[styles.btn, { borderColor: palette.border }]} onPress={onGpsAutofill} disabled={!canEditIncidentInForm}>
+                        <Text style={{ color: palette.text, fontWeight: "700" }}>GPS Autofill</Text>
+                      </Pressable>
+                      <Pressable style={[styles.btn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={onConfirmClearForm} disabled={busy || !canEditIncidentInForm}>
+                        <Text style={{ color: palette.danger, fontWeight: "700" }}>Clear Incident</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
                   <Pressable style={[styles.btn, { backgroundColor: palette.primary }]} onPress={onCreate} disabled={busy}>
                     <Text style={{ color: "#fff", fontWeight: "700" }}>
-                      {busy ? "Working..." : (editingIncidentId ? (canEditIncidentInForm ? "Resubmit Incident" : "Back to Tracking") : "Create Incident")}
+                      {busy ? "Working..." : (isDetailRoute ? (canEditIncidentInForm ? "Resubmit Incident" : "Back to Tracking") : "Create Incident")}
                     </Text>
                   </Pressable>
                 </View>
@@ -1010,7 +1068,13 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   inner: { flex: 1, padding: 12 },
   innerCreate: { padding: 12 },
-  createScrollContent: { paddingBottom: 18 },
+  createScrollContent: { paddingBottom: 18, flexGrow: 1 },
+  backRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    marginBottom: 6,
+  },
   title: { fontSize: 26, fontWeight: "800" },
   sub: { marginTop: 2, marginBottom: 10, fontSize: 13 },
   statusRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },

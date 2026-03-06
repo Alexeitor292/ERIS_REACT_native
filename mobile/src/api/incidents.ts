@@ -168,14 +168,15 @@ export async function forwardIncidentByCoordinator(token: string, incidentId: nu
 export async function requestIncidentRevisionByCoordinator(
   token: string,
   incidentId: number,
-  comment?: string | null
+  comment?: string | null,
+  revisionFields: string[] = []
 ) {
   return apiFetch<{ incident_id: number; location_match_status: string }>(
     `/incidents/${incidentId}/coordinator/request-revision`,
     {
       method: "POST",
       token,
-      body: { comment: comment ?? null },
+      body: { comment: comment ?? null, revision_fields: revisionFields },
     }
   );
 }

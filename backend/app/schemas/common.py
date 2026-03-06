@@ -180,6 +180,7 @@ class IncidentLocationLinkRequest(BaseModel):
 
 class IncidentRequestRevision(BaseModel):
     comment: str | None = None
+    revision_fields: list[str] = []
 
 
 class IncidentAssignBranchChiefRequest(BaseModel):

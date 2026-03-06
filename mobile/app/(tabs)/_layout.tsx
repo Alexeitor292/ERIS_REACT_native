@@ -61,6 +61,7 @@ export default function TabLayout() {
     if (pathname === "/submissions") return 2;
     return -1;
   }, [pathname]);
+  const isIncidentDetailsRoute = useMemo(() => /\/incidents\/\d+$/.test(pathname || ""), [pathname]);
 
   const canSwipeTabs = currentTabIndex >= 0;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -162,6 +163,25 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="exclamationmark.triangle.fill" color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="incidents/index"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="incidents"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="incidents/[id]"
+        options={{
+          href: null,
+          headerShown: false,
+        }}
+      />
 
       <Tabs.Screen
         name="settings"
@@ -173,7 +193,7 @@ export default function TabLayout() {
       />
       </Tabs>
 
-      {canSwipeTabs ? (
+      {canSwipeTabs && !isIncidentDetailsRoute ? (
         <Pressable
           onPress={openMenu}
           style={[
@@ -190,7 +210,7 @@ export default function TabLayout() {
         </Pressable>
       ) : null}
 
-      {menuOpen ? (
+      {menuOpen && !isIncidentDetailsRoute ? (
         <View style={styles.menuBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => closeMenu()} />
           <Animated.View

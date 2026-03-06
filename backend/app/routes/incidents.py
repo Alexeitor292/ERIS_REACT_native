@@ -38,6 +38,17 @@ OFFICE_BY_DISTRICT: dict[str, str] = {
     "11": "SOUTH",
     "12": "SOUTH",
 }
+REVISION_FIELDS_ALLOWED = {
+    "district",
+    "county",
+    "route",
+    "post_mile",
+    "latitude",
+    "longitude",
+    "first_observed_at",
+    "first_occurred_at",
+    "description",
+}
 
 
 def _normalized_district_code(raw_district: str | None) -> str | None:
@@ -1051,10 +1062,17 @@ def coordinator_request_revision(
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
         raise HTTPException(status_code=409, detail="Revision request is only allowed during coordinator review")
 
+    requested_fields = []
+    for raw_field in payload.revision_fields or []:
+        normalized = str(raw_field or "").strip().lower()
+        if normalized and normalized in REVISION_FIELDS_ALLOWED and normalized not in requested_fields:
+            requested_fields.append(normalized)
+
     metadata = {
         "mode": "REQUEST_REVISION",
         "comment": (payload.comment or "").strip() or None,
         "performed_by_user_id": int(user["id"]),
+        "revision_fields": requested_fields,
     }
     try:
         db.execute(
@@ -1113,6 +1131,42 @@ def maintenance_resubmit_incident(
             status_code=400,
             detail="district, county, route, and post_mile are required location fields",
         )
+
+    metadata_obj = incident.get("location_match_metadata") or {}
+    requested_fields_raw = metadata_obj.get("revision_fields") if isinstance(metadata_obj, dict) else None
+    requested_fields = {
+        str(x or "").strip().lower()
+        for x in (requested_fields_raw or [])
+        if str(x or "").strip().lower() in REVISION_FIELDS_ALLOWED
+    }
+    if requested_fields:
+        old_first_observed = str(incident.get("first_observed_at") or "")[:10]
+        old_first_occurred = str(incident.get("first_occurred_at") or "")[:10]
+        changed_fields: set[str] = set()
+        if _normalize_text(incident.get("district")) != district:
+            changed_fields.add("district")
+        if _normalize_text(incident.get("county")) != county:
+            changed_fields.add("county")
+        if _normalize_text(incident.get("route")) != route:
+            changed_fields.add("route")
+        if _normalize_text(incident.get("post_mile")) != post_mile:
+            changed_fields.add("post_mile")
+        if abs(float(incident.get("latitude") or 0.0) - float(payload.latitude)) > 0.000001:
+            changed_fields.add("latitude")
+        if abs(float(incident.get("longitude") or 0.0) - float(payload.longitude)) > 0.000001:
+            changed_fields.add("longitude")
+        if old_first_observed != str(payload.first_observed_at)[:10]:
+            changed_fields.add("first_observed_at")
+        if old_first_occurred != str(payload.first_occurred_at or "")[:10]:
+            changed_fields.add("first_occurred_at")
+        if _normalize_text(incident.get("description")) != _normalize_text(payload.description):
+            changed_fields.add("description")
+        disallowed_changes = sorted([f for f in changed_fields if f not in requested_fields])
+        if disallowed_changes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only requested revision fields may be changed: {', '.join(sorted(requested_fields))}",
+            )
 
     office_code = _office_for_district(district)
     metadata = {
