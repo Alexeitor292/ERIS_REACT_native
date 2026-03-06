@@ -3,7 +3,6 @@ import { Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, Scro
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { router, useLocalSearchParams, usePathname } from "expo-router";
-import { IconSymbol } from "@/components/ui/icon-symbol";
 
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
@@ -587,10 +586,7 @@ export default function IncidentsTabScreen() {
 
   if (isIncidentFormRoute && isWorker) {
     return (
-      <SafeAreaView
-        style={[styles.container, { backgroundColor: palette.bg }]}
-        edges={isDetailRoute ? ["left", "right", "bottom"] : ["top", "left", "right", "bottom"]}
-      >
+      <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <ScrollView
             ref={createScrollRef}
@@ -598,15 +594,28 @@ export default function IncidentsTabScreen() {
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             contentContainerStyle={[
               styles.createScrollContent,
-              isDetailRoute ? { paddingBottom: 120 } : { paddingBottom: 28 },
+              isDetailRoute ? { paddingBottom: 48 } : { paddingBottom: 28 },
             ]}
           >
             <View style={styles.innerCreate}>
               {isDetailRoute ? (
-                <Pressable style={styles.backRow} onPress={() => router.replace("/(tabs)/incidents/track")}>
-                  <IconSymbol size={18} name="chevron.left" color={palette.primary} />
-                  <Text style={{ color: palette.primary, fontSize: 16, fontWeight: "700" }}>Track Incidents</Text>
-                </Pressable>
+                <View style={styles.detailTopRow}>
+                  <Pressable onPress={() => router.replace("/(tabs)/incidents/track")} hitSlop={8}>
+                    <Text style={[styles.detailBackText, { color: palette.primary }]}>Back</Text>
+                  </Pressable>
+                  <Text style={[styles.detailTopTitle, { color: palette.text }]}>Incident Details</Text>
+                  {canEditIncidentInForm && !isMaintenanceWorkerMobile ? (
+                    <Pressable
+                      style={[styles.detailSaveBtn, { backgroundColor: palette.panel, borderColor: palette.border }]}
+                      onPress={onCreate}
+                      disabled={busy}
+                    >
+                      <Text style={[styles.detailSaveText, { color: palette.primary }]}>{busy ? "..." : "Save"}</Text>
+                    </Pressable>
+                  ) : (
+                    <View style={styles.detailSaveSpacer} />
+                  )}
+                </View>
               ) : null}
               {!isDetailRoute ? (
                 <>
@@ -734,11 +743,13 @@ export default function IncidentsTabScreen() {
                       </Pressable>
                     </>
                   ) : null}
-                  <Pressable style={[styles.btn, { backgroundColor: palette.primary }]} onPress={onCreate} disabled={busy}>
-                    <Text style={{ color: "#fff", fontWeight: "700" }}>
-                      {busy ? "Working..." : (isDetailRoute ? (canEditIncidentInForm ? "Resubmit Incident" : "Back to Tracking") : "Create Incident")}
-                    </Text>
-                  </Pressable>
+                  {!isDetailRoute ? (
+                    <Pressable style={[styles.btn, { backgroundColor: palette.primary }]} onPress={onCreate} disabled={busy}>
+                      <Text style={{ color: "#fff", fontWeight: "700" }}>
+                        {busy ? "Working..." : "Create Incident"}
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
               {err ? (
@@ -1069,11 +1080,40 @@ const styles = StyleSheet.create({
   inner: { flex: 1, padding: 12 },
   innerCreate: { padding: 12 },
   createScrollContent: { paddingBottom: 18, flexGrow: 1 },
-  backRow: {
+  detailTopRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 2,
-    marginBottom: 6,
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  detailBackText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  detailTopTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  detailSaveBtn: {
+    minWidth: 58,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  detailSaveText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  detailSaveSpacer: {
+    width: 58,
+    height: 34,
   },
   title: { fontSize: 26, fontWeight: "800" },
   sub: { marginTop: 2, marginBottom: 10, fontSize: 13 },
