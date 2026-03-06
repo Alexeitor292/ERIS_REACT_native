@@ -74,6 +74,8 @@ Source files:
 - `POST /incidents/{incident_id}/claim` (currently disabled; returns workflow-required error)
 - `POST /incidents/{incident_id}/assign` (ADMIN)
 - `POST /incidents/{incident_id}/coordinator/forward`
+- `GET /incidents/{incident_id}/location-candidates` (coordinator/admin)
+- `POST /incidents/{incident_id}/location-link` (coordinator/admin)
 - `POST /incidents/{incident_id}/office-chief/assign-branch`
 - `POST /incidents/{incident_id}/branch-chief/assign-engineer`
 - `POST /incidents/{incident_id}/unassign` (ADMIN)

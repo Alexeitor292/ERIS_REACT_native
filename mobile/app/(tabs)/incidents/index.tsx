@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
-import { router } from "expo-router";
+import { router, usePathname } from "expo-router";
 
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
@@ -15,6 +15,7 @@ import {
   type Incident,
   type IncidentStatus,
 } from "@/src/api/incidents";
+import { enrichPoint } from "@/src/api/submissions";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 import { queueIncidentMapPreload } from "@/src/offline/mapPreload";
 
@@ -34,6 +35,7 @@ function statusBg(status: IncidentStatus) {
 
 export default function IncidentsTabScreen() {
   const { palette } = useUiSettings();
+  const pathname = usePathname();
   const [me, setMe] = useState<{ id: number; roles: string[] } | null>(null);
   const [items, setItems] = useState<Incident[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -57,6 +59,7 @@ export default function IncidentsTabScreen() {
   const isAdmin = !!me?.roles?.includes("ADMIN");
   const isWorker = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "MAINTENANCE" || r === "ADMIN");
   const canResolve = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN");
+  const isCreateRoute = pathname?.startsWith("/incidents/create") || pathname?.startsWith("/(tabs)/incidents/create");
 
   const load = useCallback(async () => {
     const token = await getToken();
@@ -124,6 +127,10 @@ export default function IncidentsTabScreen() {
       Alert.alert("Invalid Coordinates", "Latitude and longitude must be numeric.");
       return;
     }
+    if (!district.trim() || !county.trim() || !routeValue.trim() || !postMile.trim()) {
+      Alert.alert("Missing Location", "District, County, Route, and Post Mile are required.");
+      return;
+    }
 
     setBusy(true);
     setErr(null);
@@ -136,10 +143,10 @@ export default function IncidentsTabScreen() {
         first_occurred_at: firstOccurredAt.trim() || null,
         latitude: lat,
         longitude: lon,
-        district: district.trim() || null,
-        county: county.trim() || null,
-        route: routeValue.trim() || null,
-        post_mile: postMile.trim() || null,
+        district: district.trim(),
+        county: county.trim(),
+        route: routeValue.trim(),
+        post_mile: postMile.trim(),
       });
       setTitle("");
       setIncidentType("");
@@ -168,8 +175,24 @@ export default function IncidentsTabScreen() {
         return;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setLatitude(String(pos.coords.latitude));
-      setLongitude(String(pos.coords.longitude));
+      const lat = Number(pos.coords.latitude);
+      const lon = Number(pos.coords.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        Alert.alert("Location Error", "Unable to read a valid coordinate.");
+        return;
+      }
+      setLatitude(String(lat));
+      setLongitude(String(lon));
+
+      const token = await getToken();
+      if (!token) {
+        return;
+      }
+      const geo = await enrichPoint(token, lat, lon);
+      if (geo.district) setDistrict(String(geo.district).trim());
+      if (geo.county) setCounty(String(geo.county).trim());
+      if (geo.route) setRouteValue(String(geo.route).trim());
+      if (geo.post_mile) setPostMile(String(geo.post_mile).trim());
     } catch (e: any) {
       Alert.alert("GPS Error", String(e?.message ?? e));
     }
@@ -245,33 +268,14 @@ export default function IncidentsTabScreen() {
     };
   }, [items]);
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
-      <View style={styles.inner}>
-        <Text style={[styles.title, { color: palette.text }]}>Incidents</Text>
-        <Text style={[styles.sub, { color: palette.muted }]}>Create incidents and process them through the assigned workflow.</Text>
+  if (isCreateRoute && isWorker) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
+        <View style={styles.inner}>
+          <Text style={[styles.title, { color: palette.text }]}>Create Incident</Text>
+          <Text style={[styles.sub, { color: palette.muted }]}>Create an incident report and send it into workflow.</Text>
 
-        <View style={styles.statusRow}>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("ALL")}>
-            <Text style={{ color: palette.text }}>All ({items.length})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("NEW")}>
-            <Text style={{ color: palette.text }}>New ({statusCounts.NEW})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("IN_PROGRESS")}>
-            <Text style={{ color: palette.text }}>In-Progress ({statusCounts.IN_PROGRESS})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("RESOLVED")}>
-            <Text style={{ color: palette.text }}>Resolved ({statusCounts.RESOLVED})</Text>
-          </Pressable>
-          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => load()}>
-            <Text style={{ color: palette.text }}>{busy ? "..." : "Refresh"}</Text>
-          </Pressable>
-        </View>
-
-        {isWorker ? (
-          <View style={[styles.formCard, { borderColor: palette.border, backgroundColor: palette.panel }]}>
-            <Text style={[styles.formTitle, { color: palette.text }]}>Create Incident</Text>
+          <View style={styles.formCard} testID="incident-create-card">
             <TextInput
               style={[styles.input, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
               placeholder="Title *"
@@ -316,6 +320,7 @@ export default function IncidentsTabScreen() {
                 placeholderTextColor={palette.muted}
                 value={latitude}
                 onChangeText={setLatitude}
+                keyboardType="numeric"
               />
               <TextInput
                 style={[styles.input, styles.half, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
@@ -323,19 +328,20 @@ export default function IncidentsTabScreen() {
                 placeholderTextColor={palette.muted}
                 value={longitude}
                 onChangeText={setLongitude}
+                keyboardType="numeric"
               />
             </View>
             <View style={styles.row2}>
               <TextInput
                 style={[styles.input, styles.half, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
-                placeholder="District"
+                placeholder="District *"
                 placeholderTextColor={palette.muted}
                 value={district}
                 onChangeText={setDistrict}
               />
               <TextInput
                 style={[styles.input, styles.half, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
-                placeholder="County"
+                placeholder="County *"
                 placeholderTextColor={palette.muted}
                 value={county}
                 onChangeText={setCounty}
@@ -344,14 +350,14 @@ export default function IncidentsTabScreen() {
             <View style={styles.row2}>
               <TextInput
                 style={[styles.input, styles.half, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
-                placeholder="Route"
+                placeholder="Route *"
                 placeholderTextColor={palette.muted}
                 value={routeValue}
                 onChangeText={setRouteValue}
               />
               <TextInput
                 style={[styles.input, styles.half, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]}
-                placeholder="Post Mile"
+                placeholder="Post Mile *"
                 placeholderTextColor={palette.muted}
                 value={postMile}
                 onChangeText={setPostMile}
@@ -366,7 +372,39 @@ export default function IncidentsTabScreen() {
               </Pressable>
             </View>
           </View>
-        ) : null}
+          {err ? (
+            <View style={[styles.errorBox, { borderColor: "#b91c1c", backgroundColor: "#450a0a" }]}>
+              <Text style={{ color: "#fecaca" }}>{err}</Text>
+            </View>
+          ) : null}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
+      <View style={styles.inner}>
+        <Text style={[styles.title, { color: palette.text }]}>Incidents</Text>
+        <Text style={[styles.sub, { color: palette.muted }]}>Create incidents and process them through the assigned workflow.</Text>
+
+        <View style={styles.statusRow}>
+          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("ALL")}>
+            <Text style={{ color: palette.text }}>All ({items.length})</Text>
+          </Pressable>
+          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("NEW")}>
+            <Text style={{ color: palette.text }}>New ({statusCounts.NEW})</Text>
+          </Pressable>
+          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("IN_PROGRESS")}>
+            <Text style={{ color: palette.text }}>In-Progress ({statusCounts.IN_PROGRESS})</Text>
+          </Pressable>
+          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => setStatusFilter("RESOLVED")}>
+            <Text style={{ color: palette.text }}>Resolved ({statusCounts.RESOLVED})</Text>
+          </Pressable>
+          <Pressable style={[styles.filterBtn, { borderColor: palette.border }]} onPress={() => load()}>
+            <Text style={{ color: palette.text }}>{busy ? "..." : "Refresh"}</Text>
+          </Pressable>
+        </View>
 
         {err ? (
           <View style={[styles.errorBox, { borderColor: "#b91c1c", backgroundColor: "#450a0a" }]}>

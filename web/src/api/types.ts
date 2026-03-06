@@ -129,6 +129,11 @@ export type Incident = {
   title: string;
   incident_type: string | null;
   description: string | null;
+  location_id: number | null;
+  location_match_status: string | null;
+  location_reviewed_by_user_id: number | null;
+  location_reviewed_at: string | null;
+  location_match_metadata: Record<string, unknown> | null;
   first_observed_at: string;
   first_occurred_at: string | null;
   latitude: number;

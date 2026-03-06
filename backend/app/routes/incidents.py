@@ -18,6 +18,7 @@ from ..schemas.common import (
     IncidentCoordinatorForwardRequest,
     IncidentCreate,
     IncidentResolveRequest,
+    IncidentLocationLinkRequest,
 )
 from ..storage import make_object_key, put_object_bytes
 
@@ -44,6 +45,24 @@ def _normalized_district_code(raw_district: str | None) -> str | None:
         return None
     m = re.search(r"(\d{1,2})", value)
     return m.group(1) if m else value
+
+
+def _normalize_text(raw: str | None) -> str | None:
+    text_value = (raw or "").strip()
+    if not text_value:
+        return None
+    text_value = re.sub(r"\s+", " ", text_value)
+    return text_value
+
+
+def _normalized_post_mile_two_decimal(raw: str | None) -> str | None:
+    value = _normalize_text(raw)
+    if not value:
+        return None
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return value
 
 
 def _office_for_district(raw_district: str | None) -> str | None:
@@ -82,6 +101,147 @@ def _queue_incident_notifications(
                 "payload_json": payload_json,
             },
         )
+
+
+def _create_or_select_location(
+    *,
+    db: Session,
+    district: str | None,
+    county: str | None,
+    route: str | None,
+    post_mile: str | None,
+    latitude: float,
+    longitude: float,
+) -> int:
+    normalized_district = _normalize_text(district)
+    normalized_county = _normalize_text(county)
+    normalized_route = _normalize_text(route)
+    normalized_post_mile = _normalized_post_mile_two_decimal(post_mile)
+
+    existing = db.execute(
+        text(
+            """
+            SELECT id
+            FROM incident_locations
+            WHERE COALESCE(district, '') = COALESCE(:district, '')
+              AND COALESCE(county, '') = COALESCE(:county, '')
+              AND COALESCE(route, '') = COALESCE(:route, '')
+              AND COALESCE(post_mile_norm, '') = COALESCE(:post_mile_norm, '')
+            LIMIT 1
+            """
+        ),
+        {
+            "district": normalized_district,
+            "county": normalized_county,
+            "route": normalized_route,
+            "post_mile_norm": normalized_post_mile,
+        },
+    ).scalars().first()
+    if existing is not None:
+        return int(existing)
+
+    db.execute(
+        text(
+            """
+            INSERT INTO incident_locations
+              (district, county, route, post_mile_raw, post_mile_norm, latitude, longitude)
+            VALUES
+              (:district, :county, :route, :post_mile_raw, :post_mile_norm, :latitude, :longitude)
+            """
+        ),
+        {
+            "district": normalized_district,
+            "county": normalized_county,
+            "route": normalized_route,
+            "post_mile_raw": _normalize_text(post_mile),
+            "post_mile_norm": normalized_post_mile,
+            "latitude": latitude,
+            "longitude": longitude,
+        },
+    )
+    return int(db.execute(text("SELECT LAST_INSERT_ID()")).scalar())
+
+
+def _incident_location_candidates(
+    *,
+    db: Session,
+    district: str | None,
+    county: str | None,
+    route: str | None,
+    post_mile: str | None,
+    latitude: float,
+    longitude: float,
+    limit: int = 8,
+) -> list[dict]:
+    normalized_district = (_normalize_text(district) or "").lower()
+    normalized_county = (_normalize_text(county) or "").lower()
+    normalized_route = (_normalize_text(route) or "").lower()
+    normalized_pm = (_normalized_post_mile_two_decimal(post_mile) or "").lower()
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              il.id,
+              il.district,
+              il.county,
+              il.route,
+              il.post_mile_raw,
+              il.post_mile_norm,
+              il.latitude,
+              il.longitude,
+              il.created_at,
+              il.updated_at,
+              (
+                (LOWER(COALESCE(il.district, '')) = :district) +
+                (LOWER(COALESCE(il.county, '')) = :county) +
+                (LOWER(COALESCE(il.route, '')) = :route) +
+                (COALESCE(il.post_mile_norm, '') = :post_mile_norm)
+              ) AS match_score,
+              (POW(COALESCE(il.latitude, :lat) - :lat, 2) + POW(COALESCE(il.longitude, :lon) - :lon, 2)) AS coordinate_distance
+            FROM incident_locations il
+            WHERE
+              il.is_active = 1
+              AND (
+                :district = ''
+                OR LOWER(COALESCE(il.district, '')) = :district
+                OR LOWER(COALESCE(il.county, '')) = :county
+                OR LOWER(COALESCE(il.route, '')) = :route
+              )
+            ORDER BY
+              match_score DESC,
+              coordinate_distance ASC,
+              il.updated_at DESC
+            LIMIT :limit
+            """
+        ),
+        {
+            "district": normalized_district,
+            "county": normalized_county,
+            "route": normalized_route,
+            "post_mile_norm": normalized_pm,
+            "lat": latitude,
+            "lon": longitude,
+            "limit": limit,
+        },
+    ).mappings().all()
+
+    return [
+        {
+            "id": int(r["id"]),
+            "district": r["district"],
+            "county": r["county"],
+            "route": r["route"],
+            "post_mile": r["post_mile_raw"],
+            "post_mile_norm": r["post_mile_norm"],
+            "latitude": float(r["latitude"]) if r["latitude"] is not None else None,
+            "longitude": float(r["longitude"]) if r["longitude"] is not None else None,
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+            "match_score": int(r["match_score"] or 0),
+            "coordinate_distance": float(r["coordinate_distance"] or 0.0),
+        }
+        for r in rows
+    ]
 
 
 def _routing_users_for(
@@ -172,6 +332,24 @@ def _set_stage_assignment(
 def ensure_incident_runtime_schema(db: Session) -> None:
     ddl_statements = [
         """
+        CREATE TABLE IF NOT EXISTS incident_locations (
+          id BIGINT PRIMARY KEY AUTO_INCREMENT,
+          district VARCHAR(64) NULL,
+          county VARCHAR(64) NULL,
+          route VARCHAR(64) NULL,
+          post_mile_raw VARCHAR(64) NULL,
+          post_mile_norm VARCHAR(64) NULL,
+          latitude DECIMAL(10,7) NULL,
+          longitude DECIMAL(10,7) NULL,
+          is_active TINYINT NOT NULL DEFAULT 1,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_incident_location_identity (district, county, route, post_mile_norm),
+          INDEX idx_incident_locations_geo (latitude, longitude),
+          INDEX idx_incident_locations_lookup (district, county, route, post_mile_norm)
+        ) ENGINE=InnoDB
+        """,
+        """
         ALTER TABLE incidents
           ADD COLUMN IF NOT EXISTS first_observed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         """,
@@ -182,6 +360,26 @@ def ensure_incident_runtime_schema(db: Session) -> None:
         """
         ALTER TABLE incidents
           ADD COLUMN IF NOT EXISTS office_code VARCHAR(16) NULL
+        """,
+        """
+        ALTER TABLE incidents
+          ADD COLUMN IF NOT EXISTS location_id BIGINT NULL
+        """,
+        """
+        ALTER TABLE incidents
+          ADD COLUMN IF NOT EXISTS location_match_status VARCHAR(24) NOT NULL DEFAULT 'PENDING_REVIEW'
+        """,
+        """
+        ALTER TABLE incidents
+          ADD COLUMN IF NOT EXISTS location_reviewed_by_user_id BIGINT NULL
+        """,
+        """
+        ALTER TABLE incidents
+          ADD COLUMN IF NOT EXISTS location_reviewed_at DATETIME NULL
+        """,
+        """
+        ALTER TABLE incidents
+          ADD COLUMN IF NOT EXISTS location_match_metadata JSON NULL
         """,
         """
         ALTER TABLE incidents
@@ -234,6 +432,7 @@ def _incident_with_assignment(db: Session, incident_id: int):
             """
             SELECT
               i.id, i.title, i.incident_type, i.description,
+              i.location_id, i.location_match_status, i.location_reviewed_by_user_id, i.location_match_metadata, i.location_reviewed_at,
               i.first_observed_at, i.first_occurred_at,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.office_code, i.current_stage,
@@ -358,6 +557,11 @@ def _serialize_incident(row: dict) -> dict:
         "title": row["title"],
         "incident_type": row["incident_type"],
         "description": row["description"],
+        "location_id": int(row["location_id"]) if row["location_id"] is not None else None,
+        "location_match_status": row["location_match_status"],
+        "location_reviewed_by_user_id": int(row["location_reviewed_by_user_id"]) if row["location_reviewed_by_user_id"] is not None else None,
+        "location_match_metadata": row["location_match_metadata"],
+        "location_reviewed_at": row["location_reviewed_at"],
         "first_observed_at": row["first_observed_at"],
         "first_occurred_at": row["first_occurred_at"],
         "latitude": float(row["latitude"]),
@@ -613,19 +817,30 @@ def create_incident(
     title = payload.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="Title is required")
-    district_code = _normalized_district_code(payload.district)
-    office_code = _office_for_district(payload.district)
+    district = _normalize_text(payload.district)
+    county = _normalize_text(payload.county)
+    route = _normalize_text(payload.route)
+    post_mile = _normalize_text(payload.post_mile)
+    if not (district and county and route and post_mile):
+        raise HTTPException(
+            status_code=400,
+            detail="district, county, route, and post_mile are required location fields",
+        )
+
+    district_code = _normalized_district_code(district)
+    office_code = _office_for_district(district)
     try:
         db.execute(
             text(
                 """
                 INSERT INTO incidents (
-                  title, incident_type, description, latitude, longitude,
+                  title, incident_type, description, location_id, location_match_status,
+                  latitude, longitude,
                   first_observed_at, first_occurred_at,
                   district, county, route, post_mile, office_code, current_stage,
                   status, reporter_user_id
                 ) VALUES (
-                  :title, :incident_type, :description, :lat, :lon,
+                :title, :incident_type, :description, NULL, 'PENDING_REVIEW', :lat, :lon,
                   :first_observed_at, :first_occurred_at,
                   :district, :county, :route, :post_mile, :office_code, 'COORDINATOR_REVIEW',
                   'NEW', :uid
@@ -640,10 +855,10 @@ def create_incident(
                 "lon": payload.longitude,
                 "first_observed_at": payload.first_observed_at,
                 "first_occurred_at": payload.first_occurred_at,
-                "district": (payload.district or "").strip() or None,
-                "county": (payload.county or "").strip() or None,
-                "route": (payload.route or "").strip() or None,
-                "post_mile": (payload.post_mile or "").strip() or None,
+                "district": district,
+                "county": county,
+                "route": route,
+                "post_mile": post_mile,
                 "office_code": office_code,
                 "uid": user["id"],
             },
@@ -678,6 +893,120 @@ def create_incident(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/incidents/{incident_id}/location-candidates")
+def list_incident_location_candidates(
+    incident_id: int = Path(..., ge=1),
+    limit: int = Query(default=8, ge=1, le=20),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+):
+    incident = _incident_with_assignment(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if incident["latitude"] is None or incident["longitude"] is None:
+        raise HTTPException(status_code=409, detail="Incident coordinates are required for location matching")
+    candidates = _incident_location_candidates(
+        db=db,
+        district=incident["district"],
+        county=incident["county"],
+        route=incident["route"],
+        post_mile=incident["post_mile"],
+        latitude=float(incident["latitude"]),
+        longitude=float(incident["longitude"]),
+        limit=limit,
+    )
+    return {
+        "incident_id": int(incident["id"]),
+        "location_id": int(incident["location_id"]) if incident["location_id"] is not None else None,
+        "location_match_status": incident["location_match_status"],
+        "items": candidates,
+    }
+
+
+@router.post("/incidents/{incident_id}/location-link")
+def link_incident_location(
+    payload: IncidentLocationLinkRequest,
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+):
+    incident = _incident_with_assignment(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if str(incident["status"]).upper() == "RESOLVED":
+        raise HTTPException(status_code=409, detail="Resolved incidents cannot be relinked")
+
+    mode = (payload.mode or "").strip().upper()
+    if mode == "EXISTING":
+        if not payload.location_id:
+            raise HTTPException(status_code=400, detail="location_id is required for EXISTING mode")
+        chosen_location_id = int(payload.location_id)
+        exists = db.execute(
+            text(
+                """
+                SELECT id
+                FROM incident_locations
+                WHERE id = :location_id
+                LIMIT 1
+                """
+            ),
+            {"location_id": chosen_location_id},
+        ).scalar()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Location was not found")
+        new_status = "LINKED_EXISTING"
+    elif mode == "CREATE_NEW":
+        chosen_location_id = _create_or_select_location(
+            db=db,
+            district=incident["district"],
+            county=incident["county"],
+            route=incident["route"],
+            post_mile=incident["post_mile"],
+            latitude=float(incident["latitude"]),
+            longitude=float(incident["longitude"]),
+        )
+        new_status = "NEW_LOCATION_CREATED"
+    else:
+        raise HTTPException(status_code=400, detail="Invalid mode. Use EXISTING or CREATE_NEW.")
+
+    metadata = {
+        "mode": mode,
+        "comment": (payload.comment or "").strip() or None,
+        "performed_by_user_id": int(user["id"]),
+    }
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE incidents
+                SET location_id = :location_id,
+                    location_match_status = :status,
+                    location_reviewed_by_user_id = :reviewer,
+                    location_reviewed_at = NOW(),
+                    location_match_metadata = CAST(:metadata AS JSON),
+                    updated_at = NOW()
+                WHERE id = :iid
+                """
+            ),
+            {
+                "iid": incident_id,
+                "location_id": chosen_location_id,
+                "status": new_status,
+                "reviewer": int(user["id"]),
+                "metadata": json.dumps(metadata),
+            },
+        )
+        db.commit()
+        return {
+            "incident_id": int(incident_id),
+            "location_id": chosen_location_id,
+            "location_match_status": new_status,
+        }
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/incidents")
 def list_incidents(
     status: str | None = Query(default=None),
@@ -707,6 +1036,7 @@ def list_incidents(
             f"""
             SELECT
               i.id, i.title, i.incident_type, i.description,
+              i.location_id, i.location_match_status, i.location_reviewed_by_user_id, i.location_match_metadata, i.location_reviewed_at,
               i.first_observed_at, i.first_occurred_at,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.office_code, i.current_stage,
@@ -792,6 +1122,11 @@ def coordinator_forward_incident(
         raise HTTPException(status_code=404, detail="Incident not found")
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be forwarded")
+    if incident["location_id"] is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Select or create a location record before forwarding this incident.",
+        )
 
     office_code = incident.get("office_code")
     if not office_code:

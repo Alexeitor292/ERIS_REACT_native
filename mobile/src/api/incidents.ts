@@ -13,6 +13,11 @@ export type Incident = {
   title: string;
   incident_type: string | null;
   description: string | null;
+  location_id: number | null;
+  location_match_status: string | null;
+  location_reviewed_by_user_id: number | null;
+  location_reviewed_at: string | null;
+  location_match_metadata: unknown | null;
   first_observed_at: string;
   first_occurred_at: string | null;
   latitude: number;
@@ -51,10 +56,31 @@ export type IncidentCreatePayload = {
   first_occurred_at?: string | null;
   latitude: number;
   longitude: number;
-  district?: string | null;
-  county?: string | null;
-  route?: string | null;
-  post_mile?: string | null;
+  district: string;
+  county: string;
+  route: string;
+  post_mile: string;
+};
+
+export type IncidentLocationCandidate = {
+  id: number;
+  district: string | null;
+  county: string | null;
+  route: string | null;
+  post_mile: string | null;
+  post_mile_norm: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string;
+  updated_at: string;
+  match_score: number;
+  coordinate_distance: number;
+};
+
+export type IncidentLocationLinkPayload = {
+  mode: "EXISTING" | "CREATE_NEW";
+  location_id?: number | null;
+  comment?: string | null;
 };
 
 export async function listIncidents(
@@ -80,6 +106,28 @@ export async function createIncident(token: string, payload: IncidentCreatePaylo
     token,
     body: payload,
   });
+}
+
+export async function getIncidentLocationCandidates(token: string, incidentId: number, limit = 8) {
+  return apiFetch<{ incident_id: number; location_id: number | null; location_match_status: string | null; items: IncidentLocationCandidate[] }>(
+    `/incidents/${incidentId}/location-candidates?limit=${limit}`,
+    { token }
+  );
+}
+
+export async function linkIncidentLocation(
+  token: string,
+  incidentId: number,
+  payload: IncidentLocationLinkPayload
+) {
+  return apiFetch<{ incident_id: number; location_id: number; location_match_status: string }>(
+    `/incidents/${incidentId}/location-link`,
+    {
+      method: "POST",
+      token,
+      body: payload,
+    }
+  );
 }
 
 export async function claimIncident(token: string, incidentId: number) {

@@ -34,6 +34,14 @@ Current tab behavior:
 
 Incidents mobile API calls request `scope=mobile` for backend-filtered visibility.
 
+## Mobile Target (maintenance-first minimal tabs)
+
+- `MAINTENANCE` should only see two workflow tabs:
+  - Create Incident
+  - Track Incidents (my incidents + status timeline)
+- Other roles should receive only role-essential tabs for their step in the process (smallest viable UI surface).
+- This is the current priority and first implementation wave.
+
 ## Mobile Offline Layer
 
 Implemented components:

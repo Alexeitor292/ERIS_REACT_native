@@ -40,6 +40,10 @@ export default function TabLayout() {
   }, []);
 
   const roleSet = useMemo(() => new Set(roles), [roles]);
+  const isMaintenanceWorker =
+    roleSet.has("MAINTENANCE") ||
+    roleSet.has("FIELD_WORKER") ||
+    roleSet.has("ADMIN");
   const canSeeDraftsSubmissions =
     rolesLoaded && (roleSet.has("FIELD_WORKER") || roleSet.has("REVIEWER") || roleSet.has("ADMIN"));
   const canSeeIncidents =
@@ -52,7 +56,7 @@ export default function TabLayout() {
     roleSet.has("ADMIN");
 
   const currentTabIndex = useMemo(() => {
-    if (pathname === "/incidents") return 0;
+    if (pathname?.startsWith("/incidents")) return 0;
     if (pathname === "/drafts") return 1;
     if (pathname === "/submissions") return 2;
     return -1;
@@ -91,7 +95,7 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1 }}>
       <Tabs
-        initialRouteName="incidents/index"
+        initialRouteName="incidents/track"
         detachInactiveScreens={false}
         screenOptions={{
           tabBarActiveTintColor: palette.primary,
@@ -141,10 +145,19 @@ export default function TabLayout() {
       />
 
       <Tabs.Screen
-        name="incidents/index"
+        name="incidents/create"
+        options={{
+          href: isMaintenanceWorker ? undefined : null,
+          title: "Create Incident",
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="plus.circle.fill" color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="incidents/track"
         options={{
           href: canSeeIncidents ? undefined : null,
-          title: "Incidents",
+          title: "Track Incidents",
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="exclamationmark.triangle.fill" color={color} />,
         }}
       />

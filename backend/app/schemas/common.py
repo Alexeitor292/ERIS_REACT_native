@@ -154,10 +154,10 @@ class IncidentCreate(BaseModel):
     first_occurred_at: datetime | None = None
     latitude: float
     longitude: float
-    district: str | None = Field(default=None, max_length=64)
-    county: str | None = Field(default=None, max_length=64)
-    route: str | None = Field(default=None, max_length=64)
-    post_mile: str | None = Field(default=None, max_length=64)
+    district: str = Field(..., min_length=1, max_length=64)
+    county: str = Field(..., min_length=1, max_length=64)
+    route: str = Field(..., min_length=1, max_length=64)
+    post_mile: str = Field(..., min_length=1, max_length=64)
 
 
 class IncidentAssignRequest(BaseModel):
@@ -169,6 +169,12 @@ class IncidentResolveRequest(BaseModel):
 
 
 class IncidentCoordinatorForwardRequest(BaseModel):
+    comment: str | None = None
+
+
+class IncidentLocationLinkRequest(BaseModel):
+    mode: Literal["EXISTING", "CREATE_NEW"]
+    location_id: int | None = Field(default=None, ge=1)
     comment: str | None = None
 
 

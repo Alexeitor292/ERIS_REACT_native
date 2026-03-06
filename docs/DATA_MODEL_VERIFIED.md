@@ -22,7 +22,8 @@ Source: `database/init/010_schema.sql` + runtime upgrade function in `backend/ap
 
 ## Incident Domain
 
-- `incidents`
+- `incidents` (now includes `location_id`, `location_match_status`, `location_reviewed_*`)
+- `incident_locations`
 - `incident_attachments`
 - `incident_assignments` (`assignment_stage`, `assignment_mode`, `is_active`)
 - `incident_routing_assignments`
@@ -34,6 +35,22 @@ Source: `database/init/010_schema.sql` + runtime upgrade function in `backend/ap
 - `submission_gisa` (wide denormalized paper-form field model)
 - `submission_gisa_incident_types`
 - `submission_gisa_actions`
+
+## Location-first implementation status
+
+- `incident_locations` is the current first-class location object table.
+  - stable identity by District/Country/Route/PM
+  - optional geometry and naming metadata
+- Keep `incidents` as event rows linked to a location object (`location_id`).
+- This enables:
+  - many incidents at the same physical location across time,
+  - location-level incident history,
+  - timeline/pattern queries by location without duplicating location fields in each event.
+- Proposed operational relationship:
+  - `incident_locations 1 -> N incidents`
+  - `incidents 1 -> N incident_attachments`
+  - `incidents 1 -> 1 incident_submission_link` (if/when engineering handoff occurs)
+- Current implementation now stores identity linkage in `location_id` and uses `incidents` for historical event rows.
 
 ## Notes on Schema Source of Truth
 

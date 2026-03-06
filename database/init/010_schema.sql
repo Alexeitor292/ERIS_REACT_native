@@ -116,11 +116,33 @@ CREATE TABLE IF NOT EXISTS attachment_links (
 -- INCIDENTS (maintenance intake + assignment workflow)
 -- ============================================================
 
+CREATE TABLE IF NOT EXISTS incident_locations (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    district VARCHAR(64) NULL,
+    county VARCHAR(64) NULL,
+    route VARCHAR(64) NULL,
+    post_mile_raw VARCHAR(64) NULL,
+    post_mile_norm VARCHAR(64) NULL,
+    latitude DECIMAL(10,7) NULL,
+    longitude DECIMAL(10,7) NULL,
+    is_active TINYINT NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_incident_location_identity (district, county, route, post_mile_norm),
+    INDEX idx_incident_locations_geo (latitude, longitude),
+    INDEX idx_incident_locations_lookup (district, county, route, post_mile_norm)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS incidents (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     title VARCHAR(255) NOT NULL,
     incident_type VARCHAR(64) NULL,
     description TEXT NULL,
+    location_id BIGINT NULL,
+    location_match_status VARCHAR(24) NOT NULL DEFAULT 'PENDING_REVIEW',
+    location_reviewed_by_user_id BIGINT NULL,
+    location_reviewed_at DATETIME NULL,
+    location_match_metadata JSON NULL,
     first_observed_at DATETIME NOT NULL,
     first_occurred_at DATETIME NULL,
     latitude DECIMAL(10,7) NOT NULL,
@@ -139,7 +161,10 @@ CREATE TABLE IF NOT EXISTS incidents (
     resolved_by_user_id BIGINT NULL,
     resolution_comment TEXT NULL,
     CONSTRAINT fk_incident_reporter FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_incident_location FOREIGN KEY (location_id) REFERENCES incident_locations(id) ON DELETE SET NULL,
+    CONSTRAINT fk_incident_location_reviewed_by FOREIGN KEY (location_reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT fk_incident_resolved_by FOREIGN KEY (resolved_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_incidents_location (location_id),
     INDEX idx_incidents_status (status),
     INDEX idx_incidents_created (created_at),
     INDEX idx_incidents_geo (latitude, longitude)

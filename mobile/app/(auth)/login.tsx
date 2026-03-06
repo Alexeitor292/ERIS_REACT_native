@@ -30,7 +30,7 @@ export default function Login() {
         body: { email: email.trim().toLowerCase(), password: password.trim() },
       });
       await setToken(res.access_token);
-      router.replace("/(tabs)/submissions");
+      router.replace("/(tabs)/incidents/track");
     } catch (e: any) {
       Alert.alert("Login failed", String(e?.message ?? e));
     } finally {
