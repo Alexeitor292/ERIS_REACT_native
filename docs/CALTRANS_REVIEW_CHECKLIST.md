@@ -1,5 +1,7 @@
 # Caltrans Review Checklist
 
+Status: `target-state checklist` (not an assertion of current implementation state).
+
 ## Backend
 - [ ] No runtime schema mutations in API startup code.
 - [ ] No runtime seeding of business lookup data.

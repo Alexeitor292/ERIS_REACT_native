@@ -1,0 +1,8 @@
+stateDiagram-v2
+  [*] --> DRAFT: Create submission
+  DRAFT --> DRAFT: Patch GISA / Attach files
+  DRAFT --> SUBMITTED: POST /submissions/{id}/submit
+  SUBMITTED --> APPROVED: approve/review approve
+  SUBMITTED --> REJECTED: reject/review reject
+  REJECTED --> DRAFT: user edits and resubmits
+  APPROVED --> [*]

@@ -1,0 +1,51 @@
+flowchart TB
+  subgraph Actors
+    A1[Maintenance Worker]
+    A2[Maintenance Coordinator]
+    A3[Office Chief]
+    A4[Branch Chief]
+    A5[Engineer]
+    A6[Reviewer]
+    A7[Admin]
+  end
+
+  subgraph ERIS
+    U1((Create Incident))
+    U2((View Assigned/Scoped Incidents))
+    U3((Forward to Office Chief))
+    U4((Assign Branch Chief))
+    U5((Assign Engineer))
+    U6((Open Linked Draft))
+    U7((Edit GISA Draft))
+    U8((Upload Photos/Attachments))
+    U9((Submit for Review))
+    U10((Approve/Reject Submission))
+    U11((Manage Users/Roles))
+    U12((Manage Routing Assignments))
+    U13((View Mission Center))
+  end
+
+  A1 --> U1
+  A1 --> U2
+  A2 --> U2
+  A2 --> U3
+  A3 --> U2
+  A3 --> U4
+  A4 --> U2
+  A4 --> U5
+  A5 --> U2
+  A5 --> U6
+  A5 --> U7
+  A5 --> U8
+  A5 --> U9
+  A6 --> U10
+  A6 --> U13
+  A7 --> U1
+  A7 --> U2
+  A7 --> U3
+  A7 --> U4
+  A7 --> U5
+  A7 --> U10
+  A7 --> U11
+  A7 --> U12
+  A7 --> U13

@@ -1,0 +1,12 @@
+stateDiagram-v2
+  [*] --> COORDINATOR_REVIEW: POST /incidents
+  COORDINATOR_REVIEW --> OFFICE_CHIEF_REVIEW: POST /incidents/{id}/coordinator/forward
+  OFFICE_CHIEF_REVIEW --> BRANCH_CHIEF_REVIEW: POST /incidents/{id}/office-chief/assign-branch
+  BRANCH_CHIEF_REVIEW --> ENGINEER_ASSIGNED: POST /incidents/{id}/branch-chief/assign-engineer
+  ENGINEER_ASSIGNED --> RESOLVED: POST /incidents/{id}/resolve
+  RESOLVED --> [*]
+
+  note right of ENGINEER_ASSIGNED
+    Engineer assignment may create or reuse
+    linked submission draft.
+  end note

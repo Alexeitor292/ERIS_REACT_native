@@ -1,34 +1,74 @@
-# ERIS Architecture
+# ERIS Architecture (Verified)
 
-## Overview
-- `backend`: FastAPI API, business rules, auth, workflow transitions, file storage integration.
-- `web`: React web client for review/edit workflows.
-- `mobile`: Expo/React Native client for field workflows with offline queueing and local drafts.
-- `database/init`: SQL bootstrap for schema and initialization data.
+## Monorepo Structure
 
-## Backend Boundaries
-- `app/main.py`: app bootstrap, shared helpers, router registration, non-domain glue.
-- `app/routes/*`: API route declarations grouped by domain.
-- `app/schemas/*`: Pydantic request/response models.
-- `app/services/*`: domain/business validation and workflow logic.
-- `app/constants/*`: controlled vocabularies and static option catalogs.
+- `backend/`: FastAPI + SQLAlchemy + MariaDB + MinIO integration
+- `web/`: Vite + React + React Router + ArcGIS JS (`@arcgis/core`)
+- `mobile/`: Expo Router + React Native + offline queue/local draft layer + ArcGIS native bridge
+- `database/init/`: SQL initialization (`001_create_db.sql`, `010_schema.sql`, `020_seed.sql`)
+- `docker/`: compose definitions for local/proxmox
 
-## Data and Validation Rules
-- Frontends may validate for UX, but backend is the final authority.
-- Controlled lookup options are backend-defined and served via `GET /gisa/lookups`.
-- Submission state transitions and edit permissions are enforced backend-side.
+## Runtime Topology
 
-## Initialization Policy
-- Runtime app code must not mutate schema or seed business data.
-- Schema creation and bootstrap data are performed through `database/init/*.sql`.
-- Current approved seed scope: admin bootstrap user/roles only at DB initialization.
+From compose (`docker-compose.yml` + `docker-compose.proxmox.yml`):
 
-## Offline Policy (Mobile)
-- Local draft and queue persistence are client-side concerns.
-- Sync is attempted automatically when network/auth are available.
-- Backend API contract remains unchanged for online and delayed-sync writes.
+- `mariadb` (source of truth DB)
+- `minio` (attachment/object storage)
+- `backend` (FastAPI on `:8000`)
+- `web` (Nginx serving built SPA on `:5173`)
+- `adminer` optional profile (`devtools`)
 
-## Review Expectations
-- Deterministic API behavior and explicit ownership of business rules.
-- Single source of truth for option catalogs and validation logic.
-- No hidden environment-dependent runtime migrations in API startup path.
+## Backend Composition
+
+- Main app bootstrap: `backend/app/main.py`
+- Feature routers:
+  - `routes/auth.py`
+  - `routes/gisa.py`
+  - `routes/arcgis.py`
+  - `routes/incidents.py`
+  - plus `admin_users.py`, `photos.py`, and `dev_routes.py` (dev env only)
+
+Supporting modules:
+
+- `auth.py`: JWT + Argon2 password verify/hash
+- `deps.py`: auth/role dependencies
+- `permissions.py`: submission ownership/authorization checks
+- `storage.py`: MinIO object put/get/presign
+- `services/gisa_validation.py`: lookup/action validation
+- `constants/gisa_lookups.py`: lookup catalog source
+
+## Important Current Behavior
+
+- Backend startup performs runtime incident schema upgrades:
+  - `ensure_incident_runtime_schema(db)` is called in `app.on_event("startup")`.
+- Therefore schema ownership is split:
+  - baseline in `database/init/010_schema.sql`
+  - additional safety upgrades at API startup for incident-related columns/tables.
+
+## Security/Auth
+
+- Password hashing: Argon2 (`argon2-cffi`) via `backend/app/auth.py`
+- Token: JWT (`python-jose`) with `sub`, `iat`, `exp`
+- Auth APIs:
+  - `POST /auth/login`
+  - `GET /auth/me`
+
+## Storage Model
+
+- Relational state in MariaDB
+- File bytes in MinIO
+- DB stores object metadata + keys (`attachments`, link tables)
+
+## Frontend/Client Boundaries
+
+- Web is primarily big-picture and review/admin portal.
+- Mobile includes offline-first mechanics:
+  - local drafts index/payload
+  - offline op queue
+  - periodic sync loop
+
+## ArcGIS
+
+- Web map uses ArcGIS JS SDK.
+- Mission Center web map currently uses OSM basemap fallback (`web/src/components/MissionCenterMap.tsx`).
+- Mobile uses native ArcGIS bridge for sketch map workflows; mission-center native launcher code exists but mobile mission-center tab has been removed in current routing.

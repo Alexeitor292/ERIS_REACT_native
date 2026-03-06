@@ -1,0 +1,33 @@
+flowchart LR
+  subgraph Users
+    MW[Maintenance Worker]
+    MC[Maintenance Coordinator]
+    OC[Office Chief]
+    BC[Branch Chief]
+    EN[Engineer]
+    RV[Reviewer/Admin]
+  end
+
+  subgraph Clients
+    WEB[Web UI]
+    MOB[Mobile App]
+  end
+
+  subgraph Platform
+    API[FastAPI Backend]
+    DB[(MariaDB)]
+    OBJ[(MinIO)]
+  end
+
+  MW --> MOB
+  MC --> MOB
+  OC --> MOB
+  BC --> MOB
+  EN --> MOB
+  RV --> WEB
+  RV --> MOB
+
+  WEB --> API
+  MOB --> API
+  API --> DB
+  API --> OBJ

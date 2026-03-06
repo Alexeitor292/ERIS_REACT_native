@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant User
+  participant UI as Mobile UI
+  participant Draft as Local Draft Store
+  participant Queue as Offline Queue
+  participant Loop as Sync Loop
+  participant API as Backend API
+
+  User->>UI: Edit draft
+  UI->>Draft: saveLocalDraft(...)
+  UI->>Queue: enqueueOfflineOp(...)
+  Loop->>Queue: flushOfflineQueue(token)
+  Queue->>API: execute next op
+  alt success
+    API-->>Queue: 2xx
+    Queue->>Queue: remove op
+  else failure
+    API-->>Queue: error
+    Queue->>Queue: increment attempts + persist lastError
+    Queue->>Draft: markLocalDraftError(...)
+    Note right of Queue: stop on first failure to preserve order
+  end
