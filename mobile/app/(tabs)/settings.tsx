@@ -23,7 +23,7 @@ function Choice({
 }
 
 export default function SettingsScreen() {
-  const { themeMode, accent, density, setThemeMode, setAccent, setDensity, palette } = useUiSettings();
+  const { themeMode, accent, density, uiScale, setThemeMode, setAccent, setDensity, setUiScale, palette } = useUiSettings();
   const entrance = useRef(new Animated.Value(22)).current;
   const fade = useRef(new Animated.Value(0)).current;
 
@@ -78,6 +78,20 @@ export default function SettingsScreen() {
             />
             <Choice label="Compact" palette={palette} active={density === "compact"} onPress={() => setDensity("compact")} />
           </View>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>UI Scale</Text>
+          <View style={styles.row}>
+            <Choice label="1x" palette={palette} active={uiScale === 1} onPress={() => setUiScale(1)} />
+            <Choice label="1.25x" palette={palette} active={uiScale === 1.25} onPress={() => setUiScale(1.25)} />
+            <Choice label="1.5x" palette={palette} active={uiScale === 1.5} onPress={() => setUiScale(1.5)} />
+            <Choice label="2x" palette={palette} active={uiScale === 2} onPress={() => setUiScale(2)} />
+            <Choice label="4x" palette={palette} active={uiScale === 4} onPress={() => setUiScale(4)} />
+          </View>
+          <Text style={[styles.subtitle, { color: palette.muted, marginBottom: 0, marginTop: 8 }]}>
+            4x uses accessibility sizing for text and a layout-safe component scale cap.
+          </Text>
         </View>
       </ScrollView>
       </Animated.View>

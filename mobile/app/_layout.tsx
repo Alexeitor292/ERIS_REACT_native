@@ -3,7 +3,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native
 import { Stack, router, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
-import { AppState, Keyboard, TextInput, TouchableWithoutFeedback, View } from "react-native";
+import { AppState, Keyboard, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -17,7 +17,7 @@ import { syncArcgisRuntimeConfig } from "@/src/offline/arcgisRuntimeConfig";
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AppNavigator() {
-  const { scheme } = useUiSettings();
+  const { scheme, textScale } = useUiSettings();
   const pathname = usePathname();
 
   useEffect(() => {
@@ -62,6 +62,20 @@ function AppNavigator() {
       sub.remove();
     };
   }, [pathname]);
+
+  useEffect(() => {
+    Text.defaultProps = {
+      ...(Text.defaultProps ?? {}),
+      allowFontScaling: true,
+      maxFontSizeMultiplier: textScale,
+    };
+    TextInput.defaultProps = {
+      ...(TextInput.defaultProps ?? {}),
+      allowFontScaling: true,
+      maxFontSizeMultiplier: textScale,
+      keyboardAppearance: "dark",
+    };
+  }, [textScale]);
 
   return (
     <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
@@ -117,13 +131,6 @@ export default function RootLayout() {
     return () => {
       cancelled = true;
       sub.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    TextInput.defaultProps = {
-      ...(TextInput.defaultProps ?? {}),
-      keyboardAppearance: "dark",
     };
   }, []);
 

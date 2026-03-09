@@ -10,12 +10,14 @@ import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
 
 export default function TabLayout() {
-  const { palette, scheme } = useUiSettings();
+  const { palette, scheme, componentScale } = useUiSettings();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const [roles, setRoles] = useState<string[]>([]);
   const [rolesLoaded, setRolesLoaded] = useState(false);
-  const tabBaseHeight = 54;
+  const tabBaseHeight = Math.round(54 * componentScale);
+  const tabIconSize = Math.round(28 * componentScale);
+  const meBtnSize = Math.round(42 * componentScale);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,7 +111,7 @@ export default function TabLayout() {
             backgroundColor: palette.panel,
             height: tabBaseHeight + insets.bottom,
             paddingBottom: Math.max(insets.bottom, 6),
-            paddingTop: 6,
+            paddingTop: Math.max(6, Math.round(6 * componentScale)),
           },
           tabBarInactiveTintColor: scheme === "dark" ? "#9fb0cf" : "#7b8da8",
         }}
@@ -133,7 +135,7 @@ export default function TabLayout() {
         options={{
           href: isMaintenanceWorker ? undefined : null,
           title: "Create Incident",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="plus.circle.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="plus.circle.fill" color={color} />,
         }}
       />
 
@@ -142,7 +144,7 @@ export default function TabLayout() {
         options={{
           href: canSeeIncidents ? undefined : null,
           title: "Track Incidents",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="exclamationmark.triangle.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="exclamationmark.triangle.fill" color={color} />,
         }}
       />
 
@@ -151,7 +153,7 @@ export default function TabLayout() {
         options={{
           href: canSeeDraftsSubmissions ? undefined : null,
           title: "Drafts",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="doc.text.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="doc.text.fill" color={color} />,
         }}
       />
 
@@ -160,7 +162,7 @@ export default function TabLayout() {
         options={{
           href: canSeeDraftsSubmissions ? undefined : null,
           title: "Submissions",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="tray.full.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="tray.full.fill" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -182,7 +184,7 @@ export default function TabLayout() {
         options={{
           href: null,
           title: "Settings",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="gearshape.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="gearshape.fill" color={color} />,
         }}
       />
       </Tabs>
@@ -195,12 +197,15 @@ export default function TabLayout() {
             {
               top: insets.top + 8,
               right: 12,
+              width: meBtnSize,
+              height: meBtnSize,
+              borderRadius: Math.round(meBtnSize / 2),
               backgroundColor: palette.panel,
               borderColor: palette.border,
             },
           ]}
         >
-          <Text style={[styles.profileText, { color: palette.text }]}>Me</Text>
+          <Text style={[styles.profileText, { color: palette.text, fontSize: Math.round(13 * componentScale) }]}>Me</Text>
         </Pressable>
       ) : null}
 
@@ -211,7 +216,7 @@ export default function TabLayout() {
             style={[
               styles.menuBubble,
               {
-                top: insets.top + 50,
+                top: insets.top + Math.round(50 * componentScale),
                 right: 12,
                 backgroundColor: palette.panel,
                 borderColor: palette.border,

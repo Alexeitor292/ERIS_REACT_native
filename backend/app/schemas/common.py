@@ -95,9 +95,9 @@ class GisaDraftPatch(BaseModel):
     water_flowing: bool | None = None
     water_seep: bool | None = None
     water_spring: bool | None = None
-    vegetation_trees: str | None = None
-    vegetation_bushes_shrubs: str | None = None
-    vegetation_groundcover: str | None = None
+    vegetation_trees: float | None = None
+    vegetation_bushes_shrubs: float | None = None
+    vegetation_groundcover: float | None = None
     drainage_clogged_inlet: bool | None = None
     drainage_compromised_drains: bool | None = None
     drainage_surface_runoff: bool | None = None

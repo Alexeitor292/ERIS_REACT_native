@@ -510,6 +510,30 @@ def validate_submit_ready(db: Session, submission_id: int) -> None:
     if int(photo_count or 0) < 1:
         missing.append("photo")
 
+    # Submit-time business rule:
+    # Drafts may keep partial percentages, but if Soil material is selected,
+    # clay/silt/sand/gravel must total exactly 100 at submit.
+    material_soil_selected = bool(gisa.get("material_soil"))
+    if material_soil_selected:
+        pct_fields = ["est_clay_pct", "est_silt_pct", "est_sand_pct", "est_gravel_pct"]
+        total = 0.0
+        pct_invalid = False
+        for key in pct_fields:
+            raw = gisa.get(key)
+            if raw is None or str(raw).strip() == "":
+                value = 0.0
+            else:
+                try:
+                    value = float(raw)
+                except Exception:
+                    pct_invalid = True
+                    break
+            total += value
+        if pct_invalid:
+            missing.append("soil_pct(type)")
+        elif abs(total - 100.0) > 0.0001:
+            missing.append(f"soil_pct_total({total:.2f})")
+
     if missing:
         raise HTTPException(
             status_code=409,
@@ -2753,7 +2777,7 @@ def notify_coordinator(
 
     try:
         db.execute(text("""
-            INSERT INTO submission_workflow_events
+            INSERT INTO workflow_events
               (submission_id, actor_user_id, event_type, from_status, to_status, comment)
             VALUES
               (:sid, :actor, 'COORDINATOR_NOTIFIED', :from_status, :to_status, :comment)

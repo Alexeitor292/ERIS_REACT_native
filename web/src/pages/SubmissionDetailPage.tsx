@@ -87,6 +87,13 @@ const triToBool = (v: Tri) => (v === "YES" ? true : v === "NO" ? false : null);
 const boolToTri = (v: unknown): Tri => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
 const nf = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${n} must be numeric`); return x; };
 const ni = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${n} must be whole number`); return x; };
+const np = (v: string, n: string) => {
+  if (!v.trim()) return null;
+  const x = Number(v);
+  if (Number.isNaN(x)) throw new Error(`${n} must be numeric`);
+  if (x < 0 || x > 100) throw new Error(`${n} must be between 0 and 100`);
+  return x;
+};
 const DISTRIBUTION_ICON_SRC: Record<string, string> = {
   ADVANCING: "/distribution-icons/advancing.png",
   RETROGRESSING: "/distribution-icons/retrogressing.png",
@@ -570,7 +577,7 @@ export default function SubmissionDetailPage() {
       material_rock: triToBool(draft.material_rock), material_soil: triToBool(draft.material_soil), material_bedding: triToBool(draft.material_bedding), material_joints: triToBool(draft.material_joints), material_fractures: triToBool(draft.material_fractures),
       est_soil_pct: nf(draft.est_soil_pct, "Estimated soil %"), est_clay_pct: nf(draft.est_clay_pct, "Estimated clay %"), est_silt_pct: nf(draft.est_silt_pct, "Estimated silt %"), est_sand_pct: nf(draft.est_sand_pct, "Estimated sand %"), est_gravel_pct: nf(draft.est_gravel_pct, "Estimated gravel %"),
       water_dry: triToBool(draft.water_dry), water_moist: triToBool(draft.water_moist), water_wet: triToBool(draft.water_wet), water_flowing: triToBool(draft.water_flowing), water_seep: triToBool(draft.water_seep), water_spring: triToBool(draft.water_spring),
-      vegetation_trees: nt(draft.vegetation_trees), vegetation_bushes_shrubs: nt(draft.vegetation_bushes_shrubs), vegetation_groundcover: nt(draft.vegetation_groundcover),
+      vegetation_trees: np(draft.vegetation_trees, "Trees Coverage %"), vegetation_bushes_shrubs: np(draft.vegetation_bushes_shrubs, "Bushes/Shrubs Coverage %"), vegetation_groundcover: np(draft.vegetation_groundcover, "Groundcover Coverage %"),
       drainage_clogged_inlet: triToBool(draft.drainage_clogged_inlet), drainage_compromised_drains: triToBool(draft.drainage_compromised_drains), drainage_surface_runoff: triToBool(draft.drainage_surface_runoff), drainage_torrent_surge_flood: triToBool(draft.drainage_torrent_surge_flood),
       impact_impacted_adj_utilities: triToBool(draft.impact_impacted_adj_utilities), impact_maybe_adj_utilities: triToBool(draft.impact_maybe_adj_utilities), impact_adj_utilities: nt(draft.impact_adj_utilities), impact_impacted_adj_properties: triToBool(draft.impact_impacted_adj_properties), impact_maybe_adj_properties: triToBool(draft.impact_maybe_adj_properties), impact_adj_properties: nt(draft.impact_adj_properties), impact_impacted_adj_structure: triToBool(draft.impact_impacted_adj_structure), impact_maybe_adj_structure: triToBool(draft.impact_maybe_adj_structure), impact_adj_structure: nt(draft.impact_adj_structure),
       measure_slope_height_ft: nf(draft.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: nf(draft.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: nf(draft.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: nf(draft.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: nf(draft.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: nf(draft.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: nf(draft.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: nf(draft.measure_roadway_width_ft, "Roadway width"),
@@ -1682,9 +1689,9 @@ export default function SubmissionDetailPage() {
                       {layoutTools("vegetation_on_slope")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Vegetation on Slope</div>
                       <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                        <div><label className={label}>Trees Coverage %</label><input className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
-                        <div><label className={label}>Bushes/Shrubs Coverage %</label><input className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
-                        <div className="col-span-full"><label className={label}>Groundcover Coverage %</label><input className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
+                        <div><label className={label}>Trees Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
+                        <div><label className={label}>Bushes/Shrubs Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
+                        <div className="col-span-full"><label className={label}>Groundcover Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
                       </div>
                     </div>
 

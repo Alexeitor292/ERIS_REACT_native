@@ -109,6 +109,13 @@ const MEMO_SECTIONS = [
 const n = (v: string) => (v.trim() ? v.trim() : null);
 const f = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${name} must be numeric`); return x; };
 const i = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${name} must be a whole number`); return x; };
+const pct = (v: string, name: string) => {
+  if (!v.trim()) return null;
+  const x = Number(v);
+  if (Number.isNaN(x)) throw new Error(`${name} must be numeric`);
+  if (x < 0 || x > 100) throw new Error(`${name} must be between 0 and 100`);
+  return x;
+};
 const triToBool = (v: "" | "YES" | "NO") =>
   v === "YES" ? true : v === "NO" ? false : null;
 const normalizeBool = (v: any): boolean | null => {
@@ -408,12 +415,18 @@ function Chip({
   iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
 }) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
   return (
     <Pressable
       disabled={disabled}
       onPress={onPress}
       style={[
         styles.chip,
+        {
+          paddingVertical: Math.round(6 * scale),
+          paddingHorizontal: Math.round(10 * scale),
+        },
         {
           borderColor: palette?.border ?? "#c8d5ea",
           backgroundColor: palette?.panelSoft ?? "#f9fbff",
@@ -422,10 +435,19 @@ function Chip({
         disabled ? { opacity: 0.6 } : null,
       ]}
     >
-      <View style={styles.chipInner}>
-        {iconLeft ? <View style={styles.chipIconWrap}>{iconLeft}</View> : null}
-        <Text style={[styles.chipText, { color: palette?.text ?? "#334155" }, active ? [styles.chipTextOn, { color: palette?.primary ?? "#1d4ed8" }] : null]}>{label}</Text>
-        {iconRight ? <View style={styles.chipIconWrap}>{iconRight}</View> : null}
+      <View style={[styles.chipInner, { gap: Math.round(6 * scale) }]}>
+        {iconLeft ? <View style={[styles.chipIconWrap, { width: Math.round(18 * scale), height: Math.round(18 * scale) }]}>{iconLeft}</View> : null}
+        <Text
+          style={[
+            styles.chipText,
+            { color: palette?.text ?? "#334155", fontSize: Math.round(12 * scale) },
+            active ? [styles.chipTextOn, { color: palette?.primary ?? "#1d4ed8" }] : null,
+          ]}
+          maxFontSizeMultiplier={textScale}
+        >
+          {label}
+        </Text>
+        {iconRight ? <View style={[styles.chipIconWrap, { width: Math.round(18 * scale), height: Math.round(18 * scale) }]}>{iconRight}</View> : null}
       </View>
     </Pressable>
   );
@@ -450,18 +472,46 @@ function Field({
   palette?: { muted: string; border: string; panel: string; panelSoft: string; text: string };
   error?: string;
 }) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
   return (
-    <View style={{ marginTop: 8 }}>
-      <View style={styles.labelRow}>
-        <Text style={[styles.label, { color: error ? "#dc2626" : (palette?.muted ?? "#465978") }]}>{label}</Text>
+    <View style={{ marginTop: Math.round(8 * scale) }}>
+      <View style={[styles.labelRow, { gap: Math.round(6 * scale) }]}>
+        <Text
+          style={[styles.label, { color: error ? "#dc2626" : (palette?.muted ?? "#465978"), fontSize: Math.round(13 * scale) }]}
+          maxFontSizeMultiplier={textScale}
+        >
+          {label}
+        </Text>
         {error ? (
-          <View style={styles.errorIcon}>
-            <Text style={styles.errorIconText}>i</Text>
+          <View style={[styles.errorIcon, { width: Math.round(16 * scale), height: Math.round(16 * scale), borderRadius: Math.round(8 * scale) }]}>
+            <Text style={[styles.errorIconText, { fontSize: Math.round(10 * scale), lineHeight: Math.round(12 * scale) }]} maxFontSizeMultiplier={textScale}>i</Text>
           </View>
         ) : null}
       </View>
-      <TextInput value={value} onChangeText={onChangeText} editable={editable} multiline={multiline} keyboardType={keyboardType ?? "default"} style={[styles.input, { borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"), backgroundColor: palette?.panelSoft ?? "#f7f8fc", color: palette?.text ?? "#1b2a40" }, multiline ? { minHeight: 90, textAlignVertical: "top" } : null, !editable ? { opacity: 0.85 } : null]} />
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        editable={editable}
+        multiline={multiline}
+        keyboardType={keyboardType ?? "default"}
+        maxFontSizeMultiplier={textScale}
+        style={[
+          styles.input,
+          {
+            borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"),
+            backgroundColor: palette?.panelSoft ?? "#f7f8fc",
+            color: palette?.text ?? "#1b2a40",
+            borderRadius: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+            paddingHorizontal: Math.round(10 * scale),
+            paddingVertical: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+            fontSize: Math.round((Platform.OS === "ios" ? 16 : 14) * scale),
+          },
+          multiline ? { minHeight: Math.round(90 * scale), textAlignVertical: "top" } : null,
+          !editable ? { opacity: 0.85 } : null,
+        ]}
+      />
+      {error ? <Text style={[styles.errorText, { fontSize: Math.round(11 * scale), marginTop: Math.round(4 * scale) }]} maxFontSizeMultiplier={textScale}>{error}</Text> : null}
     </View>
   );
 }
@@ -483,14 +533,16 @@ function SelectField({
   palette?: { muted: string; border: string; panel: string; panelSoft: string; text: string };
   error?: string;
 }) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
   const textValue = value.trim() || placeholder;
   return (
-    <View style={{ marginTop: 8 }}>
-      <View style={styles.labelRow}>
-        <Text style={[styles.label, { color: error ? "#dc2626" : (palette?.muted ?? "#465978") }]}>{label}</Text>
+    <View style={{ marginTop: Math.round(8 * scale) }}>
+      <View style={[styles.labelRow, { gap: Math.round(6 * scale) }]}>
+        <Text style={[styles.label, { color: error ? "#dc2626" : (palette?.muted ?? "#465978"), fontSize: Math.round(13 * scale) }]} maxFontSizeMultiplier={textScale}>{label}</Text>
         {error ? (
-          <View style={styles.errorIcon}>
-            <Text style={styles.errorIconText}>i</Text>
+          <View style={[styles.errorIcon, { width: Math.round(16 * scale), height: Math.round(16 * scale), borderRadius: Math.round(8 * scale) }]}>
+            <Text style={[styles.errorIconText, { fontSize: Math.round(10 * scale), lineHeight: Math.round(12 * scale) }]} maxFontSizeMultiplier={textScale}>i</Text>
           </View>
         ) : null}
       </View>
@@ -504,14 +556,18 @@ function SelectField({
             backgroundColor: palette?.panelSoft ?? "#f7f8fc",
             opacity: editable ? 1 : 0.7,
             justifyContent: "center",
+            borderRadius: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+            paddingHorizontal: Math.round(10 * scale),
+            paddingVertical: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+            minHeight: Math.round(44 * scale),
           },
         ]}
       >
-        <Text style={{ color: value.trim() ? (palette?.text ?? "#1b2a40") : (palette?.muted ?? "#6b7280") }}>
+        <Text style={{ color: value.trim() ? (palette?.text ?? "#1b2a40") : (palette?.muted ?? "#6b7280"), fontSize: Math.round((Platform.OS === "ios" ? 16 : 14) * scale) }} maxFontSizeMultiplier={textScale}>
           {textValue}
         </Text>
       </Pressable>
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? <Text style={[styles.errorText, { fontSize: Math.round(11 * scale), marginTop: Math.round(4 * scale) }]} maxFontSizeMultiplier={textScale}>{error}</Text> : null}
     </View>
   );
 }
@@ -531,12 +587,14 @@ function CollapsibleSection({
   palette: { panel: string; border: string; text: string; muted: string };
   compact: boolean;
 }) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
   const isIOS = Platform.OS === "ios";
   return (
-    <View style={[styles.section, isIOS ? styles.iosSection : null, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+    <View style={[styles.section, isIOS ? styles.iosSection : null, { backgroundColor: palette.panel, borderColor: palette.border, padding: Math.round((compact ? 10 : 12) * scale), borderRadius: Math.round((isIOS ? 12 : 14) * scale) }]}>
       <Pressable onPress={onToggle} style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>{title}</Text>
-        <Text style={[styles.sectionChevron, { color: palette.muted }]}>{open ? (isIOS ? "⌄" : "v") : ">"}</Text>
+        <Text style={[styles.sectionTitle, { color: palette.text, fontSize: Math.round((isIOS ? 23 / 1.45 : 22 / 1.45) * scale) }]} maxFontSizeMultiplier={textScale}>{title}</Text>
+        <Text style={[styles.sectionChevron, { color: palette.muted, fontSize: Math.round((isIOS ? 18 : 16) * scale) }]} maxFontSizeMultiplier={textScale}>{open ? (isIOS ? "⌄" : "v") : ">"}</Text>
       </Pressable>
       {open ? <View style={styles.sectionBody}>{children}</View> : null}
     </View>
@@ -556,13 +614,15 @@ function DropdownBlock({
   children: React.ReactNode;
   palette: { panel: string; border: string; text: string; muted: string };
 }) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
   return (
-    <View style={[styles.dropdownBlock, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+    <View style={[styles.dropdownBlock, { backgroundColor: palette.panel, borderColor: palette.border, borderRadius: Math.round((Platform.OS === "ios" ? 12 : 14) * scale), padding: Math.round((Platform.OS === "ios" ? 10 : 12) * scale) }]}>
       <Pressable onPress={onToggle} style={styles.dropdownBlockHeader}>
-        <Text style={[styles.dropdownBlockTitle, { color: palette.text }]}>{title}</Text>
-        <Text style={[styles.sectionChevron, { color: palette.muted }]}>{open ? "v" : ">"}</Text>
+        <Text style={[styles.dropdownBlockTitle, { color: palette.text, fontSize: Math.round((Platform.OS === "ios" ? 23 / 1.45 : 22 / 1.45) * scale) }]} maxFontSizeMultiplier={textScale}>{title}</Text>
+        <Text style={[styles.sectionChevron, { color: palette.muted, fontSize: Math.round((Platform.OS === "ios" ? 18 : 16) * scale) }]} maxFontSizeMultiplier={textScale}>{open ? "v" : ">"}</Text>
       </Pressable>
-      {open ? <View style={{ marginTop: 6 }}>{children}</View> : null}
+      {open ? <View style={{ marginTop: Math.round(6 * scale) }}>{children}</View> : null}
     </View>
   );
 }
@@ -577,7 +637,7 @@ export default function SubmissionDetailScreen() {
   const isLocalId = useMemo(() => isLocalDraftId(String(id ?? "")), [id]);
   const navigation = useNavigation<any>();
   const pathname = usePathname();
-  const { palette: basePalette, density } = useUiSettings();
+  const { palette: basePalette, density, componentScale, textScale, isAccessibilityLayout } = useUiSettings();
   const palette = useMemo(() => {
     if (!isDarkHexColor(basePalette?.bg)) return basePalette;
     return {
@@ -1012,6 +1072,9 @@ export default function SubmissionDetailScreen() {
     setOpenPaperBlocks((prev) => ({ ...prev, [key]: !prev[key] }));
   };
   const FORM_STEPS = ["Header", "GISA Body", "Assessment", "Actions", "Gallery"] as const;
+  const STEP_LABELS: string[] = isAccessibilityLayout
+    ? ["Hdr", "Body", "Assess", "Acts", "Gallery"]
+    : [...FORM_STEPS];
   const goNextStep = () => setActiveStep((prev) => Math.min(prev + 1, FORM_STEPS.length - 1));
   const goPrevStep = () => setActiveStep((prev) => Math.max(prev - 1, 0));
   const contactDisplayName = (contact: DistrictContact, idx: number) => {
@@ -1229,7 +1292,7 @@ export default function SubmissionDetailScreen() {
       material_rock: ynToBool(normalizedForm.material_rock), material_soil: ynToBool(normalizedForm.material_soil), material_bedding: ynToBool(normalizedForm.material_bedding), material_joints: ynToBool(normalizedForm.material_joints), material_fractures: ynToBool(normalizedForm.material_fractures),
       est_soil_pct: f(normalizedForm.est_soil_pct, "Estimated soil %"), est_clay_pct: f(normalizedForm.est_clay_pct, "Estimated clay %"), est_silt_pct: f(normalizedForm.est_silt_pct, "Estimated silt %"), est_sand_pct: f(normalizedForm.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(normalizedForm.est_gravel_pct, "Estimated gravel %"),
       water_dry: ynToBool(normalizedForm.water_dry), water_moist: ynToBool(normalizedForm.water_moist), water_wet: ynToBool(normalizedForm.water_wet), water_flowing: ynToBool(normalizedForm.water_flowing), water_seep: ynToBool(normalizedForm.water_seep), water_spring: ynToBool(normalizedForm.water_spring),
-      vegetation_trees: n(normalizedForm.vegetation_trees), vegetation_bushes_shrubs: n(normalizedForm.vegetation_bushes_shrubs), vegetation_groundcover: n(normalizedForm.vegetation_groundcover),
+      vegetation_trees: pct(normalizedForm.vegetation_trees, "Trees Coverage %"), vegetation_bushes_shrubs: pct(normalizedForm.vegetation_bushes_shrubs, "Bushes/Shrubs Coverage %"), vegetation_groundcover: pct(normalizedForm.vegetation_groundcover, "Groundcover Coverage %"),
       drainage_clogged_inlet: ynToBool(normalizedForm.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(normalizedForm.drainage_compromised_drains), drainage_surface_runoff: ynToBool(normalizedForm.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(normalizedForm.drainage_torrent_surge_flood),
       impact_impacted_adj_utilities: ynToBool(normalizedForm.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(normalizedForm.impact_maybe_adj_utilities), impact_adj_utilities: n(normalizedForm.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(normalizedForm.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(normalizedForm.impact_maybe_adj_properties), impact_adj_properties: n(normalizedForm.impact_adj_properties), impact_impacted_adj_structure: ynToBool(normalizedForm.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(normalizedForm.impact_maybe_adj_structure), impact_adj_structure: n(normalizedForm.impact_adj_structure),
       measure_slope_height_ft: f(normalizedForm.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(normalizedForm.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(normalizedForm.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(normalizedForm.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(normalizedForm.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(normalizedForm.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(normalizedForm.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(normalizedForm.measure_roadway_width_ft, "Roadway width"),
@@ -2084,10 +2147,10 @@ export default function SubmissionDetailScreen() {
       style={[styles.container, { backgroundColor: palette.bg }]}
       contentInsetAdjustmentBehavior={isIOS ? "automatic" : "never"}
       keyboardDismissMode={isIOS ? "interactive" : "on-drag"}
-      contentContainerStyle={[styles.contentWrap, { padding: compact ? 10 : 14, gap: compact ? 8 : 10 }]}
+      contentContainerStyle={[styles.contentWrap, { padding: Math.round((compact ? 10 : 14) * componentScale), gap: Math.round((compact ? 8 : 10) * componentScale) }]}
     >
-      <Text style={[styles.title, { color: palette.text }]}>{isDraftEntry ? "Draft" : "Submission"}</Text>
-      <Text style={[styles.muted, { color: palette.muted }]}>
+      <Text style={[styles.title, { color: palette.text, fontSize: Math.round((isIOS ? 22 : 24) * componentScale) }]} maxFontSizeMultiplier={textScale}>{isDraftEntry ? "Draft" : "Submission"}</Text>
+      <Text style={[styles.muted, { color: palette.muted, fontSize: Math.round(12 * componentScale) }]} maxFontSizeMultiplier={textScale}>
         {buildSubmissionDescriptor({
           id: data.submission.id,
           created_at: data.submission.created_at,
@@ -2097,14 +2160,15 @@ export default function SubmissionDetailScreen() {
           post_mile: form.post_mile || data.gisa?.post_mile,
         })}
       </Text>
-      <Text style={[styles.status, { color: palette.muted }]}>Status: {data.submission.status}</Text>
-      <View style={styles.stepTabsRow}>
-        {FORM_STEPS.map((step, idx) => (
+      <Text style={[styles.status, { color: palette.muted, fontSize: Math.round(13 * componentScale) }]} maxFontSizeMultiplier={textScale}>Status: {data.submission.status}</Text>
+      <View style={[styles.stepTabsRow, { gap: Math.max(4, Math.round(4 * componentScale)) }]}>
+        {STEP_LABELS.map((step, idx) => (
           <Pressable
             key={step}
             onPress={() => setActiveStep(idx)}
             style={[
               styles.stepTab,
+              { paddingHorizontal: Math.round(4 * componentScale), paddingVertical: Math.round(7 * componentScale), borderRadius: Math.round(10 * componentScale) },
               idx === activeStep
                 ? [
                     styles.stepTabActive,
@@ -2127,14 +2191,15 @@ export default function SubmissionDetailScreen() {
               numberOfLines={1}
               adjustsFontSizeToFit
               minimumFontScale={0.72}
-              style={[styles.stepTabLabel, { color: idx === activeStep ? palette.text : palette.muted }]}
+              style={[styles.stepTabLabel, { color: idx === activeStep ? palette.text : palette.muted, fontSize: Math.max(12, Math.round(12 * componentScale)), lineHeight: Math.max(13, Math.round(13 * componentScale)) }]}
+              maxFontSizeMultiplier={textScale}
             >
               {step}
             </Text>
           </Pressable>
         ))}
       </View>
-      <Text style={[styles.muted, { color: palette.muted }]}>Step {activeStep + 1} of {FORM_STEPS.length}</Text>
+      <Text style={[styles.muted, { color: palette.muted, fontSize: Math.round(12 * componentScale) }]} maxFontSizeMultiplier={textScale}>Step {activeStep + 1} of {FORM_STEPS.length}</Text>
       <View style={activeStep === 0 ? undefined : styles.hidden}>
         <View style={styles.stepSectionStack}>
         <CollapsibleSection title="GISA Header" open={openSections.header} onToggle={() => toggleSection("header")} palette={palette} compact={compact}>
@@ -2409,9 +2474,9 @@ export default function SubmissionDetailScreen() {
         </DropdownBlock>
 
         <DropdownBlock title="Vegetation on Slope" open={openPaperBlocks.vegetation} onToggle={() => togglePaperBlock("vegetation")} palette={palette}>
-          <Field palette={palette} label="Trees Coverage %" value={form.vegetation_trees} editable={canEdit} onChangeText={(v) => setVal("vegetation_trees", v)} />
-          <Field palette={palette} label="Bushes/Shrubs Coverage %" value={form.vegetation_bushes_shrubs} editable={canEdit} onChangeText={(v) => setVal("vegetation_bushes_shrubs", v)} />
-          <Field palette={palette} label="Groundcover Coverage %" value={form.vegetation_groundcover} editable={canEdit} onChangeText={(v) => setVal("vegetation_groundcover", v)} />
+          <Field palette={palette} label="Trees Coverage %" value={form.vegetation_trees} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("vegetation_trees", v)} />
+          <Field palette={palette} label="Bushes/Shrubs Coverage %" value={form.vegetation_bushes_shrubs} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("vegetation_bushes_shrubs", v)} />
+          <Field palette={palette} label="Groundcover Coverage %" value={form.vegetation_groundcover} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("vegetation_groundcover", v)} />
           {renderTaggedSectionMedia("vegetation_slope")}
         </DropdownBlock>
 

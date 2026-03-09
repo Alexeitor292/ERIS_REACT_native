@@ -5,12 +5,17 @@ import { useColorScheme as useSystemColorScheme } from "react-native";
 type ThemeMode = "system" | "light" | "dark";
 type Accent = "blue" | "teal" | "amber";
 type Density = "comfortable" | "compact";
+type UiScale = 1 | 1.25 | 1.5 | 2 | 4;
 type Scheme = "light" | "dark";
 
 type UiSettingsState = {
   themeMode: ThemeMode;
   accent: Accent;
   density: Density;
+  uiScale: UiScale;
+  textScale: number;
+  componentScale: number;
+  isAccessibilityLayout: boolean;
   scheme: Scheme;
   palette: {
     bg: string;
@@ -27,6 +32,7 @@ type UiSettingsState = {
   setThemeMode: (mode: ThemeMode) => void;
   setAccent: (accent: Accent) => void;
   setDensity: (density: Density) => void;
+  setUiScale: (scale: UiScale) => void;
 };
 
 const STORAGE_KEY = "eris_ui_settings_v1";
@@ -74,13 +80,14 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [accent, setAccent] = useState<Accent>("blue");
   const [density, setDensity] = useState<Density>("comfortable");
+  const [uiScale, setUiScale] = useState<UiScale>(1);
 
   useEffect(() => {
     (async () => {
       try {
         const raw = await SecureStore.getItemAsync(STORAGE_KEY);
         if (!raw) return;
-        const parsed = JSON.parse(raw) as Partial<{ themeMode: ThemeMode; accent: Accent; density: Density }>;
+        const parsed = JSON.parse(raw) as Partial<{ themeMode: ThemeMode; accent: Accent; density: Density; uiScale: UiScale }>;
         if (parsed.themeMode === "system" || parsed.themeMode === "light" || parsed.themeMode === "dark") {
           setThemeMode(parsed.themeMode);
         }
@@ -90,6 +97,9 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
         if (parsed.density === "comfortable" || parsed.density === "compact") {
           setDensity(parsed.density);
         }
+        if (parsed.uiScale === 1 || parsed.uiScale === 1.25 || parsed.uiScale === 1.5 || parsed.uiScale === 2 || parsed.uiScale === 4) {
+          setUiScale(parsed.uiScale);
+        }
       } catch {
         // No-op, defaults apply.
       }
@@ -97,24 +107,33 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => {
-    SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify({ themeMode, accent, density })).catch(() => {});
-  }, [themeMode, accent, density]);
+    SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify({ themeMode, accent, density, uiScale })).catch(() => {});
+  }, [themeMode, accent, density, uiScale]);
 
   const scheme: Scheme = themeMode === "system" ? (system === "dark" ? "dark" : "light") : themeMode;
   const palette = useMemo(() => buildPalette(scheme, accent), [scheme, accent]);
+
+  const textScale = uiScale;
+  const isAccessibilityLayout = uiScale >= 4;
+  const componentScale = isAccessibilityLayout ? 2 : uiScale;
 
   const value = useMemo(
     () => ({
       themeMode,
       accent,
       density,
+      uiScale,
+      textScale,
+      componentScale,
+      isAccessibilityLayout,
       scheme,
       palette,
       setThemeMode,
       setAccent,
       setDensity,
+      setUiScale,
     }),
-    [themeMode, accent, density, scheme, palette]
+    [themeMode, accent, density, uiScale, textScale, componentScale, isAccessibilityLayout, scheme, palette]
   );
 
   return <UiSettingsContext.Provider value={value}>{children}</UiSettingsContext.Provider>;
