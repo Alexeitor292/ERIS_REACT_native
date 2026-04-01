@@ -18,6 +18,18 @@ export function normalizePostMileInput(value?: string | number | null): string {
   return normalizePostMileValue(value) ?? "";
 }
 
+export function normalizeRouteValue(value?: string | number | null): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return raw;
+  return digits.slice(0, 3).padStart(3, "0");
+}
+
+export function normalizeRouteInput(value?: string | number | null): string {
+  return normalizeRouteValue(value) ?? "";
+}
+
 export function normalizeCoordinateValue(value?: string | number | null): number | null {
   if (value == null || value === "") return null;
   const num = typeof value === "number" ? value : Number(String(value).trim());

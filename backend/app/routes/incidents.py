@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_roles
-from ..precision import coordinates_differ, normalize_post_mile, round_coordinate
+from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
 from ..schemas.common import (
     IncidentAssignBranchChiefRequest,
     IncidentAssignEngineerRequest,
@@ -76,7 +76,7 @@ def _location_display_name(
 ) -> str | None:
     d = _normalize_text(district)
     c = _normalize_text(county)
-    r = _normalize_text(route)
+    r = normalize_route(route)
     pm = normalize_post_mile(post_mile)
     parts = [p for p in [d, c, r, pm] if p]
     if not parts:
@@ -136,7 +136,7 @@ def _create_or_select_location(
 ) -> int:
     normalized_district = _normalize_text(district)
     normalized_county = _normalize_text(county)
-    normalized_route = _normalize_text(route)
+    normalized_route = normalize_route(route)
     normalized_post_mile = normalize_post_mile(post_mile)
     rounded_latitude = round_coordinate(latitude)
     rounded_longitude = round_coordinate(longitude)
@@ -199,7 +199,7 @@ def _incident_location_candidates(
 ) -> list[dict]:
     normalized_district = (_normalize_text(district) or "").lower()
     normalized_county = (_normalize_text(county) or "").lower()
-    normalized_route = (_normalize_text(route) or "").lower()
+    normalized_route = (normalize_route(route) or "").lower()
     normalized_pm = (normalize_post_mile(post_mile) or "").lower()
     rounded_latitude = round_coordinate(latitude)
     rounded_longitude = round_coordinate(longitude)
@@ -870,7 +870,7 @@ def create_incident(
     title = (payload.title or "").strip() or None
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
-    route = _normalize_text(payload.route)
+    route = normalize_route(payload.route)
     post_mile = normalize_post_mile(payload.post_mile)
     latitude = round_coordinate(payload.latitude)
     longitude = round_coordinate(payload.longitude)
@@ -1139,7 +1139,7 @@ def maintenance_resubmit_incident(
 
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
-    route = _normalize_text(payload.route)
+    route = normalize_route(payload.route)
     post_mile = normalize_post_mile(payload.post_mile)
     latitude = round_coordinate(payload.latitude)
     longitude = round_coordinate(payload.longitude)

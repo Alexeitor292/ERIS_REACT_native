@@ -97,5 +97,6 @@ export function countyDisplayLabel(value?: string | null): string {
 export function routesForCounty(value?: string | null): string[] {
   const code = countyCodeFromNameOrCode(value);
   if (!code) return [];
-  return COUNTY_BY_CODE.get(code)?.routes ?? [];
+  return (COUNTY_BY_CODE.get(code)?.routes ?? []).map((route) => normalizeRouteInput(route));
 }
+import { normalizeRouteInput } from "./precision";

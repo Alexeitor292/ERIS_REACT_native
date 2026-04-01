@@ -34,6 +34,16 @@ def normalize_post_mile(value: object | None) -> str | None:
     return format(quantized, f".{POST_MILE_DECIMALS}f")
 
 
+def normalize_route(value: object | None) -> str | None:
+    text = _clean_text(value)
+    if text is None:
+        return None
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return text
+    return digits[:3].zfill(3)
+
+
 def round_coordinate(value: object | None) -> float | None:
     quantized = _quantized_decimal(value, COORDINATE_DECIMALS)
     if quantized is None:

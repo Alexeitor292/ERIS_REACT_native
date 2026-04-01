@@ -29,7 +29,7 @@ from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .routes.incidents import ensure_incident_runtime_schema, router as incidents_router
 from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
-from .precision import normalize_post_mile, round_coordinate
+from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .schemas.common import (
     GeometryResponse,
     GeometryUpsert,
@@ -285,7 +285,7 @@ def _extract_route_from_text(text_value: str | None) -> str | None:
     if m:
         return m.group(1)
     m = re.search(r"\b(\d{1,3})\b", text_value)
-    return m.group(1) if m else None
+    return normalize_route(m.group(1) if m else None)
 
 
 def _reverse_geocode_arcgis(lat: float, lon: float) -> dict:
@@ -351,7 +351,7 @@ def _query_postmile_layer(lat: float, lon: float) -> dict:
     return {
         "district": district_value or None,
         "county": _normalize_county(str(county)) if county is not None else None,
-        "route": str(route).strip() if route is not None and str(route).strip() else None,
+        "route": normalize_route(route),
         "post_mile": normalize_post_mile(post_mile),
         "source_postmile": "arcgis_postmile_layer",
     }
@@ -2153,6 +2153,8 @@ def patch_gisa(
 
     if "post_mile" in provided:
         provided["post_mile"] = normalize_post_mile(provided.get("post_mile"))
+    if "route" in provided:
+        provided["route"] = normalize_route(provided.get("route"))
     if "latitude" in provided:
         provided["latitude"] = round_coordinate(provided.get("latitude"))
     if "longitude" in provided:

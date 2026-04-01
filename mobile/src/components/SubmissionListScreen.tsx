@@ -11,7 +11,7 @@ import { buildSubmissionDescriptor } from "../utils/submissionLabel";
 import { countyCodeFromNameOrCode, districtForCounty, routesForCounty } from "../utils/caltransLookups";
 import { deleteSubmission, getSubmissionPermissions, patchSubmission, replaceSubmissionPermissions, SubmissionPermissions } from "../api/submissions";
 import { enrichPointFromArcgisClient } from "../utils/arcgisEnrichment";
-import { normalizeCoordinateValue, normalizePostMileValue } from "../utils/precision";
+import { normalizeCoordinateValue, normalizePostMileValue, normalizeRouteValue } from "../utils/precision";
 import {
   clearOfflineQueue,
   diagnoseOfflineQueue,
@@ -169,7 +169,7 @@ export default function SubmissionListScreen({ mode }: Props) {
           const geo = await enrichPointFromArcgisClient(lat, lon);
           const countyCode = countyCodeFromNameOrCode(geo.county ?? "");
           const district = geo.district ? String(geo.district).padStart(2, "0") : districtForCounty(countyCode);
-          const route = geo.route?.trim() || "";
+          const route = normalizeRouteValue(geo.route) ?? "";
           const routeAllowed = countyCode ? routesForCounty(countyCode) : [];
           const normalizedRoute = route && (routeAllowed.length === 0 || routeAllowed.includes(route)) ? route : "";
 

@@ -489,7 +489,7 @@ export default function IncidentsTabScreen() {
         }
       }
 
-      const route = geo.route?.trim() || "";
+      const route = normalizeRoute(geo.route || "");
       const routeAllowed = countyCode ? routesForCounty(countyCode) : [];
       const allowedRouteValues = routeAllowed.map(normalizeRoute).filter(Boolean);
       const normalizedRoute = route && (routeAllowed.length === 0 || allowedRouteValues.includes(normalizeRoute(route))) ? normalizeRoute(route) : "";

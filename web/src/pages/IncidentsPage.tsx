@@ -5,7 +5,7 @@ import { api } from "../api/client";
 import type { AdminUser, Incident, IncidentStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import AppShell from "../ui/AppShell";
-import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "../utils/precision";
+import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 
 type IncidentCreateForm = {
   title: string;
@@ -118,7 +118,7 @@ export default function IncidentsPage() {
           longitude: lon,
           district: form.district.trim() || null,
           county: form.county.trim() || null,
-          route: form.route.trim() || null,
+          route: normalizeRouteValue(form.route),
           post_mile: normalizePostMileValue(form.post_mile),
         }),
       });
@@ -251,6 +251,7 @@ export default function IncidentsPage() {
             placeholder="Route"
             value={form.route}
             onChange={(e) => setForm((prev) => ({ ...prev, route: e.target.value }))}
+            onBlur={() => setForm((prev) => ({ ...prev, route: normalizeRouteInput(prev.route) }))}
           />
           <input
             className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"

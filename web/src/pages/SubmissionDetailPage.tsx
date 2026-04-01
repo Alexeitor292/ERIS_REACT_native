@@ -9,7 +9,7 @@ import { appConfig } from "../config";
 import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
-import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "../utils/precision";
+import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 
 type Tri = "UNKNOWN" | "YES" | "NO";
 type Draft = Record<string, string> & {
@@ -214,7 +214,7 @@ function normalizeCounty(value: string): string {
 
 function tryExtractRoute(addressText: string): string | null {
   const m = addressText.match(/\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b/i) || addressText.match(/\b(\d{1,3})\b/);
-  return m?.[1] ?? null;
+  return normalizeRouteValue(m?.[1] ?? null);
 }
 
 function normalizeDistrictValue(value: unknown): string {
@@ -521,7 +521,7 @@ export default function SubmissionDetailPage() {
         report_date: t(gisa.report_date),
         district: normalizeDistrictValue(gisa.district) || normalizeDistrictValue(districtForCounty(gisa.county)),
         county: countyNameFromNameOrCode(gisa.county) ?? t(gisa.county),
-        route: t(gisa.route),
+        route: normalizeRouteInput(gisa.route),
         post_mile: normalizePostMileInput(gisa.post_mile),
         ea: t(gisa.ea),
         project_id: t(gisa.project_id),
@@ -570,7 +570,7 @@ export default function SubmissionDetailPage() {
       geometry = parsed as Record<string, unknown>;
     }
     await api(`/submissions/${sid}/gisa`, { method: "PATCH", body: JSON.stringify({
-      report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: nt(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
+      report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: normalizeRouteValue(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
       latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
       pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), crack_length_ft: nf(draft.crack_length_ft, "Crack length"), crack_horizontal_in: nf(draft.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: nf(draft.crack_vertical_in, "Crack vertical"), crack_depth_in: nf(draft.crack_depth_in, "Crack depth"), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
       failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout),

@@ -43,7 +43,7 @@ function extractRoute(text?: string | null): string | null {
   if (!text) return null;
   const m =
     text.match(/\b(?:I|US|CA|SR)[-\s]?(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\b/);
-  return m?.[1] ?? null;
+  return normalizeRouteValue(m?.[1] ?? null);
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -183,10 +183,7 @@ async function queryPostmileLayer(lat: number, lon: number) {
         ? String(getAttr(attrs, "County", "COUNTY", "county"))
         : null
     ),
-    route:
-      getAttr(attrs, "Route", "ROUTE", "route") != null
-        ? String(getAttr(attrs, "Route", "ROUTE", "route")).trim() || null
-        : null,
+    route: normalizeRouteValue(getAttr(attrs, "Route", "ROUTE", "route") as string | number | null | undefined),
     post_mile: formatPostmile(getAttr(attrs, "PM", "POSTMILE", "postmile", "ODOMETER")),
     source_postmile: "caltrans_public_postmile_layer",
   };
@@ -212,4 +209,4 @@ export async function enrichPointFromArcgisClient(
     },
   };
 }
-import { normalizePostMileValue } from "./precision";
+import { normalizePostMileValue, normalizeRouteValue } from "./precision";

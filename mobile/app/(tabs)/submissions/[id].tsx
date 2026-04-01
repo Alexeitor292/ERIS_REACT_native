@@ -22,7 +22,7 @@ import { deleteLargeItemAsync, getLargeItemAsync, setLargeItemAsync } from "../.
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
-import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "../../../src/utils/precision";
+import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../../../src/utils/precision";
 import {
   CALTRANS_COUNTIES,
   CALTRANS_DISTRICTS,
@@ -883,7 +883,7 @@ export default function SubmissionDetailScreen() {
       const districtValue = g.district ? String(g.district).padStart(2, "0") : (districtForCounty(countyCode) ?? "");
       const loadedForm: FormState = {
         ...EMPTY_FORM,
-        report_date: g.report_date ?? ymdFromTimestamp(subRes.submission.created_at), district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: normalizePostMileInput(g.post_mile), ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
+        report_date: g.report_date ?? ymdFromTimestamp(subRes.submission.created_at), district: districtValue, county: countyCode ?? "", route: normalizeRouteInput(g.route), post_mile: normalizePostMileInput(g.post_mile), ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
         latitude: formatCoordinate(g.latitude), longitude: formatCoordinate(g.longitude),
         distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "", open_highway_traffic_lanes_count: g.open_highway_traffic_lanes_count != null ? String(g.open_highway_traffic_lanes_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
@@ -1142,7 +1142,7 @@ export default function SubmissionDetailScreen() {
       const geo = await enrichPointFromArcgisClient(lat, lon);
       const countyCode = countyCodeFromNameOrCode(geo.county ?? "");
       const district = geo.district ? String(geo.district).padStart(2, "0") : districtForCounty(countyCode);
-      const route = geo.route?.trim() || "";
+      const route = normalizeRouteInput(geo.route);
       const routeAllowed = countyCode ? routesForCounty(countyCode) : [];
       const normalizedRoute = route && (routeAllowed.length === 0 || routeAllowed.includes(route)) ? route : "";
 
@@ -1289,7 +1289,7 @@ export default function SubmissionDetailScreen() {
     }
     setBusy(true);
     const patchPayload = {
-      report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: n(normalizedForm.route), post_mile: normalizePostMileValue(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
+      report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: normalizeRouteValue(normalizedForm.route), post_mile: normalizePostMileValue(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
       latitude: normalizeCoordinateValue(f(normalizedForm.latitude, "Latitude")), longitude: normalizeCoordinateValue(f(normalizedForm.longitude, "Longitude")),
       distribution_code: n(normalizedForm.distribution_code), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
       pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
@@ -1767,7 +1767,7 @@ export default function SubmissionDetailScreen() {
           if (countyCode) setVal("county", countyCode);
           const guessedDistrict = districtForCounty(countyCode ?? countyRaw);
           if (guessedDistrict) setVal("district", guessedDistrict);
-          const routeGuess = tryExtractRouteFromAddressLine([item.name, item.street, item.city].filter(Boolean).join(" "));
+          const routeGuess = normalizeRouteInput(tryExtractRouteFromAddressLine([item.name, item.street, item.city].filter(Boolean).join(" ")));
           if (routeGuess) {
             const options = routesForCounty(countyCode ?? "");
             if (options.length === 0 || options.includes(routeGuess)) {

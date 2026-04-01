@@ -1,4 +1,4 @@
-import { normalizePostMileInput } from "./precision";
+import { normalizePostMileInput, normalizeRouteInput } from "./precision";
 
 type SubmissionLabelParts = {
   id: number | string;
@@ -23,10 +23,7 @@ function formatCreatedAt(createdAt?: string | null): string {
 }
 
 function formatRoute(route?: string | null): string {
-  const raw = (route || "").trim();
-  if (!raw) return "?";
-  if (/^\d+$/.test(raw)) return raw.padStart(3, "0");
-  return raw;
+  return normalizeRouteInput(route) || "?";
 }
 
 function formatPostMile(postMile?: string | null): string {

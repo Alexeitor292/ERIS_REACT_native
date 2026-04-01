@@ -111,7 +111,7 @@ export function routesForCounty(value?: string | null): string[] {
   const countyName = countyNameFromNameOrCode(value);
   if (!countyName) return [];
   const county = COUNTY_BY_NAME.get(countyName.toLowerCase());
-  return county ? [...county.routes] : [];
+  return county ? county.routes.map((route) => normalizeRouteInput(route)) : [];
 }
 
 export function routesForDistrictCounty(district?: string | null, county?: string | null): string[] {
@@ -120,5 +120,6 @@ export function routesForDistrictCounty(district?: string | null, county?: strin
   if (!d || !countyName) return [];
   const c = COUNTY_BY_NAME.get(countyName.toLowerCase());
   if (!c || c.district !== d) return [];
-  return [...c.routes];
+  return c.routes.map((route) => normalizeRouteInput(route));
 }
+import { normalizeRouteInput } from "./precision";
