@@ -8,6 +8,7 @@ static NSString *_initialEsriJson = nil;
 static NSNumber *_initialLatitude = nil;
 static NSNumber *_initialLongitude = nil;
 static NSString *_missionIncidentsJson = nil;
+static NSString *_latestSketchImagePath = nil;
 
 + (NSString *)latestGeoJson {
   return _latestGeoJson;
@@ -55,6 +56,14 @@ static NSString *_missionIncidentsJson = nil;
 
 + (void)setMissionIncidentsJson:(NSString *)value {
   _missionIncidentsJson = value;
+}
+
++ (NSString *)latestSketchImagePath {
+  return _latestSketchImagePath;
+}
+
++ (void)setLatestSketchImagePath:(NSString *)value {
+  _latestSketchImagePath = value;
 }
 
 @end

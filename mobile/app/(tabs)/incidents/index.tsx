@@ -19,6 +19,7 @@ import {
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 import { queueIncidentMapPreload } from "@/src/offline/mapPreload";
+import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "@/src/utils/precision";
 import {
   CALTRANS_COUNTIES,
   countyCodeFromNameOrCode,
@@ -86,6 +87,7 @@ function FormField({
   keyboardType,
   placeholder,
   palette,
+  onBlur,
 }: {
   label: string;
   value: string;
@@ -96,6 +98,7 @@ function FormField({
   keyboardType?: "default" | "numeric" | "decimal-pad" | "number-pad";
   placeholder?: string;
   palette?: { text: string; muted: string; border: string; panelSoft: string };
+  onBlur?: () => void;
 }) {
   return (
     <View style={{ marginTop: 8 }}>
@@ -104,6 +107,7 @@ function FormField({
         value={value}
         onChangeText={onChangeText}
         onFocus={onFocus}
+        onBlur={onBlur}
         editable={editable}
         multiline={multiline}
         keyboardType={keyboardType ?? "default"}
@@ -280,12 +284,12 @@ export default function IncidentsTabScreen() {
     setDescription(incident.description || "");
     setFirstObservedAt((incident.first_observed_at || "").slice(0, 10));
     setFirstOccurredAt((incident.first_occurred_at || "").slice(0, 10));
-    setLatitude(Number.isFinite(incident.latitude) ? String(incident.latitude) : "");
-    setLongitude(Number.isFinite(incident.longitude) ? String(incident.longitude) : "");
+    setLatitude(formatCoordinate(incident.latitude));
+    setLongitude(formatCoordinate(incident.longitude));
     setDistrict((incident.district || "").trim());
     setCounty((incident.county || "").trim());
     setRouteValue(normalizeRoute(incident.route || ""));
-    setPostMile((incident.post_mile || "").trim());
+    setPostMile(normalizePostMileInput(incident.post_mile));
   };
 
   useEffect(() => {
@@ -404,13 +408,13 @@ export default function IncidentsTabScreen() {
       router.replace("/(tabs)/incidents/track");
       return;
     }
-    const lat = Number(latitude);
-    const lon = Number(longitude);
+    const lat = normalizeCoordinateValue(latitude);
+    const lon = normalizeCoordinateValue(longitude);
     if (!firstObservedAt.trim()) {
       Alert.alert("Missing Date", "First observed date is required.");
       return;
     }
-    if (Number.isNaN(lat) || Number.isNaN(lon)) {
+    if (lat == null || lon == null) {
       Alert.alert("Invalid Coordinates", "Latitude and longitude must be numeric.");
       return;
     }
@@ -431,7 +435,7 @@ export default function IncidentsTabScreen() {
         district: district.trim(),
         county: county.trim(),
         route: routeValue.trim(),
-        post_mile: postMile.trim(),
+        post_mile: normalizePostMileValue(postMile) ?? "",
       };
       if (editingIncidentId) {
         await updateIncident(token, editingIncidentId, payload);
@@ -458,14 +462,14 @@ export default function IncidentsTabScreen() {
         return;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const lat = Number(pos.coords.latitude);
-      const lon = Number(pos.coords.longitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      const lat = normalizeCoordinateValue(pos.coords.latitude);
+      const lon = normalizeCoordinateValue(pos.coords.longitude);
+      if (lat == null || lon == null) {
         Alert.alert("Location Error", "Unable to read a valid coordinate.");
         return;
       }
-      setLatitude(String(lat));
-      setLongitude(String(lon));
+      setLatitude(formatCoordinate(lat));
+      setLongitude(formatCoordinate(lon));
 
       const geo = await enrichPointFromArcgisClient(lat, lon);
       const districtValue = geo.district ? String(geo.district).trim() : "";
@@ -494,7 +498,7 @@ export default function IncidentsTabScreen() {
       }
 
       if (geo.post_mile?.trim()) {
-        setPostMile(String(geo.post_mile).trim());
+        setPostMile(normalizePostMileInput(geo.post_mile));
       }
     } catch (e: any) {
       Alert.alert("GPS Error", String(e?.message ?? e));
@@ -666,6 +670,7 @@ export default function IncidentsTabScreen() {
                         label="Post Mile *"
                         value={postMile}
                         onChangeText={setPostMile}
+                        onBlur={() => setPostMile((prev) => normalizePostMileInput(prev))}
                         onFocus={() => scrollToCreateField("postMile")}
                         editable={canEditField("post_mile")}
                         placeholder="Post Mile *"
@@ -681,6 +686,7 @@ export default function IncidentsTabScreen() {
                         label="Latitude *"
                         value={latitude}
                         onChangeText={setLatitude}
+                        onBlur={() => setLatitude((prev) => formatCoordinate(prev))}
                         onFocus={() => scrollToCreateField("latitude")}
                         editable={canEditField("latitude")}
                         keyboardType="numeric"
@@ -695,6 +701,7 @@ export default function IncidentsTabScreen() {
                         label="Longitude *"
                         value={longitude}
                         onChangeText={setLongitude}
+                        onBlur={() => setLongitude((prev) => formatCoordinate(prev))}
                         onFocus={() => scrollToCreateField("longitude")}
                         editable={canEditField("longitude")}
                         keyboardType="numeric"
@@ -994,7 +1001,7 @@ export default function IncidentsTabScreen() {
                   )}
                 </View>
                 <Text style={{ color: palette.muted, fontSize: 12 }}>
-                  #{item.id} | {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}
+                  #{item.id} | {formatCoordinate(item.latitude)}, {formatCoordinate(item.longitude)}
                 </Text>
                 <Text style={{ color: palette.muted, fontSize: 12 }}>
                   Assignee: {item.assignment?.assignee_name || item.assignment?.assignee_email || "Unassigned"}

@@ -1,3 +1,5 @@
+import { normalizePostMileInput } from "./precision";
+
 type SubmissionLabelParts = {
   id: number | string;
   created_at?: string | null;
@@ -28,11 +30,7 @@ function formatRoute(route?: string | null): string {
 }
 
 function formatPostMile(postMile?: string | null): string {
-  const raw = (postMile || "").trim();
-  if (!raw) return "?";
-  const num = Number(raw);
-  if (Number.isNaN(num)) return raw;
-  return num.toFixed(2);
+  return normalizePostMileInput(postMile) || "?";
 }
 
 export function buildSubmissionDescriptor(parts: SubmissionLabelParts): string {

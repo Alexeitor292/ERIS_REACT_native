@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import type { AdminUser, Incident, IncidentStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import AppShell from "../ui/AppShell";
+import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "../utils/precision";
 
 type IncidentCreateForm = {
   title: string;
@@ -95,9 +96,9 @@ export default function IncidentsPage() {
       setError("First observed date/time is required.");
       return;
     }
-    const lat = Number(form.latitude);
-    const lon = Number(form.longitude);
-    if (Number.isNaN(lat) || Number.isNaN(lon)) {
+    const lat = normalizeCoordinateValue(form.latitude);
+    const lon = normalizeCoordinateValue(form.longitude);
+    if (lat == null || lon == null) {
       setError("Latitude and longitude must be valid numbers.");
       return;
     }
@@ -118,7 +119,7 @@ export default function IncidentsPage() {
           district: form.district.trim() || null,
           county: form.county.trim() || null,
           route: form.route.trim() || null,
-          post_mile: form.post_mile.trim() || null,
+          post_mile: normalizePostMileValue(form.post_mile),
         }),
       });
       setForm(EMPTY_FORM);
@@ -214,16 +215,24 @@ export default function IncidentsPage() {
             onChange={(e) => setForm((prev) => ({ ...prev, first_occurred_at: e.target.value }))}
           />
           <input
+            type="number"
+            step="0.000001"
+            inputMode="decimal"
             className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
             placeholder="Latitude *"
             value={form.latitude}
             onChange={(e) => setForm((prev) => ({ ...prev, latitude: e.target.value }))}
+            onBlur={() => setForm((prev) => ({ ...prev, latitude: formatCoordinate(prev.latitude) }))}
           />
           <input
+            type="number"
+            step="0.000001"
+            inputMode="decimal"
             className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
             placeholder="Longitude *"
             value={form.longitude}
             onChange={(e) => setForm((prev) => ({ ...prev, longitude: e.target.value }))}
+            onBlur={() => setForm((prev) => ({ ...prev, longitude: formatCoordinate(prev.longitude) }))}
           />
           <input
             className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
@@ -248,6 +257,7 @@ export default function IncidentsPage() {
             placeholder="Post Mile"
             value={form.post_mile}
             onChange={(e) => setForm((prev) => ({ ...prev, post_mile: e.target.value }))}
+            onBlur={() => setForm((prev) => ({ ...prev, post_mile: normalizePostMileInput(prev.post_mile) }))}
           />
           <button
             onClick={createIncident}
@@ -314,7 +324,7 @@ export default function IncidentsPage() {
                       <div className="text-xs text-muted">{incident.incident_type || "-"}</div>
                     </td>
                     <td className="px-3 py-3 text-sm text-muted">
-                      {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}
+                      {formatCoordinate(incident.latitude)}, {formatCoordinate(incident.longitude)}
                     </td>
                     <td className="px-3 py-3 text-sm">
                       <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeClass(incident.status)}`}>

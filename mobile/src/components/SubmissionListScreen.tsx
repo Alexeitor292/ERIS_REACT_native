@@ -11,6 +11,7 @@ import { buildSubmissionDescriptor } from "../utils/submissionLabel";
 import { countyCodeFromNameOrCode, districtForCounty, routesForCounty } from "../utils/caltransLookups";
 import { deleteSubmission, getSubmissionPermissions, patchSubmission, replaceSubmissionPermissions, SubmissionPermissions } from "../api/submissions";
 import { enrichPointFromArcgisClient } from "../utils/arcgisEnrichment";
+import { normalizeCoordinateValue, normalizePostMileValue } from "../utils/precision";
 import {
   clearOfflineQueue,
   diagnoseOfflineQueue,
@@ -161,8 +162,9 @@ export default function SubmissionListScreen({ mode }: Props) {
           const pos = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-          const lat = pos.coords.latitude;
-          const lon = pos.coords.longitude;
+          const lat = normalizeCoordinateValue(pos.coords.latitude);
+          const lon = normalizeCoordinateValue(pos.coords.longitude);
+          if (lat == null || lon == null) throw new Error("Invalid GPS coordinates.");
 
           const geo = await enrichPointFromArcgisClient(lat, lon);
           const countyCode = countyCodeFromNameOrCode(geo.county ?? "");
@@ -177,7 +179,7 @@ export default function SubmissionListScreen({ mode }: Props) {
             county: countyCode ?? null,
             district: district ?? null,
             route: normalizedRoute || null,
-            post_mile: (geo.post_mile || "").trim() || null,
+            post_mile: normalizePostMileValue(geo.post_mile),
           });
         }
       } catch {

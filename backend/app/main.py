@@ -29,6 +29,7 @@ from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .routes.incidents import ensure_incident_runtime_schema, router as incidents_router
 from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
+from .precision import normalize_post_mile, round_coordinate
 from .schemas.common import (
     GeometryResponse,
     GeometryUpsert,
@@ -111,6 +112,8 @@ def startup():
     db = SessionLocal()
     try:
         ensure_incident_runtime_schema(db)
+        db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN latitude DECIMAL(10,6) NULL"))
+        db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN longitude DECIMAL(10,6) NULL"))
         db.commit()
     except Exception:
         db.rollback()
@@ -349,7 +352,7 @@ def _query_postmile_layer(lat: float, lon: float) -> dict:
         "district": district_value or None,
         "county": _normalize_county(str(county)) if county is not None else None,
         "route": str(route).strip() if route is not None and str(route).strip() else None,
-        "post_mile": str(post_mile).strip() if post_mile is not None and str(post_mile).strip() else None,
+        "post_mile": normalize_post_mile(post_mile),
         "source_postmile": "arcgis_postmile_layer",
     }
 
@@ -1715,13 +1718,17 @@ def enrich_point(
 ):
     if lat < -90 or lat > 90 or lon < -180 or lon > 180:
         raise HTTPException(status_code=422, detail="Invalid latitude/longitude range")
+    rounded_lat = round_coordinate(lat)
+    rounded_lon = round_coordinate(lon)
+    if rounded_lat is None or rounded_lon is None:
+        raise HTTPException(status_code=422, detail="Invalid latitude/longitude value")
 
-    reverse_info = _reverse_geocode_arcgis(lat, lon)
-    layer_info = _query_postmile_layer(lat, lon)
+    reverse_info = _reverse_geocode_arcgis(rounded_lat, rounded_lon)
+    layer_info = _query_postmile_layer(rounded_lat, rounded_lon)
 
     return {
-        "latitude": lat,
-        "longitude": lon,
+        "latitude": rounded_lat,
+        "longitude": rounded_lon,
         "district": layer_info.get("district"),
         "county": layer_info.get("county") or reverse_info.get("county"),
         "route": layer_info.get("route") or reverse_info.get("route"),
@@ -2143,6 +2150,13 @@ def patch_gisa(
 
     if "geometry_json" in provided and provided["geometry_json"] is not None:
         provided["geometry_json"] = json.dumps(provided["geometry_json"])
+
+    if "post_mile" in provided:
+        provided["post_mile"] = normalize_post_mile(provided.get("post_mile"))
+    if "latitude" in provided:
+        provided["latitude"] = round_coordinate(provided.get("latitude"))
+    if "longitude" in provided:
+        provided["longitude"] = round_coordinate(provided.get("longitude"))
 
     if provided.get("distribution_code"):
         validate_distribution_code(provided["distribution_code"])

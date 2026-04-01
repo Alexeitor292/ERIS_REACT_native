@@ -16,6 +16,14 @@ import { syncArcgisRuntimeConfig } from "@/src/offline/arcgisRuntimeConfig";
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
+type TextDefaultsComponent = {
+  defaultProps?: {
+    allowFontScaling?: boolean;
+    maxFontSizeMultiplier?: number;
+    keyboardAppearance?: "default" | "light" | "dark";
+  };
+};
+
 function AppNavigator() {
   const { scheme, textScale } = useUiSettings();
   const pathname = usePathname();
@@ -64,13 +72,16 @@ function AppNavigator() {
   }, [pathname]);
 
   useEffect(() => {
-    Text.defaultProps = {
-      ...(Text.defaultProps ?? {}),
+    const textComponent = Text as typeof Text & TextDefaultsComponent;
+    const textInputComponent = TextInput as typeof TextInput & TextDefaultsComponent;
+
+    textComponent.defaultProps = {
+      ...(textComponent.defaultProps ?? {}),
       allowFontScaling: true,
       maxFontSizeMultiplier: textScale,
     };
-    TextInput.defaultProps = {
-      ...(TextInput.defaultProps ?? {}),
+    textInputComponent.defaultProps = {
+      ...(textInputComponent.defaultProps ?? {}),
       allowFontScaling: true,
       maxFontSizeMultiplier: textScale,
       keyboardAppearance: "dark",

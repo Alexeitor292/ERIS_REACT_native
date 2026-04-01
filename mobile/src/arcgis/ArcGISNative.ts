@@ -10,7 +10,9 @@ type ArcGisNativeModule = {
   setInitialGeometry(esriJson: string): Promise<void>;
   startSketchPolygon(): Promise<void>;
   startMissionCenterMap(): Promise<void>;
+  startPencilSketch(): Promise<void>;
   getSketchGeoJson(): Promise<string>; // returns GeoJSON or Esri JSON geometry string
+  getSketchImagePath(): Promise<string>;
   clearSketch(): Promise<void>;
 };
 
@@ -86,9 +88,27 @@ export async function startMissionCenterMap() {
   return requireArcGisModule().startMissionCenterMap();
 }
 
+export async function startPencilSketch() {
+  if (!hasMethod("startPencilSketch")) {
+    throw new Error(
+      "Pencil sketch launcher missing in this app build. Rebuild the app to include the latest native module."
+    );
+  }
+  return requireArcGisModule().startPencilSketch();
+}
+
 export async function getSketchGeometry(): Promise<any> {
   const s = await requireArcGisModule().getSketchGeoJson();
   return normalizeGeometryJson(JSON.parse(s));
+}
+
+export async function getSketchImagePath(): Promise<string> {
+  if (!hasMethod("getSketchImagePath")) {
+    throw new Error(
+      "Sketch image export missing in this app build. Rebuild the app to include the latest native module."
+    );
+  }
+  return requireArcGisModule().getSketchImagePath();
 }
 
 export async function clearSketch() {

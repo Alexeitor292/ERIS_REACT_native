@@ -22,6 +22,9 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSString *)missionIncidentsJson;
 + (void)setMissionIncidentsJson:(nullable NSString *)value;
 
++ (nullable NSString *)latestSketchImagePath;
++ (void)setLatestSketchImagePath:(nullable NSString *)value;
+
 @end
 
 NS_ASSUME_NONNULL_END

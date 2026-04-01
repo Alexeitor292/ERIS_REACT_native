@@ -143,8 +143,8 @@ CREATE TABLE IF NOT EXISTS incident_locations (
     route VARCHAR(64) NULL,
     post_mile_raw VARCHAR(64) NULL,
     post_mile_norm VARCHAR(64) NULL,
-    latitude DECIMAL(10,7) NULL,
-    longitude DECIMAL(10,7) NULL,
+    latitude DECIMAL(10,6) NULL,
+    longitude DECIMAL(10,6) NULL,
     is_active TINYINT NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -169,8 +169,8 @@ CREATE TABLE IF NOT EXISTS incidents (
     location_match_metadata JSON NULL,
     first_observed_at DATETIME NOT NULL,
     first_occurred_at DATETIME NULL,
-    latitude DECIMAL(10,7) NOT NULL,
-    longitude DECIMAL(10,7) NOT NULL,
+    latitude DECIMAL(10,6) NOT NULL,
+    longitude DECIMAL(10,6) NOT NULL,
     district VARCHAR(64) NOT NULL,
     county VARCHAR(64) NOT NULL,
     route VARCHAR(64) NOT NULL,
@@ -349,8 +349,8 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     district_contact TEXT NULL,
 
     -- Section B: Geospatial location (WGS84 decimal degrees)
-    latitude DECIMAL(10,7) NULL,
-    longitude DECIMAL(10,7) NULL,
+    latitude DECIMAL(10,6) NULL,
+    longitude DECIMAL(10,6) NULL,
 
     -- Section C: High-level classification / operations status
     -- NOTE: distribution_code and highway_status_code are code values from

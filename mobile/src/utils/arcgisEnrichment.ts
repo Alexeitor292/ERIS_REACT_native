@@ -53,16 +53,7 @@ function numberOrNull(value: unknown): number | null {
 }
 
 function formatPostmile(value: unknown): string | null {
-  if (value == null) return null;
-  const raw = String(value).trim();
-  if (!raw) return null;
-  // Preserve ArcGIS precision as-is; only clean scientific notation / trailing zeros.
-  const n = numberOrNull(raw);
-  if (n == null) return raw;
-  const asText = raw.toLowerCase().includes("e")
-    ? n.toFixed(12).replace(/0+$/, "").replace(/\.$/, "")
-    : raw;
-  return asText.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+  return normalizePostMileValue(value as string | number | null | undefined);
 }
 
 function metersPerDegreeLat(): number {
@@ -221,3 +212,4 @@ export async function enrichPointFromArcgisClient(
     },
   };
 }
+import { normalizePostMileValue } from "./precision";

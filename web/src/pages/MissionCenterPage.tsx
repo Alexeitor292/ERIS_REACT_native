@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import type { Incident, IncidentStatus } from "../api/types";
 import AppShell from "../ui/AppShell";
 import MissionCenterMap from "../components/MissionCenterMap";
+import { formatCoordinate } from "../utils/precision";
 
 function statusBadgeClass(status: IncidentStatus) {
   if (status === "NEW") return "border-red-500/40 bg-red-500/15 text-red-300";
@@ -82,7 +83,7 @@ export default function MissionCenterPage() {
                   </span>
                 </div>
                 <div className="text-muted">
-                  {selected.latitude.toFixed(5)}, {selected.longitude.toFixed(5)}
+                  {formatCoordinate(selected.latitude)}, {formatCoordinate(selected.longitude)}
                 </div>
                 <div className="text-muted">
                   Assignee: {selected.assignment?.assignee_name || selected.assignment?.assignee_email || "Unassigned"}
@@ -148,7 +149,7 @@ export default function MissionCenterPage() {
                       {incident.assignment?.assignee_name || incident.assignment?.assignee_email || "-"}
                     </td>
                     <td className="px-3 py-2 text-sm text-muted">
-                      {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}
+                      {formatCoordinate(incident.latitude)}, {formatCoordinate(incident.longitude)}
                     </td>
                     <td className="px-3 py-2 text-sm">
                       {incident.linked_submission_id ? `#${incident.linked_submission_id}` : "-"}
@@ -163,4 +164,3 @@ export default function MissionCenterPage() {
     </AppShell>
   );
 }
-

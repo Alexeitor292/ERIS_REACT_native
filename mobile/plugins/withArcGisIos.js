@@ -8,6 +8,8 @@ const ARC_GIS_POD = "pod 'ArcGIS-Runtime-SDK-iOS', '100.15.6'";
 const IOS_FILES = [
   "ArcGisModule.h",
   "ArcGisModule.m",
+  "ArcGisPencilSketchViewController.h",
+  "ArcGisPencilSketchViewController.m",
   "ArcGisSketchStore.h",
   "ArcGisSketchStore.m",
   "ArcGisSketchViewController.h",

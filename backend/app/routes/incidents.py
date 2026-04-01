@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_roles
+from ..precision import coordinates_differ, normalize_post_mile, round_coordinate
 from ..schemas.common import (
     IncidentAssignBranchChiefRequest,
     IncidentAssignEngineerRequest,
@@ -67,16 +68,6 @@ def _normalize_text(raw: str | None) -> str | None:
     return text_value
 
 
-def _normalized_post_mile_two_decimal(raw: str | None) -> str | None:
-    value = _normalize_text(raw)
-    if not value:
-        return None
-    try:
-        return f"{float(value):.2f}"
-    except (TypeError, ValueError):
-        return value
-
-
 def _location_display_name(
     district: str | None,
     county: str | None,
@@ -86,7 +77,7 @@ def _location_display_name(
     d = _normalize_text(district)
     c = _normalize_text(county)
     r = _normalize_text(route)
-    pm = _normalized_post_mile_two_decimal(post_mile)
+    pm = normalize_post_mile(post_mile)
     parts = [p for p in [d, c, r, pm] if p]
     if not parts:
         return None
@@ -146,7 +137,9 @@ def _create_or_select_location(
     normalized_district = _normalize_text(district)
     normalized_county = _normalize_text(county)
     normalized_route = _normalize_text(route)
-    normalized_post_mile = _normalized_post_mile_two_decimal(post_mile)
+    normalized_post_mile = normalize_post_mile(post_mile)
+    rounded_latitude = round_coordinate(latitude)
+    rounded_longitude = round_coordinate(longitude)
 
     existing = db.execute(
         text(
@@ -186,8 +179,8 @@ def _create_or_select_location(
             "route": normalized_route,
             "post_mile_raw": _normalize_text(post_mile),
             "post_mile_norm": normalized_post_mile,
-            "latitude": latitude,
-            "longitude": longitude,
+            "latitude": rounded_latitude,
+            "longitude": rounded_longitude,
         },
     )
     return int(db.execute(text("SELECT LAST_INSERT_ID()")).scalar())
@@ -207,7 +200,9 @@ def _incident_location_candidates(
     normalized_district = (_normalize_text(district) or "").lower()
     normalized_county = (_normalize_text(county) or "").lower()
     normalized_route = (_normalize_text(route) or "").lower()
-    normalized_pm = (_normalized_post_mile_two_decimal(post_mile) or "").lower()
+    normalized_pm = (normalize_post_mile(post_mile) or "").lower()
+    rounded_latitude = round_coordinate(latitude)
+    rounded_longitude = round_coordinate(longitude)
     rows = db.execute(
         text(
             """
@@ -251,8 +246,8 @@ def _incident_location_candidates(
             "county": normalized_county,
             "route": normalized_route,
             "post_mile_norm": normalized_pm,
-            "lat": latitude,
-            "lon": longitude,
+            "lat": rounded_latitude,
+            "lon": rounded_longitude,
             "limit": limit,
         },
     ).mappings().all()
@@ -373,8 +368,8 @@ def ensure_incident_runtime_schema(db: Session) -> None:
           route VARCHAR(64) NULL,
           post_mile_raw VARCHAR(64) NULL,
           post_mile_norm VARCHAR(64) NULL,
-          latitude DECIMAL(10,7) NULL,
-          longitude DECIMAL(10,7) NULL,
+          latitude DECIMAL(10,6) NULL,
+          longitude DECIMAL(10,6) NULL,
           is_active TINYINT NOT NULL DEFAULT 1,
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -422,6 +417,22 @@ def ensure_incident_runtime_schema(db: Session) -> None:
         """
         ALTER TABLE incidents
           MODIFY COLUMN title VARCHAR(255) NULL
+        """,
+        """
+        ALTER TABLE incident_locations
+          MODIFY COLUMN latitude DECIMAL(10,6) NULL
+        """,
+        """
+        ALTER TABLE incident_locations
+          MODIFY COLUMN longitude DECIMAL(10,6) NULL
+        """,
+        """
+        ALTER TABLE incidents
+          MODIFY COLUMN latitude DECIMAL(10,6) NOT NULL
+        """,
+        """
+        ALTER TABLE incidents
+          MODIFY COLUMN longitude DECIMAL(10,6) NOT NULL
         """,
         """
         ALTER TABLE incidents
@@ -860,12 +871,16 @@ def create_incident(
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
     route = _normalize_text(payload.route)
-    post_mile = _normalize_text(payload.post_mile)
+    post_mile = normalize_post_mile(payload.post_mile)
+    latitude = round_coordinate(payload.latitude)
+    longitude = round_coordinate(payload.longitude)
     if not (district and county and route and post_mile):
         raise HTTPException(
             status_code=400,
             detail="district, county, route, and post_mile are required location fields",
         )
+    if latitude is None or longitude is None:
+        raise HTTPException(status_code=400, detail="latitude and longitude are required")
 
     district_code = _normalized_district_code(district)
     office_code = _office_for_district(district)
@@ -891,8 +906,8 @@ def create_incident(
                 "title": title,
                 "incident_type": (payload.incident_type or "").strip() or None,
                 "description": (payload.description or "").strip() or None,
-                "lat": payload.latitude,
-                "lon": payload.longitude,
+                "lat": latitude,
+                "lon": longitude,
                 "first_observed_at": payload.first_observed_at,
                 "first_occurred_at": payload.first_occurred_at,
                 "district": district,
@@ -1125,12 +1140,16 @@ def maintenance_resubmit_incident(
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
     route = _normalize_text(payload.route)
-    post_mile = _normalize_text(payload.post_mile)
+    post_mile = normalize_post_mile(payload.post_mile)
+    latitude = round_coordinate(payload.latitude)
+    longitude = round_coordinate(payload.longitude)
     if not (district and county and route and post_mile):
         raise HTTPException(
             status_code=400,
             detail="district, county, route, and post_mile are required location fields",
         )
+    if latitude is None or longitude is None:
+        raise HTTPException(status_code=400, detail="latitude and longitude are required")
 
     metadata_obj = incident.get("location_match_metadata") or {}
     requested_fields_raw = metadata_obj.get("revision_fields") if isinstance(metadata_obj, dict) else None
@@ -1151,9 +1170,9 @@ def maintenance_resubmit_incident(
             changed_fields.add("route")
         if _normalize_text(incident.get("post_mile")) != post_mile:
             changed_fields.add("post_mile")
-        if abs(float(incident.get("latitude") or 0.0) - float(payload.latitude)) > 0.000001:
+        if coordinates_differ(incident.get("latitude"), latitude):
             changed_fields.add("latitude")
-        if abs(float(incident.get("longitude") or 0.0) - float(payload.longitude)) > 0.000001:
+        if coordinates_differ(incident.get("longitude"), longitude):
             changed_fields.add("longitude")
         if old_first_observed != str(payload.first_observed_at)[:10]:
             changed_fields.add("first_observed_at")
@@ -1204,8 +1223,8 @@ def maintenance_resubmit_incident(
                 "title": (payload.title or "").strip() or None,
                 "incident_type": (payload.incident_type or "").strip() or None,
                 "description": (payload.description or "").strip() or None,
-                "lat": payload.latitude,
-                "lon": payload.longitude,
+                "lat": latitude,
+                "lon": longitude,
                 "first_observed_at": payload.first_observed_at,
                 "first_occurred_at": payload.first_occurred_at,
                 "district": district,

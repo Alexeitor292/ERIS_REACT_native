@@ -7,6 +7,7 @@
 #import "ArcGisSketchStore.h"
 #import "ArcGisSketchViewController.h"
 #import "ArcGisMissionCenterViewController.h"
+#import "ArcGisPencilSketchViewController.h"
 
 @implementation ArcGisModule
 
@@ -185,6 +186,31 @@ RCT_REMAP_METHOD(startMissionCenterMap,
   });
 }
 
+RCT_REMAP_METHOD(startPencilSketch,
+                 startPencilSketchWithResolver:(RCTPromiseResolveBlock)resolve
+                 rejecterStartPencilSketch:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *root = RCTPresentedViewController();
+    if (root == nil) {
+      reject(@"E_START_PENCIL_SKETCH", @"No active view controller.", nil);
+      return;
+    }
+
+    ArcGisPencilSketchViewController *vc = [[ArcGisPencilSketchViewController alloc] init];
+    __block BOOL didResolve = NO;
+    vc.onClose = ^{
+      if (didResolve) {
+        return;
+      }
+      didResolve = YES;
+      resolve(nil);
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [root presentViewController:nav animated:YES completion:nil];
+  });
+}
+
 RCT_REMAP_METHOD(getSketchGeoJson,
                  getSketchGeoJsonWithResolver:(RCTPromiseResolveBlock)resolve
                  rejecterGetSketch:(RCTPromiseRejectBlock)reject) {
@@ -202,7 +228,19 @@ RCT_REMAP_METHOD(clearSketch,
                  rejecterClearSketch:(RCTPromiseRejectBlock)reject) {
   NSLog(@"[ArcGisDebug] clearSketch");
   [ArcGisSketchStore setLatestGeoJson:nil];
+  [ArcGisSketchStore setLatestSketchImagePath:nil];
   resolve(nil);
+}
+
+RCT_REMAP_METHOD(getSketchImagePath,
+                 getSketchImagePathWithResolver:(RCTPromiseResolveBlock)resolve
+                 rejecterGetSketchImagePath:(RCTPromiseRejectBlock)reject) {
+  NSString *path = [ArcGisSketchStore latestSketchImagePath];
+  if (path == nil || path.length == 0) {
+    reject(@"E_NO_SKETCH_IMAGE", @"No sketch image found. Save a sketch first.", nil);
+    return;
+  }
+  resolve(path);
 }
 
 @end

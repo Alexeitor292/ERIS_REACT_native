@@ -22,6 +22,7 @@ import { deleteLargeItemAsync, getLargeItemAsync, setLargeItemAsync } from "../.
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
+import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "../../../src/utils/precision";
 import {
   CALTRANS_COUNTIES,
   CALTRANS_DISTRICTS,
@@ -137,11 +138,13 @@ const isPlayServicesUnavailableError = (msg: string) =>
 const isIosPhotosAccessError = (msg: string) =>
   /PHPhotosErrorDomain|error 3164/i.test(msg);
 
-function inferAttachmentKind(name: string, mimeType: string): "PHOTO" | "VIDEO" | "DOC" {
+function inferAttachmentKind(name: string, mimeType: string): "PHOTO" | "VIDEO" | "DOC" | "SKETCH" {
   const mime = (mimeType || "").toLowerCase();
+  if (mime === "image/png" && /sketch/i.test(name)) return "SKETCH";
   if (mime.startsWith("image/")) return "PHOTO";
   if (mime.startsWith("video/")) return "VIDEO";
   const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "png" && /sketch/i.test(name)) return "SKETCH";
   if (["jpg", "jpeg", "png", "heic", "heif", "gif", "webp"].includes(ext)) return "PHOTO";
   if (["mp4", "mov", "m4v", "avi", "mkv", "webm"].includes(ext)) return "VIDEO";
   return "DOC";
@@ -462,6 +465,7 @@ function Field({
   keyboardType,
   palette,
   error,
+  onBlur,
 }: {
   label: string;
   value: string;
@@ -471,6 +475,7 @@ function Field({
   keyboardType?: "default" | "numeric" | "decimal-pad" | "number-pad";
   palette?: { muted: string; border: string; panel: string; panelSoft: string; text: string };
   error?: string;
+  onBlur?: () => void;
 }) {
   const { componentScale, textScale } = useUiSettings();
   const scale = Math.max(1, componentScale);
@@ -492,6 +497,7 @@ function Field({
       <TextInput
         value={value}
         onChangeText={onChangeText}
+        onBlur={onBlur}
         editable={editable}
         multiline={multiline}
         keyboardType={keyboardType ?? "default"}
@@ -877,8 +883,8 @@ export default function SubmissionDetailScreen() {
       const districtValue = g.district ? String(g.district).padStart(2, "0") : (districtForCounty(countyCode) ?? "");
       const loadedForm: FormState = {
         ...EMPTY_FORM,
-        report_date: g.report_date ?? ymdFromTimestamp(subRes.submission.created_at), district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: g.post_mile ?? "", ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
-        latitude: g.latitude != null ? String(g.latitude) : "", longitude: g.longitude != null ? String(g.longitude) : "",
+        report_date: g.report_date ?? ymdFromTimestamp(subRes.submission.created_at), district: districtValue, county: countyCode ?? "", route: g.route ?? "", post_mile: normalizePostMileInput(g.post_mile), ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
+        latitude: formatCoordinate(g.latitude), longitude: formatCoordinate(g.longitude),
         distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "", open_highway_traffic_lanes_count: g.open_highway_traffic_lanes_count != null ? String(g.open_highway_traffic_lanes_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
         failure_rock_fall: boolToYn(g.failure_rock_fall), failure_topple: boolToYn(g.failure_topple), failure_slide: boolToYn(g.failure_slide), failure_spread: boolToYn(g.failure_spread), failure_flow: boolToYn(g.failure_flow), failure_compound: boolToYn(g.failure_compound), failure_erosion: boolToYn(g.failure_erosion), failure_surficial_failure: boolToYn(g.failure_surficial_failure), failure_scoured_toe: boolToYn(g.failure_scoured_toe), failure_washout: boolToYn(g.failure_washout),
@@ -1143,7 +1149,7 @@ export default function SubmissionDetailScreen() {
       if (countyCode) setVal("county", countyCode);
       if (district) setVal("district", district);
       if (normalizedRoute) setVal("route", normalizedRoute);
-      if (geo.post_mile?.trim()) setVal("post_mile", geo.post_mile.trim());
+      if (geo.post_mile?.trim()) setVal("post_mile", normalizePostMileInput(geo.post_mile));
 
       if (geo.post_mile?.trim()) {
         setEnrichmentHint("Route and postmile auto-filled from ArcGIS.");
@@ -1283,8 +1289,8 @@ export default function SubmissionDetailScreen() {
     }
     setBusy(true);
     const patchPayload = {
-      report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: n(normalizedForm.route), post_mile: n(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
-      latitude: f(normalizedForm.latitude, "Latitude"), longitude: f(normalizedForm.longitude, "Longitude"),
+      report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: n(normalizedForm.route), post_mile: normalizePostMileValue(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
+      latitude: normalizeCoordinateValue(f(normalizedForm.latitude, "Latitude")), longitude: normalizeCoordinateValue(f(normalizedForm.longitude, "Longitude")),
       distribution_code: n(normalizedForm.distribution_code), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
       pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
       failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout),
@@ -1643,6 +1649,78 @@ export default function SubmissionDetailScreen() {
     ]);
   }
 
+  async function openNativeSketchpad() {
+    if (!token || !id) return;
+    if (Platform.OS !== "ios") {
+      Alert.alert("Unavailable", "Native Apple Pencil sketching is currently available only on iOS.");
+      return;
+    }
+
+    let bridge: typeof import("../../../src/arcgis/ArcGISNative") | null = null;
+    try {
+      bridge = await import("../../../src/arcgis/ArcGISNative");
+    } catch {
+      Alert.alert("Unavailable", "Sketchpad native module is not included in this build.");
+      return;
+    }
+    if (!bridge?.isArcGisNativeAvailable?.()) {
+      Alert.alert("Unavailable", "Sketchpad native module is not included in this build.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await bridge.clearSketch().catch(() => {});
+      await bridge.startPencilSketch();
+      const uri = await bridge.getSketchImagePath();
+      const fileName = uri.split("/").pop() || `gisa-sketch-${Date.now()}.png`;
+      const file = { uri, name: fileName, type: "image/png" as const };
+
+      if (isLocalId) {
+        await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
+        await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
+          submissionId: id,
+          file,
+          sectionKey: "sketchpad",
+          kind: "SKETCH",
+        });
+        Alert.alert("Sketch queued", "The sketch was saved locally and will upload after sync.");
+        triggerOfflineSyncNow().catch(() => {});
+        return;
+      }
+
+      try {
+        await uploadSubmissionAttachment(token, id, file, { sectionKey: "sketchpad", kind: "SKETCH" });
+        await load();
+      } catch (err: any) {
+        if (isSessionExpiredError(err)) return;
+        const msg = String(err?.message ?? err ?? "Unable to upload sketch.");
+        if (isLikelyOfflineError(msg)) {
+          await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
+            submissionId: id,
+            file,
+            sectionKey: "sketchpad",
+            kind: "SKETCH",
+          });
+          Alert.alert("Sketch queued", "The sketch was queued and will upload automatically when connectivity is restored.");
+          triggerOfflineSyncNow().catch(() => {});
+          return;
+        }
+        throw err;
+      }
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
+      const msg = String(err?.message ?? err ?? "Unable to save sketch.");
+      if (msg.includes("No sketch image found")) {
+        Alert.alert("Sketch not saved", "Draw and save a sketch before closing the sketchpad.");
+      } else if (!/cancel/i.test(msg)) {
+        Alert.alert("Sketch failed", msg);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function pickPhoto() {
     try {
       promptUploadSource(null);
@@ -1704,8 +1782,8 @@ export default function SubmissionDetailScreen() {
         maxAge: 1000 * 60 * 60 * 24,
       });
       if (lastKnown) {
-        setVal("latitude", String(lastKnown.coords.latitude));
-        setVal("longitude", String(lastKnown.coords.longitude));
+        setVal("latitude", formatCoordinate(lastKnown.coords.latitude));
+        setVal("longitude", formatCoordinate(lastKnown.coords.longitude));
         await applyReverseGeocode(lastKnown.coords.latitude, lastKnown.coords.longitude);
         await enrichRouteAndPostmile(lastKnown.coords.latitude, lastKnown.coords.longitude);
         usedImmediate = true;
@@ -1761,8 +1839,8 @@ export default function SubmissionDetailScreen() {
       }
 
       if (fresh) {
-        setVal("latitude", String(fresh.coords.latitude));
-        setVal("longitude", String(fresh.coords.longitude));
+        setVal("latitude", formatCoordinate(fresh.coords.latitude));
+        setVal("longitude", formatCoordinate(fresh.coords.longitude));
         await applyReverseGeocode(fresh.coords.latitude, fresh.coords.longitude);
         await enrichRouteAndPostmile(fresh.coords.latitude, fresh.coords.longitude);
         return;
@@ -2050,20 +2128,33 @@ export default function SubmissionDetailScreen() {
     const tagged = sectionAttachments.filter((a: any) => a.section_key === sectionKey);
     return (
       <View style={{ marginTop: 8 }}>
-        <Pressable
-          style={[styles.btnGhost, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-          onPress={() => promptUploadSource(sectionKey)}
-          disabled={!canEdit || busy}
-        >
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text>
-        </Pressable>
+        <View style={styles.sectionAttachmentActions}>
+          <Pressable
+            style={[styles.btnGhost, styles.sectionAttachmentActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            onPress={() => promptUploadSource(sectionKey)}
+            disabled={!canEdit || busy}
+          >
+            <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text>
+          </Pressable>
+          {sectionKey === "sketchpad" ? (
+            <Pressable
+              style={[styles.btnGhost, styles.sectionAttachmentActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+              onPress={() => openNativeSketchpad().catch(() => {})}
+              disabled={!canEdit || busy}
+            >
+              <Text style={[styles.btnGhostText, { color: palette.text }]}>
+                {busy ? "Working..." : Platform.OS === "ios" ? "Open Sketchpad" : "Sketchpad (iOS only)"}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
         {tagged.length ? (
           tagged.map((file: any) => {
-            const isPhoto = photoIdSet.has(Number(file.id));
+            const isPreviewableImage = photoIdSet.has(Number(file.id)) || String(file.mime_type || "").toLowerCase().startsWith("image/");
             return (
               <View key={`${sectionKey}-${file.id}`} style={styles.sectionAttachmentRow}>
                 <Text style={{ fontWeight: "600", color: palette.text }}>{file.file_name}</Text>
-                {isPhoto && !failedPreviewIds[file.id] ? (
+                {isPreviewableImage && !failedPreviewIds[file.id] ? (
                   <Pressable onPress={() => openFullscreen(file.id, file.file_name)} style={{ marginTop: 6 }}>
                     <Image
                       source={previewSource(file.id)}
@@ -2080,7 +2171,9 @@ export default function SubmissionDetailScreen() {
             );
           })
         ) : (
-          <Text style={[styles.muted, { marginTop: 8, color: palette.muted }]}>No photo uploaded for this section yet.</Text>
+          <Text style={[styles.muted, { marginTop: 8, color: palette.muted }]}>
+            {sectionKey === "sketchpad" ? "No sketch or photo uploaded for this section yet." : "No photo uploaded for this section yet."}
+          </Text>
         )}
       </View>
     );
@@ -2239,7 +2332,7 @@ export default function SubmissionDetailScreen() {
           onPress={() => setRoutePickerOpen(true)}
           error={fieldErrors.route}
         />
-        <Field palette={palette} label="Post Mile" value={form.post_mile} editable={canEdit} onChangeText={(v) => setVal("post_mile", v)} error={fieldErrors.post_mile} />
+        <Field palette={palette} label="Post Mile" value={form.post_mile} editable={canEdit} onChangeText={(v) => setVal("post_mile", v)} onBlur={() => setVal("post_mile", normalizePostMileInput(form.post_mile))} error={fieldErrors.post_mile} />
         <Field palette={palette} label="EA" value={form.ea} editable={canEdit} onChangeText={(v) => setVal("ea", v)} error={fieldErrors.ea} />
         <Field palette={palette} label="Project ID" value={form.project_id} editable={canEdit} keyboardType="number-pad" onChangeText={(v) => setVal("project_id", v)} error={fieldErrors.project_id} />
         <SelectField
@@ -2315,8 +2408,8 @@ export default function SubmissionDetailScreen() {
             <Text style={[styles.muted, { color: palette.muted }]}>{enrichmentHint}</Text>
           ) : null}
         </Pressable>
-        <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} error={fieldErrors.latitude} />
-        <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} error={fieldErrors.longitude} />
+        <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} onBlur={() => setVal("latitude", formatCoordinate(form.latitude))} error={fieldErrors.latitude} />
+        <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} onBlur={() => setVal("longitude", formatCoordinate(form.longitude))} error={fieldErrors.longitude} />
       </CollapsibleSection>
         <View style={styles.stepNavRow}>
           <View style={styles.stepNavSpacer} />
@@ -3118,6 +3211,8 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: "#fff", fontWeight: "700" },
   btnGhost: { borderWidth: Platform.OS === "ios" ? StyleSheet.hairlineWidth : 1, borderColor: "#c8d5ea", borderRadius: Platform.OS === "ios" ? 12 : 8, paddingVertical: Platform.OS === "ios" ? 12 : 10, alignItems: "center", backgroundColor: "#f8fbff", marginTop: 8 },
   btnGhostText: { color: "#1f2937", fontWeight: "700" },
+  sectionAttachmentActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  sectionAttachmentActionBtn: { flexGrow: 1, flexShrink: 1, minWidth: 150 },
   mapPreviewCard: {
     marginTop: 8,
     borderWidth: 1,
