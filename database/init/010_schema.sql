@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     CONSTRAINT chk_incidents_stage
       CHECK (current_stage IN ('COORDINATOR_REVIEW', 'OFFICE_CHIEF_REVIEW', 'BRANCH_CHIEF_REVIEW', 'ENGINEER_ASSIGNED', 'RESOLVED')),
     CONSTRAINT chk_incidents_location_match_status
-      CHECK (location_match_status IN ('PENDING_REVIEW', 'MATCHED_EXISTING', 'NEW_LOCATION_CREATED', 'NEEDS_REVISION')),
+      CHECK (location_match_status IN ('PENDING_REVIEW', 'LINKED_EXISTING', 'NEW_LOCATION_CREATED', 'NEEDS_REVISION')),
     CONSTRAINT chk_incidents_lat
       CHECK (latitude >= -90 AND latitude <= 90),
     CONSTRAINT chk_incidents_lon
@@ -333,6 +333,7 @@ CREATE TABLE IF NOT EXISTS submission_editors (
 
 CREATE TABLE IF NOT EXISTS submission_gisa (
     submission_id BIGINT NOT NULL PRIMARY KEY,
+    location_id BIGINT NULL,
 
     -- Section A: Header / Administrative context
     -- NOTE: district/county/route/post_mile are stored as captured form values.
@@ -468,9 +469,12 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
 
     CONSTRAINT fk_gisa_submission
       FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_gisa_location
+      FOREIGN KEY (location_id) REFERENCES incident_locations(id) ON DELETE SET NULL,
     CONSTRAINT fk_gisa_updated_by
       FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
 
+    INDEX idx_gisa_location (location_id),
     INDEX idx_gisa_district (district),
     INDEX idx_gisa_county (county),
     INDEX idx_gisa_route (route),

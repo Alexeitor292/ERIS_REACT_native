@@ -112,6 +112,7 @@ def startup():
     db = SessionLocal()
     try:
         ensure_incident_runtime_schema(db)
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS location_id BIGINT NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN latitude DECIMAL(10,6) NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN longitude DECIMAL(10,6) NULL"))
         db.commit()
@@ -365,6 +366,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
     row = db.execute(text("""
         SELECT
           submission_id,
+          location_id,
           report_date, district, county, route, post_mile, ea, project_id,
           date_incident_reported, district_contact,
           latitude, longitude,

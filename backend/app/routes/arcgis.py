@@ -10,7 +10,7 @@ router = APIRouter(tags=["arcgis"])
 
 @router.get("/arcgis/runtime-config")
 def get_arcgis_runtime_config(
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "REVIEWER", "ADMIN"])),
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
 ):
     now = datetime.now(timezone.utc)
     issued_at = now.isoformat()
@@ -26,4 +26,3 @@ def get_arcgis_runtime_config(
         "issued_at": issued_at,
         "requested_by_user_id": user["id"],
     }
-

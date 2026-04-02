@@ -40,6 +40,7 @@ class SubmissionTitlePatch(BaseModel):
 
 
 class GisaDraftPatch(BaseModel):
+    location_id: int | None = None
     report_date: str | None = None
     district: str | None = None
     county: str | None = None

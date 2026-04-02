@@ -272,6 +272,145 @@ def _incident_location_candidates(
     ]
 
 
+def _location_timeline(
+    *,
+    db: Session,
+    location_id: int,
+    limit: int = 20,
+) -> dict:
+    location_row = db.execute(
+        text(
+            """
+            SELECT
+              id,
+              display_name,
+              district,
+              county,
+              route,
+              post_mile_raw,
+              post_mile_norm,
+              latitude,
+              longitude,
+              created_at,
+              updated_at
+            FROM incident_locations
+            WHERE id = :location_id
+            LIMIT 1
+            """
+        ),
+        {"location_id": int(location_id)},
+    ).mappings().first()
+    if not location_row:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    incident_rows = db.execute(
+        text(
+            """
+            SELECT
+              i.id,
+              i.status,
+              i.current_stage,
+              i.description,
+              i.first_observed_at,
+              i.first_occurred_at,
+              i.created_at,
+              i.updated_at,
+              i.linked_submission_id
+            FROM (
+              SELECT
+                inc.id,
+                inc.status,
+                inc.current_stage,
+                inc.description,
+                inc.first_observed_at,
+                inc.first_occurred_at,
+                inc.created_at,
+                inc.updated_at,
+                isl.submission_id AS linked_submission_id
+              FROM incidents inc
+              LEFT JOIN incident_submission_links isl
+                ON isl.incident_id = inc.id
+              WHERE inc.location_id = :location_id
+              ORDER BY inc.first_observed_at DESC, inc.id DESC
+              LIMIT :limit
+            ) i
+            ORDER BY i.first_observed_at DESC, i.id DESC
+            """
+        ),
+        {"location_id": int(location_id), "limit": limit},
+    ).mappings().all()
+
+    submission_rows = db.execute(
+        text(
+            """
+            SELECT
+              s.id,
+              s.status,
+              s.title,
+              s.created_at,
+              s.updated_at,
+              s.submitted_at,
+              s.reviewed_at,
+              g.date_incident_reported,
+              g.report_date
+            FROM submissions s
+            JOIN submission_gisa g
+              ON g.submission_id = s.id
+            WHERE g.location_id = :location_id
+            ORDER BY s.created_at DESC, s.id DESC
+            LIMIT :limit
+            """
+        ),
+        {"location_id": int(location_id), "limit": limit},
+    ).mappings().all()
+
+    return {
+        "location": {
+            "id": int(location_row["id"]),
+            "display_name": location_row["display_name"],
+            "district": location_row["district"],
+            "county": location_row["county"],
+            "route": location_row["route"],
+            "post_mile": location_row["post_mile_raw"],
+            "post_mile_norm": location_row["post_mile_norm"],
+            "latitude": float(location_row["latitude"]) if location_row["latitude"] is not None else None,
+            "longitude": float(location_row["longitude"]) if location_row["longitude"] is not None else None,
+            "created_at": location_row["created_at"],
+            "updated_at": location_row["updated_at"],
+        },
+        "incident_count": len(incident_rows),
+        "submission_count": len(submission_rows),
+        "incidents": [
+            {
+                "id": int(r["id"]),
+                "status": r["status"],
+                "current_stage": r["current_stage"],
+                "description": r["description"],
+                "first_observed_at": r["first_observed_at"],
+                "first_occurred_at": r["first_occurred_at"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "linked_submission_id": int(r["linked_submission_id"]) if r["linked_submission_id"] is not None else None,
+            }
+            for r in incident_rows
+        ],
+        "submissions": [
+            {
+                "id": int(r["id"]),
+                "status": r["status"],
+                "title": r["title"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "submitted_at": r["submitted_at"],
+                "reviewed_at": r["reviewed_at"],
+                "date_incident_reported": r["date_incident_reported"],
+                "report_date": r["report_date"],
+            }
+            for r in submission_rows
+        ],
+    }
+
+
 def _routing_users_for(
     *,
     db: Session,
@@ -672,6 +811,22 @@ def _ensure_linked_submission(
         db.execute(
             text(
                 """
+                INSERT INTO submission_gisa (submission_id, location_id, updated_by_user_id)
+                VALUES (:sid, :location_id, :updated_by)
+                ON DUPLICATE KEY UPDATE
+                  location_id = VALUES(location_id),
+                  updated_by_user_id = VALUES(updated_by_user_id)
+                """
+            ),
+            {
+                "sid": int(existing),
+                "location_id": incident_row["location_id"],
+                "updated_by": actor_user_id,
+            },
+        )
+        db.execute(
+            text(
+                """
                 INSERT INTO submission_editors (submission_id, user_id, granted_by_user_id)
                 VALUES (:sid, :uid, :granted_by)
                 ON DUPLICATE KEY UPDATE granted_by_user_id = VALUES(granted_by_user_id)
@@ -714,6 +869,7 @@ def _ensure_linked_submission(
             """
             INSERT INTO submission_gisa (
               submission_id,
+              location_id,
               report_date,
               date_incident_reported,
               district,
@@ -725,6 +881,7 @@ def _ensure_linked_submission(
               updated_by_user_id
             ) VALUES (
               :sid,
+              :location_id,
               :date_incident_reported,
               CURDATE(),
               :district,
@@ -739,6 +896,7 @@ def _ensure_linked_submission(
         ),
         {
             "sid": submission_id,
+            "location_id": incident_row["location_id"],
             "district": incident_row["district"],
             "county": incident_row["county"],
             "route": incident_row["route"],
@@ -976,6 +1134,16 @@ def list_incident_location_candidates(
         "location_match_status": incident["location_match_status"],
         "items": candidates,
     }
+
+
+@router.get("/incident-locations/{location_id}/timeline")
+def get_incident_location_timeline(
+    location_id: int = Path(..., ge=1),
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "ADMIN"])),
+):
+    return _location_timeline(db=db, location_id=location_id, limit=limit)
 
 
 @router.post("/incidents/{incident_id}/location-link")
@@ -1250,7 +1418,7 @@ def list_incidents(
     scope: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "REVIEWER", "ADMIN"])),
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
 ):
     params: dict[str, object] = {"limit": limit}
     where_parts: list[str] = []
@@ -1303,7 +1471,7 @@ def list_incidents(
 def get_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "REVIEWER", "ADMIN"])),
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
 ):
     row = _incident_with_assignment(db, incident_id)
     if not row:
@@ -1377,6 +1545,12 @@ def coordinator_forward_incident(
         raise HTTPException(status_code=400, detail="No office chief routing configured for this office")
 
     try:
+        linked_submission_id = _ensure_linked_submission(
+            db=db,
+            incident_row=incident,
+            assignee_user_id=int(user["id"]),
+            actor_user_id=int(user["id"]),
+        )
         db.execute(
             text(
                 """
@@ -1409,7 +1583,12 @@ def coordinator_forward_incident(
             },
         )
         db.commit()
-        return {"incident_id": incident_id, "current_stage": "OFFICE_CHIEF_REVIEW", "office_code": office_code}
+        return {
+            "incident_id": incident_id,
+            "current_stage": "OFFICE_CHIEF_REVIEW",
+            "office_code": office_code,
+            "linked_submission_id": linked_submission_id,
+        }
     except HTTPException:
         db.rollback()
         raise
@@ -1700,7 +1879,7 @@ def resolve_incident(
 def mission_center_incident_feed(
     scope: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "REVIEWER", "ADMIN"])),
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
 ):
     where_parts: list[str] = []
     params: dict[str, object] = {}

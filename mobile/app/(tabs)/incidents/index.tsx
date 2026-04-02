@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { router, useLocalSearchParams, usePathname } from "expo-router";
@@ -13,7 +13,14 @@ import {
   resolveIncident,
   assignIncident,
   unassignIncident,
+  forwardIncidentByCoordinator,
+  getIncidentLocationCandidates,
+  getIncidentLocationTimeline,
+  linkIncidentLocation,
+  requestIncidentRevisionByCoordinator,
   type Incident,
+  type IncidentLocationCandidate,
+  type IncidentLocationTimeline,
   type IncidentStatus,
 } from "@/src/api/incidents";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
@@ -159,6 +166,78 @@ function statusBg(status: IncidentStatus) {
   return { bg: "#052e16", fg: "#86efac", bd: "#166534" };
 }
 
+function formatTimestamp(value?: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function buildMapPreviewUrl(lat?: number | null, lon?: number | null): string | null {
+  if (lat == null || lon == null || Number.isNaN(lat) || Number.isNaN(lon)) return null;
+  const pad = 0.01;
+  const bbox = [lon - pad, lat - pad, lon + pad, lat + pad].join(",");
+  return `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${encodeURIComponent(bbox)}&bboxSR=4326&imageSR=4326&size=1200,600&format=jpg&f=image`;
+}
+
+function buildMapPreviewUrlForBounds(bounds: { minLat: number; maxLat: number; minLon: number; maxLon: number } | null): string | null {
+  if (!bounds) return null;
+  const bbox = [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat].join(",");
+  return `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${encodeURIComponent(bbox)}&bboxSR=4326&imageSR=4326&size=1200,600&format=jpg&f=image`;
+}
+
+function computeReviewBounds(
+  incident: Incident | null,
+  candidates: IncidentLocationCandidate[]
+): { minLat: number; maxLat: number; minLon: number; maxLon: number } | null {
+  const points = [
+    incident && Number.isFinite(incident.latitude) && Number.isFinite(incident.longitude)
+      ? { lat: incident.latitude, lon: incident.longitude }
+      : null,
+    ...candidates
+      .filter((c) => Number.isFinite(c.latitude) && Number.isFinite(c.longitude))
+      .map((c) => ({ lat: c.latitude as number, lon: c.longitude as number })),
+  ].filter(Boolean) as { lat: number; lon: number }[];
+
+  if (points.length === 0) return null;
+  const minLatRaw = Math.min(...points.map((p) => p.lat));
+  const maxLatRaw = Math.max(...points.map((p) => p.lat));
+  const minLonRaw = Math.min(...points.map((p) => p.lon));
+  const maxLonRaw = Math.max(...points.map((p) => p.lon));
+  const latPad = Math.max((maxLatRaw - minLatRaw) * 0.2, 0.0035);
+  const lonPad = Math.max((maxLonRaw - minLonRaw) * 0.2, 0.0035);
+  return {
+    minLat: minLatRaw - latPad,
+    maxLat: maxLatRaw + latPad,
+    minLon: minLonRaw - lonPad,
+    maxLon: maxLonRaw + lonPad,
+  };
+}
+
+function markerPosition(
+  lat: number | null | undefined,
+  lon: number | null | undefined,
+  bounds: { minLat: number; maxLat: number; minLon: number; maxLon: number } | null
+): { left: any; top: any } | null {
+  if (
+    lat == null ||
+    lon == null ||
+    !bounds ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lon) ||
+    bounds.maxLat <= bounds.minLat ||
+    bounds.maxLon <= bounds.minLon
+  ) {
+    return null;
+  }
+  const x = ((lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 100;
+  const y = ((bounds.maxLat - lat) / (bounds.maxLat - bounds.minLat)) * 100;
+  return {
+    left: `${Math.min(96, Math.max(4, x))}%` as any,
+    top: `${Math.min(94, Math.max(6, y))}%` as any,
+  };
+}
+
 export default function IncidentsTabScreen() {
   const { palette } = useUiSettings();
   const pathname = usePathname();
@@ -167,6 +246,13 @@ export default function IncidentsTabScreen() {
   const [items, setItems] = useState<Incident[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [assignIncidentId, setAssignIncidentId] = useState<number | null>(null);
+  const [reviewIncident, setReviewIncident] = useState<Incident | null>(null);
+  const [reviewCandidates, setReviewCandidates] = useState<IncidentLocationCandidate[]>([]);
+  const [reviewTimeline, setReviewTimeline] = useState<IncidentLocationTimeline | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
+  const [coordinatorComment, setCoordinatorComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"ALL" | IncidentStatus>("ALL");
@@ -212,6 +298,7 @@ export default function IncidentsTabScreen() {
   }, [calendarMonth, calendarYear]);
 
   const isAdmin = !!me?.roles?.includes("ADMIN");
+  const canCoordinatorReview = !!me?.roles?.some((r) => r === "MAINT_COORDINATOR" || r === "ADMIN");
   const isWorker = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "MAINTENANCE" || r === "ADMIN");
   const canResolve = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN");
   const isMaintenanceWorkerMobile =
@@ -270,6 +357,46 @@ export default function IncidentsTabScreen() {
       params: { id: String(linkedSubmissionId) },
     });
   };
+
+  const closeCoordinatorReview = () => {
+    setReviewIncident(null);
+    setReviewCandidates([]);
+    setReviewTimeline(null);
+    setSelectedLocationId(null);
+    setCoordinatorComment("");
+    setReviewLoading(false);
+    setReviewBusy(false);
+  };
+
+  const loadLocationTimeline = useCallback(async (locationId: number, token: string) => {
+    const timeline = await getIncidentLocationTimeline(token, locationId);
+    setReviewTimeline(timeline);
+  }, []);
+
+  const openCoordinatorReview = useCallback(async (incident: Incident) => {
+    const token = await getToken();
+    if (!token) return;
+    setReviewIncident(incident);
+    setReviewCandidates([]);
+    setReviewTimeline(null);
+    setSelectedLocationId(incident.location_id ?? null);
+    setCoordinatorComment("");
+    setReviewLoading(true);
+    setErr(null);
+    try {
+      const res = await getIncidentLocationCandidates(token, incident.id);
+      setReviewCandidates(res.items ?? []);
+      const preferredLocationId = incident.location_id ?? res.location_id ?? res.items?.[0]?.id ?? null;
+      setSelectedLocationId(preferredLocationId);
+      if (preferredLocationId) {
+        await loadLocationTimeline(preferredLocationId, token);
+      }
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setReviewLoading(false);
+    }
+  }, [loadLocationTimeline]);
 
   const openIncidentFromTracking = (incident: Incident) => {
     const incidentId = String(incident.id);
@@ -567,6 +694,121 @@ export default function IncidentsTabScreen() {
     }
   };
 
+  const selectCandidateForReview = async (locationId: number) => {
+    const token = await getToken();
+    if (!token) return;
+    setSelectedLocationId(locationId);
+    setReviewLoading(true);
+    try {
+      await loadLocationTimeline(locationId, token);
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const onCoordinatorLinkExisting = async () => {
+    const token = await getToken();
+    if (!token || !reviewIncident || !selectedLocationId) return;
+    setReviewBusy(true);
+    setErr(null);
+    try {
+      const res = await linkIncidentLocation(token, reviewIncident.id, {
+        mode: "EXISTING",
+        location_id: selectedLocationId,
+        comment: coordinatorComment.trim() || null,
+      });
+      setReviewIncident((prev) => (
+        prev ? { ...prev, location_id: res.location_id, location_match_status: res.location_match_status } : prev
+      ));
+      await load();
+      await loadLocationTimeline(selectedLocationId, token);
+      Alert.alert("Location linked", "This incident will now append to the selected location case.");
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const onCoordinatorCreateNewLocation = async () => {
+    const token = await getToken();
+    if (!token || !reviewIncident) return;
+    setReviewBusy(true);
+    setErr(null);
+    try {
+      const res = await linkIncidentLocation(token, reviewIncident.id, {
+        mode: "CREATE_NEW",
+        comment: coordinatorComment.trim() || null,
+      });
+      setSelectedLocationId(res.location_id);
+      setReviewIncident((prev) => (
+        prev ? { ...prev, location_id: res.location_id, location_match_status: res.location_match_status } : prev
+      ));
+      await load();
+      await loadLocationTimeline(res.location_id, token);
+      Alert.alert("New case created", "A new location case record is ready for this incident.");
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const onCoordinatorRequestRevision = async () => {
+    const token = await getToken();
+    if (!token || !reviewIncident) return;
+    if (!coordinatorComment.trim()) {
+      Alert.alert("Comment required", "Add a note so the maintenance crew knows what to correct.");
+      return;
+    }
+    setReviewBusy(true);
+    setErr(null);
+    try {
+      await requestIncidentRevisionByCoordinator(
+        token,
+        reviewIncident.id,
+        coordinatorComment.trim(),
+        ["district", "county", "route", "post_mile", "latitude", "longitude", "description"]
+      );
+      await load();
+      closeCoordinatorReview();
+      Alert.alert("Revision requested", "The maintenance crew can now update the incident.");
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const onCoordinatorForward = async () => {
+    const token = await getToken();
+    if (!token || !reviewIncident) return;
+    if (!reviewIncident.location_id && !selectedLocationId) {
+      Alert.alert("Location required", "Link this incident to an existing case or create a new one before forwarding.");
+      return;
+    }
+    setReviewBusy(true);
+    setErr(null);
+    try {
+      const res = await forwardIncidentByCoordinator(token, reviewIncident.id, coordinatorComment.trim() || null);
+      await load();
+      closeCoordinatorReview();
+      Alert.alert(
+        "Incident approved",
+        res.linked_submission_id
+          ? `A draft form was created for this case as Draft #${res.linked_submission_id}.`
+          : "The incident was forwarded successfully."
+      );
+      if (res.linked_submission_id) openDraft(res.linked_submission_id);
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
   const statusCounts = useMemo(() => {
     return {
       NEW: items.filter((x) => x.status === "NEW").length,
@@ -587,6 +829,14 @@ export default function IncidentsTabScreen() {
     const underReview = workerTrackingItems.length - needsRevision;
     return { underReview, needsRevision };
   }, [workerTrackingItems]);
+  const reviewMapBounds = useMemo(
+    () => computeReviewBounds(reviewIncident, reviewCandidates),
+    [reviewIncident, reviewCandidates]
+  );
+  const reviewMapPreviewUrl = useMemo(
+    () => buildMapPreviewUrlForBounds(reviewMapBounds) ?? buildMapPreviewUrl(reviewIncident?.latitude ?? null, reviewIncident?.longitude ?? null),
+    [reviewIncident?.latitude, reviewIncident?.longitude, reviewMapBounds]
+  );
 
   if (isIncidentFormRoute && isWorker) {
     return (
@@ -1020,6 +1270,14 @@ export default function IncidentsTabScreen() {
                   </Pressable>
                 ) : null}
                 <View style={[styles.actions, { marginTop: 8 }]}>
+                  {canCoordinatorReview && item.current_stage === "COORDINATOR_REVIEW" ? (
+                    <Pressable
+                      style={[styles.smallBtn, { borderColor: palette.border }]}
+                      onPress={() => openCoordinatorReview(item)}
+                    >
+                      <Text style={{ color: palette.text, fontWeight: "700" }}>Review Location</Text>
+                    </Pressable>
+                  ) : null}
                   {isAdmin ? (
                     <>
                       <Pressable
@@ -1049,6 +1307,202 @@ export default function IncidentsTabScreen() {
           }
         />
       </View>
+
+      <Modal visible={reviewIncident != null} transparent animationType="fade" onRequestClose={closeCoordinatorReview}>
+        <Pressable style={styles.modalBackdrop} onPress={closeCoordinatorReview}>
+          <Pressable style={[styles.modalCard, styles.reviewModalCard, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+            <Text style={[styles.modalTitle, { color: palette.text }]}>Coordinator Review</Text>
+            {reviewIncident ? (
+              <ScrollView style={{ maxHeight: "88%" }} contentContainerStyle={{ paddingBottom: 8 }}>
+                <Text style={[styles.reviewHeadline, { color: palette.text }]}>
+                  {reviewIncident.title?.trim() || `Incident #${reviewIncident.id}`}
+                </Text>
+                <Text style={{ color: palette.muted, marginTop: 2 }}>
+                  Review nearby cases, choose whether this belongs to an existing location, and then approve to create the draft form.
+                </Text>
+
+                <View style={[styles.reviewInfoCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+                  <Text style={[styles.reviewSectionTitle, { color: palette.text }]}>Current Incident</Text>
+                  <Text style={{ color: palette.muted }}>
+                    {reviewIncident.district || "-"} / {reviewIncident.county || "-"} / {reviewIncident.route || "-"} / PM {reviewIncident.post_mile || "-"}
+                  </Text>
+                  <Text style={{ color: palette.muted }}>
+                    {formatCoordinate(reviewIncident.latitude)}, {formatCoordinate(reviewIncident.longitude)}
+                  </Text>
+                  <Text style={{ color: palette.muted }}>Observed: {formatTimestamp(reviewIncident.first_observed_at)}</Text>
+                  {reviewMapPreviewUrl ? (
+                    <View style={styles.reviewMapWrap}>
+                      <Image source={{ uri: reviewMapPreviewUrl }} style={styles.reviewMapPreview} />
+                      {reviewCandidates.map((candidate) => {
+                        const pos = markerPosition(candidate.latitude, candidate.longitude, reviewMapBounds);
+                        if (!pos) return null;
+                        const selected = selectedLocationId === candidate.id;
+                        return (
+                          <Pressable
+                            key={`marker-${candidate.id}`}
+                            style={[
+                              styles.mapMarker,
+                              styles.mapCandidateMarker,
+                              {
+                                left: pos.left,
+                                top: pos.top,
+                                borderColor: selected ? palette.primary : "#fff",
+                                backgroundColor: selected ? palette.primary : "rgba(10,26,47,0.88)",
+                              },
+                            ]}
+                            onPress={() => selectCandidateForReview(candidate.id)}
+                          >
+                            <Text style={styles.mapMarkerText}>{candidate.id}</Text>
+                          </Pressable>
+                        );
+                      })}
+                      {(() => {
+                        const pos = markerPosition(reviewIncident.latitude, reviewIncident.longitude, reviewMapBounds);
+                        if (!pos) return null;
+                        return (
+                          <View
+                            style={[
+                              styles.mapMarker,
+                              styles.mapIncidentMarker,
+                              { left: pos.left, top: pos.top, borderColor: "#fff" },
+                            ]}
+                          >
+                            <Text style={styles.mapMarkerText}>N</Text>
+                          </View>
+                        );
+                      })()}
+                    </View>
+                  ) : null}
+                  <View style={styles.mapLegendRow}>
+                    <View style={styles.mapLegendItem}>
+                      <View style={[styles.mapLegendDot, { backgroundColor: "#c2410c" }]} />
+                      <Text style={{ color: palette.muted, fontSize: 12 }}>New incident</Text>
+                    </View>
+                    <View style={styles.mapLegendItem}>
+                      <View style={[styles.mapLegendDot, { backgroundColor: palette.primary }]} />
+                      <Text style={{ color: palette.muted, fontSize: 12 }}>Selected case</Text>
+                    </View>
+                    <View style={styles.mapLegendItem}>
+                      <View style={[styles.mapLegendDot, { backgroundColor: "#10233c" }]} />
+                      <Text style={{ color: palette.muted, fontSize: 12 }}>Nearby case</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <Text style={[styles.reviewSectionTitle, { color: palette.text }]}>Nearby Existing Cases</Text>
+                {reviewLoading ? (
+                  <ActivityIndicator style={{ marginVertical: 14 }} color={palette.primary} />
+                ) : reviewCandidates.length === 0 ? (
+                  <View style={[styles.reviewInfoCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+                    <Text style={{ color: palette.muted }}>No nearby saved location cases were found.</Text>
+                  </View>
+                ) : (
+                  reviewCandidates.map((candidate) => {
+                    const selected = selectedLocationId === candidate.id;
+                    return (
+                      <Pressable
+                        key={candidate.id}
+                        style={[
+                          styles.reviewCandidateCard,
+                          {
+                            borderColor: selected ? palette.primary : palette.border,
+                            backgroundColor: selected ? palette.panelSoft : palette.panel,
+                          },
+                        ]}
+                        onPress={() => selectCandidateForReview(candidate.id)}
+                      >
+                        <Text style={{ color: palette.text, fontWeight: "700" }}>
+                          {candidate.display_name || `Location #${candidate.id}`}
+                        </Text>
+                        <Text style={{ color: palette.muted, marginTop: 2 }}>
+                          {candidate.district || "-"} / {candidate.county || "-"} / {candidate.route || "-"} / PM {candidate.post_mile || "-"}
+                        </Text>
+                        <Text style={{ color: palette.muted, fontSize: 12 }}>
+                          Match score: {candidate.match_score} | Updated: {formatTimestamp(candidate.updated_at)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })
+                )}
+
+                {reviewTimeline ? (
+                  <View style={[styles.reviewInfoCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+                    <Text style={[styles.reviewSectionTitle, { color: palette.text }]}>
+                      Selected Case Timeline: {reviewTimeline.location.display_name || `Location #${reviewTimeline.location.id}`}
+                    </Text>
+                    <Text style={{ color: palette.muted }}>
+                      {reviewTimeline.incident_count} incidents, {reviewTimeline.submission_count} engineer forms
+                    </Text>
+                    {reviewTimeline.incidents.slice(0, 3).map((entry) => (
+                      <View key={`inc-${entry.id}`} style={styles.timelineRow}>
+                        <Text style={{ color: palette.text, fontWeight: "700" }}>Incident #{entry.id}</Text>
+                        <Text style={{ color: palette.muted, fontSize: 12 }}>
+                          {entry.current_stage} | {formatTimestamp(entry.first_observed_at)}
+                        </Text>
+                      </View>
+                    ))}
+                    {reviewTimeline.submissions.slice(0, 3).map((entry) => (
+                      <Pressable key={`sub-${entry.id}`} style={styles.timelineRow} onPress={() => openDraft(entry.id)}>
+                        <Text style={{ color: palette.text, fontWeight: "700" }}>Form #{entry.id}</Text>
+                        <Text style={{ color: palette.muted, fontSize: 12 }}>
+                          {entry.status} | {formatTimestamp(entry.created_at)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+
+                <View style={{ marginTop: 8 }}>
+                  <Text style={[styles.labelText, { color: palette.muted }]}>Coordinator Comment</Text>
+                  <TextInput
+                    value={coordinatorComment}
+                    onChangeText={setCoordinatorComment}
+                    multiline
+                    placeholder="Add context for the case decision or revision request"
+                    placeholderTextColor={palette.muted}
+                    style={[
+                      styles.input,
+                      styles.inputMultiline,
+                      { borderColor: palette.border, backgroundColor: palette.panelSoft, color: palette.text },
+                    ]}
+                  />
+                </View>
+
+                <View style={[styles.actions, { marginTop: 10 }]}>
+                  <Pressable
+                    style={[styles.reviewActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+                    onPress={onCoordinatorLinkExisting}
+                    disabled={reviewBusy || !selectedLocationId}
+                  >
+                    <Text style={{ color: palette.text, fontWeight: "700" }}>Use Existing Case</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.reviewActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+                    onPress={onCoordinatorCreateNewLocation}
+                    disabled={reviewBusy}
+                  >
+                    <Text style={{ color: palette.text, fontWeight: "700" }}>Create New Case</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.reviewActionBtn, { borderColor: palette.border, backgroundColor: "#4a1d1f" }]}
+                    onPress={onCoordinatorRequestRevision}
+                    disabled={reviewBusy}
+                  >
+                    <Text style={{ color: "#fecaca", fontWeight: "700" }}>Request Revision</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.reviewActionBtn, { borderColor: palette.primary, backgroundColor: palette.primary }]}
+                    onPress={onCoordinatorForward}
+                    disabled={reviewBusy}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "700" }}>{reviewBusy ? "Working..." : "Approve and Create Form"}</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={assignIncidentId != null} transparent animationType="fade" onRequestClose={() => setAssignIncidentId(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setAssignIncidentId(null)}>
@@ -1286,7 +1740,94 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 12,
   },
+  reviewModalCard: {
+    maxWidth: 760,
+    width: "100%",
+    alignSelf: "center",
+    maxHeight: "92%",
+  },
   modalTitle: { fontSize: 18, fontWeight: "800" },
+  reviewHeadline: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginTop: 10,
+  },
+  reviewSectionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 6,
+  },
+  reviewInfoCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  reviewCandidateCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+  },
+  reviewMapPreview: {
+    width: "100%",
+    height: 180,
+    borderRadius: 10,
+    marginTop: 10,
+    backgroundColor: "#dbe4f0",
+  },
+  reviewMapWrap: {
+    marginTop: 10,
+    position: "relative",
+  },
+  mapMarker: {
+    position: "absolute",
+    width: 26,
+    height: 26,
+    marginLeft: -13,
+    marginTop: -13,
+    borderRadius: 13,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mapIncidentMarker: {
+    backgroundColor: "#c2410c",
+  },
+  mapCandidateMarker: {},
+  mapMarkerText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  mapLegendRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 10,
+  },
+  mapLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  mapLegendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  reviewActionBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  timelineRow: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(120,130,150,0.24)",
+    paddingTop: 8,
+    marginTop: 8,
+  },
   userRow: {
     borderWidth: 1,
     borderRadius: 10,

@@ -78,6 +78,46 @@ export type IncidentLocationCandidate = {
   coordinate_distance: number;
 };
 
+export type IncidentLocationTimeline = {
+  location: {
+    id: number;
+    display_name: string | null;
+    district: string | null;
+    county: string | null;
+    route: string | null;
+    post_mile: string | null;
+    post_mile_norm: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    created_at: string;
+    updated_at: string;
+  };
+  incident_count: number;
+  submission_count: number;
+  incidents: {
+    id: number;
+    status: IncidentStatus;
+    current_stage: IncidentStage;
+    description: string | null;
+    first_observed_at: string | null;
+    first_occurred_at: string | null;
+    created_at: string;
+    updated_at: string;
+    linked_submission_id: number | null;
+  }[];
+  submissions: {
+    id: number;
+    status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+    title: string | null;
+    created_at: string;
+    updated_at: string;
+    submitted_at: string | null;
+    reviewed_at: string | null;
+    date_incident_reported: string | null;
+    report_date: string | null;
+  }[];
+};
+
 export type IncidentLocationLinkPayload = {
   mode: "EXISTING" | "CREATE_NEW";
   location_id?: number | null;
@@ -139,6 +179,12 @@ export async function linkIncidentLocation(
   );
 }
 
+export async function getIncidentLocationTimeline(token: string, locationId: number, limit = 20) {
+  return apiFetch<IncidentLocationTimeline>(`/incident-locations/${locationId}/timeline?limit=${limit}`, {
+    token,
+  });
+}
+
 export async function claimIncident(token: string, incidentId: number) {
   return apiFetch<{ incident_id: number; linked_submission_id: number }>(`/incidents/${incidentId}/claim`, {
     method: "POST",
@@ -155,7 +201,7 @@ export async function assignIncident(token: string, incidentId: number, assignee
 }
 
 export async function forwardIncidentByCoordinator(token: string, incidentId: number, comment?: string | null) {
-  return apiFetch<{ incident_id: number; current_stage: IncidentStage; office_code: string | null }>(
+  return apiFetch<{ incident_id: number; current_stage: IncidentStage; office_code: string | null; linked_submission_id: number | null }>(
     `/incidents/${incidentId}/coordinator/forward`,
     {
       method: "POST",
