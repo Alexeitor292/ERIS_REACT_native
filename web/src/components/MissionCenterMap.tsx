@@ -5,6 +5,7 @@ import MapView from "@arcgis/core/views/MapView";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Graphic from "@arcgis/core/Graphic";
 import Point from "@arcgis/core/geometry/Point";
+import Extent from "@arcgis/core/geometry/Extent";
 
 import type { Incident } from "../api/types";
 
@@ -20,6 +21,14 @@ const STATUS_COLOR: Record<string, [number, number, number, number]> = {
   IN_PROGRESS: [234, 179, 8, 0.95],
   RESOLVED: [34, 197, 94, 0.95],
 };
+
+const CALIFORNIA_EXTENT = new Extent({
+  xmin: -124.482003,
+  ymin: 32.528832,
+  xmax: -114.131211,
+  ymax: 42.009518,
+  spatialReference: { wkid: 4326 },
+});
 
 export default function MissionCenterMap({
   incidents,
@@ -51,8 +60,11 @@ export default function MissionCenterMap({
     const view = new MapView({
       container: mapElRef.current,
       map,
-      center: [-119.4179, 36.7783],
-      zoom: 6,
+      extent: CALIFORNIA_EXTENT.clone(),
+      constraints: {
+        geometry: CALIFORNIA_EXTENT,
+        minZoom: 5,
+      },
     });
 
     // Defensive fallback: if a styled basemap fails for any reason, force OSM.
