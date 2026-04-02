@@ -9,7 +9,32 @@ type AdminUser = {
   full_name: string;
   is_active: boolean;
   roles: string[];
+  metadata?: {
+    district?: string | null;
+    office_code?: string | null;
+    office_location?: string | null;
+  } | null;
 };
+
+type MetadataDraft = {
+  district: string;
+  office_code: string;
+  office_location: string;
+};
+
+const EMPTY_METADATA: MetadataDraft = {
+  district: "",
+  office_code: "",
+  office_location: "",
+};
+
+function metadataFromUser(user?: AdminUser | null): MetadataDraft {
+  return {
+    district: user?.metadata?.district ?? "",
+    office_code: user?.metadata?.office_code ?? "",
+    office_location: user?.metadata?.office_location ?? "",
+  };
+}
 
 export default function AdminUsersPage() {
   const { me } = useAuth();
@@ -27,6 +52,8 @@ export default function AdminUsersPage() {
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [newRoles, setNewRoles] = useState<string[]>([]);
+  const [newMetadata, setNewMetadata] = useState<MetadataDraft>(EMPTY_METADATA);
+  const [metadataDrafts, setMetadataDrafts] = useState<Record<number, MetadataDraft>>({});
 
   async function load() {
     setErr(null);
@@ -37,6 +64,7 @@ export default function AdminUsersPage() {
 
       const u = await api<{ items: AdminUser[] }>(`/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`);
       setItems(u.items);
+      setMetadataDrafts(Object.fromEntries((u.items ?? []).map((item) => [item.id, metadataFromUser(item)])));
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
     } finally {
@@ -62,12 +90,14 @@ export default function AdminUsersPage() {
           full_name: fullName,
           password,
           roles: newRoles,
+          metadata: newMetadata,
         }),
       });
       setEmail("");
       setFullName("");
       setPassword("");
       setNewRoles([]);
+      setNewMetadata(EMPTY_METADATA);
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Failed to create user");
@@ -87,6 +117,23 @@ export default function AdminUsersPage() {
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Failed to update user");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveUserMetadata(userId: number) {
+    const metadata = metadataDrafts[userId] ?? EMPTY_METADATA;
+    setErr(null);
+    setBusy(true);
+    try {
+      await api(`/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ metadata }),
+      });
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to update user metadata");
     } finally {
       setBusy(false);
     }
@@ -130,6 +177,13 @@ export default function AdminUsersPage() {
 
   function toggleRole(current: string[], role: string) {
     return current.includes(role) ? current.filter((r) => r !== role) : [...current, role];
+  }
+
+  function patchMetadataDraft(userId: number, patch: Partial<MetadataDraft>) {
+    setMetadataDrafts((prev) => ({
+      ...prev,
+      [userId]: { ...(prev[userId] ?? EMPTY_METADATA), ...patch },
+    }));
   }
 
   return (
@@ -209,6 +263,36 @@ export default function AdminUsersPage() {
                 </div>
               </div>
 
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <div className="text-xs text-slate-600">District metadata</div>
+                  <input
+                    value={newMetadata.district}
+                    onChange={(e) => setNewMetadata((prev) => ({ ...prev, district: e.target.value }))}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400"
+                    placeholder="01"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-600">Office code metadata</div>
+                  <input
+                    value={newMetadata.office_code}
+                    onChange={(e) => setNewMetadata((prev) => ({ ...prev, office_code: e.target.value }))}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400"
+                    placeholder="WEST"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-600">Office location metadata</div>
+                  <input
+                    value={newMetadata.office_location}
+                    onChange={(e) => setNewMetadata((prev) => ({ ...prev, office_location: e.target.value }))}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400"
+                    placeholder="West Office"
+                  />
+                </div>
+              </div>
+
               <div className="mt-3">
                 <div className="text-xs text-slate-600 mb-2">Roles</div>
                 <div className="flex flex-wrap gap-2">
@@ -245,6 +329,7 @@ export default function AdminUsersPage() {
                     <th className="py-3 px-3">User</th>
                     <th className="py-3 px-3">Status</th>
                     <th className="py-3 px-3">Roles</th>
+                    <th className="py-3 px-3">Routing Metadata</th>
                     <th className="py-3 px-3"></th>
                   </tr>
                 </thead>
@@ -282,6 +367,38 @@ export default function AdminUsersPage() {
                           ))}
                         </div>
                       </td>
+                      <td className="py-3 px-3">
+                        <div className="grid gap-2 min-w-[220px]">
+                          <input
+                            value={(metadataDrafts[u.id] ?? EMPTY_METADATA).district}
+                            onChange={(e) => patchMetadataDraft(u.id, { district: e.target.value })}
+                            disabled={busy}
+                            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-slate-400"
+                            placeholder="District"
+                          />
+                          <input
+                            value={(metadataDrafts[u.id] ?? EMPTY_METADATA).office_code}
+                            onChange={(e) => patchMetadataDraft(u.id, { office_code: e.target.value })}
+                            disabled={busy}
+                            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-slate-400"
+                            placeholder="Office code"
+                          />
+                          <input
+                            value={(metadataDrafts[u.id] ?? EMPTY_METADATA).office_location}
+                            onChange={(e) => patchMetadataDraft(u.id, { office_location: e.target.value })}
+                            disabled={busy}
+                            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-slate-400"
+                            placeholder="Office location"
+                          />
+                          <button
+                            onClick={() => saveUserMetadata(u.id)}
+                            disabled={busy}
+                            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60"
+                          >
+                            Save metadata
+                          </button>
+                        </div>
+                      </td>
                       <td className="py-3 px-3 text-sm">
                         <div className="flex flex-col gap-2 items-end">
                           <button
@@ -305,7 +422,7 @@ export default function AdminUsersPage() {
 
                   {items.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="py-6 px-3 text-sm text-slate-600">
+                      <td colSpan={6} className="py-6 px-3 text-sm text-slate-600">
                         No users found.
                       </td>
                     </tr>

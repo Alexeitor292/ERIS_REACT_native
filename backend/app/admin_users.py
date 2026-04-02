@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .db import get_db
 from .deps import require_roles
 from .auth import hash_password
+from .user_metadata import parse_user_metadata, user_metadata_json
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -17,16 +18,24 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # -----------------------------
 # Pydantic models
 # -----------------------------
+class UserMetadataIn(BaseModel):
+    district: str | None = Field(default=None, max_length=64)
+    office_code: str | None = Field(default=None, max_length=32)
+    office_location: str | None = Field(default=None, max_length=255)
+
+
 class CreateUserIn(BaseModel):
     email: str
     full_name: str = Field(min_length=1, max_length=200)
     password: str = Field(min_length=8, max_length=200)
     roles: List[str] = Field(default_factory=list)
+    metadata: UserMetadataIn | None = None
 
 
 class UpdateUserIn(BaseModel):
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     is_active: Optional[bool] = None
+    metadata: UserMetadataIn | None = None
 
 
 class SetRolesIn(BaseModel):
@@ -60,7 +69,7 @@ def _get_user_row(db: Session, user_id: int):
     u = db.execute(
         text(
             """
-            SELECT id, email, full_name, is_active
+            SELECT id, email, full_name, is_active, metadata_json
             FROM users
             WHERE id = :id
             """
@@ -96,6 +105,7 @@ def _user_with_roles(db: Session, user_id: int) -> dict:
         "email": u["email"],
         "full_name": u["full_name"],
         "is_active": bool(int(u["is_active"])),
+        "metadata": parse_user_metadata(u.get("metadata_json")),
         "roles": list(roles),
     }
 
@@ -146,7 +156,7 @@ def list_users(
         rows = db.execute(
             text(
                 """
-                SELECT id, email, full_name, is_active
+                SELECT id, email, full_name, is_active, metadata_json
                 FROM users
                 WHERE email LIKE :q OR full_name LIKE :q
                 ORDER BY id DESC
@@ -159,7 +169,7 @@ def list_users(
         rows = db.execute(
             text(
                 """
-                SELECT id, email, full_name, is_active
+                SELECT id, email, full_name, is_active, metadata_json
                 FROM users
                 ORDER BY id DESC
                 LIMIT :limit
@@ -177,6 +187,7 @@ def list_users(
                 "email": r["email"],
                 "full_name": r["full_name"],
                 "is_active": bool(int(r["is_active"])),
+                "metadata": parse_user_metadata(r.get("metadata_json")),
                 "roles": _get_user_roles(db, uid),
             }
         )
@@ -217,11 +228,16 @@ def create_user(
         res = db.execute(
             text(
                 """
-                INSERT INTO users (email, full_name, password_hash, is_active)
-                VALUES (:email, :full_name, :password_hash, 1)
+                INSERT INTO users (email, full_name, password_hash, metadata_json, is_active)
+                VALUES (:email, :full_name, :password_hash, CAST(:metadata_json AS JSON), 1)
                 """
             ),
-            {"email": email, "full_name": body.full_name, "password_hash": pw_hash},
+            {
+                "email": email,
+                "full_name": body.full_name,
+                "password_hash": pw_hash,
+                "metadata_json": user_metadata_json(body.metadata.model_dump() if body.metadata else None),
+            },
         )
         user_id = int(res.lastrowid)
 
@@ -251,6 +267,8 @@ def update_user(
         fields["full_name"] = body.full_name
     if body.is_active is not None:
         fields["is_active"] = 1 if body.is_active else 0
+    if body.metadata is not None:
+        fields["metadata_json"] = user_metadata_json(body.metadata.model_dump())
 
     if not fields:
         return _user_with_roles(db, user_id)

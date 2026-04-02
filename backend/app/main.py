@@ -30,6 +30,7 @@ from .routes.gisa import router as gisa_router
 from .routes.incidents import ensure_incident_runtime_schema, router as incidents_router
 from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
 from .precision import normalize_post_mile, normalize_route, round_coordinate
+from .user_metadata import parse_user_metadata
 from .schemas.common import (
     GeometryResponse,
     GeometryUpsert,
@@ -112,6 +113,7 @@ def startup():
     db = SessionLocal()
     try:
         ensure_incident_runtime_schema(db)
+        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS metadata_json JSON NULL"))
         db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS location_id BIGINT NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN latitude DECIMAL(10,6) NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN longitude DECIMAL(10,6) NULL"))
@@ -239,7 +241,7 @@ def resolve_user_from_request_or_token(request: Request, db: Session, access_tok
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     user = db.execute(text("""
-        SELECT id, email, full_name, is_active
+        SELECT id, email, full_name, is_active, metadata_json
         FROM users
         WHERE id = :id
     """), {"id": int(sub)}).mappings().first()
@@ -257,6 +259,7 @@ def resolve_user_from_request_or_token(request: Request, db: Session, access_tok
         "id": int(user["id"]),
         "email": user["email"],
         "full_name": user["full_name"],
+        "metadata": parse_user_metadata(user.get("metadata_json")),
         "roles": list(roles),
     }
 

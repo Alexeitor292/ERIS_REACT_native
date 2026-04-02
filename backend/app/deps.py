@@ -6,6 +6,7 @@ from sqlalchemy import text
 from .db import get_db
 from .config import settings
 from .auth import decode_token
+from .user_metadata import parse_user_metadata
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -28,7 +29,7 @@ def get_current_user(
 
     # sub is user id as string
     user = db.execute(text("""
-        SELECT id, email, full_name, is_active
+        SELECT id, email, full_name, is_active, metadata_json
         FROM users
         WHERE id = :id
     """), {"id": int(sub)}).mappings().first()
@@ -47,6 +48,7 @@ def get_current_user(
         "id": int(user["id"]),
         "email": user["email"],
         "full_name": user["full_name"],
+        "metadata": parse_user_metadata(user.get("metadata_json")),
         "roles": list(roles),
     }
 

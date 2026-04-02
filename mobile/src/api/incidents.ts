@@ -118,6 +118,17 @@ export type IncidentLocationTimeline = {
   }[];
 };
 
+export type RoutingUserOption = {
+  id: number;
+  email: string;
+  full_name: string;
+  metadata?: {
+    district?: string | null;
+    office_code?: string | null;
+    office_location?: string | null;
+  } | null;
+};
+
 export type IncidentLocationLinkPayload = {
   mode: "EXISTING" | "CREATE_NEW";
   location_id?: number | null;
@@ -239,6 +250,13 @@ export async function assignIncidentToBranchChief(
       token,
       body: { branch_chief_user_id: branchChiefUserId },
     }
+  );
+}
+
+export async function getOfficeChiefBranchOptions(token: string, incidentId: number) {
+  return apiFetch<{ incident_id: number; office_code: string | null; items: RoutingUserOption[] }>(
+    `/incidents/${incidentId}/office-chief/branch-options`,
+    { token }
   );
 }
 

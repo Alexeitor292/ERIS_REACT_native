@@ -7,7 +7,9 @@ import { router, useLocalSearchParams, usePathname } from "expo-router";
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import {
+  assignIncidentToBranchChief,
   createIncident,
+  getOfficeChiefBranchOptions,
   updateIncident,
   listIncidents,
   resolveIncident,
@@ -22,6 +24,7 @@ import {
   type IncidentLocationCandidate,
   type IncidentLocationTimeline,
   type IncidentStatus,
+  type RoutingUserOption,
 } from "@/src/api/incidents";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
@@ -246,6 +249,9 @@ export default function IncidentsTabScreen() {
   const [items, setItems] = useState<Incident[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [assignIncidentId, setAssignIncidentId] = useState<number | null>(null);
+  const [branchRouteIncident, setBranchRouteIncident] = useState<Incident | null>(null);
+  const [branchChiefOptions, setBranchChiefOptions] = useState<RoutingUserOption[]>([]);
+  const [branchChiefOptionsLoading, setBranchChiefOptionsLoading] = useState(false);
   const [reviewIncident, setReviewIncident] = useState<Incident | null>(null);
   const [reviewCandidates, setReviewCandidates] = useState<IncidentLocationCandidate[]>([]);
   const [reviewTimeline, setReviewTimeline] = useState<IncidentLocationTimeline | null>(null);
@@ -299,6 +305,8 @@ export default function IncidentsTabScreen() {
 
   const isAdmin = !!me?.roles?.includes("ADMIN");
   const canCoordinatorReview = !!me?.roles?.some((r) => r === "MAINT_COORDINATOR" || r === "ADMIN");
+  const isOfficeChiefMobile = !!me?.roles?.includes("OFFICE_CHIEF") && !me?.roles?.includes("ADMIN");
+  const isBranchChiefMobile = !!me?.roles?.includes("BRANCH_CHIEF") && !me?.roles?.includes("ADMIN");
   const isWorker = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "MAINTENANCE" || r === "ADMIN");
   const canResolve = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN");
   const isMaintenanceWorkerMobile =
@@ -679,6 +687,41 @@ export default function IncidentsTabScreen() {
     }
   };
 
+  const openBranchRouting = async (incident: Incident) => {
+    const token = await getToken();
+    if (!token) return;
+    setBranchRouteIncident(incident);
+    setBranchChiefOptions([]);
+    setBranchChiefOptionsLoading(true);
+    setErr(null);
+    try {
+      const res = await getOfficeChiefBranchOptions(token, incident.id);
+      setBranchChiefOptions(res.items ?? []);
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setBranchChiefOptionsLoading(false);
+    }
+  };
+
+  const onAssignBranchChief = async (branchChiefUserId: number) => {
+    const token = await getToken();
+    if (!token || !branchRouteIncident) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await assignIncidentToBranchChief(token, branchRouteIncident.id, branchChiefUserId);
+      setBranchRouteIncident(null);
+      setBranchChiefOptions([]);
+      await load();
+      Alert.alert("Routed", "This case is now with the selected branch chief.");
+    } catch (e: any) {
+      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onUnassign = async (incidentId: number) => {
     const token = await getToken();
     if (!token) return;
@@ -837,6 +880,12 @@ export default function IncidentsTabScreen() {
     () => buildMapPreviewUrlForBounds(reviewMapBounds) ?? buildMapPreviewUrl(reviewIncident?.latitude ?? null, reviewIncident?.longitude ?? null),
     [reviewIncident?.latitude, reviewIncident?.longitude, reviewMapBounds]
   );
+  const incidentScreenTitle = isOfficeChiefMobile || isBranchChiefMobile ? "Cases" : "Incidents";
+  const incidentScreenSubtitle = isOfficeChiefMobile
+    ? "Review approved cases in your office and route them to the right branch chief."
+    : isBranchChiefMobile
+      ? "Review office-routed cases in your office."
+      : "Create incidents and process them through the assigned workflow.";
 
   if (isIncidentFormRoute && isWorker) {
     return (
@@ -1177,8 +1226,8 @@ export default function IncidentsTabScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
       <View style={styles.inner}>
-        <Text style={[styles.title, { color: palette.text }]}>Incidents</Text>
-        <Text style={[styles.sub, { color: palette.muted }]}>Create incidents and process them through the assigned workflow.</Text>
+        <Text style={[styles.title, { color: palette.text }]}>{incidentScreenTitle}</Text>
+        <Text style={[styles.sub, { color: palette.muted }]}>{incidentScreenSubtitle}</Text>
 
         <View style={styles.statusRow}>
           {isMaintenanceWorkerMobile ? (
@@ -1230,8 +1279,9 @@ export default function IncidentsTabScreen() {
               ? { bg: "#450a0a", fg: "#fecaca", bd: "#b91c1c", label: "Needs Revision" }
               : { bg: "#422006", fg: "#fde68a", bd: "#a16207", label: "Under Review" };
             const status = statusBg(item.status);
+            const itemLabel = isOfficeChiefMobile || isBranchChiefMobile ? "Case" : "Incident";
             const incidentTitle =
-              item.title?.trim() || `Incident ${item.district ?? "Unknown district"} / ${item.route ?? "Unknown route"} / PM ${item.post_mile ?? "?"}`;
+              item.title?.trim() || `${itemLabel} ${item.district ?? "Unknown district"} / ${item.route ?? "Unknown route"} / PM ${item.post_mile ?? "?"}`;
             return (
               <Pressable
                 style={[styles.card, { borderColor: palette.border, backgroundColor: palette.panel }]}
@@ -1278,6 +1328,14 @@ export default function IncidentsTabScreen() {
                       <Text style={{ color: palette.text, fontWeight: "700" }}>Review Location</Text>
                     </Pressable>
                   ) : null}
+                  {isOfficeChiefMobile && item.current_stage === "OFFICE_CHIEF_REVIEW" ? (
+                    <Pressable
+                      style={[styles.smallBtn, { borderColor: palette.border }]}
+                      onPress={() => openBranchRouting(item)}
+                    >
+                      <Text style={{ color: palette.text, fontWeight: "700" }}>Route to Branch Chief</Text>
+                    </Pressable>
+                  ) : null}
                   {isAdmin ? (
                     <>
                       <Pressable
@@ -1302,7 +1360,15 @@ export default function IncidentsTabScreen() {
           }}
           ListEmptyComponent={
             <Text style={{ color: palette.muted, paddingVertical: 20 }}>
-              {busy ? "Loading incidents..." : (isMaintenanceWorkerMobile ? "No incidents pending coordinator review." : "No incidents yet.")}
+              {busy
+                ? "Loading incidents..."
+                : isMaintenanceWorkerMobile
+                  ? "No incidents pending coordinator review."
+                  : isOfficeChiefMobile
+                    ? "No cases are waiting for office chief review."
+                    : isBranchChiefMobile
+                      ? "No cases are waiting for branch chief review."
+                      : "No incidents yet."}
             </Text>
           }
         />
@@ -1500,6 +1566,48 @@ export default function IncidentsTabScreen() {
                 </View>
               </ScrollView>
             ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={branchRouteIncident != null} transparent animationType="fade" onRequestClose={() => setBranchRouteIncident(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setBranchRouteIncident(null)}>
+          <Pressable style={[styles.modalCard, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+            <Text style={[styles.modalTitle, { color: palette.text }]}>Route Case to Branch Chief</Text>
+            <Text style={{ color: palette.muted, marginBottom: 10 }}>
+              {branchRouteIncident
+                ? branchRouteIncident.title?.trim() || `Case #${branchRouteIncident.id}`
+                : ""}
+            </Text>
+            {branchChiefOptionsLoading ? (
+              <ActivityIndicator style={{ marginVertical: 18 }} color={palette.primary} />
+            ) : (
+              <FlatList
+                data={branchChiefOptions}
+                keyExtractor={(item) => String(item.id)}
+                renderItem={({ item }) => (
+                  <Pressable
+                    style={[styles.userRow, { borderColor: palette.border }]}
+                    onPress={() => onAssignBranchChief(item.id)}
+                  >
+                    <Text style={{ color: palette.text, fontWeight: "700" }}>{item.full_name}</Text>
+                    <Text style={{ color: palette.muted, fontSize: 12 }}>{item.email}</Text>
+                    <Text style={{ color: palette.muted, fontSize: 12 }}>
+                      Office: {item.metadata?.office_code || "-"} {item.metadata?.office_location ? `| ${item.metadata.office_location}` : ""}
+                    </Text>
+                  </Pressable>
+                )}
+                ListEmptyComponent={
+                  <Text style={{ color: palette.muted, paddingVertical: 14 }}>
+                    No branch chiefs are configured for this office yet.
+                  </Text>
+                }
+                style={{ maxHeight: 280 }}
+              />
+            )}
+            <Pressable style={[styles.btn, { borderColor: palette.border, marginTop: 8 }]} onPress={() => setBranchRouteIncident(null)}>
+              <Text style={{ color: palette.text, fontWeight: "700" }}>Close</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>

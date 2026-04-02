@@ -23,18 +23,19 @@ from ..schemas.common import (
     IncidentLocationLinkRequest,
 )
 from ..storage import make_object_key, put_object_bytes
+from ..user_metadata import normalize_district_code, normalize_office_code, normalize_profile_text, parse_user_metadata
 
 router = APIRouter(tags=["incidents"])
 OFFICE_BY_DISTRICT: dict[str, str] = {
-    "1": "WEST",
-    "2": "NORTH",
-    "3": "NORTH",
-    "4": "WEST",
-    "5": "WEST",
-    "6": "NORTH",
-    "7": "SOUTH",
-    "8": "SOUTH",
-    "9": "NORTH",
+    "01": "WEST",
+    "02": "NORTH",
+    "03": "NORTH",
+    "04": "WEST",
+    "05": "WEST",
+    "06": "NORTH",
+    "07": "SOUTH",
+    "08": "SOUTH",
+    "09": "NORTH",
     "10": "NORTH",
     "11": "SOUTH",
     "12": "SOUTH",
@@ -53,19 +54,11 @@ REVISION_FIELDS_ALLOWED = {
 
 
 def _normalized_district_code(raw_district: str | None) -> str | None:
-    value = (raw_district or "").strip()
-    if not value:
-        return None
-    m = re.search(r"(\d{1,2})", value)
-    return m.group(1) if m else value
+    return normalize_district_code(raw_district)
 
 
 def _normalize_text(raw: str | None) -> str | None:
-    text_value = (raw or "").strip()
-    if not text_value:
-        return None
-    text_value = re.sub(r"\s+", " ", text_value)
-    return text_value
+    return normalize_profile_text(raw)
 
 
 def _location_display_name(
@@ -418,25 +411,106 @@ def _routing_users_for(
     district: str | None = None,
     office_code: str | None = None,
 ) -> list[int]:
+    assignment_key = assignment_type.strip().upper()
+    role_name = {
+        "DISTRICT_COORDINATOR": "MAINT_COORDINATOR",
+        "OFFICE_CHIEF": "OFFICE_CHIEF",
+        "BRANCH_CHIEF": "BRANCH_CHIEF",
+    }.get(assignment_key)
+    if not role_name:
+        return []
+
+    params: dict[str, object] = {"role_name": role_name}
+    where_parts = ["u.is_active = 1", "r.name = :role_name"]
+    if assignment_key == "DISTRICT_COORDINATOR":
+        district_code = _normalized_district_code(district)
+        if not district_code:
+            return []
+        params["district"] = district_code
+        where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.district')), '') = :district")
+    else:
+        normalized_office = normalize_office_code(office_code)
+        if not normalized_office:
+            return []
+        params["office_code"] = normalized_office
+        where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code")
+
     rows = db.execute(
         text(
-            """
-            SELECT user_id
-            FROM incident_routing_assignments
-            WHERE assignment_type = :assignment_type
-              AND is_active = 1
-              AND (:district IS NULL OR district = :district)
-              AND (:office_code IS NULL OR office_code = :office_code)
-            ORDER BY id ASC
+            f"""
+            SELECT DISTINCT u.id
+            FROM users u
+            JOIN user_roles ur ON ur.user_id = u.id
+            JOIN roles r ON r.id = ur.role_id
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY u.id ASC
             """
         ),
-        {
-            "assignment_type": assignment_type,
-            "district": district,
-            "office_code": office_code,
-        },
+        params,
     ).scalars().all()
     return [int(x) for x in rows]
+
+
+def _routing_user_options_for(
+    *,
+    db: Session,
+    assignment_type: str,
+    district: str | None = None,
+    office_code: str | None = None,
+) -> list[dict]:
+    user_ids = _routing_users_for(db=db, assignment_type=assignment_type, district=district, office_code=office_code)
+    if not user_ids:
+        return []
+    params = {f"user_id_{idx}": int(user_id) for idx, user_id in enumerate(user_ids)}
+    tokens = ", ".join(f":user_id_{idx}" for idx in range(len(user_ids)))
+    rows = db.execute(
+        text(
+            f"""
+            SELECT id, email, full_name, metadata_json
+            FROM users
+            WHERE id IN ({tokens})
+            ORDER BY full_name ASC, id ASC
+            """
+        ),
+        params,
+    ).mappings().all()
+    return [
+        {
+            "id": int(r["id"]),
+            "email": r["email"],
+            "full_name": r["full_name"],
+            "metadata": parse_user_metadata(r.get("metadata_json")),
+        }
+        for r in rows
+    ]
+
+
+def _ensure_incident_district_access(user: dict, district: str | None) -> None:
+    if "ADMIN" in set(user.get("roles") or []):
+        return
+    user_district = _normalized_district_code((user.get("metadata") or {}).get("district"))
+    incident_district = _normalized_district_code(district)
+    if not user_district or user_district != incident_district:
+        raise HTTPException(status_code=403, detail="Incident is outside your assigned district")
+
+
+def _ensure_incident_office_access(user: dict, office_code: str | None) -> None:
+    if "ADMIN" in set(user.get("roles") or []):
+        return
+    user_office = normalize_office_code((user.get("metadata") or {}).get("office_code"))
+    incident_office = normalize_office_code(office_code)
+    if not user_office or user_office != incident_office:
+        raise HTTPException(status_code=403, detail="Incident is outside your assigned office")
+
+
+def _ensure_incident_scope_access(user: dict, incident_row: dict) -> None:
+    roles = set(user.get("roles") or [])
+    if "ADMIN" in roles:
+        return
+    if "MAINT_COORDINATOR" in roles:
+        _ensure_incident_district_access(user, incident_row.get("district"))
+    if "OFFICE_CHIEF" in roles or "BRANCH_CHIEF" in roles:
+        _ensure_incident_office_access(user, incident_row.get("office_code") or _office_for_district(incident_row.get("district")))
 
 
 def _active_assignment_for_stage(db: Session, incident_id: int, stage: str) -> dict | None:
@@ -658,76 +732,36 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
 
     role_filters: list[str] = []
     params: dict[str, object] = {"mobile_uid": uid}
+    metadata = user.get("metadata") or {}
 
     if "MAINT_COORDINATOR" in roles:
-        my_districts = db.execute(
-            text(
-                """
-                SELECT district
-                FROM incident_routing_assignments
-                WHERE assignment_type = 'DISTRICT_COORDINATOR'
-                  AND user_id = :uid
-                  AND is_active = 1
-                """
-            ),
-            {"uid": uid},
-        ).scalars().all()
-        normalized = sorted({str(x).strip() for x in my_districts if str(x).strip()})
-        if normalized:
-            district_clauses: list[str] = []
-            for i, d in enumerate(normalized):
-                k = f"coord_d_{i}"
-                params[k] = d
-                district_clauses.append(f"i.district = :{k}")
-                district_clauses.append(f"i.district = CONCAT('District ', :{k})")
-            role_filters.append(f"({' OR '.join(district_clauses)})")
+        district_code = _normalized_district_code(metadata.get("district"))
+        if district_code:
+            params["coord_district"] = district_code
+            params["coord_district_plain"] = district_code.lstrip("0") or district_code
+            role_filters.append(
+                "(i.current_stage = 'COORDINATOR_REVIEW' AND ("
+                "i.district = :coord_district OR "
+                "i.district = :coord_district_plain OR "
+                "i.district = CONCAT('District ', :coord_district) OR "
+                "i.district = CONCAT('District ', :coord_district_plain)"
+                "))"
+            )
 
     if "OFFICE_CHIEF" in roles:
-        my_offices = db.execute(
-            text(
-                """
-                SELECT office_code
-                FROM incident_routing_assignments
-                WHERE assignment_type = 'OFFICE_CHIEF'
-                  AND user_id = :uid
-                  AND is_active = 1
-                """
-            ),
-            {"uid": uid},
-        ).scalars().all()
-        offices = sorted({str(x).strip().upper() for x in my_offices if str(x).strip()})
-        if offices:
-            office_tokens = []
-            for i, o in enumerate(offices):
-                k = f"oc_o_{i}"
-                params[k] = o
-                office_tokens.append(f":{k}")
+        office_code = normalize_office_code(metadata.get("office_code"))
+        if office_code:
+            params["office_chief_office"] = office_code
             role_filters.append(
-                f"(i.office_code IN ({', '.join(office_tokens)}) AND i.current_stage <> 'COORDINATOR_REVIEW')"
+                "(i.office_code = :office_chief_office AND i.location_id IS NOT NULL AND i.current_stage IN ('OFFICE_CHIEF_REVIEW','BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
             )
 
     if "BRANCH_CHIEF" in roles:
-        my_offices = db.execute(
-            text(
-                """
-                SELECT office_code
-                FROM incident_routing_assignments
-                WHERE assignment_type = 'BRANCH_CHIEF'
-                  AND user_id = :uid
-                  AND is_active = 1
-                """
-            ),
-            {"uid": uid},
-        ).scalars().all()
-        offices = sorted({str(x).strip().upper() for x in my_offices if str(x).strip()})
-        if offices:
-            office_tokens = []
-            for i, o in enumerate(offices):
-                k = f"bc_o_{i}"
-                params[k] = o
-                office_tokens.append(f":{k}")
+        office_code = normalize_office_code(metadata.get("office_code"))
+        if office_code:
+            params["branch_chief_office"] = office_code
             role_filters.append(
-                f"(i.office_code IN ({', '.join(office_tokens)}) AND i.current_stage IN ('BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
+                "(i.office_code = :branch_chief_office AND i.location_id IS NOT NULL AND i.current_stage IN ('BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
             )
 
     if "FIELD_WORKER" in roles:
@@ -1116,6 +1150,7 @@ def list_incident_location_candidates(
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    _ensure_incident_district_access(user, incident.get("district"))
     if incident["latitude"] is None or incident["longitude"] is None:
         raise HTTPException(status_code=409, detail="Incident coordinates are required for location matching")
     candidates = _incident_location_candidates(
@@ -1156,6 +1191,7 @@ def link_incident_location(
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    _ensure_incident_district_access(user, incident.get("district"))
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be relinked")
 
@@ -1240,6 +1276,7 @@ def coordinator_request_revision(
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    _ensure_incident_district_access(user, incident.get("district"))
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be revised")
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
@@ -1476,7 +1513,9 @@ def get_incident(
     row = _incident_with_assignment(db, incident_id)
     if not row:
         raise HTTPException(status_code=404, detail="Incident not found")
-    return {"incident": _serialize_incident(dict(row)), "requested_by_user_id": user["id"]}
+    incident = dict(row)
+    _ensure_incident_scope_access(user, incident)
+    return {"incident": _serialize_incident(incident), "requested_by_user_id": user["id"]}
 
 
 @router.post("/incidents/{incident_id}/claim")
@@ -1524,6 +1563,7 @@ def coordinator_forward_incident(
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    _ensure_incident_district_access(user, incident.get("district"))
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be forwarded")
     if incident["location_id"] is None:
@@ -1597,6 +1637,28 @@ def coordinator_forward_incident(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/incidents/{incident_id}/office-chief/branch-options")
+def office_chief_branch_options(
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["OFFICE_CHIEF", "ADMIN"])),
+):
+    incident = _incident_with_assignment(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    office_code = incident.get("office_code") or _office_for_district(incident.get("district"))
+    _ensure_incident_office_access(user, office_code)
+    return {
+        "incident_id": int(incident_id),
+        "office_code": office_code,
+        "items": _routing_user_options_for(
+            db=db,
+            assignment_type="BRANCH_CHIEF",
+            office_code=office_code,
+        ),
+    }
+
+
 @router.post("/incidents/{incident_id}/office-chief/assign-branch")
 def office_chief_assign_branch(
     payload: IncidentAssignBranchChiefRequest,
@@ -1611,6 +1673,7 @@ def office_chief_assign_branch(
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be reassigned")
 
     office_code = incident.get("office_code") or _office_for_district(incident.get("district"))
+    _ensure_incident_office_access(user, office_code)
     allowed_branch_ids = _routing_users_for(
         db=db,
         assignment_type="BRANCH_CHIEF",
@@ -1664,6 +1727,10 @@ def branch_chief_assign_engineer(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["BRANCH_CHIEF", "ADMIN"])),
 ):
+    incident = _incident_with_assignment(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    _ensure_incident_office_access(user, incident.get("office_code") or _office_for_district(incident.get("district")))
     try:
         result = _assign_incident(
             db=db,
