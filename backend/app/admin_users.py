@@ -229,7 +229,7 @@ def create_user(
             text(
                 """
                 INSERT INTO users (email, full_name, password_hash, metadata_json, is_active)
-                VALUES (:email, :full_name, :password_hash, CAST(:metadata_json AS JSON), 1)
+                VALUES (:email, :full_name, :password_hash, :metadata_json, 1)
                 """
             ),
             {

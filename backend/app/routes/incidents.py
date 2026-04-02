@@ -105,7 +105,7 @@ def _queue_incident_notifications(
                 INSERT INTO incident_notifications
                   (incident_id, recipient_user_id, channel, template_code, payload_json)
                 VALUES
-                  (:iid, :uid, 'IN_APP', :template_code, CAST(:payload_json AS JSON))
+                  (:iid, :uid, 'IN_APP', :template_code, :payload_json)
                 """
             ),
             {
@@ -1242,7 +1242,7 @@ def link_incident_location(
                     location_match_status = :status,
                     location_reviewed_by_user_id = :reviewer,
                     location_reviewed_at = NOW(),
-                    location_match_metadata = CAST(:metadata AS JSON),
+                    location_match_metadata = :metadata,
                     updated_at = NOW()
                 WHERE id = :iid
                 """
@@ -1302,7 +1302,7 @@ def coordinator_request_revision(
                 SET location_match_status = 'NEEDS_REVISION',
                     location_reviewed_by_user_id = :reviewer,
                     location_reviewed_at = NOW(),
-                    location_match_metadata = CAST(:metadata AS JSON),
+                    location_match_metadata = :metadata,
                     updated_at = NOW()
                 WHERE id = :iid
                 """
@@ -1418,7 +1418,7 @@ def maintenance_resubmit_incident(
                     location_match_status = 'PENDING_REVIEW',
                     location_reviewed_by_user_id = NULL,
                     location_reviewed_at = NULL,
-                    location_match_metadata = CAST(:metadata AS JSON),
+                    location_match_metadata = :metadata,
                     updated_at = NOW()
                 WHERE id = :iid
                 """
