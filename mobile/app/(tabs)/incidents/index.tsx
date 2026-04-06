@@ -176,6 +176,37 @@ function formatTimestamp(value?: string | null): string {
   return date.toLocaleString();
 }
 
+function formatPostMileLabel(value?: string | null, fallback = "-"): string {
+  return normalizePostMileInput(value) || fallback;
+}
+
+function formatLocationLine(location: {
+  district?: string | null;
+  county?: string | null;
+  route?: string | null;
+  post_mile?: string | null;
+}): string {
+  return `${location.district || "-"} / ${location.county || "-"} / ${location.route || "-"} / PM ${formatPostMileLabel(location.post_mile)}`;
+}
+
+function formatLocationDisplayName(
+  location: {
+    display_name?: string | null;
+    district?: string | null;
+    county?: string | null;
+    route?: string | null;
+    post_mile?: string | null;
+  },
+  fallback: string
+): string {
+  if (location.district || location.county || location.route || location.post_mile) {
+    return formatLocationLine(location);
+  }
+  const displayName = location.display_name?.trim();
+  if (!displayName) return fallback;
+  return displayName.replace(/PM\s+(-?\d+(?:\.\d+)?)/i, (_match, pm) => `PM ${formatPostMileLabel(pm, pm)}`);
+}
+
 function buildMapPreviewUrl(lat?: number | null, lon?: number | null): string | null {
   if (lat == null || lon == null || Number.isNaN(lat) || Number.isNaN(lon)) return null;
   const pad = 0.01;
@@ -1281,7 +1312,8 @@ export default function IncidentsTabScreen() {
             const status = statusBg(item.status);
             const itemLabel = isOfficeChiefMobile || isBranchChiefMobile ? "Case" : "Incident";
             const incidentTitle =
-              item.title?.trim() || `${itemLabel} ${item.district ?? "Unknown district"} / ${item.route ?? "Unknown route"} / PM ${item.post_mile ?? "?"}`;
+              item.title?.trim() ||
+              `${itemLabel} ${item.district ?? "Unknown district"} / ${item.route ?? "Unknown route"} / PM ${formatPostMileLabel(item.post_mile, "?")}`;
             return (
               <Pressable
                 style={[styles.card, { borderColor: palette.border, backgroundColor: palette.panel }]}
@@ -1389,9 +1421,7 @@ export default function IncidentsTabScreen() {
 
                 <View style={[styles.reviewInfoCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
                   <Text style={[styles.reviewSectionTitle, { color: palette.text }]}>Current Incident</Text>
-                  <Text style={{ color: palette.muted }}>
-                    {reviewIncident.district || "-"} / {reviewIncident.county || "-"} / {reviewIncident.route || "-"} / PM {reviewIncident.post_mile || "-"}
-                  </Text>
+                  <Text style={{ color: palette.muted }}>{formatLocationLine(reviewIncident)}</Text>
                   <Text style={{ color: palette.muted }}>
                     {formatCoordinate(reviewIncident.latitude)}, {formatCoordinate(reviewIncident.longitude)}
                   </Text>
@@ -1478,11 +1508,9 @@ export default function IncidentsTabScreen() {
                         onPress={() => selectCandidateForReview(candidate.id)}
                       >
                         <Text style={{ color: palette.text, fontWeight: "700" }}>
-                          {candidate.display_name || `Location #${candidate.id}`}
+                          {formatLocationDisplayName(candidate, `Location #${candidate.id}`)}
                         </Text>
-                        <Text style={{ color: palette.muted, marginTop: 2 }}>
-                          {candidate.district || "-"} / {candidate.county || "-"} / {candidate.route || "-"} / PM {candidate.post_mile || "-"}
-                        </Text>
+                        <Text style={{ color: palette.muted, marginTop: 2 }}>{formatLocationLine(candidate)}</Text>
                         <Text style={{ color: palette.muted, fontSize: 12 }}>
                           Match score: {candidate.match_score} | Updated: {formatTimestamp(candidate.updated_at)}
                         </Text>
@@ -1494,7 +1522,7 @@ export default function IncidentsTabScreen() {
                 {reviewTimeline ? (
                   <View style={[styles.reviewInfoCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
                     <Text style={[styles.reviewSectionTitle, { color: palette.text }]}>
-                      Selected Case Timeline: {reviewTimeline.location.display_name || `Location #${reviewTimeline.location.id}`}
+                      Selected Case Timeline: {formatLocationDisplayName(reviewTimeline.location, `Location #${reviewTimeline.location.id}`)}
                     </Text>
                     <Text style={{ color: palette.muted }}>
                       {reviewTimeline.incident_count} incidents, {reviewTimeline.submission_count} engineer forms

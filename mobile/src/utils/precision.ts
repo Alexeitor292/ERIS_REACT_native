@@ -1,4 +1,4 @@
-export const POST_MILE_DECIMALS = 3;
+export const POST_MILE_DECIMALS = 2;
 export const COORDINATE_DECIMALS = 6;
 
 function roundTo(value: number, decimals: number): number {
