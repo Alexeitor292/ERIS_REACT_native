@@ -328,7 +328,7 @@ export default function IncidentsTabScreen() {
   const calendarDays = useMemo(() => {
     const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
     const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
-    const cells: Array<number | null> = Array(firstDay).fill(null);
+    const cells: (number | null)[] = Array(firstDay).fill(null);
     for (let day = 1; day <= daysInMonth; day += 1) cells.push(day);
     while (cells.length % 7 !== 0) cells.push(null);
     return cells;
