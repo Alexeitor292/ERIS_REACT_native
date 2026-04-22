@@ -88,6 +88,7 @@ const EMPTY_FORM: FormState = {
   latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
   crack_length_ft: "", crack_horizontal_in: "", crack_vertical_in: "", crack_depth_in: "", settlement_in: "", bulge_in: "",
   failure_rock_fall: "", failure_topple: "", failure_slide: "", failure_spread: "", failure_flow: "", failure_compound: "", failure_erosion: "", failure_surficial_failure: "", failure_scoured_toe: "", failure_washout: "",
+  incident_type_description: "",
   distribution_advancing: "", distribution_retrogressive: "", distribution_enlarging: "", distribution_widening: "", distribution_moving: "", distribution_confined: "",
   material_rock: "", material_soil: "", material_bedding: "", material_joints: "", material_fractures: "",
   est_soil_pct: "", est_clay_pct: "", est_silt_pct: "", est_sand_pct: "", est_gravel_pct: "",
@@ -210,6 +211,23 @@ const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
   failure_scoured_toe: "SCOURED_TOE",
   failure_washout: "WASHOUT",
 };
+const INCIDENT_TYPE_FORM_CODES = new Set(Object.values(INCIDENT_TYPE_CODE_BY_FORM_KEY));
+type IncidentTypeOption = { key?: string; code: string; label: string };
+const INCIDENT_TYPE_OPTIONS: IncidentTypeOption[] = [
+  { key: "failure_rock_fall", code: "ROCK_FALL", label: "Rock Fall" },
+  { key: "failure_topple", code: "TOPPLE", label: "Topple" },
+  { key: "failure_slide", code: "SLIDE", label: "Slide" },
+  { key: "failure_spread", code: "SPREAD", label: "Spread" },
+  { key: "failure_flow", code: "FLOW", label: "Flow" },
+  { key: "failure_compound", code: "COMPOUND", label: "Compound" },
+  { key: "failure_erosion", code: "EROSION", label: "Erosion" },
+  { key: "failure_surficial_failure", code: "SURFICIAL_SLOUGHING", label: "Surficial Sloughing" },
+  { key: "failure_scoured_toe", code: "SCOURED_TOE", label: "Scoured Toe" },
+  { key: "failure_washout", code: "WASHOUT", label: "Washout" },
+  { code: "SINK_HOLE", label: "Sink Hole" },
+  { code: "DEPRESSION", label: "Depression" },
+  { code: "HEAVING", label: "Heaving" },
+] as const;
 
 function isLikelyOfflineError(message: string): boolean {
   const m = String(message || "");
@@ -346,9 +364,8 @@ function enforceFormBusinessRules(input: FormState): FormState {
     "failure_scoured_toe",
     "failure_washout",
   ] as const;
-  const selectedIncident = incidentKeys.find((k) => next[k] === "YES");
   incidentKeys.forEach((k) => {
-    next[k] = k === selectedIncident ? "YES" : "NO";
+    next[k] = next[k] === "YES" ? "YES" : "NO";
   });
 
   const materialPrimary = next.material_rock === "YES" ? "material_rock" : next.material_soil === "YES" ? "material_soil" : null;
@@ -673,6 +690,7 @@ export default function SubmissionDetailScreen() {
   const [selectedSectionKey, setSelectedSectionKey] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
   const [enrichmentHint, setEnrichmentHint] = useState("");
+  const [showLocationCoordinates, setShowLocationCoordinates] = useState(false);
   const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
   const [countyPickerOpen, setCountyPickerOpen] = useState(false);
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
@@ -881,13 +899,19 @@ export default function SubmissionDetailScreen() {
       const loadedDistrictContacts = parseDistrictContacts(g.district_contact ?? "");
       const countyCode = countyCodeFromNameOrCode(g.county ?? "");
       const districtValue = g.district ? String(g.district).padStart(2, "0") : (districtForCounty(countyCode) ?? "");
+      const loadedIncidentTypeCodes = new Set((subRes.incident_types ?? []).map((x) => String(x)));
+      const incidentYn = (key: string, value: any) =>
+        value === true || value === 1 || value === "1" || loadedIncidentTypeCodes.has(INCIDENT_TYPE_CODE_BY_FORM_KEY[key])
+          ? "YES"
+          : "NO";
       const loadedForm: FormState = {
         ...EMPTY_FORM,
         report_date: g.report_date ?? ymdFromTimestamp(subRes.submission.created_at), district: districtValue, county: countyCode ?? "", route: normalizeRouteInput(g.route), post_mile: normalizePostMileInput(g.post_mile), ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
         latitude: formatCoordinate(g.latitude), longitude: formatCoordinate(g.longitude),
         distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "", open_highway_traffic_lanes_count: g.open_highway_traffic_lanes_count != null ? String(g.open_highway_traffic_lanes_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
-        failure_rock_fall: boolToYn(g.failure_rock_fall), failure_topple: boolToYn(g.failure_topple), failure_slide: boolToYn(g.failure_slide), failure_spread: boolToYn(g.failure_spread), failure_flow: boolToYn(g.failure_flow), failure_compound: boolToYn(g.failure_compound), failure_erosion: boolToYn(g.failure_erosion), failure_surficial_failure: boolToYn(g.failure_surficial_failure), failure_scoured_toe: boolToYn(g.failure_scoured_toe), failure_washout: boolToYn(g.failure_washout),
+        failure_rock_fall: incidentYn("failure_rock_fall", g.failure_rock_fall), failure_topple: incidentYn("failure_topple", g.failure_topple), failure_slide: incidentYn("failure_slide", g.failure_slide), failure_spread: incidentYn("failure_spread", g.failure_spread), failure_flow: incidentYn("failure_flow", g.failure_flow), failure_compound: incidentYn("failure_compound", g.failure_compound), failure_erosion: incidentYn("failure_erosion", g.failure_erosion), failure_surficial_failure: incidentYn("failure_surficial_failure", g.failure_surficial_failure), failure_scoured_toe: incidentYn("failure_scoured_toe", g.failure_scoured_toe), failure_washout: incidentYn("failure_washout", g.failure_washout),
+        incident_type_description: g.incident_type_description ?? "",
         distribution_advancing: boolToYn(g.distribution_advancing), distribution_retrogressive: boolToYn(g.distribution_retrogressive), distribution_enlarging: boolToYn(g.distribution_enlarging), distribution_widening: boolToYn(g.distribution_widening), distribution_moving: boolToYn(g.distribution_moving), distribution_confined: boolToYn(g.distribution_confined),
         material_rock: boolToYn(g.material_rock), material_soil: boolToYn(g.material_soil), material_bedding: boolToYn(g.material_bedding), material_joints: boolToYn(g.material_joints), material_fractures: boolToYn(g.material_fractures),
         est_soil_pct: g.est_soil_pct != null ? String(g.est_soil_pct) : "", est_clay_pct: g.est_clay_pct != null ? String(g.est_clay_pct) : "", est_silt_pct: g.est_silt_pct != null ? String(g.est_silt_pct) : "", est_sand_pct: g.est_sand_pct != null ? String(g.est_sand_pct) : "", est_gravel_pct: g.est_gravel_pct != null ? String(g.est_gravel_pct) : "",
@@ -903,7 +927,7 @@ export default function SubmissionDetailScreen() {
       const loadedState: DraftEditorState = {
         form: normalizedLoadedForm,
         districtContacts: loadedDistrictContacts,
-        incidentTypes: incidentTypesFromFormState(normalizedLoadedForm),
+        incidentTypes: Array.from(new Set([...(subRes.incident_types ?? []).map((x) => String(x)), ...incidentTypesFromFormState(normalizedLoadedForm)])),
         immediateActions: subRes.actions?.immediate ?? [],
         followUpActions: subRes.actions?.follow_up ?? [],
       };
@@ -1293,7 +1317,7 @@ export default function SubmissionDetailScreen() {
       latitude: normalizeCoordinateValue(f(normalizedForm.latitude, "Latitude")), longitude: normalizeCoordinateValue(f(normalizedForm.longitude, "Longitude")),
       distribution_code: n(normalizedForm.distribution_code), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
       pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
-      failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout),
+      failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout), incident_type_description: n(normalizedForm.incident_type_description),
       distribution_advancing: ynToBool(normalizedForm.distribution_advancing), distribution_retrogressive: ynToBool(normalizedForm.distribution_retrogressive), distribution_enlarging: ynToBool(normalizedForm.distribution_enlarging), distribution_widening: ynToBool(normalizedForm.distribution_widening), distribution_moving: ynToBool(normalizedForm.distribution_moving), distribution_confined: ynToBool(normalizedForm.distribution_confined),
       material_rock: ynToBool(normalizedForm.material_rock), material_soil: ynToBool(normalizedForm.material_soil), material_bedding: ynToBool(normalizedForm.material_bedding), material_joints: ynToBool(normalizedForm.material_joints), material_fractures: ynToBool(normalizedForm.material_fractures),
       est_soil_pct: f(normalizedForm.est_soil_pct, "Estimated soil %"), est_clay_pct: f(normalizedForm.est_clay_pct, "Estimated clay %"), est_silt_pct: f(normalizedForm.est_silt_pct, "Estimated silt %"), est_sand_pct: f(normalizedForm.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(normalizedForm.est_gravel_pct, "Estimated gravel %"),
@@ -1305,7 +1329,10 @@ export default function SubmissionDetailScreen() {
       record_of_event_notes: n(normalizedForm.record_of_event_notes), maintenance_history_notes: n(normalizedForm.maintenance_history_notes), geotechnical_assessment_notes: n(normalizedForm.geotechnical_assessment_notes), recommendations_notes: n(normalizedForm.recommendations_notes), sketchpad_notes: n(normalizedForm.sketchpad_notes),
       observations_notes: n(normalizedForm.observations_notes), geometry_json: geometry,
     };
-    const incidentItems = incidentTypesFromFormState(normalizedForm);
+    const incidentItems = Array.from(new Set([
+      ...incidentTypesFromFormState(normalizedForm),
+      ...incidentTypes.filter((code) => !INCIDENT_TYPE_FORM_CODES.has(code)),
+    ]));
     if (isLocalId) {
       try {
         await saveLocalDraft(id, {
@@ -1961,6 +1988,34 @@ export default function SubmissionDetailScreen() {
     });
   }, [draftEntryStatus, form.latitude, form.longitude, id]);
 
+  const openLocationInGoogleMaps = useCallback(async () => {
+    const lat = normalizeCoordinateValue(form.latitude);
+    const lon = normalizeCoordinateValue(form.longitude);
+    if (lat == null || lon == null) {
+      Alert.alert("Location required", "Enter a valid latitude and longitude before opening Google Maps.");
+      return;
+    }
+
+    const coordinatePair = `${lat},${lon}`;
+    const query = encodeURIComponent(coordinatePair);
+    const url = `https://www.google.com/maps/place/${query}/@${coordinatePair},17z`;
+    try {
+      await Linking.openURL(url);
+    } catch (err: any) {
+      Alert.alert("Google Maps failed", String(err?.message ?? err ?? "Unable to open Google Maps."));
+    }
+  }, [form.latitude, form.longitude]);
+
+  useEffect(() => {
+    setShowLocationCoordinates(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (fieldErrors.latitude || fieldErrors.longitude) {
+      setShowLocationCoordinates(true);
+    }
+  }, [fieldErrors.latitude, fieldErrors.longitude]);
+
   if (!token || loading || !data || !lookups || !me) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
   const roles = new Set(me.roles || []);
   const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && !!data.submission.can_edit;
@@ -1994,18 +2049,17 @@ export default function SubmissionDetailScreen() {
     : "";
   const canNotifyCoordinatorNow = canEdit && !isLocalId && immediateActions.length > 0;
 
-  const selectSingleIncidentType = (key: string) => {
+  const toggleIncidentType = (option: IncidentTypeOption) => {
     if (!canEdit) return;
-    const nextVal = form[key] === "YES" ? "NO" : "YES";
-    setForm((prev) => {
-      const next = { ...prev };
-      Object.keys(INCIDENT_TYPE_CODE_BY_FORM_KEY).forEach((k) => {
-        next[k] = k === key ? nextVal : "NO";
-      });
-      return next;
+    const active = incidentTypes.includes(option.code) || (!!option.key && form[option.key] === "YES");
+    const selecting = !active;
+    setIncidentTypes((prev) => {
+      const without = prev.filter((code) => code !== option.code);
+      return selecting ? [...without, option.code] : without;
     });
-    const nextCode = INCIDENT_TYPE_CODE_BY_FORM_KEY[key];
-    setIncidentTypes(nextVal === "YES" && nextCode ? [nextCode] : []);
+    if (option.key) {
+      setForm((prev) => ({ ...prev, [option.key as string]: selecting ? "YES" : "NO" }));
+    }
   };
 
   const selectMaterialPrimary = (key: "material_rock" | "material_soil") => {
@@ -2408,8 +2462,34 @@ export default function SubmissionDetailScreen() {
             <Text style={[styles.muted, { color: palette.muted }]}>{enrichmentHint}</Text>
           ) : null}
         </Pressable>
-        <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} onBlur={() => setVal("latitude", formatCoordinate(form.latitude))} error={fieldErrors.latitude} />
-        <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} onBlur={() => setVal("longitude", formatCoordinate(form.longitude))} error={fieldErrors.longitude} />
+        <View style={styles.locationActionRow}>
+          <Pressable
+            style={[styles.btnGhost, styles.locationActionButton, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            onPress={openLocationInGoogleMaps}
+            disabled={busy}
+          >
+            <Text style={[styles.btnGhostText, { color: palette.text }]}>Open in Google Maps</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.btnGhost, styles.locationActionButton, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            onPress={() => setShowLocationCoordinates((prev) => !prev)}
+            disabled={busy}
+          >
+            <Text style={[styles.btnGhostText, { color: palette.text }]}>
+              {showLocationCoordinates ? "Hide Lat/Lon" : "Show Lat/Lon"}
+            </Text>
+          </Pressable>
+        </View>
+        {showLocationCoordinates ? (
+          <View style={styles.locationCoordinateRow}>
+            <View style={styles.locationCoordinateField}>
+              <Field palette={palette} label="Latitude *" value={form.latitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("latitude", v)} onBlur={() => setVal("latitude", formatCoordinate(form.latitude))} error={fieldErrors.latitude} />
+            </View>
+            <View style={styles.locationCoordinateField}>
+              <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} onBlur={() => setVal("longitude", formatCoordinate(form.longitude))} error={fieldErrors.longitude} />
+            </View>
+          </View>
+        ) : null}
       </CollapsibleSection>
         <View style={styles.stepNavRow}>
           <View style={styles.stepNavSpacer} />
@@ -2481,20 +2561,25 @@ export default function SubmissionDetailScreen() {
 
         <DropdownBlock title="Incident Type" open={openPaperBlocks.incidentType} onToggle={() => togglePaperBlock("incidentType")} palette={palette}>
           <View style={styles.chips}>
-            {[
-              ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
-              ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surfacial Sloughing"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
-            ].map(([key, label]) => (
+            {INCIDENT_TYPE_OPTIONS.map((option) => (
               <Chip
-                key={key}
-                label={label}
+                key={option.code}
+                label={option.label}
                 palette={palette}
-                active={form[key] === "YES"}
+                active={incidentTypes.includes(option.code) || (!!option.key && form[option.key] === "YES")}
                 disabled={!canEdit}
-                onPress={() => selectSingleIncidentType(key)}
+                onPress={() => toggleIncidentType(option)}
               />
             ))}
           </View>
+          <Field
+            palette={palette}
+            label="Incident Type Description"
+            value={form.incident_type_description}
+            editable={canEdit}
+            multiline
+            onChangeText={(v) => setVal("incident_type_description", v)}
+          />
           {renderTaggedSectionMedia("incident_type")}
         </DropdownBlock>
 
@@ -2976,7 +3061,7 @@ export default function SubmissionDetailScreen() {
         <Pressable style={[styles.pickerSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.pickerTitle, { color: palette.text }]}>Lane(s) Closed Count</Text>
           <ScrollView style={{ maxHeight: 340 }}>
-            {Array.from({ length: 12 }, (_, idx) => String(idx + 1)).map((count) => (
+            {Array.from({ length: 4 }, (_, idx) => String(idx + 1)).map((count) => (
               <Pressable
                 key={count}
                 style={[styles.pickerItem, form.lanes_closed_count === count ? { backgroundColor: palette.panelSoft } : null]}
@@ -3237,6 +3322,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#dbe7f8",
     marginTop: 4,
     marginBottom: 4,
+  },
+  locationCoordinateRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  locationCoordinateField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  locationActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  locationActionButton: {
+    flex: 1,
+    minWidth: 150,
+    marginTop: 0,
   },
   muted: { color: "#6f809d" },
   photoPreviewCompact: { width: "100%", height: 160, borderRadius: 8, backgroundColor: "#e5e7eb" },

@@ -74,6 +74,7 @@ class GisaDraftPatch(BaseModel):
     failure_surficial_failure: bool | None = None
     failure_scoured_toe: bool | None = None
     failure_washout: bool | None = None
+    incident_type_description: str | None = None
     distribution_advancing: bool | None = None
     distribution_retrogressive: bool | None = None
     distribution_enlarging: bool | None = None

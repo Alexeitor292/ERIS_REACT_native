@@ -26,6 +26,9 @@ GISA_INCIDENT_TYPE_LUT = [
     {"code": "SURFICIAL_SLOUGHING", "label": "Surficial Sloughing", "sort_order": 80},
     {"code": "SCOURED_TOE", "label": "Scoured Toe", "sort_order": 90},
     {"code": "WASHOUT", "label": "Washout", "sort_order": 100},
+    {"code": "SINK_HOLE", "label": "Sink Hole", "sort_order": 110},
+    {"code": "DEPRESSION", "label": "Depression", "sort_order": 120},
+    {"code": "HEAVING", "label": "Heaving", "sort_order": 130},
 ]
 
 GISA_ACTION_LUT = [

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import { router, useLocalSearchParams, usePathname } from "expo-router";
 
 import { getToken } from "@/src/auth/tokenStore";
@@ -15,12 +17,14 @@ import {
   resolveIncident,
   assignIncident,
   unassignIncident,
+  uploadIncidentAttachment,
   forwardIncidentByCoordinator,
   getIncidentLocationCandidates,
   getIncidentLocationTimeline,
   linkIncidentLocation,
   requestIncidentRevisionByCoordinator,
   type Incident,
+  type IncidentAttachmentKind,
   type IncidentLocationCandidate,
   type IncidentLocationTimeline,
   type IncidentStatus,
@@ -44,6 +48,51 @@ type AdminUser = {
   is_active: boolean;
   roles: string[];
 };
+
+type PendingIncidentUpload = {
+  uri: string;
+  name: string;
+  type: string;
+  kind: IncidentAttachmentKind;
+  size?: number | null;
+};
+
+const isIosPhotosAccessError = (msg: string) =>
+  /PHPhotosErrorDomain|error 3164/i.test(msg);
+
+function inferIncidentAttachmentKind(name: string, mimeType: string): IncidentAttachmentKind {
+  const mime = (mimeType || "").toLowerCase();
+  if (mime === "image/png" && /sketch/i.test(name)) return "SKETCH";
+  if (mime.startsWith("image/")) return "PHOTO";
+  if (mime.startsWith("video/")) return "VIDEO";
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "png" && /sketch/i.test(name)) return "SKETCH";
+  if (["jpg", "jpeg", "png", "heic", "heif", "gif", "webp"].includes(ext)) return "PHOTO";
+  if (["mp4", "mov", "m4v", "avi", "mkv", "webm"].includes(ext)) return "VIDEO";
+  return "DOC";
+}
+
+function guessMimeType(name: string, fallback?: string | null): string {
+  if (fallback) return fallback;
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "heic") return "image/heic";
+  if (ext === "heif") return "image/heif";
+  if (ext === "gif") return "image/gif";
+  if (ext === "webp") return "image/webp";
+  if (ext === "mp4") return "video/mp4";
+  if (ext === "mov") return "video/quicktime";
+  if (ext === "pdf") return "application/pdf";
+  return "application/octet-stream";
+}
+
+function formatFileSize(bytes?: number | null): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function SelectField({
   label,
@@ -303,6 +352,7 @@ export default function IncidentsTabScreen() {
   const [county, setCounty] = useState("");
   const [routeValue, setRouteValue] = useState("");
   const [postMile, setPostMile] = useState("");
+  const [pendingIncidentFiles, setPendingIncidentFiles] = useState<PendingIncidentUpload[]>([]);
   const [editingIncidentId, setEditingIncidentId] = useState<number | null>(null);
   const [editingLocked, setEditingLocked] = useState(false);
   const [revisionEditableFields, setRevisionEditableFields] = useState<string[] | null>(null);
@@ -540,6 +590,7 @@ export default function IncidentsTabScreen() {
     setCounty("");
     setRouteValue("");
     setPostMile("");
+    setPendingIncidentFiles([]);
     setEditingIncidentId(null);
     setEditingLocked(false);
     setRevisionEditableFields(null);
@@ -565,6 +616,114 @@ export default function IncidentsTabScreen() {
         },
       ]
     );
+  };
+
+  const addPendingIncidentFiles = (files: PendingIncidentUpload[]) => {
+    if (!files.length) return;
+    setPendingIncidentFiles((prev) => [...prev, ...files]);
+  };
+
+  const removePendingIncidentFile = (index: number) => {
+    setPendingIncidentFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  async function pickIncidentMedia() {
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "Permission required",
+          "Photo library access is required to add photos or videos. Please allow access in Settings."
+        );
+        return;
+      }
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images", "videos"],
+        quality: 0.85,
+        allowsMultipleSelection: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      if (isIosPhotosAccessError(msg)) {
+        Alert.alert(
+          "Photo library error",
+          "iOS could not load that item from Photos. Please try another video, or use Files/imported media if available."
+        );
+        return;
+      }
+      Alert.alert("Picker failed", msg || "Unable to open photo library.");
+      return;
+    }
+
+    if (result.canceled || !result.assets?.length) return;
+    const nextFiles: PendingIncidentUpload[] = result.assets.map((asset) => {
+      const uri = asset.uri;
+      const name = asset.fileName || uri.split("/").pop() || "incident-media.bin";
+      const type = guessMimeType(name, asset.mimeType);
+      return {
+        uri,
+        name,
+        type,
+        kind: inferIncidentAttachmentKind(name, type),
+        size: typeof (asset as any).fileSize === "number" ? (asset as any).fileSize : null,
+      };
+    });
+    addPendingIncidentFiles(nextFiles);
+  }
+
+  async function pickIncidentDocument() {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const nextFiles: PendingIncidentUpload[] = [];
+      for (const asset of result.assets) {
+        const uri = String(asset.uri || "").trim();
+        if (!uri) continue;
+        const name = String(asset.name || uri.split("/").pop() || "incident-file.bin");
+        const type = guessMimeType(name, asset.mimeType);
+        nextFiles.push({
+          uri,
+          name,
+          type,
+          kind: inferIncidentAttachmentKind(name, type),
+          size: typeof asset.size === "number" ? asset.size : null,
+        });
+      }
+      addPendingIncidentFiles(nextFiles);
+    } catch (err: any) {
+      Alert.alert("File picker failed", String(err?.message ?? err ?? "Unable to open file picker."));
+    }
+  }
+
+  function promptIncidentUploadSource() {
+    Alert.alert("Upload Source", "Choose where to pick the file from.", [
+      { text: "Gallery", onPress: () => { pickIncidentMedia().catch(() => {}); } },
+      { text: "Files (PDF/CAD/etc)", onPress: () => { pickIncidentDocument().catch(() => {}); } },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
+  const uploadPendingIncidentFiles = async (authToken: string, incidentId: number) => {
+    const failures: string[] = [];
+    for (const file of pendingIncidentFiles) {
+      try {
+        await uploadIncidentAttachment(
+          authToken,
+          incidentId,
+          { uri: file.uri, name: file.name, type: file.type },
+          { kind: file.kind }
+        );
+      } catch (err: any) {
+        failures.push(`${file.name}: ${String(err?.message ?? err)}`);
+      }
+    }
+    return failures;
   };
 
   const onCreate = async () => {
@@ -603,16 +762,33 @@ export default function IncidentsTabScreen() {
         route: routeValue.trim(),
         post_mile: normalizePostMileValue(postMile) ?? "",
       };
+      const selectedFileCount = pendingIncidentFiles.length;
+      let savedIncidentId = editingIncidentId;
       if (editingIncidentId) {
         await updateIncident(token, editingIncidentId, payload);
       } else {
-        await createIncident(token, payload);
+        const created = await createIncident(token, payload);
+        savedIncidentId = created.incident.id;
       }
+      const uploadFailures = savedIncidentId
+        ? await uploadPendingIncidentFiles(token, savedIncidentId)
+        : [];
       resetCreateForm();
       if (isDetailRoute) {
         router.replace("/(tabs)/incidents/track");
       }
       await load();
+      if (selectedFileCount > 0) {
+        const uploadedCount = selectedFileCount - uploadFailures.length;
+        if (uploadFailures.length) {
+          Alert.alert(
+            "Incident saved",
+            `${uploadedCount} of ${selectedFileCount} files uploaded. ${uploadFailures.slice(0, 2).join("\n")}`
+          );
+        } else {
+          Alert.alert("Files uploaded", `${selectedFileCount} file${selectedFileCount === 1 ? "" : "s"} attached to this incident.`);
+        }
+      }
     } catch (e: any) {
       if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
     } finally {
@@ -1069,6 +1245,48 @@ export default function IncidentsTabScreen() {
                     palette={palette}
                   />
                 </View>
+                {canEditIncidentInForm ? (
+                  <View style={styles.incidentUploadSection}>
+                    <Text style={[styles.labelText, { color: palette.muted }]}>Supporting Files</Text>
+                    <Text style={[styles.uploadHelpText, { color: palette.muted }]}>
+                      Add photos, videos, PDFs, CAD, or other files. They upload after the incident is saved.
+                    </Text>
+                    <View style={styles.uploadActionRow}>
+                      <Pressable
+                        style={[styles.btn, styles.uploadActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+                        onPress={promptIncidentUploadSource}
+                        disabled={busy}
+                      >
+                        <Text style={{ color: palette.text, fontWeight: "700" }}>Add Files</Text>
+                      </Pressable>
+                    </View>
+                    {pendingIncidentFiles.length === 0 ? (
+                      <Text style={[styles.uploadEmptyText, { color: palette.muted }]}>No files selected.</Text>
+                    ) : (
+                      <View style={styles.pendingUploadList}>
+                        {pendingIncidentFiles.map((file, index) => {
+                          const sizeLabel = formatFileSize(file.size);
+                          return (
+                            <View
+                              key={`${file.uri}-${index}`}
+                              style={[styles.pendingUploadRow, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: palette.text, fontWeight: "700" }} numberOfLines={1}>{file.name}</Text>
+                                <Text style={{ color: palette.muted, fontSize: 12 }}>
+                                  {sizeLabel ? `${file.kind} - ${sizeLabel}` : file.kind}
+                                </Text>
+                              </View>
+                              <Pressable onPress={() => removePendingIncidentFile(index)} disabled={busy} hitSlop={8}>
+                                <Text style={{ color: palette.danger, fontWeight: "800" }}>Remove</Text>
+                              </Pressable>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
+                ) : null}
                 <View style={[styles.row2, styles.actionsRow]}>
                   {!isDetailRoute ? (
                     <>
@@ -1753,6 +1971,40 @@ const styles = StyleSheet.create({
   row2: { flexDirection: "row", gap: 8 },
   coordinatesRow: { marginTop: 2 },
   actionsRow: { marginTop: 4 },
+  incidentUploadSection: {
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  uploadHelpText: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 8,
+  },
+  uploadActionRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  uploadActionBtn: {
+    flexGrow: 0,
+    flexBasis: 150,
+  },
+  uploadEmptyText: {
+    fontSize: 12,
+    marginTop: 6,
+  },
+  pendingUploadList: {
+    gap: 6,
+    marginTop: 8,
+  },
+  pendingUploadRow: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   half: { flex: 1 },
   pickerBackdrop: {
     flex: 1,

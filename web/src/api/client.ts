@@ -19,7 +19,8 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   const token = getToken();
 
   const headers = new Headers(init.headers || {});
-  if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (!headers.has("Content-Type") && init.body && !isFormData) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(url, { ...init, headers });

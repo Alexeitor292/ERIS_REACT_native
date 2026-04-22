@@ -383,6 +383,7 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     failure_surficial_failure TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
     failure_scoured_toe TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
     failure_washout TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
+    incident_type_description TEXT NULL,
 
     -- Section F: Distribution movement flags
     distribution_advancing TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',

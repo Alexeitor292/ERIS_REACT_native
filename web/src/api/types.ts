@@ -72,6 +72,7 @@ export type Gisa = {
   settlement_in: number | null;
   bulge_in: number | null;
   indented_by_rocks: boolean | null;
+  incident_type_description: string | null;
   observations_notes: string | null;
   geometry_json: Record<string, unknown> | null;
   updated_by_user_id?: number | null;

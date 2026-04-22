@@ -115,6 +115,7 @@ def startup():
         ensure_incident_runtime_schema(db)
         db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS metadata_json JSON NULL"))
         db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS location_id BIGINT NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS incident_type_description TEXT NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN latitude DECIMAL(10,6) NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN longitude DECIMAL(10,6) NULL"))
         db.commit()
@@ -379,6 +380,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           settlement_in, bulge_in, indented_by_rocks,
           failure_rock_fall, failure_topple, failure_slide, failure_spread, failure_flow,
           failure_compound, failure_erosion, failure_surficial_failure, failure_scoured_toe, failure_washout,
+          incident_type_description,
           distribution_advancing, distribution_retrogressive, distribution_enlarging, distribution_widening, distribution_moving, distribution_confined,
           material_rock, material_soil, material_bedding, material_joints, material_fractures,
           est_soil_pct, est_clay_pct, est_silt_pct, est_sand_pct, est_gravel_pct,
@@ -2100,20 +2102,6 @@ def patch_gisa(
         for k in group:
             provided[k] = (k == keep)
 
-    # Incident Type: exactly one option selected at a time.
-    normalize_single_choice([
-        "failure_rock_fall",
-        "failure_topple",
-        "failure_slide",
-        "failure_spread",
-        "failure_flow",
-        "failure_compound",
-        "failure_erosion",
-        "failure_surficial_failure",
-        "failure_scoured_toe",
-        "failure_washout",
-    ])
-
     # Material: one of Rock/Soil; and if Rock then one of Bedding/Joints/Fractures.
     if any(k in provided for k in ["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures"]):
         normalize_single_choice(["material_rock", "material_soil"])
@@ -2213,10 +2201,7 @@ def replace_incident_types(
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
         raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
-    # Business rule: Incident Type is single-select.
     items = list(dict.fromkeys(payload.items))
-    if len(items) > 1:
-        raise HTTPException(status_code=400, detail="Incident Type allows only one selection")
 
     validate_incident_type_codes(items)
     try:

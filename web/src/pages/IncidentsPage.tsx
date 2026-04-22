@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
@@ -35,6 +35,32 @@ const EMPTY_FORM: IncidentCreateForm = {
   post_mile: "",
 };
 
+type IncidentAttachmentKind = "PHOTO" | "VIDEO" | "DOC" | "SKETCH";
+
+type PendingIncidentUpload = {
+  file: File;
+  kind: IncidentAttachmentKind;
+};
+
+function inferIncidentAttachmentKind(name: string, mimeType: string): IncidentAttachmentKind {
+  const mime = (mimeType || "").toLowerCase();
+  if (mime === "image/png" && /sketch/i.test(name)) return "SKETCH";
+  if (mime.startsWith("image/")) return "PHOTO";
+  if (mime.startsWith("video/")) return "VIDEO";
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "png" && /sketch/i.test(name)) return "SKETCH";
+  if (["jpg", "jpeg", "png", "heic", "heif", "gif", "webp"].includes(ext)) return "PHOTO";
+  if (["mp4", "mov", "m4v", "avi", "mkv", "webm"].includes(ext)) return "VIDEO";
+  return "DOC";
+}
+
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function statusBadgeClass(status: IncidentStatus) {
   if (status === "NEW") return "border-red-500/40 bg-red-500/15 text-red-300";
   if (status === "IN_PROGRESS") return "border-amber-500/50 bg-amber-500/15 text-amber-300";
@@ -44,6 +70,7 @@ function statusBadgeClass(status: IncidentStatus) {
 export default function IncidentsPage() {
   const { me } = useAuth();
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isAdmin = !!me?.roles?.includes("ADMIN");
 
   const [items, setItems] = useState<Incident[]>([]);
@@ -53,7 +80,9 @@ export default function IncidentsPage() {
   const [unclaimedOnly, setUnclaimedOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState<IncidentCreateForm>(EMPTY_FORM);
+  const [pendingFiles, setPendingFiles] = useState<PendingIncidentUpload[]>([]);
 
   async function load() {
     setBusy(true);
@@ -87,7 +116,46 @@ export default function IncidentsPage() {
     [users]
   );
 
+  function addPendingFiles(files: FileList | null) {
+    if (!files?.length) return;
+    const next = Array.from(files).map((file) => ({
+      file,
+      kind: inferIncidentAttachmentKind(file.name, file.type),
+    }));
+    setPendingFiles((prev) => [...prev, ...next]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removePendingFile(index: number) {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function resetCreateIncidentForm() {
+    setForm(EMPTY_FORM);
+    setPendingFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function uploadPendingIncidentFiles(incidentId: number) {
+    const failures: string[] = [];
+    for (const pending of pendingFiles) {
+      const formData = new FormData();
+      formData.append("file", pending.file, pending.file.name);
+      const query = new URLSearchParams({ kind: pending.kind }).toString();
+      try {
+        await api(`/incidents/${incidentId}/attachments?${query}`, {
+          method: "POST",
+          body: formData,
+        });
+      } catch (e: any) {
+        failures.push(`${pending.file.name}: ${e?.message ?? "Upload failed"}`);
+      }
+    }
+    return failures;
+  }
+
   async function createIncident() {
+    setNotice(null);
     if (!form.title.trim()) {
       setError("Incident title is required.");
       return;
@@ -106,7 +174,8 @@ export default function IncidentsPage() {
     setBusy(true);
     setError(null);
     try {
-      await api("/incidents", {
+      const selectedFileCount = pendingFiles.length;
+      const created = await api<{ incident: Incident }>("/incidents", {
         method: "POST",
         body: JSON.stringify({
           title: form.title.trim(),
@@ -122,8 +191,19 @@ export default function IncidentsPage() {
           post_mile: normalizePostMileValue(form.post_mile),
         }),
       });
-      setForm(EMPTY_FORM);
+      const uploadFailures = await uploadPendingIncidentFiles(created.incident.id);
+      resetCreateIncidentForm();
       await load();
+      if (selectedFileCount > 0) {
+        const uploadedCount = selectedFileCount - uploadFailures.length;
+        setNotice(
+          uploadFailures.length
+            ? `Incident created. ${uploadedCount} of ${selectedFileCount} files uploaded. ${uploadFailures.slice(0, 2).join(" ")}`
+            : `Incident created with ${selectedFileCount} attached file${selectedFileCount === 1 ? "" : "s"}.`
+        );
+      } else {
+        setNotice("Incident created.");
+      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to create incident.");
     } finally {
@@ -260,6 +340,48 @@ export default function IncidentsPage() {
             onChange={(e) => setForm((prev) => ({ ...prev, post_mile: e.target.value }))}
             onBlur={() => setForm((prev) => ({ ...prev, post_mile: normalizePostMileInput(prev.post_mile) }))}
           />
+          <div className="grid gap-2 md:col-span-3">
+            <label className="text-xs font-semibold uppercase text-muted">Supporting Files</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              disabled={busy}
+              onChange={(e) => addPendingFiles(e.currentTarget.files)}
+              className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-[var(--panel-soft)] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[var(--ink)]"
+            />
+            <div className="text-xs text-muted">
+              Add photos, videos, PDFs, CAD, or other supporting files. They upload after the incident is created.
+            </div>
+            {pendingFiles.length > 0 ? (
+              <div className="grid gap-1.5">
+                {pendingFiles.map((pending, index) => {
+                  const sizeLabel = formatFileSize(pending.file.size);
+                  return (
+                    <div
+                      key={`${pending.file.name}-${pending.file.lastModified}-${index}`}
+                      className="flex items-center justify-between gap-3 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold">{pending.file.name}</div>
+                        <div className="text-xs text-muted">
+                          {sizeLabel ? `${pending.kind} - ${sizeLabel}` : pending.kind}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removePendingFile(index)}
+                        disabled={busy}
+                        className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs hover:brightness-95 disabled:opacity-60"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
           <button
             onClick={createIncident}
             disabled={busy}
@@ -294,6 +416,10 @@ export default function IncidentsPage() {
 
         {error ? (
           <div className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>
+        ) : null}
+
+        {notice ? (
+          <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{notice}</div>
         ) : null}
 
         <div className="flex-1 overflow-auto rounded-xl border border-[var(--line)] bg-[var(--panel)]">

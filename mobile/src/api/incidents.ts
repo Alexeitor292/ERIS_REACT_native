@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
 
 export type IncidentStatus = "NEW" | "IN_PROGRESS" | "RESOLVED";
 export type IncidentStage =
@@ -135,6 +136,8 @@ export type IncidentLocationLinkPayload = {
   comment?: string | null;
 };
 
+export type IncidentAttachmentKind = "PHOTO" | "VIDEO" | "DOC" | "SKETCH";
+
 export async function listIncidents(
   token: string,
   opts: { status?: IncidentStatus; unclaimedOnly?: boolean; limit?: number; scope?: "mobile" | "all" } = {}
@@ -158,6 +161,38 @@ export async function createIncident(token: string, payload: IncidentCreatePaylo
     token,
     body: payload,
   });
+}
+
+export async function uploadIncidentAttachment(
+  token: string,
+  incidentId: number | string,
+  file: { uri: string; name: string; type: string },
+  opts?: { kind?: IncidentAttachmentKind }
+) {
+  const params = new URLSearchParams();
+  if (opts?.kind) params.set("kind", opts.kind);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const baseCandidates = [getApiBaseUrl(), ...getApiBaseCandidates()]
+    .map((u) => u.replace(/\/+$/, ""))
+    .filter((u, idx, arr) => arr.indexOf(u) === idx);
+
+  let lastError = "Network request failed";
+  for (const base of baseCandidates) {
+    const formData = new FormData();
+    formData.append("file", file as any);
+    try {
+      const response = await fetch(`${base}/incidents/${incidentId}/attachments${suffix}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (response.ok) return response.json();
+      lastError = `${response.status} ${await response.text().catch(() => "")}`;
+    } catch (err: any) {
+      lastError = String(err?.message ?? err);
+    }
+  }
+  throw new Error(`Could not reach incident upload endpoint. Last error: ${lastError}.`);
 }
 
 export async function updateIncident(token: string, incidentId: number, payload: IncidentCreatePayload) {

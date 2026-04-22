@@ -75,6 +75,7 @@ const EMPTY: Draft = {
   record_of_event_notes: "", maintenance_history_notes: "", geotechnical_assessment_notes: "", recommendations_notes: "", sketchpad_notes: "",
   observations_notes: "", geometry_json: "", pavement_ground_cracks: "UNKNOWN", indented_by_rocks: "UNKNOWN",
   failure_rock_fall: "UNKNOWN", failure_topple: "UNKNOWN", failure_slide: "UNKNOWN", failure_spread: "UNKNOWN", failure_flow: "UNKNOWN", failure_compound: "UNKNOWN", failure_erosion: "UNKNOWN", failure_surficial_failure: "UNKNOWN", failure_scoured_toe: "UNKNOWN", failure_washout: "UNKNOWN",
+  incident_type_description: "",
   distribution_advancing: "UNKNOWN", distribution_retrogressive: "UNKNOWN", distribution_enlarging: "UNKNOWN", distribution_widening: "UNKNOWN", distribution_moving: "UNKNOWN", distribution_confined: "UNKNOWN",
   material_rock: "UNKNOWN", material_soil: "UNKNOWN", material_bedding: "UNKNOWN", material_joints: "UNKNOWN", material_fractures: "UNKNOWN",
   water_dry: "UNKNOWN", water_moist: "UNKNOWN", water_wet: "UNKNOWN", water_flowing: "UNKNOWN", water_seep: "UNKNOWN", water_spring: "UNKNOWN",
@@ -103,7 +104,7 @@ const DISTRIBUTION_ICON_SRC: Record<string, string> = {
   MOVING: "/distribution-icons/moving.png",
   CONFINED: "/distribution-icons/confined.png",
 };
-const LANES_CLOSED_OPTIONS = Array.from({ length: 12 }, (_, idx) => String(idx + 1));
+const LANES_CLOSED_OPTIONS = Array.from({ length: 4 }, (_, idx) => String(idx + 1));
 const DASHBOARD_LAYOUT_KEY = "eris_submission_layout_v1";
 const DASHBOARD_LAYOUT_PROFILES_KEY = "eris_submission_layout_profiles_v1";
 const DASHBOARD_DEFAULT_ORDER = [
@@ -184,6 +185,23 @@ const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
   failure_scoured_toe: "SCOURED_TOE",
   failure_washout: "WASHOUT",
 };
+const INCIDENT_TYPE_FORM_CODES = new Set(Object.values(INCIDENT_TYPE_CODE_BY_FORM_KEY));
+type IncidentTypeOption = { key?: string; code: string; label: string };
+const INCIDENT_TYPE_OPTIONS: IncidentTypeOption[] = [
+  { key: "failure_rock_fall", code: "ROCK_FALL", label: "Rock Fall" },
+  { key: "failure_topple", code: "TOPPLE", label: "Topple" },
+  { key: "failure_slide", code: "SLIDE", label: "Slide" },
+  { key: "failure_spread", code: "SPREAD", label: "Spread" },
+  { key: "failure_flow", code: "FLOW", label: "Flow" },
+  { key: "failure_compound", code: "COMPOUND", label: "Compound" },
+  { key: "failure_erosion", code: "EROSION", label: "Erosion" },
+  { key: "failure_surficial_failure", code: "SURFICIAL_SLOUGHING", label: "Surficial Sloughing" },
+  { key: "failure_scoured_toe", code: "SCOURED_TOE", label: "Scoured Toe" },
+  { key: "failure_washout", code: "WASHOUT", label: "Washout" },
+  { code: "SINK_HOLE", label: "Sink Hole" },
+  { code: "DEPRESSION", label: "Depression" },
+  { code: "HEAVING", label: "Heaving" },
+];
 
 function S({ s }: { s: string }) {
   const c = s === "APPROVED" ? "bg-[color:color-mix(in_oklab,var(--good)_16%,transparent)] text-[var(--good)] border-[color:color-mix(in_oklab,var(--good)_48%,transparent)]" : s === "REJECTED" ? "bg-[color:color-mix(in_oklab,var(--bad)_16%,transparent)] text-[var(--bad)] border-[color:color-mix(in_oklab,var(--bad)_48%,transparent)]" : s === "SUBMITTED" ? "bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)] border-[color:color-mix(in_oklab,var(--brand)_48%,transparent)]" : "bg-[var(--panel-soft)] text-[var(--ink)] border-[var(--line)]";
@@ -516,6 +534,11 @@ export default function SubmissionDetailPage() {
       const gisa: any = d.gisa || {};
       const districtContactText = districtContactRaw(gisa.district_contact);
       const loadedDistrictContacts = parseDistrictContacts(districtContactText);
+      const loadedIncidentTypeCodes = new Set((d.incident_types ?? []).map((x) => String(x)));
+      const incidentTri = (key: string, value: unknown): Tri =>
+        value === true || value === 1 || value === "1" || loadedIncidentTypeCodes.has(INCIDENT_TYPE_CODE_BY_FORM_KEY[key])
+          ? "YES"
+          : "NO";
       setDraft({
         ...EMPTY,
         report_date: t(gisa.report_date),
@@ -529,7 +552,8 @@ export default function SubmissionDetailPage() {
         district_contact: districtContactText,
         latitude: formatCoordinate(gisa.latitude), longitude: formatCoordinate(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
         pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
-        failure_rock_fall: boolToTri(gisa.failure_rock_fall), failure_topple: boolToTri(gisa.failure_topple), failure_slide: boolToTri(gisa.failure_slide), failure_spread: boolToTri(gisa.failure_spread), failure_flow: boolToTri(gisa.failure_flow), failure_compound: boolToTri(gisa.failure_compound), failure_erosion: boolToTri(gisa.failure_erosion), failure_surficial_failure: boolToTri(gisa.failure_surficial_failure), failure_scoured_toe: boolToTri(gisa.failure_scoured_toe), failure_washout: boolToTri(gisa.failure_washout),
+        failure_rock_fall: incidentTri("failure_rock_fall", gisa.failure_rock_fall), failure_topple: incidentTri("failure_topple", gisa.failure_topple), failure_slide: incidentTri("failure_slide", gisa.failure_slide), failure_spread: incidentTri("failure_spread", gisa.failure_spread), failure_flow: incidentTri("failure_flow", gisa.failure_flow), failure_compound: incidentTri("failure_compound", gisa.failure_compound), failure_erosion: incidentTri("failure_erosion", gisa.failure_erosion), failure_surficial_failure: incidentTri("failure_surficial_failure", gisa.failure_surficial_failure), failure_scoured_toe: incidentTri("failure_scoured_toe", gisa.failure_scoured_toe), failure_washout: incidentTri("failure_washout", gisa.failure_washout),
+        incident_type_description: t(gisa.incident_type_description),
         distribution_advancing: boolToTri(gisa.distribution_advancing), distribution_retrogressive: boolToTri(gisa.distribution_retrogressive), distribution_enlarging: boolToTri(gisa.distribution_enlarging), distribution_widening: boolToTri(gisa.distribution_widening), distribution_moving: boolToTri(gisa.distribution_moving), distribution_confined: boolToTri(gisa.distribution_confined),
         material_rock: boolToTri(gisa.material_rock), material_soil: boolToTri(gisa.material_soil), material_bedding: boolToTri(gisa.material_bedding), material_joints: boolToTri(gisa.material_joints), material_fractures: boolToTri(gisa.material_fractures),
         est_soil_pct: t(gisa.est_soil_pct), est_clay_pct: t(gisa.est_clay_pct), est_silt_pct: t(gisa.est_silt_pct), est_sand_pct: t(gisa.est_sand_pct), est_gravel_pct: t(gisa.est_gravel_pct),
@@ -569,11 +593,17 @@ export default function SubmissionDetailPage() {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Geometry JSON must be object");
       geometry = parsed as Record<string, unknown>;
     }
+    const incidentItems = Array.from(new Set([
+      ...Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
+        .filter(([key]) => draft[key] === "YES")
+        .map(([, code]) => code),
+      ...inc.filter((code) => !INCIDENT_TYPE_FORM_CODES.has(code)),
+    ]));
     await api(`/submissions/${sid}/gisa`, { method: "PATCH", body: JSON.stringify({
       report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: normalizeRouteValue(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
       latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
       pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), crack_length_ft: nf(draft.crack_length_ft, "Crack length"), crack_horizontal_in: nf(draft.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: nf(draft.crack_vertical_in, "Crack vertical"), crack_depth_in: nf(draft.crack_depth_in, "Crack depth"), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
-      failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout),
+      failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout), incident_type_description: nt(draft.incident_type_description),
       distribution_advancing: triToBool(draft.distribution_advancing), distribution_retrogressive: triToBool(draft.distribution_retrogressive), distribution_enlarging: triToBool(draft.distribution_enlarging), distribution_widening: triToBool(draft.distribution_widening), distribution_moving: triToBool(draft.distribution_moving), distribution_confined: triToBool(draft.distribution_confined),
       material_rock: triToBool(draft.material_rock), material_soil: triToBool(draft.material_soil), material_bedding: triToBool(draft.material_bedding), material_joints: triToBool(draft.material_joints), material_fractures: triToBool(draft.material_fractures),
       est_soil_pct: nf(draft.est_soil_pct, "Estimated soil %"), est_clay_pct: nf(draft.est_clay_pct, "Estimated clay %"), est_silt_pct: nf(draft.est_silt_pct, "Estimated silt %"), est_sand_pct: nf(draft.est_sand_pct, "Estimated sand %"), est_gravel_pct: nf(draft.est_gravel_pct, "Estimated gravel %"),
@@ -585,7 +615,7 @@ export default function SubmissionDetailPage() {
       record_of_event_notes: nt(draft.record_of_event_notes), maintenance_history_notes: nt(draft.maintenance_history_notes), geotechnical_assessment_notes: nt(draft.geotechnical_assessment_notes), recommendations_notes: nt(draft.recommendations_notes), sketchpad_notes: nt(draft.sketchpad_notes),
       observations_notes: nt(draft.observations_notes), geometry_json: geometry,
     })});
-    await api(`/submissions/${sid}/gisa/incident-types`, { method: "PUT", body: JSON.stringify({ items: inc }) });
+    await api(`/submissions/${sid}/gisa/incident-types`, { method: "PUT", body: JSON.stringify({ items: incidentItems }) });
     await api(`/submissions/${sid}/gisa/actions`, { method: "PUT", body: JSON.stringify({ immediate: imm, follow_up: fol }) });
   }
 
@@ -749,7 +779,6 @@ export default function SubmissionDetailPage() {
   const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
   const chip = "rounded-full border px-2.5 py-1 text-xs";
   const ynChip = (active: boolean) => (active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]");
-  const failureKeys = ["failure_rock_fall", "failure_topple", "failure_slide", "failure_spread", "failure_flow", "failure_compound", "failure_erosion", "failure_surficial_failure", "failure_scoured_toe", "failure_washout"] as const;
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"] as const;
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"] as const;
   const materialRockSelected = draft.material_rock === "YES";
@@ -1108,14 +1137,17 @@ export default function SubmissionDetailPage() {
     });
   };
 
-  const selectSingleIncidentType = (key: typeof failureKeys[number]) => {
+  const toggleIncidentType = (option: IncidentTypeOption) => {
     if (!canEdit) return;
-    const nextVal = draft[key] === "YES" ? "NO" : "YES";
-    setDraft((prev) => {
-      const next = { ...prev };
-      for (const k of failureKeys) next[k] = k === key ? nextVal : "NO";
-      return next;
+    const active = inc.includes(option.code) || (!!option.key && draft[option.key] === "YES");
+    const selecting = !active;
+    setInc((prev) => {
+      const without = prev.filter((code) => code !== option.code);
+      return selecting ? [...without, option.code] : without;
     });
+    if (option.key) {
+      setDraft((prev) => ({ ...prev, [option.key as string]: selecting ? "YES" : "NO" }));
+    }
   };
   const selectMaterialPrimary = (key: "material_rock" | "material_soil") => {
     if (!canEdit) return;
@@ -1236,7 +1268,10 @@ export default function SubmissionDetailPage() {
     const items = Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
       .filter(([k]) => draft[k] === "YES")
       .map(([, code]) => code);
-    setInc(items);
+    setInc((prev) => Array.from(new Set([
+      ...items,
+      ...prev.filter((code) => !INCIDENT_TYPE_FORM_CODES.has(code)),
+    ])));
   }, [
     draft.failure_rock_fall,
     draft.failure_topple,
@@ -1549,7 +1584,7 @@ export default function SubmissionDetailPage() {
                         <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Location</div>
                         <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "GPS Autofill"}</button>
                       </div>
-                      <div className="grid grid-cols-1 gap-2">
+                      <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className={label}>Latitude</label>
                           <input type="number" step="0.000001" inputMode="decimal" className={input} value={draft.latitude} onChange={(e)=>setDraft((d)=>({...d,latitude:e.target.value}))} onBlur={()=>setDraft((d)=>({...d,latitude: formatCoordinate(d.latitude)}))} />
@@ -1620,12 +1655,25 @@ export default function SubmissionDetailPage() {
                       {layoutTools("incident_type")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Incident Type</div>
                       <div className="grid grid-cols-2 gap-2">
-                        {[
-                          ["failure_rock_fall", "Rock Fall"], ["failure_topple", "Topple"], ["failure_slide", "Slide"], ["failure_spread", "Spread"], ["failure_flow", "Flow"],
-                          ["failure_compound", "Compound"], ["failure_erosion", "Erosion"], ["failure_surficial_failure", "Surficial Sloughing"], ["failure_scoured_toe", "Scoured Toe"], ["failure_washout", "Washout"],
-                        ].map(([key, text]) => (
-                          <button key={key} type="button" onClick={() => selectSingleIncidentType(key as typeof failureKeys[number])} className={`${chip} text-left ${ynChip(draft[key] === "YES")}`}>{text}</button>
+                        {INCIDENT_TYPE_OPTIONS.map((option) => (
+                          <button
+                            key={option.code}
+                            type="button"
+                            onClick={() => toggleIncidentType(option)}
+                            className={`${chip} text-left ${ynChip(inc.includes(option.code) || (!!option.key && draft[option.key] === "YES"))}`}
+                          >
+                            {option.label}
+                          </button>
                         ))}
+                      </div>
+                      <div className="mt-3">
+                        <label className={label}>Incident Type Description</label>
+                        <textarea
+                          className={`${input} min-h-24`}
+                          value={draft.incident_type_description}
+                          onChange={(e) => setDraft((d) => ({ ...d, incident_type_description: e.target.value }))}
+                          disabled={!canEdit}
+                        />
                       </div>
                     </div>
 
