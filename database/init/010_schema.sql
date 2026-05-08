@@ -358,6 +358,7 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     -- NOTE: distribution_code and highway_status_code are code values from
     -- app/domain vocabularies (not DB-enforced enums in this draft).
     distribution_code VARCHAR(64) NULL,
+    highway_status_cause TEXT NULL,
     highway_status_code VARCHAR(64) NULL,
     lanes_closed_count INT NULL,
     open_highway_traffic_lanes_count INT NULL,

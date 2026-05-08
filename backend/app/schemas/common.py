@@ -53,6 +53,7 @@ class GisaDraftPatch(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     distribution_code: str | None = None
+    highway_status_cause: str | None = None
     highway_status_code: str | None = None
     lanes_closed_count: int | None = None
     open_highway_traffic_lanes_count: int | None = None

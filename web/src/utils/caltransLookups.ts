@@ -83,14 +83,20 @@ function normalizeDistrict(district?: string | null): string | null {
   return String(n).padStart(2, "0");
 }
 
-export function countyNameFromNameOrCode(value?: string | null): string | null {
+export function countyCodeFromNameOrCode(value?: string | null): string | null {
   const raw = String(value ?? "").replace(/\s+County$/i, "").trim();
   if (!raw) return null;
   const upper = raw.toUpperCase();
   const byCode = COUNTY_BY_CODE.get(upper);
-  if (byCode) return byCode.name;
+  if (byCode) return byCode.code;
   const byName = COUNTY_BY_NAME.get(raw.toLowerCase());
-  return byName?.name ?? null;
+  return byName?.code ?? null;
+}
+
+export function countyNameFromNameOrCode(value?: string | null): string | null {
+  const countyCode = countyCodeFromNameOrCode(value);
+  if (!countyCode) return null;
+  return COUNTY_BY_CODE.get(countyCode)?.name ?? null;
 }
 
 export function districtForCounty(value?: string | null): string | null {

@@ -62,8 +62,10 @@ export type Gisa = {
   latitude: number | null;
   longitude: number | null;
   distribution_code: string | null;
+  highway_status_cause: string | null;
   highway_status_code: string | null;
   lanes_closed_count: number | null;
+  open_highway_traffic_lanes_count: number | null;
   pavement_ground_cracks: boolean | null;
   crack_length_ft: number | null;
   crack_horizontal_in: number | null;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail } from "../api/types";
@@ -7,6 +7,12 @@ import { useAuth } from "../auth/AuthContext";
 import { getToken } from "../auth/token";
 import { appConfig } from "../config";
 import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
+import {
+  convertCaliforniaStatePlaneFeetToLatLon,
+  convertLatLonToCaliforniaStatePlaneFeet,
+  formatCaliforniaStatePlaneFeet,
+  getCaliforniaStatePlaneZone,
+} from "../utils/californiaCoordinateSystem";
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
@@ -66,7 +72,7 @@ type DistrictContact = {
 
 const EMPTY: Draft = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
-  latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
+  latitude: "", longitude: "", distribution_code: "", highway_status_cause: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
   crack_length_ft: "", crack_horizontal_in: "", crack_vertical_in: "", crack_depth_in: "", settlement_in: "", bulge_in: "",
   est_soil_pct: "", est_clay_pct: "", est_silt_pct: "", est_sand_pct: "", est_gravel_pct: "",
   vegetation_trees: "", vegetation_bushes_shrubs: "", vegetation_groundcover: "",
@@ -89,6 +95,12 @@ const triToBool = (v: Tri) => (v === "YES" ? true : v === "NO" ? false : null);
 const boolToTri = (v: unknown): Tri => (v === true ? "YES" : v === false ? "NO" : "UNKNOWN");
 const nf = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${n} must be numeric`); return x; };
 const ni = (v: string, n: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${n} must be whole number`); return x; };
+const parseStatePlaneFeetValue = (value: string) => {
+  const raw = value.trim().replace(/,/g, "");
+  if (!raw) return null;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+};
 const np = (v: string, n: string) => {
   if (!v.trim()) return null;
   const x = Number(v);
@@ -382,6 +394,10 @@ export default function SubmissionDetailPage() {
   const [geoBusy, setGeoBusy] = useState(false);
   const [geoSaveState, setGeoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [geoSaveMessage, setGeoSaveMessage] = useState("");
+  const [showNorthingEasting, setShowNorthingEasting] = useState(false);
+  const [northingInput, setNorthingInput] = useState("");
+  const [eastingInput, setEastingInput] = useState("");
+  const [statePlaneInputError, setStatePlaneInputError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [layoutMode, setLayoutMode] = useState(false);
   const layoutCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -423,6 +439,63 @@ export default function SubmissionDetailPage() {
     (me?.roles?.includes("ADMIN") ||
       (data.submission.status === "DRAFT" && me?.id === data.submission.created_by_user_id));
   const tog = (arr: string[], code: string) => (arr.includes(code) ? arr.filter((x) => x !== code) : [...arr, code]);
+  const statePlaneZone = useMemo(() => getCaliforniaStatePlaneZone(draft.county), [draft.county]);
+  const statePlaneCoordinates = useMemo(() => {
+    if (!statePlaneZone) return null;
+    const latitude = normalizeCoordinateValue(draft.latitude);
+    const longitude = normalizeCoordinateValue(draft.longitude);
+    if (latitude == null || longitude == null) {
+      return {
+        countyCode: "",
+        zone: statePlaneZone,
+        northing: Number.NaN,
+        easting: Number.NaN,
+        units: "US survey ft" as const,
+      };
+    }
+    return convertLatLonToCaliforniaStatePlaneFeet({ latitude, longitude, county: draft.county });
+  }, [draft.county, draft.latitude, draft.longitude, statePlaneZone]);
+
+  useEffect(() => {
+    if (statePlaneCoordinates) {
+      setNorthingInput(formatCaliforniaStatePlaneFeet(statePlaneCoordinates.northing));
+      setEastingInput(formatCaliforniaStatePlaneFeet(statePlaneCoordinates.easting));
+    } else {
+      setNorthingInput("");
+      setEastingInput("");
+    }
+    setStatePlaneInputError(null);
+  }, [statePlaneCoordinates?.northing, statePlaneCoordinates?.easting, statePlaneCoordinates?.zone]);
+
+  const applyStatePlaneInputs = useCallback(() => {
+    const northing = parseStatePlaneFeetValue(northingInput);
+    const easting = parseStatePlaneFeetValue(eastingInput);
+
+    if (northing == null || easting == null) {
+      setStatePlaneInputError("Northing and easting must be numeric.");
+      return;
+    }
+
+    const converted = convertCaliforniaStatePlaneFeetToLatLon({
+      northing,
+      easting,
+      county: draft.county,
+    });
+
+    if (!converted) {
+      setStatePlaneInputError("Unable to convert northing/easting for the selected county.");
+      return;
+    }
+
+    setDraft((prev) => ({
+      ...prev,
+      latitude: formatCoordinate(converted.latitude),
+      longitude: formatCoordinate(converted.longitude),
+    }));
+    setNorthingInput(formatCaliforniaStatePlaneFeet(northing));
+    setEastingInput(formatCaliforniaStatePlaneFeet(easting));
+    setStatePlaneInputError(null);
+  }, [draft.county, eastingInput, northingInput, statePlaneZone]);
 
   useEffect(() => {
     try {
@@ -550,7 +623,7 @@ export default function SubmissionDetailPage() {
         project_id: t(gisa.project_id),
         date_incident_reported: t(gisa.date_incident_reported),
         district_contact: districtContactText,
-        latitude: formatCoordinate(gisa.latitude), longitude: formatCoordinate(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
+        latitude: formatCoordinate(gisa.latitude), longitude: formatCoordinate(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_cause: t(gisa.highway_status_cause), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
         pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
         failure_rock_fall: incidentTri("failure_rock_fall", gisa.failure_rock_fall), failure_topple: incidentTri("failure_topple", gisa.failure_topple), failure_slide: incidentTri("failure_slide", gisa.failure_slide), failure_spread: incidentTri("failure_spread", gisa.failure_spread), failure_flow: incidentTri("failure_flow", gisa.failure_flow), failure_compound: incidentTri("failure_compound", gisa.failure_compound), failure_erosion: incidentTri("failure_erosion", gisa.failure_erosion), failure_surficial_failure: incidentTri("failure_surficial_failure", gisa.failure_surficial_failure), failure_scoured_toe: incidentTri("failure_scoured_toe", gisa.failure_scoured_toe), failure_washout: incidentTri("failure_washout", gisa.failure_washout),
         incident_type_description: t(gisa.incident_type_description),
@@ -601,7 +674,7 @@ export default function SubmissionDetailPage() {
     ]));
     await api(`/submissions/${sid}/gisa`, { method: "PATCH", body: JSON.stringify({
       report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: normalizeRouteValue(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
-      latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
+      latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_cause: nt(draft.highway_status_cause), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
       pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), crack_length_ft: nf(draft.crack_length_ft, "Crack length"), crack_horizontal_in: nf(draft.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: nf(draft.crack_vertical_in, "Crack vertical"), crack_depth_in: nf(draft.crack_depth_in, "Crack depth"), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
       failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout), incident_type_description: nt(draft.incident_type_description),
       distribution_advancing: triToBool(draft.distribution_advancing), distribution_retrogressive: triToBool(draft.distribution_retrogressive), distribution_enlarging: triToBool(draft.distribution_enlarging), distribution_widening: triToBool(draft.distribution_widening), distribution_moving: triToBool(draft.distribution_moving), distribution_confined: triToBool(draft.distribution_confined),
@@ -786,6 +859,13 @@ export default function SubmissionDetailPage() {
   const waterFlowingSelected = draft.water_flowing === "YES";
   const highwayLanesClosedSelected = draft.highway_status_code === "LANES_CLOSED";
   const openHighwayTrafficSelected = imm.includes("OPEN_HIGHWAY_TRAFFIC") || fol.includes("OPEN_HIGHWAY_TRAFFIC");
+  const showHighwayStatusOptions = !!(
+    draft.highway_status_cause.trim() ||
+    draft.highway_status_code ||
+    draft.lanes_closed_count ||
+    draft.open_highway_traffic_lanes_count ||
+    openHighwayTrafficSelected
+  );
   const countyOptions = draft.district ? countiesForDistrict(draft.district) : CALIFORNIA_COUNTIES;
   const routeOptions = routesForDistrictCounty(draft.district, draft.county);
   const visibleCardIds: DashboardCardId[] = [...DASHBOARD_DEFAULT_ORDER];
@@ -1580,9 +1660,19 @@ export default function SubmissionDetailPage() {
 
                     <div {...cardFrameProps("location")}>
                       {layoutTools("location")}
-                      <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                         <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Location</div>
-                        <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "GPS Autofill"}</button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "GPS Autofill"}</button>
+                          <button
+                            type="button"
+                            onClick={() => setShowNorthingEasting((prev) => !prev)}
+                            disabled={!statePlaneCoordinates}
+                            className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60"
+                          >
+                            {showNorthingEasting ? "Hide N/E" : "Show N/E"}
+                          </button>
+                        </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
@@ -1594,6 +1684,50 @@ export default function SubmissionDetailPage() {
                           <input type="number" step="0.000001" inputMode="decimal" className={input} value={draft.longitude} onChange={(e)=>setDraft((d)=>({...d,longitude:e.target.value}))} onBlur={()=>setDraft((d)=>({...d,longitude: formatCoordinate(d.longitude)}))} />
                         </div>
                       </div>
+                      {showNorthingEasting && statePlaneCoordinates ? (
+                        <div className="mt-2 rounded-md border border-[var(--line)]/70 bg-[var(--panel)] p-2">
+                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                            CCS83 Zone {statePlaneCoordinates.zone} · {statePlaneCoordinates.units}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className={label}>Northing</label>
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  inputMode="decimal"
+                                  className={input}
+                                  value={northingInput}
+                                  onChange={(e) => {
+                                    setNorthingInput(e.target.value);
+                                    if (statePlaneInputError) setStatePlaneInputError(null);
+                                  }}
+                                  onBlur={applyStatePlaneInputs}
+                                  disabled={!canEdit}
+                                />
+                            </div>
+                            <div>
+                              <label className={label}>Easting</label>
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  inputMode="decimal"
+                                  className={input}
+                                  value={eastingInput}
+                                  onChange={(e) => {
+                                    setEastingInput(e.target.value);
+                                    if (statePlaneInputError) setStatePlaneInputError(null);
+                                  }}
+                                  onBlur={applyStatePlaneInputs}
+                                  disabled={!canEdit}
+                                />
+                            </div>
+                          </div>
+                          {statePlaneInputError ? (
+                            <div className="mt-2 text-xs text-[var(--bad)]">{statePlaneInputError}</div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div {...cardFrameProps("distribution")}>
@@ -1621,34 +1755,51 @@ export default function SubmissionDetailPage() {
                     <div {...cardFrameProps("highway_status")}>
                       {layoutTools("highway_status")}
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Highway Status</div>
-                      <label className={label}>Highway Status</label>
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {(lookups?.highway_status ?? []).map((x) => {
-                          const active = draft.highway_status_code === x.code;
-                          return (
-                            <button key={x.code} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))} className={`${chip} ${ynChip(active)}`}>
-                              {x.label}
-                            </button>
-                          );
-                        })}
+                      <div className="mb-3">
+                        <label className={label}>Cause Of Highway Status</label>
+                        <input
+                          type="text"
+                          className={input}
+                          value={draft.highway_status_cause}
+                          onChange={(e) => setDraft((d) => ({ ...d, highway_status_cause: e.target.value }))}
+                          disabled={!canEdit}
+                          placeholder="Describe the cause before choosing a highway status"
+                        />
                       </div>
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                        {highwayLanesClosedSelected ? (
-                          <div>
-                            <label className={label}>Lane(s) Closed Count</label>
-                            <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
-                              <option value="">Select lanes closed</option>
-                              {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
-                            </select>
+                      {showHighwayStatusOptions ? (
+                        <>
+                          <label className={label}>Highway Status</label>
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            {(lookups?.highway_status ?? []).map((x) => {
+                              const active = draft.highway_status_code === x.code;
+                              return (
+                                <button key={x.code} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))} className={`${chip} ${ynChip(active)}`}>
+                                  {x.label}
+                                </button>
+                              );
+                            })}
                           </div>
-                        ) : null}
-                        {openHighwayTrafficSelected ? (
-                          <div>
-                            <label className={label}>Open Highway Traffic Lanes</label>
-                            <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
+                          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+                            {highwayLanesClosedSelected ? (
+                              <div>
+                                <label className={label}>Lane(s) Closed Count</label>
+                                <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
+                                  <option value="">Select lanes closed</option>
+                                  {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
+                                </select>
+                              </div>
+                            ) : null}
+                            {openHighwayTrafficSelected ? (
+                              <div>
+                                <label className={label}>Open Highway Traffic Lanes</label>
+                                <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
+                              </div>
+                            ) : null}
                           </div>
-                        ) : null}
-                      </div>
+                        </>
+                      ) : (
+                        <div className="text-xs text-muted">Enter the cause above to reveal the highway status options.</div>
+                      )}
                     </div>
 
                     <div {...cardFrameProps("incident_type")}>

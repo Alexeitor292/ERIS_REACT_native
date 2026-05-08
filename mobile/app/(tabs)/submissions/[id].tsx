@@ -20,6 +20,12 @@ import {
 import { readLookupsCache, writeLookupsCache } from "../../../src/offline/lookupsCache";
 import { deleteLargeItemAsync, getLargeItemAsync, setLargeItemAsync } from "../../../src/offline/secureStoreLarge";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
+import {
+  convertCaliforniaStatePlaneFeetToLatLon,
+  convertLatLonToCaliforniaStatePlaneFeet,
+  formatCaliforniaStatePlaneFeet,
+  getCaliforniaStatePlaneZone,
+} from "../../../src/utils/californiaCoordinateSystem";
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../../../src/utils/precision";
@@ -85,7 +91,7 @@ type FieldErrorMap = Partial<Record<keyof FormState, string>>;
 const DRAFT_LOCAL_CACHE_VERSION = 1;
 const EMPTY_FORM: FormState = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
-  latitude: "", longitude: "", distribution_code: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
+  latitude: "", longitude: "", distribution_code: "", highway_status_cause: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
   crack_length_ft: "", crack_horizontal_in: "", crack_vertical_in: "", crack_depth_in: "", settlement_in: "", bulge_in: "",
   failure_rock_fall: "", failure_topple: "", failure_slide: "", failure_spread: "", failure_flow: "", failure_compound: "", failure_erosion: "", failure_surficial_failure: "", failure_scoured_toe: "", failure_washout: "",
   incident_type_description: "",
@@ -111,6 +117,12 @@ const MEMO_SECTIONS = [
 const n = (v: string) => (v.trim() ? v.trim() : null);
 const f = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${name} must be numeric`); return x; };
 const i = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x) || !Number.isInteger(x)) throw new Error(`${name} must be a whole number`); return x; };
+const parseStatePlaneFeetValue = (value: string) => {
+  const raw = value.trim().replace(/,/g, "");
+  if (!raw) return null;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+};
 const pct = (v: string, name: string) => {
   if (!v.trim()) return null;
   const x = Number(v);
@@ -138,6 +150,8 @@ const isPlayServicesUnavailableError = (msg: string) =>
   /LocationServices\.API is not available|SERVICE_INVALID|Google Play services/i.test(msg);
 const isIosPhotosAccessError = (msg: string) =>
   /PHPhotosErrorDomain|error 3164/i.test(msg);
+const isLocalAttachmentUri = (uri?: string | null) =>
+  !!uri && /^(file|content|ph|assets-library):/i.test(String(uri).trim());
 
 function inferAttachmentKind(name: string, mimeType: string): "PHOTO" | "VIDEO" | "DOC" | "SKETCH" {
   const mime = (mimeType || "").toLowerCase();
@@ -297,6 +311,11 @@ function draftCacheKey(submissionId: string): string {
   return `draft_local_cache_${safe}`;
 }
 
+function attachmentUriCacheKey(submissionId: string): string {
+  const safe = String(submissionId || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `draft_local_attachment_uris_${safe}`;
+}
+
 async function getDraftCache(key: string): Promise<string | null> {
   try {
     return await getLargeItemAsync(key);
@@ -312,6 +331,36 @@ async function setDraftCache(key: string, value: string): Promise<void> {
 }
 
 async function removeDraftCache(key: string): Promise<void> {
+  try {
+    await deleteLargeItemAsync(key);
+  } catch {}
+}
+
+async function getAttachmentUriCache(key: string): Promise<Record<number, string>> {
+  try {
+    const raw = await getLargeItemAsync(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const next: Record<number, string> = {};
+    for (const [attachmentId, uri] of Object.entries(parsed)) {
+      const numericId = Number(attachmentId);
+      if (!numericId || typeof uri !== "string" || !uri.trim()) continue;
+      next[numericId] = uri;
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+async function setAttachmentUriCache(key: string, value: Record<number, string>): Promise<void> {
+  try {
+    await setLargeItemAsync(key, JSON.stringify(value));
+  } catch {}
+}
+
+async function removeAttachmentUriCache(key: string): Promise<void> {
   try {
     await deleteLargeItemAsync(key);
   } catch {}
@@ -685,12 +734,17 @@ export default function SubmissionDetailScreen() {
   const [districtContacts, setDistrictContacts] = useState<DistrictContact[]>([]);
   const [openDistrictContactIds, setOpenDistrictContactIds] = useState<Record<string, boolean>>({});
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>({});
+  const [localAttachmentUris, setLocalAttachmentUris] = useState<Record<number, string>>({});
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
-  const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string } | null>(null);
+  const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string; isLocal: boolean } | null>(null);
   const [selectedSectionKey, setSelectedSectionKey] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
   const [enrichmentHint, setEnrichmentHint] = useState("");
   const [showLocationCoordinates, setShowLocationCoordinates] = useState(false);
+  const [showNorthingEasting, setShowNorthingEasting] = useState(false);
+  const [northingInput, setNorthingInput] = useState("");
+  const [eastingInput, setEastingInput] = useState("");
+  const [statePlaneInputError, setStatePlaneInputError] = useState("");
   const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
   const [countyPickerOpen, setCountyPickerOpen] = useState(false);
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
@@ -746,6 +800,33 @@ export default function SubmissionDetailScreen() {
     [form.district]
   );
   const countyLabelValue = useMemo(() => countyDisplayLabel(form.county), [form.county]);
+  const statePlaneZone = useMemo(() => getCaliforniaStatePlaneZone(form.county), [form.county]);
+  const statePlaneCoordinates = useMemo(() => {
+    if (!statePlaneZone) return null;
+    const latitude = normalizeCoordinateValue(form.latitude);
+    const longitude = normalizeCoordinateValue(form.longitude);
+    if (latitude == null || longitude == null) {
+      return {
+        countyCode: "",
+        zone: statePlaneZone,
+        northing: Number.NaN,
+        easting: Number.NaN,
+        units: "US survey ft" as const,
+      };
+    }
+    return convertLatLonToCaliforniaStatePlaneFeet({ latitude, longitude, county: form.county });
+  }, [form.county, form.latitude, form.longitude, statePlaneZone]);
+
+  useEffect(() => {
+    if (statePlaneCoordinates) {
+      setNorthingInput(formatCaliforniaStatePlaneFeet(statePlaneCoordinates.northing));
+      setEastingInput(formatCaliforniaStatePlaneFeet(statePlaneCoordinates.easting));
+    } else {
+      setNorthingInput("");
+      setEastingInput("");
+    }
+    setStatePlaneInputError("");
+  }, [statePlaneCoordinates?.northing, statePlaneCoordinates?.easting, statePlaneCoordinates?.zone]);
 
   const toggleAssessmentSection = useCallback((key: string) => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -815,6 +896,45 @@ export default function SubmissionDetailScreen() {
     }));
     setPhotoUrls(next);
   }, [apiBaseUrl]);
+
+  const hydrateLocalAttachmentUris = useCallback(async (submissionId: string, files: { id: number }[]) => {
+    if (!submissionId || isLocalDraftId(submissionId)) {
+      setLocalAttachmentUris({});
+      return;
+    }
+    const cached = await getAttachmentUriCache(attachmentUriCacheKey(submissionId));
+    const allowed = new Set(files.map((file) => Number(file.id)).filter((value) => Number.isFinite(value) && value > 0));
+    const next: Record<number, string> = {};
+    for (const [attachmentIdRaw, uri] of Object.entries(cached)) {
+      const attachmentId = Number(attachmentIdRaw);
+      if (!allowed.has(attachmentId) || !isLocalAttachmentUri(uri)) continue;
+      next[attachmentId] = uri;
+    }
+    setLocalAttachmentUris(next);
+    if (Object.keys(next).length !== Object.keys(cached).length) {
+      await setAttachmentUriCache(attachmentUriCacheKey(submissionId), next);
+    }
+  }, []);
+
+  const registerLocalAttachmentUri = useCallback((attachmentId: number | null | undefined, uri: string) => {
+    if (!attachmentId || !uri) return;
+    setLocalAttachmentUris((prev) => {
+      const next = { ...prev, [attachmentId]: uri };
+      if (id && !isLocalDraftId(id)) {
+        setAttachmentUriCache(attachmentUriCacheKey(id), next).catch(() => {});
+      }
+      return next;
+    });
+  }, [id]);
+
+  const getAttachmentUri = useCallback((attachmentId: number) => {
+    const localUri = localAttachmentUris[attachmentId];
+    if (isLocalAttachmentUri(localUri)) return localUri;
+    const remoteUri = photoUrls[attachmentId];
+    if (remoteUri) return remoteUri;
+    const queryToken = encodeURIComponent(token || "");
+    return `${apiBaseUrl}/attachments/${attachmentId}/content?access_token=${queryToken}`;
+  }, [apiBaseUrl, localAttachmentUris, photoUrls, token]);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -908,7 +1028,7 @@ export default function SubmissionDetailScreen() {
         ...EMPTY_FORM,
         report_date: g.report_date ?? ymdFromTimestamp(subRes.submission.created_at), district: districtValue, county: countyCode ?? "", route: normalizeRouteInput(g.route), post_mile: normalizePostMileInput(g.post_mile), ea: g.ea ?? "", project_id: g.project_id ?? "", date_incident_reported: g.date_incident_reported ?? "", district_contact: g.district_contact ?? "",
         latitude: formatCoordinate(g.latitude), longitude: formatCoordinate(g.longitude),
-        distribution_code: g.distribution_code ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "", open_highway_traffic_lanes_count: g.open_highway_traffic_lanes_count != null ? String(g.open_highway_traffic_lanes_count) : "",
+        distribution_code: g.distribution_code ?? "", highway_status_cause: g.highway_status_cause ?? "", highway_status_code: g.highway_status_code ?? "", lanes_closed_count: g.lanes_closed_count != null ? String(g.lanes_closed_count) : "", open_highway_traffic_lanes_count: g.open_highway_traffic_lanes_count != null ? String(g.open_highway_traffic_lanes_count) : "",
         pavement_ground_cracks: boolToTri(g.pavement_ground_cracks), crack_length_ft: g.crack_length_ft != null ? String(g.crack_length_ft) : "", crack_horizontal_in: g.crack_horizontal_in != null ? String(g.crack_horizontal_in) : "", crack_vertical_in: g.crack_vertical_in != null ? String(g.crack_vertical_in) : "", crack_depth_in: g.crack_depth_in != null ? String(g.crack_depth_in) : "", settlement_in: g.settlement_in != null ? String(g.settlement_in) : "", bulge_in: g.bulge_in != null ? String(g.bulge_in) : "", indented_by_rocks: boolToTri(g.indented_by_rocks),
         failure_rock_fall: incidentYn("failure_rock_fall", g.failure_rock_fall), failure_topple: incidentYn("failure_topple", g.failure_topple), failure_slide: incidentYn("failure_slide", g.failure_slide), failure_spread: incidentYn("failure_spread", g.failure_spread), failure_flow: incidentYn("failure_flow", g.failure_flow), failure_compound: incidentYn("failure_compound", g.failure_compound), failure_erosion: incidentYn("failure_erosion", g.failure_erosion), failure_surficial_failure: incidentYn("failure_surficial_failure", g.failure_surficial_failure), failure_scoured_toe: incidentYn("failure_scoured_toe", g.failure_scoured_toe), failure_washout: incidentYn("failure_washout", g.failure_washout),
         incident_type_description: g.incident_type_description ?? "",
@@ -989,14 +1109,16 @@ export default function SubmissionDetailScreen() {
       }, 0);
       setFieldErrors({});
       setReviewComment(subRes.submission.review_comment ?? "");
-      await hydrateAttachmentUrls(token, subRes.attachments ?? subRes.photos ?? []);
+      const loadedAttachments = subRes.attachments ?? subRes.photos ?? [];
+      await hydrateAttachmentUrls(token, loadedAttachments);
+      await hydrateLocalAttachmentUris(String(id), loadedAttachments);
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
       Alert.alert("Load failed", err?.message ?? "Unable to load submission");
     } finally {
       setLoading(false);
     }
-  }, [token, id, isLocalId, hydrateAttachmentUrls, applyEditorState, incidentTypesFromFormState]);
+  }, [token, id, isLocalId, hydrateAttachmentUrls, hydrateLocalAttachmentUris, applyEditorState, incidentTypesFromFormState]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1095,6 +1217,32 @@ export default function SubmissionDetailScreen() {
       return next;
     });
   };
+  const applyStatePlaneInputs = useCallback(() => {
+    const northing = parseStatePlaneFeetValue(northingInput);
+    const easting = parseStatePlaneFeetValue(eastingInput);
+
+    if (northing == null || easting == null) {
+      setStatePlaneInputError("Northing and easting must be numeric.");
+      return;
+    }
+
+    const converted = convertCaliforniaStatePlaneFeetToLatLon({
+      northing,
+      easting,
+      county: form.county,
+    });
+
+    if (!converted) {
+      setStatePlaneInputError("Unable to convert northing/easting for the selected county.");
+      return;
+    }
+
+    setVal("latitude", formatCoordinate(converted.latitude));
+    setVal("longitude", formatCoordinate(converted.longitude));
+    setNorthingInput(formatCaliforniaStatePlaneFeet(northing));
+    setEastingInput(formatCaliforniaStatePlaneFeet(easting));
+    setStatePlaneInputError("");
+  }, [eastingInput, form.county, northingInput]);
   const toggleSection = (key: keyof typeof openSections) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -1315,7 +1463,7 @@ export default function SubmissionDetailScreen() {
     const patchPayload = {
       report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: normalizeRouteValue(normalizedForm.route), post_mile: normalizePostMileValue(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
       latitude: normalizeCoordinateValue(f(normalizedForm.latitude, "Latitude")), longitude: normalizeCoordinateValue(f(normalizedForm.longitude, "Longitude")),
-      distribution_code: n(normalizedForm.distribution_code), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
+      distribution_code: n(normalizedForm.distribution_code), highway_status_cause: n(normalizedForm.highway_status_cause), highway_status_code: n(normalizedForm.highway_status_code), lanes_closed_count: i(normalizedForm.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: i(normalizedForm.open_highway_traffic_lanes_count, "Open highway traffic lanes count"),
       pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
       failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout), incident_type_description: n(normalizedForm.incident_type_description),
       distribution_advancing: ynToBool(normalizedForm.distribution_advancing), distribution_retrogressive: ynToBool(normalizedForm.distribution_retrogressive), distribution_enlarging: ynToBool(normalizedForm.distribution_enlarging), distribution_widening: ynToBool(normalizedForm.distribution_widening), distribution_moving: ynToBool(normalizedForm.distribution_moving), distribution_confined: ynToBool(normalizedForm.distribution_confined),
@@ -1563,12 +1711,13 @@ export default function SubmissionDetailScreen() {
 
     setBusy(true);
     try {
-      await uploadSubmissionAttachment(
+      const uploaded = await uploadSubmissionAttachment(
         token,
         id,
         { uri, name: guessedName, type: mimeType },
         { sectionKey: sectionKey ?? null, kind }
       );
+      registerLocalAttachmentUri(Number(uploaded?.attachment_id), uri);
       await load();
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
@@ -1638,12 +1787,13 @@ export default function SubmissionDetailScreen() {
 
       setBusy(true);
       try {
-        await uploadSubmissionAttachment(
+        const uploaded = await uploadSubmissionAttachment(
           token,
           id,
           { uri, name, type: mimeType },
           { sectionKey: sectionKey ?? null, kind }
         );
+        registerLocalAttachmentUri(Number(uploaded?.attachment_id), uri);
         await load();
       } catch (err: any) {
         if (isSessionExpiredError(err)) return;
@@ -1717,7 +1867,8 @@ export default function SubmissionDetailScreen() {
       }
 
       try {
-        await uploadSubmissionAttachment(token, id, file, { sectionKey: "sketchpad", kind: "SKETCH" });
+        const uploaded = await uploadSubmissionAttachment(token, id, file, { sectionKey: "sketchpad", kind: "SKETCH" });
+        registerLocalAttachmentUri(Number(uploaded?.attachment_id), uri);
         await load();
       } catch (err: any) {
         if (isSessionExpiredError(err)) return;
@@ -2008,6 +2159,10 @@ export default function SubmissionDetailScreen() {
 
   useEffect(() => {
     setShowLocationCoordinates(false);
+    setFullscreenPhoto(null);
+    if (!id || isLocalDraftId(id)) {
+      setLocalAttachmentUris({});
+    }
   }, [id]);
 
   useEffect(() => {
@@ -2035,6 +2190,13 @@ export default function SubmissionDetailScreen() {
   const waterFlowingSelected = form.water_flowing === "YES";
   const highwayLanesClosedSelected = form.highway_status_code === "LANES_CLOSED";
   const openHighwayTrafficSelected = immediateActions.includes("OPEN_HIGHWAY_TRAFFIC") || followUpActions.includes("OPEN_HIGHWAY_TRAFFIC");
+  const showHighwayStatusOptions = !!(
+    form.highway_status_cause.trim() ||
+    form.highway_status_code ||
+    form.lanes_closed_count ||
+    form.open_highway_traffic_lanes_count ||
+    openHighwayTrafficSelected
+  );
   const immediateActionOptions = lookups.actions.immediate ?? [];
   const followUpActionOptions = lookups.actions.follow_up ?? [];
   const actionLabelByCode: Record<string, string> = {};
@@ -2154,23 +2316,28 @@ export default function SubmissionDetailScreen() {
   };
 
   function previewSource(photoId: number) {
-    const queryToken = encodeURIComponent(token || "");
-    return {
-      uri: `${apiBaseUrl}/attachments/${photoId}/content?access_token=${queryToken}&ts=${encodeURIComponent(submissionUpdatedAt)}`,
-    } as const;
+    const uri = getAttachmentUri(photoId);
+    return { uri } as const;
   }
 
   async function openPhotoFallback(photoId: number) {
-    const url = `${apiBaseUrl}/attachments/${photoId}/content?access_token=${encodeURIComponent(token || "")}&ts=${encodeURIComponent(submissionUpdatedAt)}`;
+    const url = getAttachmentUri(photoId);
     try {
       await Linking.openURL(url);
     } catch {
-      Alert.alert("Preview unavailable", "Could not open image URL on this device.");
+      Alert.alert("Preview unavailable", "Could not open this image on this device.");
     }
   }
 
   async function openFullscreenInDeviceEditor() {
     if (!fullscreenPhoto?.uri) return;
+    if (!fullscreenPhoto.isLocal) {
+      Alert.alert(
+        "Local Editor Unavailable",
+        "This image is currently loaded from the server. Photos picked on this device during this editing session can open in the device's native editor."
+      );
+      return;
+    }
     try {
       await Linking.openURL(fullscreenPhoto.uri);
     } catch {
@@ -2264,10 +2431,10 @@ export default function SubmissionDetailScreen() {
   }
 
   function openFullscreen(photoId: number, name: string) {
-    const source = previewSource(photoId);
-    if (!source?.uri) return;
+    const uri = getAttachmentUri(photoId);
+    if (!uri) return;
     fullscreenProgress.setValue(0);
-    setFullscreenPhoto({ uri: source.uri, name });
+    setFullscreenPhoto({ uri, name, isLocal: isLocalAttachmentUri(uri) });
     requestAnimationFrame(() => {
       Animated.spring(fullscreenProgress, {
         toValue: 1,
@@ -2479,6 +2646,15 @@ export default function SubmissionDetailScreen() {
               {showLocationCoordinates ? "Hide Lat/Lon" : "Show Lat/Lon"}
             </Text>
           </Pressable>
+          <Pressable
+            style={[styles.btnGhost, styles.locationActionButton, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            onPress={() => setShowNorthingEasting((prev) => !prev)}
+            disabled={busy || !statePlaneCoordinates}
+          >
+            <Text style={[styles.btnGhostText, { color: palette.text }]}>
+              {showNorthingEasting ? "Hide N/E" : "Show N/E"}
+            </Text>
+          </Pressable>
         </View>
         {showLocationCoordinates ? (
           <View style={styles.locationCoordinateRow}>
@@ -2488,6 +2664,46 @@ export default function SubmissionDetailScreen() {
             <View style={styles.locationCoordinateField}>
               <Field palette={palette} label="Longitude *" value={form.longitude} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("longitude", v)} onBlur={() => setVal("longitude", formatCoordinate(form.longitude))} error={fieldErrors.longitude} />
             </View>
+          </View>
+        ) : null}
+        {showNorthingEasting && statePlaneCoordinates ? (
+          <View style={{ marginTop: 8 }}>
+            <Text style={[styles.muted, { color: palette.muted }]}>
+              CCS83 Zone {statePlaneCoordinates.zone} • {statePlaneCoordinates.units}
+            </Text>
+            <View style={styles.locationCoordinateRow}>
+              <View style={styles.locationCoordinateField}>
+                <Field
+                  palette={palette}
+                  label="Northing"
+                  value={northingInput}
+                  editable={canEdit}
+                  keyboardType="decimal-pad"
+                  onChangeText={(v) => {
+                    setNorthingInput(v);
+                    if (statePlaneInputError) setStatePlaneInputError("");
+                  }}
+                  onBlur={applyStatePlaneInputs}
+                  error={statePlaneInputError || undefined}
+                />
+              </View>
+              <View style={styles.locationCoordinateField}>
+                <Field
+                  palette={palette}
+                  label="Easting"
+                  value={eastingInput}
+                  editable={canEdit}
+                  keyboardType="decimal-pad"
+                  onChangeText={(v) => {
+                    setEastingInput(v);
+                    if (statePlaneInputError) setStatePlaneInputError("");
+                  }}
+                  onBlur={applyStatePlaneInputs}
+                  error={statePlaneInputError || undefined}
+                />
+              </View>
+            </View>
+            {statePlaneInputError ? <Text style={styles.errorText}>{statePlaneInputError}</Text> : null}
           </View>
         ) : null}
       </CollapsibleSection>
@@ -2528,34 +2744,49 @@ export default function SubmissionDetailScreen() {
         </DropdownBlock>
 
         <DropdownBlock title="Highway Status" open={openPaperBlocks.highwayStatusMain} onToggle={() => togglePaperBlock("highwayStatusMain")} palette={palette}>
-          <View style={styles.chips}>
-            {lookups.highway_status.map((o) => (
-              <Chip
-                key={o.code}
-                label={o.label}
-                palette={palette}
-                active={form.highway_status_code === o.code}
-                disabled={!canEdit}
-                onPress={() => {
-                  if (!canEdit) return;
-                  const next = form.highway_status_code === o.code ? "" : o.code;
-                  setVal("highway_status_code", next);
-                  if (next !== "LANES_CLOSED") setVal("lanes_closed_count", "");
-                }}
-              />
-            ))}
-          </View>
-          {highwayLanesClosedSelected ? (
-            <SelectField
-              palette={palette}
-              label="Lane(s) Closed Count"
-              value={form.lanes_closed_count}
-              placeholder="Select lanes closed"
-              editable={canEdit}
-              onPress={() => setLanesClosedPickerOpen(true)}
-              error={fieldErrors.lanes_closed_count}
-            />
-          ) : null}
+          <Field
+            palette={palette}
+            label="Cause Of Highway Status"
+            value={form.highway_status_cause}
+            editable={canEdit}
+            onChangeText={(v) => setVal("highway_status_cause", v)}
+          />
+          {showHighwayStatusOptions ? (
+            <>
+              <View style={styles.chips}>
+                {lookups.highway_status.map((o) => (
+                  <Chip
+                    key={o.code}
+                    label={o.label}
+                    palette={palette}
+                    active={form.highway_status_code === o.code}
+                    disabled={!canEdit}
+                    onPress={() => {
+                      if (!canEdit) return;
+                      const next = form.highway_status_code === o.code ? "" : o.code;
+                      setVal("highway_status_code", next);
+                      if (next !== "LANES_CLOSED") setVal("lanes_closed_count", "");
+                    }}
+                  />
+                ))}
+              </View>
+              {highwayLanesClosedSelected ? (
+                <SelectField
+                  palette={palette}
+                  label="Lane(s) Closed Count"
+                  value={form.lanes_closed_count}
+                  placeholder="Select lanes closed"
+                  editable={canEdit}
+                  onPress={() => setLanesClosedPickerOpen(true)}
+                  error={fieldErrors.lanes_closed_count}
+                />
+              ) : null}
+            </>
+          ) : (
+            <Text style={[styles.muted, { color: palette.muted }]}>
+              Enter the cause above to reveal the highway status options.
+            </Text>
+          )}
           {renderTaggedSectionMedia("highway_status")}
         </DropdownBlock>
 
@@ -2882,9 +3113,9 @@ export default function SubmissionDetailScreen() {
               ) : (
                 <View>
                   <Text style={[styles.muted, { color: palette.muted }]}>In-app preview failed.</Text>
-                  {!!photoUrls[latestPhoto.id] && (
+                  {!!(photoUrls[latestPhoto.id] || localAttachmentUris[latestPhoto.id]) && (
                     <Pressable style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={() => openPhotoFallback(latestPhoto.id)}>
-                      <Text style={[styles.btnGhostText, { color: palette.text }]}>Open Photo Link</Text>
+                      <Text style={[styles.btnGhostText, { color: palette.text }]}>Open Photo</Text>
                     </Pressable>
                   )}
                 </View>
@@ -2939,9 +3170,9 @@ export default function SubmissionDetailScreen() {
             ) : (
               <View>
                 <Text style={[styles.muted, { color: palette.muted }]}>In-app preview failed.</Text>
-                {!!photoUrls[p.id] && (
+                {!!(photoUrls[p.id] || localAttachmentUris[p.id]) && (
                   <Pressable style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={() => openPhotoFallback(p.id)}>
-                    <Text style={[styles.btnGhostText, { color: palette.text }]}>Open Photo Link</Text>
+                    <Text style={[styles.btnGhostText, { color: palette.text }]}>Open Photo</Text>
                   </Pressable>
                 )}
               </View>
@@ -3220,7 +3451,11 @@ export default function SubmissionDetailScreen() {
           {!!fullscreenPhoto && (
             <>
               <Image
-                source={{ uri: fullscreenPhoto.uri, headers: { Authorization: `Bearer ${token}` } }}
+                source={
+                  fullscreenPhoto.isLocal
+                    ? { uri: fullscreenPhoto.uri }
+                    : { uri: fullscreenPhoto.uri, headers: { Authorization: `Bearer ${token}` } }
+                }
                 style={styles.fullscreenImage}
                 resizeMode="contain"
               />

@@ -116,6 +116,7 @@ def startup():
         db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS metadata_json JSON NULL"))
         db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS location_id BIGINT NULL"))
         db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS incident_type_description TEXT NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS highway_status_cause TEXT NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN latitude DECIMAL(10,6) NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN longitude DECIMAL(10,6) NULL"))
         db.commit()
@@ -374,7 +375,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           report_date, district, county, route, post_mile, ea, project_id,
           date_incident_reported, district_contact,
           latitude, longitude,
-          distribution_code, highway_status_code, lanes_closed_count, open_highway_traffic_lanes_count,
+          distribution_code, highway_status_cause, highway_status_code, lanes_closed_count, open_highway_traffic_lanes_count,
           pavement_ground_cracks,
           crack_length_ft, crack_horizontal_in, crack_vertical_in, crack_depth_in,
           settlement_in, bulge_in, indented_by_rocks,
