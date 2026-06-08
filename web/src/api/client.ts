@@ -1,16 +1,7 @@
 import { getToken, clearToken } from "../auth/token";
+import { appConfig } from "../config";
 
-function requireEnv(name: string): string {
-  const v = (import.meta as any).env?.[name];
-  if (!v) {
-    throw new Error(
-      `Missing ${name}. Create web/.env and set ${name}=http://127.0.0.1:8000 (dev) or your prod URL.`
-    );
-  }
-  return v;
-}
-
-const API_BASE = requireEnv("VITE_API_BASE");
+const API_BASE = appConfig.apiBaseUrl;
 
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;

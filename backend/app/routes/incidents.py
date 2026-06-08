@@ -571,6 +571,22 @@ def _set_stage_assignment(
 
 
 def ensure_incident_runtime_schema(db: Session) -> None:
+    """
+    TEMPORARY LEGACY COMPATIBILITY LAYER — do not add new columns here.
+
+    This function applies idempotent ALTER TABLE / CREATE TABLE IF NOT EXISTS
+    statements for databases that were bootstrapped before the current
+    database/init/010_schema.sql was fully in sync with the application schema.
+    All statements use IF NOT EXISTS / ADD COLUMN IF NOT EXISTS so they are
+    safe to run against a fully-migrated schema.
+
+    Status: kept until a proper migration tool (e.g. Alembic) is adopted.
+    New schema changes must be made in database/init/010_schema.sql first, then
+    mirrored here as ADD COLUMN IF NOT EXISTS for backward compat with existing
+    dev and production databases.
+
+    TODO: Replace with Alembic or a script-based migration runner.
+    """
     ddl_statements = [
         """
         CREATE TABLE IF NOT EXISTS incident_locations (

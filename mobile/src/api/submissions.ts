@@ -1,5 +1,6 @@
 import { apiFetch } from "./client";
 import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
+import { prepareUploadFile } from "../utils/uploadFile";
 
 export async function getSubmission(token: string, id: string) {
   return apiFetch(`/submissions/${id}`, { token });
@@ -11,6 +12,7 @@ export async function uploadSubmissionAttachment(
   file: { uri: string; name: string; type: string },
   opts?: { sectionKey?: string | null; kind?: "PHOTO" | "VIDEO" | "DOC" | "SKETCH" }
 ) {
+  const preparedFile = await prepareUploadFile(file);
   const params = new URLSearchParams();
   if (opts?.sectionKey) params.set("section_key", opts.sectionKey);
   if (opts?.kind) params.set("kind", opts.kind);
@@ -22,7 +24,7 @@ export async function uploadSubmissionAttachment(
   let lastError = "Network request failed";
   for (const base of baseCandidates) {
     const formData = new FormData();
-    formData.append("file", file as any);
+    formData.append("file", preparedFile as any);
     try {
       const response = await fetch(`${base}/submissions/${submissionId}/attachments${suffix}`, {
         method: "POST",

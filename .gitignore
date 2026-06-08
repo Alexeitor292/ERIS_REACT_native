@@ -8,6 +8,7 @@
 !/docker/.env.example
 !/docker/.env.proxmox.example
 !/web/.env.example
+!/mobile/.env.example
 
 # ---- python ----
 __pycache__/
@@ -24,6 +25,7 @@ coverage/
 # ---- misc ----
 .DS_Store
 mobile/.git.nested.backup/
+tmp_gisa_xfa/
 
 # ---- expo / eas / react-native native artifacts ----
 mobile/.expo/
@@ -37,3 +39,4 @@ mobile/android/local.properties
 
 # ---- web build cache ----
 web/.vite/
+.rocketride/

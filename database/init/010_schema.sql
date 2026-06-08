@@ -364,6 +364,7 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     open_highway_traffic_lanes_count INT NULL,
 
     -- Section D: Pavement / Ground condition metrics
+    pavement_ground_annotation_layout_json JSON NULL COMMENT 'JSON blob storing drag-placed annotation positions for the pavement diagram',
     pavement_ground_cracks TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
     crack_length_ft DECIMAL(10,2) NULL,
     crack_horizontal_in DECIMAL(10,2) NULL,
@@ -400,15 +401,22 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     material_bedding TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
     material_joints TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
     material_fractures TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
+    material_pavement_type VARCHAR(32) NULL COMMENT 'CONCRETE or ASPHALT',
 
     -- Section H: Material composition percentages (0..100)
     -- NOTE: Percent fields are independently constrained to [0,100].
     -- They are not currently enforced to sum to 100 at DB level.
     est_soil_pct DECIMAL(5,2) NULL,
+    est_rock_pct DECIMAL(5,2) NULL,
     est_clay_pct DECIMAL(5,2) NULL,
     est_silt_pct DECIMAL(5,2) NULL,
     est_sand_pct DECIMAL(5,2) NULL,
     est_gravel_pct DECIMAL(5,2) NULL,
+    est_boulder_pct DECIMAL(5,2) NULL,
+    est_debris_clay_silt_pct DECIMAL(5,2) NULL,
+    est_debris_sand_pct DECIMAL(5,2) NULL,
+    est_debris_gravel_pct DECIMAL(5,2) NULL,
+    est_debris_boulder_pct DECIMAL(5,2) NULL,
 
     -- Section I: Water content/state flags
     water_dry TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
@@ -490,8 +498,12 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
       CHECK (lanes_closed_count IS NULL OR lanes_closed_count >= 0),
     CONSTRAINT chk_gisa_open_lanes_count
       CHECK (open_highway_traffic_lanes_count IS NULL OR open_highway_traffic_lanes_count >= 0),
+    CONSTRAINT chk_gisa_material_pavement_type
+      CHECK (material_pavement_type IS NULL OR material_pavement_type IN ('CONCRETE', 'ASPHALT')),
     CONSTRAINT chk_gisa_est_soil_pct
       CHECK (est_soil_pct IS NULL OR (est_soil_pct >= 0 AND est_soil_pct <= 100)),
+    CONSTRAINT chk_gisa_est_rock_pct
+      CHECK (est_rock_pct IS NULL OR (est_rock_pct >= 0 AND est_rock_pct <= 100)),
     CONSTRAINT chk_gisa_est_clay_pct
       CHECK (est_clay_pct IS NULL OR (est_clay_pct >= 0 AND est_clay_pct <= 100)),
     CONSTRAINT chk_gisa_est_silt_pct
@@ -500,6 +512,16 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
       CHECK (est_sand_pct IS NULL OR (est_sand_pct >= 0 AND est_sand_pct <= 100)),
     CONSTRAINT chk_gisa_est_gravel_pct
       CHECK (est_gravel_pct IS NULL OR (est_gravel_pct >= 0 AND est_gravel_pct <= 100)),
+    CONSTRAINT chk_gisa_est_boulder_pct
+      CHECK (est_boulder_pct IS NULL OR (est_boulder_pct >= 0 AND est_boulder_pct <= 100)),
+    CONSTRAINT chk_gisa_est_debris_clay_silt_pct
+      CHECK (est_debris_clay_silt_pct IS NULL OR (est_debris_clay_silt_pct >= 0 AND est_debris_clay_silt_pct <= 100)),
+    CONSTRAINT chk_gisa_est_debris_sand_pct
+      CHECK (est_debris_sand_pct IS NULL OR (est_debris_sand_pct >= 0 AND est_debris_sand_pct <= 100)),
+    CONSTRAINT chk_gisa_est_debris_gravel_pct
+      CHECK (est_debris_gravel_pct IS NULL OR (est_debris_gravel_pct >= 0 AND est_debris_gravel_pct <= 100)),
+    CONSTRAINT chk_gisa_est_debris_boulder_pct
+      CHECK (est_debris_boulder_pct IS NULL OR (est_debris_boulder_pct >= 0 AND est_debris_boulder_pct <= 100)),
     CONSTRAINT chk_gisa_vegetation_trees_pct
       CHECK (vegetation_trees IS NULL OR (vegetation_trees >= 0 AND vegetation_trees <= 100)),
     CONSTRAINT chk_gisa_vegetation_bushes_shrubs_pct

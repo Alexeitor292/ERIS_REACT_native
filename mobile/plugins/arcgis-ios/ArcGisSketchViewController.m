@@ -245,9 +245,71 @@
   [self.mapView setViewpointCenter:point scale:12000 completion:nil];
 }
 
+- (AGSSimpleMarkerSymbol *)vertexMarkerWithSize:(CGFloat)size
+                                   outlineColor:(UIColor *)outlineColor
+                                    outlineWidth:(CGFloat)outlineWidth {
+  AGSSimpleMarkerSymbol *symbol = [[AGSSimpleMarkerSymbol alloc] initWithStyle:AGSSimpleMarkerSymbolStyleCircle
+                                                                         color:[UIColor whiteColor]
+                                                                          size:size];
+  symbol.outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
+                                                        color:outlineColor
+                                                        width:outlineWidth];
+  return symbol;
+}
+
+- (UIImage *)circlePlusImageWithSize:(CGFloat)size
+                        outlineColor:(UIColor *)outlineColor
+                           plusColor:(UIColor *)plusColor
+                        outlineWidth:(CGFloat)outlineWidth
+                       plusLineWidth:(CGFloat)plusLineWidth {
+  UIGraphicsBeginImageContextWithOptions(CGSizeMake(size, size), NO, 0.0);
+
+  CGRect bounds = CGRectMake(0, 0, size, size);
+  CGRect circleBounds = CGRectInset(bounds, outlineWidth / 2.0, outlineWidth / 2.0);
+  UIBezierPath *circle = [UIBezierPath bezierPathWithOvalInRect:circleBounds];
+  [[UIColor whiteColor] setFill];
+  [circle fill];
+  circle.lineWidth = outlineWidth;
+  [outlineColor setStroke];
+  [circle stroke];
+
+  CGFloat center = size / 2.0;
+  CGFloat inset = MAX(2.0, size * 0.28);
+  UIBezierPath *plus = [UIBezierPath bezierPath];
+  plus.lineCapStyle = kCGLineCapRound;
+  plus.lineWidth = plusLineWidth;
+  [plus moveToPoint:CGPointMake(center, inset)];
+  [plus addLineToPoint:CGPointMake(center, size - inset)];
+  [plus moveToPoint:CGPointMake(inset, center)];
+  [plus addLineToPoint:CGPointMake(size - inset, center)];
+  [plusColor setStroke];
+  [plus stroke];
+
+  UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+  return image;
+}
+
+- (AGSPictureMarkerSymbol *)midVertexMarkerWithSize:(CGFloat)size
+                                       outlineColor:(UIColor *)outlineColor
+                                          plusColor:(UIColor *)plusColor
+                                       outlineWidth:(CGFloat)outlineWidth
+                                      plusLineWidth:(CGFloat)plusLineWidth {
+  UIImage *image = [self circlePlusImageWithSize:size
+                                    outlineColor:outlineColor
+                                       plusColor:plusColor
+                                    outlineWidth:outlineWidth
+                                   plusLineWidth:plusLineWidth];
+  AGSPictureMarkerSymbol *symbol = [AGSPictureMarkerSymbol pictureMarkerSymbolWithImage:image];
+  symbol.width = size;
+  symbol.height = size;
+  return symbol;
+}
+
 - (void)configureSketchAppearance {
   AGSSketchStyle *style = [[AGSSketchStyle alloc] init];
   UIColor *red = [UIColor colorWithRed:0.84 green:0.15 blue:0.16 alpha:1.0];
+  UIColor *selectedRed = [UIColor colorWithRed:0.67 green:0.10 blue:0.11 alpha:1.0];
 
   AGSSimpleLineSymbol *outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
                                                                        color:red
@@ -255,17 +317,33 @@
   AGSSimpleFillSymbol *fill = [[AGSSimpleFillSymbol alloc] initWithStyle:AGSSimpleFillSymbolStyleSolid
                                                                     color:[red colorWithAlphaComponent:0.16]
                                                                   outline:outline];
-  AGSSimpleMarkerSymbol *vertex = [[AGSSimpleMarkerSymbol alloc] initWithStyle:AGSSimpleMarkerSymbolStyleSquare
-                                                                          color:red
-                                                                           size:10];
-  AGSSimpleMarkerSymbol *selectedVertex = [[AGSSimpleMarkerSymbol alloc] initWithStyle:AGSSimpleMarkerSymbolStyleSquare
-                                                                                   color:[UIColor colorWithRed:0.67 green:0.10 blue:0.11 alpha:1.0]
-                                                                                    size:12];
+  AGSSimpleMarkerSymbol *vertex = [self vertexMarkerWithSize:12
+                                                outlineColor:red
+                                                outlineWidth:1.8];
+  AGSSimpleMarkerSymbol *selectedVertex = [self vertexMarkerWithSize:14
+                                                        outlineColor:selectedRed
+                                                        outlineWidth:2.2];
+  AGSPictureMarkerSymbol *midVertex = [self midVertexMarkerWithSize:10
+                                                       outlineColor:red
+                                                          plusColor:red
+                                                       outlineWidth:1.4
+                                                      plusLineWidth:1.7];
+  AGSPictureMarkerSymbol *selectedMidVertex = [self midVertexMarkerWithSize:11
+                                                               outlineColor:selectedRed
+                                                                  plusColor:selectedRed
+                                                               outlineWidth:1.6
+                                                              plusLineWidth:1.9];
+  AGSSimpleMarkerSymbol *feedbackVertex = [self vertexMarkerWithSize:16
+                                                        outlineColor:red
+                                                        outlineWidth:2.3];
 
   style.lineSymbol = outline;
   style.fillSymbol = fill;
   style.vertexSymbol = vertex;
   style.selectedVertexSymbol = selectedVertex;
+  style.midVertexSymbol = midVertex;
+  style.selectedMidVertexSymbol = selectedMidVertex;
+  style.feedbackVertexSymbol = feedbackVertex;
   self.sketchEditor.style = style;
 }
 

@@ -65,6 +65,7 @@ class GisaDraftPatch(BaseModel):
     settlement_in: float | None = None
     bulge_in: float | None = None
     indented_by_rocks: bool | None = None
+    pavement_ground_annotation_layout_json: dict | None = None
     failure_rock_fall: bool | None = None
     failure_topple: bool | None = None
     failure_slide: bool | None = None
@@ -87,11 +88,18 @@ class GisaDraftPatch(BaseModel):
     material_bedding: bool | None = None
     material_joints: bool | None = None
     material_fractures: bool | None = None
+    material_pavement_type: str | None = None
     est_soil_pct: float | None = None
+    est_rock_pct: float | None = None
     est_clay_pct: float | None = None
     est_silt_pct: float | None = None
     est_sand_pct: float | None = None
     est_gravel_pct: float | None = None
+    est_boulder_pct: float | None = None
+    est_debris_clay_silt_pct: float | None = None
+    est_debris_sand_pct: float | None = None
+    est_debris_gravel_pct: float | None = None
+    est_debris_boulder_pct: float | None = None
     water_dry: bool | None = None
     water_moist: bool | None = None
     water_wet: bool | None = None

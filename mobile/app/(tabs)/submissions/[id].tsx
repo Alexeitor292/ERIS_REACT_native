@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, LayoutAnimation, Platform, UIManager } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityIndicator, StyleSheet, Linking, Modal, Animated, Easing, LayoutAnimation, Platform, UIManager, PanResponder, useWindowDimensions } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
@@ -29,6 +30,7 @@ import {
 import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../../../src/utils/precision";
+import { prepareUploadFile } from "../../../src/utils/uploadFile";
 import {
   CALTRANS_COUNTIES,
   CALTRANS_DISTRICTS,
@@ -89,6 +91,117 @@ type DraftLocalCache = DraftEditorState & {
 };
 type FieldErrorMap = Partial<Record<keyof FormState, string>>;
 const DRAFT_LOCAL_CACHE_VERSION = 1;
+type PavementAnnotationId = "crack" | "settlement" | "bulge" | "rocks";
+type PavementAnnotationPoint = { x: number; y: number };
+type PavementAnnotationLayout = Record<PavementAnnotationId, { x: number; y: number; placed: boolean; rangeEnd: PavementAnnotationPoint | null }>;
+const PAVEMENT_ANNOTATION_FIELD = "pavement_ground_annotation_layout" as const;
+const PAVEMENT_ANNOTATION_ORDER: PavementAnnotationId[] = ["crack", "settlement", "bulge", "rocks"];
+const DEFAULT_PAVEMENT_ANNOTATION_LAYOUT: PavementAnnotationLayout = {
+  crack: { x: 0.08, y: 0.12, placed: false, rangeEnd: null },
+  settlement: { x: 0.58, y: 0.18, placed: false, rangeEnd: null },
+  bulge: { x: 0.2, y: 0.58, placed: false, rangeEnd: null },
+  rocks: { x: 0.62, y: 0.62, placed: false, rangeEnd: null },
+};
+const PAVEMENT_ANNOTATION_TITLES: Record<PavementAnnotationId, string> = {
+  crack: "Crack",
+  settlement: "Settlement",
+  bulge: "Bulge",
+  rocks: "Indented by Rocks",
+};
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function parsePavementAnnotationPoint(raw: any): PavementAnnotationPoint | null {
+  if (!raw || !Number.isFinite(Number(raw.x)) || !Number.isFinite(Number(raw.y))) return null;
+  return {
+    x: clamp01(Number(raw.x)),
+    y: clamp01(Number(raw.y)),
+  };
+}
+
+function parsePavementAnnotationLayout(raw: any): PavementAnnotationLayout {
+  if (!raw || typeof raw !== "string") return { ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT };
+  try {
+    const parsed = JSON.parse(raw);
+    const next = { ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT };
+    PAVEMENT_ANNOTATION_ORDER.forEach((id) => {
+      const item = parsed?.[id];
+      if (item && Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y))) {
+        next[id] = {
+          x: clamp01(Number(item.x)),
+          y: clamp01(Number(item.y)),
+          placed: typeof item.placed === "boolean" ? item.placed : true,
+          rangeEnd: parsePavementAnnotationPoint(item.rangeEnd),
+        };
+      }
+    });
+    return next;
+  } catch {
+    return { ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT };
+  }
+}
+
+function stringifyPavementAnnotationLayout(layout: PavementAnnotationLayout): string {
+  const normalized = { ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT };
+  PAVEMENT_ANNOTATION_ORDER.forEach((id) => {
+    normalized[id] = {
+      x: clamp01(Number(layout[id]?.x ?? DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id].x)),
+      y: clamp01(Number(layout[id]?.y ?? DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id].y)),
+      placed: !!layout[id]?.placed,
+      rangeEnd: parsePavementAnnotationPoint(layout[id]?.rangeEnd),
+    };
+  });
+  return JSON.stringify(normalized);
+}
+
+function pavementAnnotationShortSummary(id: PavementAnnotationId, form: FormState): string {
+  if (id === "crack") {
+    if (form.pavement_ground_cracks === "NO") return "No crack";
+    if (form.pavement_ground_cracks !== "YES") return "Tap to add";
+    return form.crack_length_ft.trim() ? `${form.crack_length_ft.trim()} ft` : "Add measures";
+  }
+  if (id === "settlement") {
+    return form.settlement_in.trim() ? `${form.settlement_in.trim()} in` : "Tap to add";
+  }
+  if (id === "bulge") {
+    return form.bulge_in.trim() ? `${form.bulge_in.trim()} in` : "Tap to add";
+  }
+  if (form.indented_by_rocks === "YES") return "Yes";
+  if (form.indented_by_rocks === "NO") return "No";
+  return "Tap to set";
+}
+
+function pavementAnnotationLongSummary(id: PavementAnnotationId, form: FormState): string {
+  if (id === "crack") {
+    if (form.pavement_ground_cracks === "NO") return "Marked as no cracks.";
+    if (form.pavement_ground_cracks !== "YES") return "Not set yet.";
+    return [
+      `Length ${form.crack_length_ft.trim() || "--"} ft`,
+      `Horiz ${form.crack_horizontal_in.trim() || "--"} in`,
+      `Vert ${form.crack_vertical_in.trim() || "--"} in`,
+      `Depth ${form.crack_depth_in.trim() || "--"} in`,
+    ].join("  |  ");
+  }
+  if (id === "settlement") {
+    return form.settlement_in.trim() ? `${form.settlement_in.trim()} inches recorded.` : "Not set yet.";
+  }
+  if (id === "bulge") {
+    return form.bulge_in.trim() ? `${form.bulge_in.trim()} inches recorded.` : "Not set yet.";
+  }
+  if (form.indented_by_rocks === "YES") return "Marked as yes.";
+  if (form.indented_by_rocks === "NO") return "Marked as no.";
+  return "Not set yet.";
+}
+
+function pavementAnnotationHasValue(id: PavementAnnotationId, form: FormState): boolean {
+  if (id === "crack") return form.pavement_ground_cracks === "YES" || form.pavement_ground_cracks === "NO";
+  if (id === "settlement") return !!form.settlement_in.trim();
+  if (id === "bulge") return !!form.bulge_in.trim();
+  return form.indented_by_rocks === "YES" || form.indented_by_rocks === "NO";
+}
+
 const EMPTY_FORM: FormState = {
   report_date: "", district: "", county: "", route: "", post_mile: "", ea: "", project_id: "", date_incident_reported: "", district_contact: "",
   latitude: "", longitude: "", distribution_code: "", highway_status_cause: "", highway_status_code: "", lanes_closed_count: "", open_highway_traffic_lanes_count: "",
@@ -97,14 +210,17 @@ const EMPTY_FORM: FormState = {
   incident_type_description: "",
   distribution_advancing: "", distribution_retrogressive: "", distribution_enlarging: "", distribution_widening: "", distribution_moving: "", distribution_confined: "",
   material_rock: "", material_soil: "", material_bedding: "", material_joints: "", material_fractures: "",
-  est_soil_pct: "", est_clay_pct: "", est_silt_pct: "", est_sand_pct: "", est_gravel_pct: "",
+  material_pavement_type: "",
+  est_soil_pct: "", est_clay_pct: "", est_silt_pct: "", est_sand_pct: "", est_gravel_pct: "", est_boulder_pct: "",
+  est_rock_pct: "",
+  est_debris_clay_silt_pct: "", est_debris_sand_pct: "", est_debris_gravel_pct: "", est_debris_boulder_pct: "",
   water_dry: "", water_moist: "", water_wet: "", water_flowing: "", water_seep: "", water_spring: "",
   vegetation_trees: "", vegetation_bushes_shrubs: "", vegetation_groundcover: "",
   drainage_clogged_inlet: "", drainage_compromised_drains: "", drainage_surface_runoff: "", drainage_torrent_surge_flood: "",
   impact_impacted_adj_utilities: "", impact_maybe_adj_utilities: "", impact_adj_utilities: "", impact_impacted_adj_properties: "", impact_maybe_adj_properties: "", impact_adj_properties: "", impact_impacted_adj_structure: "", impact_maybe_adj_structure: "", impact_adj_structure: "",
   measure_slope_height_ft: "", measure_original_slope_deg: "", measure_landslide_width_ft: "", measure_landslide_length_ft: "", measure_main_scarp_height_ft: "", measure_landslide_slope_deg: "", measure_roadway_length_ft: "", measure_roadway_width_ft: "",
   record_of_event_notes: "", maintenance_history_notes: "", geotechnical_assessment_notes: "", recommendations_notes: "", sketchpad_notes: "",
-  observations_notes: "", geometry_json: "", pavement_ground_cracks: "", indented_by_rocks: "",
+  observations_notes: "", geometry_json: "", pavement_ground_cracks: "", indented_by_rocks: "", pavement_ground_annotation_layout: "",
 };
 
 const MEMO_SECTIONS = [
@@ -113,6 +229,57 @@ const MEMO_SECTIONS = [
   { key: "observation", label: "Observation", field: "observations_notes" },
   { key: "geotechnical_assessment", label: "Geotechnical Assessment", field: "geotechnical_assessment_notes" },
 ] as const;
+
+const GALLERY_SOURCE_SECTIONS = [
+  { key: "submission", label: "Submission", figureSection: 1 },
+  { key: "distribution", label: "Distribution", figureSection: 2 },
+  { key: "highway_status", label: "Highway Status", figureSection: 3 },
+  { key: "incident_type", label: "Incident Type", figureSection: 4 },
+  { key: "material", label: "Material", figureSection: 5 },
+  { key: "pavement_ground_status", label: "Pavement / Ground Status", figureSection: 6 },
+  { key: "vegetation_slope", label: "Vegetation on Slope", figureSection: 7 },
+  { key: "water_drainage", label: "Water / Drainage", figureSection: 8 },
+  { key: "water_content", label: "Water Content", figureSection: 9 },
+  { key: "measurements", label: "Measurements", figureSection: 10 },
+  { key: "record_of_event", label: "Record of Event", figureSection: 11 },
+  { key: "maintenance_history", label: "Maintenance History", figureSection: 12 },
+  { key: "observation", label: "Observation", figureSection: 13 },
+  { key: "geotechnical_assessment", label: "Geotechnical Assessment", figureSection: 14 },
+  { key: "sketchpad", label: "Sketchpad", figureSection: 15 },
+] as const;
+
+type GallerySource = (typeof GALLERY_SOURCE_SECTIONS)[number] | { key: string; label: string; figureSection: number };
+type GalleryImage = {
+  id: number;
+  file_name: string;
+  mime_type: string;
+  kind?: string;
+  section_key?: string | null;
+  sourceLabel: string;
+  figureLabel: string;
+};
+type FigureCitationRequest = {
+  fieldLabel: string;
+  onSelect: (image: GalleryImage) => void;
+};
+
+const GALLERY_SOURCE_BY_KEY: Map<string, (typeof GALLERY_SOURCE_SECTIONS)[number]> = new Map(GALLERY_SOURCE_SECTIONS.map((section) => [section.key, section]));
+const UNKNOWN_GALLERY_SOURCE_SECTION = GALLERY_SOURCE_SECTIONS.length + 1;
+
+function titleFromSectionKey(sectionKey: string): string {
+  return sectionKey
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function gallerySourceForSectionKey(sectionKey?: string | null): GallerySource {
+  const normalized = String(sectionKey || "").trim() || "submission";
+  const known = GALLERY_SOURCE_BY_KEY.get(normalized);
+  return known ?? { key: normalized, label: titleFromSectionKey(normalized), figureSection: UNKNOWN_GALLERY_SOURCE_SECTION };
+}
+
 
 const n = (v: string) => (v.trim() ? v.trim() : null);
 const f = (v: string, name: string) => { if (!v.trim()) return null; const x = Number(v); if (Number.isNaN(x)) throw new Error(`${name} must be numeric`); return x; };
@@ -372,6 +539,8 @@ function normalizeCachedForm(raw: any): FormState {
     raw?.pavement_ground_cracks === "YES" || raw?.pavement_ground_cracks === "NO" ? raw.pavement_ground_cracks : "";
   next.indented_by_rocks =
     raw?.indented_by_rocks === "YES" || raw?.indented_by_rocks === "NO" ? raw.indented_by_rocks : "";
+  next.pavement_ground_annotation_layout =
+    typeof raw?.pavement_ground_annotation_layout === "string" ? raw.pavement_ground_annotation_layout : "";
   return next;
 }
 
@@ -417,23 +586,25 @@ function enforceFormBusinessRules(input: FormState): FormState {
     next[k] = next[k] === "YES" ? "YES" : "NO";
   });
 
-  const materialPrimary = next.material_rock === "YES" ? "material_rock" : next.material_soil === "YES" ? "material_soil" : null;
-  next.material_rock = materialPrimary === "material_rock" ? "YES" : "NO";
-  next.material_soil = materialPrimary === "material_soil" ? "YES" : "NO";
-  if (materialPrimary === "material_rock") {
-    const rockSubs = ["material_bedding", "material_joints", "material_fractures"] as const;
-    const selectedSub = rockSubs.find((k) => next[k] === "YES");
-    rockSubs.forEach((k) => {
-      next[k] = k === selectedSub ? "YES" : "NO";
-    });
+  next.material_rock = next.material_rock === "YES" ? "YES" : "NO";
+  next.material_soil = next.material_soil === "YES" ? "YES" : "NO";
+  const rockSubs = ["material_bedding", "material_joints", "material_fractures"] as const;
+  rockSubs.forEach((k) => {
+    next[k] = next[k] === "YES" ? "YES" : "NO";
+  });
+  if (next.material_rock !== "YES") {
+    next.material_bedding = "NO";
+    next.material_joints = "NO";
+    next.material_fractures = "NO";
+    next.est_rock_pct = "";
+  }
+  if (next.material_soil !== "YES") {
+    next.est_soil_pct = "";
     next.est_clay_pct = "";
     next.est_silt_pct = "";
     next.est_sand_pct = "";
     next.est_gravel_pct = "";
-  } else {
-    next.material_bedding = "NO";
-    next.material_joints = "NO";
-    next.material_fractures = "NO";
+    next.est_boulder_pct = "";
   }
 
   if (next.pavement_ground_cracks !== "YES" && next.pavement_ground_cracks !== "NO") next.pavement_ground_cracks = "";
@@ -532,6 +703,9 @@ function Field({
   palette,
   error,
   onBlur,
+  citationImages,
+  onCitationTrigger,
+  onCitationPress,
 }: {
   label: string;
   value: string;
@@ -542,9 +716,95 @@ function Field({
   palette?: { muted: string; border: string; panel: string; panelSoft: string; text: string };
   error?: string;
   onBlur?: () => void;
+  citationImages?: GalleryImage[];
+  onCitationTrigger?: (request: FigureCitationRequest) => void;
+  onCitationPress?: (image: GalleryImage) => void;
 }) {
   const { componentScale, textScale } = useUiSettings();
   const scale = Math.max(1, componentScale);
+  const selectionRef = useRef({ start: value.length, end: value.length });
+  const inputRef = useRef<any>(null);
+  const [focused, setFocused] = useState(false);
+  const byLabel = citationImages?.length
+    ? new Map(citationImages.map((img) => [img.figureLabel, img]))
+    : null;
+
+  const startEditing = useCallback(() => {
+    setFocused(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  function renderRichText() {
+    if (!value) return null;
+    const parts: React.ReactNode[] = [];
+    const regex = /Figure\s+\d+\.\d+/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(value)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(<Text key={`t${lastIndex}`}>{value.slice(lastIndex, match.index)}</Text>);
+      }
+      const label = match[0].replace(/\s+/g, " ").trim();
+      const img = byLabel?.get(label);
+      parts.push(
+        <Text
+          key={`f${match.index}`}
+          style={{ color: "#3b82f6" }}
+          onPress={img && onCitationPress ? () => onCitationPress(img) : undefined}
+        >
+          {match[0]}
+        </Text>
+      );
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < value.length) {
+      parts.push(<Text key={`t${lastIndex}`}>{value.slice(lastIndex)}</Text>);
+    }
+    return parts;
+  }
+
+  const insertFigureCitation = useCallback(
+    (nextValue: string, slashIndex: number, image: GalleryImage) => {
+      const before = nextValue.slice(0, slashIndex);
+      const after = nextValue.slice(slashIndex + 1);
+      const leadingSpace = before && !/\s$/.test(before) ? " " : "";
+      const trailingSpace = after && !/^\s/.test(after) ? " " : "";
+      onChangeText?.(`${before}${leadingSpace}${image.figureLabel}${trailingSpace}${after}`);
+    },
+    [onChangeText]
+  );
+
+  const handleChangeText = useCallback(
+    (nextValue: string) => {
+      const previousValue = value ?? "";
+      const previousSelection = selectionRef.current;
+      onChangeText?.(nextValue);
+
+      if (!editable || !onCitationTrigger || !onChangeText) return;
+      const delta = nextValue.length - previousValue.length;
+      let slashIndex = -1;
+      if (delta > 0 && previousSelection.start <= previousValue.length) {
+        const inserted = nextValue.slice(previousSelection.start, previousSelection.start + delta);
+        const insertedSlashIndex = inserted.lastIndexOf("/");
+        if (insertedSlashIndex >= 0) {
+          slashIndex = previousSelection.start + insertedSlashIndex;
+        }
+      }
+      if (slashIndex < 0) {
+        const estimatedCursor = Math.min(nextValue.length, previousSelection.start + Math.max(delta, 0));
+        if (nextValue[estimatedCursor - 1] === "/" && previousValue[previousSelection.start - 1] !== "/") {
+          slashIndex = estimatedCursor - 1;
+        }
+      }
+      if (slashIndex < 0) return;
+      onCitationTrigger({
+        fieldLabel: label,
+        onSelect: (image) => insertFigureCitation(nextValue, slashIndex, image),
+      });
+    },
+    [editable, insertFigureCitation, label, onChangeText, onCitationTrigger, value]
+  );
+
   return (
     <View style={{ marginTop: Math.round(8 * scale) }}>
       <View style={[styles.labelRow, { gap: Math.round(6 * scale) }]}>
@@ -560,31 +820,197 @@ function Field({
           </View>
         ) : null}
       </View>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        onBlur={onBlur}
-        editable={editable}
-        multiline={multiline}
-        keyboardType={keyboardType ?? "default"}
-        maxFontSizeMultiplier={textScale}
-        style={[
-          styles.input,
-          {
-            borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"),
-            backgroundColor: palette?.panelSoft ?? "#f7f8fc",
-            color: palette?.text ?? "#1b2a40",
-            borderRadius: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
-            paddingHorizontal: Math.round(10 * scale),
-            paddingVertical: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
-            fontSize: Math.round((Platform.OS === "ios" ? 16 : 14) * scale),
-          },
-          multiline ? { minHeight: Math.round(90 * scale), textAlignVertical: "top" } : null,
-          !editable ? { opacity: 0.85 } : null,
-        ]}
-      />
+      {!focused && !editable ? (
+        <Text
+          maxFontSizeMultiplier={textScale}
+          style={[
+            styles.input,
+            {
+              borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"),
+              backgroundColor: palette?.panelSoft ?? "#f7f8fc",
+              color: palette?.text ?? "#1b2a40",
+              borderRadius: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+              paddingHorizontal: Math.round(10 * scale),
+              paddingVertical: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+              fontSize: Math.round((Platform.OS === "ios" ? 16 : 14) * scale),
+              opacity: 0.85,
+            },
+            multiline ? { minHeight: Math.round(90 * scale) } : null,
+          ]}
+        >
+          {renderRichText()}
+        </Text>
+      ) : !focused && editable ? (
+        <Pressable
+          onPress={startEditing}
+          style={[
+            styles.input,
+            {
+              borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"),
+              backgroundColor: palette?.panelSoft ?? "#f7f8fc",
+              borderRadius: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+              paddingHorizontal: Math.round(10 * scale),
+              paddingVertical: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+            },
+            multiline ? { minHeight: Math.round(90 * scale) } : null,
+          ]}
+        >
+          <Text
+            maxFontSizeMultiplier={textScale}
+            style={{
+              color: palette?.text ?? "#1b2a40",
+              fontSize: Math.round((Platform.OS === "ios" ? 16 : 14) * scale),
+            }}
+          >
+            {renderRichText()}
+          </Text>
+        </Pressable>
+      ) : (
+        <TextInput
+          ref={inputRef}
+          value={value}
+          onChangeText={handleChangeText}
+          onSelectionChange={(event) => {
+            selectionRef.current = event.nativeEvent.selection;
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); onBlur?.(); }}
+          editable={editable}
+          autoFocus
+          multiline={multiline}
+          keyboardType={keyboardType ?? "default"}
+          maxFontSizeMultiplier={textScale}
+          style={[
+            styles.input,
+            {
+              borderColor: error ? "#ef4444" : (palette?.border ?? "#ccd8ea"),
+              backgroundColor: palette?.panelSoft ?? "#f7f8fc",
+              color: palette?.text ?? "#1b2a40",
+              borderRadius: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+              paddingHorizontal: Math.round(10 * scale),
+              paddingVertical: Math.round((Platform.OS === "ios" ? 10 : 8) * scale),
+              fontSize: Math.round((Platform.OS === "ios" ? 16 : 14) * scale),
+            },
+            multiline ? { minHeight: Math.round(90 * scale), textAlignVertical: "top" } : null,
+          ]}
+        />
+      )}
       {error ? <Text style={[styles.errorText, { fontSize: Math.round(11 * scale), marginTop: Math.round(4 * scale) }]} maxFontSizeMultiplier={textScale}>{error}</Text> : null}
     </View>
+  );
+}
+
+function FigureCitationPicker({
+  visible,
+  request,
+  galleryImages,
+  palette,
+  failedPreviewIds,
+  previewSource,
+  onPreviewError,
+  onClose,
+}: {
+  visible: boolean;
+  request: FigureCitationRequest | null;
+  galleryImages: GalleryImage[];
+  palette: { bg: string; panel: string; panelSoft: string; border: string; text: string; muted: string; primary: string };
+  failedPreviewIds: Record<number, boolean>;
+  previewSource: (photoId: number) => { uri: string };
+  onPreviewError: (photoId: number) => void;
+  onClose: () => void;
+}) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
+  const grouped = galleryImages.reduce<{ key: string; label: string; images: GalleryImage[] }[]>((acc, image) => {
+    const key = image.section_key || "submission";
+    const existing = acc.find((section) => section.key === key);
+    if (existing) {
+      existing.images.push(image);
+    } else {
+      acc.push({ key, label: image.sourceLabel, images: [image] });
+    }
+    return acc;
+  }, []);
+  const tileWidth = Math.round(118 * scale);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.figurePickerBackdrop} onPress={onClose}>
+        <Pressable
+          style={[styles.figurePickerPanel, { backgroundColor: palette.panel, borderColor: palette.border }]}
+          onPress={(event) => event.stopPropagation()}
+        >
+          <View style={styles.figurePickerHeader}>
+            <View style={styles.figurePickerHeaderCopy}>
+              <Text style={[styles.figurePickerTitle, { color: palette.text }]} maxFontSizeMultiplier={textScale}>
+                Cite Image
+              </Text>
+              <Text style={[styles.figurePickerSubtitle, { color: palette.muted }]} maxFontSizeMultiplier={textScale}>
+                {request ? `Insert into ${request.fieldLabel}` : "Select a figure"}
+              </Text>
+            </View>
+            <Pressable style={[styles.figurePickerClose, { borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={onClose}>
+              <Text style={[styles.figurePickerCloseText, { color: palette.text }]} maxFontSizeMultiplier={textScale}>Close</Text>
+            </Pressable>
+          </View>
+          {galleryImages.length === 0 ? (
+            <View style={[styles.figurePickerEmpty, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+              <Text style={[styles.figurePickerEmptyText, { color: palette.muted }]} maxFontSizeMultiplier={textScale}>
+                No uploaded images yet. Upload a photo first, then type / to cite it here.
+              </Text>
+            </View>
+          ) : (
+            <ScrollView style={styles.figurePickerScroll} contentContainerStyle={styles.figurePickerScrollContent}>
+              {grouped.map((section) => (
+                <View key={`figure-picker-${section.key}`} style={styles.figurePickerSection}>
+                  <Text style={[styles.figurePickerSectionTitle, { color: palette.text }]} maxFontSizeMultiplier={textScale}>
+                    {section.label}
+                  </Text>
+                  <View style={styles.figurePickerGrid}>
+                    {section.images.map((image) => {
+                      const previewFailed = !!failedPreviewIds[image.id];
+                      return (
+                        <Pressable
+                          key={`figure-picker-image-${image.id}`}
+                          style={[styles.figurePickerTile, { width: tileWidth, borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+                          onPress={() => {
+                            request?.onSelect(image);
+                            onClose();
+                          }}
+                        >
+                          <View style={styles.figurePickerImageWrap}>
+                            {!previewFailed ? (
+                              <Image
+                                source={previewSource(image.id)}
+                                style={styles.figurePickerImage}
+                                resizeMode="cover"
+                                onError={() => onPreviewError(image.id)}
+                              />
+                            ) : (
+                              <View style={styles.figurePickerFallback}>
+                                <Text style={styles.figurePickerFallbackText}>Image</Text>
+                              </View>
+                            )}
+                            <View style={styles.figurePickerBadge}>
+                              <Text style={styles.figurePickerBadgeText} numberOfLines={1} maxFontSizeMultiplier={textScale}>
+                                {image.figureLabel}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={[styles.figurePickerFileName, { color: palette.muted }]} numberOfLines={1} maxFontSizeMultiplier={textScale}>
+                            {image.file_name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -644,6 +1070,301 @@ function SelectField({
   );
 }
 
+type MaterialSectionKey = "slope" | "pavement" | "debris";
+
+function MaterialSectionBubble({
+  label,
+  active,
+  onPress,
+  palette,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  palette: { primary: string; border: string; panelSoft: string; text: string };
+}) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.materialSectionBubble,
+        {
+          minHeight: Math.round(44 * scale),
+          paddingHorizontal: Math.round(12 * scale),
+          paddingVertical: Math.round(8 * scale),
+          borderColor: active ? palette.primary : palette.border,
+          backgroundColor: active ? palette.primary : palette.panelSoft,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.materialSectionBubbleText,
+          {
+            color: active ? "#ffffff" : palette.text,
+            fontSize: Math.round(12 * scale),
+          },
+        ]}
+        maxFontSizeMultiplier={textScale}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function MaterialSubsection({
+  title,
+  children,
+  palette,
+}: {
+  title: string;
+  children: React.ReactNode;
+  palette: { border: string; text: string; panelSoft: string };
+}) {
+  return (
+    <View style={[styles.materialSubsectionCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+      <Text style={[styles.materialSubsectionTitle, { color: palette.text }]}>{title}</Text>
+      <View style={styles.materialSubsectionBody}>{children}</View>
+    </View>
+  );
+}
+
+function SteppedPercentInput({
+  label,
+  value,
+  editable,
+  palette,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  editable: boolean;
+  palette: { panel: string; panelSoft: string; border: string; text: string; muted: string; primary: string };
+  onChange: (value: string) => void;
+}) {
+  const { componentScale, textScale } = useUiSettings();
+  const scale = Math.max(1, componentScale);
+  const thumbSize = Math.round(30 * scale);
+  const thumbTouchSize = Math.round(46 * scale);
+  const trackHeight = thumbTouchSize;
+  const railHeight = Math.round(12 * scale);
+  const numericValue = Math.max(0, Math.min(100, Number(value || 0) || 0));
+  const stepValue = Math.round(numericValue / 5) * 5;
+  const [trackWidth, setTrackWidth] = useState(0);
+  const [interactionStep, setInteractionStep] = useState<number | null>(null);
+  const dragActiveRef = useRef(false);
+  const dragStartStepRef = useRef(stepValue);
+  const currentStepRef = useRef(stepValue);
+  const thumbLeftRef = useRef(0);
+  const lastHapticStepRef = useRef(stepValue);
+  const displayStepValue = interactionStep ?? stepValue;
+
+  useEffect(() => {
+    if (dragActiveRef.current) return;
+    lastHapticStepRef.current = stepValue;
+    setInteractionStep(null);
+  }, [stepValue]);
+
+  const previewStepValue = useCallback(
+    (next: number) => {
+      if (!editable) return null;
+      const clamped = Math.max(0, Math.min(100, Math.round(next / 5) * 5));
+      setInteractionStep(clamped);
+      if (clamped !== lastHapticStepRef.current) {
+        lastHapticStepRef.current = clamped;
+        void Haptics.selectionAsync().catch(() => {});
+      }
+      return clamped;
+    },
+    [editable]
+  );
+  const usableTrackWidth = Math.max(trackWidth - thumbSize, 1);
+  const thumbLeft = trackWidth > thumbSize ? usableTrackWidth * (displayStepValue / 100) : 0;
+  currentStepRef.current = displayStepValue;
+  thumbLeftRef.current = thumbLeft;
+  const fillWidth = trackWidth > 0 ? Math.min(trackWidth, Math.max(thumbSize / 2, thumbLeft + thumbSize / 2)) : 0;
+  const updateValueFromDrag = useCallback(
+    (dx: number) => {
+      if (!editable) return null;
+      const ratio = clamp01(dragStartStepRef.current / 100 + dx / usableTrackWidth);
+      return previewStepValue(ratio * 100);
+    },
+    [editable, previewStepValue, usableTrackWidth]
+  );
+  const commitValueFromDrag = useCallback(
+    (dx: number) => {
+      const next = updateValueFromDrag(dx);
+      if (next == null) return;
+      onChange(String(next));
+    },
+    [onChange, updateValueFromDrag]
+  );
+  const thumbResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: (evt) => {
+          if (!editable || trackWidth <= thumbSize) return false;
+          const hitboxLeft = thumbLeftRef.current - (thumbTouchSize - thumbSize) / 2;
+          const touchX = evt.nativeEvent.locationX;
+          return touchX >= hitboxLeft && touchX <= hitboxLeft + thumbTouchSize;
+        },
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponderCapture: () => false,
+        onPanResponderGrant: () => {
+          dragActiveRef.current = true;
+          dragStartStepRef.current = currentStepRef.current;
+          lastHapticStepRef.current = currentStepRef.current;
+          setInteractionStep(currentStepRef.current);
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          updateValueFromDrag(gesture.dx);
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          commitValueFromDrag(gesture.dx);
+          dragActiveRef.current = false;
+        },
+        onPanResponderTerminate: (_evt, gesture) => {
+          commitValueFromDrag(gesture.dx);
+          dragActiveRef.current = false;
+        },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+      }),
+    [commitValueFromDrag, editable, thumbSize, thumbTouchSize, trackWidth, updateValueFromDrag]
+  );
+
+  return (
+    <View style={styles.materialPercentControl}>
+      <View style={styles.materialPercentLabelRow}>
+        <Text
+          style={[styles.label, { color: palette.muted, fontSize: Math.round(13 * scale) }]}
+          maxFontSizeMultiplier={textScale}
+        >
+          {label}
+        </Text>
+        <Text
+          style={[styles.materialPercentValue, { color: palette.text, fontSize: Math.round(13 * scale) }]}
+          maxFontSizeMultiplier={textScale}
+        >
+          {`${displayStepValue}%`}
+        </Text>
+      </View>
+      <View style={styles.materialPercentSliderRow}>
+        <View
+          {...(editable ? thumbResponder.panHandlers : {})}
+          style={[
+            styles.materialPercentTrackShell,
+            {
+              height: trackHeight,
+              opacity: editable ? 1 : 0.6,
+            },
+          ]}
+          onLayout={(evt) => {
+            const nextWidth = Math.round(evt.nativeEvent.layout.width);
+            setTrackWidth((current) => (current === nextWidth ? current : nextWidth));
+          }}
+        >
+          <View
+            style={[
+              styles.materialPercentTrackRail,
+              {
+                height: railHeight,
+                borderColor: palette.border,
+                backgroundColor: palette.panel,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.materialPercentTrackFill,
+                {
+                  width: fillWidth,
+                  backgroundColor: palette.primary,
+                },
+              ]}
+            />
+          </View>
+          <View style={styles.materialPercentTickRow} pointerEvents="none">
+            {Array.from({ length: 21 }, (_, idx) => {
+              const currentStep = idx * 5;
+              const active = currentStep <= displayStepValue;
+              return (
+                <View key={`${label}-${currentStep}`} style={styles.materialPercentTickSlot}>
+                  <View
+                    style={[
+                      styles.materialPercentTick,
+                      {
+                        backgroundColor: active ? "#ffffff" : palette.border,
+                        height: idx % 2 === 0 ? Math.round(10 * scale) : Math.round(7 * scale),
+                        opacity: active ? 0.95 : 0.8,
+                      },
+                    ]}
+                  />
+                </View>
+              );
+            })}
+          </View>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.materialPercentThumbHitbox,
+              {
+                width: thumbTouchSize,
+                height: thumbTouchSize,
+                left: thumbLeft - (thumbTouchSize - thumbSize) / 2,
+                top: Math.round((trackHeight - thumbTouchSize) / 2),
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.materialPercentThumb,
+                {
+                  width: thumbSize,
+                  height: thumbSize,
+                  borderColor: palette.primary,
+                  backgroundColor: palette.panelSoft,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.materialPercentThumbCore,
+                  {
+                    backgroundColor: palette.primary,
+                    width: Math.round(8 * scale),
+                    height: Math.round(8 * scale),
+                    borderRadius: Math.round(4 * scale),
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        </View>
+        <View style={styles.materialPercentRangeRow}>
+          <Text
+            style={[styles.materialPercentRangeText, { color: palette.muted, fontSize: Math.round(11 * scale) }]}
+            maxFontSizeMultiplier={textScale}
+          >
+            0%
+          </Text>
+          <Text
+            style={[styles.materialPercentRangeText, { color: palette.muted, fontSize: Math.round(11 * scale) }]}
+            maxFontSizeMultiplier={textScale}
+          >
+            100%
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function CollapsibleSection({
   title,
   open,
@@ -699,6 +1420,1078 @@ function DropdownBlock({
   );
 }
 
+type AnnotationPalette = {
+  primary: string;
+  border: string;
+  panel: string;
+  panelSoft: string;
+  text: string;
+  muted: string;
+};
+
+function PavementDrawerToken({
+  id,
+  title,
+  summary,
+  placed,
+  active,
+  editable,
+  palette,
+  onSelect,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+}: {
+  id: PavementAnnotationId;
+  title: string;
+  summary: string;
+  placed: boolean;
+  active: boolean;
+  editable: boolean;
+  palette: AnnotationPalette;
+  onSelect: (id: PavementAnnotationId) => void;
+  onDragStart: (id: PavementAnnotationId, pageX: number, pageY: number) => void;
+  onDragMove: (id: PavementAnnotationId, pageX: number, pageY: number) => void;
+  onDragEnd: (id: PavementAnnotationId, pageX: number, pageY: number, moved: boolean) => void;
+}) {
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: (_evt, gesture) =>
+          editable && Math.abs(gesture.dx) > 6 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onMoveShouldSetPanResponderCapture: (_evt, gesture) =>
+          editable && Math.abs(gesture.dx) > 6 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderGrant: (evt) => {
+          onDragStart(id, evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        },
+        onPanResponderMove: (evt) => {
+          onDragMove(id, evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        },
+        onPanResponderRelease: (evt) => {
+          onDragEnd(id, evt.nativeEvent.pageX, evt.nativeEvent.pageY, true);
+        },
+        onPanResponderTerminate: (evt) => {
+          onDragEnd(id, evt.nativeEvent.pageX, evt.nativeEvent.pageY, true);
+        },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+      }),
+    [editable, id, onDragEnd, onDragMove, onDragStart, onSelect]
+  );
+
+  return (
+    <View
+      {...(editable ? responder.panHandlers : {})}
+      style={[
+        styles.annotationDrawerToken,
+        {
+          borderColor: active ? palette.primary : palette.border,
+          backgroundColor: active ? palette.panelSoft : palette.panel,
+          opacity: editable ? 1 : 0.75,
+        },
+      ]}
+    >
+      <Pressable onPress={() => onSelect(id)}>
+        <View style={styles.annotationDrawerTokenHeader}>
+          <Text style={[styles.annotationDrawerTokenTitle, { color: palette.text }]}>{title}</Text>
+          <Text style={[styles.annotationDrawerTokenStatus, { color: placed ? palette.primary : palette.muted }]}>
+            {placed ? "On Photo" : "Not Placed"}
+          </Text>
+        </View>
+        <Text
+          numberOfLines={active ? 4 : 1}
+          style={[styles.annotationDrawerTokenSummary, { color: active ? palette.text : palette.muted }]}
+        >
+          {summary}
+        </Text>
+        {active ? (
+          <Text style={[styles.annotationDrawerTokenHint, { color: palette.muted }]}>
+            {editable ? "Swipe left onto the photo or tap to edit." : "Tap to view details."}
+          </Text>
+        ) : null}
+      </Pressable>
+    </View>
+  );
+}
+
+function PavementCanvasMarker({
+  id,
+  glyph,
+  left,
+  top,
+  active,
+  editable,
+  variant = "anchor",
+  palette,
+  onSelect,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+}: {
+  id: PavementAnnotationId;
+  glyph: string;
+  left: number;
+  top: number;
+  active: boolean;
+  editable: boolean;
+  variant?: "anchor" | "rangeEnd";
+  palette: AnnotationPalette;
+  onSelect: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd") => void;
+  onDragStart: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd") => void;
+  onDragMove: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", dx: number, dy: number) => void;
+  onDragEnd: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", moved: boolean) => void;
+}) {
+  const movedRef = useRef(false);
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => editable,
+        onStartShouldSetPanResponderCapture: () => editable,
+        onMoveShouldSetPanResponder: () => editable,
+        onMoveShouldSetPanResponderCapture: () => editable,
+        onPanResponderGrant: () => {
+          movedRef.current = false;
+          onDragStart(id, variant);
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          if (Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2) movedRef.current = true;
+          onDragMove(id, variant, gesture.dx, gesture.dy);
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          const moved = movedRef.current || Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2;
+          onDragEnd(id, variant, moved);
+          if (!moved) onSelect(id, variant);
+        },
+        onPanResponderTerminate: (_evt, gesture) => {
+          const moved = movedRef.current || Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2;
+          onDragEnd(id, variant, moved);
+          if (!moved) onSelect(id, variant);
+        },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+      }),
+    [editable, id, onDragEnd, onDragMove, onDragStart, onSelect, variant]
+  );
+
+  return (
+    <View
+      {...(editable ? responder.panHandlers : {})}
+      style={[
+        styles.annotationMarker,
+        {
+          left,
+          top,
+          borderColor: active ? "#ffffff" : palette.primary,
+          backgroundColor:
+            variant === "anchor"
+              ? active
+                ? palette.primary
+                : "rgba(255,255,255,0.85)"
+              : active
+                ? "#f8fbff"
+                : "rgba(255,255,255,0.65)",
+        },
+        variant === "rangeEnd" ? styles.annotationMarkerRangeEnd : null,
+      ]}
+    >
+      {variant === "anchor" ? (
+        <Text style={[styles.annotationMarkerText, { color: active ? "#ffffff" : palette.primary }]}>{glyph}</Text>
+      ) : (
+        <View style={[styles.annotationMarkerRangeEndDot, { backgroundColor: active ? palette.primary : "#0f172a" }]} />
+      )}
+    </View>
+  );
+}
+
+function PavementGroundAnnotator({
+  form,
+  fieldErrors,
+  canEdit,
+  busy,
+  palette,
+  imageSource,
+  imageName,
+  onUploadPhoto,
+  setVal,
+}: {
+  form: FormState;
+  fieldErrors: FieldErrorMap;
+  canEdit: boolean;
+  busy: boolean;
+  palette: AnnotationPalette;
+  imageSource?: { uri: string } | null;
+  imageName?: string | null;
+  onUploadPhoto: () => void;
+  setVal: (key: keyof FormState, value: string) => void;
+}) {
+  const MARKER_SIZE = 32;
+  const { width: windowWidth } = useWindowDimensions();
+  const stageRef = useRef<View | null>(null);
+  const markerDragRef = useRef<null | { id: PavementAnnotationId; handle: "anchor" | "rangeEnd"; originLeft: number; originTop: number; left: number; top: number }>(null);
+  const lastPersistedLayoutRef = useRef(form.pavement_ground_annotation_layout);
+  const drawerProgress = useRef(new Animated.Value(0)).current;
+  const [annotationLayout, setAnnotationLayout] = useState<PavementAnnotationLayout>(() =>
+    parsePavementAnnotationLayout(form.pavement_ground_annotation_layout)
+  );
+  const [activeAnnotation, setActiveAnnotation] = useState<PavementAnnotationId | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [imageAspectRatio, setImageAspectRatio] = useState(4 / 3);
+  const [stageAreaSize, setStageAreaSize] = useState({ width: 0, height: 0 });
+  const [stageBounds, setStageBounds] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [drawerDrag, setDrawerDrag] = useState<null | { id: PavementAnnotationId; x: number; y: number }>(null);
+  const [markerDrag, setMarkerDrag] = useState<null | { id: PavementAnnotationId; handle: "anchor" | "rangeEnd"; originLeft: number; originTop: number; left: number; top: number }>(null);
+  const [canvasPopoverAnnotation, setCanvasPopoverAnnotation] = useState<PavementAnnotationId | null>(null);
+
+  useEffect(() => {
+    if (form.pavement_ground_annotation_layout === lastPersistedLayoutRef.current) return;
+    setAnnotationLayout(parsePavementAnnotationLayout(form.pavement_ground_annotation_layout));
+    lastPersistedLayoutRef.current = form.pavement_ground_annotation_layout;
+  }, [form.pavement_ground_annotation_layout]);
+
+  useEffect(() => {
+    if (!imageSource) {
+      setActiveAnnotation(null);
+      setStageAreaSize({ width: 0, height: 0 });
+      setStageBounds({ x: 0, y: 0, width: 0, height: 0 });
+      setMarkerDrag(null);
+      setDrawerDrag(null);
+      setCanvasPopoverAnnotation(null);
+      setImageAspectRatio(4 / 3);
+    }
+  }, [imageSource]);
+
+  useEffect(() => {
+    Animated.spring(drawerProgress, {
+      toValue: drawerOpen ? 1 : 0,
+      damping: 20,
+      mass: 0.95,
+      stiffness: 180,
+      overshootClamping: false,
+      useNativeDriver: true,
+    }).start();
+  }, [drawerOpen, drawerProgress]);
+
+  useEffect(() => {
+    if (editorOpen) {
+      setDrawerOpen(true);
+      return;
+    }
+    setDrawerOpen(false);
+    setDrawerDrag(null);
+    setMarkerDrag(null);
+    setCanvasPopoverAnnotation(null);
+    markerDragRef.current = null;
+  }, [editorOpen]);
+
+  const persistAnnotationLayout = useCallback(
+    (next: PavementAnnotationLayout) => {
+      const serialized = stringifyPavementAnnotationLayout(next);
+      lastPersistedLayoutRef.current = serialized;
+      setAnnotationLayout(next);
+      setVal(PAVEMENT_ANNOTATION_FIELD as keyof FormState, serialized);
+    },
+    [setVal]
+  );
+
+  const stageSize = useMemo(() => {
+    const width = stageAreaSize.width;
+    const height = stageAreaSize.height;
+    if (!width || !height) return { width: 0, height: 0 };
+    const areaRatio = width / height;
+    if (imageAspectRatio >= areaRatio) {
+      return { width, height: width / imageAspectRatio };
+    }
+    return { width: height * imageAspectRatio, height };
+  }, [imageAspectRatio, stageAreaSize.height, stageAreaSize.width]);
+
+  const refreshStageBounds = useCallback(() => {
+    requestAnimationFrame(() => {
+      stageRef.current?.measureInWindow((x, y, width, height) => {
+        if (Number.isFinite(x) && Number.isFinite(y) && width > 0 && height > 0) {
+          setStageBounds({ x, y, width, height });
+        }
+      });
+    });
+  }, []);
+
+  const markerStageBounds = useMemo(() => {
+    const maxLeft = Math.max(0, stageSize.width - MARKER_SIZE);
+    const maxTop = Math.max(0, stageSize.height - MARKER_SIZE);
+    return { maxLeft, maxTop };
+  }, [MARKER_SIZE, stageSize.height, stageSize.width]);
+
+  const clampMarkerPosition = useCallback(
+    (left: number, top: number) => ({
+      left: Math.max(0, Math.min(left, markerStageBounds.maxLeft)),
+      top: Math.max(0, Math.min(top, markerStageBounds.maxTop)),
+    }),
+    [markerStageBounds.maxLeft, markerStageBounds.maxTop]
+  );
+
+  const getLayoutPosition = useCallback(
+    (point: PavementAnnotationPoint | null | undefined) => {
+      if (!point) return null;
+      return clampMarkerPosition(point.x * markerStageBounds.maxLeft, point.y * markerStageBounds.maxTop);
+    },
+    [clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop]
+  );
+
+  const commitMarkerPosition = useCallback(
+    (id: PavementAnnotationId, left: number, top: number, placed = true) => {
+      const nextPosition = clampMarkerPosition(left, top);
+      const current = annotationLayout[id];
+      const next: PavementAnnotationLayout = {
+        ...annotationLayout,
+        [id]: {
+          x: markerStageBounds.maxLeft > 0 ? nextPosition.left / markerStageBounds.maxLeft : 0,
+          y: markerStageBounds.maxTop > 0 ? nextPosition.top / markerStageBounds.maxTop : 0,
+          placed,
+          rangeEnd: current.rangeEnd,
+        },
+      };
+      persistAnnotationLayout(next);
+      return nextPosition;
+    },
+    [annotationLayout, clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop, persistAnnotationLayout]
+  );
+
+  const commitRangeEndPosition = useCallback(
+    (id: PavementAnnotationId, left: number, top: number) => {
+      const nextPosition = clampMarkerPosition(left, top);
+      const current = annotationLayout[id];
+      const next: PavementAnnotationLayout = {
+        ...annotationLayout,
+        [id]: {
+          ...current,
+          rangeEnd: {
+            x: markerStageBounds.maxLeft > 0 ? nextPosition.left / markerStageBounds.maxLeft : 0,
+            y: markerStageBounds.maxTop > 0 ? nextPosition.top / markerStageBounds.maxTop : 0,
+          },
+        },
+      };
+      persistAnnotationLayout(next);
+      return nextPosition;
+    },
+    [annotationLayout, clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop, persistAnnotationLayout]
+  );
+
+  useEffect(() => {
+    if (!editorOpen) return;
+    const timer = setTimeout(refreshStageBounds, 60);
+    return () => clearTimeout(timer);
+  }, [editorOpen, refreshStageBounds, stageSize.height, stageSize.width]);
+
+  const placeAnnotationAtPoint = useCallback(
+    (id: PavementAnnotationId, pageX: number, pageY: number) => {
+      if (stageBounds.width <= 0 || stageBounds.height <= 0) return false;
+      if (
+        pageX < stageBounds.x ||
+        pageX > stageBounds.x + stageBounds.width ||
+        pageY < stageBounds.y ||
+        pageY > stageBounds.y + stageBounds.height
+      ) {
+        return false;
+      }
+      const nextLeft = pageX - stageBounds.x - MARKER_SIZE / 2;
+      const nextTop = pageY - stageBounds.y - MARKER_SIZE / 2;
+      commitMarkerPosition(id, nextLeft, nextTop, true);
+      return true;
+    },
+    [MARKER_SIZE, commitMarkerPosition, stageBounds.height, stageBounds.width, stageBounds.x, stageBounds.y]
+  );
+
+  const resetPositions = useCallback(() => {
+    const next: PavementAnnotationLayout = { ...annotationLayout };
+    PAVEMENT_ANNOTATION_ORDER.forEach((id) => {
+      next[id] = {
+        ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id],
+        placed: annotationLayout[id]?.placed ?? false,
+        rangeEnd: annotationLayout[id]?.rangeEnd ?? null,
+      };
+    });
+    persistAnnotationLayout(next);
+  }, [annotationLayout, persistAnnotationLayout]);
+
+  const removePlacement = useCallback(
+    (id: PavementAnnotationId) => {
+      const next: PavementAnnotationLayout = {
+        ...annotationLayout,
+        [id]: {
+          ...annotationLayout[id],
+          placed: false,
+          rangeEnd: null,
+        },
+      };
+      persistAnnotationLayout(next);
+      if (activeAnnotation === id) setActiveAnnotation(null);
+      if (canvasPopoverAnnotation === id) setCanvasPopoverAnnotation(null);
+    },
+    [activeAnnotation, annotationLayout, canvasPopoverAnnotation, persistAnnotationLayout]
+  );
+
+  const clearCrackMeasurements = useCallback(() => {
+    setVal("crack_length_ft", "");
+    setVal("crack_horizontal_in", "");
+    setVal("crack_vertical_in", "");
+    setVal("crack_depth_in", "");
+  }, [setVal]);
+
+  const glyphForAnnotation = useCallback((id: PavementAnnotationId) => {
+    if (id === "crack") return "C";
+    if (id === "settlement") return "S";
+    if (id === "bulge") return "B";
+    return "R";
+  }, []);
+
+  const annotationRows = useMemo(
+    () =>
+      PAVEMENT_ANNOTATION_ORDER.map((id) => ({
+        id,
+        title: PAVEMENT_ANNOTATION_TITLES[id],
+        shortSummary: pavementAnnotationShortSummary(id, form),
+        longSummary: pavementAnnotationLongSummary(id, form),
+        hasValue: pavementAnnotationHasValue(id, form),
+        placed: annotationLayout[id]?.placed ?? false,
+      })),
+    [annotationLayout, form]
+  );
+
+  const selectAnnotationFromDrawer = useCallback(
+    (id: PavementAnnotationId) => {
+      setActiveAnnotation(id);
+      setCanvasPopoverAnnotation(null);
+      setDrawerOpen(true);
+    },
+    []
+  );
+
+  const selectAnnotationFromCanvas = useCallback(
+    (id: PavementAnnotationId, _handle?: "anchor" | "rangeEnd") => {
+      setActiveAnnotation(id);
+      setCanvasPopoverAnnotation(id);
+      setDrawerOpen(false);
+    },
+    []
+  );
+
+  const beginDrawerDrag = useCallback((id: PavementAnnotationId, pageX: number, pageY: number) => {
+    refreshStageBounds();
+    setDrawerDrag({ id, x: pageX, y: pageY });
+  }, [refreshStageBounds]);
+
+  const moveDrawerDrag = useCallback((id: PavementAnnotationId, pageX: number, pageY: number) => {
+    setDrawerDrag((current) => (current?.id === id ? { id, x: pageX, y: pageY } : { id, x: pageX, y: pageY }));
+  }, []);
+
+  const endDrawerDrag = useCallback(
+    (id: PavementAnnotationId, pageX: number, pageY: number, moved: boolean) => {
+      if (moved) {
+        placeAnnotationAtPoint(id, pageX, pageY);
+      }
+      setDrawerDrag(null);
+    },
+    [placeAnnotationAtPoint]
+  );
+
+  const beginMarkerDrag = useCallback(
+    (id: PavementAnnotationId, handle: "anchor" | "rangeEnd") => {
+      const layout = annotationLayout[id];
+      const point =
+        handle === "rangeEnd"
+          ? getLayoutPosition(layout.rangeEnd)
+          : {
+              left: layout.x * markerStageBounds.maxLeft,
+              top: layout.y * markerStageBounds.maxTop,
+            };
+      if (!point) return;
+      const next = {
+        id,
+        handle,
+        originLeft: point.left,
+        originTop: point.top,
+        left: point.left,
+        top: point.top,
+      };
+      markerDragRef.current = next;
+      setMarkerDrag(next);
+    },
+    [annotationLayout, getLayoutPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop]
+  );
+
+  const moveMarkerDrag = useCallback(
+    (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", dx: number, dy: number) => {
+      const current = markerDragRef.current;
+      if (!current || current.id !== id || current.handle !== handle) return;
+      const nextPosition = clampMarkerPosition(current.originLeft + dx, current.originTop + dy);
+      const next = {
+        ...current,
+        left: nextPosition.left,
+        top: nextPosition.top,
+      };
+      markerDragRef.current = next;
+      setMarkerDrag(next);
+    },
+    [clampMarkerPosition]
+  );
+
+  const endMarkerDrag = useCallback(
+    (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", moved: boolean) => {
+      const current = markerDragRef.current;
+      if (moved && current?.id === id && current.handle === handle) {
+        if (handle === "rangeEnd") {
+          commitRangeEndPosition(id, current.left, current.top);
+        } else {
+          commitMarkerPosition(id, current.left, current.top, true);
+        }
+      }
+      markerDragRef.current = null;
+      setMarkerDrag(null);
+    },
+    [commitMarkerPosition, commitRangeEndPosition]
+  );
+
+  const addRangeReference = useCallback(
+    (id: PavementAnnotationId) => {
+      const current = annotationLayout[id];
+      const anchorLeft = current.x * markerStageBounds.maxLeft;
+      const anchorTop = current.y * markerStageBounds.maxTop;
+      const defaultOffset = Math.max(54, Math.min(markerStageBounds.maxLeft * 0.22, 120));
+      const nextPosition = clampMarkerPosition(anchorLeft + defaultOffset, anchorTop);
+      const next: PavementAnnotationLayout = {
+        ...annotationLayout,
+        [id]: {
+          ...current,
+          rangeEnd: {
+            x: markerStageBounds.maxLeft > 0 ? nextPosition.left / markerStageBounds.maxLeft : current.x,
+            y: markerStageBounds.maxTop > 0 ? nextPosition.top / markerStageBounds.maxTop : current.y,
+          },
+        },
+      };
+      persistAnnotationLayout(next);
+    },
+    [annotationLayout, clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop, persistAnnotationLayout]
+  );
+
+  const removeRangeReference = useCallback(
+    (id: PavementAnnotationId) => {
+      const current = annotationLayout[id];
+      const next: PavementAnnotationLayout = {
+        ...annotationLayout,
+        [id]: {
+          ...current,
+          rangeEnd: null,
+        },
+      };
+      persistAnnotationLayout(next);
+    },
+    [annotationLayout, persistAnnotationLayout]
+  );
+
+  const renderAnnotationFields = (mode: "drawer" | "popover" = "drawer") => {
+    const popoverMode = mode === "popover";
+    const headingColor = popoverMode ? "#f8fbff" : palette.text;
+    const secondaryColor = popoverMode ? "rgba(248,251,255,0.9)" : palette.muted;
+    const panelBg = popoverMode ? "rgba(255,255,255,0.06)" : palette.panel;
+    if (!activeAnnotation) {
+      return <Text style={[styles.annotationDrawerEmptyText, { color: palette.muted }]}>Tap a label in the drawer or a marker on the photo to edit it.</Text>;
+    }
+
+    return (
+      <>
+        {!popoverMode ? (
+          <Text style={[styles.pickerTitle, styles.annotationFieldTitle, { color: headingColor }]}>{PAVEMENT_ANNOTATION_TITLES[activeAnnotation]}</Text>
+        ) : null}
+
+        {activeAnnotation === "crack" ? (
+          <>
+            <Text style={[styles.label, styles.annotationFieldLabel, { color: secondaryColor }]}>Pavement/Ground Cracks</Text>
+            <View style={styles.chips}>
+              {(["YES", "NO"] as const).map((choice) => (
+                <Chip
+                  key={`annot-crack-${choice}`}
+                  label={choice}
+                  palette={palette}
+                  active={form.pavement_ground_cracks === choice}
+                  disabled={!canEdit}
+                  onPress={() => {
+                    if (!canEdit) return;
+                    setVal("pavement_ground_cracks", choice);
+                    if (choice !== "YES") {
+                      clearCrackMeasurements();
+                    }
+                  }}
+                />
+              ))}
+            </View>
+            {form.pavement_ground_cracks === "YES" ? (
+              <>
+                <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Length (feet)" value={form.crack_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_length_ft", v)} error={fieldErrors.crack_length_ft} />
+                <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Horizontal Disp (inches)" value={form.crack_horizontal_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_horizontal_in", v)} error={fieldErrors.crack_horizontal_in} />
+                <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Vertical Disp (inches)" value={form.crack_vertical_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_vertical_in", v)} error={fieldErrors.crack_vertical_in} />
+                <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Depth of Crack (inches)" value={form.crack_depth_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_depth_in", v)} error={fieldErrors.crack_depth_in} />
+              </>
+            ) : null}
+          </>
+        ) : null}
+
+        {activeAnnotation === "settlement" ? (
+          <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Settlement (inches)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
+        ) : null}
+
+        {activeAnnotation === "bulge" ? (
+          <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
+        ) : null}
+
+        {activeAnnotation === "rocks" ? (
+          <>
+            <Text style={[styles.label, styles.annotationFieldLabel, { color: secondaryColor }]}>Indented by Rocks</Text>
+            <View style={styles.chips}>
+              {(["YES", "NO"] as const).map((choice) => (
+                <Chip
+                  key={`annot-rocks-${choice}`}
+                  label={choice}
+                  palette={palette}
+                  active={form.indented_by_rocks === choice}
+                  disabled={!canEdit}
+                  onPress={() => {
+                    if (!canEdit) return;
+                    setVal("indented_by_rocks", choice);
+                  }}
+                />
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        {annotationLayout[activeAnnotation]?.placed ? (
+          <>
+            <View style={styles.annotationDetailActions}>
+              {annotationLayout[activeAnnotation]?.rangeEnd ? (
+                <Pressable
+                  style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]}
+                  onPress={() => removeRangeReference(activeAnnotation)}
+                  disabled={!canEdit}
+                >
+                  <Text style={[styles.btnGhostText, { color: headingColor }]}>Remove Range</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]}
+                  onPress={() => addRangeReference(activeAnnotation)}
+                  disabled={!canEdit}
+                >
+                  <Text style={[styles.btnGhostText, { color: headingColor }]}>Add Range</Text>
+                </Pressable>
+              )}
+              <Pressable
+                style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]}
+                onPress={() => removePlacement(activeAnnotation)}
+                disabled={!canEdit}
+              >
+                <Text style={[styles.btnGhostText, { color: headingColor }]}>Remove</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+      </>
+    );
+  };
+
+  const placedCount = annotationRows.filter((item) => item.placed).length;
+  const drawerWidth = Math.min(360, Math.max(260, Math.round(windowWidth * 0.78)));
+  const drawerTranslateX = drawerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [drawerWidth + 24, 0],
+  });
+  const activeAnnotationLayout = activeAnnotation ? annotationLayout[activeAnnotation] : null;
+  const activePopoverLayout = canvasPopoverAnnotation ? annotationLayout[canvasPopoverAnnotation] : null;
+  const activeAnnotationAnchorPosition =
+    canvasPopoverAnnotation && activePopoverLayout
+      ? markerDrag?.id === canvasPopoverAnnotation && markerDrag.handle === "anchor"
+        ? { left: markerDrag.left, top: markerDrag.top }
+        : {
+            left: activePopoverLayout.x * markerStageBounds.maxLeft,
+            top: activePopoverLayout.y * markerStageBounds.maxTop,
+          }
+      : null;
+  const activeCanvasPopupWidth = Math.min(320, Math.max(240, stageSize.width - 24));
+  const activeCanvasPopupStyle = useMemo(() => {
+    if (!canvasPopoverAnnotation || drawerOpen || !activePopoverLayout?.placed || !activeAnnotationAnchorPosition) return null;
+    const preferredLeft = activeAnnotationAnchorPosition.left + MARKER_SIZE + 10;
+    const fallbackLeft = activeAnnotationAnchorPosition.left - activeCanvasPopupWidth - 10;
+    const usePreferredSide = preferredLeft + activeCanvasPopupWidth <= stageSize.width - 8;
+    const left = Math.max(
+      8,
+      Math.min(
+        usePreferredSide ? preferredLeft : fallbackLeft,
+        Math.max(8, stageSize.width - activeCanvasPopupWidth - 8)
+      )
+    );
+    const preferredTop = activeAnnotationAnchorPosition.top - 8;
+    const top = Math.max(8, Math.min(preferredTop, Math.max(8, stageSize.height - 240)));
+    return { left, top, width: activeCanvasPopupWidth, side: usePreferredSide ? "right" : "left" as const };
+  }, [
+    MARKER_SIZE,
+    activeAnnotationAnchorPosition,
+    activePopoverLayout?.placed,
+    activeCanvasPopupWidth,
+    canvasPopoverAnnotation,
+    drawerOpen,
+    stageSize.height,
+    stageSize.width,
+  ]);
+
+  return (
+    <View style={[styles.annotationCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+      <Text style={[styles.annotationIntro, { color: palette.text }]}>
+        Upload a pavement photo, then place compact markers from the right-side label drawer in the fullscreen editor.
+      </Text>
+      {imageName ? (
+        <Text style={[styles.annotationSubtle, { color: palette.muted }]}>Using latest section photo: {imageName}</Text>
+      ) : (
+        <Text style={[styles.annotationSubtle, { color: palette.muted }]}>Upload a section photo first to unlock the fullscreen annotation editor.</Text>
+      )}
+
+      <View style={styles.annotationToolbar}>
+        <Pressable
+          style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]}
+          onPress={onUploadPhoto}
+          disabled={!canEdit || busy}
+        >
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>
+            {busy ? "Working..." : imageSource ? "Upload Another Photo" : "Upload Photo"}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]}
+          onPress={() => {
+            setEditorOpen(true);
+            if (!activeAnnotation) setActiveAnnotation("crack");
+          }}
+          disabled={busy}
+        >
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Open Full Screen Editor</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]}
+          onPress={resetPositions}
+          disabled={!canEdit || busy}
+        >
+          <Text style={[styles.btnGhostText, { color: palette.text }]}>Reset Placed Marker Positions</Text>
+        </Pressable>
+      </View>
+
+      {imageSource ? (
+        <Pressable
+          style={[styles.annotationPreviewShell, { borderColor: palette.border, backgroundColor: palette.panel }]}
+          onPress={() => setEditorOpen(true)}
+        >
+          <Image
+            source={imageSource}
+            style={styles.annotationPreviewImage}
+            resizeMode="cover"
+            onLoad={(event) => {
+              const source = event.nativeEvent.source;
+              if (source?.width && source?.height) {
+                setImageAspectRatio(source.width / source.height);
+              }
+            }}
+          />
+          <View style={styles.annotationPreviewOverlay}>
+            <Text style={styles.annotationPreviewOverlayText}>
+              {placedCount ? `${placedCount} marker${placedCount === 1 ? "" : "s"} placed` : "Open Full Screen Editor"}
+            </Text>
+          </View>
+        </Pressable>
+      ) : (
+        <View style={[styles.annotationEmptyState, { borderColor: palette.border, backgroundColor: palette.panel }]}>
+          <Text style={[styles.annotationEmptyTitle, { color: palette.text }]}>No pavement photo yet</Text>
+          <Text style={[styles.annotationSubtle, { color: palette.muted }]}>
+            Upload a picture for this section to start dropping markers onto the image.
+          </Text>
+        </View>
+      )}
+
+      <View style={styles.annotationSummaryList}>
+        {annotationRows.map((item) => (
+          <Pressable
+            key={`summary-${item.id}`}
+            style={[styles.annotationSummaryRow, { borderColor: palette.border, backgroundColor: palette.panel }]}
+            onPress={() => {
+              setActiveAnnotation(item.id);
+              setEditorOpen(true);
+            }}
+          >
+            <View
+              style={[
+                styles.annotationSummaryDot,
+                { backgroundColor: item.placed ? palette.primary : palette.border },
+              ]}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.annotationSummaryTitle, { color: palette.text }]}>{item.title}</Text>
+              <Text style={[styles.annotationSummaryText, { color: palette.muted }]}>{item.longSummary}</Text>
+            </View>
+            <Text style={[styles.annotationSummaryAction, { color: palette.primary }]}>
+              {item.placed ? "Placed" : "Place"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <Modal visible={editorOpen} animationType="slide" onRequestClose={() => setEditorOpen(false)}>
+        <View style={[styles.annotationEditorScreen, { backgroundColor: "#091321" }]}>
+          <View style={styles.annotationEditorTopBar}>
+            <Text style={styles.annotationEditorTitle}>Pavement Photo Editor</Text>
+            <View style={styles.annotationEditorTopBarSpacer} />
+            <View style={styles.annotationEditorHeaderActions}>
+              <Pressable
+                style={[
+                  styles.annotationEditorCloseBtn,
+                  styles.annotationEditorHeaderBtn,
+                  drawerOpen ? styles.annotationEditorDrawerToggleBtnActive : null,
+                ]}
+                onPress={() => setDrawerOpen((current) => !current)}
+              >
+                <Text style={styles.annotationEditorCloseText}>{drawerOpen ? "Hide Labels" : "Show Labels"}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.annotationEditorCloseBtn, styles.annotationEditorHeaderBtn]}
+                onPress={() => setEditorOpen(false)}
+              >
+                <Text style={styles.annotationEditorCloseText}>Done</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.annotationEditorBody}>
+            <View style={styles.annotationEditorCanvasArea} onLayout={(event) => setStageAreaSize(event.nativeEvent.layout)}>
+              {imageSource ? (
+                <View
+                  ref={stageRef}
+                  collapsable={false}
+                  onLayout={refreshStageBounds}
+                  style={[
+                    styles.annotationEditorStage,
+                    {
+                      width: stageSize.width || 0,
+                      height: stageSize.height || 0,
+                    },
+                  ]}
+                >
+                  <Image source={imageSource} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                  {annotationRows
+                    .filter((item) => item.placed)
+                    .map((item) => {
+                      const layout = annotationLayout[item.id];
+                      const anchorLeft =
+                        markerDrag?.id === item.id && markerDrag.handle === "anchor"
+                          ? markerDrag.left
+                          : layout.x * markerStageBounds.maxLeft;
+                      const anchorTop =
+                        markerDrag?.id === item.id && markerDrag.handle === "anchor"
+                          ? markerDrag.top
+                          : layout.y * markerStageBounds.maxTop;
+                      const rangeEndPosition =
+                        markerDrag?.id === item.id && markerDrag.handle === "rangeEnd"
+                          ? { left: markerDrag.left, top: markerDrag.top }
+                          : getLayoutPosition(layout.rangeEnd);
+                      const lineStartX = anchorLeft + MARKER_SIZE / 2;
+                      const lineStartY = anchorTop + MARKER_SIZE / 2;
+                      const lineEndX = rangeEndPosition ? rangeEndPosition.left + MARKER_SIZE / 2 : null;
+                      const lineEndY = rangeEndPosition ? rangeEndPosition.top + MARKER_SIZE / 2 : null;
+                      const lineDeltaX = lineEndX != null ? lineEndX - lineStartX : 0;
+                      const lineDeltaY = lineEndY != null ? lineEndY - lineStartY : 0;
+                      const lineLength = Math.sqrt(lineDeltaX * lineDeltaX + lineDeltaY * lineDeltaY);
+                      const lineAngle = Math.atan2(lineDeltaY, lineDeltaX);
+                      const lineCenterX = rangeEndPosition && lineEndX != null ? (lineStartX + lineEndX) / 2 : 0;
+                      const lineCenterY = rangeEndPosition && lineEndY != null ? (lineStartY + lineEndY) / 2 : 0;
+                      return (
+                        <View key={`marker-${item.id}`}>
+                          {rangeEndPosition && lineEndX != null && lineEndY != null ? (
+                            <View
+                              pointerEvents="none"
+                              style={[
+                                styles.annotationRangeLine,
+                                {
+                                  left: lineCenterX - lineLength / 2,
+                                  top: lineCenterY - 1,
+                                  width: lineLength,
+                                  transform: [{ rotateZ: `${lineAngle}rad` }],
+                                  backgroundColor: activeAnnotation === item.id ? "#f8fbff" : "rgba(248,251,255,0.86)",
+                                },
+                              ]}
+                            >
+                              <View
+                                style={[
+                                  styles.annotationRangeCap,
+                                  { backgroundColor: activeAnnotation === item.id ? "#f8fbff" : "rgba(248,251,255,0.86)" },
+                                ]}
+                              />
+                              <View
+                                style={[
+                                  styles.annotationRangeCap,
+                                  styles.annotationRangeCapEnd,
+                                  { backgroundColor: activeAnnotation === item.id ? "#f8fbff" : "rgba(248,251,255,0.86)" },
+                                ]}
+                              />
+                            </View>
+                          ) : null}
+                          <PavementCanvasMarker
+                            id={item.id}
+                            glyph={glyphForAnnotation(item.id)}
+                            left={anchorLeft}
+                            top={anchorTop}
+                          active={activeAnnotation === item.id}
+                          editable={canEdit}
+                          palette={palette}
+                          onSelect={selectAnnotationFromCanvas}
+                          onDragStart={beginMarkerDrag}
+                          onDragMove={moveMarkerDrag}
+                          onDragEnd={endMarkerDrag}
+                          />
+                          {rangeEndPosition ? (
+                            <PavementCanvasMarker
+                              id={item.id}
+                              glyph=""
+                              left={rangeEndPosition.left}
+                              top={rangeEndPosition.top}
+                              active={activeAnnotation === item.id}
+                              editable={canEdit}
+                              variant="rangeEnd"
+                              palette={palette}
+                              onSelect={selectAnnotationFromCanvas}
+                              onDragStart={beginMarkerDrag}
+                              onDragMove={moveMarkerDrag}
+                              onDragEnd={endMarkerDrag}
+                            />
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  {activeCanvasPopupStyle ? (
+                    <View style={styles.annotationCanvasPopoverLayer}>
+                      <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setCanvasPopoverAnnotation(null)} />
+                      <Pressable
+                        style={[
+                          styles.annotationCanvasPopover,
+                          {
+                            left: activeCanvasPopupStyle.left,
+                            top: activeCanvasPopupStyle.top,
+                            width: activeCanvasPopupStyle.width,
+                            borderColor: palette.border,
+                            backgroundColor: "rgba(9,19,33,0.94)",
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.annotationCanvasPopoverArrow,
+                            activeCanvasPopupStyle.side === "left" ? styles.annotationCanvasPopoverArrowLeft : styles.annotationCanvasPopoverArrowRight,
+                            activeCanvasPopupStyle.side === "left"
+                              ? { borderLeftColor: "rgba(9,19,33,0.94)" }
+                              : { borderRightColor: "rgba(9,19,33,0.94)" },
+                          ]}
+                        />
+                        <View style={styles.annotationCanvasPopoverHeader}>
+                          <Text style={styles.annotationCanvasPopoverHeaderTitle}>
+                            {canvasPopoverAnnotation ? PAVEMENT_ANNOTATION_TITLES[canvasPopoverAnnotation] : ""}
+                          </Text>
+                          <Pressable style={styles.annotationCanvasPopoverCloseBtn} onPress={() => setCanvasPopoverAnnotation(null)}>
+                            <Text style={styles.annotationCanvasPopoverCloseText}>X</Text>
+                          </Pressable>
+                        </View>
+                        <ScrollView
+                          style={styles.annotationCanvasPopoverScroll}
+                          contentContainerStyle={styles.annotationCanvasPopoverScrollContent}
+                          keyboardShouldPersistTaps="handled"
+                        >
+                          {renderAnnotationFields("popover")}
+                        </ScrollView>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              ) : (
+                <View style={styles.annotationEditorEmpty}>
+                  <Text style={styles.annotationEditorEmptyTitle}>Upload a section photo to annotate</Text>
+                  <Text style={styles.annotationEditorEmptyText}>Once a photo is attached, this editor stays clean and only shows compact markers that you place.</Text>
+                  <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary, minWidth: 180 }]} onPress={onUploadPhoto} disabled={!canEdit || busy}>
+                    <Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Upload Photo"}</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+
+            <Animated.View
+              pointerEvents={drawerOpen ? "auto" : "none"}
+              style={[
+                styles.annotationEditorDrawer,
+                {
+                  transform: [{ translateX: drawerTranslateX }],
+                  width: drawerWidth,
+                  borderColor: palette.border,
+                  backgroundColor: palette.panelSoft,
+                },
+              ]}
+            >
+              <Text style={[styles.annotationEditorDrawerTitle, { color: palette.text }]}>Labels</Text>
+              <Text style={[styles.annotationEditorDrawerHelp, { color: palette.muted }]}>
+                Swipe a label left onto the photo. Tap a label or marker any time to reopen its detail form.
+              </Text>
+              <ScrollView
+                style={styles.annotationEditorDrawerScroll}
+                contentContainerStyle={styles.annotationEditorDrawerScrollContent}
+                scrollEnabled={!drawerDrag}
+                keyboardShouldPersistTaps="handled"
+              >
+                {annotationRows.map((item) => (
+                  <PavementDrawerToken
+                    key={`drawer-${item.id}`}
+                    id={item.id}
+                    title={item.title}
+                    summary={item.longSummary}
+                    placed={item.placed}
+                    active={activeAnnotation === item.id}
+                    editable={canEdit}
+                    palette={palette}
+                    onSelect={selectAnnotationFromDrawer}
+                    onDragStart={beginDrawerDrag}
+                    onDragMove={moveDrawerDrag}
+                    onDragEnd={endDrawerDrag}
+                  />
+                ))}
+
+                <View style={[styles.annotationEditorDetailPanel, { borderColor: palette.border, backgroundColor: palette.panel }]}>
+                  {renderAnnotationFields()}
+                </View>
+              </ScrollView>
+            </Animated.View>
+          </View>
+
+          {drawerDrag ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.annotationDragGhost,
+                {
+                  left: drawerDrag.x - 60,
+                  top: drawerDrag.y - 22,
+                },
+              ]}
+            >
+              <Text style={styles.annotationDragGhostText}>{PAVEMENT_ANNOTATION_TITLES[drawerDrag.id]}</Text>
+            </View>
+          ) : null}
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 export default function SubmissionDetailScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const id = useMemo(() => {
@@ -710,6 +2503,7 @@ export default function SubmissionDetailScreen() {
   const navigation = useNavigation<any>();
   const pathname = usePathname();
   const { palette: basePalette, density, componentScale, textScale, isAccessibilityLayout } = useUiSettings();
+  const { width: windowWidth } = useWindowDimensions();
   const palette = useMemo(() => {
     if (!isDarkHexColor(basePalette?.bg)) return basePalette;
     return {
@@ -737,6 +2531,7 @@ export default function SubmissionDetailScreen() {
   const [localAttachmentUris, setLocalAttachmentUris] = useState<Record<number, string>>({});
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string; isLocal: boolean } | null>(null);
+  const [figureCitationRequest, setFigureCitationRequest] = useState<FigureCitationRequest | null>(null);
   const [selectedSectionKey, setSelectedSectionKey] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
   const [enrichmentHint, setEnrichmentHint] = useState("");
@@ -775,6 +2570,7 @@ export default function SubmissionDetailScreen() {
     waterDrainage: false,
     measurements: false,
   });
+  const [activeMaterialSection, setActiveMaterialSection] = useState<MaterialSectionKey>("slope");
   const [activeStep, setActiveStep] = useState(0);
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
   const isIOS = Platform.OS === "ios";
@@ -1034,14 +2830,16 @@ export default function SubmissionDetailScreen() {
         incident_type_description: g.incident_type_description ?? "",
         distribution_advancing: boolToYn(g.distribution_advancing), distribution_retrogressive: boolToYn(g.distribution_retrogressive), distribution_enlarging: boolToYn(g.distribution_enlarging), distribution_widening: boolToYn(g.distribution_widening), distribution_moving: boolToYn(g.distribution_moving), distribution_confined: boolToYn(g.distribution_confined),
         material_rock: boolToYn(g.material_rock), material_soil: boolToYn(g.material_soil), material_bedding: boolToYn(g.material_bedding), material_joints: boolToYn(g.material_joints), material_fractures: boolToYn(g.material_fractures),
-        est_soil_pct: g.est_soil_pct != null ? String(g.est_soil_pct) : "", est_clay_pct: g.est_clay_pct != null ? String(g.est_clay_pct) : "", est_silt_pct: g.est_silt_pct != null ? String(g.est_silt_pct) : "", est_sand_pct: g.est_sand_pct != null ? String(g.est_sand_pct) : "", est_gravel_pct: g.est_gravel_pct != null ? String(g.est_gravel_pct) : "",
+        material_pavement_type: g.material_pavement_type === "CONCRETE" || g.material_pavement_type === "ASPHALT" ? g.material_pavement_type : "",
+        est_soil_pct: g.est_soil_pct != null ? String(g.est_soil_pct) : "", est_rock_pct: g.est_rock_pct != null ? String(g.est_rock_pct) : "", est_clay_pct: g.est_clay_pct != null ? String(g.est_clay_pct) : "", est_silt_pct: g.est_silt_pct != null ? String(g.est_silt_pct) : "", est_sand_pct: g.est_sand_pct != null ? String(g.est_sand_pct) : "", est_gravel_pct: g.est_gravel_pct != null ? String(g.est_gravel_pct) : "", est_boulder_pct: g.est_boulder_pct != null ? String(g.est_boulder_pct) : "",
+        est_debris_clay_silt_pct: g.est_debris_clay_silt_pct != null ? String(g.est_debris_clay_silt_pct) : "", est_debris_sand_pct: g.est_debris_sand_pct != null ? String(g.est_debris_sand_pct) : "", est_debris_gravel_pct: g.est_debris_gravel_pct != null ? String(g.est_debris_gravel_pct) : "", est_debris_boulder_pct: g.est_debris_boulder_pct != null ? String(g.est_debris_boulder_pct) : "",
         water_dry: boolToYn(g.water_dry), water_moist: boolToYn(g.water_moist), water_wet: boolToYn(g.water_wet), water_flowing: boolToYn(g.water_flowing), water_seep: boolToYn(g.water_seep), water_spring: boolToYn(g.water_spring),
         vegetation_trees: g.vegetation_trees ?? "", vegetation_bushes_shrubs: g.vegetation_bushes_shrubs ?? "", vegetation_groundcover: g.vegetation_groundcover ?? "",
         drainage_clogged_inlet: boolToYn(g.drainage_clogged_inlet), drainage_compromised_drains: boolToYn(g.drainage_compromised_drains), drainage_surface_runoff: boolToYn(g.drainage_surface_runoff), drainage_torrent_surge_flood: boolToYn(g.drainage_torrent_surge_flood),
         impact_impacted_adj_utilities: boolToYn(g.impact_impacted_adj_utilities), impact_maybe_adj_utilities: boolToYn(g.impact_maybe_adj_utilities), impact_adj_utilities: g.impact_adj_utilities ?? "", impact_impacted_adj_properties: boolToYn(g.impact_impacted_adj_properties), impact_maybe_adj_properties: boolToYn(g.impact_maybe_adj_properties), impact_adj_properties: g.impact_adj_properties ?? "", impact_impacted_adj_structure: boolToYn(g.impact_impacted_adj_structure), impact_maybe_adj_structure: boolToYn(g.impact_maybe_adj_structure), impact_adj_structure: g.impact_adj_structure ?? "",
         measure_slope_height_ft: g.measure_slope_height_ft != null ? String(g.measure_slope_height_ft) : "", measure_original_slope_deg: g.measure_original_slope_deg != null ? String(g.measure_original_slope_deg) : "", measure_landslide_width_ft: g.measure_landslide_width_ft != null ? String(g.measure_landslide_width_ft) : "", measure_landslide_length_ft: g.measure_landslide_length_ft != null ? String(g.measure_landslide_length_ft) : "", measure_main_scarp_height_ft: g.measure_main_scarp_height_ft != null ? String(g.measure_main_scarp_height_ft) : "", measure_landslide_slope_deg: g.measure_landslide_slope_deg != null ? String(g.measure_landslide_slope_deg) : "", measure_roadway_length_ft: g.measure_roadway_length_ft != null ? String(g.measure_roadway_length_ft) : "", measure_roadway_width_ft: g.measure_roadway_width_ft != null ? String(g.measure_roadway_width_ft) : "",
         record_of_event_notes: g.record_of_event_notes ?? "", maintenance_history_notes: g.maintenance_history_notes ?? "", geotechnical_assessment_notes: g.geotechnical_assessment_notes ?? "", recommendations_notes: g.recommendations_notes ?? "", sketchpad_notes: g.sketchpad_notes ?? "",
-        observations_notes: g.observations_notes ?? "", geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "",
+        observations_notes: g.observations_notes ?? "", geometry_json: g.geometry_json ? JSON.stringify(g.geometry_json, null, 2) : "", pavement_ground_annotation_layout: g.pavement_ground_annotation_layout_json ? JSON.stringify(g.pavement_ground_annotation_layout_json) : "",
       };
       const normalizedLoadedForm = enforceFormBusinessRules(loadedForm);
       const loadedState: DraftEditorState = {
@@ -1384,18 +3182,29 @@ export default function SubmissionDetailScreen() {
 
   const validateSoilPercentForSubmit = useCallback((): boolean => {
     if (form.material_soil !== "YES") return true;
+    const clayRaw = String(form.est_clay_pct ?? "").trim();
+    const siltRaw = String(form.est_silt_pct ?? "").trim();
+    const clayValue = clayRaw ? Number(clayRaw) : 0;
+    const siltValue = siltRaw ? Number(siltRaw) : 0;
+    if (Number.isNaN(clayValue) || Number.isNaN(siltValue)) {
+      setActiveStep(1);
+      setActiveMaterialSection("slope");
+      setOpenPaperBlocks((prev) => ({ ...prev, material: true }));
+      Alert.alert("Cannot Submit Yet", "Clay/Silt percentage must be numeric.");
+      return false;
+    }
     const fields: [keyof FormState, string][] = [
-      ["est_clay_pct", "Clay"],
-      ["est_silt_pct", "Silt"],
       ["est_sand_pct", "Sand"],
       ["est_gravel_pct", "Gravel"],
+      ["est_boulder_pct", "Boulder"],
     ];
-    let total = 0;
+    let total = clayValue + siltValue;
     for (const [key, label] of fields) {
       const raw = String(form[key] ?? "").trim();
       const value = raw ? Number(raw) : 0;
       if (Number.isNaN(value)) {
         setActiveStep(1);
+        setActiveMaterialSection("slope");
         setOpenPaperBlocks((prev) => ({ ...prev, material: true }));
         Alert.alert("Cannot Submit Yet", `${label} percentage must be numeric.`);
         return false;
@@ -1406,10 +3215,46 @@ export default function SubmissionDetailScreen() {
     if (total === 100) return true;
     const dir = delta > 0 ? "over" : "under";
     setActiveStep(1);
+    setActiveMaterialSection("slope");
     setOpenPaperBlocks((prev) => ({ ...prev, material: true }));
     Alert.alert(
       "Cannot Submit Yet",
       `Material Soil percentages must total 100%. Current total is ${total.toFixed(2)}% (${dir} by ${Math.abs(delta).toFixed(2)}%).`
+    );
+    return false;
+  }, [form]);
+
+  const validateDebrisPercentForSubmit = useCallback((): boolean => {
+    const fields: [keyof FormState, string][] = [
+      ["est_debris_clay_silt_pct", "Debris Clay/Silt"],
+      ["est_debris_sand_pct", "Debris Sand"],
+      ["est_debris_gravel_pct", "Debris Gravel/Cobbles"],
+      ["est_debris_boulder_pct", "Debris Boulder"],
+    ];
+    const hasDebrisValue = fields.some(([key]) => String(form[key] ?? "").trim());
+    if (!hasDebrisValue) return true;
+    let total = 0;
+    for (const [key, label] of fields) {
+      const raw = String(form[key] ?? "").trim();
+      const value = raw ? Number(raw) : 0;
+      if (Number.isNaN(value)) {
+        setActiveStep(1);
+        setActiveMaterialSection("debris");
+        setOpenPaperBlocks((prev) => ({ ...prev, material: true }));
+        Alert.alert("Cannot Submit Yet", `${label} percentage must be numeric.`);
+        return false;
+      }
+      total += value;
+    }
+    const delta = total - 100;
+    if (total === 100) return true;
+    const dir = delta > 0 ? "over" : "under";
+    setActiveStep(1);
+    setActiveMaterialSection("debris");
+    setOpenPaperBlocks((prev) => ({ ...prev, material: true }));
+    Alert.alert(
+      "Cannot Submit Yet",
+      `Landslide Debris percentages must total 100%. Current total is ${total.toFixed(2)}% (${dir} by ${Math.abs(delta).toFixed(2)}%).`
     );
     return false;
   }, [form]);
@@ -1459,6 +3304,14 @@ export default function SubmissionDetailScreen() {
         return false;
       }
     }
+    let pavementAnnotationLayoutPayload: Record<string, any> | null = null;
+    if (normalizedForm.pavement_ground_annotation_layout.trim()) {
+      try {
+        pavementAnnotationLayoutPayload = JSON.parse(normalizedForm.pavement_ground_annotation_layout);
+      } catch {
+        pavementAnnotationLayoutPayload = parsePavementAnnotationLayout(normalizedForm.pavement_ground_annotation_layout);
+      }
+    }
     setBusy(true);
     const patchPayload = {
       report_date: n(normalizedForm.report_date), district: n(normalizedForm.district), county: n(normalizedForm.county), route: normalizeRouteValue(normalizedForm.route), post_mile: normalizePostMileValue(normalizedForm.post_mile), ea: n(normalizedForm.ea), project_id: n(normalizedForm.project_id), date_incident_reported: n(normalizedForm.date_incident_reported), district_contact: n(normalizedForm.district_contact),
@@ -1467,15 +3320,16 @@ export default function SubmissionDetailScreen() {
       pavement_ground_cracks: triToBool(normalizedForm.pavement_ground_cracks), crack_length_ft: f(normalizedForm.crack_length_ft, "Crack length"), crack_horizontal_in: f(normalizedForm.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: f(normalizedForm.crack_vertical_in, "Crack vertical"), crack_depth_in: f(normalizedForm.crack_depth_in, "Crack depth"), settlement_in: f(normalizedForm.settlement_in, "Settlement"), bulge_in: f(normalizedForm.bulge_in, "Bulge"), indented_by_rocks: triToBool(normalizedForm.indented_by_rocks),
       failure_rock_fall: ynToBool(normalizedForm.failure_rock_fall), failure_topple: ynToBool(normalizedForm.failure_topple), failure_slide: ynToBool(normalizedForm.failure_slide), failure_spread: ynToBool(normalizedForm.failure_spread), failure_flow: ynToBool(normalizedForm.failure_flow), failure_compound: ynToBool(normalizedForm.failure_compound), failure_erosion: ynToBool(normalizedForm.failure_erosion), failure_surficial_failure: ynToBool(normalizedForm.failure_surficial_failure), failure_scoured_toe: ynToBool(normalizedForm.failure_scoured_toe), failure_washout: ynToBool(normalizedForm.failure_washout), incident_type_description: n(normalizedForm.incident_type_description),
       distribution_advancing: ynToBool(normalizedForm.distribution_advancing), distribution_retrogressive: ynToBool(normalizedForm.distribution_retrogressive), distribution_enlarging: ynToBool(normalizedForm.distribution_enlarging), distribution_widening: ynToBool(normalizedForm.distribution_widening), distribution_moving: ynToBool(normalizedForm.distribution_moving), distribution_confined: ynToBool(normalizedForm.distribution_confined),
-      material_rock: ynToBool(normalizedForm.material_rock), material_soil: ynToBool(normalizedForm.material_soil), material_bedding: ynToBool(normalizedForm.material_bedding), material_joints: ynToBool(normalizedForm.material_joints), material_fractures: ynToBool(normalizedForm.material_fractures),
-      est_soil_pct: f(normalizedForm.est_soil_pct, "Estimated soil %"), est_clay_pct: f(normalizedForm.est_clay_pct, "Estimated clay %"), est_silt_pct: f(normalizedForm.est_silt_pct, "Estimated silt %"), est_sand_pct: f(normalizedForm.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(normalizedForm.est_gravel_pct, "Estimated gravel %"),
+      material_rock: ynToBool(normalizedForm.material_rock), material_soil: ynToBool(normalizedForm.material_soil), material_bedding: ynToBool(normalizedForm.material_bedding), material_joints: ynToBool(normalizedForm.material_joints), material_fractures: ynToBool(normalizedForm.material_fractures), material_pavement_type: n(normalizedForm.material_pavement_type),
+      est_soil_pct: f(normalizedForm.est_soil_pct, "Estimated soil %"), est_rock_pct: f(normalizedForm.est_rock_pct, "Estimated rock formation %"), est_clay_pct: f(normalizedForm.est_clay_pct, "Estimated clay %"), est_silt_pct: f(normalizedForm.est_silt_pct, "Estimated silt %"), est_sand_pct: f(normalizedForm.est_sand_pct, "Estimated sand %"), est_gravel_pct: f(normalizedForm.est_gravel_pct, "Estimated gravel/cobbles %"), est_boulder_pct: f(normalizedForm.est_boulder_pct, "Estimated boulder %"),
+      est_debris_clay_silt_pct: f(normalizedForm.est_debris_clay_silt_pct, "Estimated landslide debris clay/silt %"), est_debris_sand_pct: f(normalizedForm.est_debris_sand_pct, "Estimated landslide debris sand %"), est_debris_gravel_pct: f(normalizedForm.est_debris_gravel_pct, "Estimated landslide debris gravel/cobbles %"), est_debris_boulder_pct: f(normalizedForm.est_debris_boulder_pct, "Estimated landslide debris boulder %"),
       water_dry: ynToBool(normalizedForm.water_dry), water_moist: ynToBool(normalizedForm.water_moist), water_wet: ynToBool(normalizedForm.water_wet), water_flowing: ynToBool(normalizedForm.water_flowing), water_seep: ynToBool(normalizedForm.water_seep), water_spring: ynToBool(normalizedForm.water_spring),
       vegetation_trees: pct(normalizedForm.vegetation_trees, "Trees Coverage %"), vegetation_bushes_shrubs: pct(normalizedForm.vegetation_bushes_shrubs, "Bushes/Shrubs Coverage %"), vegetation_groundcover: pct(normalizedForm.vegetation_groundcover, "Groundcover Coverage %"),
       drainage_clogged_inlet: ynToBool(normalizedForm.drainage_clogged_inlet), drainage_compromised_drains: ynToBool(normalizedForm.drainage_compromised_drains), drainage_surface_runoff: ynToBool(normalizedForm.drainage_surface_runoff), drainage_torrent_surge_flood: ynToBool(normalizedForm.drainage_torrent_surge_flood),
       impact_impacted_adj_utilities: ynToBool(normalizedForm.impact_impacted_adj_utilities), impact_maybe_adj_utilities: ynToBool(normalizedForm.impact_maybe_adj_utilities), impact_adj_utilities: n(normalizedForm.impact_adj_utilities), impact_impacted_adj_properties: ynToBool(normalizedForm.impact_impacted_adj_properties), impact_maybe_adj_properties: ynToBool(normalizedForm.impact_maybe_adj_properties), impact_adj_properties: n(normalizedForm.impact_adj_properties), impact_impacted_adj_structure: ynToBool(normalizedForm.impact_impacted_adj_structure), impact_maybe_adj_structure: ynToBool(normalizedForm.impact_maybe_adj_structure), impact_adj_structure: n(normalizedForm.impact_adj_structure),
       measure_slope_height_ft: f(normalizedForm.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: f(normalizedForm.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: f(normalizedForm.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: f(normalizedForm.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: f(normalizedForm.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: f(normalizedForm.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: f(normalizedForm.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: f(normalizedForm.measure_roadway_width_ft, "Roadway width"),
       record_of_event_notes: n(normalizedForm.record_of_event_notes), maintenance_history_notes: n(normalizedForm.maintenance_history_notes), geotechnical_assessment_notes: n(normalizedForm.geotechnical_assessment_notes), recommendations_notes: n(normalizedForm.recommendations_notes), sketchpad_notes: n(normalizedForm.sketchpad_notes),
-      observations_notes: n(normalizedForm.observations_notes), geometry_json: geometry,
+      observations_notes: n(normalizedForm.observations_notes), geometry_json: geometry, pavement_ground_annotation_layout_json: pavementAnnotationLayoutPayload,
     };
     const incidentItems = Array.from(new Set([
       ...incidentTypesFromFormState(normalizedForm),
@@ -1559,6 +3413,7 @@ export default function SubmissionDetailScreen() {
     if (!token || !id) return;
     if (!validateSubmitRequiredFields()) return;
     if (!validateSoilPercentForSubmit()) return;
+    if (!validateDebrisPercentForSubmit()) return;
     if (isLocalId) {
       await saveDraft();
       await enqueueOfflineOp("SUBMIT_SUBMISSION", { submissionId: id, comment: null });
@@ -1694,13 +3549,20 @@ export default function SubmissionDetailScreen() {
       else if (ext === "mp4") mimeType = "video/mp4";
       else if (ext === "mov") mimeType = "video/quicktime";
     }
-    const kind = inferAttachmentKind(guessedName, mimeType);
+    let file: { uri: string; name: string; type: string };
+    try {
+      file = await prepareUploadFile({ uri, name: guessedName, type: mimeType });
+    } catch (err: any) {
+      Alert.alert("File unavailable", String(err?.message ?? err ?? "Unable to access the selected file."));
+      return;
+    }
+    const kind = inferAttachmentKind(file.name, file.type);
 
     if (isLocalId) {
       await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
       await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
         submissionId: id,
-        file: { uri, name: guessedName, type: mimeType },
+        file,
         sectionKey: sectionKey ?? null,
         kind,
       });
@@ -1714,10 +3576,10 @@ export default function SubmissionDetailScreen() {
       const uploaded = await uploadSubmissionAttachment(
         token,
         id,
-        { uri, name: guessedName, type: mimeType },
+        file,
         { sectionKey: sectionKey ?? null, kind }
       );
-      registerLocalAttachmentUri(Number(uploaded?.attachment_id), uri);
+      registerLocalAttachmentUri(Number(uploaded?.attachment_id), file.uri);
       await load();
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
@@ -1725,7 +3587,7 @@ export default function SubmissionDetailScreen() {
       if (isLikelyOfflineError(msg)) {
         await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
           submissionId: id,
-          file: { uri, name: guessedName, type: mimeType },
+          file,
           sectionKey: sectionKey ?? null,
           kind,
         });
@@ -1770,13 +3632,14 @@ export default function SubmissionDetailScreen() {
       }
       const name = String(asset.name || "attachment.bin");
       const mimeType = String(asset.mimeType || "application/octet-stream");
-      const kind = inferAttachmentKind(name, mimeType);
+      const file = await prepareUploadFile({ uri, name, type: mimeType });
+      const kind = inferAttachmentKind(file.name, file.type);
 
       if (isLocalId) {
         await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
         await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
           submissionId: id,
-          file: { uri, name, type: mimeType },
+          file,
           sectionKey: sectionKey ?? null,
           kind,
         });
@@ -1790,10 +3653,10 @@ export default function SubmissionDetailScreen() {
         const uploaded = await uploadSubmissionAttachment(
           token,
           id,
-          { uri, name, type: mimeType },
+          file,
           { sectionKey: sectionKey ?? null, kind }
         );
-        registerLocalAttachmentUri(Number(uploaded?.attachment_id), uri);
+        registerLocalAttachmentUri(Number(uploaded?.attachment_id), file.uri);
         await load();
       } catch (err: any) {
         if (isSessionExpiredError(err)) return;
@@ -1801,7 +3664,7 @@ export default function SubmissionDetailScreen() {
         if (isLikelyOfflineError(msg)) {
           await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
             submissionId: id,
-            file: { uri, name, type: mimeType },
+            file,
             sectionKey: sectionKey ?? null,
             kind,
           });
@@ -1851,7 +3714,7 @@ export default function SubmissionDetailScreen() {
       await bridge.startPencilSketch();
       const uri = await bridge.getSketchImagePath();
       const fileName = uri.split("/").pop() || `gisa-sketch-${Date.now()}.png`;
-      const file = { uri, name: fileName, type: "image/png" as const };
+      const file = await prepareUploadFile({ uri, name: fileName, type: "image/png" });
 
       if (isLocalId) {
         await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
@@ -1868,7 +3731,7 @@ export default function SubmissionDetailScreen() {
 
       try {
         const uploaded = await uploadSubmissionAttachment(token, id, file, { sectionKey: "sketchpad", kind: "SKETCH" });
-        registerLocalAttachmentUri(Number(uploaded?.attachment_id), uri);
+        registerLocalAttachmentUri(Number(uploaded?.attachment_id), file.uri);
         await load();
       } catch (err: any) {
         if (isSessionExpiredError(err)) return;
@@ -2160,6 +4023,7 @@ export default function SubmissionDetailScreen() {
   useEffect(() => {
     setShowLocationCoordinates(false);
     setFullscreenPhoto(null);
+    setFigureCitationRequest(null);
     if (!id || isLocalDraftId(id)) {
       setLocalAttachmentUris({});
     }
@@ -2182,11 +4046,77 @@ export default function SubmissionDetailScreen() {
   const generalPhotos = data.photos;
   const photoIdSet = new Set(data.photos.map((p) => Number(p.id)));
   const latestPhoto = data.photos.length ? data.photos[data.photos.length - 1] : null;
+  const galleryColumns = isAccessibilityLayout || windowWidth < 360 ? 2 : windowWidth >= 780 ? 4 : 3;
+  const galleryGap = Math.round(8 * componentScale);
+  const galleryImages: GalleryImage[] = (() => {
+    const imageById = new Map<number, { id: number; file_name: string; mime_type: string; kind?: string; section_key?: string | null }>();
+    const orderedIds: number[] = [];
+    const addImage = (file: any, fallbackSectionKey?: string | null) => {
+      const idValue = Number(file?.id);
+      if (!Number.isFinite(idValue) || idValue <= 0) return;
+      const mimeType = String(file?.mime_type || "");
+      const isPreviewableImage = photoIdSet.has(idValue) || mimeType.toLowerCase().startsWith("image/");
+      if (!isPreviewableImage) return;
+      const existing = imageById.get(idValue);
+      const next = {
+        id: idValue,
+        file_name: String(file?.file_name || `Image ${idValue}`),
+        mime_type: mimeType || existing?.mime_type || "image/*",
+        kind: file?.kind ?? existing?.kind,
+        section_key: file?.section_key ?? existing?.section_key ?? fallbackSectionKey ?? null,
+      };
+      if (!existing) orderedIds.push(idValue);
+      imageById.set(idValue, next);
+    };
+
+    (allAttachments ?? []).forEach((file: any) => addImage(file, null));
+    (generalPhotos ?? []).forEach((file: any) => addImage(file, null));
+
+    const figureCounts = new Map<string, number>();
+    return orderedIds.map((imageId) => {
+      const image = imageById.get(imageId)!;
+      const source = gallerySourceForSectionKey(image.section_key);
+      const currentCount = (figureCounts.get(source.key) ?? 0) + 1;
+      figureCounts.set(source.key, currentCount);
+      return {
+        ...image,
+        sourceLabel: source.label,
+        figureLabel: `Figure ${source.figureSection}.${currentCount}`,
+      };
+    });
+  })();
+  const galleryRows: GalleryImage[][] = [];
+  for (let index = 0; index < galleryImages.length; index += galleryColumns) {
+    galleryRows.push(galleryImages.slice(index, index + galleryColumns));
+  }
+  const figureCitationFieldProps = {
+    citationImages: galleryImages,
+    onCitationTrigger: setFigureCitationRequest,
+    onCitationPress: openCitedFigure,
+  };
+  const pavementSectionPhoto =
+    [...sectionAttachments]
+      .reverse()
+      .find(
+        (file: any) =>
+          file.section_key === "pavement_ground_status" &&
+          (photoIdSet.has(Number(file.id)) || String(file.mime_type || "").toLowerCase().startsWith("image/"))
+      ) ?? null;
   const submissionUpdatedAt = data?.submission.updated_at ?? "";
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"];
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"];
   const materialRockSelected = form.material_rock === "YES";
   const materialSoilSelected = form.material_soil === "YES";
+  const claySiltPercentValue = (() => {
+    const clayRaw = String(form.est_clay_pct ?? "").trim();
+    const siltRaw = String(form.est_silt_pct ?? "").trim();
+    if (!clayRaw && !siltRaw) return "";
+    const clayValue = clayRaw ? Number(clayRaw) : 0;
+    const siltValue = siltRaw ? Number(siltRaw) : 0;
+    if (!Number.isFinite(clayValue) || !Number.isFinite(siltValue)) return "";
+    const combined = Math.max(0, Math.min(100, Math.round((clayValue + siltValue) / 5) * 5));
+    return String(combined);
+  })();
   const waterFlowingSelected = form.water_flowing === "YES";
   const highwayLanesClosedSelected = form.highway_status_code === "LANES_CLOSED";
   const openHighwayTrafficSelected = immediateActions.includes("OPEN_HIGHWAY_TRAFFIC") || followUpActions.includes("OPEN_HIGHWAY_TRAFFIC");
@@ -2224,43 +4154,57 @@ export default function SubmissionDetailScreen() {
     }
   };
 
-  const selectMaterialPrimary = (key: "material_rock" | "material_soil") => {
+  const toggleMaterialSection = (key: "material_rock" | "material_soil") => {
     if (!canEdit) return;
     const selecting = form[key] !== "YES";
-    if (!selecting) {
-      setVal("material_rock", "NO");
-      setVal("material_soil", "NO");
-      setVal("material_bedding", "NO");
-      setVal("material_joints", "NO");
-      setVal("material_fractures", "NO");
+    setVal(key, selecting ? "YES" : "NO");
+    if (key === "material_soil" && !selecting) {
+      setVal("est_soil_pct", "");
       setVal("est_clay_pct", "");
       setVal("est_silt_pct", "");
       setVal("est_sand_pct", "");
       setVal("est_gravel_pct", "");
-      return;
+      setVal("est_boulder_pct", "");
     }
-    if (key === "material_rock") {
-      setVal("material_rock", "YES");
-      setVal("material_soil", "NO");
-      setVal("est_clay_pct", "");
-      setVal("est_silt_pct", "");
-      setVal("est_sand_pct", "");
-      setVal("est_gravel_pct", "");
-    } else {
-      setVal("material_soil", "YES");
-      setVal("material_rock", "NO");
+    if (key === "material_rock" && !selecting) {
+      setVal("est_rock_pct", "");
       setVal("material_bedding", "NO");
       setVal("material_joints", "NO");
       setVal("material_fractures", "NO");
     }
   };
 
+  const setPercentStep = (
+    key: "est_soil_pct" | "est_rock_pct" | "est_clay_pct" | "est_silt_pct" | "est_sand_pct" | "est_gravel_pct" | "est_boulder_pct" | "est_debris_clay_silt_pct" | "est_debris_sand_pct" | "est_debris_gravel_pct" | "est_debris_boulder_pct",
+    value: string
+  ) => {
+    if (!canEdit) return;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      setVal(key, "");
+      return;
+    }
+    const stepped = Math.max(0, Math.min(100, Math.round(numeric / 5) * 5));
+    setVal(key, String(stepped));
+  };
+
+  const setClaySiltPercentStep = (value: string) => {
+    if (!canEdit) return;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      setVal("est_clay_pct", "");
+      setVal("est_silt_pct", "");
+      return;
+    }
+    const stepped = Math.max(0, Math.min(100, Math.round(numeric / 5) * 5));
+    setVal("est_clay_pct", String(stepped));
+    setVal("est_silt_pct", "0");
+  };
+
   const selectRockSubtype = (key: "material_bedding" | "material_joints" | "material_fractures") => {
     if (!canEdit || form.material_rock !== "YES") return;
     const selecting = form[key] !== "YES";
-    setVal("material_bedding", key === "material_bedding" && selecting ? "YES" : "NO");
-    setVal("material_joints", key === "material_joints" && selecting ? "YES" : "NO");
-    setVal("material_fractures", key === "material_fractures" && selecting ? "YES" : "NO");
+    setVal(key, selecting ? "YES" : "NO");
   };
 
   const selectSingleDrainage = (key: string) => {
@@ -2315,6 +4259,36 @@ export default function SubmissionDetailScreen() {
     if (next === "YES") setVal(impactedKey as keyof FormState, "");
   };
 
+  function remoteAttachmentUri(attachmentId: number) {
+    const remoteUri = photoUrls[attachmentId];
+    if (remoteUri) return remoteUri;
+    const queryToken = encodeURIComponent(token || "");
+    return `${apiBaseUrl}/attachments/${attachmentId}/content?access_token=${queryToken}`;
+  }
+
+  function handleAttachmentPreviewError(attachmentId: number) {
+    const localUri = localAttachmentUris[attachmentId];
+    if (isLocalAttachmentUri(localUri)) {
+      setLocalAttachmentUris((prev) => {
+        if (!prev[attachmentId]) return prev;
+        const next = { ...prev };
+        delete next[attachmentId];
+        if (id && !isLocalDraftId(id)) {
+          setAttachmentUriCache(attachmentUriCacheKey(id), next).catch(() => {});
+        }
+        return next;
+      });
+      setFailedPreviewIds((prev) => {
+        if (!prev[attachmentId]) return prev;
+        const next = { ...prev };
+        delete next[attachmentId];
+        return next;
+      });
+      return;
+    }
+    setFailedPreviewIds((prev) => ({ ...prev, [attachmentId]: true }));
+  }
+
   function previewSource(photoId: number) {
     const uri = getAttachmentUri(photoId);
     return { uri } as const;
@@ -2322,9 +4296,18 @@ export default function SubmissionDetailScreen() {
 
   async function openPhotoFallback(photoId: number) {
     const url = getAttachmentUri(photoId);
+    const remoteUrl = remoteAttachmentUri(photoId);
     try {
       await Linking.openURL(url);
     } catch {
+      if (remoteUrl && remoteUrl !== url) {
+        try {
+          await Linking.openURL(remoteUrl);
+          return;
+        } catch {
+          // Fall through to the user-facing alert below.
+        }
+      }
       Alert.alert("Preview unavailable", "Could not open this image on this device.");
     }
   }
@@ -2345,30 +4328,32 @@ export default function SubmissionDetailScreen() {
     }
   }
 
-  function renderTaggedSectionMedia(sectionKey: string) {
+  function renderTaggedSectionMedia(sectionKey: string, opts?: { hideUploadButton?: boolean }) {
     const tagged = sectionAttachments.filter((a: any) => a.section_key === sectionKey);
     return (
       <View style={{ marginTop: 8 }}>
-        <View style={styles.sectionAttachmentActions}>
-          <Pressable
-            style={[styles.btnGhost, styles.sectionAttachmentActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-            onPress={() => promptUploadSource(sectionKey)}
-            disabled={!canEdit || busy}
-          >
-            <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text>
-          </Pressable>
-          {sectionKey === "sketchpad" ? (
+        {!opts?.hideUploadButton ? (
+          <View style={styles.sectionAttachmentActions}>
             <Pressable
               style={[styles.btnGhost, styles.sectionAttachmentActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-              onPress={() => openNativeSketchpad().catch(() => {})}
+              onPress={() => promptUploadSource(sectionKey)}
               disabled={!canEdit || busy}
             >
-              <Text style={[styles.btnGhostText, { color: palette.text }]}>
-                {busy ? "Working..." : Platform.OS === "ios" ? "Open Sketchpad" : "Sketchpad (iOS only)"}
-              </Text>
+              <Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : "Upload Photo"}</Text>
             </Pressable>
-          ) : null}
-        </View>
+            {sectionKey === "sketchpad" ? (
+              <Pressable
+                style={[styles.btnGhost, styles.sectionAttachmentActionBtn, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+                onPress={() => openNativeSketchpad().catch(() => {})}
+                disabled={!canEdit || busy}
+              >
+                <Text style={[styles.btnGhostText, { color: palette.text }]}>
+                  {busy ? "Working..." : Platform.OS === "ios" ? "Open Sketchpad" : "Sketchpad (iOS only)"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         {tagged.length ? (
           tagged.map((file: any) => {
             const isPreviewableImage = photoIdSet.has(Number(file.id)) || String(file.mime_type || "").toLowerCase().startsWith("image/");
@@ -2380,7 +4365,7 @@ export default function SubmissionDetailScreen() {
                     <Image
                       source={previewSource(file.id)}
                       style={styles.photoPreviewCompact}
-                      onError={() => setFailedPreviewIds((prev) => ({ ...prev, [file.id]: true }))}
+                      onError={() => handleAttachmentPreviewError(file.id)}
                     />
                   </Pressable>
                 ) : (
@@ -2446,6 +4431,10 @@ export default function SubmissionDetailScreen() {
     });
   }
 
+  function openCitedFigure(image: GalleryImage) {
+    openFullscreen(image.id, `${image.figureLabel} - ${image.file_name}`);
+  }
+
   function closeFullscreen() {
     Animated.timing(fullscreenProgress, {
       toValue: 0,
@@ -2460,7 +4449,9 @@ export default function SubmissionDetailScreen() {
     <ScrollView
       style={[styles.container, { backgroundColor: palette.bg }]}
       contentInsetAdjustmentBehavior={isIOS ? "automatic" : "never"}
+      canCancelContentTouches
       keyboardDismissMode={isIOS ? "interactive" : "on-drag"}
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={[styles.contentWrap, { padding: Math.round((compact ? 10 : 14) * componentScale), gap: Math.round((compact ? 8 : 10) * componentScale) }]}
     >
       <Text style={[styles.title, { color: palette.text, fontSize: Math.round((isIOS ? 22 : 24) * componentScale) }]} maxFontSizeMultiplier={textScale}>{isDraftEntry ? "Draft" : "Submission"}</Text>
@@ -2750,6 +4741,7 @@ export default function SubmissionDetailScreen() {
             value={form.highway_status_cause}
             editable={canEdit}
             onChangeText={(v) => setVal("highway_status_cause", v)}
+            {...figureCitationFieldProps}
           />
           {showHighwayStatusOptions ? (
             <>
@@ -2810,76 +4802,144 @@ export default function SubmissionDetailScreen() {
             editable={canEdit}
             multiline
             onChangeText={(v) => setVal("incident_type_description", v)}
+            {...figureCitationFieldProps}
           />
           {renderTaggedSectionMedia("incident_type")}
         </DropdownBlock>
 
         <DropdownBlock title="Material" open={openPaperBlocks.material} onToggle={() => togglePaperBlock("material")} palette={palette}>
-          <View style={styles.chips}>
-            {[["material_rock", "Rock"], ["material_soil", "Soil"]].map(([key, label]) => (
-              <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => selectMaterialPrimary(key as "material_rock" | "material_soil")} />
-            ))}
+          <View style={styles.materialSectionBubbleRow}>
+            <MaterialSectionBubble
+              label="Slope"
+              active={activeMaterialSection === "slope"}
+              onPress={() => setActiveMaterialSection("slope")}
+              palette={palette}
+            />
+            <MaterialSectionBubble
+              label="Pavement"
+              active={activeMaterialSection === "pavement"}
+              onPress={() => setActiveMaterialSection("pavement")}
+              palette={palette}
+            />
+            <MaterialSectionBubble
+              label="Landslide Debris"
+              active={activeMaterialSection === "debris"}
+              onPress={() => setActiveMaterialSection("debris")}
+              palette={palette}
+            />
           </View>
-          {materialRockSelected ? (
-            <View style={styles.chips}>
-              {[["material_bedding", "Bedding"], ["material_joints", "Joints"], ["material_fractures", "Fractures"]].map(([key, label]) => (
-                <Chip key={key} label={label} palette={palette} active={form[key] === "YES"} disabled={!canEdit} onPress={() => selectRockSubtype(key as "material_bedding" | "material_joints" | "material_fractures")} />
-              ))}
-            </View>
+
+          {activeMaterialSection === "slope" ? (
+            <MaterialSubsection title="Slope" palette={palette}>
+              <View style={styles.materialSlopeStack}>
+                <View pointerEvents="box-none" style={[styles.materialInlineGroup, { borderColor: palette.border, backgroundColor: palette.panel }]}>
+                  <View style={styles.materialInlineHeader}>
+                    <Text style={[styles.materialInlineTitle, { color: palette.text }]}>Soil</Text>
+                    <Chip
+                      label={materialSoilSelected ? "YES" : "NO"}
+                      palette={palette}
+                      active={materialSoilSelected}
+                      disabled={!canEdit}
+                      onPress={() => toggleMaterialSection("material_soil")}
+                    />
+                  </View>
+                  {materialSoilSelected ? (
+                    <View style={styles.materialInlineBody}>
+                      <SteppedPercentInput label="Soil Est %" value={form.est_soil_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_soil_pct", v)} />
+                      <SteppedPercentInput label="Clay/Silt Est %" value={claySiltPercentValue} editable={canEdit} palette={palette} onChange={setClaySiltPercentStep} />
+                      <SteppedPercentInput label="Sand Est %" value={form.est_sand_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_sand_pct", v)} />
+                      <SteppedPercentInput label="Gravel/Cobbles Est %" value={form.est_gravel_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_gravel_pct", v)} />
+                      <SteppedPercentInput label="Boulder Est %" value={form.est_boulder_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_boulder_pct", v)} />
+                    </View>
+                  ) : null}
+                </View>
+
+                <View pointerEvents="box-none" style={[styles.materialInlineGroup, { borderColor: palette.border, backgroundColor: palette.panel }]}>
+                  <View style={styles.materialInlineHeader}>
+                    <Text style={[styles.materialInlineTitle, { color: palette.text }]}>Rock Formation</Text>
+                    <Chip
+                      label={materialRockSelected ? "YES" : "NO"}
+                      palette={palette}
+                      active={materialRockSelected}
+                      disabled={!canEdit}
+                      onPress={() => toggleMaterialSection("material_rock")}
+                    />
+                  </View>
+                  {materialRockSelected ? (
+                    <View style={styles.materialInlineBody}>
+                      <SteppedPercentInput
+                      label="Rock Formation Est %"
+                      value={form.est_rock_pct}
+                      editable={canEdit}
+                      palette={palette}
+                      onChange={(v) => setPercentStep("est_rock_pct", v)}
+                    />
+                      <View style={styles.chips}>
+                        {[["material_bedding", "Bedding"], ["material_joints", "Joint"], ["material_fractures", "Fracture"]].map(([key, label]) => (
+                          <Chip
+                            key={key}
+                            label={label}
+                            palette={palette}
+                            active={form[key] === "YES"}
+                            disabled={!canEdit}
+                            onPress={() => selectRockSubtype(key as "material_bedding" | "material_joints" | "material_fractures")}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            </MaterialSubsection>
           ) : null}
-          {materialSoilSelected ? (
-            <View>
-              <Field palette={palette} label="Clay Est %" value={form.est_clay_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_clay_pct", v)} />
-              <Field palette={palette} label="Silt Est %" value={form.est_silt_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_silt_pct", v)} />
-              <Field palette={palette} label="Sand Est %" value={form.est_sand_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_sand_pct", v)} />
-              <Field palette={palette} label="Gravel Est %" value={form.est_gravel_pct} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("est_gravel_pct", v)} />
-            </View>
+
+          {activeMaterialSection === "pavement" ? (
+            <MaterialSubsection title="Pavement" palette={palette}>
+              <View style={styles.materialSectionBubbleRow}>
+                <MaterialSectionBubble
+                  label="Concrete"
+                  active={form.material_pavement_type === "CONCRETE"}
+                  onPress={() => canEdit && setVal("material_pavement_type", form.material_pavement_type === "CONCRETE" ? "" : "CONCRETE")}
+                  palette={palette}
+                />
+                <MaterialSectionBubble
+                  label="Asphalt"
+                  active={form.material_pavement_type === "ASPHALT"}
+                  onPress={() => canEdit && setVal("material_pavement_type", form.material_pavement_type === "ASPHALT" ? "" : "ASPHALT")}
+                  palette={palette}
+                />
+              </View>
+            </MaterialSubsection>
+          ) : null}
+
+          {activeMaterialSection === "debris" ? (
+            <MaterialSubsection title="Landslide Debris" palette={palette}>
+              <View pointerEvents="box-none" style={styles.materialInlineBody}>
+                <SteppedPercentInput label="Clay/Silt Est %" value={form.est_debris_clay_silt_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_debris_clay_silt_pct", v)} />
+                <SteppedPercentInput label="Sand Est %" value={form.est_debris_sand_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_debris_sand_pct", v)} />
+                <SteppedPercentInput label="Gravel/Cobbles Est %" value={form.est_debris_gravel_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_debris_gravel_pct", v)} />
+                <SteppedPercentInput label="Boulder Est %" value={form.est_debris_boulder_pct} editable={canEdit} palette={palette} onChange={(v) => setPercentStep("est_debris_boulder_pct", v)} />
+              </View>
+            </MaterialSubsection>
           ) : null}
           {renderTaggedSectionMedia("material")}
         </DropdownBlock>
 
         <DropdownBlock title="Pavement / Ground Status" open={openPaperBlocks.pavementGroundStatus} onToggle={() => togglePaperBlock("pavementGroundStatus")} palette={palette}>
-          <Text style={styles.label}>Pavement/Ground Cracks</Text>
-          <View style={styles.chips}>
-            {(["YES", "NO"] as const).map((c) => (
-              <Chip
-                key={`cracks-${c}`}
-                label={c}
-                palette={palette}
-                active={form.pavement_ground_cracks === c}
-                disabled={!canEdit}
-                onPress={() => {
-                  if (!canEdit) return;
-                  setVal("pavement_ground_cracks", c);
-                  if (c !== "YES") {
-                    setVal("crack_length_ft", "");
-                    setVal("crack_horizontal_in", "");
-                    setVal("crack_vertical_in", "");
-                    setVal("crack_depth_in", "");
-                    setVal("settlement_in", "");
-                    setVal("bulge_in", "");
-                  }
-                }}
-              />
-            ))}
-          </View>
-          {form.pavement_ground_cracks === "YES" ? (
-            <>
-              <Field palette={palette} label="Length (feet)" value={form.crack_length_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_length_ft", v)} error={fieldErrors.crack_length_ft} />
-              <Field palette={palette} label="Horizontal Disp (inches)" value={form.crack_horizontal_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_horizontal_in", v)} error={fieldErrors.crack_horizontal_in} />
-              <Field palette={palette} label="Vertical Disp (inches)" value={form.crack_vertical_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_vertical_in", v)} error={fieldErrors.crack_vertical_in} />
-              <Field palette={palette} label="Depth of Crack (inches)" value={form.crack_depth_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("crack_depth_in", v)} error={fieldErrors.crack_depth_in} />
-            </>
-          ) : null}
-          <Field palette={palette} label="Settlement (inches)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
-          <Field palette={palette} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
-          <Text style={styles.label}>Indented by Rocks</Text>
-          <View style={styles.chips}>
-            {(["YES", "NO"] as const).map((c) => (
-              <Chip key={`paper-${c}`} label={c} palette={palette} active={form.indented_by_rocks === c} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", c)} />
-            ))}
-          </View>
-          {renderTaggedSectionMedia("pavement_ground_status")}
+          <PavementGroundAnnotator
+            form={form}
+            fieldErrors={fieldErrors}
+            canEdit={canEdit}
+            busy={busy}
+            palette={palette}
+            imageSource={pavementSectionPhoto ? previewSource(Number(pavementSectionPhoto.id)) : null}
+            imageName={pavementSectionPhoto?.file_name ?? null}
+            onUploadPhoto={() => {
+              pickAndUploadAttachment("pavement_ground_status").catch(() => {});
+            }}
+            setVal={setVal}
+          />
+          {renderTaggedSectionMedia("pavement_ground_status", { hideUploadButton: true })}
         </DropdownBlock>
 
         <DropdownBlock title="Vegetation on Slope" open={openPaperBlocks.vegetation} onToggle={() => togglePaperBlock("vegetation")} palette={palette}>
@@ -2900,7 +4960,7 @@ export default function SubmissionDetailScreen() {
             <Text style={[styles.recommendedHeaderCell, { color: palette.text }]}>May be Impacted</Text>
             <View style={styles.recommendedLabelSpacer} />
           </View>
-          {[ 
+          {[
             ["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"],
             ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"],
             ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"],
@@ -2989,6 +5049,7 @@ export default function SubmissionDetailScreen() {
             multiline
             onChangeText={(v) => setVal(item.field as keyof FormState, v)}
             error={fieldErrors[item.field as keyof FormState]}
+            {...figureCitationFieldProps}
           />
           {renderTaggedSectionMedia(item.key)}
         </DropdownBlock>
@@ -3006,6 +5067,7 @@ export default function SubmissionDetailScreen() {
           editable={canEdit}
           multiline
           onChangeText={(v) => setVal("sketchpad_notes", v)}
+          {...figureCitationFieldProps}
         />
         {renderTaggedSectionMedia("sketchpad")}
       </DropdownBlock>
@@ -3053,6 +5115,7 @@ export default function SubmissionDetailScreen() {
               editable={canEdit && !isLocalId}
               multiline
               onChangeText={setNotifyMessage}
+              {...figureCitationFieldProps}
             />
             <Pressable
               style={[styles.btnPrimary, { backgroundColor: palette.primary, marginTop: 8, opacity: canNotifyCoordinatorNow ? 1 : 0.65 }]}
@@ -3107,7 +5170,7 @@ export default function SubmissionDetailScreen() {
                   <Image
                     source={previewSource(latestPhoto.id)}
                     style={styles.photoPreviewCompact}
-                    onError={() => setFailedPreviewIds((prev) => ({ ...prev, [latestPhoto.id]: true }))}
+                    onError={() => handleAttachmentPreviewError(latestPhoto.id)}
                   />
                 </Pressable>
               ) : (
@@ -3128,7 +5191,7 @@ export default function SubmissionDetailScreen() {
       {activeStep === 3 && canReview && (
         <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
           <Text style={styles.sectionTitle}>Reviewer Decision</Text>
-          <Field palette={palette} label="Review Comment" value={reviewComment} editable={!busy} multiline onChangeText={setReviewComment} />
+          <Field palette={palette} label="Review Comment" value={reviewComment} editable={!busy} multiline onChangeText={setReviewComment} {...figureCitationFieldProps} />
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable style={[styles.btnPrimary, { flex: 1, backgroundColor: palette.success }]} onPress={() => review("APPROVE")} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Approve"}</Text></Pressable>
             <Pressable style={[styles.btnPrimary, { flex: 1, backgroundColor: palette.danger }]} onPress={() => review("REJECT")} disabled={busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Reject"}</Text></Pressable>
@@ -3155,33 +5218,68 @@ export default function SubmissionDetailScreen() {
       </View>
 
       <View style={[styles.section, activeStep === 4 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
-        <Text style={styles.sectionTitle}>Photos</Text>
-        {generalPhotos.length === 0 ? <Text style={styles.muted}>No general photos uploaded.</Text> : generalPhotos.map((p) => (
-          <View key={p.id} style={{ marginTop: 8 }}>
-            <Text style={{ fontWeight: "600", color: palette.text, marginBottom: 4 }}>{p.file_name}</Text>
-            {!failedPreviewIds[p.id] ? (
-              <Pressable onPress={() => openFullscreen(p.id, p.file_name)}>
-                <Image
-                  source={previewSource(p.id)}
-                  style={styles.photo}
-                  onError={() => setFailedPreviewIds((prev) => ({ ...prev, [p.id]: true }))}
-                />
-              </Pressable>
-            ) : (
-              <View>
-                <Text style={[styles.muted, { color: palette.muted }]}>In-app preview failed.</Text>
-                {!!(photoUrls[p.id] || localAttachmentUris[p.id]) && (
-                  <Pressable style={[styles.btnGhost, { marginTop: 8, borderColor: palette.border, backgroundColor: palette.panelSoft }]} onPress={() => openPhotoFallback(p.id)}>
-                    <Text style={[styles.btnGhostText, { color: palette.text }]}>Open Photo</Text>
-                  </Pressable>
-                )}
+        <Text style={styles.sectionTitle}>Gallery</Text>
+        {galleryImages.length === 0 ? (
+          <Text style={[styles.muted, { color: palette.muted }]}>No photos uploaded yet.</Text>
+        ) : (
+          <View style={styles.galleryGrid}>
+            {galleryRows.map((row, rowIndex) => (
+              <View key={`gallery-row-${rowIndex}`} style={[styles.galleryRow, rowIndex ? { marginTop: galleryGap } : null]}>
+                {row.map((file, columnIndex) => {
+                  const previewFailed = !!failedPreviewIds[file.id];
+                  return (
+                    <Pressable
+                      key={`gallery-image-${file.id}`}
+                      style={[styles.galleryTile, columnIndex ? { marginLeft: galleryGap } : null]}
+                      onPress={() => {
+                        if (previewFailed) {
+                          openPhotoFallback(file.id).catch(() => {});
+                          return;
+                        }
+                        openFullscreen(file.id, file.file_name);
+                      }}
+                    >
+                      <View style={[styles.galleryImageWrap, { backgroundColor: palette.panelSoft }]}>
+                        {!previewFailed ? (
+                          <Image
+                            source={previewSource(file.id)}
+                            style={styles.galleryImage}
+                            resizeMode="cover"
+                            onError={() => handleAttachmentPreviewError(file.id)}
+                          />
+                        ) : (
+                          <View style={styles.galleryFallback}>
+                            <Text style={styles.galleryFallbackText}>Tap to open</Text>
+                          </View>
+                        )}
+                        <View style={styles.galleryFigureBadge}>
+                          <Text style={styles.galleryFigureText} numberOfLines={1}>{file.figureLabel}</Text>
+                        </View>
+                        <View style={styles.gallerySourceBadge}>
+                          <Text style={styles.gallerySourceText} numberOfLines={1}>{file.sourceLabel}</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.galleryCaption, { color: palette.muted }]} numberOfLines={1}>
+                        {file.file_name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                {row.length < galleryColumns
+                  ? Array.from({ length: galleryColumns - row.length }, (_, fillerIndex) => (
+                      <View
+                        key={`gallery-row-${rowIndex}-filler-${fillerIndex}`}
+                        style={[styles.galleryTile, styles.galleryTileFiller, { marginLeft: galleryGap }]}
+                      />
+                    ))
+                  : null}
               </View>
-            )}
+            ))}
           </View>
-        ))}
+        )}
       </View>
 
-      <View style={[styles.section, activeStep === 4 ? null : styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
+      <View style={[styles.section, styles.hidden, { backgroundColor: palette.panel, borderColor: palette.border, padding: compact ? 10 : 12 }]}>
         <Text style={styles.sectionTitle}>Section Media</Text>
         {sectionAttachments.length === 0 ? <Text style={styles.muted}>No section-tagged files uploaded.</Text> : sectionAttachments.map((file: any) => (
           <Pressable key={`gallery-attach-${file.id}`} style={styles.sectionAttachmentRow} onPress={() => openPhotoFallback(file.id)}>
@@ -3426,6 +5524,16 @@ export default function SubmissionDetailScreen() {
         </Pressable>
       </Pressable>
     </Modal>
+    <FigureCitationPicker
+      visible={!!figureCitationRequest}
+      request={figureCitationRequest}
+      galleryImages={galleryImages}
+      palette={palette}
+      failedPreviewIds={failedPreviewIds}
+      previewSource={previewSource}
+      onPreviewError={handleAttachmentPreviewError}
+      onClose={() => setFigureCitationRequest(null)}
+    />
     <Modal visible={!!fullscreenPhoto} transparent animationType="none" onRequestClose={closeFullscreen}>
       <Pressable style={styles.fullscreenBackdrop} onPress={closeFullscreen}>
         <Animated.View
@@ -3580,6 +5688,210 @@ const styles = StyleSheet.create({
   muted: { color: "#6f809d" },
   photoPreviewCompact: { width: "100%", height: 160, borderRadius: 8, backgroundColor: "#e5e7eb" },
   photo: { width: "100%", height: 220, borderRadius: 8, backgroundColor: "#e5e7eb" },
+  galleryGrid: {
+    marginTop: 8,
+  },
+  galleryRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  galleryTile: {
+    flex: 1,
+    minWidth: 0,
+  },
+  galleryTileFiller: {
+    opacity: 0,
+  },
+  galleryImageWrap: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 8,
+    aspectRatio: 1,
+  },
+  galleryImage: {
+    width: "100%",
+    height: "100%",
+  },
+  galleryFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.12)",
+  },
+  galleryFallbackText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  galleryFigureBadge: {
+    position: "absolute",
+    left: 5,
+    top: 5,
+    maxWidth: "84%",
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    backgroundColor: "rgba(15,23,42,0.78)",
+  },
+  galleryFigureText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  gallerySourceBadge: {
+    position: "absolute",
+    left: 5,
+    right: 5,
+    bottom: 5,
+    borderRadius: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    backgroundColor: "rgba(15,23,42,0.72)",
+  },
+  gallerySourceText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  galleryCaption: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  figureCitationChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
+  figureCitationChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  figureCitationChipText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  figurePickerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.42)",
+    justifyContent: "flex-end",
+  },
+  figurePickerPanel: {
+    maxHeight: "82%",
+    borderTopWidth: 1,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: Platform.OS === "ios" ? 24 : 16,
+  },
+  figurePickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  figurePickerHeaderCopy: {
+    flex: 1,
+  },
+  figurePickerTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  figurePickerSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  figurePickerClose: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  figurePickerCloseText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  figurePickerEmpty: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 18,
+  },
+  figurePickerEmptyText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "700",
+  },
+  figurePickerScroll: {
+    marginTop: 10,
+  },
+  figurePickerScrollContent: {
+    paddingBottom: 12,
+  },
+  figurePickerSection: {
+    marginTop: 12,
+  },
+  figurePickerSectionTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  figurePickerGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  figurePickerTile: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 6,
+  },
+  figurePickerImageWrap: {
+    position: "relative",
+    aspectRatio: 1,
+    borderRadius: 9,
+    overflow: "hidden",
+  },
+  figurePickerImage: {
+    width: "100%",
+    height: "100%",
+  },
+  figurePickerFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.12)",
+  },
+  figurePickerFallbackText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  figurePickerBadge: {
+    position: "absolute",
+    left: 5,
+    top: 5,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    backgroundColor: "rgba(15,23,42,0.78)",
+  },
+  figurePickerBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  figurePickerFileName: {
+    marginTop: 5,
+    fontSize: 10,
+    fontWeight: "700",
+  },
   eventRow: { borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8, padding: 8, gap: 2, marginTop: 8 },
   sectionAttachmentRow: {
     marginTop: 8,
@@ -3588,6 +5900,645 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
+  },
+  annotationCard: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+  },
+  annotationIntro: {
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  annotationSubtle: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  annotationToolbar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  annotationToolbarButton: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 150,
+    marginTop: 0,
+  },
+  annotationCanvasShell: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  annotationCanvas: {
+    width: "100%",
+    minHeight: 240,
+    position: "relative",
+    backgroundColor: "#d7e3f5",
+  },
+  annotationEmptyState: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+    gap: 6,
+  },
+  annotationEmptyTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  annotationPreviewShell: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 16,
+    overflow: "hidden",
+    position: "relative",
+  },
+  annotationPreviewImage: {
+    width: "100%",
+    height: 220,
+    backgroundColor: "#d7e3f5",
+  },
+  annotationPreviewOverlay: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(9,19,33,0.76)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  annotationPreviewOverlayText: {
+    color: "#f8fbff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  annotationTag: {
+    position: "absolute",
+    borderWidth: 1,
+    borderRadius: 12,
+    minWidth: 110,
+    maxWidth: 164,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  annotationTagPressable: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  annotationTagTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  annotationTagSummary: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  annotationSummaryList: {
+    marginTop: 12,
+    gap: 8,
+  },
+  annotationSummaryRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  annotationSummaryDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  annotationSummaryTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  annotationSummaryText: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  annotationSummaryAction: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  annotationEditorScreen: {
+    flex: 1,
+    position: "relative",
+  },
+  annotationEditorTopBar: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 10 : 8,
+    left: 10,
+    right: 10,
+    zIndex: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingTop: Platform.OS === "ios" ? 44 : 8,
+    paddingHorizontal: 8,
+    paddingBottom: 0,
+  },
+  annotationEditorTitle: {
+    color: "#f8fbff",
+    fontSize: 18,
+    fontWeight: "800",
+    flexShrink: 1,
+  },
+  annotationEditorSubtitle: {
+    color: "#c2d1e6",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
+    maxWidth: 720,
+  },
+  annotationEditorCloseBtn: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(9,19,33,0.72)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  annotationEditorCloseText: {
+    color: "#f8fbff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  annotationEditorTopBarSpacer: {
+    flex: 1,
+    minWidth: 8,
+  },
+  annotationEditorHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 0,
+  },
+  annotationEditorHeaderBtn: {
+    flexShrink: 0,
+  },
+  annotationEditorDrawerToggleBtnActive: {
+    backgroundColor: "rgba(78,132,255,0.22)",
+    borderColor: "rgba(113,164,255,0.4)",
+  },
+  annotationEditorBody: {
+    flex: 1,
+    position: "relative",
+    backgroundColor: "#050d18",
+    overflow: "hidden",
+  },
+  annotationEditorCanvasArea: {
+    flex: 1,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  annotationEditorStage: {
+    position: "relative",
+    overflow: "hidden",
+    maxWidth: "100%",
+    maxHeight: "100%",
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: "#10253f",
+  },
+  annotationEditorEmpty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    gap: 10,
+  },
+  annotationEditorEmptyTitle: {
+    color: "#f8fbff",
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  annotationEditorEmptyText: {
+    color: "#c2d1e6",
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center",
+    maxWidth: 420,
+  },
+  annotationDragGhost: {
+    position: "absolute",
+    borderWidth: 1,
+    borderColor: "#d7e3f5",
+    backgroundColor: "rgba(248,250,252,0.96)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 4,
+  },
+  annotationDragGhostText: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  annotationEditorDrawer: {
+    position: "absolute",
+    top: 12,
+    right: 0,
+    bottom: 12,
+    borderWidth: 1,
+    borderLeftWidth: 1,
+    borderTopLeftRadius: 22,
+    borderBottomLeftRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    shadowColor: "#020817",
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    shadowOffset: { width: -8, height: 0 },
+    elevation: 14,
+  },
+  annotationEditorDrawerTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  annotationEditorDrawerHelp: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  annotationEditorDrawerScroll: {
+    flex: 1,
+    marginTop: 12,
+  },
+  annotationEditorDrawerScrollContent: {
+    paddingBottom: 28,
+  },
+  annotationDrawerToken: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  annotationDrawerTokenHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  annotationDrawerTokenTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  annotationDrawerTokenStatus: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  annotationDrawerTokenSummary: {
+    marginTop: 5,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  annotationDrawerTokenHint: {
+    marginTop: 6,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  annotationMarker: {
+    position: "absolute",
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
+  },
+  annotationMarkerText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  annotationMarkerRangeEnd: {
+    backgroundColor: "rgba(248,251,255,0.8)",
+  },
+  annotationMarkerRangeEndDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+  annotationEditorDetailPanel: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  annotationDrawerEmptyText: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  annotationFieldTitle: {
+    marginBottom: 6,
+  },
+  annotationFieldLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  annotationModalHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  annotationRangeHint: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  annotationDetailActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  annotationDetailActionBtn: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 132,
+    marginTop: 0,
+  },
+  annotationRangeLine: {
+    position: "absolute",
+    height: 2,
+  },
+  annotationRangeCap: {
+    position: "absolute",
+    left: 0,
+    top: -6,
+    width: 2,
+    height: 14,
+    borderRadius: 999,
+  },
+  annotationRangeCapEnd: {
+    right: 0,
+  },
+  annotationCanvasPopover: {
+    position: "absolute",
+    maxHeight: 260,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 6,
+    shadowColor: "#020817",
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  annotationCanvasPopoverLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 6,
+  },
+  annotationCanvasPopoverArrow: {
+    position: "absolute",
+    top: 18,
+    width: 0,
+    height: 0,
+    borderTopWidth: 10,
+    borderBottomWidth: 10,
+    borderTopColor: "transparent",
+    borderBottomColor: "transparent",
+  },
+  annotationCanvasPopoverArrowRight: {
+    left: -12,
+    borderRightWidth: 12,
+    borderLeftWidth: 0,
+    borderLeftColor: "transparent",
+  },
+  annotationCanvasPopoverArrowLeft: {
+    right: -12,
+    borderLeftWidth: 12,
+    borderRightWidth: 0,
+    borderRightColor: "transparent",
+  },
+  annotationCanvasPopoverScroll: {
+    maxHeight: 248,
+  },
+  annotationCanvasPopoverScrollContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  annotationCanvasPopoverHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.1)",
+  },
+  annotationCanvasPopoverHeaderTitle: {
+    color: "#f8fbff",
+    fontSize: 15,
+    fontWeight: "800",
+    flex: 1,
+    paddingRight: 8,
+  },
+  annotationCanvasPopoverCloseBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  annotationCanvasPopoverCloseText: {
+    color: "#f8fbff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  materialSubsectionCard: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  materialSectionBubbleRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 8,
+  },
+  materialSectionBubble: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  materialSectionBubbleText: {
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  materialSubsectionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  materialSubsectionBody: {
+    marginTop: 10,
+  },
+  materialToggleColumn: {
+    gap: 10,
+  },
+  materialToggleRow: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  materialToggleCopy: {
+    flex: 1,
+  },
+  materialToggleTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  materialToggleSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  materialSlopeStack: {
+    gap: 10,
+  },
+  materialInlineGroup: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  materialInlineHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  materialInlineTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  materialInlineBody: {
+    marginTop: 10,
+  },
+  materialPercentControl: {
+    marginTop: 4,
+  },
+  materialPercentLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 6,
+  },
+  materialPercentValue: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  materialPercentSliderRow: {
+    gap: 6,
+  },
+  materialPercentTrackShell: {
+    position: "relative",
+    justifyContent: "center",
+  },
+  materialPercentTrackRail: {
+    borderWidth: 1,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  materialPercentTrackFill: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 999,
+  },
+  materialPercentTickRow: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  materialPercentTickSlot: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  materialPercentTick: {
+    width: 2,
+    borderRadius: 999,
+  },
+  materialPercentThumbHitbox: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  materialPercentThumb: {
+    borderWidth: 1,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  materialPercentThumbCore: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  materialPercentRangeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  materialPercentRangeText: {
+    fontSize: 11,
+    fontWeight: "700",
   },
   hidden: { display: "none" },
   stepTabsRow: {

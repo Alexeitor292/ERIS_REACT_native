@@ -1,5 +1,6 @@
 import { apiFetch } from "./client";
 import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
+import { prepareUploadFile } from "../utils/uploadFile";
 
 export type IncidentStatus = "NEW" | "IN_PROGRESS" | "RESOLVED";
 export type IncidentStage =
@@ -169,6 +170,7 @@ export async function uploadIncidentAttachment(
   file: { uri: string; name: string; type: string },
   opts?: { kind?: IncidentAttachmentKind }
 ) {
+  const preparedFile = await prepareUploadFile(file);
   const params = new URLSearchParams();
   if (opts?.kind) params.set("kind", opts.kind);
   const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -179,7 +181,7 @@ export async function uploadIncidentAttachment(
   let lastError = "Network request failed";
   for (const base of baseCandidates) {
     const formData = new FormData();
-    formData.append("file", file as any);
+    formData.append("file", preparedFile as any);
     try {
       const response = await fetch(`${base}/incidents/${incidentId}/attachments${suffix}`, {
         method: "POST",

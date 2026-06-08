@@ -102,7 +102,13 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def startup():
-    # Create bucket if missing
+    # TEMPORARY LEGACY COMPAT: All ALTER TABLE calls below are idempotent
+    # (ADD COLUMN IF NOT EXISTS / MODIFY COLUMN). They backfill columns added
+    # after initial deployment so that existing dev/prod databases are
+    # automatically brought up to the current schema without a full reinit.
+    # New columns must be added to database/init/010_schema.sql first, then
+    # mirrored here as ADD COLUMN IF NOT EXISTS.
+    # TODO: migrate to Alembic or a script-based migration runner.
     try:
         ensure_bucket()
     except Exception as exc:
@@ -117,6 +123,14 @@ def startup():
         db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS location_id BIGINT NULL"))
         db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS incident_type_description TEXT NULL"))
         db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS highway_status_cause TEXT NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS pavement_ground_annotation_layout_json JSON NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS material_pavement_type VARCHAR(32) NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_rock_pct DECIMAL(5,2) NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_boulder_pct DECIMAL(5,2) NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_clay_silt_pct DECIMAL(5,2) NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_sand_pct DECIMAL(5,2) NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_gravel_pct DECIMAL(5,2) NULL"))
+        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_boulder_pct DECIMAL(5,2) NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN latitude DECIMAL(10,6) NULL"))
         db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN longitude DECIMAL(10,6) NULL"))
         db.commit()
@@ -379,12 +393,14 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           pavement_ground_cracks,
           crack_length_ft, crack_horizontal_in, crack_vertical_in, crack_depth_in,
           settlement_in, bulge_in, indented_by_rocks,
+          pavement_ground_annotation_layout_json,
           failure_rock_fall, failure_topple, failure_slide, failure_spread, failure_flow,
           failure_compound, failure_erosion, failure_surficial_failure, failure_scoured_toe, failure_washout,
           incident_type_description,
           distribution_advancing, distribution_retrogressive, distribution_enlarging, distribution_widening, distribution_moving, distribution_confined,
-          material_rock, material_soil, material_bedding, material_joints, material_fractures,
-          est_soil_pct, est_clay_pct, est_silt_pct, est_sand_pct, est_gravel_pct,
+          material_rock, material_soil, material_bedding, material_joints, material_fractures, material_pavement_type,
+          est_soil_pct, est_rock_pct, est_clay_pct, est_silt_pct, est_sand_pct, est_gravel_pct, est_boulder_pct,
+          est_debris_clay_silt_pct, est_debris_sand_pct, est_debris_gravel_pct, est_debris_boulder_pct,
           water_dry, water_moist, water_wet, water_flowing, water_seep, water_spring,
           vegetation_trees, vegetation_bushes_shrubs, vegetation_groundcover,
           drainage_clogged_inlet, drainage_compromised_drains, drainage_surface_runoff, drainage_torrent_surge_flood,
@@ -407,6 +423,11 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
     if isinstance(d.get("geometry_json"), str):
         try:
             d["geometry_json"] = json.loads(d["geometry_json"])
+        except Exception:
+            pass
+    if isinstance(d.get("pavement_ground_annotation_layout_json"), str):
+        try:
+            d["pavement_ground_annotation_layout_json"] = json.loads(d["pavement_ground_annotation_layout_json"])
         except Exception:
             pass
     # Normalize MySQL/MariaDB tinyint(1) values to JSON booleans for API consistency.
@@ -521,12 +542,7 @@ def validate_submit_ready(db: Session, submission_id: int) -> None:
     if int(photo_count or 0) < 1:
         missing.append("photo")
 
-    # Submit-time business rule:
-    # Drafts may keep partial percentages, but if Soil material is selected,
-    # clay/silt/sand/gravel must total exactly 100 at submit.
-    material_soil_selected = bool(gisa.get("material_soil"))
-    if material_soil_selected:
-        pct_fields = ["est_clay_pct", "est_silt_pct", "est_sand_pct", "est_gravel_pct"]
+    def validate_percent_total(pct_fields: list[str], missing_key: str) -> None:
         total = 0.0
         pct_invalid = False
         for key in pct_fields:
@@ -541,9 +557,26 @@ def validate_submit_ready(db: Session, submission_id: int) -> None:
                     break
             total += value
         if pct_invalid:
-            missing.append("soil_pct(type)")
+            missing.append(f"{missing_key}(type)")
         elif abs(total - 100.0) > 0.0001:
-            missing.append(f"soil_pct_total({total:.2f})")
+            missing.append(f"{missing_key}_total({total:.2f})")
+
+    # Submit-time business rule:
+    # Drafts may keep partial percentages, but selected/filled material
+    # composition groups must total exactly 100 at submit.
+    material_soil_selected = bool(gisa.get("material_soil"))
+    if material_soil_selected:
+        validate_percent_total(["est_clay_pct", "est_silt_pct", "est_sand_pct", "est_gravel_pct", "est_boulder_pct"], "soil_pct")
+
+    debris_pct_fields = [
+        "est_debris_clay_silt_pct",
+        "est_debris_sand_pct",
+        "est_debris_gravel_pct",
+        "est_debris_boulder_pct",
+    ]
+    debris_pct_entered = any(gisa.get(key) is not None and str(gisa.get(key)).strip() != "" for key in debris_pct_fields)
+    if debris_pct_entered:
+        validate_percent_total(debris_pct_fields, "debris_pct")
 
     if missing:
         raise HTTPException(
@@ -2103,21 +2136,32 @@ def patch_gisa(
         for k in group:
             provided[k] = (k == keep)
 
-    # Material: one of Rock/Soil; and if Rock then one of Bedding/Joints/Fractures.
+    # Material: Soil and Rock can both be selected. Rock subtypes are independent yes/no toggles.
     if any(k in provided for k in ["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures"]):
-        normalize_single_choice(["material_rock", "material_soil"])
         rock_selected = _to_bool(provided.get("material_rock")) is True
-        if rock_selected:
-            normalize_single_choice(["material_bedding", "material_joints", "material_fractures"])
+        soil_selected = _to_bool(provided.get("material_soil")) is True
+        if not rock_selected:
+            provided["material_bedding"] = False
+            provided["material_joints"] = False
+            provided["material_fractures"] = False
+            provided["est_rock_pct"] = None
+        if not soil_selected:
             provided["est_soil_pct"] = None
             provided["est_clay_pct"] = None
             provided["est_silt_pct"] = None
             provided["est_sand_pct"] = None
             provided["est_gravel_pct"] = None
+            provided["est_boulder_pct"] = None
+
+    if "material_pavement_type" in provided:
+        raw_pavement_type = provided.get("material_pavement_type")
+        if raw_pavement_type is None or str(raw_pavement_type).strip() == "":
+            provided["material_pavement_type"] = None
         else:
-            provided["material_bedding"] = False
-            provided["material_joints"] = False
-            provided["material_fractures"] = False
+            pavement_type = str(raw_pavement_type).strip().upper()
+            if pavement_type not in {"CONCRETE", "ASPHALT"}:
+                raise HTTPException(status_code=400, detail="material_pavement_type must be CONCRETE or ASPHALT")
+            provided["material_pavement_type"] = pavement_type
 
     # Water/Drainage: only one drainage option can be selected.
     normalize_single_choice([
@@ -2144,6 +2188,8 @@ def patch_gisa(
 
     if "geometry_json" in provided and provided["geometry_json"] is not None:
         provided["geometry_json"] = json.dumps(provided["geometry_json"])
+    if "pavement_ground_annotation_layout_json" in provided and provided["pavement_ground_annotation_layout_json"] is not None:
+        provided["pavement_ground_annotation_layout_json"] = json.dumps(provided["pavement_ground_annotation_layout_json"])
 
     if "post_mile" in provided:
         provided["post_mile"] = normalize_post_mile(provided.get("post_mile"))

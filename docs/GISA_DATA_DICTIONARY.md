@@ -100,6 +100,7 @@ Use this as a handoff reference for integration work.
 | `material_bedding` | `TINYINT` | Yes | boolean 0/1 |
 | `material_joints` | `TINYINT` | Yes | boolean 0/1 |
 | `material_fractures` | `TINYINT` | Yes | boolean 0/1 |
+| `material_pavement_type` | `VARCHAR(32)` | No | `CONCRETE` or `ASPHALT` |
 
 ### Section H: Material composition percentages
 | Field | Type | Required | Notes |
@@ -109,6 +110,11 @@ Use this as a handoff reference for integration work.
 | `est_silt_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
 | `est_sand_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
 | `est_gravel_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
+| `est_boulder_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
+| `est_debris_clay_silt_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
+| `est_debris_sand_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
+| `est_debris_gravel_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
+| `est_debris_boulder_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
 
 ### Section I: Water content/state flags
 | Field | Type | Required | Notes |

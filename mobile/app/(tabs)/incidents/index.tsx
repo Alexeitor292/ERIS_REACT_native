@@ -34,6 +34,7 @@ import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 import { queueIncidentMapPreload } from "@/src/offline/mapPreload";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "@/src/utils/precision";
+import { prepareUploadFile } from "@/src/utils/uploadFile";
 import {
   CALTRANS_COUNTIES,
   countyCodeFromNameOrCode,
@@ -658,19 +659,34 @@ export default function IncidentsTabScreen() {
     }
 
     if (result.canceled || !result.assets?.length) return;
-    const nextFiles: PendingIncidentUpload[] = result.assets.map((asset) => {
-      const uri = asset.uri;
+    const nextFiles: PendingIncidentUpload[] = [];
+    const failedNames: string[] = [];
+    for (const asset of result.assets) {
+      const uri = String(asset.uri || "").trim();
       const name = asset.fileName || uri.split("/").pop() || "incident-media.bin";
       const type = guessMimeType(name, asset.mimeType);
-      return {
-        uri,
-        name,
-        type,
-        kind: inferIncidentAttachmentKind(name, type),
-        size: typeof (asset as any).fileSize === "number" ? (asset as any).fileSize : null,
-      };
-    });
+      try {
+        const preparedFile = await prepareUploadFile({ uri, name, type });
+        nextFiles.push({
+          uri: preparedFile.uri,
+          name: preparedFile.name,
+          type: preparedFile.type,
+          kind: inferIncidentAttachmentKind(preparedFile.name, preparedFile.type),
+          size: typeof (asset as any).fileSize === "number" ? (asset as any).fileSize : null,
+        });
+      } catch {
+        failedNames.push(name);
+      }
+    }
     addPendingIncidentFiles(nextFiles);
+    if (failedNames.length) {
+      const detail = failedNames.slice(0, 2).join("\n");
+      const extra = failedNames.length > 2 ? `\n+${failedNames.length - 2} more` : "";
+      Alert.alert(
+        nextFiles.length ? "Some files couldn't be added" : "File unavailable",
+        `${detail}${extra}\nPlease pick the file again before uploading.`
+      );
+    }
   }
 
   async function pickIncidentDocument() {
@@ -687,11 +703,12 @@ export default function IncidentsTabScreen() {
         if (!uri) continue;
         const name = String(asset.name || uri.split("/").pop() || "incident-file.bin");
         const type = guessMimeType(name, asset.mimeType);
+        const preparedFile = await prepareUploadFile({ uri, name, type });
         nextFiles.push({
-          uri,
-          name,
-          type,
-          kind: inferIncidentAttachmentKind(name, type),
+          uri: preparedFile.uri,
+          name: preparedFile.name,
+          type: preparedFile.type,
+          kind: inferIncidentAttachmentKind(preparedFile.name, preparedFile.type),
           size: typeof asset.size === "number" ? asset.size : null,
         });
       }
