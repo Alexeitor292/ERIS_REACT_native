@@ -187,6 +187,14 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="gearshape.fill" color={color} />,
         }}
       />
+
+      <Tabs.Screen
+        name="road-inventory"
+        options={{
+          href: null,
+          title: "Road Inventory",
+        }}
+      />
       </Tabs>
 
       {canSwipeTabs && !isIncidentDetailsRoute ? (
@@ -230,6 +238,12 @@ export default function TabLayout() {
               onPress={() => closeMenu(() => router.push("/(tabs)/settings"))}
             >
               <Text style={[styles.menuItemText, { color: palette.text }]}>Settings</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.menuItem, { borderBottomColor: palette.border }]}
+              onPress={() => closeMenu(() => router.push("/(tabs)/road-inventory"))}
+            >
+              <Text style={[styles.menuItemText, { color: palette.text }]}>Road Inventory</Text>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={onLogout}>
               <Text style={[styles.menuItemText, { color: "#dc2626" }]}>Logout</Text>
