@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import get_current_user, require_roles
-from ..storage import put_object_bytes, object_access_url
+from ..storage import ensure_bucket_exists, put_object_bytes, object_access_url
 from ..config import settings
 from ..services.road_inventory_parser import ParseError, parse_excel
 from ..services.road_inventory_lookup import (
@@ -82,12 +82,19 @@ def create_import_job_route(
         )
 
     object_key = f"uploads/{uuid.uuid4()}.xlsx"
-    put_object_bytes(
-        object_key=object_key,
-        data=file_bytes,
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        bucket=_ROAD_INVENTORY_BUCKET,
-    )
+    try:
+        ensure_bucket_exists(_ROAD_INVENTORY_BUCKET)
+        put_object_bytes(
+            object_key=object_key,
+            data=file_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            bucket=_ROAD_INVENTORY_BUCKET,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Road inventory storage is unavailable. Please check MinIO bucket configuration.",
+        )
 
     tag = version_tag.strip() or None
     job_uuid = create_import_job_svc(
@@ -164,11 +171,11 @@ def upload_road_inventory(
             detail=str(exc),
         ) from exc
 
-    # Archive raw Excel in MinIO
+    # Archive raw Excel in MinIO (non-fatal: version record is inserted regardless)
     object_key = f"uploads/{uuid.uuid4()}.xlsx"
     sha256 = hashlib.sha256(file_bytes).hexdigest()
     try:
-        from io import BytesIO
+        ensure_bucket_exists(_ROAD_INVENTORY_BUCKET)
         put_object_bytes(
             object_key=object_key,
             data=file_bytes,

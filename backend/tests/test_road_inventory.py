@@ -526,6 +526,20 @@ class TestImportJobs:
                 "DELETE FROM road_inventory_import_jobs WHERE job_uuid = :uuid"
             ), {"uuid": job_uuid})
 
+    def test_import_job_returns_503_if_storage_unavailable(self, client_db, admin_token):
+        from unittest.mock import patch
+        xlsx = _make_xlsx(_row())
+        with patch("app.routes.road_inventory.ensure_bucket_exists") as mock_ensure:
+            mock_ensure.side_effect = RuntimeError("MinIO connection refused")
+            resp = client_db.post(
+                "/road-inventory/import-jobs",
+                files={"file": ("test.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                params={"version_tag": "storage-fail-test"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert resp.status_code == 503
+        assert "unavailable" in resp.json()["detail"].lower()
+
     def test_run_import_job_failure(self, client_db, admin_token):
         from unittest.mock import patch
         from app.db import engine

@@ -9,7 +9,7 @@ Covers:
   - /attachments/{id}/download-url response shape (no real DB required; 401 expected)
 """
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 class TestObjectPublicUrl:
@@ -96,3 +96,58 @@ class TestDownloadUrlEndpointShape:
     def test_requires_auth(self, client):
         resp = client.get("/attachments/1/download-url")
         assert resp.status_code == 401
+
+
+class TestEnsureBucketExists:
+    """Unit tests for ensure_bucket_exists() — all MinIO I/O is mocked."""
+
+    def test_bucket_already_exists_no_make_bucket(self):
+        from app.storage import ensure_bucket_exists
+
+        with patch("app.storage._client") as mk:
+            mk.return_value.bucket_exists.return_value = True
+            ensure_bucket_exists("road-inventory")
+            mk.return_value.make_bucket.assert_not_called()
+
+    def test_bucket_missing_calls_make_bucket(self):
+        from app.storage import ensure_bucket_exists
+
+        with patch("app.storage._client") as mk:
+            mk.return_value.bucket_exists.return_value = False
+            ensure_bucket_exists("road-inventory")
+            mk.return_value.make_bucket.assert_called_once_with("road-inventory")
+
+    def test_s3error_on_bucket_exists_raises_runtime_error(self):
+        from app.storage import ensure_bucket_exists
+        from minio.error import S3Error
+
+        fake_resp = MagicMock()
+        fake_resp.status = 403
+        fake_resp.getheader = MagicMock(return_value=None)
+        s3err = S3Error(
+            "AccessDenied", "Access Denied", "/road-inventory", "req-1", "host-1",
+            fake_resp, bucket_name="road-inventory",
+        )
+
+        with patch("app.storage._client") as mk:
+            mk.return_value.bucket_exists.side_effect = s3err
+            with pytest.raises(RuntimeError, match="MinIO ensure_bucket_exists failed"):
+                ensure_bucket_exists("road-inventory")
+
+    def test_s3error_on_make_bucket_raises_runtime_error(self):
+        from app.storage import ensure_bucket_exists
+        from minio.error import S3Error
+
+        fake_resp = MagicMock()
+        fake_resp.status = 500
+        fake_resp.getheader = MagicMock(return_value=None)
+        s3err = S3Error(
+            "InternalError", "Internal server error", "/road-inventory", "req-2", "host-2",
+            fake_resp, bucket_name="road-inventory",
+        )
+
+        with patch("app.storage._client") as mk:
+            mk.return_value.bucket_exists.return_value = False
+            mk.return_value.make_bucket.side_effect = s3err
+            with pytest.raises(RuntimeError, match="MinIO ensure_bucket_exists failed"):
+                ensure_bucket_exists("road-inventory")
