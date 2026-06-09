@@ -30,6 +30,7 @@ from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .migrations_check import check_migration_head
 from .routes.incidents import router as incidents_router
+from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
@@ -83,6 +84,7 @@ app.include_router(auth_router)
 app.include_router(arcgis_router)
 app.include_router(gisa_router)
 app.include_router(incidents_router)
+app.include_router(road_inventory_router)
 
 app.add_middleware(
     CORSMiddleware,

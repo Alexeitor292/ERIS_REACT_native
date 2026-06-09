@@ -10,16 +10,24 @@ pytestmark = pytest.mark.db
 
 
 class TestAlembicCurrent:
-    def test_db_stamped_at_baseline(self, client_db):
+    def test_db_at_head(self, client_db):
+        from alembic.config import Config
         from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
         from app.db import engine
+        import os
+
+        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+        cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+        expected = set(ScriptDirectory.from_config(cfg).get_heads())
 
         with engine.connect() as conn:
-            ctx = MigrationContext.configure(conn)
-            current = set(ctx.get_current_heads())
+            current = set(MigrationContext.configure(conn).get_current_heads())
 
-        assert "0001_baseline" in current, (
-            f"Expected 0001_baseline in alembic_version, got {current}"
+        assert current == expected, (
+            f"DB revision {current} does not match script head {expected}. "
+            f"Run: alembic upgrade head"
         )
 
 
