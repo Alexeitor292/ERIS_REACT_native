@@ -3,6 +3,7 @@ import LoginPage from "./pages/LoginPage";
 import SubmissionsPage from "./pages/SubmissionsPage";
 import SubmissionDetailPage from "./pages/SubmissionDetailPage";
 import AdminUsersPage from "./pages/AdminUsersPage";
+import RoadInventoryPage from "./pages/RoadInventoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
@@ -53,6 +54,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AdminUsersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/road-inventory"
+            element={
+              <ProtectedRoute>
+                <RoadInventoryPage />
               </ProtectedRoute>
             }
           />

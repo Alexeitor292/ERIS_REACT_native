@@ -79,6 +79,7 @@ export default function AppShell({ title, children }: { title: string; children:
               <NavItem to="/submissions" label="Submissions" />
               <NavItem to="/settings" label="Settings" />
               {me?.roles?.includes("ADMIN") && <NavItem to="/admin/users" label="Admin Users" />}
+              {me?.roles?.includes("ADMIN") && <NavItem to="/admin/road-inventory" label="Road Inventory" />}
             </nav>
           </div>
         </aside>
@@ -101,6 +102,7 @@ export default function AppShell({ title, children }: { title: string; children:
               <NavItem to="/submissions" label="Submissions" collapsed={!navExpanded} />
               <NavItem to="/settings" label="Settings" collapsed={!navExpanded} />
               {me?.roles?.includes("ADMIN") && <NavItem to="/admin/users" label="Admin Users" collapsed={!navExpanded} />}
+              {me?.roles?.includes("ADMIN") && <NavItem to="/admin/road-inventory" label="Road Inventory" collapsed={!navExpanded} />}
             </nav>
 
             <div className={cn("mt-4 border-t border-[var(--line)] pt-3 text-xs text-muted px-2", navExpanded ? "" : "hidden")}>
