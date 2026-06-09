@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import { router, useLocalSearchParams, usePathname } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams, usePathname } from "expo-router";
 
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
@@ -41,6 +41,11 @@ import {
   districtForCounty,
   routesForCounty,
 } from "@/src/utils/caltransLookups";
+import {
+  getLocalRoadInventoryStatus,
+  lookupLocalRoadSegments,
+  type RoadSegment,
+} from "@/src/services/roadInventoryOffline";
 
 type AdminUser = {
   id: number;
@@ -322,6 +327,82 @@ function markerPosition(
   };
 }
 
+const riCardStyles = StyleSheet.create({
+  card: { borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 8, marginBottom: 2 },
+  title: { fontSize: 13, fontWeight: "800", marginBottom: 4 },
+  grid: { gap: 3 },
+  row: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  fieldLabel: { fontSize: 12, fontWeight: "600" },
+  fieldValue: { fontSize: 12, fontWeight: "400", flexShrink: 1, textAlign: "right" },
+});
+
+function RoadInventoryContextCard({
+  matches,
+  lookupBusy,
+  lookupError,
+  palette,
+}: {
+  matches: RoadSegment[] | null;
+  lookupBusy: boolean;
+  lookupError: string | null;
+  palette: { text: string; muted: string; border: string; panelSoft: string; primary: string };
+}) {
+  if (lookupBusy) {
+    return (
+      <View style={[riCardStyles.card, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <ActivityIndicator size="small" color={palette.primary} />
+          <Text style={{ color: palette.muted, fontSize: 12 }}>Checking road inventory...</Text>
+        </View>
+      </View>
+    );
+  }
+  if (lookupError && (!matches || matches.length === 0)) {
+    return (
+      <View style={[riCardStyles.card, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+        <Text style={[riCardStyles.title, { color: palette.text }]}>Road Inventory</Text>
+        <Text style={{ color: palette.muted, fontSize: 12, marginTop: 2 }}>{lookupError}</Text>
+      </View>
+    );
+  }
+  if (!matches || matches.length === 0) return null;
+  const seg = matches[0];
+  const rows: [string, string | null | undefined][] = [
+    ["District", seg.district_code],
+    ["County", seg.county_code],
+    ["Route", seg.route_name + (seg.route_suffix_code ? ` (${seg.route_suffix_code})` : "")],
+    ["Postmile range", `${seg.begin_pm} – ${seg.end_pm} mi`],
+    ["Length", seg.length_miles != null ? `${seg.length_miles} mi` : null],
+    ["Lanes L/R", seg.left_lanes != null || seg.right_lanes != null ? `${seg.left_lanes ?? "-"} / ${seg.right_lanes ?? "-"}` : null],
+    ["Surface L/R", seg.left_surface_type || seg.right_surface_type ? `${seg.left_surface_type ?? "-"} / ${seg.right_surface_type ?? "-"}` : null],
+    ["Median", seg.median_type ? `${seg.median_type}${seg.median_width != null ? ` (${seg.median_width} ft)` : ""}` : null],
+    ["Terrain", seg.terrain_code],
+    ["Design speed", seg.design_speed != null ? `${seg.design_speed} mph` : null],
+    ["ADT", seg.adt != null ? String(seg.adt) : null],
+    ["Landmark", seg.landmark_short_desc],
+  ];
+  return (
+    <View style={[riCardStyles.card, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+      <Text style={[riCardStyles.title, { color: palette.text }]}>Road Inventory Match</Text>
+      {matches.length > 1 ? (
+        <Text style={{ color: palette.muted, fontSize: 11, marginBottom: 4 }}>
+          Showing best match. {matches.length} total matches.
+        </Text>
+      ) : null}
+      <View style={riCardStyles.grid}>
+        {rows
+          .filter(([, v]) => v != null && String(v).trim() !== "")
+          .map(([label, value]) => (
+            <View key={label} style={riCardStyles.row}>
+              <Text style={[riCardStyles.fieldLabel, { color: palette.muted }]}>{label}</Text>
+              <Text style={[riCardStyles.fieldValue, { color: palette.text }]}>{value}</Text>
+            </View>
+          ))}
+      </View>
+    </View>
+  );
+}
+
 export default function IncidentsTabScreen() {
   const { palette } = useUiSettings();
   const pathname = usePathname();
@@ -363,6 +444,12 @@ export default function IncidentsTabScreen() {
   const [districtPickerOpen, setDistrictPickerOpen] = useState(false);
   const [countyPickerOpen, setCountyPickerOpen] = useState(false);
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
+  const [roadInventoryAvailable, setRoadInventoryAvailable] = useState(false);
+  const [roadInventoryVersionTag, setRoadInventoryVersionTag] = useState("");
+  const [roadInventoryMatches, setRoadInventoryMatches] = useState<RoadSegment[] | null>(null);
+  const [roadInventoryLookupBusy, setRoadInventoryLookupBusy] = useState(false);
+  const [roadInventoryLookupError, setRoadInventoryLookupError] = useState<string | null>(null);
+  const riLookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const createScrollRef = useRef<ScrollView | null>(null);
   const createFieldY = useRef<Record<string, number>>({});
 
@@ -527,6 +614,65 @@ export default function IncidentsTabScreen() {
     setRevisionEditableFields(null);
   }, [isCreateRoute]);
 
+  const runRoadInventoryLookup = useCallback(async (
+    countyCode: string,
+    route: string,
+    pm: string,
+    dist: string,
+  ) => {
+    const pmNum = parseFloat((pm || "").replace(/^[A-Za-z]+/, ""));
+    if (!countyCode.trim() || !route.trim() || !pm.trim() || Number.isNaN(pmNum)) {
+      setRoadInventoryMatches(null);
+      setRoadInventoryLookupError(null);
+      return;
+    }
+    setRoadInventoryLookupBusy(true);
+    setRoadInventoryLookupError(null);
+    try {
+      const results = await lookupLocalRoadSegments({
+        countyCode: countyCode.trim(),
+        routeName: route.trim(),
+        postmile: pmNum,
+        districtCode: dist.trim() || undefined,
+      });
+      setRoadInventoryMatches(results);
+      setRoadInventoryLookupError(
+        results.length === 0
+          ? "No road inventory segment matched this county/route/postmile."
+          : null,
+      );
+    } catch (e: any) {
+      setRoadInventoryMatches(null);
+      setRoadInventoryLookupError(String(e?.message ?? e));
+    } finally {
+      setRoadInventoryLookupBusy(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      getLocalRoadInventoryStatus().then((status) => {
+        setRoadInventoryAvailable(status.available);
+        setRoadInventoryVersionTag(status.available ? status.meta.version_tag : "");
+      }).catch(() => {});
+    }, []),
+  );
+
+  useEffect(() => {
+    if (!roadInventoryAvailable || !isIncidentFormRoute) {
+      setRoadInventoryMatches(null);
+      setRoadInventoryLookupError(null);
+      return;
+    }
+    if (riLookupTimer.current) clearTimeout(riLookupTimer.current);
+    riLookupTimer.current = setTimeout(() => {
+      runRoadInventoryLookup(county, routeValue, postMile, district);
+    }, 500);
+    return () => {
+      if (riLookupTimer.current) clearTimeout(riLookupTimer.current);
+    };
+  }, [county, routeValue, postMile, district, roadInventoryAvailable, isIncidentFormRoute, runRoadInventoryLookup]);
+
   const registerCreateField = (key: string, y: number) => {
     createFieldY.current[key] = y;
   };
@@ -595,6 +741,8 @@ export default function IncidentsTabScreen() {
     setEditingIncidentId(null);
     setEditingLocked(false);
     setRevisionEditableFields(null);
+    setRoadInventoryMatches(null);
+    setRoadInventoryLookupError(null);
   };
 
   const canEditField = (field: string) => {
@@ -768,6 +916,7 @@ export default function IncidentsTabScreen() {
     setBusy(true);
     setErr(null);
     try {
+      // TODO: persist selected road inventory segment id/context in a future backend schema migration.
       const payload = {
         description: description.trim() || null,
         first_observed_at: firstObservedAt.trim(),
@@ -1234,6 +1383,41 @@ export default function IncidentsTabScreen() {
                     </View>
                   </View>
                 </View>
+                <View style={{ marginTop: 6 }}>
+                  <Text style={{ fontSize: 11, color: roadInventoryAvailable ? palette.muted : "#b45309" }}>
+                    {roadInventoryAvailable
+                      ? `Road inventory offline: ${roadInventoryVersionTag}`
+                      : "Road inventory offline data not synced"}
+                  </Text>
+                </View>
+                {roadInventoryAvailable ? (
+                  <Pressable
+                    style={[
+                      styles.btn,
+                      {
+                        borderColor: palette.border,
+                        backgroundColor: palette.panelSoft,
+                        marginTop: 4,
+                        marginBottom: 2,
+                        flex: 0,
+                        alignSelf: "flex-start",
+                        paddingHorizontal: 12,
+                      },
+                    ]}
+                    onPress={() => runRoadInventoryLookup(county, routeValue, postMile, district)}
+                    disabled={roadInventoryLookupBusy || !county || !routeValue || !postMile}
+                  >
+                    <Text style={{ color: palette.text, fontWeight: "700", fontSize: 13 }}>
+                      {roadInventoryLookupBusy ? "Looking up..." : "Check Road Inventory"}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <RoadInventoryContextCard
+                  matches={roadInventoryMatches}
+                  lookupBusy={roadInventoryLookupBusy}
+                  lookupError={roadInventoryLookupError}
+                  palette={palette}
+                />
                 <SelectField
                   label="First Observed (YYYY-MM-DD) *"
                   value={firstObservedAt}
