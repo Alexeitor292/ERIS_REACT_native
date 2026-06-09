@@ -59,9 +59,9 @@ Source: `database/init/010_schema.sql` (baseline) + Alembic migrations in
   git commit `ce447ab`. This is the bootstrap source for fresh Docker installs.
 - Alembic baseline `0001_baseline` corresponds exactly to this init SQL. All schema
   changes after commit `ce447ab` must go through Alembic migrations.
-- Backend startup currently calls `ensure_incident_runtime_schema` as a temporary
-  backwards-compat shim. All columns it covers are now present in `010_schema.sql`.
-  The shim will be removed once all environments are stamped to the Alembic baseline.
+- Backend startup calls `check_migration_head()` and fails with a `RuntimeError` if
+  the database is not at the current Alembic head. Runtime ALTER TABLE shims have been
+  removed. Both local dev and Proxmox are confirmed stamped at `0001_baseline`.
 - See `docs/MIGRATIONS.md` for the full migration system documentation.
 
 ## Seed Data (`020_seed.sql`)

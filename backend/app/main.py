@@ -16,7 +16,7 @@ from reportlab.pdfgen import canvas
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ContentStream
 
-from .db import SessionLocal, get_db
+from .db import get_db
 from .config import settings
 from .auth import decode_token
 from .deps import get_current_user, require_roles
@@ -27,7 +27,8 @@ from .photos import router as photos_router
 from .routes.auth import router as auth_router
 from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
-from .routes.incidents import ensure_incident_runtime_schema, router as incidents_router
+from .migrations_check import check_migration_head
+from .routes.incidents import router as incidents_router
 from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
@@ -102,13 +103,6 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def startup():
-    # TEMPORARY LEGACY COMPAT: All ALTER TABLE calls below are idempotent
-    # (ADD COLUMN IF NOT EXISTS / MODIFY COLUMN). They backfill columns added
-    # after initial deployment so that existing dev/prod databases are
-    # automatically brought up to the current schema without a full reinit.
-    # New columns must be added to database/init/010_schema.sql first, then
-    # mirrored here as ADD COLUMN IF NOT EXISTS.
-    # TODO: migrate to Alembic or a script-based migration runner.
     try:
         ensure_bucket()
     except Exception as exc:
@@ -116,29 +110,7 @@ def startup():
             logger.warning("MinIO not available during startup: %s", exc)
         else:
             raise
-    db = SessionLocal()
-    try:
-        ensure_incident_runtime_schema(db)
-        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS metadata_json JSON NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS location_id BIGINT NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS incident_type_description TEXT NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS highway_status_cause TEXT NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS pavement_ground_annotation_layout_json JSON NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS material_pavement_type VARCHAR(32) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_rock_pct DECIMAL(5,2) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_boulder_pct DECIMAL(5,2) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_clay_silt_pct DECIMAL(5,2) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_sand_pct DECIMAL(5,2) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_gravel_pct DECIMAL(5,2) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa ADD COLUMN IF NOT EXISTS est_debris_boulder_pct DECIMAL(5,2) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN latitude DECIMAL(10,6) NULL"))
-        db.execute(text("ALTER TABLE submission_gisa MODIFY COLUMN longitude DECIMAL(10,6) NULL"))
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    check_migration_head()
 
 
 # ----------------------------

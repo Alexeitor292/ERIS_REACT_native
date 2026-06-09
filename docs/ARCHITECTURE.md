@@ -39,18 +39,16 @@ Supporting modules:
 
 ## Schema Management
 
-Schema ownership is transitioning to Alembic:
+Alembic is the sole owner of schema changes after the baseline:
 
 - `database/init/010_schema.sql` — authoritative bootstrap schema for fresh installs,
   representing 19 tables as of commit `ce447ab`. Do not add new columns here after that
   baseline; use Alembic migrations instead.
 - `backend/migrations/versions/0001_baseline.py` — empty Alembic checkpoint corresponding
-  to the init SQL. Existing databases must be stamped to this revision once
-  (`alembic stamp 0001_baseline`).
-- `backend/app/main.py` `startup()` and `backend/app/routes/incidents.py`
-  `ensure_incident_runtime_schema()` — temporary backwards-compatibility shims that apply
-  idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on startup. Present until all
-  environments are confirmed stamped and shims are removed in a later commit.
+  to the init SQL. All environments are stamped at this revision.
+- `backend/app/main.py` `startup()` — calls `check_migration_head()` (via
+  `backend/app/migrations_check.py`) which raises `RuntimeError` on startup if the database
+  is not at Alembic head. Runtime ALTER TABLE shims have been removed.
 
 See `docs/MIGRATIONS.md` for full procedures, backup commands, and Proxmox instructions.
 

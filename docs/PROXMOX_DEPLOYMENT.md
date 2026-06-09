@@ -111,6 +111,9 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:5173/healthz
 ```
 
+If the backend fails to start with a `RuntimeError` about Alembic head, the database
+is not stamped. Follow step 5 above before the backend will accept connections.
+
 From your browser:
 
 - `http://<proxmox-ip>:5173`

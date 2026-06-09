@@ -10,7 +10,7 @@ after the initial baseline.
 | `database/init/010_schema.sql` | Bootstrap schema for **fresh installs only** — defines the initial 19 tables as of baseline commit `ce447ab`. Do not add new columns here after the baseline. |
 | `database/init/020_seed.sql` | Dev/bootstrap seed data (roles + local users). Idempotent; safe to re-run. |
 | `backend/migrations/versions/` | Alembic revisions. All schema changes **after** the baseline live here. |
-| `backend/app/main.py` `startup()` | Temporary runtime ALTER TABLE shims — present until all environments are confirmed stamped. |
+| `backend/app/main.py` `startup()` | Calls `check_migration_head()` — fails fast if DB is not at Alembic head. No DDL is executed. |
 
 The backend uses raw SQLAlchemy `text()` queries, not ORM models. Alembic
 autogenerate is disabled. All migrations are written as explicit
@@ -241,20 +241,15 @@ alembic upgrade --sql head   # prints SQL to stdout, no DB connection needed
 
 ## Runtime shim status
 
-The backend currently applies two sets of runtime ALTER TABLE statements on
-every startup:
+Runtime ALTER TABLE shims have been removed. Both environments (local dev and
+Proxmox) were confirmed stamped to `0001_baseline` before removal.
 
-- `backend/app/main.py` `startup()` — GISA and users columns
-- `backend/app/routes/incidents.py` `ensure_incident_runtime_schema()` — incident tables/columns
+The backend now fails fast on startup if the database is not at Alembic head:
 
-These are temporary backwards-compatibility shims for databases that predate
-the current `010_schema.sql`. They are idempotent (`ADD COLUMN IF NOT EXISTS`)
-and safe to leave in place.
+```
+RuntimeError: Database schema is not stamped with an Alembic revision.
+Run from backend/: alembic stamp 0001_baseline && alembic upgrade head
+```
 
-**They will be removed in a future commit once every environment (local dev,
-Proxmox) has been confirmed stamped to `0001_baseline` and verified with
-`alembic current`.**
-
-Until then, the startup shims and Alembic operate in parallel without conflict:
-the shims are no-ops on any DB that was initialized from current `010_schema.sql`,
-and Alembic does not touch the schema until `alembic upgrade head` is explicitly run.
+If you see this error on a new environment, follow the Fresh install or
+Existing database procedure above before starting the backend.

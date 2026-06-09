@@ -26,11 +26,13 @@ This migration intentionally contains NO DDL. It is a checkpoint only.
 
 --- STAMPING EXISTING DATABASES ---
 
-Existing databases (local dev, Proxmox) should be stamped to this revision
-ONCE, after the backend has been started at least once on that database
-(so the runtime compatibility shims in main.py and
-ensure_incident_runtime_schema() have been applied and the schema matches
-010_schema.sql). Stamping does not alter the schema.
+Existing databases (local dev, Proxmox) must be stamped to this revision
+ONCE, after confirming the schema matches 010_schema.sql. Stamping does not
+alter the schema.
+
+The runtime compatibility shims (startup() ALTER TABLE block and
+ensure_incident_runtime_schema()) were removed once both environments were
+confirmed stamped. See git commit after 63baed7 for the removal.
 
 From backend/ directory:
   alembic stamp 0001_baseline

@@ -26,6 +26,7 @@ coverage/
 .DS_Store
 mobile/.git.nested.backup/
 tmp_gisa_xfa/
+backups/
 
 # ---- expo / eas / react-native native artifacts ----
 mobile/.expo/
