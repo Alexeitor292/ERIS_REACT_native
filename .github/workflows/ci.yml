@@ -39,7 +39,7 @@ jobs:
         env:
           DB_PASS: ci_placeholder
           JWT_SECRET: ci_placeholder_secret
-        run: python -m pytest tests/ -v --tb=short
+        run: python -m pytest tests/ -m "not db" -v --tb=short
 
   web:
     runs-on: ubuntu-latest
@@ -83,6 +83,60 @@ jobs:
 
       - name: TypeScript check
         run: npx tsc -p tsconfig.json --noEmit
+
+  backend-db:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: rootpassword
+          MARIADB_DATABASE: eris
+          MARIADB_USER: eris_user
+          MARIADB_PASSWORD: CHANGE_ME_APP_DB_PASSWORD
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=15
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: eris
+      DB_USER: eris_user
+      DB_PASS: CHANGE_ME_APP_DB_PASSWORD
+      JWT_SECRET: ci_placeholder_secret
+      ENV: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Initialize schema and seed data
+        run: |
+          mysql -h 127.0.0.1 -u root -prootpassword < ../database/init/010_schema.sql
+          mysql -h 127.0.0.1 -u root -prootpassword < ../database/init/020_seed.sql
+
+      - name: Stamp Alembic baseline
+        run: |
+          alembic stamp 0001_baseline
+          alembic current
+
+      - name: Run DB integration tests
+        run: python -m pytest tests/ -m db -v --tb=short
 
   docker-config:
     runs-on: ubuntu-latest

@@ -5,9 +5,11 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 
-# Set required env vars before any app module is imported.
-# In CI there is no backend/.env; locally the .env overrides these at runtime.
-os.environ.setdefault("DB_PASS", "ci_placeholder")
+# JWT_SECRET has no default in Settings; set a fallback for CI/no-DB runs.
+# In CI the no-DB job also sets this as a step-level env var; the setdefault
+# here is a belt-and-suspenders guard so pytest can import app.config at all.
+# DB_PASS is intentionally NOT defaulted here — local runs read it from
+# backend/.env, and CI jobs set it explicitly via their env: block.
 os.environ.setdefault("JWT_SECRET", "ci_placeholder_secret")
 
 # Ensure backend/ is on sys.path so `from app.X import Y` resolves correctly
@@ -27,3 +29,26 @@ def client():
         from app.main import app
         with TestClient(app) as c:
             yield c
+
+
+@pytest.fixture(scope="session")
+def client_db():
+    """
+    TestClient with real startup — requires a live MariaDB stamped at Alembic head.
+    MinIO is not required; startup warns and continues in dev mode.
+    Run only with: pytest -m db
+    """
+    from app.main import app
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture(scope="session")
+def admin_token(client_db):
+    """JWT token for admin@local (password: 'password'). Acquired once per session."""
+    resp = client_db.post(
+        "/auth/login",
+        json={"email": "admin@local", "password": "password"},
+    )
+    assert resp.status_code == 200, f"Admin login failed: {resp.status_code} {resp.text}"
+    return resp.json()["access_token"]
