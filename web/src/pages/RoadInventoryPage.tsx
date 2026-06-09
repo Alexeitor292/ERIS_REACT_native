@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import {
+  createRoadInventoryImportJob,
+  getRoadInventoryImportJob,
   getRoadInventoryManifest,
+  listRoadInventoryImportJobs,
   listRoadInventoryVersions,
   lookupRoadSegments,
   publishRoadInventoryVersion,
   rollbackRoadInventoryVersion,
-  uploadRoadInventory,
   type RoadInventoryDataset,
+  type RoadInventoryImportJob,
   type RoadInventoryManifest,
   type RoadSegment,
-  type UploadResult,
 } from "../api/roadInventory";
 
 // ---------------------------------------------------------------------------
@@ -40,31 +42,153 @@ function StatusBadge({ status }: { status: RoadInventoryDataset["status"] }) {
   );
 }
 
+function JobStatusBadge({ status }: { status: RoadInventoryImportJob["status"] }) {
+  const map: Record<string, string> = {
+    queued: "bg-[var(--panel-soft)] text-[var(--ink)] border border-[var(--line)]",
+    processing: "bg-[color:color-mix(in_srgb,var(--brand)_15%,transparent)] text-[var(--brand)]",
+    succeeded: "bg-[var(--good)] text-white",
+    failed: "bg-[var(--bad)] text-white",
+  };
+  return (
+    <span className={`inline-block rounded px-2 py-0.5 text-xs font-semibold ${map[status] ?? ""}`}>
+      {status}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Upload section
+// Job progress card
 // ---------------------------------------------------------------------------
 
-function UploadSection({ onUploaded }: { onUploaded: () => void }) {
-  const fileRef = useRef<HTMLInputElement>(null);
+function JobProgressCard({ job }: { job: RoadInventoryImportJob }) {
+  const isActive = job.status === "queued" || job.status === "processing";
+  const isSuccess = job.status === "succeeded";
+  const isFailed = job.status === "failed";
+
+  return (
+    <div
+      className={`rounded border p-4 text-sm space-y-2 ${
+        isFailed
+          ? "border-[var(--bad)] bg-[color:color-mix(in_srgb,var(--bad)_8%,transparent)]"
+          : isSuccess
+          ? "border-[var(--good)] bg-[color:color-mix(in_srgb,var(--good)_8%,transparent)]"
+          : "border-[var(--line)] bg-[var(--panel-soft)]"
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        {isActive && (
+          <span className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--brand)] animate-pulse shrink-0" />
+        )}
+        <span className="font-semibold">
+          {isSuccess
+            ? "Import complete"
+            : isFailed
+            ? "Import failed"
+            : "Import in progress…"}
+        </span>
+        <span className="text-xs text-muted ml-auto font-mono">{job.stage}</span>
+      </div>
+
+      {job.message && <p className="text-xs text-muted">{job.message}</p>}
+
+      {isSuccess && (
+        <>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 max-w-xs pt-1">
+            <span className="text-muted">Dataset ID</span>
+            <span>{job.dataset_version_id}</span>
+            <span className="text-muted">Rows imported</span>
+            <span>{job.row_count.toLocaleString()}</span>
+            <span className="text-muted">Rows skipped</span>
+            <span>{job.skipped_count}</span>
+          </div>
+          <p className="text-xs font-medium text-[var(--good)]">
+            Dataset is pending — click Publish in the versions table to make it active.
+          </p>
+          {job.warnings.length > 0 && (
+            <details>
+              <summary className="text-xs cursor-pointer text-muted">
+                {job.warnings.length} warning(s)
+              </summary>
+              <pre className="mt-1 max-h-32 overflow-auto rounded border border-[var(--line)] bg-[var(--bg)] p-2 text-xs">
+                {job.warnings.join("\n")}
+              </pre>
+            </details>
+          )}
+        </>
+      )}
+
+      {isFailed && job.error_message && (
+        <pre className="mt-1 max-h-32 overflow-auto rounded border border-[var(--bad)] bg-[var(--bg)] p-2 text-xs text-[var(--bad)]">
+          {job.error_message}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Upload section (async — calls POST /import-jobs, polls for progress)
+// ---------------------------------------------------------------------------
+
+function UploadSection({
+  onJobCreated,
+  onJobSucceeded,
+}: {
+  onJobCreated: () => void;
+  onJobSucceeded: () => void;
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [tag, setTag] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<UploadResult | null>(null);
+  const [currentJob, setCurrentJob] = useState<RoadInventoryImportJob | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [showWarnings, setShowWarnings] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  function startPolling(jobUuid: string) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const updated = await getRoadInventoryImportJob(jobUuid);
+        setCurrentJob(updated);
+        if (updated.status === "succeeded" || updated.status === "failed") {
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+          if (updated.status === "succeeded") {
+            onJobSucceeded();
+          }
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    }, 2000);
+  }
 
   async function handleUpload() {
     if (!file) return;
     setBusy(true);
     setErr(null);
-    setResult(null);
+    setCurrentJob(null);
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
     try {
-      const r = await uploadRoadInventory(file, tag.trim() || undefined);
-      setResult(r);
-      setShowWarnings(false);
-      onUploaded();
+      const job = await createRoadInventoryImportJob(file, tag.trim() || undefined);
+      setCurrentJob(job);
+      onJobCreated();
+      if (job.status === "queued" || job.status === "processing") {
+        startPolling(job.job_uuid);
+      } else if (job.status === "succeeded") {
+        onJobSucceeded();
+      }
     } catch (e: any) {
-      setErr(e.message ?? "Upload failed");
+      setErr(e.message ?? "Failed to create import job");
     } finally {
       setBusy(false);
     }
@@ -77,14 +201,12 @@ function UploadSection({ onUploaded }: { onUploaded: () => void }) {
         <div>
           <label className="block text-xs text-muted mb-1">Excel file (.xlsx)</label>
           <input
-            ref={fileRef}
             type="file"
             accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             className="text-sm"
             onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              setFile(f);
-              setResult(null);
+              setFile(e.target.files?.[0] ?? null);
+              setCurrentJob(null);
               setErr(null);
             }}
           />
@@ -104,39 +226,15 @@ function UploadSection({ onUploaded }: { onUploaded: () => void }) {
           onClick={handleUpload}
           className="rounded bg-[var(--brand)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40 hover:brightness-110"
         >
-          {busy ? "Uploading…" : "Upload"}
+          {busy ? "Submitting…" : "Upload"}
         </button>
       </div>
 
-      {err && (
-        <p className="mt-3 text-sm text-[var(--bad)]">{err}</p>
-      )}
+      {err && <p className="mt-3 text-sm text-[var(--bad)]">{err}</p>}
 
-      {result && (
-        <div className="mt-4 rounded border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm space-y-1">
-          <div className="font-semibold text-[var(--good)] mb-2">Upload complete</div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm">
-            <span className="text-muted">Version ID</span><span>{result.version_id}</span>
-            <span className="text-muted">Tag</span><span>{result.version_tag}</span>
-            <span className="text-muted">Rows imported</span><span>{result.row_count.toLocaleString()}</span>
-            <span className="text-muted">Rows skipped</span><span>{result.skipped_count}</span>
-            <span className="text-muted">Status</span><span><StatusBadge status={result.status as RoadInventoryDataset["status"]} /></span>
-          </div>
-          {result.warnings.length > 0 && (
-            <div className="mt-3">
-              <button
-                className="text-xs underline text-muted"
-                onClick={() => setShowWarnings((v) => !v)}
-              >
-                {showWarnings ? "Hide" : "Show"} {result.warnings.length} warning(s)
-              </button>
-              {showWarnings && (
-                <pre className="mt-2 max-h-48 overflow-auto rounded border border-[var(--line)] bg-[var(--bg)] p-2 text-xs text-[var(--bad)]">
-                  {result.warnings.join("\n")}
-                </pre>
-              )}
-            </div>
-          )}
+      {currentJob && (
+        <div className="mt-4">
+          <JobProgressCard job={currentJob} />
         </div>
       )}
     </div>
@@ -159,7 +257,9 @@ function ManifestBanner() {
 
   if (missing) {
     return (
-      <p className="text-sm text-muted italic">No published dataset. Upload and publish a version to make it active.</p>
+      <p className="text-sm text-muted italic">
+        No published dataset. Upload and publish a version to make it active.
+      </p>
     );
   }
   if (!manifest) return <p className="text-sm text-muted">Loading…</p>;
@@ -169,7 +269,8 @@ function ManifestBanner() {
       <span className="font-semibold text-[var(--good)]">Published:</span>{" "}
       <span className="font-medium">{manifest.version_tag}</span>
       <span className="text-muted ml-4">
-        {manifest.row_count.toLocaleString()} segments · extract {fmt(manifest.extract_date)} · published {fmt(manifest.published_at)}
+        {manifest.row_count.toLocaleString()} segments · extract {fmt(manifest.extract_date)} ·
+        published {fmt(manifest.published_at)}
       </span>
       {!manifest.package.available && (
         <span className="ml-4 text-xs text-muted italic">(mobile package not yet generated)</span>
@@ -218,12 +319,17 @@ function VersionsTable({
             <tr key={v.id} className="border-b border-[var(--line)] hover:bg-[var(--panel-soft)]">
               <td className="py-2 pr-4 tabular-nums text-muted">{v.id}</td>
               <td className="py-2 pr-4 font-medium">{v.version_tag}</td>
-              <td className="py-2 pr-4 max-w-[200px] truncate text-muted" title={v.upload_filename}>
+              <td
+                className="py-2 pr-4 max-w-[200px] truncate text-muted"
+                title={v.upload_filename}
+              >
                 {v.upload_filename}
               </td>
               <td className="py-2 pr-4 tabular-nums">{v.row_count.toLocaleString()}</td>
               <td className="py-2 pr-4 tabular-nums text-muted">{v.skipped_count}</td>
-              <td className="py-2 pr-4"><StatusBadge status={v.status} /></td>
+              <td className="py-2 pr-4">
+                <StatusBadge status={v.status} />
+              </td>
               <td className="py-2 pr-4 text-muted">{fmt(v.extract_date)}</td>
               <td className="py-2 pr-4 text-muted">{fmt(v.created_at)}</td>
               <td className="py-2">
@@ -247,6 +353,83 @@ function VersionsTable({
                     </button>
                   )}
                 </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recent import jobs table
+// ---------------------------------------------------------------------------
+
+function RecentImportJobs({ refreshKey }: { refreshKey: number }) {
+  const [jobs, setJobs] = useState<RoadInventoryImportJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setErr(null);
+    listRoadInventoryImportJobs()
+      .then(setJobs)
+      .catch((e: any) => setErr(e.message ?? "Failed to load jobs"))
+      .finally(() => setLoading(false));
+  }, [refreshKey]);
+
+  if (loading) return <p className="text-sm text-muted">Loading…</p>;
+  if (err) return <p className="text-sm text-[var(--bad)]">{err}</p>;
+  if (jobs.length === 0) return <p className="text-sm text-muted">No import jobs yet.</p>;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b border-[var(--line)] text-left text-xs text-muted">
+            <th className="py-2 pr-4 font-medium">UUID</th>
+            <th className="py-2 pr-4 font-medium">Status</th>
+            <th className="py-2 pr-4 font-medium">File</th>
+            <th className="py-2 pr-4 font-medium">Rows</th>
+            <th className="py-2 pr-4 font-medium">Dataset ID</th>
+            <th className="py-2 pr-4 font-medium">Created</th>
+            <th className="py-2 pr-4 font-medium">Finished</th>
+            <th className="py-2 font-medium">Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.map((j) => (
+            <tr
+              key={j.id}
+              className="border-b border-[var(--line)] hover:bg-[var(--panel-soft)]"
+            >
+              <td className="py-2 pr-4 font-mono text-xs text-muted">
+                {j.job_uuid.slice(0, 8)}…
+              </td>
+              <td className="py-2 pr-4">
+                <JobStatusBadge status={j.status} />
+              </td>
+              <td
+                className="py-2 pr-4 max-w-[160px] truncate text-muted text-xs"
+                title={j.upload_filename}
+              >
+                {j.upload_filename}
+              </td>
+              <td className="py-2 pr-4 tabular-nums text-xs">
+                {j.row_count > 0 ? j.row_count.toLocaleString() : "—"}
+              </td>
+              <td className="py-2 pr-4 tabular-nums text-xs">
+                {j.dataset_version_id ?? "—"}
+              </td>
+              <td className="py-2 pr-4 text-muted text-xs">{fmt(j.created_at)}</td>
+              <td className="py-2 pr-4 text-muted text-xs">{fmt(j.finished_at)}</td>
+              <td
+                className="py-2 max-w-[200px] truncate text-xs text-[var(--bad)]"
+                title={j.error_message ?? undefined}
+              >
+                {j.error_message ?? "—"}
               </td>
             </tr>
           ))}
@@ -361,20 +544,42 @@ function LookupTester() {
             <thead>
               <tr className="border-b border-[var(--line)] text-left text-muted">
                 {[
-                  "Dist", "County", "Route", "PM prefix", "Begin PM", "End PM",
-                  "Len mi", "L lanes", "R lanes", "L surf", "R surf",
-                  "Median", "Med W", "Terrain", "Speed", "ADT", "Landmark",
+                  "Dist",
+                  "County",
+                  "Route",
+                  "PM prefix",
+                  "Begin PM",
+                  "End PM",
+                  "Len mi",
+                  "L lanes",
+                  "R lanes",
+                  "L surf",
+                  "R surf",
+                  "Median",
+                  "Med W",
+                  "Terrain",
+                  "Speed",
+                  "ADT",
+                  "Landmark",
                 ].map((h) => (
-                  <th key={h} className="py-1.5 pr-3 font-medium whitespace-nowrap">{h}</th>
+                  <th key={h} className="py-1.5 pr-3 font-medium whitespace-nowrap">
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {segments.map((s) => (
-                <tr key={s.id} className="border-b border-[var(--line)] hover:bg-[var(--panel-soft)]">
+                <tr
+                  key={s.id}
+                  className="border-b border-[var(--line)] hover:bg-[var(--panel-soft)]"
+                >
                   <td className="py-1.5 pr-3 tabular-nums">{s.district_code ?? "—"}</td>
                   <td className="py-1.5 pr-3">{s.county_code}</td>
-                  <td className="py-1.5 pr-3 font-medium">{s.route_name}{s.route_suffix_code ?? ""}</td>
+                  <td className="py-1.5 pr-3 font-medium">
+                    {s.route_name}
+                    {s.route_suffix_code ?? ""}
+                  </td>
                   <td className="py-1.5 pr-3 text-muted">{s.pm_prefix_code ?? "—"}</td>
                   <td className="py-1.5 pr-3 tabular-nums">{s.begin_pm}</td>
                   <td className="py-1.5 pr-3 tabular-nums">{s.end_pm}</td>
@@ -387,8 +592,13 @@ function LookupTester() {
                   <td className="py-1.5 pr-3 tabular-nums">{s.median_width ?? "—"}</td>
                   <td className="py-1.5 pr-3">{s.terrain_code ?? "—"}</td>
                   <td className="py-1.5 pr-3 tabular-nums">{s.design_speed ?? "—"}</td>
-                  <td className="py-1.5 pr-3 tabular-nums">{s.adt?.toLocaleString() ?? "—"}</td>
-                  <td className="py-1.5 pr-3 max-w-[160px] truncate" title={s.landmark_short_desc ?? undefined}>
+                  <td className="py-1.5 pr-3 tabular-nums">
+                    {s.adt?.toLocaleString() ?? "—"}
+                  </td>
+                  <td
+                    className="py-1.5 pr-3 max-w-[160px] truncate"
+                    title={s.landmark_short_desc ?? undefined}
+                  >
                     {s.landmark_short_desc ?? "—"}
                   </td>
                 </tr>
@@ -414,6 +624,7 @@ export default function RoadInventoryPage() {
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [manifestKey, setManifestKey] = useState(0);
+  const [jobsKey, setJobsKey] = useState(0);
 
   async function loadVersions() {
     setLoadErr(null);
@@ -476,7 +687,14 @@ export default function RoadInventoryPage() {
 
           {/* Upload */}
           <section>
-            <UploadSection onUploaded={loadVersions} />
+            <UploadSection
+              onJobCreated={() => setJobsKey((k) => k + 1)}
+              onJobSucceeded={() => {
+                setJobsKey((k) => k + 1);
+                setManifestKey((k) => k + 1);
+                loadVersions();
+              }}
+            />
           </section>
 
           <hr className="border-[var(--line)]" />
@@ -500,6 +718,22 @@ export default function RoadInventoryPage() {
               onPublish={handlePublish}
               onRollback={handleRollback}
             />
+          </section>
+
+          <hr className="border-[var(--line)]" />
+
+          {/* Recent import jobs */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">Recent Import Jobs</h2>
+              <button
+                onClick={() => setJobsKey((k) => k + 1)}
+                className="text-xs text-muted underline hover:text-[var(--ink)]"
+              >
+                Refresh
+              </button>
+            </div>
+            <RecentImportJobs refreshKey={jobsKey} />
           </section>
 
           <hr className="border-[var(--line)]" />

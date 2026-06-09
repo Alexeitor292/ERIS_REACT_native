@@ -1,16 +1,15 @@
 """
 Road inventory admin + lookup routes.
 
-POST   /road-inventory/upload               ADMIN  — upload Excel, create pending version
+POST   /road-inventory/import-jobs          ADMIN  — async upload: store Excel, queue job, 202
+GET    /road-inventory/import-jobs          ADMIN  — list latest 25 import jobs
+GET    /road-inventory/import-jobs/{uuid}   ADMIN  — get single import job status
+POST   /road-inventory/upload               ADMIN  — (legacy sync) upload Excel inline
 GET    /road-inventory/versions             ADMIN  — list all dataset versions
 POST   /road-inventory/versions/{id}/publish ADMIN — publish a version
 POST   /road-inventory/versions/{id}/rollback ADMIN — re-publish a superseded version
 GET    /road-inventory/manifest             auth   — latest published version + download URL
 GET    /road-inventory/lookup               auth   — postmile range query
-
-Upload stores the raw Excel in MinIO at road-inventory/<uuid>.xlsx and bulk-inserts
-normalized road_segments rows.  Package generation (SQLite for mobile) is Phase 2 —
-this layer inserts a placeholder in road_inventory_packages when publish is called.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -35,6 +34,12 @@ from ..services.road_inventory_lookup import (
     get_published_version_id,
     lookup_segments,
 )
+from ..services.road_inventory_import_jobs import (
+    create_import_job as create_import_job_svc,
+    get_import_job as get_import_job_svc,
+    list_import_jobs as list_import_jobs_svc,
+    run_import_job as run_import_job_svc,
+)
 
 router = APIRouter(prefix="/road-inventory", tags=["road-inventory"])
 
@@ -46,7 +51,83 @@ _ROAD_INVENTORY_BUCKET = "road-inventory"
 
 
 # ---------------------------------------------------------------------------
-# Admin: Upload
+# Admin: Async import jobs
+# ---------------------------------------------------------------------------
+
+@router.post("/import-jobs", status_code=202)
+def create_import_job_route(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    version_tag: str = Query(default="", description="Optional label, e.g. '2025-06-08'"),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["ADMIN"])),
+):
+    """Store Excel in MinIO, create a queued import job, return 202.
+
+    Background processing: parse Excel + bulk insert road_segments.
+    Poll GET /road-inventory/import-jobs/{job_uuid} to track progress.
+    """
+    filename = file.filename or "upload.xlsx"
+    if not filename.lower().endswith(".xlsx"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only .xlsx files are accepted.",
+        )
+
+    file_bytes = file.file.read()
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty.",
+        )
+
+    object_key = f"uploads/{uuid.uuid4()}.xlsx"
+    put_object_bytes(
+        object_key=object_key,
+        data=file_bytes,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        bucket=_ROAD_INVENTORY_BUCKET,
+    )
+
+    tag = version_tag.strip() or None
+    job_uuid = create_import_job_svc(
+        db,
+        filename=filename,
+        storage_key=object_key,
+        file_size_bytes=len(file_bytes),
+        version_tag=tag,
+        created_by=user["id"],
+    )
+
+    background_tasks.add_task(run_import_job_svc, job_uuid)
+
+    return get_import_job_svc(db, job_uuid)
+
+
+@router.get("/import-jobs")
+def list_import_jobs_route(
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles(["ADMIN"])),
+):
+    """Return the latest 25 import jobs, newest first."""
+    return list_import_jobs_svc(db)
+
+
+@router.get("/import-jobs/{job_uuid}")
+def get_import_job_route(
+    job_uuid: str,
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles(["ADMIN"])),
+):
+    """Return a single import job by UUID."""
+    job = get_import_job_svc(db, job_uuid)
+    if not job:
+        raise HTTPException(status_code=404, detail="Import job not found")
+    return job
+
+
+# ---------------------------------------------------------------------------
+# Admin: Upload (legacy sync — kept for backwards compatibility)
 # ---------------------------------------------------------------------------
 
 @router.post("/upload", status_code=201)
