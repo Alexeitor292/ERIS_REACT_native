@@ -42,7 +42,7 @@ def check_migration_head() -> None:
     if not current_heads:
         raise RuntimeError(
             "Database schema is not stamped with an Alembic revision. "
-            "Run from backend/: alembic stamp 0001_baseline && alembic upgrade head"
+            "Run from backend/: alembic upgrade head"
         )
 
     pending = sorted(expected_heads - current_heads)
