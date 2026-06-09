@@ -925,6 +925,7 @@ function Field({
           editable={editable}
           autoFocus
           multiline={multiline}
+          scrollEnabled={multiline ? false : undefined}
           keyboardType={keyboardType ?? "default"}
           maxFontSizeMultiplier={textScale}
           style={[
@@ -4524,7 +4525,7 @@ export default function SubmissionDetailScreen() {
       <Text style={[styles.status, { color: palette.muted, fontSize: Math.round(13 * componentScale) }]} maxFontSizeMultiplier={textScale}>Status: {data.submission.status}</Text>
       <View style={[styles.stepTabsRow, { gap: Math.max(4, Math.round(4 * componentScale)) }]}>
         {STEP_LABELS.map((step, idx) => (
-          <Pressable
+          <ScrollSafePressable
             key={step}
             onPress={() => setActiveStep(idx)}
             style={[
@@ -4557,7 +4558,7 @@ export default function SubmissionDetailScreen() {
             >
               {step}
             </Text>
-          </Pressable>
+          </ScrollSafePressable>
         ))}
       </View>
       <Text style={[styles.muted, { color: palette.muted, fontSize: Math.round(12 * componentScale) }]} maxFontSizeMultiplier={textScale}>Step {activeStep + 1} of {FORM_STEPS.length}</Text>
@@ -4620,10 +4621,10 @@ export default function SubmissionDetailScreen() {
             const isOpen = !!openDistrictContactIds[contact.id];
             return (
               <View key={contact.id} style={[styles.contactCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
-                <Pressable style={styles.contactCardHeader} onPress={() => toggleDistrictContact(contact.id)}>
+                <ScrollSafePressable style={styles.contactCardHeader} onPress={() => toggleDistrictContact(contact.id)}>
                   <Text style={[styles.contactCardTitle, { color: palette.text }]}>{contactDisplayName(contact, idx)}</Text>
                   <Text style={[styles.sectionChevron, { color: palette.muted }]}>{isOpen ? "v" : ">"}</Text>
-                </Pressable>
+                </ScrollSafePressable>
                 {isOpen ? (
                   <View style={{ marginTop: 6 }}>
                     <Field palette={palette} label="First Name" value={contact.first_name} editable={canEdit} onChangeText={(v) => updateDistrictContact(contact.id, "first_name", v)} />
@@ -4656,7 +4657,7 @@ export default function SubmissionDetailScreen() {
       </CollapsibleSection>
 
       <CollapsibleSection title="Location" open={openSections.location} onToggle={() => toggleSection("location")} palette={palette} compact={compact}>
-        <Pressable
+        <ScrollSafePressable
           style={[styles.mapPreviewCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
           onPress={openMapEditor}
           disabled={busy}
@@ -4675,7 +4676,7 @@ export default function SubmissionDetailScreen() {
           {enrichmentHint ? (
             <Text style={[styles.muted, { color: palette.muted }]}>{enrichmentHint}</Text>
           ) : null}
-        </Pressable>
+        </ScrollSafePressable>
         <View style={styles.locationActionRow}>
           <Pressable
             style={[styles.btnGhost, styles.locationActionButton, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
@@ -5284,7 +5285,7 @@ export default function SubmissionDetailScreen() {
                 {row.map((file, columnIndex) => {
                   const previewFailed = !!failedPreviewIds[file.id];
                   return (
-                    <Pressable
+                    <ScrollSafePressable
                       key={`gallery-image-${file.id}`}
                       style={[styles.galleryTile, columnIndex ? { marginLeft: galleryGap } : null]}
                       onPress={() => {
@@ -5318,7 +5319,7 @@ export default function SubmissionDetailScreen() {
                       <Text style={[styles.galleryCaption, { color: palette.muted }]} numberOfLines={1}>
                         {file.file_name}
                       </Text>
-                    </Pressable>
+                    </ScrollSafePressable>
                   );
                 })}
                 {row.length < galleryColumns
