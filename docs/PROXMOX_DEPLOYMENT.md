@@ -152,4 +152,214 @@ docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.p
 
 - This deployment path does not alter local development commands or env files.
 - Vite env is compile-time, so changing `VITE_API_BASE_URL` requires rebuilding `web`.
-- For internet-facing deployment, place a reverse proxy (Nginx/Traefik/Caddy) in front and add TLS.
+- For internet-facing deployment, see the Public Internet Deployment section below.
+
+---
+
+## Public Internet Deployment (Cloudflare + Caddy Reverse Proxy)
+
+This section documents the working public showcase architecture for
+`eris.camposlabs.org` / `api.camposlabs.org` / `files.camposlabs.org`.
+It is **separate from** the future Caltrans internal deployment, which will use private
+DNS and an internal proxy on the Caltrans network — no Cloudflare required for that scenario.
+
+### Architecture Overview
+
+```
+                   [Internet]
+                       |
+             [Cloudflare DNS + proxy]
+             eris / api / files .camposlabs.org  → 104.220.27.58
+                       |
+             [UniFi / WAN router]
+             WAN :80  → 192.168.20.20:80
+             WAN :443 → 192.168.20.20:443
+                       |
+        ┌──────────────────────────────┐
+        │  VM 102 — eris-proxy         │  192.168.20.20
+        │  Caddy (public ingress)       │
+        │  Cloudflare Origin Cert here  │
+        └──────────────────────────────┘
+                       |  (internal LAN)
+        ┌──────────────────────────────┐
+        │  VM 101 — ERIS-server         │  192.168.20.75
+        │  Docker: backend :8000        │
+        │          web :5173            │
+        │          minio :9800          │
+        │          mariadb :3306        │
+        └──────────────────────────────┘
+```
+
+**Key rule:** Public internet traffic enters only through eris-proxy (VM 102).
+ERIS-server (VM 101) is **not** forwarded directly from WAN and should not be.
+
+### Two Deployment Scenarios
+
+| | Public showcase (camposlabs) | Caltrans internal (future) |
+|---|---|---|
+| DNS | Cloudflare, proxied | Internal DNS or `/etc/hosts` |
+| TLS | Cloudflare Full (strict) + Caddy + Origin Cert | Internal CA or self-signed |
+| Reverse proxy | eris-proxy VM (Caddy) | Internal Nginx/Caddy |
+| MinIO access | Via `files.camposlabs.org` (Caddy → 9800) | Direct LAN IP:9800 |
+| STORAGE_URL_MODE | `public` | `public` or `presigned` |
+
+---
+
+### Step A — Cloudflare
+
+1. Add DNS records (proxied, orange cloud):
+   ```
+   A  eris   → 104.220.27.58   (proxied)
+   A  api    → 104.220.27.58   (proxied)
+   A  files  → 104.220.27.58   (proxied)
+   ```
+2. Set SSL/TLS mode to **Full (strict)** in the Cloudflare dashboard.
+   - "Flexible" or "Full" will not enforce certificate validation and should not be used.
+3. Generate a **Cloudflare Origin Certificate** (15-year, wildcard `*.camposlabs.org` or per-hostname).
+   Download the `.pem` and `.key` files — you will install these on eris-proxy only.
+
+---
+
+### Step B — UniFi Port Forwarding
+
+Forward WAN ports 80 and 443 to eris-proxy (VM 102 at `192.168.20.20`):
+
+| WAN port | → | LAN destination |
+|----------|---|-----------------|
+| TCP 80   | → | 192.168.20.20:80  |
+| TCP 443  | → | 192.168.20.20:443 |
+
+Do **not** forward port 8000, 5173, or 9800 from WAN — those are ERIS-server internal ports.
+
+---
+
+### Step C — eris-proxy (VM 102): Caddy Setup
+
+Create VM 102 as a lightweight Ubuntu LXC. Install Caddy.
+
+Copy the Cloudflare Origin Certificate files to eris-proxy, e.g.:
+```
+/etc/caddy/certs/origin.pem
+/etc/caddy/certs/origin.key
+```
+
+Create `/etc/caddy/Caddyfile`:
+
+```caddyfile
+(origin_cert) {
+  tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+}
+
+eris.camposlabs.org {
+  import origin_cert
+  reverse_proxy 192.168.20.75:5173
+}
+
+api.camposlabs.org {
+  import origin_cert
+  reverse_proxy 192.168.20.75:8000
+}
+
+files.camposlabs.org {
+  import origin_cert
+  reverse_proxy 192.168.20.75:9800
+}
+```
+
+Start Caddy:
+```bash
+systemctl enable --now caddy
+caddy validate --config /etc/caddy/Caddyfile  # check syntax first
+systemctl reload caddy
+```
+
+Caddy on eris-proxy handles TLS termination. It does **not** need auto-HTTPS (the origin cert
+replaces that). Traffic from Caddy to ERIS-server travels over the internal LAN (HTTP).
+
+---
+
+### Step D — ERIS-server (VM 101): env configuration
+
+In `docker/.env.proxmox`:
+```env
+STORAGE_URL_MODE=public
+MINIO_PUBLIC_ENDPOINT=https://files.camposlabs.org
+
+VITE_API_BASE_URL=https://api.camposlabs.org
+VITE_API_BASE=https://api.camposlabs.org
+CORS_ORIGINS=https://eris.camposlabs.org
+
+MINIO_API_BIND=127.0.0.1
+MINIO_CONSOLE_BIND=127.0.0.1
+```
+
+> Setting `MINIO_API_BIND=127.0.0.1` and `MINIO_CONSOLE_BIND=127.0.0.1` ensures MinIO
+> listens only on localhost on ERIS-server. Port 9800 is never directly reachable from WAN —
+> all access goes via eris-proxy → Caddy → 192.168.20.75:9800 (LAN).
+
+Deploy and build (run from `/opt/ERIS_REACT_native/docker` on ERIS-server):
+```bash
+docker compose --env-file .env.proxmox \
+  -f docker-compose.yml \
+  -f docker-compose.proxmox.yml \
+  up -d --build
+```
+
+---
+
+### Step E — MinIO Anonymous Download Policy
+
+Run on ERIS-server (where MinIO port 9800 is reachable at localhost):
+```bash
+mc alias set eris http://localhost:9800 <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD>
+mc anonymous set download eris/eris-uploads
+mc anonymous get eris/eris-uploads   # expected: download
+```
+
+For why this is required and the security rationale, see
+[docs/ALPHA_STORAGE.md — MinIO Anonymous Read Policy](./ALPHA_STORAGE.md).
+
+---
+
+### Step F — MinIO CORS
+
+Browsers loading `https://eris.camposlabs.org` will fetch files from `https://files.camposlabs.org`.
+This is cross-origin, so MinIO CORS must allow the web origin.
+
+Save this as `cors.json` on ERIS-server:
+```json
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": ["https://eris.camposlabs.org"],
+      "AllowedMethods": ["GET", "HEAD"],
+      "AllowedHeaders": ["*"],
+      "MaxAgeSeconds": 3600
+    }
+  ]
+}
+```
+
+Apply:
+```bash
+mc cors set eris/eris-uploads cors.json
+```
+
+---
+
+### Verification
+
+From a browser or external device:
+```
+https://eris.camposlabs.org        → web app loads
+https://api.camposlabs.org/health  → {"ok": true}
+```
+
+Log in, open a submission with an attached photo, and check the browser Network tab:
+- The photo request should go to `https://files.camposlabs.org/eris-uploads/uploads/...`
+- It should return `200 OK`, **not** `AccessDenied`
+- The request should **not** go to `api.camposlabs.org` (that would mean the `/content` fallback is active)
+
+If the Cloudflare SSL handshake fails, confirm:
+- Caddy is presenting the Cloudflare Origin Certificate (not a self-signed cert)
+- Cloudflare SSL mode is **Full (strict)**, not Flexible
