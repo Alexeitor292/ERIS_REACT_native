@@ -45,6 +45,8 @@ class TestRouteRegistration:
         "/road-inventory/lookup",
         "/road-inventory/import-jobs",
         "/road-inventory/import-jobs/{job_uuid}",
+        "/road-inventory/versions/{dataset_version_id}/package",
+        "/road-inventory/package",
     }
 
     def test_core_routes_registered(self):
@@ -70,10 +72,10 @@ class TestAlembicScripts:
         heads = self._script_dir().get_heads()
         assert heads, "No Alembic head revisions found in migration scripts"
 
-    def test_import_jobs_is_head(self):
+    def test_package_type_is_head(self):
         heads = self._script_dir().get_heads()
-        assert "0003_road_inventory_import_jobs" in heads, (
-            f"0003_road_inventory_import_jobs not in heads: {heads}"
+        assert "0004_ri_packages_json_gz" in heads, (
+            f"0004_ri_packages_json_gz not in heads: {heads}"
         )
 
     def test_baseline_in_chain(self):

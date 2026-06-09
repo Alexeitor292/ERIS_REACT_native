@@ -46,19 +46,24 @@ export type UploadResult = {
   status: string;
 };
 
+export type RoadInventoryPackageMeta = {
+  dataset_version_id: number;
+  storage_key: string;
+  size_bytes: number;
+  sha256: string;
+  generated_at: string;
+  download_url: string | null;
+};
+
 export type RoadInventoryManifest = {
   version_id: number;
   version_tag: string;
   extract_date: string | null;
   row_count: number;
   published_at: string | null;
-  package: {
-    available: boolean;
-    download_url: string | null;
-    file_size_bytes: number | null;
-    sha256: string | null;
-    generated_at: string | null;
-  };
+  package:
+    | { available: false }
+    | ({ available: true } & Omit<RoadInventoryPackageMeta, "dataset_version_id" | "storage_key">);
 };
 
 export type RoadSegment = {
@@ -142,6 +147,19 @@ export async function getRoadInventoryImportJob(
   jobUuid: string,
 ): Promise<RoadInventoryImportJob> {
   return api<RoadInventoryImportJob>(`/road-inventory/import-jobs/${encodeURIComponent(jobUuid)}`);
+}
+
+export async function generateRoadInventoryPackage(
+  datasetVersionId: number,
+): Promise<RoadInventoryPackageMeta> {
+  return api<RoadInventoryPackageMeta>(
+    `/road-inventory/versions/${datasetVersionId}/package`,
+    { method: "POST" },
+  );
+}
+
+export async function getRoadInventoryPackage(): Promise<RoadInventoryPackageMeta> {
+  return api<RoadInventoryPackageMeta>("/road-inventory/package");
 }
 
 export async function lookupRoadSegments(

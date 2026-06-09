@@ -3,6 +3,7 @@ import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import {
   createRoadInventoryImportJob,
+  generateRoadInventoryPackage,
   getRoadInventoryImportJob,
   getRoadInventoryManifest,
   listRoadInventoryImportJobs,
@@ -245,15 +246,48 @@ function UploadSection({
 // Published manifest banner
 // ---------------------------------------------------------------------------
 
-function ManifestBanner() {
+function fmtBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function ManifestBanner({
+  refreshKey,
+  isAdmin,
+  onPackageGenerated,
+}: {
+  refreshKey: number;
+  isAdmin: boolean;
+  onPackageGenerated: () => void;
+}) {
   const [manifest, setManifest] = useState<RoadInventoryManifest | null>(null);
   const [missing, setMissing] = useState(false);
+  const [generatingPkg, setGeneratingPkg] = useState(false);
+  const [pkgErr, setPkgErr] = useState<string | null>(null);
 
   useEffect(() => {
+    setMissing(false);
+    setManifest(null);
+    setPkgErr(null);
     getRoadInventoryManifest()
       .then(setManifest)
       .catch(() => setMissing(true));
-  }, []);
+  }, [refreshKey]);
+
+  async function handleGeneratePackage() {
+    if (!manifest) return;
+    setGeneratingPkg(true);
+    setPkgErr(null);
+    try {
+      await generateRoadInventoryPackage(manifest.version_id);
+      onPackageGenerated();
+    } catch (e: any) {
+      setPkgErr(e.message ?? "Package generation failed");
+    } finally {
+      setGeneratingPkg(false);
+    }
+  }
 
   if (missing) {
     return (
@@ -264,17 +298,70 @@ function ManifestBanner() {
   }
   if (!manifest) return <p className="text-sm text-muted">Loading…</p>;
 
+  const pkg = manifest.package;
+
   return (
-    <div className="rounded border border-[var(--good)] bg-[color:color-mix(in_srgb,var(--good)_8%,transparent)] px-4 py-3 text-sm">
-      <span className="font-semibold text-[var(--good)]">Published:</span>{" "}
-      <span className="font-medium">{manifest.version_tag}</span>
-      <span className="text-muted ml-4">
-        {manifest.row_count.toLocaleString()} segments · extract {fmt(manifest.extract_date)} ·
-        published {fmt(manifest.published_at)}
-      </span>
-      {!manifest.package.available && (
-        <span className="ml-4 text-xs text-muted italic">(mobile package not yet generated)</span>
-      )}
+    <div className="space-y-3">
+      <div className="rounded border border-[var(--good)] bg-[color:color-mix(in_srgb,var(--good)_8%,transparent)] px-4 py-3 text-sm">
+        <span className="font-semibold text-[var(--good)]">Published:</span>{" "}
+        <span className="font-medium">{manifest.version_tag}</span>
+        <span className="text-muted ml-4">
+          {manifest.row_count.toLocaleString()} segments · extract {fmt(manifest.extract_date)} ·
+          published {fmt(manifest.published_at)}
+        </span>
+      </div>
+
+      {/* Package section */}
+      <div className="rounded border border-[var(--line)] px-4 py-3 text-sm">
+        {pkg.available ? (
+          <div className="space-y-1">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="font-semibold text-[var(--good)]">Mobile package ready</span>
+              {pkg.download_url && (
+                <a
+                  href={pkg.download_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-[var(--brand)] underline hover:brightness-110"
+                >
+                  Download
+                </a>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 max-w-sm text-xs mt-1">
+              <span className="text-muted">Size</span>
+              <span>{fmtBytes(pkg.size_bytes)}</span>
+              <span className="text-muted">Generated</span>
+              <span>{fmt(pkg.generated_at)}</span>
+              <span className="text-muted">SHA-256</span>
+              <span className="font-mono">{pkg.sha256.slice(0, 12)}…</span>
+            </div>
+            {isAdmin && (
+              <button
+                disabled={generatingPkg}
+                onClick={handleGeneratePackage}
+                className="mt-2 rounded border border-[var(--line)] px-3 py-1 text-xs text-muted hover:bg-[var(--panel-soft)] disabled:opacity-40"
+              >
+                {generatingPkg ? "Regenerating…" : "Regenerate Package"}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="text-muted italic">Mobile package not generated</span>
+            {isAdmin && (
+              <button
+                disabled={generatingPkg}
+                onClick={handleGeneratePackage}
+                className="rounded bg-[var(--brand)] px-3 py-1 text-xs font-medium text-white disabled:opacity-40 hover:brightness-110"
+              >
+                {generatingPkg ? "Generating…" : "Generate Mobile Package"}
+              </button>
+            )}
+          </div>
+        )}
+        {pkgErr && <p className="mt-2 text-xs text-[var(--bad)]">{pkgErr}</p>}
+      </div>
     </div>
   );
 }
@@ -680,7 +767,11 @@ export default function RoadInventoryPage() {
           {/* Published version banner */}
           <section>
             <h2 className="text-sm font-semibold mb-2">Current Published Version</h2>
-            <ManifestBanner key={manifestKey} />
+            <ManifestBanner
+              refreshKey={manifestKey}
+              isAdmin={isAdmin}
+              onPackageGenerated={() => setManifestKey((k) => k + 1)}
+            />
           </section>
 
           <hr className="border-[var(--line)]" />

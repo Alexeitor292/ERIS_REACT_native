@@ -104,7 +104,10 @@ async def eris_http_exception_handler(request: Request, exc: HTTPException):
             request.url.path,
             exc_info=exc,
         )
-        return JSONResponse(status_code=exc.status_code, content={"detail": GENERIC_SERVER_ERROR_DETAIL})
+        # 503 = dependency/service unavailable: pass through the controlled detail so
+        # clients know which upstream service failed.  500/502/504 mask the detail.
+        detail = exc.detail if exc.status_code == 503 else GENERIC_SERVER_ERROR_DETAIL
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail})
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
