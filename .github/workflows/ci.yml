@@ -31,10 +31,12 @@ jobs:
           python -m py_compile app/services/road_inventory_parser.py
           python -m py_compile app/services/road_inventory_lookup.py
           python -m py_compile app/services/road_inventory_import_jobs.py
+          python -m py_compile app/services/road_inventory_packages.py
           python -m py_compile migrations/env.py
           python -m py_compile migrations/versions/0001_baseline.py
           python -m py_compile migrations/versions/0002_road_inventory.py
           python -m py_compile migrations/versions/0003_road_inventory_import_jobs.py
+          python -m py_compile migrations/versions/0004_ri_packages_json_gz.py
 
       - name: Alembic script check
         run: |
