@@ -37,13 +37,22 @@ Supporting modules:
 - `services/gisa_validation.py`: lookup/action validation
 - `constants/gisa_lookups.py`: lookup catalog source
 
-## Important Current Behavior
+## Schema Management
 
-- Backend startup performs runtime incident schema upgrades:
-  - `ensure_incident_runtime_schema(db)` is called in `app.on_event("startup")`.
-- Therefore schema ownership is split:
-  - baseline in `database/init/010_schema.sql`
-  - additional safety upgrades at API startup for incident-related columns/tables.
+Schema ownership is transitioning to Alembic:
+
+- `database/init/010_schema.sql` — authoritative bootstrap schema for fresh installs,
+  representing 19 tables as of commit `ce447ab`. Do not add new columns here after that
+  baseline; use Alembic migrations instead.
+- `backend/migrations/versions/0001_baseline.py` — empty Alembic checkpoint corresponding
+  to the init SQL. Existing databases must be stamped to this revision once
+  (`alembic stamp 0001_baseline`).
+- `backend/app/main.py` `startup()` and `backend/app/routes/incidents.py`
+  `ensure_incident_runtime_schema()` — temporary backwards-compatibility shims that apply
+  idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on startup. Present until all
+  environments are confirmed stamped and shims are removed in a later commit.
+
+See `docs/MIGRATIONS.md` for full procedures, backup commands, and Proxmox instructions.
 
 ## Security/Auth
 

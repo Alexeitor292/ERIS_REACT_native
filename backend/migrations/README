@@ -1,0 +1,29 @@
+ERIS Alembic Migrations
+=======================
+
+Run all alembic commands from the backend/ directory, where alembic.ini
+and backend/.env are located.
+
+Quick reference
+---------------
+  alembic current               Show current revision on the connected DB
+  alembic history --verbose     Show full migration history
+  alembic heads                 Show revision(s) with no children (= "head")
+  alembic upgrade head          Apply all pending migrations
+  alembic upgrade +1            Apply the next migration only
+  alembic upgrade --sql head    Preview SQL without executing it
+  alembic stamp 0001_baseline   Mark an existing DB at baseline (one-time)
+  alembic revision -m "..."     Create a new migration file
+
+Helper scripts (run from backend/)
+-----------------------------------
+  .\migrate.ps1 <command>       Windows PowerShell
+  ./migrate.sh <command>        Linux / Proxmox server
+
+Never run
+---------
+  Do NOT put real credentials in alembic.ini.
+  DB credentials are read from backend/.env via app settings.
+
+Full procedures, backup commands, and Proxmox deployment instructions:
+  docs/MIGRATIONS.md

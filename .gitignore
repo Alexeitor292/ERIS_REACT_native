@@ -40,3 +40,6 @@ mobile/android/local.properties
 # ---- web build cache ----
 web/.vite/
 .rocketride/
+
+# ---- alembic ----
+backend/migrations/versions/__pycache__/

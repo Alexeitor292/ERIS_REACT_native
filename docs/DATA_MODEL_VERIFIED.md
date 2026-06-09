@@ -1,6 +1,7 @@
 # Data Model (Verified)
 
-Source: `database/init/010_schema.sql` + runtime upgrade function in `backend/app/routes/incidents.py`.
+Source: `database/init/010_schema.sql` (baseline) + Alembic migrations in
+`backend/migrations/versions/` (post-baseline changes).
 
 ## Core Identity
 
@@ -54,15 +55,14 @@ Source: `database/init/010_schema.sql` + runtime upgrade function in `backend/ap
 
 ## Notes on Schema Source of Truth
 
-- Base schema is declared in `database/init/010_schema.sql`.
-- Backend startup currently calls `ensure_incident_runtime_schema`, which can add incident-related columns/tables if missing:
-  - `incidents.first_observed_at`
-  - `incidents.first_occurred_at`
-  - `incidents.office_code`
-  - `incidents.current_stage`
-  - `incident_assignments.assignment_stage`
-  - `incident_routing_assignments` table
-  - `incident_notifications` table
+- `database/init/010_schema.sql` defines the complete initial schema (19 tables) as of
+  git commit `ce447ab`. This is the bootstrap source for fresh Docker installs.
+- Alembic baseline `0001_baseline` corresponds exactly to this init SQL. All schema
+  changes after commit `ce447ab` must go through Alembic migrations.
+- Backend startup currently calls `ensure_incident_runtime_schema` as a temporary
+  backwards-compat shim. All columns it covers are now present in `010_schema.sql`.
+  The shim will be removed once all environments are stamped to the Alembic baseline.
+- See `docs/MIGRATIONS.md` for the full migration system documentation.
 
 ## Seed Data (`020_seed.sql`)
 

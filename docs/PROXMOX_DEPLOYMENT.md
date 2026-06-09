@@ -80,7 +80,30 @@ To run Adminer temporarily:
 docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml --profile devtools up -d adminer
 ```
 
-## 5) Verify
+## 5) Stamp the Alembic baseline (one-time, first deploy after adding Alembic)
+
+After the first successful backend startup, stamp the database to the migration baseline.
+This records the current schema version without altering the database.
+
+```bash
+# Always backup before touching schema
+docker compose --env-file .env.proxmox -f docker-compose.yml \
+  exec mariadb sh -c 'mysqldump -u "$MARIADB_USER" -p"$MARIADB_PASSWORD" "$MARIADB_DATABASE"' \
+  > /opt/backups/eris_pre_alembic_$(date +%Y%m%d_%H%M).sql
+
+# Stamp the baseline
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml \
+  exec backend alembic stamp 0001_baseline
+
+# Verify
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml \
+  exec backend alembic current
+# Expected: 0001_baseline (head)
+```
+
+Skip this step on subsequent deploys — it is needed only once per database.
+
+## 6) Verify
 
 ```bash
 docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml ps
@@ -92,17 +115,34 @@ From your browser:
 
 - `http://<proxmox-ip>:5173`
 
-## 6) Mobile access on same network
+## 7) Mobile access on same network
 
 Set `EXPO_PUBLIC_API_URL=http://<proxmox-ip>:8000` in `mobile/.env` when testing against server.
 
-## 7) Update / redeploy
+## 8) Update / redeploy
 
 ```bash
 cd /opt/ERIS_REACT_native
 git pull
 cd docker
 docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml up -d --build
+```
+
+After a redeploy that includes new Alembic migrations, apply them:
+
+```bash
+# Backup first
+docker compose --env-file .env.proxmox -f docker-compose.yml \
+  exec mariadb sh -c 'mysqldump -u "$MARIADB_USER" -p"$MARIADB_PASSWORD" "$MARIADB_DATABASE"' \
+  > /opt/backups/eris_pre_upgrade_$(date +%Y%m%d_%H%M).sql
+
+# Apply migrations
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml \
+  exec backend alembic upgrade head
+
+# Verify
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml \
+  exec backend alembic current
 ```
 
 ## Notes
