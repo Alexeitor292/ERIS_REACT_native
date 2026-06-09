@@ -2688,7 +2688,13 @@ export default function SubmissionDetailScreen() {
   const hydrateAttachmentUrls = useCallback(async (authToken: string, files: { id: number }[]) => {
     const next: Record<number, string> = {};
     await Promise.all(files.map(async (p) => {
-      next[p.id] = `${apiBaseUrl}/attachments/${p.id}/content?access_token=${encodeURIComponent(authToken)}`;
+      try {
+        const resp = await apiFetch<{ download_url: string }>(`/attachments/${p.id}/download-url`, { token: authToken });
+        next[p.id] = resp.download_url;
+      } catch {
+        // fallback to content proxy if download-url fails (e.g. offline or permission error)
+        next[p.id] = `${apiBaseUrl}/attachments/${p.id}/content?access_token=${encodeURIComponent(authToken)}`;
+      }
     }));
     setPhotoUrls(next);
   }, [apiBaseUrl]);
@@ -4390,8 +4396,7 @@ export default function SubmissionDetailScreen() {
     setBusy(true);
     try {
       const resp = await generateSubmissionGisaPdf(token, id);
-      const url = `${apiBaseUrl}/attachments/${resp.attachment_id}/content?access_token=${encodeURIComponent(token)}`;
-      await Linking.openURL(url);
+      await Linking.openURL(resp.download_url);
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
       Alert.alert("PDF generation failed", err?.message ?? "Unable to generate GISA PDF");
@@ -4405,8 +4410,7 @@ export default function SubmissionDetailScreen() {
     setBusy(true);
     try {
       const resp = await getSubmissionGisaPdf(token, id);
-      const url = `${apiBaseUrl}/attachments/${resp.attachment_id}/content?access_token=${encodeURIComponent(token)}`;
-      await Linking.openURL(url);
+      await Linking.openURL(resp.download_url);
     } catch (err: any) {
       if (isSessionExpiredError(err)) return;
       Alert.alert("No PDF yet", "Generate the GISA PDF first, then open it.");
