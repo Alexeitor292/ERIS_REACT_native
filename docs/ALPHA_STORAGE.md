@@ -29,11 +29,13 @@ Set `STORAGE_URL_MODE` in the backend environment:
 - Backend returns `{MINIO_PUBLIC_ENDPOINT}/{bucket}/{object_key}` — no signing, no expiry.
 - `MINIO_PUBLIC_ENDPOINT` is **required** (startup/URL generation fails clearly if missing).
 - `expires_seconds` is returned as `null`.
-- Appropriate for internal Caltrans-style networks where clients can reach the MinIO API port directly.
-- Do not use on public internet deployments without additional access controls.
+- `MINIO_PUBLIC_ENDPOINT` can be:
+  - An internal LAN address (`http://192.168.20.75:9800`) — for Caltrans-style private deployments.
+  - A public hostname behind a reverse proxy (`https://files.camposlabs.org`) — for the public
+    showcase deployment where Caddy/Cloudflare fronts MinIO over TLS.
 
 > **Important:** MinIO buckets are private by default. Raw object URLs will return `AccessDenied`
-> unless the bucket (or prefix) has an anonymous read/download policy set.
+> unless the bucket has an anonymous read/download policy set.
 > You must explicitly grant anonymous download access before public mode works.
 > See [MinIO Anonymous Read Policy](#minio-anonymous-read-policy-required-for-public-mode) below.
 > `presigned` mode does **not** require anonymous bucket access — presigned URLs carry
@@ -54,11 +56,30 @@ STORAGE_URL_MODE=presigned
 MINIO_PUBLIC_ENDPOINT=http://<ERIS_SERVER_IP_OR_INTERNAL_DNS>:9800
 ```
 
-### Alpha / Proxmox deployment (`docker/.env.proxmox`)
+### Public showcase deployment — camposlabs (Cloudflare + eris-proxy)
+
+MinIO is fronted by Caddy on VM 102 (eris-proxy) at `files.camposlabs.org`. Clients never
+connect to the MinIO port directly; TLS is terminated by Cloudflare + Caddy.
 
 ```env
 STORAGE_URL_MODE=public
-MINIO_PUBLIC_ENDPOINT=http://YOUR_PROXMOX_IP:9800
+MINIO_PUBLIC_ENDPOINT=https://files.camposlabs.org
+CORS_ORIGINS=https://eris.camposlabs.org
+VITE_API_BASE_URL=https://api.camposlabs.org
+```
+
+See [docs/PROXMOX_DEPLOYMENT.md — Public Internet Deployment](./PROXMOX_DEPLOYMENT.md) for the
+full two-VM Caddy setup and Cloudflare configuration.
+
+### Caltrans internal deployment (future, LAN-only)
+
+MinIO is exposed only on the private LAN; clients reach it directly by IP/port.
+
+```env
+STORAGE_URL_MODE=public
+MINIO_PUBLIC_ENDPOINT=http://<ERIS_SERVER_LAN_IP>:9800
+CORS_ORIGINS=http://<ERIS_SERVER_LAN_IP>:5173
+VITE_API_BASE_URL=http://<ERIS_SERVER_LAN_IP>:8000
 ```
 
 ---
@@ -123,23 +144,35 @@ These will be removed after clients have fully migrated to the download-url flow
 
 ### Network reachability
 
-`MINIO_PUBLIC_ENDPOINT` must be a URL that web browsers and mobile clients can reach from their network:
+`MINIO_PUBLIC_ENDPOINT` must be a URL that web browsers and mobile clients can reach. Two patterns:
 
-- For Proxmox LAN deployment: `http://<SERVER_LAN_IP>:9800`
-- For Docker local dev: `http://127.0.0.1:9800` or `http://localhost:9800`
+**Direct (Caltrans internal / LAN-only):**
+- `http://<SERVER_LAN_IP>:9800` — clients hit the MinIO API port directly.
+- Requires port 9800 to be open to client subnets. Set `MINIO_API_BIND=0.0.0.0` if needed.
 
-The MinIO API port (default: `9800` on the Docker host, mapped from container port `9000`) must be reachable from all client devices.
+**Reverse-proxy (public showcase / Cloudflare):**
+- `https://files.camposlabs.org` — Cloudflare → Caddy on eris-proxy → MinIO on port 9800.
+- The MinIO port does **not** need to be directly reachable from clients; only port 443 on
+  the eris-proxy host needs to be reachable.
+- TLS is terminated by Cloudflare (Full strict) and Caddy holds the Cloudflare Origin Certificate.
+- See [PROXMOX_DEPLOYMENT.md](./PROXMOX_DEPLOYMENT.md) for Caddy configuration.
+
+**Local dev:**
+- `http://127.0.0.1:9800` or `http://localhost:9800`
 
 ### MinIO Anonymous Read Policy (required for public mode)
 
 MinIO buckets are **private by default**. Direct object URLs (`STORAGE_URL_MODE=public`) will
 return `AccessDenied` unless the bucket or prefix has anonymous download access explicitly enabled.
 
-Use the MinIO Client (`mc`) to set the policy after the containers are running:
+Use the MinIO Client (`mc`) to set the policy after the containers are running.
+Run these commands **on the ERIS-server host** (VM 101), where MinIO is accessible
+at `http://localhost:9800` without going through the proxy:
 
 ```bash
-# 1. Add an alias pointing to your MinIO instance
-mc alias set eris http://<SERVER_IP>:9800 <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD>
+# 1. Add an alias pointing directly to the MinIO API (internal address, not the proxy)
+mc alias set eris http://localhost:9800 <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD>
+# Or from another LAN host: mc alias set eris http://192.168.20.75:9800 ...
 
 # 2. Grant anonymous download access to the entire bucket
 mc anonymous set download eris/eris-uploads
@@ -149,11 +182,16 @@ This grants `s3:GetObject` to anonymous (unauthenticated) callers, which allows 
 GET. It does **not** grant `s3:ListBucket`, so clients cannot enumerate the bucket contents —
 they can only fetch objects whose full path they already know.
 
-**When is this safe?**
-- Only on internal networks (Caltrans LAN, Proxmox private subnet).
-- Object keys are UUIDs generated by the backend (`uploads/<uuid>.<ext>`), so they are not guessable.
-- Backend still enforces auth before issuing any URL — clients cannot discover keys independently.
-- Do not use on internet-facing deployments.
+**When is this acceptable?**
+- Object keys are UUIDs generated by the backend (`uploads/<uuid>.<ext>`), so they are not
+  guessable without a prior authorized API call.
+- The backend enforces auth before issuing any URL — unauthenticated clients cannot discover keys.
+- **Internal networks (Caltrans LAN, Proxmox private subnet):** directly acceptable; only
+  on-network clients can reach MinIO at all.
+- **Public hostname behind reverse proxy (camposlabs):** acceptable for the alpha showcase because
+  the anonymous policy is GET-only (not LIST), keys are UUIDs, and auth guards URL issuance.
+  This is an alpha posture — for a production Caltrans deployment, switch to `presigned` mode
+  so no anonymous bucket access is required.
 
 **Presigned mode does not require this step.** Presigned URLs carry embedded credentials
 and work against private buckets without any anonymous policy.
@@ -179,7 +217,7 @@ In `public` mode, browsers fetch files directly from MinIO. If the web app origi
 {
   "CORSRules": [
     {
-      "AllowedOrigins": ["http://YOUR_PROXMOX_IP:5173"],
+      "AllowedOrigins": ["https://eris.camposlabs.org"],
       "AllowedMethods": ["GET", "HEAD"],
       "AllowedHeaders": ["*"],
       "MaxAgeSeconds": 3600
@@ -188,12 +226,16 @@ In `public` mode, browsers fetch files directly from MinIO. If the web app origi
 }
 ```
 
-Apply with:
+Save as `cors.json`, then apply from the ERIS-server host:
 ```bash
-mc anonymous set-json cors.json myminio/eris-uploads
+mc cors set eris/eris-uploads cors.json
+# Or for older mc versions:
+mc anonymous set-json cors.json eris/eris-uploads
 ```
 
-Or configure via the MinIO Console (port 9801).
+For a Caltrans LAN deployment replace the origin with `http://<SERVER_LAN_IP>:5173`.
+
+Or configure via the MinIO Console (`http://192.168.20.75:9801` internally, not exposed externally).
 
 In `presigned` mode, MinIO CORS is typically not needed because presigned URLs embed credentials and browsers accept them from any origin.
 
@@ -205,26 +247,51 @@ React Native's `fetch` and `Linking.openURL` are not bound by the same-origin po
 
 ## Proxmox Deployment Steps
 
-1. Copy `docker/.env.proxmox.example` to `docker/.env.proxmox`.
-2. Set `STORAGE_URL_MODE=public`.
-3. Set `MINIO_PUBLIC_ENDPOINT=http://<SERVER_LAN_IP>:9800`.
-4. Ensure `MINIO_API_BIND` allows the server LAN IP (or `0.0.0.0`) if needed.
-5. Deploy with:
-   ```bash
-   docker compose --env-file docker/.env.proxmox -f docker/docker-compose.proxmox.yml up -d
+These steps cover the storage-specific configuration on **ERIS-server (VM 101)**.
+For the full two-VM public internet architecture (Cloudflare + eris-proxy), see
+[docs/PROXMOX_DEPLOYMENT.md — Public Internet Deployment](./PROXMOX_DEPLOYMENT.md).
+
+### Public showcase (camposlabs)
+
+1. On ERIS-server, copy `docker/.env.proxmox.example` to `docker/.env.proxmox`.
+2. Set the following in `.env.proxmox`:
+   ```env
+   STORAGE_URL_MODE=public
+   MINIO_PUBLIC_ENDPOINT=https://files.camposlabs.org
+   CORS_ORIGINS=https://eris.camposlabs.org
+   VITE_API_BASE_URL=https://api.camposlabs.org
    ```
-6. **Set MinIO anonymous download policy** (required for public mode):
+3. Deploy the ERIS stack on ERIS-server:
    ```bash
-   mc alias set eris http://<SERVER_LAN_IP>:9800 <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD>
+   cd /opt/ERIS_REACT_native/docker
+   docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml up -d --build
+   ```
+4. **Set MinIO anonymous download policy** (run on ERIS-server after containers are up):
+   ```bash
+   mc alias set eris http://localhost:9800 <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD>
    mc anonymous set download eris/eris-uploads
-   # Verify:
-   mc anonymous get eris/eris-uploads
-   # Expected: download
+   mc anonymous get eris/eris-uploads   # expected: download
    ```
-7. (Optional) Configure MinIO CORS if browser direct GET requires it (see section above).
-8. Verify: open the ERIS web app, navigate to a submission with an attachment, and confirm the
-   photo loads directly from MinIO (check browser DevTools Network tab — requests should go to
-   port 9800, not 8000). If you see `AccessDenied`, re-check step 6.
+5. Configure MinIO CORS for the web origin (run on ERIS-server):
+   ```bash
+   # Save cors.json first (see MinIO CORS section above for content)
+   mc cors set eris/eris-uploads cors.json
+   ```
+6. Set up eris-proxy (VM 102) with Caddy pointing `files.camposlabs.org` → `192.168.20.75:9800`.
+   See [PROXMOX_DEPLOYMENT.md](./PROXMOX_DEPLOYMENT.md) for the Caddy config.
+7. Verify: open `https://eris.camposlabs.org`, navigate to a submission with an attachment, and
+   confirm the photo loads from `https://files.camposlabs.org/...` (check browser Network tab).
+   If you see `AccessDenied`, re-check step 4.
+
+### Caltrans internal (future LAN deployment)
+
+Same as above with these differences in `.env.proxmox`:
+```env
+MINIO_PUBLIC_ENDPOINT=http://<ERIS_SERVER_LAN_IP>:9800
+CORS_ORIGINS=http://<ERIS_SERVER_LAN_IP>:5173
+VITE_API_BASE_URL=http://<ERIS_SERVER_LAN_IP>:8000
+```
+No eris-proxy or Cloudflare required. Ensure MinIO port 9800 is reachable from client subnets.
 
 ---
 
@@ -236,7 +303,8 @@ React Native's `fetch` and `Linking.openURL` are not bound by the same-origin po
 | Browser CORS error in public mode | Configure MinIO CORS to allow web app origin |
 | Stale URLs (presigned mode) | Default 900-second expiry. For long-lived links, re-call download-url. |
 | MinIO returns AccessDenied in public mode | Anonymous download policy must be set on the bucket (`mc anonymous set download eris/<bucket>`). Private-by-default is MinIO's baseline. |
-| Unintended public read after enabling anonymous policy | Policy grants GET only, not LIST. Object keys are UUIDs — not guessable. Acceptable on internal-only alpha networks; remove policy before any public exposure. |
+| Anonymous policy exposes objects to anyone with a URL | Policy grants GET only (not LIST). Keys are UUIDs. Auth gates URL issuance. Acceptable for alpha — switch to `presigned` mode for production Caltrans deployment. |
+| Public traffic hitting ERIS-server directly | All inbound traffic must enter via eris-proxy (VM 102). ERIS-server (VM 101) should not be port-forwarded directly from WAN. |
 
 ---
 
