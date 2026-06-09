@@ -35,6 +35,12 @@ jobs:
           alembic history
           alembic heads
 
+      - name: Run smoke tests
+        env:
+          DB_PASS: ci_placeholder
+          JWT_SECRET: ci_placeholder_secret
+        run: python -m pytest tests/ -v --tb=short
+
   web:
     runs-on: ubuntu-latest
     defaults:
