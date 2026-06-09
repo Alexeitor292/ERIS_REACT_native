@@ -421,6 +421,145 @@ class TestLookup:
 
 
 # ---------------------------------------------------------------------------
+# Async import jobs
+# ---------------------------------------------------------------------------
+
+class TestImportJobs:
+    def test_import_job_requires_admin(self, client_db):
+        resp = client_db.post(
+            "/road-inventory/import-jobs",
+            files={"file": ("x.xlsx", b"data", "application/octet-stream")},
+        )
+        assert resp.status_code == 401
+
+    def test_import_job_rejects_non_xlsx(self, client_db, admin_token):
+        resp = client_db.post(
+            "/road-inventory/import-jobs",
+            files={"file": ("report.pdf", b"fake pdf bytes", "application/pdf")},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 422
+        assert "xlsx" in resp.json()["detail"].lower()
+
+    def test_import_job_creates_queued_job(self, client_db, admin_token):
+        from unittest.mock import patch
+        from app.db import engine
+        from sqlalchemy import text
+
+        xlsx = _make_xlsx(_row())
+        with patch("app.routes.road_inventory.put_object_bytes"), \
+             patch("app.routes.road_inventory.run_import_job_svc"):
+            resp = client_db.post(
+                "/road-inventory/import-jobs",
+                files={"file": ("test.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                params={"version_tag": "queued-job-test"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "job_uuid" in data
+        assert data["status"] == "queued"
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "DELETE FROM road_inventory_import_jobs WHERE job_uuid = :uuid"
+            ), {"uuid": data["job_uuid"]})
+
+    def test_get_import_job_requires_admin(self, client_db):
+        resp = client_db.get("/road-inventory/import-jobs/fake-uuid")
+        assert resp.status_code == 401
+
+    def test_get_import_job_not_found(self, client_db, admin_token):
+        resp = client_db.get(
+            "/road-inventory/import-jobs/00000000-0000-0000-0000-000000000000",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 404
+
+    def test_list_import_jobs_requires_admin(self, client_db):
+        resp = client_db.get("/road-inventory/import-jobs")
+        assert resp.status_code == 401
+
+    def test_list_import_jobs_returns_list(self, client_db, admin_token):
+        resp = client_db.get(
+            "/road-inventory/import-jobs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+    def test_run_import_job_success(self, client_db, admin_token):
+        from unittest.mock import patch
+        from app.db import engine
+        from sqlalchemy import text
+
+        xlsx = _make_xlsx(_row())
+        # BackgroundTasks run synchronously in TestClient, so by the time
+        # the 202 response returns, the background job has already finished.
+        with patch("app.routes.road_inventory.put_object_bytes"), \
+             patch("app.services.road_inventory_import_jobs.get_object_bytes") as mock_get:
+            mock_get.return_value = (xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            resp = client_db.post(
+                "/road-inventory/import-jobs",
+                files={"file": ("test.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                params={"version_tag": "async-success"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert resp.status_code == 202
+        job_uuid = resp.json()["job_uuid"]
+
+        resp2 = client_db.get(
+            f"/road-inventory/import-jobs/{job_uuid}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp2.status_code == 200
+        job = resp2.json()
+        assert job["status"] == "succeeded"
+        assert job["row_count"] == 1
+        assert job["dataset_version_id"] is not None
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "DELETE FROM road_inventory_datasets WHERE id = :id"
+            ), {"id": job["dataset_version_id"]})
+            conn.execute(text(
+                "DELETE FROM road_inventory_import_jobs WHERE job_uuid = :uuid"
+            ), {"uuid": job_uuid})
+
+    def test_run_import_job_failure(self, client_db, admin_token):
+        from unittest.mock import patch
+        from app.db import engine
+        from sqlalchemy import text
+
+        xlsx = _make_xlsx(_row())
+        with patch("app.routes.road_inventory.put_object_bytes"), \
+             patch("app.services.road_inventory_import_jobs.get_object_bytes") as mock_get:
+            mock_get.side_effect = RuntimeError("MinIO unreachable")
+            resp = client_db.post(
+                "/road-inventory/import-jobs",
+                files={"file": ("test.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                params={"version_tag": "async-fail"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert resp.status_code == 202
+        job_uuid = resp.json()["job_uuid"]
+
+        resp2 = client_db.get(
+            f"/road-inventory/import-jobs/{job_uuid}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp2.status_code == 200
+        job = resp2.json()
+        assert job["status"] == "failed"
+        assert job["error_message"] is not None
+
+        with engine.begin() as conn:
+            conn.execute(text(
+                "DELETE FROM road_inventory_import_jobs WHERE job_uuid = :uuid"
+            ), {"uuid": job_uuid})
+
+
+# ---------------------------------------------------------------------------
 # Versions list
 # ---------------------------------------------------------------------------
 

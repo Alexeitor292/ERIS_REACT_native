@@ -1,5 +1,29 @@
 import { api } from "./client";
 
+export type RoadInventoryImportJob = {
+  id: number;
+  job_uuid: string;
+  status: "queued" | "processing" | "succeeded" | "failed";
+  stage: string;
+  message: string | null;
+  upload_filename: string;
+  requested_version_tag: string | null;
+  storage_key: string | null;
+  file_size_bytes: number | null;
+  dataset_version_id: number | null;
+  row_count: number;
+  skipped_count: number;
+  warnings: string[];
+  error_message: string | null;
+  created_by: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string | null;
+};
+
+export type CreateImportJobResult = RoadInventoryImportJob;
+
 export type RoadInventoryDataset = {
   id: number;
   version_tag: string;
@@ -95,6 +119,29 @@ export async function rollbackRoadInventoryVersion(id: number): Promise<void> {
 
 export async function getRoadInventoryManifest(): Promise<RoadInventoryManifest> {
   return api<RoadInventoryManifest>("/road-inventory/manifest");
+}
+
+export async function createRoadInventoryImportJob(
+  file: File,
+  versionTag?: string,
+): Promise<CreateImportJobResult> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const qs = versionTag ? `?version_tag=${encodeURIComponent(versionTag)}` : "";
+  return api<CreateImportJobResult>(`/road-inventory/import-jobs${qs}`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export async function listRoadInventoryImportJobs(): Promise<RoadInventoryImportJob[]> {
+  return api<RoadInventoryImportJob[]>("/road-inventory/import-jobs");
+}
+
+export async function getRoadInventoryImportJob(
+  jobUuid: string,
+): Promise<RoadInventoryImportJob> {
+  return api<RoadInventoryImportJob>(`/road-inventory/import-jobs/${encodeURIComponent(jobUuid)}`);
 }
 
 export async function lookupRoadSegments(
