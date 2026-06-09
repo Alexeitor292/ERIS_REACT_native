@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", validation_alias="MINIO_ROOT_USER")
     MINIO_SECRET_KEY: str = Field(default="minio_root_password", validation_alias="MINIO_ROOT_PASSWORD")
     MINIO_PUBLIC_ENDPOINT: str | None = Field(default=None)
+    # "presigned" (default): return MinIO presigned GET URLs.
+    # "public": return deterministic direct object URLs via MINIO_PUBLIC_ENDPOINT.
+    STORAGE_URL_MODE: str = Field(default="presigned")
 
     # JWT (required)
     JWT_SECRET: str  # REQUIRED

@@ -69,6 +69,35 @@ def presign_get(object_key: str, *, bucket: str | None = None, expires_seconds: 
         raise RuntimeError(f"MinIO presign_get failed bucket={bucket_name} key={object_key}: {e}") from e
 
 
+def object_public_url(bucket: str, object_key: str) -> str:
+    """Return a deterministic direct URL for the object using MINIO_PUBLIC_ENDPOINT.
+
+    Used when STORAGE_URL_MODE=public (internal-network alpha deployments).
+    Raises RuntimeError if MINIO_PUBLIC_ENDPOINT is not configured.
+    """
+    public_endpoint = (settings.MINIO_PUBLIC_ENDPOINT or "").strip()
+    if not public_endpoint:
+        raise RuntimeError(
+            "STORAGE_URL_MODE=public requires MINIO_PUBLIC_ENDPOINT to be set. "
+            "Set it to the client-reachable MinIO API URL (e.g. http://10.0.0.1:9800)."
+        )
+    base = public_endpoint.rstrip("/")
+    key = object_key.lstrip("/")
+    return f"{base}/{bucket}/{key}"
+
+
+def object_access_url(bucket: str, object_key: str, expires_seconds: int = 900) -> str:
+    """Return the appropriate access URL based on STORAGE_URL_MODE.
+
+    presigned (default): returns a MinIO presigned GET URL (with MINIO_PUBLIC_ENDPOINT
+      rewriting applied if configured).
+    public: returns a deterministic direct URL via object_public_url().
+    """
+    if settings.STORAGE_URL_MODE == "public":
+        return object_public_url(bucket, object_key)
+    return presign_get(object_key, bucket=bucket, expires_seconds=expires_seconds)
+
+
 def put_object_stream(
     *,
     object_key: str,

@@ -21,7 +21,7 @@ from .db import get_db
 from .config import settings
 from .auth import decode_token
 from .deps import get_current_user, require_roles
-from .storage import ensure_bucket, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes
+from .storage import ensure_bucket, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
@@ -2584,6 +2584,7 @@ def generate_submission_gisa_pdf(
         )
         raise HTTPException(status_code=500, detail="Failed to generate PDF")
 
+    _is_public = settings.STORAGE_URL_MODE == "public"
     return {
         "submission_id": submission_id,
         "attachment_id": attachment_id,
@@ -2591,8 +2592,8 @@ def generate_submission_gisa_pdf(
         "content_type": content_type,
         "file_size_bytes": len(pdf_bytes),
         "sha256": sha256,
-        "download_url": presign_get(object_key, bucket=bucket, expires_seconds=900),
-        "expires_seconds": 900,
+        "download_url": object_access_url(bucket, object_key, expires_seconds=900),
+        "expires_seconds": None if _is_public else 900,
     }
 
 
@@ -2619,6 +2620,7 @@ def get_submission_gisa_pdf(
     if not row:
         raise HTTPException(status_code=404, detail="No generated GISA PDF found for this submission")
 
+    _is_public = settings.STORAGE_URL_MODE == "public"
     return {
         "submission_id": submission_id,
         "attachment_id": int(row["id"]),
@@ -2627,8 +2629,8 @@ def get_submission_gisa_pdf(
         "file_size_bytes": row["file_size_bytes"],
         "sha256": row["sha256"],
         "uploaded_at": row["uploaded_at"],
-        "download_url": presign_get(str(row["storage_key"]), bucket=row["storage_bucket"], expires_seconds=900),
-        "expires_seconds": 900,
+        "download_url": object_access_url(str(row["storage_bucket"]), str(row["storage_key"]), expires_seconds=900),
+        "expires_seconds": None if _is_public else 900,
     }
 
 @app.get("/attachments/{attachment_id}/download-url")
@@ -2659,13 +2661,14 @@ def attachment_download_url(
 
         require_can_view_submission(int(sid), db, user)
 
-    url = presign_get(row["storage_key"], bucket=row["storage_bucket"], expires_seconds=900)
+    _is_public = settings.STORAGE_URL_MODE == "public"
+    url = object_access_url(str(row["storage_bucket"]), str(row["storage_key"]), expires_seconds=900)
 
     return {
         "attachment_id": row["id"],
         "storage_key": row["storage_key"],
         "download_url": url,
-        "expires_seconds": 900
+        "expires_seconds": None if _is_public else 900,
     }
 
 @app.get("/photos/{photo_id}/download")
@@ -2677,6 +2680,9 @@ def photo_download(
     return attachment_download_url(photo_id, db, user)
 
 
+# FALLBACK / DEPRECATED (alpha): proxies attachment bytes through FastAPI.
+# Clients should use /attachments/{id}/download-url and load files directly from storage.
+# Kept for backward-compatibility during the alpha transition; remove after clients migrate.
 @app.get("/attachments/{attachment_id}/content")
 def attachment_content(
     attachment_id: int = Path(..., ge=1),
@@ -2712,6 +2718,8 @@ def attachment_content(
     return Response(content=data, media_type=content_type)
 
 
+# FALLBACK / DEPRECATED (alpha): proxies photo bytes through FastAPI.
+# Clients should use /photos/{id}/download or /attachments/{id}/download-url instead.
 @app.get("/photos/{photo_id}/content")
 def photo_content(
     photo_id: int = Path(..., ge=1),

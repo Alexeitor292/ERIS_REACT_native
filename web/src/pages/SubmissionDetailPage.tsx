@@ -741,11 +741,8 @@ export default function SubmissionDetailPage() {
   async function openDownloadUrl(id: number) {
     setDownloading(id);
     try {
-      const token = getToken();
-      if (!token) throw new Error("Missing auth token");
-      const base = appConfig.apiBaseUrl.replace(/\/+$/, "");
-      const url = `${base}/attachments/${id}/content?access_token=${encodeURIComponent(token)}&ts=${Date.now()}`;
-      window.open(url, "_blank", "noopener,noreferrer");
+      const data = await api<{ download_url: string }>(`/attachments/${id}/download-url`);
+      window.open(data.download_url, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       setErr(e?.message ?? "Download failed");
     } finally {
