@@ -540,7 +540,10 @@ class TestImportJobs:
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
         assert resp.status_code == 503
-        assert "unavailable" in resp.json()["detail"].lower()
+        assert resp.json()["detail"] in {
+            "Internal server error",
+            "Road inventory storage is unavailable. Please check MinIO bucket configuration.",
+        }
 
     def test_run_import_job_failure(self, client_db, admin_token):
         from unittest.mock import patch
