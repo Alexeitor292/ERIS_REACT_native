@@ -638,6 +638,53 @@ function enforceFormBusinessRules(input: FormState): FormState {
   return next;
 }
 
+// Tap-only wrapper that proactively releases the responder on vertical drag, allowing
+// the parent ScrollView to scroll even when the touch starts over a button/field.
+// Replaces Pressable in form elements where scroll-through is needed.
+function ScrollSafePressable({
+  onPress,
+  disabled,
+  style,
+  children,
+}: {
+  onPress: () => void;
+  disabled?: boolean;
+  style?: any;
+  children: React.ReactNode;
+}) {
+  const activeRef = useRef(false);
+  const startYRef = useRef(0);
+  return (
+    <View
+      accessible
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
+      style={style}
+      onStartShouldSetResponder={() => !disabled}
+      onResponderTerminationRequest={() => true}
+      onResponderGrant={(e) => {
+        activeRef.current = true;
+        startYRef.current = e.nativeEvent.pageY;
+      }}
+      onResponderMove={(e) => {
+        if (!activeRef.current) return;
+        if (Math.abs(e.nativeEvent.pageY - startYRef.current) > 8) {
+          activeRef.current = false;
+        }
+      }}
+      onResponderRelease={() => {
+        if (activeRef.current) onPress();
+        activeRef.current = false;
+      }}
+      onResponderTerminate={() => {
+        activeRef.current = false;
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
 function Chip({
   label,
   active,
@@ -658,7 +705,7 @@ function Chip({
   const { componentScale, textScale } = useUiSettings();
   const scale = Math.max(1, componentScale);
   return (
-    <Pressable
+    <ScrollSafePressable
       disabled={disabled}
       onPress={onPress}
       style={[
@@ -689,7 +736,7 @@ function Chip({
         </Text>
         {iconRight ? <View style={[styles.chipIconWrap, { width: Math.round(18 * scale), height: Math.round(18 * scale) }]}>{iconRight}</View> : null}
       </View>
-    </Pressable>
+    </ScrollSafePressable>
   );
 }
 
@@ -841,7 +888,7 @@ function Field({
           {renderRichText()}
         </Text>
       ) : !focused && editable ? (
-        <Pressable
+        <ScrollSafePressable
           onPress={startEditing}
           style={[
             styles.input,
@@ -864,7 +911,7 @@ function Field({
           >
             {renderRichText()}
           </Text>
-        </Pressable>
+        </ScrollSafePressable>
       ) : (
         <TextInput
           ref={inputRef}
@@ -1044,7 +1091,7 @@ function SelectField({
           </View>
         ) : null}
       </View>
-      <Pressable
+      <ScrollSafePressable
         disabled={!editable}
         onPress={onPress}
         style={[
@@ -1064,7 +1111,7 @@ function SelectField({
         <Text style={{ color: value.trim() ? (palette?.text ?? "#1b2a40") : (palette?.muted ?? "#6b7280"), fontSize: Math.round((Platform.OS === "ios" ? 16 : 14) * scale) }} maxFontSizeMultiplier={textScale}>
           {textValue}
         </Text>
-      </Pressable>
+      </ScrollSafePressable>
       {error ? <Text style={[styles.errorText, { fontSize: Math.round(11 * scale), marginTop: Math.round(4 * scale) }]} maxFontSizeMultiplier={textScale}>{error}</Text> : null}
     </View>
   );
@@ -1087,7 +1134,7 @@ function MaterialSectionBubble({
   const scale = Math.max(1, componentScale);
 
   return (
-    <Pressable
+    <ScrollSafePressable
       onPress={onPress}
       style={[
         styles.materialSectionBubble,
@@ -1112,7 +1159,7 @@ function MaterialSectionBubble({
       >
         {label}
       </Text>
-    </Pressable>
+    </ScrollSafePressable>
   );
 }
 
@@ -1157,6 +1204,7 @@ function SteppedPercentInput({
   const [trackWidth, setTrackWidth] = useState(0);
   const [interactionStep, setInteractionStep] = useState<number | null>(null);
   const dragActiveRef = useRef(false);
+  const hasSliderMovedRef = useRef(false);
   const dragStartStepRef = useRef(stepValue);
   const currentStepRef = useRef(stepValue);
   const thumbLeftRef = useRef(0);
@@ -1217,22 +1265,26 @@ function SteppedPercentInput({
         onMoveShouldSetPanResponderCapture: () => false,
         onPanResponderGrant: () => {
           dragActiveRef.current = true;
+          hasSliderMovedRef.current = false;
           dragStartStepRef.current = currentStepRef.current;
           lastHapticStepRef.current = currentStepRef.current;
           setInteractionStep(currentStepRef.current);
         },
         onPanResponderMove: (_evt, gesture) => {
+          if (Math.abs(gesture.dx) > 3) hasSliderMovedRef.current = true;
           updateValueFromDrag(gesture.dx);
         },
         onPanResponderRelease: (_evt, gesture) => {
           commitValueFromDrag(gesture.dx);
           dragActiveRef.current = false;
+          hasSliderMovedRef.current = false;
         },
         onPanResponderTerminate: (_evt, gesture) => {
           commitValueFromDrag(gesture.dx);
           dragActiveRef.current = false;
+          hasSliderMovedRef.current = false;
         },
-        onPanResponderTerminationRequest: () => false,
+        onPanResponderTerminationRequest: () => !hasSliderMovedRef.current,
         onShouldBlockNativeResponder: () => true,
       }),
     [commitValueFromDrag, editable, thumbSize, thumbTouchSize, trackWidth, updateValueFromDrag]
@@ -1385,10 +1437,10 @@ function CollapsibleSection({
   const isIOS = Platform.OS === "ios";
   return (
     <View style={[styles.section, isIOS ? styles.iosSection : null, { backgroundColor: palette.panel, borderColor: palette.border, padding: Math.round((compact ? 10 : 12) * scale), borderRadius: Math.round((isIOS ? 12 : 14) * scale) }]}>
-      <Pressable onPress={onToggle} style={styles.sectionHeader}>
+      <ScrollSafePressable onPress={onToggle} style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, { color: palette.text, fontSize: Math.round((isIOS ? 23 / 1.45 : 22 / 1.45) * scale) }]} maxFontSizeMultiplier={textScale}>{title}</Text>
         <Text style={[styles.sectionChevron, { color: palette.muted, fontSize: Math.round((isIOS ? 18 : 16) * scale) }]} maxFontSizeMultiplier={textScale}>{open ? (isIOS ? "⌄" : "v") : ">"}</Text>
-      </Pressable>
+      </ScrollSafePressable>
       {open ? <View style={styles.sectionBody}>{children}</View> : null}
     </View>
   );
@@ -1411,10 +1463,10 @@ function DropdownBlock({
   const scale = Math.max(1, componentScale);
   return (
     <View style={[styles.dropdownBlock, { backgroundColor: palette.panel, borderColor: palette.border, borderRadius: Math.round((Platform.OS === "ios" ? 12 : 14) * scale), padding: Math.round((Platform.OS === "ios" ? 10 : 12) * scale) }]}>
-      <Pressable onPress={onToggle} style={styles.dropdownBlockHeader}>
+      <ScrollSafePressable onPress={onToggle} style={styles.dropdownBlockHeader}>
         <Text style={[styles.dropdownBlockTitle, { color: palette.text, fontSize: Math.round((Platform.OS === "ios" ? 23 / 1.45 : 22 / 1.45) * scale) }]} maxFontSizeMultiplier={textScale}>{title}</Text>
         <Text style={[styles.sectionChevron, { color: palette.muted, fontSize: Math.round((Platform.OS === "ios" ? 18 : 16) * scale) }]} maxFontSizeMultiplier={textScale}>{open ? "v" : ">"}</Text>
-      </Pressable>
+      </ScrollSafePressable>
       {open ? <View style={{ marginTop: Math.round(6 * scale) }}>{children}</View> : null}
     </View>
   );
