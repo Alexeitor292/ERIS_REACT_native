@@ -447,8 +447,9 @@ class TestImportJobs:
         from sqlalchemy import text
 
         xlsx = _make_xlsx(_row())
-        with patch("app.routes.road_inventory.put_object_bytes"), \
-             patch("app.routes.road_inventory.run_import_job_svc"):
+        with patch("app.routes.road_inventory.ensure_bucket_exists"), \
+            patch("app.routes.road_inventory.put_object_bytes"), \
+            patch("app.routes.road_inventory.run_import_job_svc"):
             resp = client_db.post(
                 "/road-inventory/import-jobs",
                 files={"file": ("test.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
@@ -496,8 +497,9 @@ class TestImportJobs:
         xlsx = _make_xlsx(_row())
         # BackgroundTasks run synchronously in TestClient, so by the time
         # the 202 response returns, the background job has already finished.
-        with patch("app.routes.road_inventory.put_object_bytes"), \
-             patch("app.services.road_inventory_import_jobs.get_object_bytes") as mock_get:
+        with patch("app.routes.road_inventory.ensure_bucket_exists"), \
+            patch("app.routes.road_inventory.put_object_bytes"), \
+            patch("app.services.road_inventory_import_jobs.get_object_bytes") as mock_get:
             mock_get.return_value = (xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             resp = client_db.post(
                 "/road-inventory/import-jobs",
@@ -526,14 +528,32 @@ class TestImportJobs:
                 "DELETE FROM road_inventory_import_jobs WHERE job_uuid = :uuid"
             ), {"uuid": job_uuid})
 
+    def test_import_job_returns_503_if_storage_unavailable(self, client_db, admin_token):
+        from unittest.mock import patch
+        xlsx = _make_xlsx(_row())
+        with patch("app.routes.road_inventory.ensure_bucket_exists") as mock_ensure:
+            mock_ensure.side_effect = RuntimeError("MinIO connection refused")
+            resp = client_db.post(
+                "/road-inventory/import-jobs",
+                files={"file": ("test.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                params={"version_tag": "storage-fail-test"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert resp.status_code == 503
+        assert resp.json()["detail"] in {
+            "Internal server error",
+            "Road inventory storage is unavailable. Please check MinIO bucket configuration.",
+        }
+
     def test_run_import_job_failure(self, client_db, admin_token):
         from unittest.mock import patch
         from app.db import engine
         from sqlalchemy import text
 
         xlsx = _make_xlsx(_row())
-        with patch("app.routes.road_inventory.put_object_bytes"), \
-             patch("app.services.road_inventory_import_jobs.get_object_bytes") as mock_get:
+        with patch("app.routes.road_inventory.ensure_bucket_exists"), \
+            patch("app.routes.road_inventory.put_object_bytes"), \
+            patch("app.services.road_inventory_import_jobs.get_object_bytes") as mock_get:
             mock_get.side_effect = RuntimeError("MinIO unreachable")
             resp = client_db.post(
                 "/road-inventory/import-jobs",

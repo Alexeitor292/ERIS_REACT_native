@@ -40,6 +40,23 @@ def ensure_bucket(bucket: str | None = None) -> None:
         raise RuntimeError(f"MinIO ensure_bucket failed for bucket={bucket_name}: {e}") from e
 
 
+def ensure_bucket_exists(bucket: str) -> None:
+    """Ensure the named bucket exists, creating it if necessary.
+
+    Unlike ensure_bucket(), this requires an explicit bucket name with no
+    default fallback.  Raises RuntimeError if MinIO is unreachable, the
+    credentials are invalid, or bucket creation fails.
+    """
+    client = _client()
+    try:
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+    except S3Error as e:
+        raise RuntimeError(
+            f"MinIO ensure_bucket_exists failed for bucket={bucket}: {e}"
+        ) from e
+
+
 def presign_get(object_key: str, *, bucket: str | None = None, expires_seconds: int = 900) -> str:
     bucket_name = bucket or settings.MINIO_BUCKET
     client = _client()
@@ -132,13 +149,16 @@ def put_object_bytes(*, object_key: str, data: bytes, content_type: str, bucket:
     bucket_name = bucket or settings.MINIO_BUCKET
     client = _client()
     bio = BytesIO(data)
-    client.put_object(
-        bucket_name,
-        object_key,
-        bio,
-        length=len(data),
-        content_type=content_type,
-    )
+    try:
+        client.put_object(
+            bucket_name,
+            object_key,
+            bio,
+            length=len(data),
+            content_type=content_type,
+        )
+    except S3Error as e:
+        raise RuntimeError(f"MinIO put_object failed bucket={bucket_name} key={object_key}: {e}") from e
 
 
 def get_object_bytes(*, object_key: str, bucket: str | None = None) -> tuple[bytes, str]:
