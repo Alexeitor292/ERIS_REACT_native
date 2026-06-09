@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 import json
 import re
 import hashlib
@@ -55,9 +56,24 @@ from .services.gisa_validation import (
 
 
 
-app = FastAPI(title="ERIS React Native Prototype API")
 logger = logging.getLogger("eris.api")
 GENERIC_SERVER_ERROR_DETAIL = "Internal server error"
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        ensure_bucket()
+    except Exception as exc:
+        if settings.ENV.lower() == "dev":
+            logger.warning("MinIO not available during startup: %s", exc)
+        else:
+            raise
+    check_migration_head()
+    yield
+
+
+app = FastAPI(title="ERIS React Native Prototype API", lifespan=lifespan)
 
 if settings.ENV.lower() == "dev":
     app.include_router(dev_router)
@@ -99,18 +115,6 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
         exc_info=exc,
     )
     return JSONResponse(status_code=500, content={"detail": GENERIC_SERVER_ERROR_DETAIL})
-
-
-@app.on_event("startup")
-def startup():
-    try:
-        ensure_bucket()
-    except Exception as exc:
-        if settings.ENV.lower() == "dev":
-            logger.warning("MinIO not available during startup: %s", exc)
-        else:
-            raise
-    check_migration_head()
 
 
 # ----------------------------
