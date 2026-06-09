@@ -595,3 +595,176 @@ class TestVersionsList:
         )
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+
+
+# ---------------------------------------------------------------------------
+# Package generation
+# ---------------------------------------------------------------------------
+
+class TestPackageGeneration:
+    _PKG_PATCH = "app.services.road_inventory_packages"
+
+    def _generate(self, client_db, admin_token, version_id: int):
+        from unittest.mock import patch
+        with patch(f"{self._PKG_PATCH}.ensure_bucket_exists"), \
+             patch(f"{self._PKG_PATCH}.put_object_bytes"), \
+             patch(f"{self._PKG_PATCH}.object_access_url", return_value="http://minio/pkg.gz"):
+            return client_db.post(
+                f"/road-inventory/versions/{version_id}/package",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+
+    def test_generate_package_requires_admin(self, client_db):
+        resp = client_db.post("/road-inventory/versions/1/package")
+        assert resp.status_code == 401
+
+    def test_generate_package_missing_dataset(self, client_db, admin_token):
+        from unittest.mock import patch
+        with patch(f"{self._PKG_PATCH}.ensure_bucket_exists"), \
+             patch(f"{self._PKG_PATCH}.put_object_bytes"):
+            resp = client_db.post(
+                "/road-inventory/versions/999999/package",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert resp.status_code == 404
+
+    def test_generate_package_non_published_dataset(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(), tag="pkg-nonpub")
+        # dataset is pending — do NOT publish
+        try:
+            resp = self._generate(client_db, admin_token, v["version_id"])
+            assert resp.status_code == 422
+            assert "published" in resp.json()["detail"].lower()
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM road_inventory_datasets WHERE version_tag = 'pkg-nonpub'"
+                ))
+
+    def test_generate_package_creates_package_row(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(), tag="pkg-create")
+        _publish(client_db, admin_token, v["version_id"])
+        try:
+            resp = self._generate(client_db, admin_token, v["version_id"])
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["dataset_version_id"] == v["version_id"]
+            assert data["size_bytes"] > 0
+            assert len(data["sha256"]) == 64
+            assert data["storage_key"].endswith(".json.gz")
+
+            # Verify DB row was created
+            with engine.connect() as conn:
+                row = conn.execute(text("""
+                    SELECT file_size_bytes, sha256 FROM road_inventory_packages
+                    WHERE dataset_version_id = :vid AND package_type = 'json_gz'
+                """), {"vid": v["version_id"]}).mappings().first()
+            assert row is not None
+            assert row["sha256"] == data["sha256"]
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM road_inventory_datasets WHERE version_tag = 'pkg-create'"
+                ))
+
+    def test_generate_package_upserts_on_regenerate(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(), tag="pkg-upsert")
+        _publish(client_db, admin_token, v["version_id"])
+        try:
+            # Generate twice — should not raise a unique key violation
+            r1 = self._generate(client_db, admin_token, v["version_id"])
+            r2 = self._generate(client_db, admin_token, v["version_id"])
+            assert r1.status_code == 200
+            assert r2.status_code == 200
+
+            with engine.connect() as conn:
+                count = conn.execute(text("""
+                    SELECT COUNT(*) FROM road_inventory_packages
+                    WHERE dataset_version_id = :vid AND package_type = 'json_gz'
+                """), {"vid": v["version_id"]}).scalar()
+            assert count == 1
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM road_inventory_datasets WHERE version_tag = 'pkg-upsert'"
+                ))
+
+    def test_manifest_shows_package_after_generation(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(), tag="pkg-manifest")
+        _publish(client_db, admin_token, v["version_id"])
+        try:
+            self._generate(client_db, admin_token, v["version_id"])
+
+            manifest = client_db.get(
+                "/road-inventory/manifest",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            ).json()
+
+            assert manifest["package"]["available"] is True
+            assert manifest["package"]["size_bytes"] > 0
+            assert len(manifest["package"]["sha256"]) == 64
+            assert manifest["package"]["generated_at"] is not None
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM road_inventory_datasets WHERE version_tag = 'pkg-manifest'"
+                ))
+
+    def test_get_package_requires_auth(self, client_db):
+        resp = client_db.get("/road-inventory/package")
+        assert resp.status_code == 401
+
+    def test_get_package_404_when_no_package(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(), tag="pkg-404")
+        _publish(client_db, admin_token, v["version_id"])
+        try:
+            resp = client_db.get(
+                "/road-inventory/package",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 404
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM road_inventory_datasets WHERE version_tag = 'pkg-404'"
+                ))
+
+    def test_get_package_returns_metadata(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(), tag="pkg-get")
+        _publish(client_db, admin_token, v["version_id"])
+        try:
+            self._generate(client_db, admin_token, v["version_id"])
+
+            resp = client_db.get(
+                "/road-inventory/package",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["dataset_version_id"] == v["version_id"]
+            assert data["size_bytes"] > 0
+            assert len(data["sha256"]) == 64
+            assert data["generated_at"] is not None
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM road_inventory_datasets WHERE version_tag = 'pkg-get'"
+                ))

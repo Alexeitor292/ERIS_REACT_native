@@ -40,6 +40,10 @@ from ..services.road_inventory_import_jobs import (
     list_import_jobs as list_import_jobs_svc,
     run_import_job as run_import_job_svc,
 )
+from ..services.road_inventory_packages import (
+    generate_package_for_dataset,
+    get_package_for_dataset,
+)
 
 router = APIRouter(prefix="/road-inventory", tags=["road-inventory"])
 
@@ -131,6 +135,65 @@ def get_import_job_route(
     if not job:
         raise HTTPException(status_code=404, detail="Import job not found")
     return job
+
+
+# ---------------------------------------------------------------------------
+# Admin: Generate package for a dataset version
+# ---------------------------------------------------------------------------
+
+@router.post("/versions/{dataset_version_id}/package")
+def generate_package_route(
+    dataset_version_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles(["ADMIN"])),
+):
+    """Generate (or regenerate) a gzip-compressed JSON mobile package.
+
+    The dataset must already be published.  Returns package metadata including
+    the storage key and a download URL.
+    """
+    try:
+        result = generate_package_for_dataset(db, dataset_version_id)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=msg)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Road inventory storage is unavailable. Package could not be stored.",
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Authenticated: Current published package
+# ---------------------------------------------------------------------------
+
+@router.get("/package")
+def get_current_package_route(
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """Return the mobile package for the currently published dataset.
+
+    Returns 404 if no published dataset exists or no package has been generated.
+    """
+    version = db.execute(text("""
+        SELECT id FROM road_inventory_datasets
+        WHERE status = 'published'
+        ORDER BY published_at DESC
+        LIMIT 1
+    """)).mappings().first()
+
+    if not version:
+        raise HTTPException(status_code=404, detail="No published road inventory dataset")
+
+    pkg = get_package_for_dataset(db, int(version["id"]))
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not yet generated for published dataset")
+    return pkg
 
 
 # ---------------------------------------------------------------------------
@@ -351,19 +414,24 @@ def get_manifest(
     pkg = db.execute(text("""
         SELECT storage_key, file_size_bytes, sha256, generated_at
         FROM road_inventory_packages
-        WHERE dataset_version_id = :vid AND package_type = 'sqlite_gz'
+        WHERE dataset_version_id = :vid AND package_type = 'json_gz'
         LIMIT 1
     """), {"vid": version["id"]}).mappings().first()
 
-    download_url = None
     if pkg:
         try:
-            download_url = object_access_url(
-                _ROAD_INVENTORY_BUCKET,
-                pkg["storage_key"],
-            )
+            download_url = object_access_url(_ROAD_INVENTORY_BUCKET, pkg["storage_key"])
         except Exception:
             download_url = None
+        package_info: dict = {
+            "available":    True,
+            "size_bytes":   pkg["file_size_bytes"],
+            "sha256":       pkg["sha256"],
+            "generated_at": pkg["generated_at"].isoformat() if pkg["generated_at"] else None,
+            "download_url": download_url,
+        }
+    else:
+        package_info = {"available": False}
 
     return {
         "version_id":   version["id"],
@@ -371,13 +439,7 @@ def get_manifest(
         "extract_date": version["extract_date"].isoformat() if version["extract_date"] else None,
         "row_count":    version["row_count"],
         "published_at": version["published_at"].isoformat() if version["published_at"] else None,
-        "package": {
-            "available":      pkg is not None,
-            "download_url":   download_url,
-            "file_size_bytes": pkg["file_size_bytes"] if pkg else None,
-            "sha256":         pkg["sha256"] if pkg else None,
-            "generated_at":   pkg["generated_at"].isoformat() if pkg and pkg["generated_at"] else None,
-        },
+        "package":      package_info,
     }
 
 
