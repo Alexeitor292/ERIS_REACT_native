@@ -80,6 +80,7 @@ export type Gisa = {
   updated_by_user_id?: number | null;
   created_at?: string;
   updated_at: string;
+  road_inventory_context?: RoadInventoryIncidentContext | null;
 };
 
 export type LookupItem = {

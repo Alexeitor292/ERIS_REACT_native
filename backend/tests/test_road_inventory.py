@@ -916,3 +916,156 @@ class TestRoadInventoryContext:
         finally:
             with engine.begin() as conn:
                 conn.execute(text("DELETE FROM road_inventory_datasets WHERE version_tag = 'ri-ctx-list'"))
+
+
+# ---------------------------------------------------------------------------
+# Road inventory context on submission_gisa (via incident forward)
+# ---------------------------------------------------------------------------
+
+class TestSubmissionGisaRiContext:
+    """Tests that forwarding an incident copies its road inventory context into submission_gisa."""
+
+    def _incident_payload(self, ri_context=None) -> dict:
+        payload = {
+            "first_observed_at": "2026-06-10T00:00:00",
+            "latitude": 37.7,
+            "longitude": -122.4,
+            "district": "04",
+            "county": "ALA",
+            "route": "080",
+            "post_mile": "5.0",
+        }
+        if ri_context is not None:
+            payload["road_inventory_context"] = ri_context
+        return payload
+
+    def _get_segment_id(self, version_id: int) -> int:
+        from app.db import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            return conn.execute(text(
+                "SELECT id FROM road_segments WHERE dataset_version_id = :vid LIMIT 1"
+            ), {"vid": version_id}).scalar()
+
+    def _create_incident(self, client_db, admin_token, payload: dict) -> int:
+        resp = client_db.post(
+            "/incidents",
+            json=payload,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200
+        return resp.json()["incident"]["id"]
+
+    def _link_location_and_forward(self, client_db, admin_token, incident_id: int) -> int:
+        """Link a new location and forward the incident so a submission is created."""
+        link_resp = client_db.post(
+            f"/incidents/{incident_id}/location-link",
+            json={"mode": "CREATE_NEW"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert link_resp.status_code == 200
+
+        fwd_resp = client_db.post(
+            f"/incidents/{incident_id}/coordinator/forward",
+            json={"comment": "test"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert fwd_resp.status_code == 200
+        return fwd_resp.json()["linked_submission_id"]
+
+    def test_forward_without_ri_context_creates_gisa_without_ri(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        incident_id = self._create_incident(client_db, admin_token, self._incident_payload())
+        try:
+            sub_id = self._link_location_and_forward(client_db, admin_token, incident_id)
+            resp = client_db.get(
+                f"/submissions/{sub_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 200
+            gisa = resp.json()["gisa"]
+            assert gisa["road_inventory_context"] is None
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
+    def test_forward_with_ri_context_populates_submission_gisa(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(county="SAC", route="050", begin=0.0, end=10.0, district="03"), tag="gisa-ri-fwd")
+        _publish(client_db, admin_token, v["version_id"])
+        seg_id = self._get_segment_id(v["version_id"])
+        incident_id = None
+        try:
+            incident_id = self._create_incident(client_db, admin_token, self._incident_payload({
+                "dataset_version_id": v["version_id"],
+                "segment_id": seg_id,
+                "match_method": "MOBILE_OFFLINE",
+                "snapshot": {"county_code": "SAC", "route_name": "50", "left_lanes": 2},
+            }))
+            sub_id = self._link_location_and_forward(client_db, admin_token, incident_id)
+
+            resp = client_db.get(
+                f"/submissions/{sub_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 200
+            gisa = resp.json()["gisa"]
+            ctx = gisa["road_inventory_context"]
+            assert ctx is not None
+            assert ctx["dataset_version_id"] == v["version_id"]
+            assert ctx["segment_id"] == seg_id
+            assert ctx["match_method"] == "MOBILE_OFFLINE"
+            assert ctx["snapshot"] is not None
+            assert ctx["snapshot"]["county_code"] == "SAC"
+        finally:
+            if incident_id:
+                with engine.begin() as conn:
+                    conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM road_inventory_datasets WHERE version_tag = 'gisa-ri-fwd'"))
+
+    def test_gisa_patch_does_not_wipe_ri_context(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(county="SAC", route="050", begin=0.0, end=10.0, district="03"), tag="gisa-ri-patch")
+        _publish(client_db, admin_token, v["version_id"])
+        seg_id = self._get_segment_id(v["version_id"])
+        incident_id = None
+        try:
+            incident_id = self._create_incident(client_db, admin_token, self._incident_payload({
+                "dataset_version_id": v["version_id"],
+                "segment_id": seg_id,
+                "match_method": "MOBILE_OFFLINE",
+                "snapshot": {"county_code": "SAC"},
+            }))
+            sub_id = self._link_location_and_forward(client_db, admin_token, incident_id)
+
+            # Patch some unrelated GISA fields
+            patch_resp = client_db.patch(
+                f"/submissions/{sub_id}/gisa",
+                json={"observations_notes": "Test observation after patch"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert patch_resp.status_code == 200
+
+            # RI context must still be present
+            get_resp = client_db.get(
+                f"/submissions/{sub_id}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert get_resp.status_code == 200
+            ctx = get_resp.json()["gisa"]["road_inventory_context"]
+            assert ctx is not None
+            assert ctx["dataset_version_id"] == v["version_id"]
+            assert get_resp.json()["gisa"]["observations_notes"] == "Test observation after patch"
+        finally:
+            if incident_id:
+                with engine.begin() as conn:
+                    conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM road_inventory_datasets WHERE version_tag = 'gisa-ri-patch'"))

@@ -101,6 +101,14 @@ export async function getGisaLookups(token: string) {
   return apiFetch("/gisa/lookups", { token });
 }
 
+export type GisaRoadInventoryContext = {
+  dataset_version_id: number;
+  segment_id: number | null;
+  match_method: string | null;
+  checked_at: string | null;
+  snapshot: Record<string, unknown> | null;
+};
+
 export type GisaPdfResponse = {
   submission_id: number;
   attachment_id: number;

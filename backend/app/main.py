@@ -392,6 +392,8 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           measure_main_scarp_height_ft, measure_landslide_slope_deg, measure_roadway_length_ft, measure_roadway_width_ft,
           record_of_event_notes, maintenance_history_notes, geotechnical_assessment_notes, recommendations_notes, sketchpad_notes,
           observations_notes, geometry_json,
+          road_inventory_dataset_version_id, road_inventory_segment_id,
+          road_inventory_snapshot_json, road_inventory_match_method, road_inventory_checked_at,
           updated_by_user_id, created_at, updated_at
         FROM submission_gisa
         WHERE submission_id = :sid
@@ -411,6 +413,28 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
             d["pavement_ground_annotation_layout_json"] = json.loads(d["pavement_ground_annotation_layout_json"])
         except Exception:
             pass
+
+    # Build nested road_inventory_context from flat DB columns.
+    ri_snapshot = d.pop("road_inventory_snapshot_json", None)
+    if isinstance(ri_snapshot, str):
+        try:
+            ri_snapshot = json.loads(ri_snapshot)
+        except Exception:
+            ri_snapshot = None
+    ri_dvid = d.pop("road_inventory_dataset_version_id", None)
+    ri_sid = d.pop("road_inventory_segment_id", None)
+    ri_method = d.pop("road_inventory_match_method", None)
+    ri_at = d.pop("road_inventory_checked_at", None)
+    if ri_dvid is not None:
+        d["road_inventory_context"] = {
+            "dataset_version_id": int(ri_dvid),
+            "segment_id": int(ri_sid) if ri_sid is not None else None,
+            "match_method": ri_method,
+            "checked_at": ri_at,
+            "snapshot": ri_snapshot,
+        }
+    else:
+        d["road_inventory_context"] = None
     # Normalize MySQL/MariaDB tinyint(1) values to JSON booleans for API consistency.
     bool_fields = {
         "pavement_ground_cracks",
