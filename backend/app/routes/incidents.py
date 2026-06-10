@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import decimal
 import hashlib
 import json
 import re
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from sqlalchemy import text
@@ -21,6 +23,7 @@ from ..schemas.common import (
     IncidentRequestRevision,
     IncidentResolveRequest,
     IncidentLocationLinkRequest,
+    RoadInventoryIncidentContext,
 )
 from ..storage import make_object_key, put_object_bytes
 from ..user_metadata import normalize_district_code, normalize_office_code, normalize_profile_text, parse_user_metadata
@@ -571,6 +574,77 @@ def _set_stage_assignment(
 
 
 
+def _json_safe(val: object) -> object:
+    if isinstance(val, (int, float, str, bool, type(None))):
+        return val
+    if isinstance(val, decimal.Decimal):
+        return float(val)
+    return str(val)
+
+
+def _validate_road_inventory_context(
+    db: Session,
+    context: RoadInventoryIncidentContext | None,
+) -> dict | None:
+    if context is None:
+        return None
+
+    dataset_id = int(context.dataset_version_id)
+    segment_id = int(context.segment_id)
+
+    if not db.execute(
+        text("SELECT 1 FROM road_inventory_datasets WHERE id = :id LIMIT 1"),
+        {"id": dataset_id},
+    ).scalar():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Road inventory dataset {dataset_id} not found",
+        )
+
+    seg = db.execute(
+        text(
+            """
+            SELECT id, dataset_version_id,
+                   district_code, county_code, route_name, route_suffix_code,
+                   pm_prefix_code, begin_pm, end_pm, length_miles,
+                   left_lanes, right_lanes, left_surface_type, right_surface_type,
+                   median_type, median_width, terrain_code, design_speed,
+                   adt, landmark_short_desc
+            FROM road_segments WHERE id = :id LIMIT 1
+            """
+        ),
+        {"id": segment_id},
+    ).mappings().first()
+    if not seg:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Road segment {segment_id} not found",
+        )
+    if int(seg["dataset_version_id"]) != dataset_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Segment {segment_id} belongs to dataset {int(seg['dataset_version_id'])}, not {dataset_id}",
+        )
+
+    if context.snapshot is not None:
+        snapshot = context.snapshot
+    else:
+        skip = {"id", "dataset_version_id"}
+        snapshot = {
+            k: _json_safe(v)
+            for k, v in dict(seg).items()
+            if k not in skip and v is not None
+        }
+
+    method = ((context.match_method or "") or "MOBILE_OFFLINE").strip().upper()[:32]
+    return {
+        "ri_dataset_version_id": dataset_id,
+        "ri_segment_id": segment_id,
+        "ri_snapshot_json": json.dumps(snapshot),
+        "ri_match_method": method,
+    }
+
+
 def _incident_with_assignment(db: Session, incident_id: int):
     row = db.execute(
         text(
@@ -580,6 +654,8 @@ def _incident_with_assignment(db: Session, incident_id: int):
               i.location_id, i.location_match_status, i.location_reviewed_by_user_id, i.location_match_metadata, i.location_reviewed_at,
               i.first_observed_at, i.first_occurred_at,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
+              i.road_inventory_dataset_version_id, i.road_inventory_segment_id,
+              i.road_inventory_snapshot_json, i.road_inventory_match_method, i.road_inventory_checked_at,
               i.office_code, i.current_stage,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,
@@ -657,6 +733,21 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
 
 
 def _serialize_incident(row: dict) -> dict:
+    ri_snapshot = row.get("road_inventory_snapshot_json")
+    if isinstance(ri_snapshot, str):
+        try:
+            ri_snapshot = json.loads(ri_snapshot)
+        except Exception:
+            ri_snapshot = None
+    ri_context: dict | None = None
+    if row.get("road_inventory_dataset_version_id") is not None:
+        ri_context = {
+            "dataset_version_id": int(row["road_inventory_dataset_version_id"]),
+            "segment_id": int(row["road_inventory_segment_id"]) if row.get("road_inventory_segment_id") is not None else None,
+            "match_method": row.get("road_inventory_match_method"),
+            "checked_at": row.get("road_inventory_checked_at"),
+            "snapshot": ri_snapshot,
+        }
     return {
         "id": int(row["id"]),
         "title": row["title"],
@@ -685,6 +776,7 @@ def _serialize_incident(row: dict) -> dict:
         "resolved_by_user_id": row["resolved_by_user_id"],
         "resolution_comment": row["resolution_comment"],
         "linked_submission_id": int(row["submission_id"]) if row["submission_id"] is not None else None,
+        "road_inventory_context": ri_context,
         "assignment": (
             {
                 "assignment_id": int(row["assignment_id"]),
@@ -955,6 +1047,7 @@ def create_incident(
 
     district_code = _normalized_district_code(district)
     office_code = _office_for_district(district)
+    ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     try:
         db.execute(
             text(
@@ -964,12 +1057,16 @@ def create_incident(
                   latitude, longitude,
                   first_observed_at, first_occurred_at,
                   district, county, route, post_mile, office_code, current_stage,
-                  status, reporter_user_id
+                  status, reporter_user_id,
+                  road_inventory_dataset_version_id, road_inventory_segment_id,
+                  road_inventory_snapshot_json, road_inventory_match_method, road_inventory_checked_at
                 ) VALUES (
                 :title, :incident_type, :description, NULL, 'PENDING_REVIEW', :lat, :lon,
                   :first_observed_at, :first_occurred_at,
                   :district, :county, :route, :post_mile, :office_code, 'COORDINATOR_REVIEW',
-                  'NEW', :uid
+                  'NEW', :uid,
+                  :ri_dataset_version_id, :ri_segment_id,
+                  :ri_snapshot_json, :ri_match_method, :ri_checked_at
                 )
                 """
             ),
@@ -987,6 +1084,11 @@ def create_incident(
                 "post_mile": post_mile,
                 "office_code": office_code,
                 "uid": user["id"],
+                "ri_dataset_version_id": ri["ri_dataset_version_id"] if ri else None,
+                "ri_segment_id": ri["ri_segment_id"] if ri else None,
+                "ri_snapshot_json": ri["ri_snapshot_json"] if ri else None,
+                "ri_match_method": ri["ri_match_method"] if ri else None,
+                "ri_checked_at": datetime.utcnow() if ri else None,
             },
         )
         new_id = int(db.execute(text("SELECT LAST_INSERT_ID()")).scalar())
@@ -1272,14 +1374,32 @@ def maintenance_resubmit_incident(
             )
 
     office_code = _office_for_district(district)
+    ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     metadata = {
         "mode": "RESUBMITTED_BY_MAINTENANCE",
         "performed_by_user_id": int(user["id"]),
     }
+    ri_set_sql = ""
+    ri_params: dict = {}
+    if ri:
+        ri_set_sql = (
+            "road_inventory_dataset_version_id = :ri_dataset_version_id, "
+            "road_inventory_segment_id = :ri_segment_id, "
+            "road_inventory_snapshot_json = :ri_snapshot_json, "
+            "road_inventory_match_method = :ri_match_method, "
+            "road_inventory_checked_at = :ri_checked_at, "
+        )
+        ri_params = {
+            "ri_dataset_version_id": ri["ri_dataset_version_id"],
+            "ri_segment_id": ri["ri_segment_id"],
+            "ri_snapshot_json": ri["ri_snapshot_json"],
+            "ri_match_method": ri["ri_match_method"],
+            "ri_checked_at": datetime.utcnow(),
+        }
     try:
         db.execute(
             text(
-                """
+                f"""
                 UPDATE incidents
                 SET title = :title,
                     incident_type = :incident_type,
@@ -1293,6 +1413,7 @@ def maintenance_resubmit_incident(
                     route = :route,
                     post_mile = :post_mile,
                     office_code = :office_code,
+                    {ri_set_sql}
                     location_id = NULL,
                     location_match_status = 'PENDING_REVIEW',
                     location_reviewed_by_user_id = NULL,
@@ -1317,6 +1438,7 @@ def maintenance_resubmit_incident(
                 "post_mile": post_mile,
                 "office_code": office_code,
                 "metadata": json.dumps(metadata),
+                **ri_params,
             },
         )
         db.commit()
@@ -1359,6 +1481,8 @@ def list_incidents(
               i.location_id, i.location_match_status, i.location_reviewed_by_user_id, i.location_match_metadata, i.location_reviewed_at,
               i.first_observed_at, i.first_occurred_at,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
+              i.road_inventory_dataset_version_id, i.road_inventory_segment_id,
+              i.road_inventory_snapshot_json, i.road_inventory_match_method, i.road_inventory_checked_at,
               i.office_code, i.current_stage,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,

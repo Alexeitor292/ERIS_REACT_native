@@ -108,6 +108,14 @@ export type SubmissionDetail = {
   workflow_events: WorkflowEvent[];
 };
 
+export type RoadInventoryIncidentContext = {
+  dataset_version_id: number;
+  segment_id: number;
+  match_method: string | null;
+  checked_at: string | null;
+  snapshot: Record<string, unknown> | null;
+};
+
 export type IncidentStatus = "NEW" | "IN_PROGRESS" | "RESOLVED";
 export type IncidentStage =
   | "COORDINATOR_REVIEW"
@@ -155,5 +163,6 @@ export type Incident = {
   resolved_by_user_id: number | null;
   resolution_comment: string | null;
   linked_submission_id: number | null;
+  road_inventory_context: RoadInventoryIncidentContext | null;
   assignment: IncidentAssignment | null;
 };

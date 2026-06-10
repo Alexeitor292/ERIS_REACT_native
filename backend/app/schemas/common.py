@@ -161,6 +161,13 @@ class GeometryResponse(BaseModel):
     source: str | None = None
 
 
+class RoadInventoryIncidentContext(BaseModel):
+    dataset_version_id: int
+    segment_id: int
+    match_method: str | None = "MOBILE_OFFLINE"
+    snapshot: dict | None = None
+
+
 class IncidentCreate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     incident_type: str | None = Field(default=None, max_length=64)
@@ -173,6 +180,7 @@ class IncidentCreate(BaseModel):
     county: str = Field(..., min_length=1, max_length=64)
     route: str = Field(..., min_length=1, max_length=64)
     post_mile: str = Field(..., min_length=1, max_length=64)
+    road_inventory_context: RoadInventoryIncidentContext | None = None
 
 
 class IncidentAssignRequest(BaseModel):
