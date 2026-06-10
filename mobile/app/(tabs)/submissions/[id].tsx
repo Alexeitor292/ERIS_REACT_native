@@ -8,7 +8,7 @@ import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathnam
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment } from "../../../src/api/submissions";
+import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaRoadInventoryContext } from "../../../src/api/submissions";
 import { enqueueOfflineOp } from "../../../src/offline/queue";
 import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
 import {
@@ -5064,10 +5064,39 @@ export default function SubmissionDetailScreen() {
         </DropdownBlock>
 
         <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
-            <MeasurementDiagramRenderer
-              formValues={form}
-              roadInventorySnapshot={null}
-            />
+            {(() => {
+              const riCtx = (data?.gisa?.road_inventory_context ?? null) as GisaRoadInventoryContext | null;
+              const riSnapshot = riCtx?.snapshot ?? null;
+              return (
+                <>
+                  <View style={[riInfoStyles.card, { borderColor: riCtx ? "#065f46" : palette.border, backgroundColor: palette.panelSoft }]}>
+                    {riCtx ? (
+                      <>
+                        <Text style={[riInfoStyles.title, { color: "#34d399" }]}>Road inventory context active</Text>
+                        <View style={riInfoStyles.row}>
+                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Dataset:</Text>
+                          <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.dataset_version_id}</Text>
+                        </View>
+                        <View style={riInfoStyles.row}>
+                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Segment:</Text>
+                          <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.segment_id ?? "—"}</Text>
+                        </View>
+                        <View style={riInfoStyles.row}>
+                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Source:</Text>
+                          <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.match_method ?? "—"}</Text>
+                        </View>
+                      </>
+                    ) : (
+                      <Text style={[riInfoStyles.title, { color: palette.muted }]}>No road inventory context attached. Diagram uses form / default roadway assumptions.</Text>
+                    )}
+                  </View>
+                  <MeasurementDiagramRenderer
+                    formValues={form}
+                    roadInventorySnapshot={riSnapshot}
+                  />
+                </>
+              );
+            })()}
             <Field palette={palette} label="Slope Height, ft (H)" value={form.measure_slope_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_slope_height_ft", v)} />
             <Field palette={palette} label="Original Slope, deg (α)" value={form.measure_original_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_original_slope_deg", v)} />
             <Field palette={palette} label="Landslide Width, ft (Wd)" value={form.measure_landslide_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_width_ft", v)} />
@@ -6847,6 +6876,35 @@ const styles = StyleSheet.create({
   fullscreenEditText: {
     color: "#dbeafe",
     fontWeight: "700",
+  },
+});
+
+const riInfoStyles = StyleSheet.create({
+  card: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 4,
+    gap: 3,
+  },
+  title: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  row: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: "600",
+    minWidth: 58,
+  },
+  value: {
+    fontSize: 11,
+    flex: 1,
   },
 });
 

@@ -812,6 +812,9 @@ def _ensure_linked_submission(
         ),
         {"iid": int(incident_row["id"])},
     ).scalar()
+
+    ri_dvid = incident_row.get("road_inventory_dataset_version_id")
+
     if existing is not None:
         db.execute(
             text(
@@ -829,6 +832,31 @@ def _ensure_linked_submission(
                 "updated_by": actor_user_id,
             },
         )
+        # Copy RI context into the existing GISA draft only when it has none yet.
+        if ri_dvid is not None:
+            db.execute(
+                text(
+                    """
+                    UPDATE submission_gisa
+                    SET
+                      road_inventory_dataset_version_id = :ri_dvid,
+                      road_inventory_segment_id         = :ri_sid,
+                      road_inventory_snapshot_json      = :ri_snapshot_json,
+                      road_inventory_match_method       = :ri_method,
+                      road_inventory_checked_at         = :ri_at
+                    WHERE submission_id = :sid
+                      AND road_inventory_dataset_version_id IS NULL
+                    """
+                ),
+                {
+                    "sid": int(existing),
+                    "ri_dvid": ri_dvid,
+                    "ri_sid": incident_row.get("road_inventory_segment_id"),
+                    "ri_snapshot_json": incident_row.get("road_inventory_snapshot_json"),
+                    "ri_method": incident_row.get("road_inventory_match_method"),
+                    "ri_at": incident_row.get("road_inventory_checked_at"),
+                },
+            )
         db.execute(
             text(
                 """
@@ -869,9 +897,29 @@ def _ensure_linked_submission(
         },
     )
 
+    ri_cols = ""
+    ri_vals = ""
+    ri_params: dict = {}
+    if ri_dvid is not None:
+        ri_cols = """,
+              road_inventory_dataset_version_id,
+              road_inventory_segment_id,
+              road_inventory_snapshot_json,
+              road_inventory_match_method,
+              road_inventory_checked_at"""
+        ri_vals = """,
+              :ri_dvid, :ri_sid, :ri_snapshot_json, :ri_method, :ri_at"""
+        ri_params = {
+            "ri_dvid": ri_dvid,
+            "ri_sid": incident_row.get("road_inventory_segment_id"),
+            "ri_snapshot_json": incident_row.get("road_inventory_snapshot_json"),
+            "ri_method": incident_row.get("road_inventory_match_method"),
+            "ri_at": incident_row.get("road_inventory_checked_at"),
+        }
+
     db.execute(
         text(
-            """
+            f"""
             INSERT INTO submission_gisa (
               submission_id,
               location_id,
@@ -883,7 +931,7 @@ def _ensure_linked_submission(
               post_mile,
               latitude,
               longitude,
-              updated_by_user_id
+              updated_by_user_id{ri_cols}
             ) VALUES (
               :sid,
               :location_id,
@@ -895,7 +943,7 @@ def _ensure_linked_submission(
               :post_mile,
               :lat,
               :lon,
-              :updated_by
+              :updated_by{ri_vals}
             )
             """
         ),
@@ -914,6 +962,7 @@ def _ensure_linked_submission(
             "lat": incident_row["latitude"],
             "lon": incident_row["longitude"],
             "updated_by": actor_user_id,
+            **ri_params,
         },
     )
 
