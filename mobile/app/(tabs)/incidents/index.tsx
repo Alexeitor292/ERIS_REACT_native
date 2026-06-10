@@ -28,6 +28,7 @@ import {
   type IncidentLocationCandidate,
   type IncidentLocationTimeline,
   type IncidentStatus,
+  type RoadInventoryIncidentContext,
   type RoutingUserOption,
 } from "@/src/api/incidents";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
@@ -446,9 +447,11 @@ export default function IncidentsTabScreen() {
   const [routePickerOpen, setRoutePickerOpen] = useState(false);
   const [roadInventoryAvailable, setRoadInventoryAvailable] = useState(false);
   const [roadInventoryVersionTag, setRoadInventoryVersionTag] = useState("");
+  const [roadInventoryDatasetVersionId, setRoadInventoryDatasetVersionId] = useState<number | null>(null);
   const [roadInventoryMatches, setRoadInventoryMatches] = useState<RoadSegment[] | null>(null);
   const [roadInventoryLookupBusy, setRoadInventoryLookupBusy] = useState(false);
   const [roadInventoryLookupError, setRoadInventoryLookupError] = useState<string | null>(null);
+  const [savedRoadInventoryContext, setSavedRoadInventoryContext] = useState<RoadInventoryIncidentContext | null>(null);
   const riLookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const createScrollRef = useRef<ScrollView | null>(null);
   const createFieldY = useRef<Record<string, number>>({});
@@ -594,6 +597,7 @@ export default function IncidentsTabScreen() {
     setCounty((incident.county || "").trim());
     setRouteValue(normalizeRoute(incident.route || ""));
     setPostMile(normalizePostMileInput(incident.post_mile));
+    setSavedRoadInventoryContext(incident.road_inventory_context ?? null);
   };
 
   useEffect(() => {
@@ -654,6 +658,7 @@ export default function IncidentsTabScreen() {
       getLocalRoadInventoryStatus().then((status) => {
         setRoadInventoryAvailable(status.available);
         setRoadInventoryVersionTag(status.available ? status.meta.version_tag : "");
+        setRoadInventoryDatasetVersionId(status.available ? status.meta.dataset_version_id : null);
       }).catch(() => {});
     }, []),
   );
@@ -743,6 +748,7 @@ export default function IncidentsTabScreen() {
     setRevisionEditableFields(null);
     setRoadInventoryMatches(null);
     setRoadInventoryLookupError(null);
+    setSavedRoadInventoryContext(null);
   };
 
   const canEditField = (field: string) => {
@@ -916,7 +922,35 @@ export default function IncidentsTabScreen() {
     setBusy(true);
     setErr(null);
     try {
-      // TODO: persist selected road inventory segment id/context in a future backend schema migration.
+      const seg = roadInventoryMatches && roadInventoryMatches.length > 0 ? roadInventoryMatches[0] : null;
+      const riContext =
+        seg && roadInventoryDatasetVersionId
+          ? {
+              dataset_version_id: roadInventoryDatasetVersionId,
+              segment_id: seg.id,
+              match_method: "MOBILE_OFFLINE",
+              snapshot: {
+                district_code: seg.district_code,
+                county_code: seg.county_code,
+                route_name: seg.route_name,
+                route_suffix_code: seg.route_suffix_code,
+                pm_prefix_code: seg.pm_prefix_code,
+                begin_pm: seg.begin_pm,
+                end_pm: seg.end_pm,
+                length_miles: seg.length_miles,
+                left_lanes: seg.left_lanes,
+                right_lanes: seg.right_lanes,
+                left_surface_type: seg.left_surface_type,
+                right_surface_type: seg.right_surface_type,
+                median_type: seg.median_type,
+                median_width: seg.median_width,
+                terrain_code: seg.terrain_code,
+                design_speed: seg.design_speed,
+                adt: seg.adt,
+                landmark_short_desc: seg.landmark_short_desc,
+              },
+            }
+          : undefined;
       const payload = {
         description: description.trim() || null,
         first_observed_at: firstObservedAt.trim(),
@@ -927,6 +961,7 @@ export default function IncidentsTabScreen() {
         county: county.trim(),
         route: routeValue.trim(),
         post_mile: normalizePostMileValue(postMile) ?? "",
+        road_inventory_context: riContext,
       };
       const selectedFileCount = pendingIncidentFiles.length;
       let savedIncidentId = editingIncidentId;
@@ -1418,6 +1453,29 @@ export default function IncidentsTabScreen() {
                   lookupError={roadInventoryLookupError}
                   palette={palette}
                 />
+                {isDetailRoute && savedRoadInventoryContext ? (
+                  <View style={[riCardStyles.card, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+                    <Text style={[riCardStyles.title, { color: palette.text }]}>Saved Road Inventory Context</Text>
+                    <Text style={{ color: palette.muted, fontSize: 11, marginBottom: 4 }}>Linked when this incident was filed.</Text>
+                    <View style={riCardStyles.grid}>
+                      {(
+                        [
+                          ["Dataset version", String(savedRoadInventoryContext.dataset_version_id)],
+                          ["Segment ID", String(savedRoadInventoryContext.segment_id)],
+                          ["Match method", savedRoadInventoryContext.match_method],
+                          ["Checked at", savedRoadInventoryContext.checked_at],
+                        ] as [string, string | null][]
+                      )
+                        .filter(([, v]) => v != null && String(v).trim() !== "")
+                        .map(([label, value]) => (
+                          <View key={label} style={riCardStyles.row}>
+                            <Text style={[riCardStyles.fieldLabel, { color: palette.muted }]}>{label}</Text>
+                            <Text style={[riCardStyles.fieldValue, { color: palette.text }]}>{value}</Text>
+                          </View>
+                        ))}
+                    </View>
+                  </View>
+                ) : null}
                 <SelectField
                   label="First Observed (YYYY-MM-DD) *"
                   value={firstObservedAt}

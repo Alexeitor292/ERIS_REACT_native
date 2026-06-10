@@ -37,6 +37,7 @@ jobs:
           python -m py_compile migrations/versions/0002_road_inventory.py
           python -m py_compile migrations/versions/0003_road_inventory_import_jobs.py
           python -m py_compile migrations/versions/0004_ri_packages_json_gz.py
+          python -m py_compile migrations/versions/0005_incidents_ri_context.py
 
       - name: Alembic script check
         run: |

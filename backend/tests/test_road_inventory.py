@@ -768,3 +768,151 @@ class TestPackageGeneration:
                 conn.execute(text(
                     "DELETE FROM road_inventory_datasets WHERE version_tag = 'pkg-get'"
                 ))
+
+
+# ---------------------------------------------------------------------------
+# Road inventory context on incidents
+# ---------------------------------------------------------------------------
+
+class TestRoadInventoryContext:
+
+    def _incident_payload(self, ri_context=None) -> dict:
+        payload = {
+            "first_observed_at": "2026-06-09T00:00:00",
+            "latitude": 38.5,
+            "longitude": -121.5,
+            "district": "03",
+            "county": "SAC",
+            "route": "50",
+            "post_mile": "5.0",
+        }
+        if ri_context is not None:
+            payload["road_inventory_context"] = ri_context
+        return payload
+
+    def _get_segment_id(self, version_id: int) -> int:
+        from app.db import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            return conn.execute(text(
+                "SELECT id FROM road_segments WHERE dataset_version_id = :vid LIMIT 1"
+            ), {"vid": version_id}).scalar()
+
+    def test_create_without_ri_context_works(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        resp = client_db.post(
+            "/incidents",
+            json=self._incident_payload(),
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200
+        incident = resp.json()["incident"]
+        assert incident["road_inventory_context"] is None
+
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident["id"]})
+
+    def test_create_with_valid_context_stores_all_fields(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(county="SAC", route="050", begin=0.0, end=10.0, district="03"), tag="ri-ctx-valid")
+        _publish(client_db, admin_token, v["version_id"])
+        seg_id = self._get_segment_id(v["version_id"])
+        try:
+            resp = client_db.post(
+                "/incidents",
+                json=self._incident_payload({
+                    "dataset_version_id": v["version_id"],
+                    "segment_id": seg_id,
+                    "match_method": "MOBILE_OFFLINE",
+                    "snapshot": {"county_code": "SAC", "route_name": "50"},
+                }),
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 200
+            incident = resp.json()["incident"]
+            ctx = incident["road_inventory_context"]
+            assert ctx is not None
+            assert ctx["dataset_version_id"] == v["version_id"]
+            assert ctx["segment_id"] == seg_id
+            assert ctx["match_method"] == "MOBILE_OFFLINE"
+            assert ctx["checked_at"] is not None
+
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident["id"]})
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM road_inventory_datasets WHERE version_tag = 'ri-ctx-valid'"))
+
+    def test_create_with_invalid_dataset_id_returns_400(self, client_db, admin_token):
+        resp = client_db.post(
+            "/incidents",
+            json=self._incident_payload({
+                "dataset_version_id": 999999999,
+                "segment_id": 1,
+            }),
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 400
+
+    def test_create_with_segment_from_wrong_dataset_returns_400(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v1 = _upload(client_db, admin_token, _row(county="SAC", route="050", begin=0.0, end=10.0), tag="ri-ctx-ds1")
+        _publish(client_db, admin_token, v1["version_id"])
+        seg_from_v1 = self._get_segment_id(v1["version_id"])
+
+        v2 = _upload(client_db, admin_token, _row(county="ORA", route="001"), tag="ri-ctx-ds2")
+        _publish(client_db, admin_token, v2["version_id"])
+        try:
+            resp = client_db.post(
+                "/incidents",
+                json=self._incident_payload({
+                    "dataset_version_id": v2["version_id"],
+                    "segment_id": seg_from_v1,
+                }),
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 400
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM road_inventory_datasets WHERE version_tag IN ('ri-ctx-ds1', 'ri-ctx-ds2')"))
+
+    def test_list_incidents_includes_ri_context(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+
+        v = _upload(client_db, admin_token, _row(county="SAC", route="050", begin=0.0, end=10.0, district="03"), tag="ri-ctx-list")
+        _publish(client_db, admin_token, v["version_id"])
+        seg_id = self._get_segment_id(v["version_id"])
+        try:
+            create_resp = client_db.post(
+                "/incidents",
+                json=self._incident_payload({
+                    "dataset_version_id": v["version_id"],
+                    "segment_id": seg_id,
+                }),
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert create_resp.status_code == 200
+            incident_id = create_resp.json()["incident"]["id"]
+
+            list_resp = client_db.get(
+                "/incidents?scope=all",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert list_resp.status_code == 200
+            found = next((i for i in list_resp.json()["items"] if i["id"] == incident_id), None)
+            assert found is not None
+            assert found["road_inventory_context"] is not None
+            assert found["road_inventory_context"]["dataset_version_id"] == v["version_id"]
+
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM road_inventory_datasets WHERE version_tag = 'ri-ctx-list'"))

@@ -10,6 +10,14 @@ export type IncidentStage =
   | "ENGINEER_ASSIGNED"
   | "RESOLVED";
 
+export type RoadInventoryIncidentContext = {
+  dataset_version_id: number;
+  segment_id: number;
+  match_method: string | null;
+  checked_at: string | null;
+  snapshot: Record<string, unknown> | null;
+};
+
 export type Incident = {
   id: number;
   title: string | null;
@@ -38,6 +46,7 @@ export type Incident = {
   resolved_by_user_id: number | null;
   resolution_comment: string | null;
   linked_submission_id: number | null;
+  road_inventory_context: RoadInventoryIncidentContext | null;
   assignment: {
     assignment_id: number;
     assignee_user_id: number;
@@ -62,6 +71,12 @@ export type IncidentCreatePayload = {
   county: string;
   route: string;
   post_mile: string;
+  road_inventory_context?: {
+    dataset_version_id: number;
+    segment_id: number;
+    match_method?: string | null;
+    snapshot?: Record<string, unknown> | null;
+  } | null;
 };
 
 export type IncidentLocationCandidate = {
