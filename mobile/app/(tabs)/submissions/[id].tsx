@@ -39,6 +39,7 @@ import {
   districtForCounty,
   routesForCounty,
 } from "../../../src/utils/caltransLookups";
+import { MeasurementDiagramRenderer } from "../../../src/components/MeasurementDiagramRenderer";
 
 type OptionItem = { code: string; label: string };
 type UserInfo = { id: number; roles: string[] };
@@ -423,7 +424,6 @@ const DISTRIBUTION_ICON_SOURCE: Record<string, any> = {
   MOVING: require("../../../assets/distribution-icons/moving.png"),
   CONFINED: require("../../../assets/distribution-icons/confined.png"),
 };
-const LANDSLIDE_MEASURE_DIAGRAM = require("../../../assets/measurement/landslide.png");
 
 function createEmptyDistrictContact(): DistrictContact {
   return {
@@ -5064,9 +5064,10 @@ export default function SubmissionDetailScreen() {
         </DropdownBlock>
 
         <DropdownBlock title="Measurements" open={openPaperBlocks.measurements} onToggle={() => togglePaperBlock("measurements")} palette={palette}>
-            <View style={[styles.measurementDiagramWrap, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
-              <Image source={LANDSLIDE_MEASURE_DIAGRAM} style={styles.measurementDiagram} resizeMode="contain" />
-            </View>
+            <MeasurementDiagramRenderer
+              formValues={form}
+              roadInventorySnapshot={null}
+            />
             <Field palette={palette} label="Slope Height, ft (H)" value={form.measure_slope_height_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_slope_height_ft", v)} />
             <Field palette={palette} label="Original Slope, deg (α)" value={form.measure_original_slope_deg} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_original_slope_deg", v)} />
             <Field palette={palette} label="Landslide Width, ft (Wd)" value={form.measure_landslide_width_ft} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("measure_landslide_width_ft", v)} />
