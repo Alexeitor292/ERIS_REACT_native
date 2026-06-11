@@ -35,6 +35,7 @@ from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
 from .schemas.common import (
+    ElevationProfileRequest,
     GeometryResponse,
     GeometryUpsert,
     GisaDraftPatch,
@@ -48,6 +49,7 @@ from .schemas.common import (
     SubmissionTitlePatch,
     WorkflowAction,
 )
+from .services import elevation_profile as elevation_profile_svc
 from .services.gisa_validation import (
     validate_action_code_group,
     validate_distribution_code,
@@ -394,6 +396,8 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           observations_notes, geometry_json,
           road_inventory_dataset_version_id, road_inventory_segment_id,
           road_inventory_snapshot_json, road_inventory_match_method, road_inventory_checked_at,
+          elevation_profile_json, elevation_profile_source, elevation_profile_checked_at,
+          elevation_profile_classification, elevation_profile_confidence, elevation_profile_error,
           updated_by_user_id, created_at, updated_at
         FROM submission_gisa
         WHERE submission_id = :sid
@@ -435,6 +439,31 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
         }
     else:
         d["road_inventory_context"] = None
+
+    # Build nested elevation_profile from flat DB columns.
+    ep_json_raw = d.pop("elevation_profile_json", None)
+    if isinstance(ep_json_raw, str):
+        try:
+            ep_json_raw = json.loads(ep_json_raw)
+        except Exception:
+            ep_json_raw = None
+    ep_source = d.pop("elevation_profile_source", None)
+    ep_at = d.pop("elevation_profile_checked_at", None)
+    ep_class = d.pop("elevation_profile_classification", None)
+    ep_conf = d.pop("elevation_profile_confidence", None)
+    ep_err = d.pop("elevation_profile_error", None)
+    if ep_source is not None or ep_at is not None:
+        d["elevation_profile"] = {
+            "source": ep_source,
+            "checked_at": str(ep_at) if ep_at is not None else None,
+            "classification": ep_class,
+            "confidence": float(ep_conf) if ep_conf is not None else None,
+            "profile": ep_json_raw,
+            "error": ep_err,
+        }
+    else:
+        d["elevation_profile"] = None
+
     # Normalize MySQL/MariaDB tinyint(1) values to JSON booleans for API consistency.
     bool_fields = {
         "pavement_ground_cracks",
@@ -2240,6 +2269,109 @@ def patch_gisa(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/submissions/{submission_id}/gisa/elevation-profile")
+def enrich_gisa_elevation_profile(
+    submission_id: int = Path(..., ge=1),
+    payload: ElevationProfileRequest = ElevationProfileRequest(),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_edit_submission(submission_id, db, user)
+
+    # Read current GISA row for lat/lon and existing profile
+    row = db.execute(text("""
+        SELECT latitude, longitude,
+               elevation_profile_source, elevation_profile_checked_at,
+               elevation_profile_classification, elevation_profile_confidence,
+               elevation_profile_json, elevation_profile_error
+        FROM submission_gisa
+        WHERE submission_id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="GISA data not found for this submission")
+
+    lat = row["latitude"]
+    lon = row["longitude"]
+    if lat is None or lon is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot fetch elevation profile: GISA latitude/longitude are not set",
+        )
+
+    force = bool(payload.force) if payload.force is not None else False
+
+    # Return existing profile if present and force not requested
+    existing_source = row["elevation_profile_source"]
+    if existing_source and not force:
+        ep_json_raw = row["elevation_profile_json"]
+        if isinstance(ep_json_raw, str):
+            try:
+                ep_json_raw = json.loads(ep_json_raw)
+            except Exception:
+                ep_json_raw = None
+        ep_conf = row["elevation_profile_confidence"]
+        return {
+            "submission_id": submission_id,
+            "elevation_profile": {
+                "source": existing_source,
+                "checked_at": str(row["elevation_profile_checked_at"]) if row["elevation_profile_checked_at"] else None,
+                "classification": row["elevation_profile_classification"],
+                "confidence": float(ep_conf) if ep_conf is not None else None,
+                "profile": ep_json_raw,
+                "error": row["elevation_profile_error"],
+            },
+        }
+
+    # Fetch from USGS EPQS
+    result = elevation_profile_svc.fetch_elevation_profile(
+        lat=float(lat),
+        lon=float(lon),
+        road_bearing_deg=payload.road_bearing_deg,
+        half_width_m=float(payload.half_width_m) if payload.half_width_m is not None else 60.0,
+        spacing_m=float(payload.spacing_m) if payload.spacing_m is not None else 10.0,
+    )
+
+    profile_json_str = json.dumps(result.get("profile"))
+
+    try:
+        db.execute(text("""
+            UPDATE submission_gisa
+            SET elevation_profile_source         = :source,
+                elevation_profile_checked_at     = :checked_at,
+                elevation_profile_classification = :classification,
+                elevation_profile_confidence     = :confidence,
+                elevation_profile_json           = :profile_json,
+                elevation_profile_error          = :error
+            WHERE submission_id = :sid
+        """), {
+            "sid": submission_id,
+            "source": result["source"],
+            "checked_at": result["checked_at"],
+            "classification": result["classification"],
+            "confidence": result["confidence"],
+            "profile_json": profile_json_str,
+            "error": result["error"],
+        })
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "submission_id": submission_id,
+        "elevation_profile": {
+            "source": result["source"],
+            "checked_at": result["checked_at"],
+            "classification": result["classification"],
+            "confidence": result["confidence"],
+            "profile": result.get("profile"),
+            "error": result["error"],
+        },
+    }
 
 
 @app.put("/submissions/{submission_id}/gisa/incident-types")

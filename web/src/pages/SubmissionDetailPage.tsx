@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { GisaLookups, SubmissionDetail } from "../api/types";
+import type { GisaElevationProfile, GisaLookups, SubmissionDetail } from "../api/types";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import { getToken } from "../auth/token";
@@ -429,6 +429,8 @@ export default function SubmissionDetailPage() {
     Default: buildDefaultDashboardLayout(),
   });
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => buildDefaultDashboardLayout());
+  const [elevFetching, setElevFetching] = useState(false);
+  const [elevError, setElevError] = useState<string | null>(null);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
@@ -736,6 +738,20 @@ export default function SubmissionDetailPage() {
     } catch (e: any) {
       setErr(e?.message ?? "Unshare failed");
       setBusy(false);
+    }
+  }
+  async function fetchElevation(force: boolean) {
+    setElevFetching(true); setElevError(null);
+    try {
+      await api<{ elevation_profile: GisaElevationProfile }>(
+        `/submissions/${sid}/gisa/elevation-profile`,
+        { method: "POST", body: JSON.stringify({ force }) },
+      );
+      await load();
+    } catch (e: any) {
+      setElevError(e?.message ?? "Elevation fetch failed");
+    } finally {
+      setElevFetching(false);
     }
   }
   async function openDownloadUrl(id: number) {
@@ -1951,6 +1967,47 @@ export default function SubmissionDetailPage() {
                           </div>
                         ) : (
                           <div className="mb-2 text-xs italic text-muted">No road inventory context. Diagram uses form / default roadway assumptions.</div>
+                        )}
+                        {/* Elevation profile panel */}
+                        {data.gisa?.elevation_profile ? (
+                          <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_28%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,transparent)] px-2.5 py-2 text-xs">
+                            <div className="mb-1 flex items-center justify-between">
+                              <span className="font-semibold text-[var(--brand)]">Elevation profile</span>
+                              <button
+                                disabled={elevFetching}
+                                onClick={() => fetchElevation(true)}
+                                className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
+                              >
+                                {elevFetching ? "Refreshing…" : "Refresh"}
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
+                              <span>Source: <span className="text-[var(--ink)]">{data.gisa.elevation_profile.source ?? "—"}</span></span>
+                              <span>Classification: <span className="text-[var(--ink)]">{data.gisa.elevation_profile.classification ?? "—"}</span></span>
+                              {data.gisa.elevation_profile.confidence != null && (
+                                <span>Confidence: <span className="text-[var(--ink)]">{(data.gisa.elevation_profile.confidence * 100).toFixed(0)}%</span></span>
+                              )}
+                              {data.gisa.elevation_profile.checked_at && (
+                                <span>Checked: <span className="text-[var(--ink)]">{data.gisa.elevation_profile.checked_at.slice(0, 10)}</span></span>
+                              )}
+                            </div>
+                            {data.gisa.elevation_profile.error && (
+                              <div className="mt-1 text-[10px] text-[var(--error)]">{data.gisa.elevation_profile.error}</div>
+                            )}
+                            {elevError && <div className="mt-1 text-[10px] text-[var(--error)]">{elevError}</div>}
+                          </div>
+                        ) : (
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="text-xs italic text-muted">No elevation profile fetched.</span>
+                            <button
+                              disabled={elevFetching}
+                              onClick={() => fetchElevation(false)}
+                              className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
+                            >
+                              {elevFetching ? "Fetching…" : "Fetch Elevation Profile"}
+                            </button>
+                            {elevError && <span className="text-[10px] text-[var(--error)]">{elevError}</span>}
+                          </div>
                         )}
                         <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
                           <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />

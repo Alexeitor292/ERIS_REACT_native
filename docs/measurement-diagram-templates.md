@@ -94,10 +94,11 @@ See the table in the Templates section above. Inference is applied when the Terr
 
 Each diagram section shows the data source in a badge and the source/assumption note row below the controls:
 
-- **Road**: Road inventory snapshot → Form fields → Default (24 ft, 2 lanes)
-- **Template**: Auto-inferred from GISA failure type fields, or manually overridden
-- **Terrain**: Auto-inferred from template + failure side, or manually overridden
-- **Elevation**: Not yet connected — actual DEM or survey elevation data would improve terrain accuracy
+- **Road**: Road inventory snapshot → Form fields → Default (24 ft, 2 lanes). Source of truth: `road_inventory_context.snapshot` (unchanged).
+- **Template**: Auto-inferred from GISA failure type fields, or manually overridden.
+- **Terrain (current)**: Auto-inferred from template + failure side. This is a heuristic approximation — manual terrain controls remain schematic.
+- **Terrain (next PR)**: Terrain AUTO will be driven by `elevation_profile.classification` persisted from USGS 3DEP/EPQS (see `docs/elevation-profile-enrichment.md`). Once wired, `LEFT_HIGH`/`RIGHT_HIGH`/`BOWL`/`CROWN`/`FLAT` will come from real elevation data.
+- **Elevation**: Backend elevation profile enrichment is active (migration 0007). The mobile diagram source note shows "Elevation: not connected" until the classification is wired into `buildMeasurementDiagramData`.
 
 ---
 
@@ -114,6 +115,6 @@ To manually override:
 
 ## Future improvements
 
-- Connect actual DEM or cross-section survey elevation to drive terrain polygons
+- Wire `elevation_profile.classification` into `buildMeasurementDiagramData` so terrain AUTO uses real USGS elevation data
 - Add scarp height annotation to terrain profile
 - Support cut/fill depth callouts on terrain surface
