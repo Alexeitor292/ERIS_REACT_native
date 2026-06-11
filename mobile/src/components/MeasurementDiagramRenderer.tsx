@@ -1,5 +1,9 @@
-import React, { useState, useCallback } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent } from "react-native";
+import React, { useState, useCallback, useEffect } from "react";
+import {
+  View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent,
+  Modal, SafeAreaView, StatusBar, Dimensions,
+} from "react-native";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { RoadCrossSectionRenderer } from "./RoadCrossSectionRenderer";
 import { buildMeasurementDiagramData } from "../measurements/buildMeasurementDiagramData";
 import type { DiagramTemplate, FailureSide, StationingView, TerrainSideShape } from "../measurements/measurementDiagramModel";
@@ -53,13 +57,51 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
   const [failureSide, setFailureSide] = useState<FailureSide>("LT");
   const [terrainShape, setTerrainShape] = useState<TerrainSideShape | "AUTO">("AUTO");
   const [containerWidth, setContainerWidth] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fsWidth, setFsWidth] = useState(0);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     setContainerWidth(e.nativeEvent.layout.width);
   }, []);
 
+  const onFsLayout = useCallback((e: LayoutChangeEvent) => {
+    setFsWidth(e.nativeEvent.layout.width);
+  }, []);
+
+  const openFullscreen = useCallback(async () => {
+    setFullscreen(true);
+    await ScreenOrientation.unlockAsync();
+  }, []);
+
+  const closeFullscreen = useCallback(async () => {
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    setFullscreen(false);
+  }, []);
+
+  // Safety: re-lock if component unmounts while fullscreen is open
+  useEffect(() => {
+    return () => {
+      if (fullscreen) {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      }
+    };
+  }, [fullscreen]);
+
   const data =
     containerWidth > 0
+      ? buildMeasurementDiagramData(
+          formValues,
+          roadInventorySnapshot,
+          template,
+          view,
+          failureSide,
+          terrainShape,
+          elevationProfile,
+        )
+      : null;
+
+  const fsData =
+    fsWidth > 0
       ? buildMeasurementDiagramData(
           formValues,
           roadInventorySnapshot,
@@ -87,7 +129,7 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
       ? "auto · pending GEO"
       : TEMPLATE_SHORT[template as DiagramTemplate] ?? template;
 
-  // Terrain note — reflects what AUTO actually resolved to
+  // Terrain note
   let terrainNoteLabel: string;
   if (terrainShape !== "AUTO") {
     terrainNoteLabel = `manual · ${TERRAIN_SHORT[terrainShape as TerrainSideShape] ?? terrainShape}`;
@@ -109,13 +151,16 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
     elevNoteLabel = elevationProfile.source ?? "USGS";
   }
 
+  const compactNote = `Road: ${sourceLabel}  ·  Terrain: ${terrainNoteLabel}  ·  Elev: ${elevNoteLabel}`;
+  const fullNote = `Road: ${sourceLabel}  ·  Template: ${templateNoteLabel}  ·  Terrain: ${terrainNoteLabel}  ·  Elevation: ${elevNoteLabel}`;
+
   // Failure side selector is only meaningful for ABOVE and BELOW templates
   const resolvedTemplate: DiagramTemplate =
     template === "AUTO" ? "LANDSLIDE_THROUGH_ROAD" : template;
   const showFailureSide = resolvedTemplate !== "LANDSLIDE_THROUGH_ROAD";
 
-  return (
-    <View style={styles.wrapper}>
+  const controls = (
+    <>
       {/* Template selector */}
       <View style={styles.segRow}>
         {TEMPLATES.map((t) => (
@@ -133,7 +178,6 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
         ))}
       </View>
 
-      {/* Failure side selector — LT/RT are Caltrans stationing sides, not compass directions */}
       {showFailureSide && (
         <View style={styles.controlRow}>
           <Text style={styles.controlLabel}>Failure side:</Text>
@@ -153,7 +197,6 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
         </View>
       )}
 
-      {/* Terrain shape selector */}
       <View style={styles.controlRow}>
         <Text style={styles.controlLabel}>Terrain:</Text>
         {TERRAIN_SHAPES.map((ts) => (
@@ -170,8 +213,14 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
           </TouchableOpacity>
         ))}
       </View>
+    </>
+  );
 
-      {/* Stationing view toggle and data source badge */}
+  return (
+    <View style={styles.wrapper}>
+      {controls}
+
+      {/* Stationing view + source badge + fullscreen button */}
       <View style={styles.viewRow}>
         <Text style={styles.viewLabel}>View:</Text>
         <TouchableOpacity
@@ -194,16 +243,21 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
         <View style={[styles.badge, { backgroundColor: sourceBadgeColor }]}>
           <Text style={styles.badgeText}>{sourceLabel}</Text>
         </View>
+
+        <TouchableOpacity
+          style={styles.fsBtn}
+          onPress={openFullscreen}
+          accessibilityLabel="Open fullscreen diagram"
+          accessibilityRole="button"
+        >
+          <Text style={styles.fsBtnText}>⤢</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Source / assumption notes */}
       <View style={styles.noteRow}>
-        <Text style={styles.noteText}>
-          {`Road: ${sourceLabel}  ·  Template: ${templateNoteLabel}  ·  Terrain: ${terrainNoteLabel}  ·  Elevation: ${elevNoteLabel}`}
-        </Text>
+        <Text style={styles.noteText}>{fullNote}</Text>
       </View>
 
-      {/* SVG diagram */}
       <View style={styles.svgContainer} onLayout={onLayout}>
         {data && containerWidth > 0 ? (
           <RoadCrossSectionRenderer data={data} width={containerWidth} />
@@ -213,6 +267,85 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
           </View>
         )}
       </View>
+
+      {/* Fullscreen modal */}
+      <Modal
+        visible={fullscreen}
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeFullscreen}
+      >
+        <StatusBar hidden />
+        <SafeAreaView style={styles.fsModal}>
+          {/* Fullscreen header */}
+          <View style={styles.fsHeader}>
+            <View style={styles.fsHeaderLeft}>
+              {TEMPLATES.map((t) => (
+                <TouchableOpacity
+                  key={t.key}
+                  style={[styles.fsSeg, template === t.key && styles.fsSegActive]}
+                  onPress={() => setTemplate(t.key)}
+                >
+                  <Text style={[styles.segText, template === t.key && styles.segTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={styles.fsCloseBtn} onPress={closeFullscreen} accessibilityLabel="Close fullscreen">
+              <Text style={styles.fsCloseBtnText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Fullscreen sub-controls */}
+          <View style={styles.fsControls}>
+            {showFailureSide && FAILURE_SIDES.map((fs) => (
+              <TouchableOpacity
+                key={fs.key}
+                style={[styles.controlBtn, failureSide === fs.key && styles.controlBtnActive]}
+                onPress={() => setFailureSide(fs.key)}
+              >
+                <Text style={[styles.controlBtnText, failureSide === fs.key && styles.controlBtnTextActive]}>
+                  {fs.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {TERRAIN_SHAPES.map((ts) => (
+              <TouchableOpacity
+                key={ts.key}
+                style={[styles.controlBtn, terrainShape === ts.key && styles.terrainBtnActive]}
+                onPress={() => setTerrainShape(ts.key)}
+              >
+                <Text style={[styles.controlBtnText, terrainShape === ts.key && styles.controlBtnTextActive]}>
+                  {ts.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.viewBtn, view === "UPSTATION" && styles.viewBtnActive]}
+              onPress={() => setView(view === "UPSTATION" ? "DOWNSTATION" : "UPSTATION")}
+            >
+              <Text style={[styles.viewBtnText, view === "UPSTATION" && styles.viewBtnTextActive]}>
+                {view === "UPSTATION" ? "↑ UP" : "↓ DOWN"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Fullscreen diagram — fills remaining space */}
+          <View style={styles.fsBody} onLayout={onFsLayout}>
+            {fsData && fsWidth > 0 ? (
+              <RoadCrossSectionRenderer data={fsData} width={fsWidth} />
+            ) : (
+              <View style={styles.placeholder}>
+                <Text style={styles.placeholderText}>Loading…</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Compact note */}
+          <View style={styles.fsNoteRow}>
+            <Text style={styles.noteText}>{compactNote}</Text>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -319,7 +452,6 @@ const styles = StyleSheet.create({
     color: "#ffffff",
   },
   badge: {
-    marginLeft: "auto",
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 4,
@@ -328,6 +460,19 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: "#d1fae5",
     fontWeight: "700",
+  },
+  fsBtn: {
+    marginLeft: "auto",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#475569",
+    backgroundColor: "#1e293b",
+  },
+  fsBtnText: {
+    fontSize: 13,
+    color: "#94a3b8",
   },
   noteRow: {
     paddingHorizontal: 8,
@@ -352,5 +497,66 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: "#475569",
     fontSize: 12,
+  },
+  // Fullscreen modal styles
+  fsModal: {
+    flex: 1,
+    backgroundColor: "#060d1a",
+  },
+  fsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0f172a",
+    borderBottomWidth: 1,
+    borderBottomColor: "#1e293b",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  fsHeaderLeft: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 4,
+  },
+  fsSeg: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 4,
+    backgroundColor: "#1e293b",
+  },
+  fsSegActive: {
+    backgroundColor: "#1d4ed8",
+  },
+  fsControls: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    gap: 5,
+    backgroundColor: "#0f1e30",
+    borderBottomWidth: 1,
+    borderBottomColor: "#1e293b",
+  },
+  fsCloseBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 4,
+    backgroundColor: "#334155",
+  },
+  fsCloseBtnText: {
+    fontSize: 14,
+    color: "#f1f5f9",
+    fontWeight: "700",
+  },
+  fsBody: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  fsNoteRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#0a1628",
+    borderTopWidth: 1,
+    borderTopColor: "#1e293b",
   },
 });

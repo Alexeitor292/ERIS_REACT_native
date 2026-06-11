@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaElevationProfile, GisaLookups, SubmissionDetail } from "../api/types";
+import { friendlyFieldLabel, friendlyFieldValue, fieldDescription, terrainLabel } from "../utils/roadInventoryGlossary";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import { getToken } from "../auth/token";
@@ -431,6 +432,7 @@ export default function SubmissionDetailPage() {
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => buildDefaultDashboardLayout());
   const [elevFetching, setElevFetching] = useState(false);
   const [elevError, setElevError] = useState<string | null>(null);
+  const [riDetailsOpen, setRiDetailsOpen] = useState(false);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
@@ -1949,23 +1951,61 @@ export default function SubmissionDetailPage() {
                     <div {...cardFrameProps("measurements")}>
                         {layoutTools("measurements")}
                         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Measurements</div>
-                        {data.gisa?.road_inventory_context ? (
-                          <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--good)_32%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_8%,transparent)] px-2.5 py-2 text-xs">
-                            <div className="mb-1 font-semibold text-[var(--good)]">Road inventory context</div>
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
-                              <span>Dataset: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.dataset_version_id}</span></span>
-                              <span>Segment: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.segment_id ?? "—"}</span></span>
-                              {data.gisa.road_inventory_context.snapshot?.county_code != null && <span>County: <span className="text-[var(--ink)]">{String(data.gisa.road_inventory_context.snapshot.county_code)}</span></span>}
-                              {data.gisa.road_inventory_context.snapshot?.route_name != null && <span>Route: <span className="text-[var(--ink)]">{String(data.gisa.road_inventory_context.snapshot.route_name)}</span></span>}
-                              {(data.gisa.road_inventory_context.snapshot?.begin_pm != null || data.gisa.road_inventory_context.snapshot?.end_pm != null) && (
-                                <span className="col-span-2">PM: {String(data.gisa.road_inventory_context.snapshot?.begin_pm ?? "?")} – {String(data.gisa.road_inventory_context.snapshot?.end_pm ?? "?")}</span>
+                        {data.gisa?.road_inventory_context ? (() => {
+                          const ri = data.gisa!.road_inventory_context!;
+                          const sn = ri.snapshot ?? {};
+                          const terrainCode = (sn.terrain_code ?? sn.THY_TERRAIN_CODE) as string | null | undefined;
+                          return (
+                            <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--good)_32%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_8%,transparent)] px-2.5 py-2 text-xs">
+                              <div className="mb-1 font-semibold text-[var(--good)]">Road inventory context</div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
+                                {sn.county_code != null && <span>County: <span className="text-[var(--ink)]">{String(sn.county_code)}</span></span>}
+                                {sn.route_name != null && <span>Route: <span className="text-[var(--ink)]">{String(sn.route_name)}</span></span>}
+                                {(sn.begin_pm != null || sn.end_pm != null) && (
+                                  <span className="col-span-2">Postmile: <span className="text-[var(--ink)]">{String(sn.begin_pm ?? "?")} – {String(sn.end_pm ?? "?")} mi</span></span>
+                                )}
+                                {terrainCode && (
+                                  <span className="col-span-2">Terrain: <span className="text-[var(--ink)]">{terrainLabel(terrainCode)}</span></span>
+                                )}
+                                {(sn.left_lanes != null || sn.right_lanes != null) && (
+                                  <span>Lanes: <span className="text-[var(--ink)]">{sn.left_lanes != null ? `${sn.left_lanes} LT` : "?"} / {sn.right_lanes != null ? `${sn.right_lanes} RT` : "?"}</span></span>
+                                )}
+                                <span>Match: <span className="text-[var(--ink)]">{ri.match_method ?? "—"}</span></span>
+                                {ri.checked_at && <span>Checked: <span className="text-[var(--ink)]">{ri.checked_at.slice(0, 10)}</span></span>}
+                              </div>
+                              {/* Expandable field details */}
+                              <button
+                                type="button"
+                                onClick={() => setRiDetailsOpen((v) => !v)}
+                                className="mt-1.5 text-[10px] font-medium text-[var(--good)] hover:opacity-80"
+                              >
+                                {riDetailsOpen ? "▲ Hide field details" : "▼ Field meanings & raw values"}
+                              </button>
+                              {riDetailsOpen && Object.keys(sn).length > 0 && (
+                                <div className="mt-2 border-t border-[color:color-mix(in_oklab,var(--good)_20%,transparent)] pt-2">
+                                  <div className="mb-1 text-[9px] italic text-[var(--good)]">
+                                    CA Highways (HICOMP) dataset — v{ri.dataset_version_id}, segment {ri.segment_id}. Raw field names shown for traceability.
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-y-1">
+                                    {Object.entries(sn).map(([key, val]) => (
+                                      <div key={key} className="text-[10px]">
+                                        <span className="font-medium text-[var(--ink)]">{friendlyFieldLabel(key)}: </span>
+                                        <span className="text-[var(--ink)]">{friendlyFieldValue(key, val)}</span>
+                                        <span className="ml-1 text-[var(--muted)] opacity-60">({key})</span>
+                                        {fieldDescription(key) && (
+                                          <div className="text-[9px] italic text-muted pl-2">{fieldDescription(key)}</div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
-                              <span>Method: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.match_method ?? "—"}</span></span>
-                              {data.gisa.road_inventory_context.checked_at && <span>Checked: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.checked_at}</span></span>}
+                              <div className="mt-1 text-[10px] italic text-[var(--good)]">
+                                Road inventory values from the published CA Highways dataset.
+                              </div>
                             </div>
-                            <div className="mt-1 text-[10px] text-[var(--good)]">Diagram built from road inventory snapshot</div>
-                          </div>
-                        ) : (
+                          );
+                        })() : (
                           <div className="mb-2 text-xs italic text-muted">No road inventory context. Diagram uses form / default roadway assumptions.</div>
                         )}
                         {/* Elevation profile panel */}
