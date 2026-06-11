@@ -33,10 +33,25 @@ export type MeasurementValues = {
   roadwayWidth_ft?: number | null;     // R&S   (measure_roadway_width_ft)
 };
 
+/**
+ * Approximate terrain elevation profile on each side of the road.
+ * Inferred from template + failure side when AUTO is not used.
+ * LEFT_HIGH / RIGHT_HIGH indicate which side has a cut slope (terrain above road).
+ * BOWL = both sides fill (road on embankment); CROWN = both sides cut.
+ * FLAT = level ground on both sides (default / through-road).
+ */
+export type TerrainSideShape =
+  | "LEFT_HIGH"   // LT side cut slope; RT side fill or flat
+  | "RIGHT_HIGH"  // RT side cut slope; LT side fill or flat
+  | "BOWL"        // both sides fill slope — road on embankment
+  | "CROWN"       // both sides cut slope — road in cut section
+  | "FLAT";       // terrain level with road edges
+
 export type MeasurementDiagramData = {
   template: DiagramTemplate;
   view: StationingView;
   failureSide: FailureSide;
+  terrainShape: TerrainSideShape;
   crossSection: RoadCrossSection;
   measurements: MeasurementValues;
 };

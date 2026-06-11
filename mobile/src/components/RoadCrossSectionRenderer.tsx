@@ -23,7 +23,7 @@ import Svg, {
   Defs,
   Pattern,
 } from "react-native-svg";
-import type { FailureSide, MeasurementDiagramData } from "../measurements/measurementDiagramModel";
+import type { FailureSide, MeasurementDiagramData, TerrainSideShape } from "../measurements/measurementDiagramModel";
 import type { RoadCrossSection } from "../measurements/roadCrossSectionModel";
 
 // ── SVG constants ─────────────────────────────────────────────────────────────
@@ -333,16 +333,70 @@ function renderWidthLabels(els: LayoutEl[]): React.ReactNode[] {
   return nodes;
 }
 
-// ── Terrain (neutral — both sides same style, no directional implication) ─────
+// ── Terrain profile — slope-aware filled polygons ────────────────────────────
 
-function renderTerrain(ltEdge: number, rtEdge: number, svgW: number): React.ReactNode[] {
-  const terrainTop = 8;
-  return [
-    <Rect key="terrain-lt" x={0} y={terrainTop} width={ltEdge} height={SVG_H - terrainTop - 16}
-      fill={C.terrain_neutral} />,
-    <Rect key="terrain-rt" x={rtEdge} y={terrainTop} width={svgW - rtEdge} height={SVG_H - terrainTop - 16}
-      fill={C.terrain_neutral} />,
+const TERRAIN_TOP = 8;
+const TERRAIN_BOT = SVG_H - 16;
+
+type SideTerrain = "HIGH" | "LOW" | "FLAT";
+
+function ltTerrainPath(t: SideTerrain, ltEdge: number): string {
+  const lowY = ROAD_BOT + (TERRAIN_BOT - ROAD_BOT) * 0.65;
+  if (t === "HIGH")
+    // cut slope: surface rises from road edge up to top of diagram going left
+    return `M 0,${TERRAIN_TOP} L ${ltEdge},${ROAD_TOP} L ${ltEdge},${TERRAIN_BOT} L 0,${TERRAIN_BOT} Z`;
+  if (t === "LOW")
+    // fill slope: surface drops from road bottom going left
+    return `M 0,${lowY} L ${ltEdge},${ROAD_BOT} L ${ltEdge},${TERRAIN_BOT} L 0,${TERRAIN_BOT} Z`;
+  // FLAT: level with road top
+  return `M 0,${ROAD_TOP} L ${ltEdge},${ROAD_TOP} L ${ltEdge},${TERRAIN_BOT} L 0,${TERRAIN_BOT} Z`;
+}
+
+function rtTerrainPath(t: SideTerrain, rtEdge: number, svgW: number): string {
+  const lowY = ROAD_BOT + (TERRAIN_BOT - ROAD_BOT) * 0.65;
+  if (t === "HIGH")
+    return `M ${rtEdge},${ROAD_TOP} L ${svgW},${TERRAIN_TOP} L ${svgW},${TERRAIN_BOT} L ${rtEdge},${TERRAIN_BOT} Z`;
+  if (t === "LOW")
+    return `M ${rtEdge},${ROAD_BOT} L ${svgW},${lowY} L ${svgW},${TERRAIN_BOT} L ${rtEdge},${TERRAIN_BOT} Z`;
+  return `M ${rtEdge},${ROAD_TOP} L ${svgW},${ROAD_TOP} L ${svgW},${TERRAIN_BOT} L ${rtEdge},${TERRAIN_BOT} Z`;
+}
+
+function renderTerrainProfile(
+  terrainShape: TerrainSideShape,
+  ltEdge: number,
+  rtEdge: number,
+  svgW: number,
+): React.ReactNode[] {
+  let lt: SideTerrain;
+  let rt: SideTerrain;
+
+  switch (terrainShape) {
+    case "LEFT_HIGH":  lt = "HIGH"; rt = "LOW";  break;
+    case "RIGHT_HIGH": lt = "LOW";  rt = "HIGH"; break;
+    case "BOWL":       lt = "LOW";  rt = "LOW";  break;
+    case "CROWN":      lt = "HIGH"; rt = "HIGH"; break;
+    case "FLAT":
+    default:           lt = "FLAT"; rt = "FLAT"; break;
+  }
+
+  const lowY = ROAD_BOT + (TERRAIN_BOT - ROAD_BOT) * 0.65;
+  const nodes: React.ReactNode[] = [
+    <Path key="terrain-lt" d={ltTerrainPath(lt, ltEdge)} fill={C.terrain_neutral} />,
+    <Path key="terrain-rt" d={rtTerrainPath(rt, rtEdge, svgW)} fill={C.terrain_neutral} />,
   ];
+
+  // Surface slope indicator lines — make the ground profile edge readable
+  if (lt === "HIGH")
+    nodes.push(<Line key="surf-lt" x1={0} y1={TERRAIN_TOP} x2={ltEdge} y2={ROAD_TOP} stroke={C.slope_line} strokeWidth={1.2} opacity={0.35} />);
+  else if (lt === "LOW")
+    nodes.push(<Line key="surf-lt" x1={0} y1={lowY} x2={ltEdge} y2={ROAD_BOT} stroke={C.muted} strokeWidth={1.2} opacity={0.5} />);
+
+  if (rt === "HIGH")
+    nodes.push(<Line key="surf-rt" x1={rtEdge} y1={ROAD_TOP} x2={svgW} y2={TERRAIN_TOP} stroke={C.slope_line} strokeWidth={1.2} opacity={0.35} />);
+  else if (rt === "LOW")
+    nodes.push(<Line key="surf-rt" x1={rtEdge} y1={ROAD_BOT} x2={svgW} y2={lowY} stroke={C.muted} strokeWidth={1.2} opacity={0.5} />);
+
+  return nodes;
 }
 
 // ── Template overlays ─────────────────────────────────────────────────────────
@@ -640,8 +694,8 @@ export function RoadCrossSectionRenderer({ data, width }: Props) {
       {/* Background */}
       <Rect x={0} y={0} width={svgW} height={SVG_H} fill={C.bg} />
 
-      {/* Neutral terrain — no directional assumption on either side */}
-      {renderTerrain(ltEdge, rtEdge, svgW)}
+      {/* Terrain profile — slope shape inferred from template + failure side */}
+      {renderTerrainProfile(data.terrainShape, ltEdge, rtEdge, svgW)}
 
       {/* Road cross-section */}
       {renderRoadSection(els, data.crossSection, cx)}
