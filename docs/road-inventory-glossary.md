@@ -64,6 +64,7 @@ version was used. Both keys map to the same value map.
 | `segment_id` | Segment ID | Internal RI segment ID |
 | `dataset_version_id` | Dataset Version | Road inventory package version |
 | `match_method` | Match Method | MOBILE_OFFLINE = matched from device-local package |
+| `road_bearing_deg` | Road Bearing | Compass bearing (0–359°, clockwise from North) of the road in the upstation direction. **Not present in the current CA Highways tabular extract** — requires route geometry source. |
 
 ## How to add new field definitions
 

@@ -222,6 +222,101 @@ class TestElevationProfile:
             with engine.begin() as conn:
                 conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
 
+    def test_bearing_from_request_passed_to_service(self, client_db, admin_token):
+        """Explicit road_bearing_deg in payload is forwarded to the elevation service."""
+        from unittest.mock import patch
+
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            with patch(_PATCH_TARGET, return_value=_MOCK_PROFILE) as mock_fetch:
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/elevation-profile",
+                    json={"road_bearing_deg": 135.0, "force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 200, resp.text
+            _, kwargs = mock_fetch.call_args
+            assert kwargs.get("road_bearing_deg") == 135.0
+        finally:
+            from app.db import engine
+            from sqlalchemy import text
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
+    def test_bearing_from_snapshot_used_when_payload_missing(self, client_db, admin_token):
+        """When snapshot has road_bearing_deg and payload omits it, snapshot bearing is used."""
+        import json as _json
+        from unittest.mock import patch
+        from app.db import engine
+        from sqlalchemy import text
+
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE submission_gisa
+                    SET road_inventory_snapshot_json = :snap
+                    WHERE submission_id = :sid
+                """), {
+                    "sid": sub_id,
+                    "snap": _json.dumps({"county_code": "ALA", "route_name": "080", "road_bearing_deg": 270.0}),
+                })
+
+            with patch(_PATCH_TARGET, return_value=_MOCK_PROFILE) as mock_fetch:
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/elevation-profile",
+                    json={"force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 200, resp.text
+            _, kwargs = mock_fetch.call_args
+            assert kwargs.get("road_bearing_deg") == 270.0
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
+    def test_no_bearing_service_called_with_none(self, client_db, admin_token):
+        """Without any bearing source, service receives road_bearing_deg=None."""
+        from unittest.mock import patch
+        from app.db import engine
+        from sqlalchemy import text
+
+        _unknown_profile = {**_MOCK_PROFILE, "classification": "UNKNOWN", "confidence": None,
+                            "profile": {"points": [], "metadata": {"road_bearing_deg_used": None,
+                            "road_bearing_source": None, "half_width_m": 60.0, "spacing_m": 10.0,
+                            "classification_requires_bearing": True}}}
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            with patch(_PATCH_TARGET, return_value=_unknown_profile) as mock_fetch:
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/elevation-profile",
+                    json={"force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 200, resp.text
+            _, kwargs = mock_fetch.call_args
+            assert kwargs.get("road_bearing_deg") is None
+            assert resp.json()["elevation_profile"]["classification"] == "UNKNOWN"
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
+    def test_invalid_explicit_bearing_returns_422(self, client_db, admin_token):
+        """Pydantic rejects road_bearing_deg >= 360 before business logic runs."""
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            resp = client_db.post(
+                f"/submissions/{sub_id}/gisa/elevation-profile",
+                json={"road_bearing_deg": 400.0},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 422
+        finally:
+            from app.db import engine
+            from sqlalchemy import text
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
     def test_elevation_profile_skips_fetch_when_exists_and_no_force(self, client_db, admin_token):
         from unittest.mock import patch, MagicMock
         from app.db import engine
