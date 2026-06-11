@@ -2027,8 +2027,12 @@ export default function SubmissionDetailPage() {
                           const epMeta = (ep?.profile as Record<string, unknown> | null | undefined)?.metadata as Record<string, unknown> | null | undefined;
                           const bearingUsed = epMeta?.road_bearing_deg_used as number | null | undefined;
                           const bearingSource = epMeta?.road_bearing_source as string | null | undefined;
+                          const bearingSourceLabel =
+                            bearingSource === "arcgis_postmile_geometry" ? "auto from postmile geometry" :
+                            bearingSource === "road_inventory_snapshot" ? "road inventory snapshot" :
+                            bearingSource ?? "request";
                           const bearingNote = bearingUsed != null
-                            ? `${bearingUsed}° (${bearingSource ?? "request"})`
+                            ? `${Math.round(bearingUsed)}° (${bearingSourceLabel})`
                             : "not set — classification may be UNKNOWN";
                           return ep ? (
                             <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_28%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,transparent)] px-2.5 py-2 text-xs">
@@ -2052,7 +2056,7 @@ export default function SubmissionDetailPage() {
                                   onChange={(e) => setBearingInput(e.target.value)}
                                   className="w-20 rounded border border-[var(--line)] bg-[var(--panel)] px-1.5 py-0.5 text-[10px] text-[var(--ink)]"
                                 />
-                                <span className="text-[9px] italic text-muted">Optional. Needed for left/right terrain classification.</span>
+                                <span className="text-[9px] italic text-muted">Optional. Leave blank to auto-derive from postmile geometry when available.</span>
                               </div>
                               <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
                                 <span>Source: <span className="text-[var(--ink)]">{ep.source ?? "—"}</span></span>
@@ -2082,7 +2086,7 @@ export default function SubmissionDetailPage() {
                                   onChange={(e) => setBearingInput(e.target.value)}
                                   className="w-20 rounded border border-[var(--line)] bg-[var(--panel)] px-1.5 py-0.5 text-[10px] text-[var(--ink)]"
                                 />
-                                <span className="text-[9px] italic text-muted">Needed for terrain classification.</span>
+                                <span className="text-[9px] italic text-muted">Optional. Leave blank to auto-derive from postmile geometry when available.</span>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs italic text-muted">No elevation profile fetched.</span>

@@ -81,10 +81,12 @@ The endpoint resolves bearing using the following priority:
 |----------|--------|-----------------------------|
 | 1 | Explicit in request payload | `"request"` |
 | 2 | `road_inventory_context.snapshot.road_bearing_deg` | `"road_inventory_snapshot"` |
-| 3 | None (no bearing available) | `null` → classification `UNKNOWN` |
+| 3 | Auto-derived from ArcGIS postmile geometry | `"arcgis_postmile_geometry"` |
+| 4 | None (no bearing available) | `null` → classification `UNKNOWN` |
 
 The resolved bearing and its source are stored in `elevation_profile.profile.metadata`:
 
+**Request-supplied bearing:**
 ```json
 {
   "road_bearing_deg_used": 90.0,
@@ -95,7 +97,22 @@ The resolved bearing and its source are stored in `elevation_profile.profile.met
 }
 ```
 
-When bearing is absent:
+**Auto-derived bearing:**
+```json
+{
+  "road_bearing_deg_used": 87.0,
+  "road_bearing_source": "arcgis_postmile_geometry",
+  "half_width_m": 60.0,
+  "spacing_m": 10.0,
+  "classification_requires_bearing": true,
+  "road_bearing_derivation": {
+    "method": "postmile_points_lower_to_higher",
+    "source": "https://arcgis.example.com/.../FeatureServer/0"
+  }
+}
+```
+
+**Bearing absent:**
 ```json
 {
   "road_bearing_deg_used": null,
@@ -105,12 +122,45 @@ When bearing is absent:
 }
 ```
 
-### Why bearing is not automatic from CA Highways
+### Automatic bearing derivation from postmile geometry
 
-The current CA Highways tabular extract (HICOMP) is postmile-based and contains no segment
-geometry or heading column. Automatic bearing would require a Caltrans SHN shapefile or ArcGIS
-route geometry layer. Until that is integrated, bearing must be supplied manually via the web
-elevation panel or left absent.
+When neither the request payload nor the road inventory snapshot supply a bearing, the endpoint
+attempts to derive one from the ArcGIS postmile feature layer (configured via
+`POSTMILE_FEATURE_LAYER_URL`).
+
+**Algorithm:**
+
+1. Query the postmile layer with `returnGeometry=true`, `outSR=4326`, search distance
+   `max(POSTMILE_SEARCH_DISTANCE_METERS, 3200)` metres (wider than the point-in-polygon query to
+   capture marker points ~1 mile apart).
+2. Filter returned features to those matching the submission's route, county, and district.
+3. Identify the **nearest lower-PM point** (highest PM ≤ current PM) and the **nearest higher-PM
+   point** (lowest PM > current PM).
+4. Compute the geodesic initial bearing from the lower-PM point to the higher-PM point.  This
+   defines the upstation / increasing-postmile road direction.
+5. Round to 2 decimal places and return.
+
+**Bearing formula** (geodesic initial bearing):
+```
+x = sin(Δlon) × cos(lat₂)
+y = cos(lat₁) × sin(lat₂) − sin(lat₁) × cos(lat₂) × cos(Δlon)
+bearing = atan2(x, y) normalized to [0, 360)
+```
+
+**Safety rules:**
+- If `POSTMILE_FEATURE_LAYER_URL` is not configured, derivation is skipped and bearing stays `null`.
+- If route, county, or post_mile are missing from the GISA record, derivation is skipped.
+- If fewer than two valid geometry points pass filtering, derivation returns `null`.
+- Any network or ArcGIS error is caught silently; the elevation profile request continues with
+  bearing `null` and classification `UNKNOWN`.
+- This function never infers bearing from `THY_TERRAIN_CODE` or any terrain classification field.
+
+### CA Highways tabular extract limitation
+
+The CA Highways tabular data (HICOMP) is postmile-based and contains no segment geometry or
+bearing column. Automatic bearing derivation therefore relies on the ArcGIS postmile feature
+layer supplying point geometries for the route. When the layer is not configured or returns
+insufficient geometry points, bearing remains `null`.
 
 ## API endpoint
 
@@ -174,11 +224,19 @@ Added to `submission_gisa`:
 
 All columns are nullable. Existing GISA rows are unaffected. GISA PATCH does not touch these columns.
 
-## Future: bearing derivation
+## Web UI bearing display
 
-When `road_inventory_context.snapshot` contains a `road_bearing_deg` field, the endpoint will use it
-automatically without requiring the caller to supply it. Until road inventory segment bearings are
-added to the snapshot, pass `road_bearing_deg` manually or accept `UNKNOWN` classification.
+The web elevation panel shows the resolved bearing and its source:
+
+| `road_bearing_source` | Display text |
+|-----------------------|-------------|
+| `"request"` | `87° (request)` |
+| `"road_inventory_snapshot"` | `87° (road inventory snapshot)` |
+| `"arcgis_postmile_geometry"` | `87° (auto from postmile geometry)` |
+| `null` | `not set — classification may be UNKNOWN` |
+
+The bearing input field is pre-filled from `road_inventory_context.snapshot.road_bearing_deg` when
+available. Leaving the field blank allows auto-derivation from postmile geometry on each Fetch/Refresh.
 
 ## Mobile diagram integration
 

@@ -317,6 +317,132 @@ class TestElevationProfile:
             with engine.begin() as conn:
                 conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
 
+    def test_auto_bearing_not_called_when_request_bearing_present(self, client_db, admin_token):
+        """Request bearing wins: auto-derive helper must not be called."""
+        from unittest.mock import patch
+
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            with patch(_PATCH_TARGET, return_value=_MOCK_PROFILE) as mock_fetch, \
+                 patch("app.main._derive_road_bearing_from_postmile_layer", return_value=270.0) as mock_derive:
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/elevation-profile",
+                    json={"road_bearing_deg": 90.0, "force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 200, resp.text
+            # Auto-derive must not have been called
+            mock_derive.assert_not_called()
+            # Service must have received the request bearing, not the auto-derived value
+            _, kwargs = mock_fetch.call_args
+            assert kwargs.get("road_bearing_deg") == 90.0
+        finally:
+            from app.db import engine
+            from sqlalchemy import text
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
+    def test_auto_bearing_not_called_when_snapshot_bearing_present(self, client_db, admin_token):
+        """Snapshot bearing wins over auto-derived: auto-derive helper must not be called."""
+        import json as _json
+        from unittest.mock import patch
+        from app.db import engine
+        from sqlalchemy import text
+
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE submission_gisa
+                    SET road_inventory_snapshot_json = :snap
+                    WHERE submission_id = :sid
+                """), {
+                    "sid": sub_id,
+                    "snap": _json.dumps({"route_name": "080", "road_bearing_deg": 123.0}),
+                })
+
+            with patch(_PATCH_TARGET, return_value=_MOCK_PROFILE) as mock_fetch, \
+                 patch("app.main._derive_road_bearing_from_postmile_layer", return_value=270.0) as mock_derive:
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/elevation-profile",
+                    json={"force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 200, resp.text
+            mock_derive.assert_not_called()
+            _, kwargs = mock_fetch.call_args
+            assert kwargs.get("road_bearing_deg") == 123.0
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
+    def test_auto_derived_bearing_used_when_request_and_snapshot_missing(self, client_db, admin_token):
+        """Auto-derive is used when neither request nor snapshot supply a bearing."""
+        from unittest.mock import patch
+
+        _auto_profile = {**_MOCK_PROFILE, "classification": "RIGHT_HIGH",
+                         "profile": {"points": [], "metadata": {
+                             "road_bearing_deg_used": 87.0,
+                             "road_bearing_source": "arcgis_postmile_geometry",
+                             "half_width_m": 60.0, "spacing_m": 10.0,
+                             "classification_requires_bearing": True,
+                         }}}
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            with patch(_PATCH_TARGET, return_value=_auto_profile) as mock_fetch, \
+                 patch("app.main._derive_road_bearing_from_postmile_layer", return_value=87.0):
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/elevation-profile",
+                    json={"force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 200, resp.text
+            _, kwargs = mock_fetch.call_args
+            assert kwargs.get("road_bearing_deg") == 87.0
+            ep = resp.json()["elevation_profile"]
+            meta = ep.get("profile", {}).get("metadata", {})
+            assert meta.get("road_bearing_source") == "arcgis_postmile_geometry"
+            assert meta.get("road_bearing_deg_used") == 87.0
+        finally:
+            from app.db import engine
+            from sqlalchemy import text
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
+    def test_auto_derive_failure_falls_back_to_none(self, client_db, admin_token):
+        """Auto-derive returning None results in service receiving None and UNKNOWN classification."""
+        from unittest.mock import patch
+
+        _unknown_profile = {**_MOCK_PROFILE, "classification": "UNKNOWN", "confidence": None,
+                            "profile": {"points": [], "metadata": {
+                                "road_bearing_deg_used": None, "road_bearing_source": None,
+                                "half_width_m": 60.0, "spacing_m": 10.0,
+                                "classification_requires_bearing": True,
+                                "classification_note": "No road bearing was provided; only center elevation was sampled.",
+                            }}}
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            with patch(_PATCH_TARGET, return_value=_unknown_profile) as mock_fetch, \
+                 patch("app.main._derive_road_bearing_from_postmile_layer", return_value=None):
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/elevation-profile",
+                    json={"force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 200, resp.text
+            _, kwargs = mock_fetch.call_args
+            assert kwargs.get("road_bearing_deg") is None
+            ep = resp.json()["elevation_profile"]
+            assert ep["classification"] == "UNKNOWN"
+            meta = ep.get("profile", {}).get("metadata", {})
+            assert meta.get("road_bearing_source") is None
+            assert meta.get("road_bearing_deg_used") is None
+        finally:
+            from app.db import engine
+            from sqlalchemy import text
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+
     def test_elevation_profile_skips_fetch_when_exists_and_no_force(self, client_db, admin_token):
         from unittest.mock import patch, MagicMock
         from app.db import engine
