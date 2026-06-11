@@ -48,6 +48,15 @@ export type WorkflowEvent = {
   created_at: string;
 };
 
+export type GisaElevationProfile = {
+  source: string | null;
+  checked_at: string | null;
+  classification: string | null;
+  confidence: number | null;
+  profile: Record<string, unknown> | null;
+  error: string | null;
+};
+
 export type Gisa = {
   submission_id: number;
   report_date: string | null;
@@ -81,6 +90,7 @@ export type Gisa = {
   created_at?: string;
   updated_at: string;
   road_inventory_context?: RoadInventoryIncidentContext | null;
+  elevation_profile?: GisaElevationProfile | null;
 };
 
 export type LookupItem = {
