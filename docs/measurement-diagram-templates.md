@@ -94,11 +94,11 @@ See the table in the Templates section above. Inference is applied when the Terr
 
 Each diagram section shows the data source in a badge and the source/assumption note row below the controls:
 
-- **Road**: Road inventory snapshot → Form fields → Default (24 ft, 2 lanes). Source of truth: `road_inventory_context.snapshot` (unchanged).
-- **Template**: Auto-inferred from GISA failure type fields, or manually overridden.
-- **Terrain (current)**: Auto-inferred from template + failure side. This is a heuristic approximation — manual terrain controls remain schematic.
-- **Terrain (next PR)**: Terrain AUTO will be driven by `elevation_profile.classification` persisted from USGS 3DEP/EPQS (see `docs/elevation-profile-enrichment.md`). Once wired, `LEFT_HIGH`/`RIGHT_HIGH`/`BOWL`/`CROWN`/`FLAT` will come from real elevation data.
-- **Elevation**: Backend elevation profile enrichment is active (migration 0007). The mobile diagram source note shows "Elevation: not connected" until the classification is wired into `buildMeasurementDiagramData`.
+- **Road AUTO**: Source of truth is `road_inventory_context.snapshot` (lanes, shoulders, road width). Falls back to form fields then 24 ft / 2-lane default.
+- **Template AUTO**: Conservative default — `LANDSLIDE_THROUGH_ROAD` — until GEO/map-derived landslide classification is available. Template is **not** inferred from failure_* form checkboxes.
+- **Terrain AUTO**: Source of truth is `gisa.elevation_profile.classification` (USGS 3DEP/EPQS cross-section). Mapping: `LEFT_HIGH` → LEFT_HIGH, `RIGHT_HIGH` → RIGHT_HIGH, `BOWL` → BOWL, `CROWN` → CROWN, `FLAT` → FLAT, `UNKNOWN` or missing → FLAT (safe schematic).
+- **Elevation**: Backend elevation profile enrichment active (migration 0007, USGS EPQS). Profile fetched on demand via `POST /submissions/{id}/gisa/elevation-profile`. See `docs/elevation-profile-enrichment.md`.
+- **Manual overrides**: All three selectors (template, failure side, terrain) remain available and override AUTO when pressed.
 
 ---
 
@@ -115,6 +115,6 @@ To manually override:
 
 ## Future improvements
 
-- Wire `elevation_profile.classification` into `buildMeasurementDiagramData` so terrain AUTO uses real USGS elevation data
+- Add GEO/map-derived landslide template classification (ABOVE / SLIPOUT / THROUGH) so Template AUTO can resolve from spatial evidence rather than defaulting to THROUGH
 - Add scarp height annotation to terrain profile
 - Support cut/fill depth callouts on terrain surface

@@ -5115,6 +5115,7 @@ export default function SubmissionDetailScreen() {
                   <MeasurementDiagramRenderer
                     formValues={form}
                     roadInventorySnapshot={riSnapshot}
+                    elevationProfile={data?.gisa?.elevation_profile ?? null}
                   />
                 </>
               );

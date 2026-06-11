@@ -7,6 +7,7 @@ import type {
   TerrainSideShape,
 } from "./measurementDiagramModel";
 import { buildRoadSectionFromInventory } from "./buildRoadSectionFromInventory";
+import type { GisaElevationProfile } from "../api/submissions";
 
 function parseNum(s: string | undefined | null): number | null {
   if (!s || !s.trim()) return null;
@@ -15,43 +16,20 @@ function parseNum(s: string | undefined | null): number | null {
 }
 
 /**
- * Infer diagram template from GISA failure type fields.
- * Rock fall / topple / flow → failure from above.
- * Surficial sloughing / scoured toe / erosion / washout → below-road slipout.
- * Slide / spread / compound → through the road (default).
+ * Resolve terrain shape from a persisted USGS 3DEP elevation profile.
+ * UNKNOWN and missing profiles both fall back to FLAT (safe schematic).
  */
-export function inferTemplate(
-  form: Record<string, string | undefined | null>,
-): DiagramTemplate {
-  const isSet = (k: string) => Boolean(form[k]?.trim());
-  if (isSet("failure_rock_fall") || isSet("failure_topple") || isSet("failure_flow"))
-    return "LANDSLIDE_ABOVE_ROAD";
-  if (
-    isSet("failure_surficial_failure") ||
-    isSet("failure_scoured_toe") ||
-    isSet("failure_erosion") ||
-    isSet("failure_washout")
-  )
-    return "LANDSLIDE_BELOW_ROAD_SLIPOUT";
-  return "LANDSLIDE_THROUGH_ROAD";
-}
-
-function inferTerrainShape(
-  template: DiagramTemplate,
-  failureSide: FailureSide,
+function terrainShapeFromElevationProfile(
+  profile?: GisaElevationProfile | null,
 ): TerrainSideShape {
-  if (template === "LANDSLIDE_ABOVE_ROAD") {
-    if (failureSide === "LT") return "LEFT_HIGH";
-    if (failureSide === "RT") return "RIGHT_HIGH";
-    return "CROWN"; // BOTH: cut slopes on both sides
+  switch (profile?.classification) {
+    case "LEFT_HIGH":  return "LEFT_HIGH";
+    case "RIGHT_HIGH": return "RIGHT_HIGH";
+    case "BOWL":       return "BOWL";
+    case "CROWN":      return "CROWN";
+    case "FLAT":       return "FLAT";
+    default:           return "FLAT"; // UNKNOWN or null
   }
-  if (template === "LANDSLIDE_BELOW_ROAD_SLIPOUT") {
-    // Fill side (failure/slipout) is opposite the cut (high) side
-    if (failureSide === "LT") return "RIGHT_HIGH";
-    if (failureSide === "RT") return "LEFT_HIGH";
-    return "BOWL"; // BOTH: fill on both sides
-  }
-  return "FLAT"; // THROUGH_ROAD: no elevation assumption
 }
 
 export function buildMeasurementDiagramData(
@@ -61,6 +39,7 @@ export function buildMeasurementDiagramData(
   view: StationingView,
   failureSide: FailureSide,
   terrainShapeOverride: TerrainSideShape | "AUTO" = "AUTO",
+  elevationProfile?: GisaElevationProfile | null,
 ): MeasurementDiagramData {
   const measurements: MeasurementValues = {
     slopeHeight_ft: parseNum(form.measure_slope_height_ft),
@@ -78,12 +57,16 @@ export function buildMeasurementDiagramData(
     measurements.roadwayWidth_ft,
   );
 
-  const resolvedTemplate =
-    template === "AUTO" ? inferTemplate(form) : template;
+  // Template AUTO: conservative default until GEO/map-derived classification is available.
+  // We intentionally do not infer template from failure_* form checkboxes.
+  const resolvedTemplate: DiagramTemplate =
+    template === "AUTO" ? "LANDSLIDE_THROUGH_ROAD" : template;
 
-  const terrainShape =
+  // Terrain AUTO: use persisted elevation_profile.classification from USGS 3DEP/EPQS.
+  // Manual override takes priority when terrainShapeOverride !== "AUTO".
+  const terrainShape: TerrainSideShape =
     terrainShapeOverride === "AUTO"
-      ? inferTerrainShape(resolvedTemplate, failureSide)
+      ? terrainShapeFromElevationProfile(elevationProfile)
       : terrainShapeOverride;
 
   return {

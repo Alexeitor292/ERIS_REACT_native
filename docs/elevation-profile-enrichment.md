@@ -129,6 +129,27 @@ When `road_inventory_context.snapshot` contains a `road_bearing_deg` field, the 
 automatically without requiring the caller to supply it. Until road inventory segment bearings are
 added to the snapshot, pass `road_bearing_deg` manually or accept `UNKNOWN` classification.
 
+## Mobile diagram integration
+
+The mobile measurement diagram reads `elevation_profile.classification` to drive Terrain AUTO mode:
+
+| classification | Rendered terrain shape |
+|----------------|----------------------|
+| `LEFT_HIGH` | LEFT_HIGH (cut slope on left) |
+| `RIGHT_HIGH` | RIGHT_HIGH (cut slope on right) |
+| `BOWL` | BOWL (road on embankment) |
+| `CROWN` | CROWN (road in cut section) |
+| `FLAT` | FLAT |
+| `UNKNOWN` | FLAT (safe schematic fallback) |
+| `null` / no profile | FLAT (safe schematic fallback) |
+
+The source note row in the diagram shows:
+- `"Terrain: auto · USGS (LEFT_HIGH)"` when a valid non-UNKNOWN classification exists
+- `"Terrain: auto · elevation unknown"` when classification is UNKNOWN
+- `"Terrain: auto · no elevation profile"` when no profile has been fetched
+
+Manual terrain buttons (L-High / R-High / Bowl / Crown / Flat) override AUTO regardless of the persisted classification.
+
 ## Error handling
 
 - USGS EPQS is retried twice on network failure before returning `null` for that point.
