@@ -46,6 +46,11 @@ function segmentsFile(): File {
 // Types
 // ---------------------------------------------------------------------------
 
+// TODO: road_bearing_deg is not yet available in the CA Highways tabular extract
+// (HICOMP). The tabular data is postmile-based with no segment geometry or heading
+// field. Automatic road bearing would require a route geometry source (e.g., a
+// Caltrans SHN shapefile or ArcGIS route layer). Until that is wired in, bearing
+// must be supplied manually by the web user or left absent (→ UNKNOWN classification).
 export type RoadSegment = {
   id: number;
   district_code: string | null;

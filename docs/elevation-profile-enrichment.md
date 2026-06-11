@@ -65,8 +65,52 @@ Confidence is set to `0.80` when a full cross-section is available and `0.0` oth
 ### UNKNOWN limitation
 
 When `road_bearing_deg` is not supplied, the service fetches only the center point and always returns
-`UNKNOWN`. This covers the case where no road inventory context exists for the submission. Once road
-inventory matching provides a bearing, the full cross-section will be computed automatically.
+`UNKNOWN`. This covers the case where no road inventory context exists for the submission. Until a
+bearing source is available, the mobile diagram AUTO terrain will fall back to FLAT.
+
+## Road bearing
+
+`road_bearing_deg` is the compass bearing (0–359°, clockwise from North) of the road in the
+**upstation** (increasing postmile) direction.
+
+### Bearing source order
+
+The endpoint resolves bearing using the following priority:
+
+| Priority | Source | `road_bearing_source` value |
+|----------|--------|-----------------------------|
+| 1 | Explicit in request payload | `"request"` |
+| 2 | `road_inventory_context.snapshot.road_bearing_deg` | `"road_inventory_snapshot"` |
+| 3 | None (no bearing available) | `null` → classification `UNKNOWN` |
+
+The resolved bearing and its source are stored in `elevation_profile.profile.metadata`:
+
+```json
+{
+  "road_bearing_deg_used": 90.0,
+  "road_bearing_source": "request",
+  "half_width_m": 60.0,
+  "spacing_m": 10.0,
+  "classification_requires_bearing": true
+}
+```
+
+When bearing is absent:
+```json
+{
+  "road_bearing_deg_used": null,
+  "road_bearing_source": null,
+  "classification_requires_bearing": true,
+  "classification_note": "No road bearing was provided; only center elevation was sampled."
+}
+```
+
+### Why bearing is not automatic from CA Highways
+
+The current CA Highways tabular extract (HICOMP) is postmile-based and contains no segment
+geometry or heading column. Automatic bearing would require a Caltrans SHN shapefile or ArcGIS
+route geometry layer. Until that is integrated, bearing must be supplied manually via the web
+elevation panel or left absent.
 
 ## API endpoint
 
@@ -101,7 +145,14 @@ POST /submissions/{submission_id}/gisa/elevation-profile
       "points": [
         { "offset_m": -60.0, "lat": 37.701, "lon": -122.401, "elevation_ft": 120.5, "source": "USGS_EPQS_3DEP" },
         ...
-      ]
+      ],
+      "metadata": {
+        "road_bearing_deg_used": 90.0,
+        "road_bearing_source": "request",
+        "half_width_m": 60.0,
+        "spacing_m": 10.0,
+        "classification_requires_bearing": true
+      }
     },
     "error": null
   }

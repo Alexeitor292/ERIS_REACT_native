@@ -1,4 +1,5 @@
 import logging
+import math
 from contextlib import asynccontextmanager
 import json
 import re
@@ -2280,9 +2281,10 @@ def enrich_gisa_elevation_profile(
 ):
     require_can_edit_submission(submission_id, db, user)
 
-    # Read current GISA row for lat/lon and existing profile
+    # Read current GISA row for lat/lon, road inventory snapshot, and existing profile
     row = db.execute(text("""
         SELECT latitude, longitude,
+               road_inventory_snapshot_json,
                elevation_profile_source, elevation_profile_checked_at,
                elevation_profile_classification, elevation_profile_confidence,
                elevation_profile_json, elevation_profile_error
@@ -2326,14 +2328,45 @@ def enrich_gisa_elevation_profile(
             },
         }
 
+    # Resolve road bearing: payload > road_inventory_snapshot > None
+    resolved_bearing: float | None = None
+    bearing_source: str | None = None
+    if payload.road_bearing_deg is not None:
+        resolved_bearing = float(payload.road_bearing_deg)
+        bearing_source = "request"
+    else:
+        ri_snap_raw = row["road_inventory_snapshot_json"]
+        ri_snap: dict | None = None
+        if isinstance(ri_snap_raw, str):
+            try:
+                ri_snap = json.loads(ri_snap_raw)
+            except Exception:
+                pass
+        elif isinstance(ri_snap_raw, dict):
+            ri_snap = ri_snap_raw
+        if ri_snap:
+            snap_bearing = ri_snap.get("road_bearing_deg")
+            if snap_bearing is not None:
+                try:
+                    bf = float(snap_bearing)
+                    if math.isfinite(bf) and 0.0 <= bf < 360.0:
+                        resolved_bearing = bf
+                        bearing_source = "road_inventory_snapshot"
+                except (TypeError, ValueError):
+                    pass
+
     # Fetch from USGS EPQS
     result = elevation_profile_svc.fetch_elevation_profile(
         lat=float(lat),
         lon=float(lon),
-        road_bearing_deg=payload.road_bearing_deg,
+        road_bearing_deg=resolved_bearing,
         half_width_m=float(payload.half_width_m) if payload.half_width_m is not None else 60.0,
         spacing_m=float(payload.spacing_m) if payload.spacing_m is not None else 10.0,
     )
+
+    # Inject bearing source into profile metadata
+    if isinstance(result.get("profile"), dict) and isinstance(result["profile"].get("metadata"), dict):
+        result["profile"]["metadata"]["road_bearing_source"] = bearing_source
 
     profile_json_str = json.dumps(result.get("profile"))
 

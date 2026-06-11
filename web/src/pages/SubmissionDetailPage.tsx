@@ -432,6 +432,7 @@ export default function SubmissionDetailPage() {
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => buildDefaultDashboardLayout());
   const [elevFetching, setElevFetching] = useState(false);
   const [elevError, setElevError] = useState<string | null>(null);
+  const [bearingInput, setBearingInput] = useState<string>("");
   const [riDetailsOpen, setRiDetailsOpen] = useState(false);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
@@ -743,11 +744,14 @@ export default function SubmissionDetailPage() {
     }
   }
   async function fetchElevation(force: boolean) {
+    const parsedBearing = bearingInput.trim() ? parseFloat(bearingInput) : NaN;
+    const road_bearing_deg = isFinite(parsedBearing) && parsedBearing >= 0 && parsedBearing < 360
+      ? parsedBearing : null;
     setElevFetching(true); setElevError(null);
     try {
       await api<{ elevation_profile: GisaElevationProfile }>(
         `/submissions/${sid}/gisa/elevation-profile`,
-        { method: "POST", body: JSON.stringify({ force }) },
+        { method: "POST", body: JSON.stringify({ force, road_bearing_deg }) },
       );
       await load();
     } catch (e: any) {
@@ -861,6 +865,15 @@ export default function SubmissionDetailPage() {
   }
 
   useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid, canManageSharing]);
+
+  // Prefill bearing from road inventory snapshot when available
+  useEffect(() => {
+    const snapBearing = data?.gisa?.road_inventory_context?.snapshot?.road_bearing_deg;
+    if (snapBearing != null && bearingInput === "") {
+      setBearingInput(String(snapBearing));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.gisa?.road_inventory_context?.snapshot?.road_bearing_deg]);
 
   const box = "rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3";
   const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
@@ -2009,46 +2022,82 @@ export default function SubmissionDetailPage() {
                           <div className="mb-2 text-xs italic text-muted">No road inventory context. Diagram uses form / default roadway assumptions.</div>
                         )}
                         {/* Elevation profile panel */}
-                        {data.gisa?.elevation_profile ? (
-                          <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_28%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,transparent)] px-2.5 py-2 text-xs">
-                            <div className="mb-1 flex items-center justify-between">
-                              <span className="font-semibold text-[var(--brand)]">Elevation profile</span>
-                              <button
-                                disabled={elevFetching}
-                                onClick={() => fetchElevation(true)}
-                                className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
-                              >
-                                {elevFetching ? "Refreshing…" : "Refresh"}
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
-                              <span>Source: <span className="text-[var(--ink)]">{data.gisa.elevation_profile.source ?? "—"}</span></span>
-                              <span>Classification: <span className="text-[var(--ink)]">{data.gisa.elevation_profile.classification ?? "—"}</span></span>
-                              {data.gisa.elevation_profile.confidence != null && (
-                                <span>Confidence: <span className="text-[var(--ink)]">{(data.gisa.elevation_profile.confidence * 100).toFixed(0)}%</span></span>
+                        {(() => {
+                          const ep = data.gisa?.elevation_profile;
+                          const epMeta = (ep?.profile as Record<string, unknown> | null | undefined)?.metadata as Record<string, unknown> | null | undefined;
+                          const bearingUsed = epMeta?.road_bearing_deg_used as number | null | undefined;
+                          const bearingSource = epMeta?.road_bearing_source as string | null | undefined;
+                          const bearingNote = bearingUsed != null
+                            ? `${bearingUsed}° (${bearingSource ?? "request"})`
+                            : "not set — classification may be UNKNOWN";
+                          return ep ? (
+                            <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_28%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,transparent)] px-2.5 py-2 text-xs">
+                              <div className="mb-1.5 flex items-center justify-between">
+                                <span className="font-semibold text-[var(--brand)]">Elevation profile</span>
+                                <button
+                                  disabled={elevFetching}
+                                  onClick={() => fetchElevation(true)}
+                                  className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
+                                >
+                                  {elevFetching ? "Refreshing…" : "Refresh"}
+                                </button>
+                              </div>
+                              {/* Bearing input for re-fetch */}
+                              <div className="mb-1.5 flex items-center gap-2">
+                                <label className="shrink-0 text-[10px] text-muted">Road bearing (deg):</label>
+                                <input
+                                  type="number" min="0" max="359" step="1"
+                                  placeholder="0–359"
+                                  value={bearingInput}
+                                  onChange={(e) => setBearingInput(e.target.value)}
+                                  className="w-20 rounded border border-[var(--line)] bg-[var(--panel)] px-1.5 py-0.5 text-[10px] text-[var(--ink)]"
+                                />
+                                <span className="text-[9px] italic text-muted">Optional. Needed for left/right terrain classification.</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
+                                <span>Source: <span className="text-[var(--ink)]">{ep.source ?? "—"}</span></span>
+                                <span>Classification: <span className="text-[var(--ink)]">{ep.classification ?? "—"}</span></span>
+                                {ep.confidence != null && (
+                                  <span>Confidence: <span className="text-[var(--ink)]">{(ep.confidence * 100).toFixed(0)}%</span></span>
+                                )}
+                                {ep.checked_at && (
+                                  <span>Checked: <span className="text-[var(--ink)]">{ep.checked_at.slice(0, 10)}</span></span>
+                                )}
+                                <span className="col-span-2">Bearing: <span className={`${bearingUsed != null ? "text-[var(--ink)]" : "text-[var(--muted)] italic"}`}>{bearingNote}</span></span>
+                              </div>
+                              {ep.error && (
+                                <div className="mt-1 text-[10px] text-[var(--error)]">{ep.error}</div>
                               )}
-                              {data.gisa.elevation_profile.checked_at && (
-                                <span>Checked: <span className="text-[var(--ink)]">{data.gisa.elevation_profile.checked_at.slice(0, 10)}</span></span>
-                              )}
+                              {elevError && <div className="mt-1 text-[10px] text-[var(--error)]">{elevError}</div>}
                             </div>
-                            {data.gisa.elevation_profile.error && (
-                              <div className="mt-1 text-[10px] text-[var(--error)]">{data.gisa.elevation_profile.error}</div>
-                            )}
-                            {elevError && <div className="mt-1 text-[10px] text-[var(--error)]">{elevError}</div>}
-                          </div>
-                        ) : (
-                          <div className="mb-2 flex items-center gap-2">
-                            <span className="text-xs italic text-muted">No elevation profile fetched.</span>
-                            <button
-                              disabled={elevFetching}
-                              onClick={() => fetchElevation(false)}
-                              className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
-                            >
-                              {elevFetching ? "Fetching…" : "Fetch Elevation Profile"}
-                            </button>
-                            {elevError && <span className="text-[10px] text-[var(--error)]">{elevError}</span>}
-                          </div>
-                        )}
+                          ) : (
+                            <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_15%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_4%,transparent)] px-2.5 py-2 text-xs">
+                              <div className="mb-1.5 font-semibold text-[var(--brand)]">Elevation profile</div>
+                              <div className="mb-1.5 flex items-center gap-2">
+                                <label className="shrink-0 text-[10px] text-muted">Road bearing (deg):</label>
+                                <input
+                                  type="number" min="0" max="359" step="1"
+                                  placeholder="0–359"
+                                  value={bearingInput}
+                                  onChange={(e) => setBearingInput(e.target.value)}
+                                  className="w-20 rounded border border-[var(--line)] bg-[var(--panel)] px-1.5 py-0.5 text-[10px] text-[var(--ink)]"
+                                />
+                                <span className="text-[9px] italic text-muted">Needed for terrain classification.</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs italic text-muted">No elevation profile fetched.</span>
+                                <button
+                                  disabled={elevFetching}
+                                  onClick={() => fetchElevation(false)}
+                                  className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
+                                >
+                                  {elevFetching ? "Fetching…" : "Fetch Elevation Profile"}
+                                </button>
+                              </div>
+                              {elevError && <div className="mt-1 text-[10px] text-[var(--error)]">{elevError}</div>}
+                            </div>
+                          );
+                        })()}
                         <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
                           <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
                         </div>

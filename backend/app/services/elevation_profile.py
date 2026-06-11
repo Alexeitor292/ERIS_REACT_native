@@ -236,11 +236,23 @@ def fetch_elevation_profile(
         logger.error("Elevation profile failed lat=%.6f lon=%.6f: %s", lat, lon, exc)
         error = str(exc)
 
+    profile_meta: dict = {
+        "road_bearing_deg_used": road_bearing_deg,
+        "road_bearing_source": None,  # endpoint fills this in after resolving source
+        "half_width_m": half_width_m,
+        "spacing_m": spacing_m,
+        "classification_requires_bearing": True,
+    }
+    if road_bearing_deg is None:
+        profile_meta["classification_note"] = (
+            "No road bearing was provided; only center elevation was sampled."
+        )
+
     return {
         "source": EPQS_SOURCE,
         "checked_at": checked_at,
         "classification": classification,
         "confidence": confidence,
-        "profile": {"points": profile_points},
+        "profile": {"points": profile_points, "metadata": profile_meta},
         "error": error,
     }

@@ -48,12 +48,30 @@ export type WorkflowEvent = {
   created_at: string;
 };
 
+export type GisaElevationProfileMetadata = {
+  road_bearing_deg_used: number | null;
+  road_bearing_source: string | null;
+  half_width_m: number;
+  spacing_m: number;
+  classification_requires_bearing: boolean;
+  classification_note?: string;
+};
+
 export type GisaElevationProfile = {
   source: string | null;
   checked_at: string | null;
   classification: string | null;
   confidence: number | null;
-  profile: Record<string, unknown> | null;
+  profile: {
+    points?: Array<{
+      offset_m: number;
+      lat: number;
+      lon: number;
+      elevation_ft: number | null;
+      source: string;
+    }>;
+    metadata?: GisaElevationProfileMetadata;
+  } | null;
   error: string | null;
 };
 
