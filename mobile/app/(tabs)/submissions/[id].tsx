@@ -5067,6 +5067,7 @@ export default function SubmissionDetailScreen() {
             {(() => {
               const riCtx = (data?.gisa?.road_inventory_context ?? null) as GisaRoadInventoryContext | null;
               const riSnapshot = riCtx?.snapshot ?? null;
+              const snap = riSnapshot as Record<string, unknown> | null;
               return (
                 <>
                   <View style={[riInfoStyles.card, { borderColor: riCtx ? "#065f46" : palette.border, backgroundColor: palette.panelSoft }]}>
@@ -5074,13 +5075,31 @@ export default function SubmissionDetailScreen() {
                       <>
                         <Text style={[riInfoStyles.title, { color: "#34d399" }]}>Road inventory context active</Text>
                         <View style={riInfoStyles.row}>
-                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Dataset:</Text>
+                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Dataset ID:</Text>
                           <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.dataset_version_id}</Text>
                         </View>
                         <View style={riInfoStyles.row}>
                           <Text style={[riInfoStyles.label, { color: palette.muted }]}>Segment:</Text>
                           <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.segment_id ?? "—"}</Text>
                         </View>
+                        {snap?.county_code != null ? (
+                          <View style={riInfoStyles.row}>
+                            <Text style={[riInfoStyles.label, { color: palette.muted }]}>County:</Text>
+                            <Text style={[riInfoStyles.value, { color: palette.text }]}>{String(snap.county_code)}</Text>
+                          </View>
+                        ) : null}
+                        {snap?.route_name != null ? (
+                          <View style={riInfoStyles.row}>
+                            <Text style={[riInfoStyles.label, { color: palette.muted }]}>Route:</Text>
+                            <Text style={[riInfoStyles.value, { color: palette.text }]}>{String(snap.route_name)}</Text>
+                          </View>
+                        ) : null}
+                        {(snap?.begin_pm != null || snap?.end_pm != null) ? (
+                          <View style={riInfoStyles.row}>
+                            <Text style={[riInfoStyles.label, { color: palette.muted }]}>PM range:</Text>
+                            <Text style={[riInfoStyles.value, { color: palette.text }]}>{String(snap?.begin_pm ?? "?")} – {String(snap?.end_pm ?? "?")}</Text>
+                          </View>
+                        ) : null}
                         <View style={riInfoStyles.row}>
                           <Text style={[riInfoStyles.label, { color: palette.muted }]}>Source:</Text>
                           <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.match_method ?? "—"}</Text>
@@ -5090,6 +5109,9 @@ export default function SubmissionDetailScreen() {
                       <Text style={[riInfoStyles.title, { color: palette.muted }]}>No road inventory context attached. Diagram uses form / default roadway assumptions.</Text>
                     )}
                   </View>
+                  <Text style={{ fontSize: 10, color: riCtx ? "#34d399" : palette.muted, marginTop: 4, marginBottom: 2 }}>
+                    Diagram source: {riCtx ? "Road inventory snapshot" : "Form / default assumptions"}
+                  </Text>
                   <MeasurementDiagramRenderer
                     formValues={form}
                     roadInventorySnapshot={riSnapshot}

@@ -400,6 +400,7 @@ function RoadInventoryContextCard({
             </View>
           ))}
       </View>
+      <Text style={{ color: palette.muted, fontSize: 11, marginTop: 6 }}>This context will be saved with the incident.</Text>
     </View>
   );
 }
@@ -642,7 +643,7 @@ export default function IncidentsTabScreen() {
       setRoadInventoryMatches(results);
       setRoadInventoryLookupError(
         results.length === 0
-          ? "No road inventory segment matched this county/route/postmile."
+          ? "No matching road segment found. Incident can still be submitted."
           : null,
       );
     } catch (e: any) {
@@ -1422,7 +1423,7 @@ export default function IncidentsTabScreen() {
                   <Text style={{ fontSize: 11, color: roadInventoryAvailable ? palette.muted : "#b45309" }}>
                     {roadInventoryAvailable
                       ? `Road inventory offline: ${roadInventoryVersionTag}`
-                      : "Road inventory offline data not synced"}
+                      : "Road inventory not synced. Go to Me → Road Inventory to sync."}
                   </Text>
                 </View>
                 {roadInventoryAvailable ? (
@@ -1818,6 +1819,11 @@ export default function IncidentsTabScreen() {
                 <Text style={{ color: palette.muted, fontSize: 12 }}>
                   Stage: {isMaintenanceWorkerMobile ? workerBadge.label : item.current_stage}
                 </Text>
+                {item.road_inventory_context ? (
+                  <Text style={{ color: "#34d399", fontSize: 11, marginTop: 2 }}>
+                    RI context saved · Dataset {item.road_inventory_context.dataset_version_id}{item.road_inventory_context.segment_id != null ? ` · Seg ${item.road_inventory_context.segment_id}` : ""}
+                  </Text>
+                ) : null}
                 {!!item.linked_submission_id ? (
                   <Pressable
                     style={[styles.smallBtn, { borderColor: palette.border, marginTop: 8 }]}

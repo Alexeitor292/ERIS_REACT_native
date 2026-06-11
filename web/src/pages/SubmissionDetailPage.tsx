@@ -1933,6 +1933,25 @@ export default function SubmissionDetailPage() {
                     <div {...cardFrameProps("measurements")}>
                         {layoutTools("measurements")}
                         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Measurements</div>
+                        {data.gisa?.road_inventory_context ? (
+                          <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--good)_32%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_8%,transparent)] px-2.5 py-2 text-xs">
+                            <div className="mb-1 font-semibold text-[var(--good)]">Road inventory context</div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
+                              <span>Dataset: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.dataset_version_id}</span></span>
+                              <span>Segment: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.segment_id ?? "—"}</span></span>
+                              {data.gisa.road_inventory_context.snapshot?.county_code != null && <span>County: <span className="text-[var(--ink)]">{String(data.gisa.road_inventory_context.snapshot.county_code)}</span></span>}
+                              {data.gisa.road_inventory_context.snapshot?.route_name != null && <span>Route: <span className="text-[var(--ink)]">{String(data.gisa.road_inventory_context.snapshot.route_name)}</span></span>}
+                              {(data.gisa.road_inventory_context.snapshot?.begin_pm != null || data.gisa.road_inventory_context.snapshot?.end_pm != null) && (
+                                <span className="col-span-2">PM: {String(data.gisa.road_inventory_context.snapshot?.begin_pm ?? "?")} – {String(data.gisa.road_inventory_context.snapshot?.end_pm ?? "?")}</span>
+                              )}
+                              <span>Method: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.match_method ?? "—"}</span></span>
+                              {data.gisa.road_inventory_context.checked_at && <span>Checked: <span className="text-[var(--ink)]">{data.gisa.road_inventory_context.checked_at}</span></span>}
+                            </div>
+                            <div className="mt-1 text-[10px] text-[var(--good)]">Diagram built from road inventory snapshot</div>
+                          </div>
+                        ) : (
+                          <div className="mb-2 text-xs italic text-muted">No road inventory context. Diagram uses form / default roadway assumptions.</div>
+                        )}
                         <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
                           <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
                         </div>
