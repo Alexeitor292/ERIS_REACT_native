@@ -113,6 +113,24 @@ To manually override:
 
 ---
 
+## Fullscreen diagram (mobile)
+
+Tap the **⤢** button in the View row to open the diagram fullscreen.
+
+The fullscreen modal:
+- Uses the entire screen (SafeAreaView + StatusBar hidden).
+- Unlocks device orientation — rotate to landscape for a wider cross-section view.
+- Keeps all controls (template selector, terrain selector, view toggle) accessible.
+- Shows a compact source note at the bottom.
+- Tap **✕** to close; orientation re-locks to portrait.
+
+Rotation is handled by `expo-screen-orientation`:
+- `ScreenOrientation.unlockAsync()` on open
+- `ScreenOrientation.lockAsync(PORTRAIT_UP)` on close
+- Safety cleanup if the component unmounts while fullscreen is open.
+
+---
+
 ## Future improvements
 
 - Add GEO/map-derived landslide template classification (ABOVE / SLIPOUT / THROUGH) so Template AUTO can resolve from spatial evidence rather than defaulting to THROUGH

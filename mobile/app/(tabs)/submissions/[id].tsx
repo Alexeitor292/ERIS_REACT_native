@@ -9,6 +9,7 @@ import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
 import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaRoadInventoryContext } from "../../../src/api/submissions";
+import { terrainLabel, explainRoadInventoryField } from "../../../src/roadInventory/roadInventoryGlossary";
 import { enqueueOfflineOp } from "../../../src/offline/queue";
 import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
 import {
@@ -2623,6 +2624,7 @@ export default function SubmissionDetailScreen() {
     waterDrainage: false,
     measurements: false,
   });
+  const [riDetailsOpen, setRiDetailsOpen] = useState(false);
   const [activeMaterialSection, setActiveMaterialSection] = useState<MaterialSectionKey>("slope");
   const [activeStep, setActiveStep] = useState(0);
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
@@ -5074,14 +5076,7 @@ export default function SubmissionDetailScreen() {
                     {riCtx ? (
                       <>
                         <Text style={[riInfoStyles.title, { color: "#34d399" }]}>Road inventory context active</Text>
-                        <View style={riInfoStyles.row}>
-                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Dataset ID:</Text>
-                          <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.dataset_version_id}</Text>
-                        </View>
-                        <View style={riInfoStyles.row}>
-                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Segment:</Text>
-                          <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.segment_id ?? "—"}</Text>
-                        </View>
+                        {/* Primary fields with friendly labels */}
                         {snap?.county_code != null ? (
                           <View style={riInfoStyles.row}>
                             <Text style={[riInfoStyles.label, { color: palette.muted }]}>County:</Text>
@@ -5096,14 +5091,67 @@ export default function SubmissionDetailScreen() {
                         ) : null}
                         {(snap?.begin_pm != null || snap?.end_pm != null) ? (
                           <View style={riInfoStyles.row}>
-                            <Text style={[riInfoStyles.label, { color: palette.muted }]}>PM range:</Text>
-                            <Text style={[riInfoStyles.value, { color: palette.text }]}>{String(snap?.begin_pm ?? "?")} – {String(snap?.end_pm ?? "?")}</Text>
+                            <Text style={[riInfoStyles.label, { color: palette.muted }]}>Postmile range:</Text>
+                            <Text style={[riInfoStyles.value, { color: palette.text }]}>{String(snap?.begin_pm ?? "?")} – {String(snap?.end_pm ?? "?")} mi</Text>
+                          </View>
+                        ) : null}
+                        {/* Terrain — friendly label from glossary */}
+                        {(snap?.terrain_code != null || snap?.THY_TERRAIN_CODE != null) ? (
+                          <View style={riInfoStyles.row}>
+                            <Text style={[riInfoStyles.label, { color: palette.muted }]}>Terrain:</Text>
+                            <Text style={[riInfoStyles.value, { color: palette.text }]}>
+                              {terrainLabel(String(snap?.terrain_code ?? snap?.THY_TERRAIN_CODE))}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {/* Lane counts */}
+                        {(snap?.left_lanes != null || snap?.right_lanes != null) ? (
+                          <View style={riInfoStyles.row}>
+                            <Text style={[riInfoStyles.label, { color: palette.muted }]}>Lanes:</Text>
+                            <Text style={[riInfoStyles.value, { color: palette.text }]}>
+                              {snap?.left_lanes != null ? `${snap.left_lanes} LT` : "? LT"}{" / "}{snap?.right_lanes != null ? `${snap.right_lanes} RT` : "? RT"}
+                            </Text>
                           </View>
                         ) : null}
                         <View style={riInfoStyles.row}>
-                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Source:</Text>
+                          <Text style={[riInfoStyles.label, { color: palette.muted }]}>Match method:</Text>
                           <Text style={[riInfoStyles.value, { color: palette.text }]}>{riCtx.match_method ?? "—"}</Text>
                         </View>
+                        {/* Expandable raw details */}
+                        <Pressable
+                          onPress={() => setRiDetailsOpen((v) => !v)}
+                          style={{ marginTop: 4 }}
+                          accessibilityRole="button"
+                          accessibilityLabel={riDetailsOpen ? "Hide road inventory details" : "Show road inventory details"}
+                        >
+                          <Text style={{ fontSize: 10, color: "#34d399", fontWeight: "600" }}>
+                            {riDetailsOpen ? "▲ Hide field details" : "▼ Field meanings & raw values"}
+                          </Text>
+                        </Pressable>
+                        {riDetailsOpen && snap ? (
+                          <View style={{ marginTop: 6, gap: 3, borderTopWidth: 1, borderTopColor: "#1e3a2e", paddingTop: 6 }}>
+                            <Text style={{ fontSize: 9, color: "#64748b", fontStyle: "italic", marginBottom: 2 }}>
+                              Road inventory values from the CA Highways (HICOMP) dataset. Dataset v{riCtx.dataset_version_id}, segment {riCtx.segment_id}.
+                            </Text>
+                            {Object.entries(snap).map(([key, val]) => {
+                              const ex = explainRoadInventoryField(key, val);
+                              return (
+                                <View key={key} style={{ gap: 0 }}>
+                                  <View style={riInfoStyles.row}>
+                                    <Text style={[riInfoStyles.label, { color: palette.muted, fontSize: 10, minWidth: 90 }]}>{ex.label}:</Text>
+                                    <Text style={[riInfoStyles.value, { color: palette.text, fontSize: 10 }]}>{ex.displayValue}</Text>
+                                  </View>
+                                  {ex.description ? (
+                                    <Text style={{ fontSize: 8, color: "#475569", marginLeft: 96, marginTop: -1, fontStyle: "italic" }}>{ex.description}</Text>
+                                  ) : null}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        ) : null}
+                        <Text style={{ fontSize: 9, color: "#34d399", marginTop: 4, fontStyle: "italic" }}>
+                          Road inventory values from the published CA Highways dataset.
+                        </Text>
                       </>
                     ) : (
                       <Text style={[riInfoStyles.title, { color: palette.muted }]}>No road inventory context attached. Diagram uses form / default roadway assumptions.</Text>
