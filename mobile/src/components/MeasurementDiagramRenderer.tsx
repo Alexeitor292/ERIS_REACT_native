@@ -1,45 +1,11 @@
-import React, { useState, useCallback, useEffect } from "react";
+// Orientation unlock disabled — expo-screen-orientation native module is not
+// present in the current Expo Go/dev-client binary. Fullscreen remains available;
+// rotation follows the OS lock. Can be revisited after a native client rebuild.
+import React, { useState, useCallback } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent,
   Modal, SafeAreaView, StatusBar,
 } from "react-native";
-// Rotation is best-effort. Some Expo Go / dev-client binaries may not include
-// ExpoScreenOrientation until the native client is rebuilt with the module.
-// We lazy-require to avoid a crash at module load time when it is missing.
-import type * as ScreenOrientationTypes from "expo-screen-orientation";
-
-let _screenOrientationModule: typeof ScreenOrientationTypes | null | undefined;
-
-function getScreenOrientationModule(): typeof ScreenOrientationTypes | null {
-  if (_screenOrientationModule !== undefined) return _screenOrientationModule;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    _screenOrientationModule = require("expo-screen-orientation");
-  } catch {
-    _screenOrientationModule = null;
-  }
-  return _screenOrientationModule ?? null;
-}
-
-async function unlockOrientationIfAvailable(): Promise<void> {
-  const mod = getScreenOrientationModule();
-  if (!mod) return;
-  try {
-    await mod.unlockAsync();
-  } catch {
-    // Native module unavailable in this client; fullscreen still works.
-  }
-}
-
-async function lockPortraitIfAvailable(): Promise<void> {
-  const mod = getScreenOrientationModule();
-  if (!mod) return;
-  try {
-    await mod.lockAsync(mod.OrientationLock.PORTRAIT_UP);
-  } catch {
-    // Native module unavailable in this client; ignore.
-  }
-}
 import { RoadCrossSectionRenderer } from "./RoadCrossSectionRenderer";
 import { buildMeasurementDiagramData } from "../measurements/buildMeasurementDiagramData";
 import type { DiagramTemplate, FailureSide, StationingView, TerrainSideShape } from "../measurements/measurementDiagramModel";
@@ -104,24 +70,13 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
     setFsWidth(e.nativeEvent.layout.width);
   }, []);
 
-  const openFullscreen = useCallback(async () => {
+  const openFullscreen = useCallback(() => {
     setFullscreen(true);
-    await unlockOrientationIfAvailable();
   }, []);
 
-  const closeFullscreen = useCallback(async () => {
-    await lockPortraitIfAvailable();
+  const closeFullscreen = useCallback(() => {
     setFullscreen(false);
   }, []);
-
-  // Safety: re-lock if component unmounts while fullscreen is open
-  useEffect(() => {
-    return () => {
-      if (fullscreen) {
-        lockPortraitIfAvailable().catch(() => {});
-      }
-    };
-  }, [fullscreen]);
 
   const data =
     containerWidth > 0
