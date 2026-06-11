@@ -98,6 +98,8 @@ Each diagram section shows the data source in a badge and the source/assumption 
 - **Template AUTO**: Conservative default — `LANDSLIDE_THROUGH_ROAD` — until GEO/map-derived landslide classification is available. Template is **not** inferred from failure_* form checkboxes.
 - **Terrain AUTO**: Source of truth is `gisa.elevation_profile.classification` (USGS 3DEP/EPQS cross-section). Mapping: `LEFT_HIGH` → LEFT_HIGH, `RIGHT_HIGH` → RIGHT_HIGH, `BOWL` → BOWL, `CROWN` → CROWN, `FLAT` → FLAT, `UNKNOWN` or missing → FLAT (safe schematic).
 - **Elevation**: Backend elevation profile enrichment active (migration 0007, USGS EPQS). Profile fetched on demand via `POST /submissions/{id}/gisa/elevation-profile`. See `docs/elevation-profile-enrichment.md`.
+  - **Mobile**: Field users can tap **Fetch / Refresh** in the Measurements section elevation profile panel to update the profile before using Terrain AUTO. Leave the Road bearing field blank to let the backend auto-derive bearing from postmile geometry.
+  - **Web**: The elevation panel in the submission detail page provides the same Fetch / Refresh controls.
 - **Manual overrides**: All three selectors (template, failure side, terrain) remain available and override AUTO when pressed.
 
 ---

@@ -8,7 +8,7 @@ import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathnam
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaRoadInventoryContext } from "../../../src/api/submissions";
+import { fetchElevationProfile, generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaElevationProfile, type GisaRoadInventoryContext } from "../../../src/api/submissions";
 import { terrainLabel, explainRoadInventoryField } from "../../../src/roadInventory/roadInventoryGlossary";
 import { enqueueOfflineOp } from "../../../src/offline/queue";
 import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
@@ -2625,6 +2625,11 @@ export default function SubmissionDetailScreen() {
     measurements: false,
   });
   const [riDetailsOpen, setRiDetailsOpen] = useState(false);
+  const [elevRefreshing, setElevRefreshing] = useState(false);
+  const [elevError, setElevError] = useState<string | null>(null);
+  const [elevBearingInput, setElevBearingInput] = useState("");
+  const [elevBearingError, setElevBearingError] = useState<string | null>(null);
+  const [localElevProfile, setLocalElevProfile] = useState<GisaElevationProfile | null | undefined>(undefined);
   const [activeMaterialSection, setActiveMaterialSection] = useState<MaterialSectionKey>("slope");
   const [activeStep, setActiveStep] = useState(0);
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
@@ -3555,6 +3560,40 @@ export default function SubmissionDetailScreen() {
       Alert.alert("Notify failed", String(err?.message ?? err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function refreshElevationProfile() {
+    if (!token || !id || isLocalId) return;
+    // Validate manual bearing input if provided
+    const rawBearing = elevBearingInput.trim();
+    let road_bearing_deg: number | null = null;
+    if (rawBearing !== "") {
+      const parsed = parseFloat(rawBearing);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 360) {
+        setElevBearingError("Bearing must be 0–359°");
+        return;
+      }
+      road_bearing_deg = parsed;
+    }
+    setElevBearingError(null);
+    setElevRefreshing(true);
+    setElevError(null);
+    try {
+      const res = await fetchElevationProfile(token, id, { force: true, road_bearing_deg });
+      const ep = res.elevation_profile as GisaElevationProfile;
+      // Update local state immediately so diagram reflects new classification
+      setLocalElevProfile(ep);
+      setData((prev) =>
+        prev
+          ? { ...prev, gisa: prev.gisa ? { ...prev.gisa, elevation_profile: ep } : prev.gisa }
+          : prev,
+      );
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
+      setElevError(String(err?.message ?? "Elevation profile refresh failed"));
+    } finally {
+      setElevRefreshing(false);
     }
   }
 
@@ -5160,10 +5199,93 @@ export default function SubmissionDetailScreen() {
                   <Text style={{ fontSize: 10, color: riCtx ? "#34d399" : palette.muted, marginTop: 4, marginBottom: 2 }}>
                     Diagram source: {riCtx ? "Road inventory snapshot" : "Form / default assumptions"}
                   </Text>
+                  {/* Elevation profile panel */}
+                  {(() => {
+                    const ep = (localElevProfile !== undefined ? localElevProfile : data?.gisa?.elevation_profile) as GisaElevationProfile | null | undefined;
+                    const epMeta = (ep?.profile as Record<string, unknown> | null | undefined)?.metadata as Record<string, unknown> | null | undefined;
+                    const bearingUsed = epMeta?.road_bearing_deg_used as number | null | undefined;
+                    const bearingSource = epMeta?.road_bearing_source as string | null | undefined;
+                    const bearingSourceLabel =
+                      bearingSource === "arcgis_postmile_geometry" ? "auto from postmile geometry" :
+                      bearingSource === "road_inventory_snapshot" ? "road inventory snapshot" :
+                      bearingSource ?? null;
+                    const bearingNote = bearingUsed != null
+                      ? `${Math.round(bearingUsed)}° (${bearingSourceLabel ?? "request"})`
+                      : "not set — classification may be UNKNOWN";
+
+                    return (
+                      <View style={[elevStyles.card, { borderColor: ep ? "#065f46" : palette.border, backgroundColor: palette.panelSoft }]}>
+                        <View style={elevStyles.headerRow}>
+                          <Text style={[elevStyles.title, { color: ep ? "#34d399" : palette.muted }]}>Elevation profile</Text>
+                          {!isLocalId && (
+                            <Pressable
+                              onPress={refreshElevationProfile}
+                              disabled={elevRefreshing}
+                              accessibilityRole="button"
+                              style={[elevStyles.refreshBtn, elevRefreshing && { opacity: 0.5 }]}
+                            >
+                              <Text style={elevStyles.refreshBtnText}>{elevRefreshing ? "Refreshing…" : ep ? "Refresh" : "Fetch"}</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                        {/* Optional bearing input */}
+                        <View style={elevStyles.bearingRow}>
+                          <Text style={[elevStyles.bearingLabel, { color: palette.muted }]}>Road bearing (deg):</Text>
+                          <TextInput
+                            style={[elevStyles.bearingInput, { color: palette.text, borderColor: elevBearingError ? "#f87171" : palette.border, backgroundColor: palette.panel }]}
+                            value={elevBearingInput}
+                            onChangeText={(v) => { setElevBearingInput(v); setElevBearingError(null); }}
+                            placeholder="Auto"
+                            placeholderTextColor={palette.muted}
+                            keyboardType="decimal-pad"
+                            maxLength={5}
+                            editable={!elevRefreshing}
+                          />
+                          <Text style={[elevStyles.bearingHint, { color: palette.muted }]}>Optional. Leave blank to auto-derive.</Text>
+                        </View>
+                        {elevBearingError ? (
+                          <Text style={elevStyles.errorText}>{elevBearingError}</Text>
+                        ) : null}
+                        {ep ? (
+                          <View style={elevStyles.metaGrid}>
+                            <View style={elevStyles.metaRow}>
+                              <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Source:</Text>
+                              <Text style={[elevStyles.metaValue, { color: palette.text }]}>{ep.source ?? "—"}</Text>
+                            </View>
+                            <View style={elevStyles.metaRow}>
+                              <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Classification:</Text>
+                              <Text style={[elevStyles.metaValue, { color: palette.text }]}>{ep.classification ?? "—"}</Text>
+                            </View>
+                            {ep.confidence != null && (
+                              <View style={elevStyles.metaRow}>
+                                <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Confidence:</Text>
+                                <Text style={[elevStyles.metaValue, { color: palette.text }]}>{(ep.confidence * 100).toFixed(0)}%</Text>
+                              </View>
+                            )}
+                            {ep.checked_at ? (
+                              <View style={elevStyles.metaRow}>
+                                <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Checked:</Text>
+                                <Text style={[elevStyles.metaValue, { color: palette.text }]}>{String(ep.checked_at).slice(0, 10)}</Text>
+                              </View>
+                            ) : null}
+                            <View style={elevStyles.metaRow}>
+                              <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Bearing:</Text>
+                              <Text style={[elevStyles.metaValue, { color: bearingUsed != null ? palette.text : palette.muted, fontStyle: bearingUsed != null ? "normal" : "italic" }]}>{bearingNote}</Text>
+                            </View>
+                          </View>
+                        ) : (
+                          <Text style={[elevStyles.noProfileText, { color: palette.muted }]}>No elevation profile fetched.</Text>
+                        )}
+                        {elevError ? (
+                          <Text style={elevStyles.errorText}>{elevError}</Text>
+                        ) : null}
+                      </View>
+                    );
+                  })()}
                   <MeasurementDiagramRenderer
                     formValues={form}
                     roadInventorySnapshot={riSnapshot}
-                    elevationProfile={data?.gisa?.elevation_profile ?? null}
+                    elevationProfile={(localElevProfile !== undefined ? localElevProfile : data?.gisa?.elevation_profile) ?? null}
                   />
                 </>
               );
@@ -6976,6 +7098,88 @@ const riInfoStyles = StyleSheet.create({
   value: {
     fontSize: 11,
     flex: 1,
+  },
+});
+
+const elevStyles = StyleSheet.create({
+  card: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 6,
+    gap: 4,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  title: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  refreshBtn: {
+    backgroundColor: "#10b981",
+    borderRadius: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  refreshBtnText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  bearingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  bearingLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  bearingInput: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    fontSize: 11,
+    width: 64,
+  },
+  bearingHint: {
+    fontSize: 9,
+    fontStyle: "italic",
+    flex: 1,
+  },
+  metaGrid: {
+    gap: 2,
+    marginTop: 2,
+  },
+  metaRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  metaLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+    minWidth: 80,
+  },
+  metaValue: {
+    fontSize: 10,
+    flex: 1,
+  },
+  noProfileText: {
+    fontSize: 10,
+    fontStyle: "italic",
+    marginTop: 2,
+  },
+  errorText: {
+    fontSize: 10,
+    color: "#f87171",
+    marginTop: 2,
   },
 });
 

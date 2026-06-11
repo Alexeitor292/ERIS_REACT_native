@@ -238,6 +238,60 @@ The web elevation panel shows the resolved bearing and its source:
 The bearing input field is pre-filled from `road_inventory_context.snapshot.road_bearing_deg` when
 available. Leaving the field blank allows auto-derivation from postmile geometry on each Fetch/Refresh.
 
+## Mobile refresh
+
+Field users can fetch or refresh the elevation profile directly from the Measurements section
+of the mobile submission detail screen.
+
+### Controls
+
+| Control | Behavior |
+|---------|----------|
+| **Fetch / Refresh button** | Calls `POST /submissions/{id}/gisa/elevation-profile` with `force: true` |
+| **Road bearing (deg)** input | Optional. Placeholder: `Auto`. Leave blank to let the backend auto-derive from postmile geometry. |
+| Manual bearing validation | Input must be `0–359°`. Inline error shown if out of range; request is not sent. |
+| Loading state | Button text changes to `Refreshing…` while the request is in flight. |
+| Error display | On network or server failure, a red inline error appears below the panel. |
+
+### Bearing input behavior
+
+- The field defaults to **blank** on every screen visit, regardless of previously stored metadata.
+- If blank, the backend resolves bearing via: request payload → road_inventory_snapshot → ArcGIS
+  postmile geometry → `null` (UNKNOWN).
+- If filled, the value overrides all automatic sources and is sent as `road_bearing_deg` in the
+  POST body (source: `"request"`).
+- Advanced users testing specific bearing angles can type a value here; it is not persisted
+  beyond the request.
+
+### Local state update
+
+On successful refresh the response `elevation_profile` object is:
+1. Written into `localElevProfile` state (screen-scoped).
+2. Merged into the `data.gisa.elevation_profile` state immediately.
+3. Passed as the `elevationProfile` prop to `MeasurementDiagramRenderer`.
+
+This means the diagram Terrain AUTO switches to the new classification **without requiring a
+screen reload or full data refresh**.
+
+### Elevation profile summary display
+
+| Field | Display |
+|-------|---------|
+| Source | `USGS_EPQS_3DEP` |
+| Classification | `LEFT_HIGH` / `RIGHT_HIGH` / `BOWL` / `CROWN` / `FLAT` / `UNKNOWN` |
+| Confidence | `54%` |
+| Checked | `YYYY-MM-DD` |
+| Bearing | see table below |
+
+Bearing display:
+
+| `road_bearing_source` | Label |
+|-----------------------|-------|
+| `"request"` | `90° (request)` |
+| `"road_inventory_snapshot"` | `90° (road inventory snapshot)` |
+| `"arcgis_postmile_geometry"` | `87° (auto from postmile geometry)` |
+| `null` / absent | `not set — classification may be UNKNOWN` |
+
 ## Mobile diagram integration
 
 The mobile measurement diagram reads `elevation_profile.classification` to drive Terrain AUTO mode:
