@@ -1,12 +1,14 @@
 import React, { useState, useCallback } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent } from "react-native";
 import { RoadCrossSectionRenderer } from "./RoadCrossSectionRenderer";
-import { buildMeasurementDiagramData, inferTemplate } from "../measurements/buildMeasurementDiagramData";
+import { buildMeasurementDiagramData } from "../measurements/buildMeasurementDiagramData";
 import type { DiagramTemplate, FailureSide, StationingView, TerrainSideShape } from "../measurements/measurementDiagramModel";
+import type { GisaElevationProfile } from "../api/submissions";
 
 interface Props {
   formValues: Record<string, string | undefined | null>;
   roadInventorySnapshot?: Record<string, unknown> | null;
+  elevationProfile?: GisaElevationProfile | null;
 }
 
 const TEMPLATES: { key: DiagramTemplate | "AUTO"; label: string }[] = [
@@ -45,7 +47,7 @@ const TERRAIN_SHORT: Record<TerrainSideShape, string> = {
   FLAT: "flat",
 };
 
-export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }: Props) {
+export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, elevationProfile }: Props) {
   const [template, setTemplate] = useState<DiagramTemplate | "AUTO">("AUTO");
   const [view, setView] = useState<StationingView>("UPSTATION");
   const [failureSide, setFailureSide] = useState<FailureSide>("LT");
@@ -65,6 +67,7 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }
           view,
           failureSide,
           terrainShape,
+          elevationProfile,
         )
       : null;
 
@@ -78,19 +81,37 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }
     source === "FORM_FIELDS" ? "#78350f" :
     "#1e3a5f";
 
-  // Inferred labels for AUTO selections — shown in the notes row
-  const autoTemplate = inferTemplate(formValues);
+  // Template note
   const templateNoteLabel =
     template === "AUTO"
-      ? `auto (${TEMPLATE_SHORT[autoTemplate]})`
+      ? "auto · pending GEO"
       : TEMPLATE_SHORT[template as DiagramTemplate] ?? template;
-  const terrainNoteLabel =
-    terrainShape === "AUTO"
-      ? `auto (${data ? TERRAIN_SHORT[data.terrainShape] : "—"})`
-      : TERRAIN_SHORT[terrainShape as TerrainSideShape] ?? terrainShape;
 
-  // Failure side selector is only meaningful for ABOVE and BELOW templates.
-  const resolvedTemplate = template === "AUTO" ? autoTemplate : template;
+  // Terrain note — reflects what AUTO actually resolved to
+  let terrainNoteLabel: string;
+  if (terrainShape !== "AUTO") {
+    terrainNoteLabel = `manual · ${TERRAIN_SHORT[terrainShape as TerrainSideShape] ?? terrainShape}`;
+  } else if (!elevationProfile) {
+    terrainNoteLabel = "auto · no elevation profile";
+  } else if (elevationProfile.classification === "UNKNOWN" || !elevationProfile.classification) {
+    terrainNoteLabel = "auto · elevation unknown";
+  } else {
+    terrainNoteLabel = `auto · USGS (${elevationProfile.classification})`;
+  }
+
+  // Elevation source note
+  let elevNoteLabel: string;
+  if (!elevationProfile) {
+    elevNoteLabel = "not fetched";
+  } else if (elevationProfile.error) {
+    elevNoteLabel = `error · ${elevationProfile.source ?? "USGS"}`;
+  } else {
+    elevNoteLabel = elevationProfile.source ?? "USGS";
+  }
+
+  // Failure side selector is only meaningful for ABOVE and BELOW templates
+  const resolvedTemplate: DiagramTemplate =
+    template === "AUTO" ? "LANDSLIDE_THROUGH_ROAD" : template;
   const showFailureSide = resolvedTemplate !== "LANDSLIDE_THROUGH_ROAD";
 
   return (
@@ -178,7 +199,7 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }
       {/* Source / assumption notes */}
       <View style={styles.noteRow}>
         <Text style={styles.noteText}>
-          {`Road: ${sourceLabel}  ·  Template: ${templateNoteLabel}  ·  Terrain: ${terrainNoteLabel}  ·  Elevation: not connected`}
+          {`Road: ${sourceLabel}  ·  Template: ${templateNoteLabel}  ·  Terrain: ${terrainNoteLabel}  ·  Elevation: ${elevNoteLabel}`}
         </Text>
       </View>
 
