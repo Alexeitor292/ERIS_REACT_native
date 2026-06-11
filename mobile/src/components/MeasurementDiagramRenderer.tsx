@@ -1,30 +1,55 @@
 import React, { useState, useCallback } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent } from "react-native";
 import { RoadCrossSectionRenderer } from "./RoadCrossSectionRenderer";
-import { buildMeasurementDiagramData } from "../measurements/buildMeasurementDiagramData";
-import type { DiagramTemplate, FailureSide, StationingView } from "../measurements/measurementDiagramModel";
+import { buildMeasurementDiagramData, inferTemplate } from "../measurements/buildMeasurementDiagramData";
+import type { DiagramTemplate, FailureSide, StationingView, TerrainSideShape } from "../measurements/measurementDiagramModel";
 
 interface Props {
   formValues: Record<string, string | undefined | null>;
   roadInventorySnapshot?: Record<string, unknown> | null;
 }
 
-const TEMPLATES: { key: DiagramTemplate; label: string }[] = [
-  { key: "LANDSLIDE_THROUGH_ROAD", label: "THROUGH ROAD" },
-  { key: "LANDSLIDE_ABOVE_ROAD", label: "ABOVE ROAD" },
-  { key: "LANDSLIDE_BELOW_ROAD_SLIPOUT", label: "BELOW / SLIPOUT" },
+const TEMPLATES: { key: DiagramTemplate | "AUTO"; label: string }[] = [
+  { key: "AUTO", label: "AUTO" },
+  { key: "LANDSLIDE_THROUGH_ROAD", label: "THROUGH" },
+  { key: "LANDSLIDE_ABOVE_ROAD", label: "ABOVE" },
+  { key: "LANDSLIDE_BELOW_ROAD_SLIPOUT", label: "SLIPOUT" },
 ];
 
 const FAILURE_SIDES: { key: FailureSide; label: string }[] = [
   { key: "LT", label: "LT SIDE" },
   { key: "RT", label: "RT SIDE" },
-  { key: "BOTH", label: "BOTH SIDES" },
+  { key: "BOTH", label: "BOTH" },
 ];
 
+const TERRAIN_SHAPES: { key: TerrainSideShape | "AUTO"; label: string }[] = [
+  { key: "AUTO", label: "Auto" },
+  { key: "LEFT_HIGH", label: "L-High" },
+  { key: "RIGHT_HIGH", label: "R-High" },
+  { key: "BOWL", label: "Bowl" },
+  { key: "CROWN", label: "Crown" },
+  { key: "FLAT", label: "Flat" },
+];
+
+const TEMPLATE_SHORT: Record<DiagramTemplate, string> = {
+  LANDSLIDE_THROUGH_ROAD: "through road",
+  LANDSLIDE_ABOVE_ROAD: "above road",
+  LANDSLIDE_BELOW_ROAD_SLIPOUT: "slipout",
+};
+
+const TERRAIN_SHORT: Record<TerrainSideShape, string> = {
+  LEFT_HIGH: "left-high",
+  RIGHT_HIGH: "right-high",
+  BOWL: "bowl",
+  CROWN: "crown",
+  FLAT: "flat",
+};
+
 export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }: Props) {
-  const [template, setTemplate] = useState<DiagramTemplate>("LANDSLIDE_THROUGH_ROAD");
+  const [template, setTemplate] = useState<DiagramTemplate | "AUTO">("AUTO");
   const [view, setView] = useState<StationingView>("UPSTATION");
   const [failureSide, setFailureSide] = useState<FailureSide>("LT");
+  const [terrainShape, setTerrainShape] = useState<TerrainSideShape | "AUTO">("AUTO");
   const [containerWidth, setContainerWidth] = useState(0);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
@@ -33,22 +58,40 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }
 
   const data =
     containerWidth > 0
-      ? buildMeasurementDiagramData(formValues, roadInventorySnapshot, template, view, failureSide)
+      ? buildMeasurementDiagramData(
+          formValues,
+          roadInventorySnapshot,
+          template,
+          view,
+          failureSide,
+          terrainShape,
+        )
       : null;
 
   const source = data?.crossSection.source ?? "DEFAULT";
   const sourceLabel =
-    source === "ROAD_INVENTORY" ? "Road Inventory" :
-    source === "FORM_FIELDS" ? "From Form Fields" :
-    "Default (no data)";
+    source === "ROAD_INVENTORY" ? "Road inventory" :
+    source === "FORM_FIELDS" ? "Form fields" :
+    "Default";
   const sourceBadgeColor =
     source === "ROAD_INVENTORY" ? "#065f46" :
     source === "FORM_FIELDS" ? "#78350f" :
     "#1e3a5f";
 
+  // Inferred labels for AUTO selections — shown in the notes row
+  const autoTemplate = inferTemplate(formValues);
+  const templateNoteLabel =
+    template === "AUTO"
+      ? `auto (${TEMPLATE_SHORT[autoTemplate]})`
+      : TEMPLATE_SHORT[template as DiagramTemplate] ?? template;
+  const terrainNoteLabel =
+    terrainShape === "AUTO"
+      ? `auto (${data ? TERRAIN_SHORT[data.terrainShape] : "—"})`
+      : TERRAIN_SHORT[terrainShape as TerrainSideShape] ?? terrainShape;
+
   // Failure side selector is only meaningful for ABOVE and BELOW templates.
-  // For THROUGH_ROAD the overlay always spans the full road regardless.
-  const showFailureSide = template !== "LANDSLIDE_THROUGH_ROAD";
+  const resolvedTemplate = template === "AUTO" ? autoTemplate : template;
+  const showFailureSide = resolvedTemplate !== "LANDSLIDE_THROUGH_ROAD";
 
   return (
     <View style={styles.wrapper}>
@@ -89,6 +132,24 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }
         </View>
       )}
 
+      {/* Terrain shape selector */}
+      <View style={styles.controlRow}>
+        <Text style={styles.controlLabel}>Terrain:</Text>
+        {TERRAIN_SHAPES.map((ts) => (
+          <TouchableOpacity
+            key={ts.key}
+            style={[styles.controlBtn, terrainShape === ts.key && styles.terrainBtnActive]}
+            onPress={() => setTerrainShape(ts.key)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: terrainShape === ts.key }}
+          >
+            <Text style={[styles.controlBtnText, terrainShape === ts.key && styles.controlBtnTextActive]}>
+              {ts.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {/* Stationing view toggle and data source badge */}
       <View style={styles.viewRow}>
         <Text style={styles.viewLabel}>View:</Text>
@@ -112,6 +173,13 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot }
         <View style={[styles.badge, { backgroundColor: sourceBadgeColor }]}>
           <Text style={styles.badgeText}>{sourceLabel}</Text>
         </View>
+      </View>
+
+      {/* Source / assumption notes */}
+      <View style={styles.noteRow}>
+        <Text style={styles.noteText}>
+          {`Road: ${sourceLabel}  ·  Template: ${templateNoteLabel}  ·  Terrain: ${terrainNoteLabel}  ·  Elevation: not connected`}
+        </Text>
       </View>
 
       {/* SVG diagram */}
@@ -162,7 +230,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 8,
     paddingVertical: 5,
-    gap: 6,
+    gap: 5,
     backgroundColor: "#0f1e30",
     borderBottomWidth: 1,
     borderBottomColor: "#1e293b",
@@ -173,7 +241,7 @@ const styles = StyleSheet.create({
     marginRight: 2,
   },
   controlBtn: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 4,
     borderWidth: 1,
@@ -183,6 +251,10 @@ const styles = StyleSheet.create({
   controlBtnActive: {
     backgroundColor: "#b45309",
     borderColor: "#b45309",
+  },
+  terrainBtnActive: {
+    backgroundColor: "#0f5132",
+    borderColor: "#0f5132",
   },
   controlBtnText: {
     fontSize: 9,
@@ -235,6 +307,18 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: "#d1fae5",
     fontWeight: "700",
+  },
+  noteRow: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "#0a1628",
+    borderTopWidth: 1,
+    borderTopColor: "#1e293b",
+  },
+  noteText: {
+    fontSize: 8,
+    color: "#475569",
+    fontStyle: "italic",
   },
   svgContainer: {
     width: "100%",
