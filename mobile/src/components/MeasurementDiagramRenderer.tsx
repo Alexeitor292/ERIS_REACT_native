@@ -1,9 +1,11 @@
-import React, { useState, useCallback, useEffect } from "react";
+// Orientation unlock disabled — expo-screen-orientation native module is not
+// present in the current Expo Go/dev-client binary. Fullscreen remains available;
+// rotation follows the OS lock. Can be revisited after a native client rebuild.
+import React, { useState, useCallback } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent,
-  Modal, SafeAreaView, StatusBar, Dimensions,
+  Modal, SafeAreaView, StatusBar,
 } from "react-native";
-import * as ScreenOrientation from "expo-screen-orientation";
 import { RoadCrossSectionRenderer } from "./RoadCrossSectionRenderer";
 import { buildMeasurementDiagramData } from "../measurements/buildMeasurementDiagramData";
 import type { DiagramTemplate, FailureSide, StationingView, TerrainSideShape } from "../measurements/measurementDiagramModel";
@@ -68,24 +70,13 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
     setFsWidth(e.nativeEvent.layout.width);
   }, []);
 
-  const openFullscreen = useCallback(async () => {
+  const openFullscreen = useCallback(() => {
     setFullscreen(true);
-    await ScreenOrientation.unlockAsync();
   }, []);
 
-  const closeFullscreen = useCallback(async () => {
-    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+  const closeFullscreen = useCallback(() => {
     setFullscreen(false);
   }, []);
-
-  // Safety: re-lock if component unmounts while fullscreen is open
-  useEffect(() => {
-    return () => {
-      if (fullscreen) {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-      }
-    };
-  }, [fullscreen]);
 
   const data =
     containerWidth > 0

@@ -124,10 +124,7 @@ The fullscreen modal:
 - Shows a compact source note at the bottom.
 - Tap **✕** to close; orientation re-locks to portrait.
 
-Rotation is handled by `expo-screen-orientation`:
-- `ScreenOrientation.unlockAsync()` on open
-- `ScreenOrientation.lockAsync(PORTRAIT_UP)` on close
-- Safety cleanup if the component unmounts while fullscreen is open.
+**Rotation note:** `expo-screen-orientation` is installed in `package.json` but is not invoked at runtime because the native module (`ExpoScreenOrientation`) is not included in the current Expo Go / dev-client binary. The fullscreen modal works normally; rotation follows the OS/device lock. Orientation unlock can be re-enabled after a native client rebuild that includes the module.
 
 ---
 
