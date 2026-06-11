@@ -212,3 +212,10 @@ class IncidentAssignBranchChiefRequest(BaseModel):
 
 class IncidentAssignEngineerRequest(BaseModel):
     engineer_user_id: int = Field(..., ge=1)
+
+
+class ElevationProfileRequest(BaseModel):
+    road_bearing_deg: float | None = Field(default=None, ge=0, lt=360)
+    half_width_m: float | None = Field(default=None, gt=0, le=500)
+    spacing_m: float | None = Field(default=None, gt=0, le=100)
+    force: bool | None = None

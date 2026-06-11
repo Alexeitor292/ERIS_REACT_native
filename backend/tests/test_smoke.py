@@ -74,8 +74,8 @@ class TestAlembicScripts:
 
     def test_package_type_is_head(self):
         heads = self._script_dir().get_heads()
-        assert "0006_submission_gisa_ri_context" in heads, (
-            f"0006_submission_gisa_ri_context not in heads: {heads}"
+        assert "0007_gisa_elevation_profile" in heads, (
+            f"0007_gisa_elevation_profile not in heads: {heads}"
         )
 
     def test_baseline_in_chain(self):

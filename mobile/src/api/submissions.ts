@@ -109,6 +109,26 @@ export type GisaRoadInventoryContext = {
   snapshot: Record<string, unknown> | null;
 };
 
+export type GisaElevationProfile = {
+  source: string | null;
+  checked_at: string | null;
+  classification: string | null;
+  confidence: number | null;
+  profile: Record<string, unknown> | null;
+  error: string | null;
+};
+
+export async function fetchElevationProfile(
+  token: string,
+  id: string,
+  payload: { road_bearing_deg?: number | null; half_width_m?: number | null; spacing_m?: number | null; force?: boolean | null },
+) {
+  return apiFetch<{ elevation_profile: GisaElevationProfile }>(
+    `/submissions/${id}/gisa/elevation-profile`,
+    { method: "POST", token, body: payload },
+  );
+}
+
 export type GisaPdfResponse = {
   submission_id: number;
   attachment_id: number;
