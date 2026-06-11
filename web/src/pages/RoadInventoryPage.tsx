@@ -348,7 +348,7 @@ function ManifestBanner({
           </div>
         ) : (
           <div className="flex items-center gap-4 flex-wrap">
-            <span className="text-muted italic">Mobile package not generated</span>
+            <span className="text-muted italic">Mobile package not generated — field devices cannot sync until a package is built</span>
             {isAdmin && (
               <button
                 disabled={generatingPkg}
