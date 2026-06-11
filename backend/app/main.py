@@ -361,6 +361,153 @@ def _query_postmile_layer(lat: float, lon: float) -> dict:
     }
 
 
+def _safe_float(value) -> float | None:
+    """Parse value to a finite float, or return None."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_arcgis_point_geometry(feature: dict) -> tuple[float, float] | None:
+    """
+    Extract (lat, lon) from an ArcGIS point feature geometry in outSR=4326.
+    Returns None if geometry is missing or out-of-range.
+    """
+    geom = feature.get("geometry")
+    if not isinstance(geom, dict):
+        return None
+    x = _safe_float(geom.get("x"))  # longitude in WGS84
+    y = _safe_float(geom.get("y"))  # latitude in WGS84
+    if x is None or y is None:
+        return None
+    if not (-180.0 <= x <= 180.0 and -90.0 <= y <= 90.0):
+        return None
+    return (y, x)  # (lat, lon)
+
+
+def _initial_bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Geodesic initial bearing from (lat1, lon1) to (lat2, lon2), in degrees [0, 360).
+    Uses the spherical haversine formula.
+    """
+    lat1r = math.radians(lat1)
+    lat2r = math.radians(lat2)
+    dlon = math.radians(lon2 - lon1)
+    x = math.sin(dlon) * math.cos(lat2r)
+    y = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlon)
+    return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
+
+
+def _derive_road_bearing_from_postmile_layer(
+    lat: float,
+    lon: float,
+    route: str | None,
+    county: str | None,
+    post_mile: float | None,
+    district: str | None = None,
+) -> float | None:
+    """
+    Derive road bearing (upstation / increasing-postmile direction) by querying the
+    ArcGIS postmile feature layer for nearby postmile marker points, then computing
+    the geodesic bearing from the nearest lower-PM point to the nearest higher-PM point.
+
+    Returns None when:
+    - POSTMILE_FEATURE_LAYER_URL is not configured
+    - route, county, or post_mile are unavailable
+    - fewer than two valid geometry points are found after filtering
+    """
+    base = (settings.POSTMILE_FEATURE_LAYER_URL or "").strip().rstrip("/")
+    if not base:
+        return None
+    if route is None or county is None or post_mile is None:
+        return None
+
+    search_dist = max(settings.POSTMILE_SEARCH_DISTANCE_METERS, 3200)
+    out_fields = ",".join([
+        settings.POSTMILE_ROUTE_FIELD,
+        settings.POSTMILE_PM_FIELD,
+        settings.POSTMILE_COUNTY_FIELD,
+        settings.POSTMILE_DISTRICT_FIELD,
+    ])
+    params = urlencode({
+        "f": "pjson",
+        "where": settings.POSTMILE_WHERE,
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "distance": str(search_dist),
+        "units": "esriSRUnit_Meter",
+        "outFields": out_fields,
+        "returnGeometry": "true",
+        "outSR": "4326",
+        "resultRecordCount": "50",
+    })
+    data = _safe_json_get(f"{base}/query?{params}") or {}
+    features = data.get("features")
+    if not isinstance(features, list) or not features:
+        return None
+
+    norm_route = normalize_route(route) or ""
+    norm_county = (_normalize_county(county) or "").lower()
+
+    # Filter features to same route/county/district and extract (pm, lat, lon) triples.
+    candidates: list[tuple[float, float, float]] = []
+    for feat in features:
+        attrs = feat.get("attributes") or {}
+
+        feat_route = normalize_route(str(attrs.get(settings.POSTMILE_ROUTE_FIELD) or "")) or ""
+        if feat_route != norm_route:
+            continue
+
+        feat_county_raw = attrs.get(settings.POSTMILE_COUNTY_FIELD)
+        feat_county = (_normalize_county(str(feat_county_raw)) or "").lower() if feat_county_raw is not None else ""
+        if feat_county and norm_county and feat_county != norm_county:
+            continue
+
+        if district:
+            feat_dist_raw = attrs.get(settings.POSTMILE_DISTRICT_FIELD)
+            if feat_dist_raw is not None:
+                digits = re.sub(r"\D", "", str(feat_dist_raw))
+                feat_dist_norm = digits.zfill(2) if digits else str(feat_dist_raw).strip()
+                if feat_dist_norm != district:
+                    continue
+
+        feat_pm = _safe_float(attrs.get(settings.POSTMILE_PM_FIELD))
+        if feat_pm is None:
+            continue
+
+        pt = _extract_arcgis_point_geometry(feat)
+        if pt is None:
+            continue
+
+        candidates.append((feat_pm, pt[0], pt[1]))
+
+    if len(candidates) < 2:
+        return None
+
+    # Choose the nearest lower-PM and nearest higher-PM points to straddle current PM.
+    lower = sorted([(pm, plat, plon) for pm, plat, plon in candidates if pm <= post_mile],
+                   key=lambda t: t[0], reverse=True)
+    higher = sorted([(pm, plat, plon) for pm, plat, plon in candidates if pm > post_mile],
+                    key=lambda t: t[0])
+
+    if lower and higher:
+        p1 = lower[0]   # nearest lower PM
+        p2 = higher[0]  # nearest higher PM
+    else:
+        # All markers on one side — use the two with smallest and largest PM.
+        candidates_sorted = sorted(candidates, key=lambda t: t[0])
+        p1, p2 = candidates_sorted[0], candidates_sorted[-1]
+
+    bearing = _initial_bearing_deg(p1[1], p1[2], p2[1], p2[2])
+    return round(bearing, 2)
+
+
 # ----------------------------
 # GISA helpers
 # ----------------------------
@@ -2281,9 +2428,10 @@ def enrich_gisa_elevation_profile(
 ):
     require_can_edit_submission(submission_id, db, user)
 
-    # Read current GISA row for lat/lon, road inventory snapshot, and existing profile
+    # Read current GISA row for lat/lon, location fields, road inventory snapshot, and existing profile
     row = db.execute(text("""
         SELECT latitude, longitude,
+               route, county, post_mile, district,
                road_inventory_snapshot_json,
                elevation_profile_source, elevation_profile_checked_at,
                elevation_profile_classification, elevation_profile_confidence,
@@ -2328,7 +2476,7 @@ def enrich_gisa_elevation_profile(
             },
         }
 
-    # Resolve road bearing: payload > road_inventory_snapshot > None
+    # Resolve road bearing: payload > road_inventory_snapshot > arcgis_postmile_geometry > None
     resolved_bearing: float | None = None
     bearing_source: str | None = None
     if payload.road_bearing_deg is not None:
@@ -2355,6 +2503,24 @@ def enrich_gisa_elevation_profile(
                 except (TypeError, ValueError):
                     pass
 
+    # Auto-derive bearing from ArcGIS postmile geometry when request and snapshot are missing
+    if resolved_bearing is None:
+        try:
+            pm_float = _safe_float(row["post_mile"])
+            auto_bearing = _derive_road_bearing_from_postmile_layer(
+                lat=float(lat),
+                lon=float(lon),
+                route=row["route"] or None,
+                county=row["county"] or None,
+                post_mile=pm_float,
+                district=row["district"] or None,
+            )
+            if auto_bearing is not None:
+                resolved_bearing = auto_bearing
+                bearing_source = "arcgis_postmile_geometry"
+        except Exception:
+            pass  # Network/ArcGIS errors are non-fatal; bearing remains None
+
     # Fetch from USGS EPQS
     result = elevation_profile_svc.fetch_elevation_profile(
         lat=float(lat),
@@ -2367,6 +2533,11 @@ def enrich_gisa_elevation_profile(
     # Inject bearing source into profile metadata
     if isinstance(result.get("profile"), dict) and isinstance(result["profile"].get("metadata"), dict):
         result["profile"]["metadata"]["road_bearing_source"] = bearing_source
+        if bearing_source == "arcgis_postmile_geometry":
+            result["profile"]["metadata"]["road_bearing_derivation"] = {
+                "method": "postmile_points_lower_to_higher",
+                "source": settings.POSTMILE_FEATURE_LAYER_URL or "unconfigured",
+            }
 
     profile_json_str = json.dumps(result.get("profile"))
 
