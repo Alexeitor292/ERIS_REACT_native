@@ -41,6 +41,8 @@ import {
   routesForCounty,
 } from "../../../src/utils/caltransLookups";
 import { MeasurementDiagramRenderer } from "../../../src/components/MeasurementDiagramRenderer";
+import { RoadElevationProfileChart } from "../../../src/components/RoadElevationProfileChart";
+import { buildTerrainAppearance } from "../../../src/measurements/buildTerrainAppearance";
 
 type OptionItem = { code: string; label: string };
 type UserInfo = { id: number; roles: string[] };
@@ -2629,6 +2631,7 @@ export default function SubmissionDetailScreen() {
   const [elevError, setElevError] = useState<string | null>(null);
   const [elevBearingInput, setElevBearingInput] = useState("");
   const [elevBearingError, setElevBearingError] = useState<string | null>(null);
+  const [elevShowAdvanced, setElevShowAdvanced] = useState(false);
   const [localElevProfile, setLocalElevProfile] = useState<GisaElevationProfile | null | undefined>(undefined);
   const [activeMaterialSection, setActiveMaterialSection] = useState<MaterialSectionKey>("slope");
   const [activeStep, setActiveStep] = useState(0);
@@ -5205,13 +5208,17 @@ export default function SubmissionDetailScreen() {
                     const epMeta = (ep?.profile as Record<string, unknown> | null | undefined)?.metadata as Record<string, unknown> | null | undefined;
                     const bearingUsed = epMeta?.road_bearing_deg_used as number | null | undefined;
                     const bearingSource = epMeta?.road_bearing_source as string | null | undefined;
-                    const bearingSourceLabel =
-                      bearingSource === "arcgis_postmile_geometry" ? "auto from postmile geometry" :
-                      bearingSource === "road_inventory_snapshot" ? "road inventory snapshot" :
-                      bearingSource ?? null;
-                    const bearingNote = bearingUsed != null
-                      ? `${Math.round(bearingUsed)}° (${bearingSourceLabel ?? "request"})`
-                      : "not set — classification may be UNKNOWN";
+                    // Plain-language road-orientation label (no GIS jargon).
+                    const orientationNote = bearingUsed != null
+                      ? `${Math.round(bearingUsed)}° · ${
+                          bearingSource === "arcgis_postmile_geometry" ? "auto-detected from map" :
+                          bearingSource === "road_inventory_snapshot" ? "from road inventory" :
+                          bearingSource === "request" ? "manual override" :
+                          "auto-detected"
+                        }`
+                      : "not detected yet — tap Refresh to auto-detect";
+                    const rwNum = Number(form.measure_roadway_width_ft);
+                    const roadwayWidthFt = Number.isFinite(rwNum) && rwNum > 0 ? rwNum : null;
 
                     return (
                       <View style={[elevStyles.card, { borderColor: ep ? "#065f46" : palette.border, backgroundColor: palette.panelSoft }]}>
@@ -5228,53 +5235,83 @@ export default function SubmissionDetailScreen() {
                             </Pressable>
                           )}
                         </View>
-                        {/* Optional bearing input */}
-                        <View style={elevStyles.bearingRow}>
-                          <Text style={[elevStyles.bearingLabel, { color: palette.muted }]}>Road bearing (deg):</Text>
-                          <TextInput
-                            style={[elevStyles.bearingInput, { color: palette.text, borderColor: elevBearingError ? "#f87171" : palette.border, backgroundColor: palette.panel }]}
-                            value={elevBearingInput}
-                            onChangeText={(v) => { setElevBearingInput(v); setElevBearingError(null); }}
-                            placeholder="Auto"
-                            placeholderTextColor={palette.muted}
-                            keyboardType="decimal-pad"
-                            maxLength={5}
-                            editable={!elevRefreshing}
-                          />
-                          <Text style={[elevStyles.bearingHint, { color: palette.muted }]}>Optional. Leave blank to auto-derive.</Text>
-                        </View>
-                        {elevBearingError ? (
-                          <Text style={elevStyles.errorText}>{elevBearingError}</Text>
-                        ) : null}
+                        <Text style={[elevStyles.explain, { color: palette.muted }]}>
+                          Ground elevations come from USGS 3DEP. The road’s orientation is detected
+                          automatically so the profile knows what’s on the left and right of the road.
+                        </Text>
                         {ep ? (
-                          <View style={elevStyles.metaGrid}>
-                            <View style={elevStyles.metaRow}>
-                              <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Source:</Text>
-                              <Text style={[elevStyles.metaValue, { color: palette.text }]}>{ep.source ?? "—"}</Text>
-                            </View>
-                            <View style={elevStyles.metaRow}>
-                              <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Classification:</Text>
-                              <Text style={[elevStyles.metaValue, { color: palette.text }]}>{ep.classification ?? "—"}</Text>
-                            </View>
-                            {ep.confidence != null && (
+                          <>
+                            <View style={elevStyles.metaGrid}>
                               <View style={elevStyles.metaRow}>
-                                <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Confidence:</Text>
-                                <Text style={[elevStyles.metaValue, { color: palette.text }]}>{(ep.confidence * 100).toFixed(0)}%</Text>
+                                <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Source:</Text>
+                                <Text style={[elevStyles.metaValue, { color: palette.text }]}>{ep.source ?? "—"}</Text>
                               </View>
-                            )}
-                            {ep.checked_at ? (
                               <View style={elevStyles.metaRow}>
-                                <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Checked:</Text>
-                                <Text style={[elevStyles.metaValue, { color: palette.text }]}>{String(ep.checked_at).slice(0, 10)}</Text>
+                                <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Terrain summary:</Text>
+                                <Text style={[elevStyles.metaValue, { color: palette.text }]}>{ep.classification ?? "—"}</Text>
                               </View>
-                            ) : null}
-                            <View style={elevStyles.metaRow}>
-                              <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Bearing:</Text>
-                              <Text style={[elevStyles.metaValue, { color: bearingUsed != null ? palette.text : palette.muted, fontStyle: bearingUsed != null ? "normal" : "italic" }]}>{bearingNote}</Text>
+                              {ep.confidence != null && (
+                                <View style={elevStyles.metaRow}>
+                                  <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Confidence:</Text>
+                                  <Text style={[elevStyles.metaValue, { color: palette.text }]}>{(ep.confidence * 100).toFixed(0)}%</Text>
+                                </View>
+                              )}
+                              {ep.checked_at ? (
+                                <View style={elevStyles.metaRow}>
+                                  <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Checked:</Text>
+                                  <Text style={[elevStyles.metaValue, { color: palette.text }]}>{String(ep.checked_at).slice(0, 10)}</Text>
+                                </View>
+                              ) : null}
+                              <View style={elevStyles.metaRow}>
+                                <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Road orientation:</Text>
+                                <Text style={[elevStyles.metaValue, { color: bearingUsed != null ? palette.text : palette.muted, fontStyle: bearingUsed != null ? "normal" : "italic" }]}>{orientationNote}</Text>
+                              </View>
                             </View>
-                          </View>
+
+                            {/* Live 2D slope profile from the actual sampled points,
+                                styled from the GISA material/moisture/vegetation inputs */}
+                            <RoadElevationProfileChart
+                              elevationProfile={ep}
+                              roadwayWidthFt={roadwayWidthFt}
+                              appearance={buildTerrainAppearance(form)}
+                            />
+                          </>
                         ) : (
                           <Text style={[elevStyles.noProfileText, { color: palette.muted }]}>No elevation profile fetched.</Text>
+                        )}
+
+                        {/* Advanced: manual road-orientation override (demoted; most users never need this) */}
+                        {!isLocalId && (
+                          <>
+                            <Pressable
+                              onPress={() => setElevShowAdvanced((v) => !v)}
+                              accessibilityRole="button"
+                              style={elevStyles.advancedToggle}
+                            >
+                              <Text style={[elevStyles.advancedToggleText, { color: palette.muted }]}>
+                                {elevShowAdvanced ? "▾ " : "▸ "}Advanced: set road orientation manually
+                              </Text>
+                            </Pressable>
+                            {elevShowAdvanced && (
+                              <View style={elevStyles.bearingRow}>
+                                <Text style={[elevStyles.bearingLabel, { color: palette.muted }]}>Bearing (deg):</Text>
+                                <TextInput
+                                  style={[elevStyles.bearingInput, { color: palette.text, borderColor: elevBearingError ? "#f87171" : palette.border, backgroundColor: palette.panel }]}
+                                  value={elevBearingInput}
+                                  onChangeText={(v) => { setElevBearingInput(v); setElevBearingError(null); }}
+                                  placeholder="Auto"
+                                  placeholderTextColor={palette.muted}
+                                  keyboardType="decimal-pad"
+                                  maxLength={5}
+                                  editable={!elevRefreshing}
+                                />
+                                <Text style={[elevStyles.bearingHint, { color: palette.muted }]}>Compass heading up-station. Leave blank to auto-detect, then Refresh.</Text>
+                              </View>
+                            )}
+                            {elevBearingError ? (
+                              <Text style={elevStyles.errorText}>{elevBearingError}</Text>
+                            ) : null}
+                          </>
                         )}
                         {elevError ? (
                           <Text style={elevStyles.errorText}>{elevError}</Text>
@@ -7130,6 +7167,19 @@ const elevStyles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
     color: "#fff",
+  },
+  explain: {
+    fontSize: 9.5,
+    lineHeight: 13,
+    marginBottom: 2,
+  },
+  advancedToggle: {
+    marginTop: 6,
+    paddingVertical: 2,
+  },
+  advancedToggleText: {
+    fontSize: 10,
+    fontWeight: "600",
   },
   bearingRow: {
     flexDirection: "row",
