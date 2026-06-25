@@ -52,7 +52,21 @@ class TestRouteRegistration:
     def test_core_routes_registered(self):
         from app.main import app as eris_app
 
-        registered = {r.path for r in eris_app.routes}
+        def _collect_paths(routes):
+            paths = set()
+            for r in routes:
+                if hasattr(r, "path"):
+                    paths.add(r.path)
+                # Starlette ≥1.0 wraps included routers in _IncludedRouter,
+                # which has no .path/.routes of its own; recurse via
+                # original_router.routes to reach the individual APIRoutes.
+                if hasattr(r, "original_router"):
+                    paths.update(_collect_paths(r.original_router.routes))
+                elif hasattr(r, "routes"):
+                    paths.update(_collect_paths(r.routes))
+            return paths
+
+        registered = _collect_paths(eris_app.routes)
         missing = self.EXPECTED - registered
         assert not missing, f"Expected routes not registered: {missing}"
 
