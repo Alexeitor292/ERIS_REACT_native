@@ -3,10 +3,10 @@ import type {
   FailureSide,
   MeasurementDiagramData,
   MeasurementValues,
-  StationingView,
   TerrainSideShape,
 } from "./measurementDiagramModel";
 import { buildRoadSectionFromInventory } from "./buildRoadSectionFromInventory";
+import { buildTerrainAppearance } from "./buildTerrainAppearance";
 import type { GisaElevationProfile } from "../api/submissions";
 
 function parseNum(s: string | undefined | null): number | null {
@@ -36,7 +36,6 @@ export function buildMeasurementDiagramData(
   form: Record<string, string | undefined | null>,
   snapshot: Record<string, unknown> | null | undefined,
   template: DiagramTemplate | "AUTO",
-  view: StationingView,
   failureSide: FailureSide,
   terrainShapeOverride: TerrainSideShape | "AUTO" = "AUTO",
   elevationProfile?: GisaElevationProfile | null,
@@ -56,6 +55,7 @@ export function buildMeasurementDiagramData(
     snapshot,
     measurements.roadwayWidth_ft,
   );
+  const terrainAppearance = buildTerrainAppearance(form);
 
   // Template AUTO: conservative default until GEO/map-derived classification is available.
   // We intentionally do not infer template from failure_* form checkboxes.
@@ -71,9 +71,9 @@ export function buildMeasurementDiagramData(
 
   return {
     template: resolvedTemplate,
-    view,
     failureSide,
     terrainShape,
+    terrainAppearance,
     crossSection,
     measurements,
   };

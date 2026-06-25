@@ -4,13 +4,12 @@
  * LT = Caltrans left side relative to increasing postmile (UPSTATION direction).
  * RT = Caltrans right side relative to increasing postmile (UPSTATION direction).
  *
- * UPSTATION view:  LT elements appear on the left of the diagram, RT on the right.
- * DOWNSTATION view: the diagram is mirrored left-right; LT appears on the right.
+ * Orientation is CANONICAL UPSTATION — always. The diagram always looks toward
+ * increasing postmile, so LT elements are always on the left and RT on the right.
+ * There is no mirrored / DOWNSTATION perspective and no user-facing view toggle.
  *
  * The failure side (LT, RT, or both) is an explicit field on MeasurementDiagramData.
  * It carries no implied compass direction, elevation, or cut/fill relationship.
- * UPSTATION/DOWNSTATION only controls visual orientation — it does NOT change which
- * Caltrans side the failure is on.
  */
 
 import React, { useMemo } from "react";
@@ -22,9 +21,13 @@ import Svg, {
   G,
   Defs,
   Pattern,
+  LinearGradient,
+  Stop,
+  Circle,
 } from "react-native-svg";
-import type { FailureSide, MeasurementDiagramData, TerrainSideShape } from "../measurements/measurementDiagramModel";
+import type { MeasurementDiagramData, TerrainAppearance, TerrainSideShape } from "../measurements/measurementDiagramModel";
 import type { RoadCrossSection } from "../measurements/roadCrossSectionModel";
+import { buildTerrainPalette, type TerrainPalette } from "../measurements/buildTerrainAppearance";
 
 // ── SVG constants ─────────────────────────────────────────────────────────────
 const SVG_H = 270;
@@ -59,6 +62,27 @@ const C = {
   rt_chip: "#15803d",
   header: "#94a3b8",
 };
+
+type TerrainSurfaceSegment = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
+type TerrainRenderSide = {
+  kind: SideTerrain;
+  path: string;
+  surface: TerrainSurfaceSegment;
+};
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function clamp01(n: number): number {
+  return Math.max(0, Math.min(1, n));
+}
 
 // ── Layout computation ────────────────────────────────────────────────────────
 
@@ -118,31 +142,14 @@ function computeLayout(
   return { els, scale, ltEdge, rtEdge, cx };
 }
 
-function mirrorLayout(
-  layout: ReturnType<typeof computeLayout>,
-  svgW: number,
-): ReturnType<typeof computeLayout> {
-  const mirrored = layout.els
-    .map((el) => ({ ...el, x: svgW - el.x - el.w }))
-    .reverse();
-  return {
-    ...layout,
-    els: mirrored,
-    ltEdge: svgW - layout.rtEdge,
-    rtEdge: svgW - layout.ltEdge,
-    cx: svgW - layout.cx,
-  };
-}
-
 // ── Failure-side geometry helper ──────────────────────────────────────────────
 
 /**
  * Returns the x-position of the road edge on the requested Caltrans side and
  * the direction (sign) to extend an overlay away from the road center.
  *
- * After mirrorLayout, ltEdge/rtEdge already reflect the current visual position,
- * so this function works identically for UPSTATION and DOWNSTATION without any
- * view-specific branching.
+ * Orientation is canonical UPSTATION, so LT is always the left edge and RT the
+ * right edge; the dir sign falls out of the edge position.
  */
 function getFailureEdgeAndDir(
   side: "LT" | "RT",
@@ -203,17 +210,18 @@ function renderRoadSection(
   els: LayoutEl[],
   cs: RoadCrossSection,
   cx: number,
+  terrainPalette: TerrainPalette,
 ) {
   const nodes: React.ReactNode[] = [];
 
   for (const el of els) {
-    let fill = C.road;
-    if (el.kind.includes("shoulder")) fill = C.shoulder;
+    let fill = terrainPalette.road;
+    if (el.kind.includes("shoulder")) fill = terrainPalette.shoulder;
     if (el.kind === "median") {
       fill =
         cs.median_category === "BARRIER" ? C.median_barrier
         : cs.median_category === "RAISED" ? C.median_raised
-        : C.road;
+        : terrainPalette.road;
     }
     nodes.push(
       <Rect key={`fill-${el.kind}-${el.x}`} x={el.x} y={ROAD_TOP} width={el.w} height={ROAD_H} fill={fill} />,
@@ -242,6 +250,8 @@ function renderRoadSection(
   nodes.push(
     <Line key="elt" x1={ltTravelLeft} y1={ROAD_TOP} x2={ltTravelLeft} y2={ROAD_BOT} stroke={C.edge_line} strokeWidth={2} />,
     <Line key="ert" x1={rtTravelRight} y1={ROAD_TOP} x2={rtTravelRight} y2={ROAD_BOT} stroke={C.edge_line} strokeWidth={2} />,
+    <Line key="road-top-shadow" x1={ltTravelLeft} y1={ROAD_TOP + 2} x2={rtTravelRight} y2={ROAD_TOP + 2} stroke={terrainPalette.roadEdge} strokeWidth={1.2} opacity={0.55} />,
+    <Line key="road-bot-shadow" x1={ltTravelLeft} y1={ROAD_BOT - 2} x2={rtTravelRight} y2={ROAD_BOT - 2} stroke={terrainPalette.roadEdge} strokeWidth={1.1} opacity={0.35} />,
   );
 
   // Centerline / median treatment
@@ -361,40 +371,191 @@ function rtTerrainPath(t: SideTerrain, rtEdge: number, svgW: number): string {
   return `M ${rtEdge},${ROAD_TOP} L ${svgW},${ROAD_TOP} L ${svgW},${TERRAIN_BOT} L ${rtEdge},${TERRAIN_BOT} Z`;
 }
 
-function renderTerrainProfile(
+function ltSurfaceSegment(t: SideTerrain, ltEdge: number): TerrainSurfaceSegment {
+  const lowY = ROAD_BOT + (TERRAIN_BOT - ROAD_BOT) * 0.65;
+  if (t === "HIGH") return { x1: 0, y1: TERRAIN_TOP, x2: ltEdge, y2: ROAD_TOP };
+  if (t === "LOW") return { x1: 0, y1: lowY, x2: ltEdge, y2: ROAD_BOT };
+  return { x1: 0, y1: ROAD_TOP, x2: ltEdge, y2: ROAD_TOP };
+}
+
+function rtSurfaceSegment(t: SideTerrain, rtEdge: number, svgW: number): TerrainSurfaceSegment {
+  const lowY = ROAD_BOT + (TERRAIN_BOT - ROAD_BOT) * 0.65;
+  if (t === "HIGH") return { x1: rtEdge, y1: ROAD_TOP, x2: svgW, y2: TERRAIN_TOP };
+  if (t === "LOW") return { x1: rtEdge, y1: ROAD_BOT, x2: svgW, y2: lowY };
+  return { x1: rtEdge, y1: ROAD_TOP, x2: svgW, y2: ROAD_TOP };
+}
+
+function resolveTerrainSides(
   terrainShape: TerrainSideShape,
   ltEdge: number,
   rtEdge: number,
   svgW: number,
-): React.ReactNode[] {
-  let lt: SideTerrain;
-  let rt: SideTerrain;
+): { lt: TerrainRenderSide; rt: TerrainRenderSide } {
+  let ltKind: SideTerrain;
+  let rtKind: SideTerrain;
 
   switch (terrainShape) {
-    case "LEFT_HIGH":  lt = "HIGH"; rt = "LOW";  break;
-    case "RIGHT_HIGH": lt = "LOW";  rt = "HIGH"; break;
-    case "BOWL":       lt = "LOW";  rt = "LOW";  break;
-    case "CROWN":      lt = "HIGH"; rt = "HIGH"; break;
+    case "LEFT_HIGH":  ltKind = "HIGH"; rtKind = "LOW"; break;
+    case "RIGHT_HIGH": ltKind = "LOW";  rtKind = "HIGH"; break;
+    case "BOWL":       ltKind = "LOW";  rtKind = "LOW"; break;
+    case "CROWN":      ltKind = "HIGH"; rtKind = "HIGH"; break;
     case "FLAT":
-    default:           lt = "FLAT"; rt = "FLAT"; break;
+    default:           ltKind = "FLAT"; rtKind = "FLAT"; break;
   }
 
-  const lowY = ROAD_BOT + (TERRAIN_BOT - ROAD_BOT) * 0.65;
-  const nodes: React.ReactNode[] = [
-    <Path key="terrain-lt" d={ltTerrainPath(lt, ltEdge)} fill={C.terrain_neutral} />,
-    <Path key="terrain-rt" d={rtTerrainPath(rt, rtEdge, svgW)} fill={C.terrain_neutral} />,
-  ];
+  return {
+    lt: {
+      kind: ltKind,
+      path: ltTerrainPath(ltKind, ltEdge),
+      surface: ltSurfaceSegment(ltKind, ltEdge),
+    },
+    rt: {
+      kind: rtKind,
+      path: rtTerrainPath(rtKind, rtEdge, svgW),
+      surface: rtSurfaceSegment(rtKind, rtEdge, svgW),
+    },
+  };
+}
 
-  // Surface slope indicator lines — make the ground profile edge readable
-  if (lt === "HIGH")
-    nodes.push(<Line key="surf-lt" x1={0} y1={TERRAIN_TOP} x2={ltEdge} y2={ROAD_TOP} stroke={C.slope_line} strokeWidth={1.2} opacity={0.35} />);
-  else if (lt === "LOW")
-    nodes.push(<Line key="surf-lt" x1={0} y1={lowY} x2={ltEdge} y2={ROAD_BOT} stroke={C.muted} strokeWidth={1.2} opacity={0.5} />);
+function renderVegetationClumps(
+  keyPrefix: string,
+  surface: TerrainSurfaceSegment,
+  appearance: TerrainAppearance,
+  terrainPalette: TerrainPalette,
+): React.ReactNode[] {
+  if (appearance.vegetationDensity < 0.12) return [];
+  const count =
+    appearance.vegetationDensity > 0.58 ? 4 :
+    appearance.vegetationDensity > 0.32 ? 3 :
+    2;
+  const nodes: React.ReactNode[] = [];
+  const span = Array.from({ length: count }, (_, i) => 0.14 + (0.72 * i) / (count - 1));
 
-  if (rt === "HIGH")
-    nodes.push(<Line key="surf-rt" x1={rtEdge} y1={ROAD_TOP} x2={svgW} y2={TERRAIN_TOP} stroke={C.slope_line} strokeWidth={1.2} opacity={0.35} />);
-  else if (rt === "LOW")
-    nodes.push(<Line key="surf-rt" x1={rtEdge} y1={ROAD_BOT} x2={svgW} y2={lowY} stroke={C.muted} strokeWidth={1.2} opacity={0.5} />);
+  span.forEach((t, idx) => {
+    const x = lerp(surface.x1, surface.x2, t);
+    const y = lerp(surface.y1, surface.y2, t) - 2.6 - (idx % 2) * 1.4;
+    const r = 2.5 + appearance.vegetationDensity * 2.2 + (appearance.treesPct / 100) * 1.2;
+    nodes.push(
+      <Circle key={`${keyPrefix}-veg-shadow-${idx}`} cx={x} cy={y + 1.1} r={r * 0.9} fill={terrainPalette.vegetationDark} opacity={0.5} />,
+      <Circle key={`${keyPrefix}-veg-${idx}`} cx={x} cy={y} r={r} fill={terrainPalette.vegetation} />,
+    );
+  });
+
+  return nodes;
+}
+
+function renderRockAccents(
+  keyPrefix: string,
+  side: TerrainRenderSide,
+  appearance: TerrainAppearance,
+  terrainPalette: TerrainPalette,
+): React.ReactNode[] {
+  if (appearance.rockiness < 0.35 && appearance.boulderPct < 8) return [];
+  const count =
+    appearance.boulderPct > 26 ? 4 :
+    appearance.rockiness > 0.66 ? 3 :
+    2;
+  const nodes: React.ReactNode[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const t = 0.2 + i * 0.22;
+    const depth = side.kind === "HIGH" ? 0.34 + i * 0.08 : 0.46 + i * 0.08;
+    const x = lerp(side.surface.x1, side.surface.x2, t);
+    const surfaceY = lerp(side.surface.y1, side.surface.y2, t);
+    const y = lerp(surfaceY, TERRAIN_BOT - 14, clamp01(depth));
+    const r = 2.6 + appearance.rockiness * 1.9 + (appearance.boulderPct / 100) * 2.6 + (i === count - 1 ? 0.8 : 0);
+    nodes.push(
+      <Circle key={`${keyPrefix}-rock-${i}`} cx={x} cy={y} r={r} fill={terrainPalette.stone} stroke={terrainPalette.stoneShade} strokeWidth={0.9} />,
+      <Line key={`${keyPrefix}-rock-shine-${i}`} x1={x - r * 0.5} y1={y - r * 0.3} x2={x + r * 0.25} y2={y - r * 0.55} stroke="#ffffff" strokeWidth={0.7} opacity={0.18} />,
+    );
+  }
+
+  return nodes;
+}
+
+function renderMoistureStreaks(
+  keyPrefix: string,
+  side: TerrainRenderSide,
+  appearance: TerrainAppearance,
+  terrainPalette: TerrainPalette,
+): React.ReactNode[] {
+  if (appearance.moistureLevel < 0.52 && !appearance.seep && !appearance.spring) return [];
+  const streakCount = appearance.moisture === "FLOWING" ? 2 : 1;
+  const nodes: React.ReactNode[] = [];
+  const dir = side.surface.x2 >= side.surface.x1 ? 1 : -1;
+
+  for (let i = 0; i < streakCount; i++) {
+    const t = 0.32 + i * 0.26;
+    const startX = lerp(side.surface.x1, side.surface.x2, t);
+    const startY = lerp(side.surface.y1, side.surface.y2, t);
+    const endX = startX + dir * (8 + i * 4);
+    const endY = Math.min(TERRAIN_BOT - 12, startY + 24 + i * 10);
+    nodes.push(
+      <Line key={`${keyPrefix}-wet-${i}`} x1={startX} y1={startY + 1} x2={endX} y2={endY} stroke={terrainPalette.moisture} strokeWidth={1.6} opacity={0.7} />,
+      <Line key={`${keyPrefix}-wet-shine-${i}`} x1={startX + dir * 1.2} y1={startY + 2.2} x2={endX + dir * 1.2} y2={endY} stroke="#dbeafe" strokeWidth={0.65} opacity={0.4} />,
+    );
+  }
+
+  return nodes;
+}
+
+function renderTerrainProfile(
+  terrainShape: TerrainSideShape,
+  appearance: TerrainAppearance,
+  terrainPalette: TerrainPalette,
+  ltEdge: number,
+  rtEdge: number,
+  svgW: number,
+): React.ReactNode[] {
+  const sides = resolveTerrainSides(terrainShape, ltEdge, rtEdge, svgW);
+  const textureFill =
+    appearance.dominantMaterial === "ROCK"
+      ? "url(#terrain_tex_rock)"
+      : appearance.dominantMaterial === "SOIL"
+        ? "url(#terrain_tex_soil)"
+        : "url(#terrain_tex_mixed)";
+  const nodes: React.ReactNode[] = [];
+
+  ([
+    ["lt", sides.lt],
+    ["rt", sides.rt],
+  ] as const).forEach(([prefix, side]) => {
+    nodes.push(
+      <Path key={`${prefix}-terrain-base`} d={side.path} fill="url(#terrain_fill)" />,
+      <Path key={`${prefix}-terrain-shadow`} d={side.path} fill="url(#terrain_shadow)" opacity={0.72} />,
+      <Path key={`${prefix}-terrain-texture`} d={side.path} fill={textureFill} opacity={0.42 + appearance.rockiness * 0.1} />,
+    );
+    if (appearance.moistureLevel > 0.18) {
+      nodes.push(
+        <Path key={`${prefix}-terrain-moisture`} d={side.path} fill="url(#terrain_moisture)" opacity={0.28 + appearance.moistureLevel * 0.24} />,
+      );
+    }
+    nodes.push(
+      <Line
+        key={`${prefix}-surface`}
+        x1={side.surface.x1}
+        y1={side.surface.y1}
+        x2={side.surface.x2}
+        y2={side.surface.y2}
+        stroke={appearance.vegetationDensity > 0.12 ? terrainPalette.vegetation : terrainPalette.texture}
+        strokeWidth={2.2}
+        opacity={0.95}
+      />,
+      <Line
+        key={`${prefix}-surface-shadow`}
+        x1={side.surface.x1}
+        y1={side.surface.y1 + 1.1}
+        x2={side.surface.x2}
+        y2={side.surface.y2 + 1.1}
+        stroke={terrainPalette.crack}
+        strokeWidth={1.2}
+        opacity={0.35}
+      />,
+    );
+    nodes.push(...renderVegetationClumps(prefix, side.surface, appearance, terrainPalette));
+    nodes.push(...renderRockAccents(prefix, side, appearance, terrainPalette));
+    nodes.push(...renderMoistureStreaks(prefix, side, appearance, terrainPalette));
+  });
 
   return nodes;
 }
@@ -404,8 +565,8 @@ function renderTerrainProfile(
 /**
  * Draws an above-road (high-side failure) overlay on one Caltrans side.
  *
- * The side is resolved to a diagram x-position via getFailureEdgeAndDir, which
- * already accounts for visual mirroring — no view-specific logic is needed here.
+ * The side is resolved to a diagram x-position via getFailureEdgeAndDir. With
+ * canonical UPSTATION orientation, LT is always the left edge and RT the right.
  */
 function renderAboveRoadOneSide(
   data: MeasurementDiagramData,
@@ -593,32 +754,27 @@ function renderThroughRoadOverlay(
 
 // ── Station direction labels ──────────────────────────────────────────────────
 
-function renderStationLabels(
-  view: "UPSTATION" | "DOWNSTATION",
-  svgW: number,
-): React.ReactNode[] {
-  const upX = view === "UPSTATION" ? svgW - 4 : 4;
-  const dnX = view === "UPSTATION" ? 4 : svgW - 4;
-  const upAnchor = view === "UPSTATION" ? "end" : "start";
-  const dnAnchor = view === "UPSTATION" ? "start" : "end";
+// Canonical UPSTATION: the diagram always looks toward increasing postmile.
+// These are static directional annotations (which way is up-/down-station), NOT
+// a view toggle — there is no mirrored perspective.
+function renderStationLabels(svgW: number): React.ReactNode[] {
   return [
-    <SvgText key="st-up" x={upX} y={FOOTER_Y - 1}
-      fontSize={9} fill="#60a5fa" textAnchor={upAnchor} fontWeight="700">
-      {view === "UPSTATION" ? "UPSTATION →" : "← UPSTATION"}
+    <SvgText key="st-up" x={svgW - 4} y={FOOTER_Y - 1}
+      fontSize={9} fill="#60a5fa" textAnchor="end" fontWeight="700">
+      UPSTATION →
     </SvgText>,
-    <SvgText key="st-dn" x={dnX} y={FOOTER_Y - 1}
-      fontSize={9} fill="#94a3b8" textAnchor={dnAnchor}>
-      {view === "UPSTATION" ? "← DOWNSTATION" : "DOWNSTATION →"}
+    <SvgText key="st-dn" x={4} y={FOOTER_Y - 1}
+      fontSize={9} fill="#94a3b8" textAnchor="start">
+      ← DOWNSTATION
     </SvgText>,
   ];
 }
 
-function renderLtRtLabels(
-  view: "UPSTATION" | "DOWNSTATION",
-): React.ReactNode[] {
-  // LT chip: left side in UPSTATION, right side in DOWNSTATION (because layout is mirrored)
-  const ltX = view === "UPSTATION" ? 2 : 272;
-  const rtX = view === "UPSTATION" ? 272 : 2;
+// Canonical UPSTATION: LT (Caltrans left) is always on the left of the diagram,
+// RT always on the right.
+function renderLtRtLabels(svgW: number): React.ReactNode[] {
+  const ltX = 2;
+  const rtX = svgW - 28;
   const labelY = ROAD_TOP + ROAD_H / 2 + 4;
 
   return [
@@ -671,10 +827,17 @@ interface Props {
 export function RoadCrossSectionRenderer({ data, width }: Props) {
   const svgW = Math.max(200, width);
 
-  const layout = useMemo(() => {
-    const base = computeLayout(data.crossSection, svgW);
-    return data.view === "DOWNSTATION" ? mirrorLayout(base, svgW) : base;
-  }, [data.crossSection, data.view, svgW]);
+  // Canonical UPSTATION layout — never mirrored.
+  const layout = useMemo(
+    () => computeLayout(data.crossSection, svgW),
+    [data.crossSection, svgW],
+  );
+
+  // Material-aware palette derived from the GISA form inputs.
+  const pal = useMemo(
+    () => buildTerrainPalette(data.terrainAppearance),
+    [data.terrainAppearance],
+  );
 
   const { els, ltEdge, rtEdge, cx } = layout;
 
@@ -689,16 +852,62 @@ export function RoadCrossSectionRenderer({ data, width }: Props) {
         >
           <Line x1="0" y1="0" x2="0" y2="8" stroke={C.ls_hatch} strokeWidth="2.5" />
         </Pattern>
+
+        {/* Atmospheric backdrop */}
+        <LinearGradient id="sky_grad" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={pal.skyTop} />
+          <Stop offset="1" stopColor={pal.skyBottom} />
+        </LinearGradient>
+
+        {/* Ground body: lit crest → mid → shaded toe */}
+        <LinearGradient id="terrain_fill" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={pal.top} />
+          <Stop offset="0.5" stopColor={pal.mid} />
+          <Stop offset="1" stopColor={pal.deep} />
+        </LinearGradient>
+
+        {/* Ambient occlusion toward the toe of the slope for depth */}
+        <LinearGradient id="terrain_shadow" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#000000" stopOpacity="0" />
+          <Stop offset="0.62" stopColor="#000000" stopOpacity="0" />
+          <Stop offset="1" stopColor="#000000" stopOpacity="0.5" />
+        </LinearGradient>
+
+        {/* Damp darkening + sheen toward the toe when wet */}
+        <LinearGradient id="terrain_moisture" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={pal.moisture} stopOpacity="0" />
+          <Stop offset="0.55" stopColor={pal.moisture} stopOpacity="0.25" />
+          <Stop offset="1" stopColor={pal.moisture} stopOpacity="0.82" />
+        </LinearGradient>
+
+        {/* Soil: fine granular speckle */}
+        <Pattern id="terrain_tex_soil" patternUnits="userSpaceOnUse" width="9" height="9">
+          <Circle cx="1.6" cy="2.2" r="0.8" fill={pal.texture} opacity="0.5" />
+          <Circle cx="6.2" cy="5.4" r="0.6" fill={pal.texture} opacity="0.4" />
+          <Circle cx="3.6" cy="7.6" r="0.5" fill={pal.texture} opacity="0.35" />
+        </Pattern>
+
+        {/* Rock: angular fracture hatch */}
+        <Pattern id="terrain_tex_rock" patternUnits="userSpaceOnUse" width="11" height="11" patternTransform="rotate(20)">
+          <Line x1="0" y1="0" x2="0" y2="11" stroke={pal.crack} strokeWidth="0.9" opacity="0.55" />
+          <Line x1="5.5" y1="0" x2="5.5" y2="11" stroke={pal.texture} strokeWidth="0.6" opacity="0.4" />
+        </Pattern>
+
+        {/* Mixed: sparse grit + occasional seam */}
+        <Pattern id="terrain_tex_mixed" patternUnits="userSpaceOnUse" width="12" height="12">
+          <Circle cx="3" cy="3.4" r="0.7" fill={pal.texture} opacity="0.45" />
+          <Line x1="7" y1="2" x2="10.5" y2="9.5" stroke={pal.crack} strokeWidth="0.7" opacity="0.4" />
+        </Pattern>
       </Defs>
 
-      {/* Background */}
-      <Rect x={0} y={0} width={svgW} height={SVG_H} fill={C.bg} />
+      {/* Atmospheric background */}
+      <Rect x={0} y={0} width={svgW} height={SVG_H} fill="url(#sky_grad)" />
 
-      {/* Terrain profile — slope shape inferred from template + failure side */}
-      {renderTerrainProfile(data.terrainShape, ltEdge, rtEdge, svgW)}
+      {/* Terrain profile — material-aware ground render */}
+      {renderTerrainProfile(data.terrainShape, data.terrainAppearance, pal, ltEdge, rtEdge, svgW)}
 
       {/* Road cross-section */}
-      {renderRoadSection(els, data.crossSection, cx)}
+      {renderRoadSection(els, data.crossSection, cx, pal)}
 
       {/* Template overlay — failure side from data.failureSide, not view */}
       {data.template === "LANDSLIDE_ABOVE_ROAD" &&
@@ -712,10 +921,10 @@ export function RoadCrossSectionRenderer({ data, width }: Props) {
       {renderWidthLabels(els)}
 
       {/* LT / RT chips — always indicate Caltrans stationing sides */}
-      {renderLtRtLabels(data.view)}
+      {renderLtRtLabels(svgW)}
 
-      {/* Station direction arrows */}
-      {renderStationLabels(data.view, svgW)}
+      {/* Station direction arrows (canonical UPSTATION) */}
+      {renderStationLabels(svgW)}
 
       {/* Header */}
       {renderHeader(data.crossSection, svgW)}

@@ -2,10 +2,13 @@
  * Domain model for the measurement diagram.
  *
  * DiagramTemplate selects which Caltrans field measurement scenario is shown.
- * StationingView controls visual perspective only:
- *   UPSTATION  = looking toward increasing postmile; LT elements on left of diagram.
- *   DOWNSTATION = looking toward decreasing postmile; diagram is mirrored so LT
- *                 elements appear on the right.
+ *
+ * Orientation is CANONICAL UPSTATION — always. Every render looks toward
+ * increasing postmile, so LT (Caltrans left) elements are always on the left of
+ * the diagram and RT on the right. There is intentionally no mirrored /
+ * DOWNSTATION perspective and no user-facing view toggle; the orientation is
+ * derived from the road's stationing direction, not chosen by the user.
+ *
  * FailureSide indicates which Caltrans road side (LT, RT, or both) the landslide
  *   originates from. LT and RT are defined relative to increasing postmile and carry
  *   no implied compass direction, elevation, or cut/fill relationship.
@@ -17,8 +20,6 @@ export type DiagramTemplate =
   | "LANDSLIDE_THROUGH_ROAD"
   | "LANDSLIDE_ABOVE_ROAD"
   | "LANDSLIDE_BELOW_ROAD_SLIPOUT";
-
-export type StationingView = "UPSTATION" | "DOWNSTATION";
 
 export type FailureSide = "LT" | "RT" | "BOTH";
 
@@ -47,11 +48,38 @@ export type TerrainSideShape =
   | "CROWN"       // both sides cut slope — road in cut section
   | "FLAT";       // terrain level with road edges
 
+export type TerrainMaterialKind = "SOIL" | "ROCK" | "MIXED";
+export type TerrainMoisture = "DRY" | "MOIST" | "WET" | "FLOWING";
+
+export type TerrainAppearance = {
+  dominantMaterial: TerrainMaterialKind;
+  moisture: TerrainMoisture;
+  moistureLevel: number;       // 0..1
+  vegetationDensity: number;   // 0..1
+  rockiness: number;           // 0..1
+  soilPct: number;
+  rockPct: number;
+  clayPct: number;
+  siltPct: number;
+  sandPct: number;
+  gravelPct: number;
+  boulderPct: number;
+  treesPct: number;
+  shrubsPct: number;
+  groundcoverPct: number;
+  seep: boolean;
+  spring: boolean;
+  bedding: boolean;
+  joints: boolean;
+  fractures: boolean;
+  pavementType: "ASPHALT" | "CONCRETE" | null;
+};
+
 export type MeasurementDiagramData = {
   template: DiagramTemplate;
-  view: StationingView;
   failureSide: FailureSide;
   terrainShape: TerrainSideShape;
+  terrainAppearance: TerrainAppearance;
   crossSection: RoadCrossSection;
   measurements: MeasurementValues;
 };

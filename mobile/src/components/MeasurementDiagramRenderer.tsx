@@ -1,15 +1,18 @@
-// Orientation unlock disabled — expo-screen-orientation native module is not
-// present in the current Expo Go/dev-client binary. Fullscreen remains available;
-// rotation follows the OS lock. Can be revisited after a native client rebuild.
-import React, { useState, useCallback } from "react";
+// Rotation: the app allows device rotation (expo.orientation "default" in
+// app.json — requires a native rebuild to take effect). Entering the fullscreen
+// measurement view additionally forces landscape via expo-screen-orientation;
+// closing it restores the device's natural rotation. Orientation calls are
+// guarded (see utils/screenOrientation) so they no-op gracefully in Expo Go.
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, LayoutChangeEvent,
   Modal, SafeAreaView, StatusBar,
 } from "react-native";
 import { RoadCrossSectionRenderer } from "./RoadCrossSectionRenderer";
 import { buildMeasurementDiagramData } from "../measurements/buildMeasurementDiagramData";
-import type { DiagramTemplate, FailureSide, StationingView, TerrainSideShape } from "../measurements/measurementDiagramModel";
+import type { DiagramTemplate, FailureSide, TerrainSideShape } from "../measurements/measurementDiagramModel";
 import type { GisaElevationProfile } from "../api/submissions";
+import { lockLandscape, unlockOrientation } from "../utils/screenOrientation";
 
 interface Props {
   formValues: Record<string, string | undefined | null>;
@@ -55,7 +58,6 @@ const TERRAIN_SHORT: Record<TerrainSideShape, string> = {
 
 export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, elevationProfile }: Props) {
   const [template, setTemplate] = useState<DiagramTemplate | "AUTO">("AUTO");
-  const [view, setView] = useState<StationingView>("UPSTATION");
   const [failureSide, setFailureSide] = useState<FailureSide>("LT");
   const [terrainShape, setTerrainShape] = useState<TerrainSideShape | "AUTO">("AUTO");
   const [containerWidth, setContainerWidth] = useState(0);
@@ -72,10 +74,19 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
 
   const openFullscreen = useCallback(() => {
     setFullscreen(true);
+    void lockLandscape();
   }, []);
 
   const closeFullscreen = useCallback(() => {
     setFullscreen(false);
+    void unlockOrientation();
+  }, []);
+
+  // Safety net: if this component unmounts while fullscreen, restore rotation.
+  useEffect(() => {
+    return () => {
+      void unlockOrientation();
+    };
   }, []);
 
   const data =
@@ -84,7 +95,6 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
           formValues,
           roadInventorySnapshot,
           template,
-          view,
           failureSide,
           terrainShape,
           elevationProfile,
@@ -97,7 +107,6 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
           formValues,
           roadInventorySnapshot,
           template,
-          view,
           failureSide,
           terrainShape,
           elevationProfile,
@@ -211,25 +220,12 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
     <View style={styles.wrapper}>
       {controls}
 
-      {/* Stationing view + source badge + fullscreen button */}
+      {/* Canonical orientation indicator + source badge + fullscreen button.
+          Orientation is always UPSTATION — there is no perspective toggle. */}
       <View style={styles.viewRow}>
-        <Text style={styles.viewLabel}>View:</Text>
-        <TouchableOpacity
-          style={[styles.viewBtn, view === "UPSTATION" && styles.viewBtnActive]}
-          onPress={() => setView("UPSTATION")}
-        >
-          <Text style={[styles.viewBtnText, view === "UPSTATION" && styles.viewBtnTextActive]}>
-            UPSTATION
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.viewBtn, view === "DOWNSTATION" && styles.viewBtnActive]}
-          onPress={() => setView("DOWNSTATION")}
-        >
-          <Text style={[styles.viewBtnText, view === "DOWNSTATION" && styles.viewBtnTextActive]}>
-            DOWNSTATION
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.orientChip}>
+          <Text style={styles.orientChipText}>UPSTATION →</Text>
+        </View>
 
         <View style={[styles.badge, { backgroundColor: sourceBadgeColor }]}>
           <Text style={styles.badgeText}>{sourceLabel}</Text>
@@ -264,6 +260,7 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
         visible={fullscreen}
         animationType="slide"
         statusBarTranslucent
+        supportedOrientations={["portrait", "landscape", "landscape-left", "landscape-right"]}
         onRequestClose={closeFullscreen}
       >
         <StatusBar hidden />
@@ -310,14 +307,9 @@ export function MeasurementDiagramRenderer({ formValues, roadInventorySnapshot, 
                 </Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity
-              style={[styles.viewBtn, view === "UPSTATION" && styles.viewBtnActive]}
-              onPress={() => setView(view === "UPSTATION" ? "DOWNSTATION" : "UPSTATION")}
-            >
-              <Text style={[styles.viewBtnText, view === "UPSTATION" && styles.viewBtnTextActive]}>
-                {view === "UPSTATION" ? "↑ UP" : "↓ DOWN"}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.orientChip}>
+              <Text style={styles.orientChipText}>UPSTATION →</Text>
+            </View>
           </View>
 
           {/* Fullscreen diagram — fills remaining space */}
@@ -417,30 +409,16 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: "#111827",
   },
-  viewLabel: {
-    fontSize: 10,
-    color: "#64748b",
-    marginRight: 2,
-  },
-  viewBtn: {
+  orientChip: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
-    borderWidth: 1,
-    borderColor: "#334155",
-    backgroundColor: "#1e293b",
+    backgroundColor: "#1e3a5f",
   },
-  viewBtnActive: {
-    backgroundColor: "#3b82f6",
-    borderColor: "#3b82f6",
-  },
-  viewBtnText: {
+  orientChipText: {
     fontSize: 9,
-    color: "#94a3b8",
-    fontWeight: "600",
-  },
-  viewBtnTextActive: {
-    color: "#ffffff",
+    fontWeight: "700",
+    color: "#93c5fd",
   },
   badge: {
     paddingHorizontal: 7,

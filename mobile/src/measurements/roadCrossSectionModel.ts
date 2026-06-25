@@ -3,7 +3,7 @@
  *
  * Widths are in feet. The cross-section is always described in the UPSTATION
  * direction (facing increasing postmile): LT is the left lane, RT is the right
- * lane. The renderer mirrors the layout for DOWNSTATION perspective.
+ * lane. This is the canonical and only orientation — the renderer never mirrors.
  */
 
 export type MedianCategory =
