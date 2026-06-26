@@ -8,6 +8,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { clearToken, getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
+import { isOperationalUser } from "@/src/utils/roleModel";
 
 export default function TabLayout() {
   const { palette, scheme, componentScale } = useUiSettings();
@@ -56,6 +57,8 @@ export default function TabLayout() {
     roleSet.has("BRANCH_CHIEF") ||
     roleSet.has("FIELD_WORKER") ||
     roleSet.has("ADMIN");
+  // Assessments are for non-maintenance operational users only.
+  const canSeeAssessments = rolesLoaded && isOperationalUser(roles);
 
   const currentTabIndex = useMemo(() => {
     if (pathname?.startsWith("/incidents")) return 0;
@@ -145,6 +148,15 @@ export default function TabLayout() {
           href: canSeeIncidents ? undefined : null,
           title: "Track Incidents",
           tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="exclamationmark.triangle.fill" color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="assessments/index"
+        options={{
+          href: canSeeAssessments ? undefined : null,
+          title: "Assessments",
+          tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="checkmark.seal.fill" color={color} />,
         }}
       />
 

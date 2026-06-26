@@ -20,6 +20,7 @@ const MAPPING = {
   'exclamationmark.triangle.fill': 'warning',
   'globe.americas.fill': 'public',
   'gearshape.fill': 'settings',
+  'checkmark.seal.fill': 'verified',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
 } as IconMapping;
