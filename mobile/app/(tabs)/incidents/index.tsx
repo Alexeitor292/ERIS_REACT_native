@@ -451,6 +451,9 @@ export default function IncidentsTabScreen() {
   const [postMile, setPostMile] = useState("");
   const [pendingIncidentFiles, setPendingIncidentFiles] = useState<PendingIncidentUpload[]>([]);
   const [editingIncidentId, setEditingIncidentId] = useState<number | null>(null);
+  // Bumped on every successful screen refresh/mutation so the embedded workflow
+  // tree refetches without polling.
+  const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
   const [editingLocked, setEditingLocked] = useState(false);
   const [revisionEditableFields, setRevisionEditableFields] = useState<string[] | null>(null);
   const [datePickerKey, setDatePickerKey] = useState<"firstObservedAt" | "firstOccurredAt" | null>(null);
@@ -522,6 +525,9 @@ export default function IncidentsTabScreen() {
       ]);
       setMe(userRes);
       setItems(incidentsRes.items ?? []);
+      // Signal the embedded workflow tree to refetch after a successful refresh
+      // (load runs on focus and after every mutation of the open incident).
+      setWorkflowRefreshKey((k) => k + 1);
 
       if (userRes.roles.includes("ADMIN")) {
         const userList = await apiFetch<{ items: AdminUser[] }>("/admin/users", { token });
@@ -1364,7 +1370,7 @@ export default function IncidentsTabScreen() {
                 </View>
               ) : null}
               {isDetailRoute && editingIncidentId != null ? (
-                <IncidentWorkflowTree incidentId={editingIncidentId} />
+                <IncidentWorkflowTree incidentId={editingIncidentId} refreshKey={workflowRefreshKey} />
               ) : null}
               {!isDetailRoute ? (
                 <>

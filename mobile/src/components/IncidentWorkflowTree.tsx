@@ -39,13 +39,32 @@ function personLabel(node: WorkflowNode): string {
   return node.role_title;
 }
 
-export default function IncidentWorkflowTree({ incidentId }: { incidentId: number }) {
+export default function IncidentWorkflowTree({
+  incidentId,
+  refreshKey = 0,
+}: {
+  incidentId: number;
+  // Parent bumps this on any successful refresh/mutation of the open incident so
+  // the tree refetches (no polling).
+  refreshKey?: number;
+}) {
   const { palette } = useUiSettings();
   const [tree, setTree] = useState<WorkflowTree | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // When the incident itself changes, reset to a fresh first-load state so the
+  // spinner shows. A refreshKey-only change (same incident) keeps the current
+  // tree and refetches silently below — no spinner flash, no polling.
+  useEffect(() => {
+    setTree(null);
+    setError(null);
+    setLoading(true);
+    setExpanded(null);
+  }, [incidentId]);
+
+  // Fetch on first mount, incident change, or parent-signalled refresh.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -53,7 +72,10 @@ export default function IncidentWorkflowTree({ incidentId }: { incidentId: numbe
         const token = await getToken();
         if (!token) return;
         const t = await getWorkflowTree(token, incidentId);
-        if (alive) setTree(t);
+        if (alive) {
+          setTree(t);
+          setError(null);
+        }
       } catch (e) {
         if (alive && !isSessionExpiredError(e)) setError(e instanceof Error ? e.message : "Failed to load workflow");
       } finally {
@@ -63,13 +85,12 @@ export default function IncidentWorkflowTree({ incidentId }: { incidentId: numbe
     return () => {
       alive = false;
     };
-  }, [incidentId]);
+  }, [incidentId, refreshKey]);
 
-  if (loading) return <ActivityIndicator color={palette.primary} style={{ marginVertical: 16 }} />;
-  if (error || !tree) {
-    // Access-denied or fetch error: keep the detail screen usable, just omit the tree.
-    return null;
-  }
+  // Show the spinner only on the initial load (no tree yet).
+  if (loading && tree == null) return <ActivityIndicator color={palette.primary} style={{ marginVertical: 16 }} />;
+  // Access-denied or fetch error with nothing to show: keep the detail screen usable.
+  if (!tree) return null;
 
   const owner = tree.current_owner;
   const overall = STATUS_META[tree.overall_status];
@@ -77,6 +98,10 @@ export default function IncidentWorkflowTree({ incidentId }: { incidentId: numbe
   return (
     <View style={[styles.wrap, { borderColor: palette.border, backgroundColor: palette.panel }]}>
       <Text style={[styles.title, { color: palette.text }]}>Workflow</Text>
+      {error ? (
+        // A refresh failed but we still show the last-known tree.
+        <Text style={{ color: palette.muted, fontSize: 11, marginBottom: 6 }}>Could not refresh — showing last known state.</Text>
+      ) : null}
 
       {/* Current owner / status banner — readable without expanding nodes */}
       <View style={[styles.banner, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
