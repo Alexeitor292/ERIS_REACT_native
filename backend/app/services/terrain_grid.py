@@ -127,6 +127,24 @@ def build_grid_points(
     return points
 
 
+def _drain_and_release(executor: ThreadPoolExecutor, lat: float, lon: float) -> None:
+    """Background cleanup for a timed-out build.
+
+    Waits for the up-to-_MAX_WORKERS in-flight EPQS calls to actually finish
+    (queued futures were already cancelled), then releases the process-wide
+    guard. Holding the guard until the executor fully drains keeps total live
+    EPQS requests at or below _MAX_WORKERS even though the partial response was
+    already returned at the time budget."""
+    try:
+        executor.shutdown(wait=True)
+    except Exception:  # pragma: no cover - defensive
+        logger.exception(
+            "Terrain grid background cleanup failed lat=%.6f lon=%.6f", lat, lon
+        )
+    finally:
+        _BUILD_SEMAPHORE.release()
+
+
 def fetch_terrain_grid(
     lat: float,
     lon: float,
@@ -170,59 +188,92 @@ def fetch_terrain_grid(
     sample_count = rows * cols
 
     # Acquire the process-wide build guard BEFORE submitting any USGS work. Fail
-    # fast if another build holds it — do not wait behind it.
+    # fast if another build holds it (or a previous build's workers are still
+    # draining) — do not wait behind it.
     if not _BUILD_SEMAPHORE.acquire(blocking=False):
         raise TerrainBuildBusyError(
             "Terrain sampling is already in progress. Please try again shortly."
         )
+
+    # The guard is normally released synchronously below. On a time-budget timeout
+    # we instead hand it to a background cleanup thread so it stays held until the
+    # up-to-_MAX_WORKERS in-flight EPQS calls actually finish — otherwise a new
+    # build could start six more calls while these are still alive, exceeding the
+    # ceiling on total live EPQS requests.
+    deferred_cleanup = False
+    executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
     try:
         # Bounded concurrency + an overall time budget. We submit all points, then
         # collect results until either everything is done or the budget elapses; on
         # timeout we stop waiting and keep the partial (real) data we already have.
-        executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
+        future_to_idx = {
+            executor.submit(_fetch_elevation_ft, p["lat"], p["lon"]): i
+            for i, p in enumerate(points)
+        }
         try:
-            future_to_idx = {
-                executor.submit(_fetch_elevation_ft, p["lat"], p["lon"]): i
-                for i, p in enumerate(points)
-            }
-            try:
-                for fut in as_completed(future_to_idx, timeout=TOTAL_BUILD_BUDGET_S):
-                    idx = future_to_idx[fut]
-                    try:
-                        elev = fut.result()
-                    except Exception:
-                        elev = None
-                    if elev is not None:
-                        points[idx]["elevation_ft"] = round(elev, 2)
-                        valid += 1
-            except FuturesTimeoutError:
-                timed_out = True
-                logger.warning(
-                    "Terrain grid time budget (%.0fs) exceeded lat=%.6f lon=%.6f; returning %d/%d points",
-                    TOTAL_BUILD_BUDGET_S, lat, lon, valid, sample_count,
-                )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error("Terrain grid failed lat=%.6f lon=%.6f: %s", lat, lon, exc)
-            error = str(exc)
-        finally:
-            # Do not block on stragglers; cancel queued work and let any in-flight
-            # requests finish in the background.
-            executor.shutdown(wait=False, cancel_futures=True)
+            for fut in as_completed(future_to_idx, timeout=TOTAL_BUILD_BUDGET_S):
+                idx = future_to_idx[fut]
+                try:
+                    elev = fut.result()
+                except Exception:
+                    elev = None
+                if elev is not None:
+                    points[idx]["elevation_ft"] = round(elev, 2)
+                    valid += 1
+        except FuturesTimeoutError:
+            timed_out = True
+            logger.warning(
+                "Terrain grid time budget (%.0fs) exceeded lat=%.6f lon=%.6f; returning %d/%d points",
+                TOTAL_BUILD_BUDGET_S, lat, lon, valid, sample_count,
+            )
+            # Cancel queued (not-yet-started) work so only the in-flight EPQS
+            # calls remain alive, then drain + release the guard in the
+            # background. The partial response returns now; the guard stays held
+            # (new uncached builds get a fast 503) until those in-flight calls
+            # finish, so total live EPQS requests never exceed _MAX_WORKERS.
+            for f in future_to_idx:
+                f.cancel()
+            threading.Thread(
+                target=_drain_and_release,
+                args=(executor, lat, lon),
+                name="terrain-grid-cleanup",
+                daemon=True,
+            ).start()
+            deferred_cleanup = True
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Terrain grid failed lat=%.6f lon=%.6f: %s", lat, lon, exc)
+        error = str(exc)
     finally:
-        # Always release the process-wide guard — on success, error, or timeout.
-        _BUILD_SEMAPHORE.release()
+        if not deferred_cleanup:
+            # Synchronous path: every future is finished (or failed). Shut the
+            # executor down and release the guard immediately.
+            executor.shutdown(wait=False, cancel_futures=True)
+            _BUILD_SEMAPHORE.release()
 
+    # Partial terrain = some-but-not-all samples resolved, regardless of cause
+    # (time-budget timeout OR ordinary USGS no-data/null samples).
+    partial = 0 < valid < sample_count
     if error is None:
         if valid == 0:
             error = (
                 "USGS EPQS did not return any valid elevation samples"
                 + (" within the time budget." if timed_out else " for this grid.")
             )
-        elif timed_out:
-            error = (
-                f"USGS EPQS was slow/unavailable; built partial terrain "
-                f"({valid} of {sample_count} points within the time budget)."
-            )
+        elif partial:
+            # Always report partial coverage (the UI shows an amber notice) and
+            # never fabricate the missing cells.
+            if timed_out:
+                error = (
+                    f"USGS EPQS was slow or unavailable; built partial terrain "
+                    f"({valid} of {sample_count} samples within the time budget). "
+                    f"Missing cells are left blank, not interpolated."
+                )
+            else:
+                error = (
+                    f"USGS EPQS returned no data for some points; built partial "
+                    f"terrain ({valid} of {sample_count} samples). "
+                    f"Missing cells are left blank, not interpolated."
+                )
 
     return {
         "source": EPQS_SOURCE,
@@ -238,7 +289,7 @@ def fetch_terrain_grid(
             "extent_cross_m": round(cross_spacing_m * (cols - 1), 1),
             "sample_count": sample_count,
             "valid_sample_count": valid,
-            "partial": bool(timed_out and valid > 0),
+            "partial": partial,
             "points": points,
         },
         "error": error,

@@ -7,12 +7,25 @@ in the no-DB CI job.
 
 from __future__ import annotations
 
+import threading
 import time
 from unittest.mock import patch
 
 import pytest
 
 from app.services import terrain_grid as tg
+
+
+def _wait_for_guard_free(timeout: float = 5.0) -> bool:
+    """Poll until the process-wide build guard is free (acquirable), e.g. after a
+    timed-out build's background cleanup has drained the in-flight workers."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if tg._BUILD_SEMAPHORE.acquire(blocking=False):
+            tg._BUILD_SEMAPHORE.release()
+            return True
+        time.sleep(0.02)
+    return False
 
 
 class TestOddDimensions:
@@ -52,7 +65,7 @@ class TestTimeBudget:
             calls["n"] += 1
             if calls["n"] <= 5:
                 return 100.0
-            time.sleep(2.0)  # exceeds the 0.4s budget
+            time.sleep(1.0)  # exceeds the 0.4s budget
             return 100.0
 
         with patch.object(tg, "_fetch_elevation_ft", side_effect=slow):
@@ -63,18 +76,22 @@ class TestTimeBudget:
         assert res["error"] and "partial" in res["error"].lower()
         # Unresolved points stay null — no synthetic elevations.
         assert any(p["elevation_ft"] is None for p in grid["points"])
+        # Let the deferred cleanup drain so the guard does not leak to the next test.
+        assert _wait_for_guard_free(timeout=5.0)
 
     def test_full_outage_within_budget_reports_no_data(self, monkeypatch):
         monkeypatch.setattr(tg, "TOTAL_BUILD_BUDGET_S", 0.4)
 
         def hang(lat, lon):
-            time.sleep(2.0)
+            time.sleep(1.0)
             return 100.0
 
         with patch.object(tg, "_fetch_elevation_ft", side_effect=hang):
             res = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
         assert res["grid"]["valid_sample_count"] == 0
         assert res["error"] is not None
+        # Let the deferred cleanup drain so the guard does not leak to the next test.
+        assert _wait_for_guard_free(timeout=5.0)
 
 
 class TestGlobalConcurrencyGuard:
@@ -111,17 +128,56 @@ class TestGlobalConcurrencyGuard:
         tg._BUILD_SEMAPHORE.release()
 
     def test_guard_released_after_timeout(self, monkeypatch):
-        # A time-budget timeout must also release the guard in finally.
+        # A time-budget timeout defers executor cleanup to a background thread; the
+        # guard stays held until the in-flight workers finish, THEN is released.
         monkeypatch.setattr(tg, "TOTAL_BUILD_BUDGET_S", 0.3)
 
         def hang(lat, lon):
-            time.sleep(2.0)
+            time.sleep(1.0)
             return 100.0
 
         with patch.object(tg, "_fetch_elevation_ft", side_effect=hang):
             tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
-        assert tg._BUILD_SEMAPHORE.acquire(blocking=False)
-        tg._BUILD_SEMAPHORE.release()
+        # Eventually (after the in-flight workers finish) the guard is released.
+        assert _wait_for_guard_free(timeout=5.0)
+
+    def test_guard_held_until_inflight_workers_finish(self, monkeypatch):
+        """Timeout must NOT release the guard while in-flight EPQS calls are alive.
+
+        1. First build times out with workers still blocked.
+        2. A second build immediately gets TerrainBuildBusyError.
+        3. After the blocked workers finish and cleanup releases the guard, a new
+           build can proceed.
+        """
+        monkeypatch.setattr(tg, "TOTAL_BUILD_BUDGET_S", 0.3)
+        release_workers = threading.Event()
+
+        def blocking(lat, lon):
+            # Hold the worker (a live EPQS call) until the test releases it.
+            release_workers.wait(timeout=10)
+            return 100.0
+
+        try:
+            with patch.object(tg, "_fetch_elevation_ft", side_effect=blocking):
+                # 1. First build times out; its workers stay blocked (alive).
+                first = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+                assert first["grid"]["valid_sample_count"] == 0
+
+                # 2. Guard still held by the draining cleanup -> fast busy error.
+                with pytest.raises(tg.TerrainBuildBusyError):
+                    tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+                # ...and a raw non-blocking acquire also fails meanwhile.
+                assert tg._BUILD_SEMAPHORE.acquire(blocking=False) is False
+
+                # 3. Release the workers; cleanup drains and frees the guard.
+                release_workers.set()
+                assert _wait_for_guard_free(timeout=5.0)
+
+                # A fresh build now proceeds (workers return immediately).
+                third = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+                assert third["grid"]["valid_sample_count"] == 9
+        finally:
+            release_workers.set()  # never leave daemon workers blocked
 
 
 class TestBuildGridPoints:
@@ -170,6 +226,8 @@ class TestFetchTerrainGrid:
         assert grid["extent_along_m"] == 200.0 and grid["extent_cross_m"] == 200.0
         assert res["source"] == "USGS_EPQS_3DEP"
         assert res["road_bearing_deg_used"] == 90.0
+        # Full coverage: not partial, no error.
+        assert grid["partial"] is False
         assert res["error"] is None
         assert all(p["elevation_ft"] == 100.0 for p in grid["points"])
 
@@ -182,17 +240,25 @@ class TestFetchTerrainGrid:
         assert all(p["elevation_ft"] is None for p in grid["points"])
         assert res["error"] is not None
 
-    def test_partial_samples(self):
-        # Only points with non-negative along offset resolve; the rest are null.
+    def test_partial_samples_without_timeout(self):
+        # Ordinary USGS no-data: some points resolve, the rest return None (no
+        # timeout involved). This must still be flagged partial with a clear error
+        # that includes the valid/requested counts; missing cells stay null.
         def fake(lat, lon):
             return 200.0 if lon >= -122.0 else None
 
         with patch.object(tg, "_fetch_elevation_ft", side_effect=fake):
             res = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0)
         grid = res["grid"]
-        assert 0 < grid["valid_sample_count"] < grid["sample_count"]
-        # No error when at least one valid sample exists.
-        assert res["error"] is None
+        valid, total = grid["valid_sample_count"], grid["sample_count"]
+        assert 0 < valid < total
+        assert grid["partial"] is True
+        assert res["error"] is not None
+        assert f"{valid} of {total}" in res["error"]
+        # Reason mentions unavailable / no-data (not the time budget).
+        assert "no data" in res["error"].lower()
+        # Missing cells stay null — never interpolated or invented.
+        assert any(p["elevation_ft"] is None for p in grid["points"])
 
     def test_dimension_and_spacing_clamped(self):
         with patch.object(tg, "_fetch_elevation_ft", return_value=10.0):
