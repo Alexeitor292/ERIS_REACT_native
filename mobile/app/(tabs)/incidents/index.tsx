@@ -18,11 +18,9 @@ import {
   assignIncident,
   unassignIncident,
   uploadIncidentAttachment,
-  forwardIncidentByCoordinator,
   getIncidentLocationCandidates,
   getIncidentLocationTimeline,
   linkIncidentLocation,
-  requestIncidentRevisionByCoordinator,
   type Incident,
   type IncidentAttachmentKind,
   type IncidentLocationCandidate,
@@ -31,6 +29,12 @@ import {
   type RoadInventoryIncidentContext,
   type RoutingUserOption,
 } from "@/src/api/incidents";
+import {
+  routingPreview,
+  triageIncident,
+  type RoutingPreview,
+  type TriageDisposition,
+} from "@/src/api/assessments";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 import { queueIncidentMapPreload } from "@/src/offline/mapPreload";
@@ -423,6 +427,14 @@ export default function IncidentsTabScreen() {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
   const [coordinatorComment, setCoordinatorComment] = useState("");
+  // Coordinator triage picker state
+  const [triageDisposition, setTriageDisposition] = useState<TriageDisposition | null>(null);
+  const [triageRouting, setTriageRouting] = useState<RoutingPreview | null>(null);
+  const [triageOverrideOffice, setTriageOverrideOffice] = useState("");
+  const [triageOverrideReason, setTriageOverrideReason] = useState("");
+  const [triageRevisionFields, setTriageRevisionFields] = useState<string[]>([]);
+  const [triageDupIncidentId, setTriageDupIncidentId] = useState("");
+  const [triageDupLocationId, setTriageDupLocationId] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"ALL" | IncidentStatus>("ALL");
@@ -547,6 +559,13 @@ export default function IncidentsTabScreen() {
     setCoordinatorComment("");
     setReviewLoading(false);
     setReviewBusy(false);
+    setTriageDisposition(null);
+    setTriageRouting(null);
+    setTriageOverrideOffice("");
+    setTriageOverrideReason("");
+    setTriageRevisionFields([]);
+    setTriageDupIncidentId("");
+    setTriageDupLocationId("");
   };
 
   const loadLocationTimeline = useCallback(async (locationId: number, token: string) => {
@@ -562,8 +581,21 @@ export default function IncidentsTabScreen() {
     setReviewTimeline(null);
     setSelectedLocationId(incident.location_id ?? null);
     setCoordinatorComment("");
+    setTriageDisposition(null);
+    setTriageRouting(null);
+    setTriageOverrideOffice("");
+    setTriageOverrideReason("");
+    setTriageRevisionFields([]);
+    setTriageDupIncidentId("");
+    setTriageDupLocationId("");
     setReviewLoading(true);
     setErr(null);
+    // Pre-fetch the calculated GeoTech office routing for ASSESSMENT_REQUIRED.
+    if (incident.district) {
+      routingPreview(token, incident.district)
+        .then((r) => setTriageRouting(r))
+        .catch(() => setTriageRouting(null));
+    }
     try {
       const res = await getIncidentLocationCandidates(token, incident.id);
       setReviewCandidates(res.items ?? []);
@@ -1208,52 +1240,53 @@ export default function IncidentsTabScreen() {
     }
   };
 
-  const onCoordinatorRequestRevision = async () => {
+  // NOTE: the legacy coordinator forward / request-revision actions were
+  // replaced by the four-disposition triage picker below (onCoordinatorTriage).
+  // ASSESSMENT_REQUIRED supersedes "forward"; NEEDS_REPORTER_INFORMATION
+  // supersedes "request revision". The legacy backend endpoints remain for
+  // backward compatibility but are no longer called from mobile.
+  const onCoordinatorTriage = async () => {
     const token = await getToken();
-    if (!token || !reviewIncident) return;
-    if (!coordinatorComment.trim()) {
-      Alert.alert("Comment required", "Add a note so the maintenance crew knows what to correct.");
-      return;
-    }
-    setReviewBusy(true);
-    setErr(null);
-    try {
-      await requestIncidentRevisionByCoordinator(
-        token,
-        reviewIncident.id,
-        coordinatorComment.trim(),
-        ["district", "county", "route", "post_mile", "latitude", "longitude", "description"]
-      );
-      await load();
-      closeCoordinatorReview();
-      Alert.alert("Revision requested", "The maintenance crew can now update the incident.");
-    } catch (e: any) {
-      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
-    } finally {
-      setReviewBusy(false);
-    }
-  };
+    if (!token || !reviewIncident || !triageDisposition) return;
+    const notes = coordinatorComment.trim() || undefined;
 
-  const onCoordinatorForward = async () => {
-    const token = await getToken();
-    if (!token || !reviewIncident) return;
-    if (!reviewIncident.location_id && !selectedLocationId) {
-      Alert.alert("Location required", "Link this incident to an existing case or create a new one before forwarding.");
+    // Per-disposition validation mirrors the server contract.
+    if (triageDisposition === "NEEDS_REPORTER_INFORMATION" && !notes) {
+      Alert.alert("Note required", "Add a note so the maintenance crew knows what to correct.");
       return;
     }
+    const body: Parameters<typeof triageIncident>[2] = { disposition: triageDisposition, notes };
+    if (triageDisposition === "ASSESSMENT_REQUIRED" && triageOverrideOffice.trim()) {
+      if (!triageOverrideReason.trim()) {
+        Alert.alert("Reason required", "An override reason is required when changing the routed office.");
+        return;
+      }
+      body.office_code_override = triageOverrideOffice.trim().toUpperCase();
+      body.override_reason = triageOverrideReason.trim();
+    }
+    if (triageDisposition === "NEEDS_REPORTER_INFORMATION") {
+      body.revision_fields = triageRevisionFields;
+    }
+    if (triageDisposition === "DUPLICATE_OR_LINKED") {
+      const ti = Number(triageDupIncidentId);
+      const tl = Number(triageDupLocationId);
+      if (triageDupIncidentId.trim() && Number.isFinite(ti) && ti > 0) body.target_incident_id = ti;
+      if (triageDupLocationId.trim() && Number.isFinite(tl) && tl > 0) body.target_location_id = tl;
+    }
+
     setReviewBusy(true);
     setErr(null);
     try {
-      const res = await forwardIncidentByCoordinator(token, reviewIncident.id, coordinatorComment.trim() || null);
-      await load();
+      await triageIncident(token, reviewIncident.id, body);
+      await load(); // refresh incident + downstream assessment state immediately
       closeCoordinatorReview();
-      Alert.alert(
-        "Incident approved",
-        res.linked_submission_id
-          ? `A draft form was created for this case as Draft #${res.linked_submission_id}.`
-          : "The incident was forwarded successfully."
-      );
-      if (res.linked_submission_id) openDraft(res.linked_submission_id);
+      const msg: Record<TriageDisposition, string> = {
+        ASSESSMENT_REQUIRED: "Assessment required — routed to the GeoTech office.",
+        NO_ASSESSMENT_REQUIRED: "Recorded: no assessment required. The report was closed.",
+        NEEDS_REPORTER_INFORMATION: "Revision requested — the maintenance crew can update the report.",
+        DUPLICATE_OR_LINKED: "Recorded as duplicate/linked. The report was closed.",
+      };
+      Alert.alert("Triage recorded", msg[triageDisposition]);
     } catch (e: any) {
       if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
     } finally {
@@ -2060,19 +2093,143 @@ export default function IncidentsTabScreen() {
                   >
                     <Text style={{ color: palette.text, fontWeight: "700" }}>Create New Case</Text>
                   </Pressable>
+                </View>
+
+                {/* Coordinator triage decision (four dispositions). The note above
+                    is recorded with every decision. Server enforces authority. */}
+                <View style={{ marginTop: 14 }}>
+                  <Text style={[styles.labelText, { color: palette.muted }]}>Triage Decision</Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    {([
+                      ["ASSESSMENT_REQUIRED", "Assessment Required"],
+                      ["NO_ASSESSMENT_REQUIRED", "No Assessment"],
+                      ["NEEDS_REPORTER_INFORMATION", "Needs Info"],
+                      ["DUPLICATE_OR_LINKED", "Duplicate / Linked"],
+                    ] as [TriageDisposition, string][]).map(([key, label]) => {
+                      const active = triageDisposition === key;
+                      return (
+                        <Pressable
+                          key={key}
+                          onPress={() => setTriageDisposition(key)}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 8,
+                            borderRadius: 18,
+                            borderWidth: 1,
+                            borderColor: active ? palette.primary : palette.border,
+                            backgroundColor: active ? palette.primary : palette.panelSoft,
+                          }}
+                        >
+                          <Text style={{ color: active ? "#fff" : palette.text, fontWeight: "700", fontSize: 13 }}>{label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {triageDisposition === "ASSESSMENT_REQUIRED" ? (
+                    <View style={{ marginTop: 10, gap: 6 }}>
+                      <Text style={{ color: palette.text }}>
+                        Routes to:{" "}
+                        <Text style={{ fontWeight: "800" }}>
+                          {triageRouting?.office_name || triageRouting?.office_code || "—"}
+                        </Text>
+                        {triageRouting?.office_code ? ` (${triageRouting.office_code})` : ""}
+                        {reviewIncident?.district ? `  ·  District ${reviewIncident.district}` : ""}
+                      </Text>
+                      <Text style={{ color: palette.muted, fontSize: 12 }}>
+                        Override the routed office only with a required reason.
+                      </Text>
+                      <TextInput
+                        value={triageOverrideOffice}
+                        onChangeText={setTriageOverrideOffice}
+                        autoCapitalize="characters"
+                        placeholder="Override office code (optional, e.g. SOUTH)"
+                        placeholderTextColor={palette.muted}
+                        style={[styles.input, { borderColor: palette.border, backgroundColor: palette.panelSoft, color: palette.text }]}
+                      />
+                      {triageOverrideOffice.trim() ? (
+                        <TextInput
+                          value={triageOverrideReason}
+                          onChangeText={setTriageOverrideReason}
+                          placeholder="Reason for override (required)"
+                          placeholderTextColor={palette.muted}
+                          style={[styles.input, { borderColor: palette.border, backgroundColor: palette.panelSoft, color: palette.text }]}
+                        />
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {triageDisposition === "NEEDS_REPORTER_INFORMATION" ? (
+                    <View style={{ marginTop: 10 }}>
+                      <Text style={{ color: palette.muted, fontSize: 12, marginBottom: 6 }}>
+                        Fields the reporter may revise (note above is required):
+                      </Text>
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                        {REVISION_FIELDS.map((field) => {
+                          const on = triageRevisionFields.includes(field);
+                          return (
+                            <Pressable
+                              key={field}
+                              onPress={() =>
+                                setTriageRevisionFields((prev) =>
+                                  prev.includes(field) ? prev.filter((f) => f !== field) : [...prev, field]
+                                )
+                              }
+                              style={{
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                borderRadius: 14,
+                                borderWidth: 1,
+                                borderColor: on ? palette.primary : palette.border,
+                                backgroundColor: on ? palette.primary : palette.panelSoft,
+                              }}
+                            >
+                              <Text style={{ color: on ? "#fff" : palette.text, fontSize: 12 }}>{field}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {triageDisposition === "DUPLICATE_OR_LINKED" ? (
+                    <View style={{ marginTop: 10, gap: 6 }}>
+                      <Text style={{ color: palette.muted, fontSize: 12 }}>Link to the original (optional):</Text>
+                      <TextInput
+                        value={triageDupIncidentId}
+                        onChangeText={setTriageDupIncidentId}
+                        keyboardType="number-pad"
+                        placeholder="Duplicate of incident id"
+                        placeholderTextColor={palette.muted}
+                        style={[styles.input, { borderColor: palette.border, backgroundColor: palette.panelSoft, color: palette.text }]}
+                      />
+                      <TextInput
+                        value={triageDupLocationId}
+                        onChangeText={setTriageDupLocationId}
+                        keyboardType="number-pad"
+                        placeholder="Linked location id (optional)"
+                        placeholderTextColor={palette.muted}
+                        style={[styles.input, { borderColor: palette.border, backgroundColor: palette.panelSoft, color: palette.text }]}
+                      />
+                    </View>
+                  ) : null}
+
                   <Pressable
-                    style={[styles.reviewActionBtn, { borderColor: palette.border, backgroundColor: "#4a1d1f" }]}
-                    onPress={onCoordinatorRequestRevision}
-                    disabled={reviewBusy}
+                    style={[
+                      styles.reviewActionBtn,
+                      {
+                        marginTop: 12,
+                        borderColor: palette.primary,
+                        backgroundColor: triageDisposition ? palette.primary : palette.panelSoft,
+                        opacity: triageDisposition && !reviewBusy ? 1 : 0.5,
+                      },
+                    ]}
+                    onPress={onCoordinatorTriage}
+                    disabled={reviewBusy || !triageDisposition}
                   >
-                    <Text style={{ color: "#fecaca", fontWeight: "700" }}>Request Revision</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.reviewActionBtn, { borderColor: palette.primary, backgroundColor: palette.primary }]}
-                    onPress={onCoordinatorForward}
-                    disabled={reviewBusy}
-                  >
-                    <Text style={{ color: "#fff", fontWeight: "700" }}>{reviewBusy ? "Working..." : "Approve and Create Form"}</Text>
+                    <Text style={{ color: triageDisposition ? "#fff" : palette.text, fontWeight: "800" }}>
+                      {reviewBusy ? "Working..." : "Submit Triage Decision"}
+                    </Text>
                   </Pressable>
                 </View>
               </ScrollView>

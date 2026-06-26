@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
+import { triageIncident, type TriageDisposition } from "../api/assessments";
 import type { AdminUser, Incident, IncidentStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { canTriage } from "../utils/roleModel";
 import AppShell from "../ui/AppShell";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 
@@ -260,6 +262,40 @@ export default function IncidentsPage() {
     }
   }
 
+  async function triageIncidentAction(incidentId: number) {
+    // Coordinator triage. The backend records an immutable timeline event and,
+    // for ASSESSMENT_REQUIRED, routes by district and creates the Assessment.
+    const raw = prompt(
+      "Triage disposition:\n1 = ASSESSMENT_REQUIRED\n2 = NO_ASSESSMENT_REQUIRED\n3 = NEEDS_REPORTER_INFORMATION\n4 = DUPLICATE_OR_LINKED",
+      "1"
+    );
+    if (!raw) return;
+    const map: Record<string, TriageDisposition> = {
+      "1": "ASSESSMENT_REQUIRED",
+      "2": "NO_ASSESSMENT_REQUIRED",
+      "3": "NEEDS_REPORTER_INFORMATION",
+      "4": "DUPLICATE_OR_LINKED",
+    };
+    const disposition = map[raw.trim()];
+    if (!disposition) {
+      setError("Invalid triage disposition.");
+      return;
+    }
+    const notes = prompt("Decision notes (recorded in the timeline):") ?? "";
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await triageIncident(incidentId, { disposition, notes: notes.trim() || undefined });
+      setNotice(`Triage recorded: ${disposition}.`);
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Triage failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AppShell title="Incidents">
       <div className="flex h-full flex-col gap-4 p-4 md:p-5">
@@ -475,6 +511,14 @@ export default function IncidentsPage() {
                     </td>
                     <td className="px-3 py-3 text-right">
                       <div className="inline-flex flex-wrap justify-end gap-1.5">
+                        {canTriage(me?.roles) && incident.current_stage === "COORDINATOR_REVIEW" ? (
+                          <button
+                            onClick={() => triageIncidentAction(incident.id)}
+                            className="rounded border border-sky-500/50 bg-sky-500/15 px-2 py-1 text-xs font-semibold text-sky-200 hover:brightness-95"
+                          >
+                            Triage
+                          </button>
+                        ) : null}
                         {isAdmin ? (
                           <>
                             <select

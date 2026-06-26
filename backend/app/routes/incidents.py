@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_roles
+from ..roles import is_maintenance_only
+from ..services import office_routing
 from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
 from ..schemas.common import (
     IncidentAssignBranchChiefRequest,
@@ -510,6 +512,11 @@ def _ensure_incident_scope_access(user: dict, incident_row: dict) -> None:
     roles = set(user.get("roles") or [])
     if "ADMIN" in roles:
         return
+    # Maintenance field workers may only read their own reports.
+    if is_maintenance_only(user):
+        if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):
+            raise HTTPException(status_code=403, detail="You can only view your own incident reports")
+        return
     if "MAINT_COORDINATOR" in roles:
         _ensure_incident_district_access(user, incident_row.get("district"))
     if "OFFICE_CHIEF" in roles or "BRANCH_CHIEF" in roles:
@@ -659,6 +666,8 @@ def _incident_with_assignment(db: Session, incident_id: int):
               i.office_code, i.current_stage,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,
+              i.triage_disposition, i.triage_decided_by_user_id, i.triage_decided_at,
+              i.triage_notes, i.duplicate_of_incident_id, i.duplicate_of_location_id,
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
@@ -748,6 +757,15 @@ def _serialize_incident(row: dict) -> dict:
             "checked_at": row.get("road_inventory_checked_at"),
             "snapshot": ri_snapshot,
         }
+    # location_match_metadata is a JSON column; the driver may hand it back as a
+    # raw string. Parse it to an object so clients (and the reporter-revision
+    # flow) can read fields like `revision_fields` directly.
+    location_metadata = row.get("location_match_metadata")
+    if isinstance(location_metadata, str):
+        try:
+            location_metadata = json.loads(location_metadata)
+        except Exception:
+            location_metadata = None
     return {
         "id": int(row["id"]),
         "title": row["title"],
@@ -756,7 +774,7 @@ def _serialize_incident(row: dict) -> dict:
         "location_id": int(row["location_id"]) if row["location_id"] is not None else None,
         "location_match_status": row["location_match_status"],
         "location_reviewed_by_user_id": int(row["location_reviewed_by_user_id"]) if row["location_reviewed_by_user_id"] is not None else None,
-        "location_match_metadata": row["location_match_metadata"],
+        "location_match_metadata": location_metadata,
         "location_reviewed_at": row["location_reviewed_at"],
         "first_observed_at": row["first_observed_at"],
         "first_occurred_at": row["first_occurred_at"],
@@ -775,6 +793,12 @@ def _serialize_incident(row: dict) -> dict:
         "resolved_at": row["resolved_at"],
         "resolved_by_user_id": row["resolved_by_user_id"],
         "resolution_comment": row["resolution_comment"],
+        "triage_disposition": row.get("triage_disposition"),
+        "triage_decided_by_user_id": int(row["triage_decided_by_user_id"]) if row.get("triage_decided_by_user_id") is not None else None,
+        "triage_decided_at": row.get("triage_decided_at"),
+        "triage_notes": row.get("triage_notes"),
+        "duplicate_of_incident_id": int(row["duplicate_of_incident_id"]) if row.get("duplicate_of_incident_id") is not None else None,
+        "duplicate_of_location_id": int(row["duplicate_of_location_id"]) if row.get("duplicate_of_location_id") is not None else None,
         "linked_submission_id": int(row["submission_id"]) if row["submission_id"] is not None else None,
         "road_inventory_context": ri_context,
         "assignment": (
@@ -1095,7 +1119,9 @@ def create_incident(
         raise HTTPException(status_code=400, detail="latitude and longitude are required")
 
     district_code = _normalized_district_code(district)
-    office_code = _office_for_district(district)
+    # Prefer the configurable geotech_office_routing table; fall back to the
+    # legacy constant map when a district has no active routing row yet.
+    office_code = office_routing.office_for_district(db, district) or _office_for_district(district)
     ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     try:
         db.execute(
@@ -1422,7 +1448,7 @@ def maintenance_resubmit_incident(
                 detail=f"Only requested revision fields may be changed: {', '.join(sorted(requested_fields))}",
             )
 
-    office_code = _office_for_district(district)
+    office_code = office_routing.office_for_district(db, district) or _office_for_district(district)
     ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     metadata = {
         "mode": "RESUBMITTED_BY_MAINTENANCE",
@@ -1521,6 +1547,13 @@ def list_incidents(
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
+    # Broad visibility, narrow authority: maintenance field workers are scoped
+    # to their OWN reports server-side regardless of the requested scope. This
+    # is enforced here (not only in the mobile filter) so the WebUI cannot be
+    # used to enumerate statewide incidents.
+    if is_maintenance_only(user):
+        where_parts.append("i.reporter_user_id = :self_uid")
+        params["self_uid"] = int(user["id"])
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = db.execute(
         text(
@@ -1535,6 +1568,8 @@ def list_incidents(
               i.office_code, i.current_stage,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,
+              i.triage_disposition, i.triage_decided_by_user_id, i.triage_decided_at,
+              i.triage_notes, i.duplicate_of_incident_id, i.duplicate_of_location_id,
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
@@ -2006,6 +2041,10 @@ def mission_center_incident_feed(
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
+    # Maintenance field workers only ever see their own reports (server-side).
+    if is_maintenance_only(user):
+        where_parts.append("i.reporter_user_id = :self_uid")
+        params["self_uid"] = int(user["id"])
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = db.execute(
         text(
