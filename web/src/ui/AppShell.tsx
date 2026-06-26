@@ -76,6 +76,7 @@ export default function AppShell({ title, children }: { title: string; children:
             <nav className="space-y-1.5">
               <NavItem to="/mission-center" label="Mission Center" />
               <NavItem to="/incidents" label="Incidents" />
+              <NavItem to="/assessments" label="Assessments" />
               <NavItem to="/submissions" label="Submissions" />
               <NavItem to="/settings" label="Settings" />
               {me?.roles?.includes("ADMIN") && <NavItem to="/admin/users" label="Admin Users" />}
@@ -99,6 +100,7 @@ export default function AppShell({ title, children }: { title: string; children:
             <nav className="space-y-1.5">
               <NavItem to="/mission-center" label="Mission Center" collapsed={!navExpanded} />
               <NavItem to="/incidents" label="Incidents" collapsed={!navExpanded} />
+              <NavItem to="/assessments" label="Assessments" collapsed={!navExpanded} />
               <NavItem to="/submissions" label="Submissions" collapsed={!navExpanded} />
               <NavItem to="/settings" label="Settings" collapsed={!navExpanded} />
               {me?.roles?.includes("ADMIN") && <NavItem to="/admin/users" label="Admin Users" collapsed={!navExpanded} />}

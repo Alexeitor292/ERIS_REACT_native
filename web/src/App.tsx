@@ -6,6 +6,7 @@ import AdminUsersPage from "./pages/AdminUsersPage";
 import RoadInventoryPage from "./pages/RoadInventoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
+import AssessmentsPage from "./pages/AssessmentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
@@ -30,6 +31,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <IncidentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/assessments"
+            element={
+              <ProtectedRoute>
+                <AssessmentsPage />
               </ProtectedRoute>
             }
           />
