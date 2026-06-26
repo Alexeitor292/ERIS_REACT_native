@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { GisaElevationProfile, GisaLookups, SubmissionDetail } from "../api/types";
+import type { GisaElevationProfile, GisaLookups, GisaTerrainGrid, SubmissionDetail } from "../api/types";
+import { TerrainRelief } from "../components/TerrainRelief";
 import { friendlyFieldLabel, friendlyFieldValue, fieldDescription, terrainLabel } from "../utils/roadInventoryGlossary";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
@@ -433,6 +434,9 @@ export default function SubmissionDetailPage() {
   const [elevFetching, setElevFetching] = useState(false);
   const [elevError, setElevError] = useState<string | null>(null);
   const [bearingInput, setBearingInput] = useState<string>("");
+  const [terrainView, setTerrainView] = useState<"profile" | "terrain">("profile");
+  const [terrainFetching, setTerrainFetching] = useState(false);
+  const [terrainError, setTerrainError] = useState<string | null>(null);
   const [riDetailsOpen, setRiDetailsOpen] = useState(false);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
@@ -758,6 +762,23 @@ export default function SubmissionDetailPage() {
       setElevError(e?.message ?? "Elevation fetch failed");
     } finally {
       setElevFetching(false);
+    }
+  }
+  async function fetchTerrain(force: boolean) {
+    const parsedBearing = bearingInput.trim() ? parseFloat(bearingInput) : NaN;
+    const road_bearing_deg = isFinite(parsedBearing) && parsedBearing >= 0 && parsedBearing < 360
+      ? parsedBearing : null;
+    setTerrainFetching(true); setTerrainError(null);
+    try {
+      await api<{ terrain: GisaTerrainGrid }>(
+        `/submissions/${sid}/gisa/terrain-grid`,
+        { method: "POST", body: JSON.stringify({ force, road_bearing_deg }) },
+      );
+      await load();
+    } catch (e: any) {
+      setTerrainError(e?.message ?? "Terrain build failed");
+    } finally {
+      setTerrainFetching(false);
     }
   }
   async function openDownloadUrl(id: number) {
@@ -2021,8 +2042,41 @@ export default function SubmissionDetailPage() {
                         })() : (
                           <div className="mb-2 text-xs italic text-muted">No road inventory context. Diagram uses form / default roadway assumptions.</div>
                         )}
+                        {/* Elevation Profile | 3D Terrain toggle */}
+                        <div className="mb-2 inline-flex overflow-hidden rounded border border-[var(--line)] text-[11px]">
+                          {(["profile", "terrain"] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              onClick={() => setTerrainView(mode)}
+                              className={`px-2.5 py-1 font-medium ${terrainView === mode ? "bg-[var(--brand)] text-white" : "bg-[var(--panel-soft)] text-[var(--ink)] hover:brightness-95"}`}
+                            >
+                              {mode === "profile" ? "Elevation Profile" : "3D Terrain"}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* 3D Terrain panel */}
+                        {terrainView === "terrain" && (
+                          <div className="mb-2">
+                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                              <button
+                                disabled={terrainFetching}
+                                onClick={() => fetchTerrain(true)}
+                                className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-90 hover:opacity-100 disabled:opacity-40"
+                              >
+                                {terrainFetching ? "Building…" : data.gisa?.elevation_terrain ? "Rebuild terrain" : "Build terrain"}
+                              </button>
+                              <span className="text-[9px] italic text-muted">
+                                Samples an 11×11 USGS 3DEP grid (~200×200 m), road-aligned. Cached after first build.
+                              </span>
+                            </div>
+                            <TerrainRelief terrain={data.gisa?.elevation_terrain ?? null} />
+                            {terrainError && <div className="mt-1 text-[10px] text-[var(--error)]">{terrainError}</div>}
+                          </div>
+                        )}
+
                         {/* Elevation profile panel */}
-                        {(() => {
+                        {terrainView === "profile" && (() => {
                           const ep = data.gisa?.elevation_profile;
                           const epMeta = (ep?.profile as Record<string, unknown> | null | undefined)?.metadata as Record<string, unknown> | null | undefined;
                           const bearingUsed = epMeta?.road_bearing_deg_used as number | null | undefined;
@@ -2034,6 +2088,13 @@ export default function SubmissionDetailPage() {
                           const bearingNote = bearingUsed != null
                             ? `${Math.round(bearingUsed)}° (${bearingSourceLabel})`
                             : "not set — classification may be UNKNOWN";
+                          const classReason = (ep?.classification_reason ?? (epMeta?.classification_reason as string | null | undefined)) as string | null | undefined;
+                          const reasonNote = (epMeta?.classification_note as string | undefined) ?? (
+                            classReason === "ROAD_BEARING_UNAVAILABLE" ? "Road bearing could not be resolved, so only center elevation is available." :
+                            classReason === "INSUFFICIENT_VALID_SAMPLES" ? "Not enough valid USGS samples on both sides of the road to classify the terrain." :
+                            classReason === "AMBIGUOUS_TERRAIN" ? "Terrain is mixed/ambiguous: the sampled cross-section does not match a single shape." :
+                            undefined
+                          );
                           return ep ? (
                             <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_28%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,transparent)] px-2.5 py-2 text-xs">
                               <div className="mb-1.5 flex items-center justify-between">
@@ -2068,6 +2129,9 @@ export default function SubmissionDetailPage() {
                                   <span>Checked: <span className="text-[var(--ink)]">{ep.checked_at.slice(0, 10)}</span></span>
                                 )}
                                 <span className="col-span-2">Bearing: <span className={`${bearingUsed != null ? "text-[var(--ink)]" : "text-[var(--muted)] italic"}`}>{bearingNote}</span></span>
+                                {ep.classification === "UNKNOWN" && reasonNote && (
+                                  <span className="col-span-2">Why UNKNOWN: <span className="text-[var(--ink)]">{reasonNote}</span></span>
+                                )}
                               </div>
                               {ep.error && (
                                 <div className="mt-1 text-[10px] text-[var(--error)]">{ep.error}</div>
