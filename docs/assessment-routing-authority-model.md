@@ -182,17 +182,45 @@ Migration `0008_assessment_domain` (additive, reversible):
   convention.
 - Inserts the five new canonical roles (idempotent `ON DUPLICATE KEY`).
 
-Nothing is renamed or dropped. `downgrade()` drops the four new tables and the
-new role rows.
+Migration `0009_incident_triage_fields` (additive, reversible) adds dedicated
+triage columns to `incidents` so the coordinator's decision is first-class and
+never overwrites the location-review JSON:
+
+- `triage_disposition` (CHECK on the four dispositions), `triage_decided_by_user_id`
+  (FK users), `triage_decided_at`, `triage_notes`.
+- `duplicate_of_incident_id` (self FK) and `duplicate_of_location_id` (FK
+  incident_locations) for `DUPLICATE_OR_LINKED`. All FKs `ON DELETE SET NULL`.
+
+Triage handling (see `routes/assessments.py`):
+
+- The disposition is written to these triage columns, **not** to
+  `location_match_metadata`. `ASSESSMENT_REQUIRED` / `NO_ASSESSMENT_REQUIRED` /
+  `DUPLICATE_OR_LINKED` do not touch `location_match_metadata` at all.
+- `NEEDS_REPORTER_INFORMATION` **merges** the revision request into the existing
+  `location_match_metadata` (preserving prior location-review fields) so the
+  reporter-resubmit flow keeps working.
+- `_serialize_incident` now parses `location_match_metadata` to a JSON object.
+
+Non-assessment outcomes (explicit, auditable; no Assessment is created):
+
+- `NO_ASSESSMENT_REQUIRED` and `DUPLICATE_OR_LINKED` close the incident
+  (`status=RESOLVED`, `current_stage=RESOLVED`, `resolved_by`/`resolution_comment`
+  set, active assignments deactivated), so it leaves the coordinator-review queue
+  while the report and history are fully preserved. `DUPLICATE_OR_LINKED` also
+  records the link target in `duplicate_of_incident_id` / `duplicate_of_location_id`.
+- Triage is only permitted while the incident is in `COORDINATOR_REVIEW` (a single
+  decision point); a triaged/closed/routed incident cannot be re-triaged.
+
+Nothing is renamed or dropped. Each `downgrade()` reverses its own migration.
 
 Run the chain:
 
 ```bash
 cd backend
-alembic upgrade head        # applies 0001 .. 0008
-alembic current             # -> 0008_assessment_domain (head)
+alembic upgrade head        # applies 0001 .. 0009
+alembic current             # -> 0009_incident_triage_fields (head)
 # review without a DB:
-alembic upgrade 0007_gisa_elevation_profile:0008_assessment_domain --sql
+alembic upgrade 0008_assessment_domain:0009_incident_triage_fields --sql
 ```
 
 `database/init/020_seed.sql` also registers the new roles for fresh dev DBs.
@@ -236,41 +264,41 @@ legacy compatibility).
 
 ## 8. Assumptions & unresolved policy decisions
 
-1. **One assessment per incident** (`uk_assessment_incident`). Re-triaging
-   `ASSESSMENT_REQUIRED` reactivates the existing assessment rather than creating
-   a second one.
-2. **Closure policy is intentionally minimal.** `FINALIZED` is a terminal
-   Assessment state set by an Office Chief/Admin after `APPROVED`. The legacy
-   incident `RESOLVED`/`resolve` behavior is preserved and **not** automatically
-   coupled to assessment finalization — coupling them is an open business
-   decision.
-3. **`NO_ASSESSMENT_REQUIRED`** records a disposition + timeline event and keeps
-   the report; it does not auto-close or hide the incident.
-4. **`NEEDS_REPORTER_INFORMATION`** reuses the existing reporter-revision channel
-   (`location_match_status = NEEDS_REVISION` + `PATCH /incidents/{id}`), so the
-   reporter sees and can resubmit. Whether needs-info should also be expressible
-   after an assessment exists is an open question.
-5. **`DUPLICATE_OR_LINKED`** records the link target (incident/location) in the
-   timeline + incident metadata; it does not merge records.
-6. **Office/branch chief eligibility** is derived from user metadata
+1. **One assessment per incident** (`uk_assessment_incident`). Triage is a single
+   decision point (only allowed in `COORDINATOR_REVIEW`); a routed/closed incident
+   cannot be re-triaged.
+2. **Closure policy.** `FINALIZED` is a terminal Assessment state set by an Office
+   Chief/Admin after `APPROVED`. Coupling assessment finalization to the legacy
+   incident `RESOLVED`/`resolve` flow is still an open business decision.
+3. **`NO_ASSESSMENT_REQUIRED`** closes the incident at triage (`status=RESOLVED`,
+   `current_stage=RESOLVED`, `resolution_comment` set) with the disposition in the
+   dedicated triage columns. The report and history are preserved; no Assessment
+   is created; the incident leaves the coordinator-review queue.
+4. **`NEEDS_REPORTER_INFORMATION`** keeps the incident in coordinator review and
+   reuses the reporter-revision channel (`location_match_status = NEEDS_REVISION` +
+   `PATCH /incidents/{id}`), merging the revision request into existing metadata so
+   prior location-review fields are preserved. Whether needs-info should also be
+   expressible after an assessment exists is an open question.
+5. **`DUPLICATE_OR_LINKED`** closes the incident at triage and links it to the
+   target via `duplicate_of_incident_id` / `duplicate_of_location_id`. The original
+   report is preserved; records are linked, not merged.
+6. **Triage never overwrites `location_match_metadata`** — the disposition lives in
+   dedicated triage columns (migration 0009). Only the needs-info path writes
+   metadata, and it merges rather than overwrites.
+7. **Office/branch chief eligibility** is derived from user metadata
    (`office_code`) + role via the existing `incident_routing_assignments`
    helpers, not from `geotech_office_routing` (which maps district→office only).
-7. **Legacy `REVIEWER` role** is retained; migrating those users to per-assessment
+8. **Legacy `REVIEWER` role** is retained; migrating those users to per-assessment
    assignments is deferred.
-8. **Mobile coordinator triage UI:** the mobile client ships the `triageIncident`
-   API and the operational Assessments screen; the existing mobile
-   coordinator *forward*/*request-revision* actions remain functional. Surfacing
-   the full 4-disposition triage picker on the mobile incident detail is the
-   recommended next phase (the WebUI already has it).
 
 ---
 
 ## 9. Recommended next implementation phase
 
-1. Mobile incident-detail triage picker (all four dispositions) replacing the
-   legacy forward/request-revision buttons.
-2. Admin UI for `geotech_office_routing` and office/branch chief eligibility.
-3. Staged rename of `gisa` storage behind a compatibility view; migrate
+1. Admin UI for `geotech_office_routing` and office/branch chief eligibility.
+2. Staged rename of `gisa` storage behind a compatibility view; migrate
    `REVIEWER`-role users to assessment assignments and retire the global role.
-4. Decide and implement the assessment-finalization ↔ incident-closure coupling.
-5. Attachment access hardening parity check for assessment-linked attachments.
+3. Decide and implement the assessment-finalization ↔ incident-closure coupling.
+4. Attachment access hardening parity check for assessment-linked attachments.
+5. Replace the mobile reviewer/engineer user-id text inputs with searchable
+   pickers (the coordinator triage picker and routing display already ship).
