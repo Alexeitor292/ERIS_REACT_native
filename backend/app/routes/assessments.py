@@ -303,6 +303,15 @@ def triage_incident(
     incidents_routes._ensure_incident_district_access(user, incident.get("district"))
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be triaged")
+    # Triage is the single coordinator decision point: only allowed while the
+    # incident is still in coordinator review. This prevents re-triaging an
+    # incident that has already been routed/closed, and guarantees every
+    # disposition produces a real, terminal-or-forwarded outcome.
+    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
+        raise HTTPException(
+            status_code=409,
+            detail="Triage is only allowed while the incident is in coordinator review",
+        )
 
     disposition = payload.disposition
     notes = (payload.notes or "").strip() or None
@@ -327,6 +336,93 @@ def triage_incident(
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _set_incident_triage(
+    db: Session,
+    *,
+    incident_id: int,
+    disposition: str,
+    actor_id: int,
+    notes: str | None,
+    duplicate_of_incident_id: int | None = None,
+    duplicate_of_location_id: int | None = None,
+) -> None:
+    """Record the coordinator's triage decision in the dedicated triage columns.
+
+    Deliberately does NOT touch ``location_match_metadata`` — that JSON belongs
+    to the location-review / reporter-revision flows and must be preserved.
+    """
+    db.execute(
+        text(
+            """
+            UPDATE incidents
+            SET triage_disposition = :disposition,
+                triage_decided_by_user_id = :actor,
+                triage_decided_at = NOW(),
+                triage_notes = :notes,
+                duplicate_of_incident_id = :dup_incident,
+                duplicate_of_location_id = :dup_location,
+                updated_at = NOW()
+            WHERE id = :iid
+            """
+        ),
+        {
+            "disposition": disposition,
+            "actor": actor_id,
+            "notes": notes,
+            "dup_incident": duplicate_of_incident_id,
+            "dup_location": duplicate_of_location_id,
+            "iid": incident_id,
+        },
+    )
+
+
+def _close_incident_at_triage(db: Session, *, incident_id: int, actor_id: int, comment: str | None) -> None:
+    """Move a non-assessment incident to a terminal RESOLVED outcome so it leaves
+    the coordinator-review queue, while preserving the report and its history.
+    Mirrors the engineer resolve path (status + stage + resolved_* + deactivate
+    any active assignments). No Assessment is created."""
+    db.execute(
+        text(
+            """
+            UPDATE incidents
+            SET status = 'RESOLVED',
+                current_stage = 'RESOLVED',
+                resolved_at = NOW(),
+                resolved_by_user_id = :actor,
+                resolution_comment = :comment,
+                updated_at = NOW()
+            WHERE id = :iid
+            """
+        ),
+        {"iid": incident_id, "actor": actor_id, "comment": comment},
+    )
+    db.execute(
+        text(
+            """
+            UPDATE incident_assignments
+            SET is_active = 0, updated_at = NOW()
+            WHERE incident_id = :iid AND is_active = 1
+            """
+        ),
+        {"iid": incident_id},
+    )
+
+
+def _merge_incident_location_metadata(db: Session, incident: dict, updates: dict) -> str:
+    """Merge ``updates`` into the incident's existing ``location_match_metadata``
+    instead of overwriting it, preserving any location-review fields. Returns the
+    merged JSON string."""
+    existing = incident.get("location_match_metadata")
+    if isinstance(existing, str):
+        try:
+            existing = json.loads(existing)
+        except Exception:
+            existing = None
+    base = dict(existing) if isinstance(existing, dict) else {}
+    base.update(updates)
+    return json.dumps(base)
 
 
 def _triage_assessment_required(
@@ -438,6 +534,13 @@ def _triage_assessment_required(
             payload={"incident_id": incident_id, "office_code": office_code, "assessment_id": assessment_id},
         )
 
+    _set_incident_triage(
+        db,
+        incident_id=incident_id,
+        disposition="ASSESSMENT_REQUIRED",
+        actor_id=actor_id,
+        notes=notes,
+    )
     _record_event(
         db,
         incident_id=incident_id,
@@ -455,32 +558,30 @@ def _triage_assessment_required(
 
 def _triage_no_assessment(db: Session, incident: dict, actor_id: int, notes: str | None) -> dict:
     incident_id = int(incident["id"])
-    # Preserve the decision and timeline. Do NOT delete or hide the report; the
-    # incident remains in coordinator review with a recorded disposition.
+    # Explicit, auditable outcome: the report is closed (RESOLVED) at triage with
+    # the "no assessment required" disposition. The report and its history are
+    # preserved; it simply leaves the coordinator-review queue. No Assessment is
+    # created. location_match_metadata is left untouched.
+    _set_incident_triage(
+        db, incident_id=incident_id, disposition="NO_ASSESSMENT_REQUIRED", actor_id=actor_id, notes=notes
+    )
+    _close_incident_at_triage(
+        db,
+        incident_id=incident_id,
+        actor_id=actor_id,
+        comment=f"Closed at triage — no assessment required.{(' ' + notes) if notes else ''}",
+    )
     _record_event(
         db,
         incident_id=incident_id,
         actor_user_id=actor_id,
         event_type="TRIAGE_DECISION",
         disposition="NO_ASSESSMENT_REQUIRED",
+        from_state="COORDINATOR_REVIEW",
+        to_state="RESOLVED",
         notes=notes,
     )
-    db.execute(
-        text(
-            """
-            UPDATE incidents
-            SET location_match_metadata = :metadata, updated_at = NOW()
-            WHERE id = :iid
-            """
-        ),
-        {
-            "iid": incident_id,
-            "metadata": json.dumps(
-                {"triage_disposition": "NO_ASSESSMENT_REQUIRED", "performed_by_user_id": actor_id, "notes": notes}
-            ),
-        },
-    )
-    return {"incident_id": incident_id, "disposition": "NO_ASSESSMENT_REQUIRED"}
+    return {"incident_id": incident_id, "disposition": "NO_ASSESSMENT_REQUIRED", "status": "RESOLVED"}
 
 
 def _triage_needs_info(
@@ -494,6 +595,18 @@ def _triage_needs_info(
             requested.append(f)
     # Reuse the existing reporter-revision channel so the maintenance worker can
     # see the request and resubmit via the existing PATCH /incidents/{id} path.
+    # Merge (do not overwrite) so any prior location-review fields are preserved.
+    merged_metadata = _merge_incident_location_metadata(
+        db,
+        incident,
+        {
+            "mode": "REQUEST_REVISION",
+            "triage_disposition": "NEEDS_REPORTER_INFORMATION",
+            "comment": notes,
+            "performed_by_user_id": actor_id,
+            "revision_fields": requested,
+        },
+    )
     db.execute(
         text(
             """
@@ -506,19 +619,12 @@ def _triage_needs_info(
             WHERE id = :iid
             """
         ),
-        {
-            "iid": incident_id,
-            "actor": actor_id,
-            "metadata": json.dumps(
-                {
-                    "mode": "REQUEST_REVISION",
-                    "triage_disposition": "NEEDS_REPORTER_INFORMATION",
-                    "comment": notes,
-                    "performed_by_user_id": actor_id,
-                    "revision_fields": requested,
-                }
-            ),
-        },
+        {"iid": incident_id, "actor": actor_id, "metadata": merged_metadata},
+    )
+    # Record the triage disposition in the dedicated columns too (the incident
+    # stays in coordinator review pending the reporter's resubmission).
+    _set_incident_triage(
+        db, incident_id=incident_id, disposition="NEEDS_REPORTER_INFORMATION", actor_id=actor_id, notes=notes
     )
     _record_event(
         db,
@@ -552,27 +658,30 @@ def _triage_duplicate(
         if not exists:
             raise HTTPException(status_code=404, detail="target_location_id not found")
 
-    # Preserve the original report; record the link in the timeline + metadata.
-    db.execute(
-        text(
-            """
-            UPDATE incidents
-            SET location_match_metadata = :metadata, updated_at = NOW()
-            WHERE id = :iid
-            """
-        ),
-        {
-            "iid": incident_id,
-            "metadata": json.dumps(
-                {
-                    "triage_disposition": "DUPLICATE_OR_LINKED",
-                    "performed_by_user_id": actor_id,
-                    "notes": notes,
-                    "target_incident_id": target_incident_id,
-                    "target_location_id": target_location_id,
-                }
-            ),
-        },
+    # Explicit, auditable outcome: the duplicate/linked report is closed
+    # (RESOLVED) at triage and linked to its target via dedicated columns. The
+    # original report and history are preserved; location_match_metadata is left
+    # untouched. No Assessment is created.
+    _set_incident_triage(
+        db,
+        incident_id=incident_id,
+        disposition="DUPLICATE_OR_LINKED",
+        actor_id=actor_id,
+        notes=notes,
+        duplicate_of_incident_id=target_incident_id,
+        duplicate_of_location_id=target_location_id,
+    )
+    target_desc = []
+    if target_incident_id is not None:
+        target_desc.append(f"incident #{target_incident_id}")
+    if target_location_id is not None:
+        target_desc.append(f"location #{target_location_id}")
+    target_phrase = (" Linked to " + ", ".join(target_desc) + ".") if target_desc else ""
+    _close_incident_at_triage(
+        db,
+        incident_id=incident_id,
+        actor_id=actor_id,
+        comment=f"Closed at triage — duplicate or linked.{target_phrase}{(' ' + notes) if notes else ''}",
     )
     _record_event(
         db,
@@ -580,6 +689,8 @@ def _triage_duplicate(
         actor_user_id=actor_id,
         event_type="TRIAGE_DECISION",
         disposition="DUPLICATE_OR_LINKED",
+        from_state="COORDINATOR_REVIEW",
+        to_state="RESOLVED",
         notes=notes,
         target_incident_id=target_incident_id,
         target_location_id=target_location_id,
@@ -587,6 +698,7 @@ def _triage_duplicate(
     return {
         "incident_id": incident_id,
         "disposition": "DUPLICATE_OR_LINKED",
+        "status": "RESOLVED",
         "target_incident_id": target_incident_id,
         "target_location_id": target_location_id,
     }

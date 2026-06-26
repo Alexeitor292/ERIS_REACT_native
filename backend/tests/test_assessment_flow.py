@@ -258,6 +258,18 @@ class TestLifecycle:
         assert review.status_code == 200, f"review failed: {review.status_code} {review.text}"
         assert review.json()["assessment"]["state"] == "APPROVED"
 
+    def test_office_chief_finalizes_after_approval(self, client_db, tokens, submitted):
+        # End of the lifecycle: an APPROVED assessment is finalized by the office
+        # chief. Runs after the approve test (definition order shares the state).
+        aid = submitted["assessment_id"]
+        resp = client_db.post(
+            f"/assessments/{aid}/finalize",
+            json={"notes": "Closing out"},
+            headers=_auth(tokens["officechief"]),
+        )
+        assert resp.status_code == 200, f"finalize failed: {resp.status_code} {resp.text}"
+        assert resp.json()["assessment"]["state"] == "FINALIZED"
+
     def test_timeline_preserves_decisions(self, client_db, tokens, submitted):
         # 12: the immutable timeline records every decision/assignment.
         resp = client_db.get(f"/assessments/{submitted['assessment_id']}", headers=_auth(tokens["reviewer"]))
@@ -299,9 +311,145 @@ class TestCoordinatorTriage:
         )
         assert resp.status_code == 200
         assert resp.json()["disposition"] == "NO_ASSESSMENT_REQUIRED"
+        assert resp.json()["status"] == "RESOLVED"
         # The report is preserved (not deleted) and no assessment exists.
         check = client_db.get(f"/incidents/{incident_id}/assessment", headers=_auth(tokens["admin"]))
         assert check.status_code == 404
+        # Explicit terminal outcome: it leaves the coordinator-review queue.
+        inc = client_db.get(f"/incidents/{incident_id}", headers=_auth(tokens["admin"])).json()["incident"]
+        assert inc["status"] == "RESOLVED"
+        assert inc["current_stage"] == "RESOLVED"
+        assert inc["triage_disposition"] == "NO_ASSESSMENT_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# Items 2 + 3: non-assessment dispositions get real outcomes WITHOUT clobbering
+# location-review metadata.
+# ---------------------------------------------------------------------------
+
+
+def _create_and_link(client_db, token, *, district="04", county="Marin", route="1"):
+    """Create an incident and link a (new) location so location_match_metadata is
+    populated by the location-review flow. Returns (incident_id, metadata)."""
+    incident_id = _create_incident(client_db, token, district=district, county=county, route=route)
+    link = client_db.post(
+        f"/incidents/{incident_id}/location-link",
+        json={"mode": "CREATE_NEW", "comment": "linked at review"},
+        headers=_auth(token),
+    )
+    assert link.status_code == 200, f"location-link failed: {link.status_code} {link.text}"
+    inc = client_db.get(f"/incidents/{incident_id}", headers=_auth(token)).json()["incident"]
+    assert inc["location_match_metadata"] is not None
+    return incident_id, inc["location_match_metadata"]
+
+
+class TestTriageOutcomes:
+    def test_no_assessment_preserves_location_metadata(self, client_db, tokens):
+        incident_id, before = _create_and_link(client_db, tokens["admin"])
+        assert before.get("mode") == "CREATE_NEW"
+        resp = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={"disposition": "NO_ASSESSMENT_REQUIRED", "notes": "n/a"},
+            headers=_auth(tokens["admin"]),
+        )
+        assert resp.status_code == 200
+        inc = client_db.get(f"/incidents/{incident_id}", headers=_auth(tokens["admin"])).json()["incident"]
+        # location-review metadata is fully preserved (NOT overwritten by triage).
+        assert inc["location_match_metadata"].get("mode") == "CREATE_NEW"
+        assert inc["location_match_metadata"].get("comment") == "linked at review"
+        # The disposition lives in dedicated triage columns.
+        assert inc["triage_disposition"] == "NO_ASSESSMENT_REQUIRED"
+        assert inc["status"] == "RESOLVED"
+
+    def test_duplicate_links_target_and_preserves_metadata(self, client_db, tokens):
+        target_id = _create_incident(client_db, tokens["admin"], district="04", county="Marin", route="1")
+        incident_id, _ = _create_and_link(client_db, tokens["admin"])
+        resp = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={
+                "disposition": "DUPLICATE_OR_LINKED",
+                "notes": "dup of earlier report",
+                "target_incident_id": target_id,
+            },
+            headers=_auth(tokens["admin"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["target_incident_id"] == target_id
+        inc = client_db.get(f"/incidents/{incident_id}", headers=_auth(tokens["admin"])).json()["incident"]
+        assert inc["location_match_metadata"].get("mode") == "CREATE_NEW"  # preserved
+        assert inc["triage_disposition"] == "DUPLICATE_OR_LINKED"
+        assert inc["duplicate_of_incident_id"] == target_id
+        assert inc["status"] == "RESOLVED"
+
+    def test_duplicate_invalid_target_rejected(self, client_db, tokens):
+        incident_id = _create_incident(client_db, tokens["admin"], district="04", county="Marin", route="1")
+        resp = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={"disposition": "DUPLICATE_OR_LINKED", "target_incident_id": 99999999},
+            headers=_auth(tokens["admin"]),
+        )
+        assert resp.status_code == 404
+
+    def test_needs_info_merges_metadata_and_enables_resubmit(self, client_db, tokens):
+        # Reporter creates so they can resubmit; admin triages (bypasses district).
+        incident_id = _create_incident(client_db, tokens["maintenance"], district="04", county="Marin", route="1")
+        link = client_db.post(
+            f"/incidents/{incident_id}/location-link",
+            json={"mode": "CREATE_NEW", "comment": "linked"},
+            headers=_auth(tokens["admin"]),
+        )
+        assert link.status_code == 200
+        triage = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={
+                "disposition": "NEEDS_REPORTER_INFORMATION",
+                "notes": "please clarify description",
+                "revision_fields": ["description"],
+            },
+            headers=_auth(tokens["admin"]),
+        )
+        assert triage.status_code == 200, triage.text
+        assert triage.json()["revision_fields"] == ["description"]
+        inc = client_db.get(f"/incidents/{incident_id}", headers=_auth(tokens["admin"])).json()["incident"]
+        assert inc["location_match_status"] == "NEEDS_REVISION"
+        assert inc["triage_disposition"] == "NEEDS_REPORTER_INFORMATION"
+        # Merged metadata is well-formed: the reporter-revision channel is armed.
+        assert inc["location_match_metadata"].get("revision_fields") == ["description"]
+        # The reporter can see and resubmit (only the requested field changed).
+        resubmit = client_db.patch(
+            f"/incidents/{incident_id}",
+            json={
+                "title": "Assessment flow incident " + _RUN,
+                "incident_type": "ROCK_FALL",
+                "description": "Clarified description after coordinator request",
+                "first_observed_at": "2026-06-25T10:00:00",
+                "latitude": 38.0,
+                "longitude": -122.5,
+                "district": "04",
+                "county": "Marin",
+                "route": "1",
+                "post_mile": "10.0",
+            },
+            headers=_auth(tokens["maintenance"]),
+        )
+        assert resubmit.status_code == 200, f"reporter resubmit failed: {resubmit.status_code} {resubmit.text}"
+
+    def test_triage_blocked_after_routing(self, client_db, tokens):
+        # Once ASSESSMENT_REQUIRED routes the incident out of coordinator review,
+        # it can no longer be re-triaged.
+        incident_id = _create_incident(client_db, tokens["admin"], district="04", county="Marin", route="1")
+        first = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={"disposition": "ASSESSMENT_REQUIRED"},
+            headers=_auth(tokens["admin"]),
+        )
+        assert first.status_code == 200
+        second = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={"disposition": "NO_ASSESSMENT_REQUIRED"},
+            headers=_auth(tokens["admin"]),
+        )
+        assert second.status_code == 409
 
 
 # ---------------------------------------------------------------------------

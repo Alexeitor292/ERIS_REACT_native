@@ -666,6 +666,8 @@ def _incident_with_assignment(db: Session, incident_id: int):
               i.office_code, i.current_stage,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,
+              i.triage_disposition, i.triage_decided_by_user_id, i.triage_decided_at,
+              i.triage_notes, i.duplicate_of_incident_id, i.duplicate_of_location_id,
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
@@ -755,6 +757,15 @@ def _serialize_incident(row: dict) -> dict:
             "checked_at": row.get("road_inventory_checked_at"),
             "snapshot": ri_snapshot,
         }
+    # location_match_metadata is a JSON column; the driver may hand it back as a
+    # raw string. Parse it to an object so clients (and the reporter-revision
+    # flow) can read fields like `revision_fields` directly.
+    location_metadata = row.get("location_match_metadata")
+    if isinstance(location_metadata, str):
+        try:
+            location_metadata = json.loads(location_metadata)
+        except Exception:
+            location_metadata = None
     return {
         "id": int(row["id"]),
         "title": row["title"],
@@ -763,7 +774,7 @@ def _serialize_incident(row: dict) -> dict:
         "location_id": int(row["location_id"]) if row["location_id"] is not None else None,
         "location_match_status": row["location_match_status"],
         "location_reviewed_by_user_id": int(row["location_reviewed_by_user_id"]) if row["location_reviewed_by_user_id"] is not None else None,
-        "location_match_metadata": row["location_match_metadata"],
+        "location_match_metadata": location_metadata,
         "location_reviewed_at": row["location_reviewed_at"],
         "first_observed_at": row["first_observed_at"],
         "first_occurred_at": row["first_occurred_at"],
@@ -782,6 +793,12 @@ def _serialize_incident(row: dict) -> dict:
         "resolved_at": row["resolved_at"],
         "resolved_by_user_id": row["resolved_by_user_id"],
         "resolution_comment": row["resolution_comment"],
+        "triage_disposition": row.get("triage_disposition"),
+        "triage_decided_by_user_id": int(row["triage_decided_by_user_id"]) if row.get("triage_decided_by_user_id") is not None else None,
+        "triage_decided_at": row.get("triage_decided_at"),
+        "triage_notes": row.get("triage_notes"),
+        "duplicate_of_incident_id": int(row["duplicate_of_incident_id"]) if row.get("duplicate_of_incident_id") is not None else None,
+        "duplicate_of_location_id": int(row["duplicate_of_location_id"]) if row.get("duplicate_of_location_id") is not None else None,
         "linked_submission_id": int(row["submission_id"]) if row["submission_id"] is not None else None,
         "road_inventory_context": ri_context,
         "assignment": (
@@ -1551,6 +1568,8 @@ def list_incidents(
               i.office_code, i.current_stage,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,
+              i.triage_disposition, i.triage_decided_by_user_id, i.triage_decided_at,
+              i.triage_notes, i.duplicate_of_incident_id, i.duplicate_of_location_id,
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
