@@ -219,3 +219,59 @@ class ElevationProfileRequest(BaseModel):
     half_width_m: float | None = Field(default=None, gt=0, le=500)
     spacing_m: float | None = Field(default=None, gt=0, le=100)
     force: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# Assessment Routing & Authority Model
+# ---------------------------------------------------------------------------
+
+TriageDisposition = Literal[
+    "ASSESSMENT_REQUIRED",
+    "NO_ASSESSMENT_REQUIRED",
+    "NEEDS_REPORTER_INFORMATION",
+    "DUPLICATE_OR_LINKED",
+]
+
+
+class IncidentTriageRequest(BaseModel):
+    """Coordinator triage decision for an incident report."""
+
+    disposition: TriageDisposition
+    notes: str | None = Field(default=None, max_length=4000)
+    # ASSESSMENT_REQUIRED: optional explicit office override (audited).
+    office_code_override: str | None = Field(default=None, max_length=16)
+    override_reason: str | None = Field(default=None, max_length=1000)
+    # NEEDS_REPORTER_INFORMATION: which incident fields the reporter may revise.
+    revision_fields: list[str] = []
+    # DUPLICATE_OR_LINKED: the incident/location this report duplicates or links to.
+    target_incident_id: int | None = Field(default=None, ge=1)
+    target_location_id: int | None = Field(default=None, ge=1)
+
+
+class AssessmentDelegateBranchRequest(BaseModel):
+    branch_chief_user_id: int = Field(..., ge=1)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class AssessmentAssignEngineerRequest(BaseModel):
+    engineer_user_id: int = Field(..., ge=1)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class AssessmentAssignmentRequest(BaseModel):
+    user_id: int = Field(..., ge=1)
+    assignment_role: Literal["REVIEWER", "APPROVER", "CONSULTED"]
+    notes: str | None = Field(default=None, max_length=255)
+
+
+class AssessmentSubmitRequest(BaseModel):
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class AssessmentReviewRequest(BaseModel):
+    action: Literal["APPROVE", "REQUEST_REVISION"]
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class AssessmentFinalizeRequest(BaseModel):
+    notes: str | None = Field(default=None, max_length=2000)

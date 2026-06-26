@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_roles
+from ..roles import is_maintenance_only
+from ..services import office_routing
 from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
 from ..schemas.common import (
     IncidentAssignBranchChiefRequest,
@@ -509,6 +511,11 @@ def _ensure_incident_office_access(user: dict, office_code: str | None) -> None:
 def _ensure_incident_scope_access(user: dict, incident_row: dict) -> None:
     roles = set(user.get("roles") or [])
     if "ADMIN" in roles:
+        return
+    # Maintenance field workers may only read their own reports.
+    if is_maintenance_only(user):
+        if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):
+            raise HTTPException(status_code=403, detail="You can only view your own incident reports")
         return
     if "MAINT_COORDINATOR" in roles:
         _ensure_incident_district_access(user, incident_row.get("district"))
@@ -1095,7 +1102,9 @@ def create_incident(
         raise HTTPException(status_code=400, detail="latitude and longitude are required")
 
     district_code = _normalized_district_code(district)
-    office_code = _office_for_district(district)
+    # Prefer the configurable geotech_office_routing table; fall back to the
+    # legacy constant map when a district has no active routing row yet.
+    office_code = office_routing.office_for_district(db, district) or _office_for_district(district)
     ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     try:
         db.execute(
@@ -1422,7 +1431,7 @@ def maintenance_resubmit_incident(
                 detail=f"Only requested revision fields may be changed: {', '.join(sorted(requested_fields))}",
             )
 
-    office_code = _office_for_district(district)
+    office_code = office_routing.office_for_district(db, district) or _office_for_district(district)
     ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     metadata = {
         "mode": "RESUBMITTED_BY_MAINTENANCE",
@@ -1521,6 +1530,13 @@ def list_incidents(
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
+    # Broad visibility, narrow authority: maintenance field workers are scoped
+    # to their OWN reports server-side regardless of the requested scope. This
+    # is enforced here (not only in the mobile filter) so the WebUI cannot be
+    # used to enumerate statewide incidents.
+    if is_maintenance_only(user):
+        where_parts.append("i.reporter_user_id = :self_uid")
+        params["self_uid"] = int(user["id"])
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = db.execute(
         text(
@@ -2006,6 +2022,10 @@ def mission_center_incident_feed(
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
+    # Maintenance field workers only ever see their own reports (server-side).
+    if is_maintenance_only(user):
+        where_parts.append("i.reporter_user_id = :self_uid")
+        params["self_uid"] = int(user["id"])
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = db.execute(
         text(

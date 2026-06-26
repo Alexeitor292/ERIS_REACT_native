@@ -31,8 +31,9 @@ from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .migrations_check import check_migration_head
 from .routes.incidents import router as incidents_router
+from .routes.assessments import router as assessments_router
 from .routes.road_inventory import router as road_inventory_router
-from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
+from .permissions import is_admin, is_reviewer, is_operational_user, require_is_owner_or_admin
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
 from .schemas.common import (
@@ -87,6 +88,7 @@ app.include_router(auth_router)
 app.include_router(arcgis_router)
 app.include_router(gisa_router)
 app.include_router(incidents_router)
+app.include_router(assessments_router)
 app.include_router(road_inventory_router)
 
 app.add_middleware(
@@ -130,7 +132,11 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
 # ----------------------------
 
 def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
-    if is_admin(user) or is_reviewer(user):
+    # Broad visibility: any non-maintenance operational user (admin, coordinator,
+    # office/branch chief, engineer, legacy reviewer) may READ submissions /
+    # assessment technical forms. Maintenance field workers remain restricted to
+    # records they own or were explicitly granted. Write access is unchanged.
+    if is_admin(user) or is_reviewer(user) or is_operational_user(user):
         return True
 
     row = db.execute(text("""

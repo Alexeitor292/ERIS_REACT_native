@@ -7,7 +7,14 @@ INSERT INTO roles (name, description) VALUES
 ('OFFICE_CHIEF', 'Can route incidents to branch chiefs'),
 ('BRANCH_CHIEF', 'Can assign incidents to engineers'),
 ('REVIEWER', 'Can review submitted reports'),
-('ADMIN', 'Can manage users, forms, and approvals')
+('ADMIN', 'Can manage users, forms, and approvals'),
+-- Canonical Assessment-model roles (additive; legacy roles above still work
+-- via app/roles.py aliasing). See migration 0008_assessment_domain.
+('MAINTENANCE_FIELD_WORKER', 'Maintenance field worker: creates and follows own incident reports'),
+('MAINTENANCE_COORDINATOR', 'Maintenance coordinator: triages incident reports and routes assessments'),
+('GEOTECH_OFFICE_CHIEF', 'GeoTech office chief: delegates assessments to branch chiefs'),
+('GEOTECH_BRANCH_CHIEF', 'GeoTech branch chief: assigns engineers to assessments'),
+('GEOTECH_ENGINEER', 'GeoTech engineer: completes assessments / technical form')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 -- Example admin user (password: "password", hashed with argon2id)
