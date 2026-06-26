@@ -8,7 +8,7 @@ import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathnam
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { fetchElevationProfile, generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaElevationProfile, type GisaRoadInventoryContext } from "../../../src/api/submissions";
+import { buildTerrainGrid, fetchElevationProfile, generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaElevationProfile, type GisaRoadInventoryContext, type GisaTerrainGrid } from "../../../src/api/submissions";
 import { terrainLabel, explainRoadInventoryField } from "../../../src/roadInventory/roadInventoryGlossary";
 import { enqueueOfflineOp } from "../../../src/offline/queue";
 import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
@@ -42,6 +42,7 @@ import {
 } from "../../../src/utils/caltransLookups";
 import { MeasurementDiagramRenderer } from "../../../src/components/MeasurementDiagramRenderer";
 import { RoadElevationProfileChart } from "../../../src/components/RoadElevationProfileChart";
+import { TerrainReliefView } from "../../../src/components/TerrainReliefView";
 import { buildTerrainAppearance } from "../../../src/measurements/buildTerrainAppearance";
 
 type OptionItem = { code: string; label: string };
@@ -2632,6 +2633,10 @@ export default function SubmissionDetailScreen() {
   const [elevBearingInput, setElevBearingInput] = useState("");
   const [elevBearingError, setElevBearingError] = useState<string | null>(null);
   const [elevShowAdvanced, setElevShowAdvanced] = useState(false);
+  const [terrainView, setTerrainView] = useState<"profile" | "terrain">("profile");
+  const [terrainBuilding, setTerrainBuilding] = useState(false);
+  const [terrainError, setTerrainError] = useState<string | null>(null);
+  const [localTerrain, setLocalTerrain] = useState<GisaTerrainGrid | null | undefined>(undefined);
   const [localElevProfile, setLocalElevProfile] = useState<GisaElevationProfile | null | undefined>(undefined);
   const [activeMaterialSection, setActiveMaterialSection] = useState<MaterialSectionKey>("slope");
   const [activeStep, setActiveStep] = useState(0);
@@ -3597,6 +3602,32 @@ export default function SubmissionDetailScreen() {
       setElevError(String(err?.message ?? "Elevation profile refresh failed"));
     } finally {
       setElevRefreshing(false);
+    }
+  }
+
+  async function buildTerrainGridAction() {
+    if (!token || !id || isLocalId) return;
+    const rawBearing = elevBearingInput.trim();
+    let road_bearing_deg: number | null = null;
+    if (rawBearing !== "") {
+      const parsed = parseFloat(rawBearing);
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed < 360) road_bearing_deg = parsed;
+    }
+    setTerrainBuilding(true);
+    setTerrainError(null);
+    try {
+      const res = await buildTerrainGrid(token, id, { force: true, road_bearing_deg });
+      setLocalTerrain(res.terrain);
+      setData((prev) =>
+        prev
+          ? { ...prev, gisa: prev.gisa ? { ...prev.gisa, elevation_terrain: res.terrain } : prev.gisa }
+          : prev,
+      );
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
+      setTerrainError(String(err?.message ?? "Terrain build failed"));
+    } finally {
+      setTerrainBuilding(false);
     }
   }
 
@@ -5219,6 +5250,14 @@ export default function SubmissionDetailScreen() {
                       : "not detected yet — tap Refresh to auto-detect";
                     const rwNum = Number(form.measure_roadway_width_ft);
                     const roadwayWidthFt = Number.isFinite(rwNum) && rwNum > 0 ? rwNum : null;
+                    const terrain = (localTerrain !== undefined ? localTerrain : data?.gisa?.elevation_terrain) as GisaTerrainGrid | null | undefined;
+                    const classReason = (ep?.classification_reason ?? (epMeta?.classification_reason as string | null | undefined)) as string | null | undefined;
+                    const reasonNote = (epMeta?.classification_note as string | undefined) ?? (
+                      classReason === "ROAD_BEARING_UNAVAILABLE" ? "Road bearing could not be resolved, so only center elevation is available." :
+                      classReason === "INSUFFICIENT_VALID_SAMPLES" ? "Not enough valid USGS samples on both sides to classify." :
+                      classReason === "AMBIGUOUS_TERRAIN" ? "Terrain is mixed/ambiguous — not a single shape." :
+                      undefined
+                    );
 
                     return (
                       <View style={[elevStyles.card, { borderColor: ep ? "#065f46" : palette.border, backgroundColor: palette.panelSoft }]}>
@@ -5239,7 +5278,43 @@ export default function SubmissionDetailScreen() {
                           Ground elevations come from USGS 3DEP. The road’s orientation is detected
                           automatically so the profile knows what’s on the left and right of the road.
                         </Text>
-                        {ep ? (
+
+                        {/* Elevation Profile | 3D Terrain toggle */}
+                        <View style={elevStyles.segRow}>
+                          {(["profile", "terrain"] as const).map((mode) => (
+                            <Pressable
+                              key={mode}
+                              onPress={() => setTerrainView(mode)}
+                              style={[
+                                elevStyles.seg,
+                                { borderColor: palette.border, backgroundColor: terrainView === mode ? "#065f46" : palette.panel },
+                              ]}
+                            >
+                              <Text style={[elevStyles.segText, { color: terrainView === mode ? "#fff" : palette.muted }]}>
+                                {mode === "profile" ? "Elevation Profile" : "3D Terrain"}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+
+                        {terrainView === "terrain" ? (
+                          <View>
+                            {!isLocalId && (
+                              <Pressable
+                                onPress={buildTerrainGridAction}
+                                disabled={terrainBuilding}
+                                accessibilityRole="button"
+                                style={[elevStyles.refreshBtn, { alignSelf: "flex-start", marginBottom: 4 }, terrainBuilding && { opacity: 0.5 }]}
+                              >
+                                <Text style={elevStyles.refreshBtnText}>
+                                  {terrainBuilding ? "Building…" : terrain ? "Rebuild terrain" : "Build terrain"}
+                                </Text>
+                              </Pressable>
+                            )}
+                            <TerrainReliefView terrain={terrain} />
+                            {terrainError ? <Text style={[elevStyles.noProfileText, { color: "#f87171" }]}>{terrainError}</Text> : null}
+                          </View>
+                        ) : ep ? (
                           <>
                             <View style={elevStyles.metaGrid}>
                               <View style={elevStyles.metaRow}>
@@ -5266,6 +5341,12 @@ export default function SubmissionDetailScreen() {
                                 <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Road orientation:</Text>
                                 <Text style={[elevStyles.metaValue, { color: bearingUsed != null ? palette.text : palette.muted, fontStyle: bearingUsed != null ? "normal" : "italic" }]}>{orientationNote}</Text>
                               </View>
+                              {ep.classification === "UNKNOWN" && reasonNote ? (
+                                <View style={elevStyles.metaRow}>
+                                  <Text style={[elevStyles.metaLabel, { color: palette.muted }]}>Why UNKNOWN:</Text>
+                                  <Text style={[elevStyles.metaValue, { color: palette.text }]}>{reasonNote}</Text>
+                                </View>
+                              ) : null}
                             </View>
 
                             {/* Live 2D slope profile from the actual sampled points,
@@ -7172,6 +7253,22 @@ const elevStyles = StyleSheet.create({
     fontSize: 9.5,
     lineHeight: 13,
     marginBottom: 2,
+  },
+  segRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  seg: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  segText: {
+    fontSize: 10,
+    fontWeight: "700",
   },
   advancedToggle: {
     marginTop: 6,
