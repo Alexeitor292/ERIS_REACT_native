@@ -36,6 +36,7 @@ import {
   type TriageDisposition,
 } from "@/src/api/assessments";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
+import IncidentWorkflowTree from "@/src/components/IncidentWorkflowTree";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 import { queueIncidentMapPreload } from "@/src/offline/mapPreload";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "@/src/utils/precision";
@@ -1361,6 +1362,9 @@ export default function IncidentsTabScreen() {
                     <View style={styles.detailSaveSpacer} />
                   )}
                 </View>
+              ) : null}
+              {isDetailRoute && editingIncidentId != null ? (
+                <IncidentWorkflowTree incidentId={editingIncidentId} />
               ) : null}
               {!isDetailRoute ? (
                 <>
