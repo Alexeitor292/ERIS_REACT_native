@@ -150,7 +150,7 @@ export default function AssessmentsPage() {
 
         <div className="lg:w-1/2">
           {detail ? (
-            <AssessmentDetailPanel detail={detail} roles={roles} onChanged={refreshBoth} onError={setError} />
+            <AssessmentDetailPanel detail={detail} roles={roles} meId={me?.id} onChanged={refreshBoth} onError={setError} />
           ) : (
             <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-6 text-sm text-muted">
               Select an assessment to view its timeline and available actions.
@@ -165,11 +165,13 @@ export default function AssessmentsPage() {
 function AssessmentDetailPanel({
   detail,
   roles,
+  meId,
   onChanged,
   onError,
 }: {
   detail: AssessmentDetail;
   roles: string[] | undefined;
+  meId: number | undefined;
   onChanged: () => Promise<void>;
   onError: (msg: string) => void;
 }) {
@@ -201,11 +203,20 @@ function AssessmentDetailPanel({
     }
   }, [assessment.id, assessment.state, roles]);
 
-  const isAssignedEngineer = assessment.assigned_engineer_user_id != null; // server enforces identity
+  // UX gating only — the backend remains authoritative for every action.
+  const admin = isAdmin(roles);
+  // Submit: only the assigned engineer (or admin).
+  const isAssignedEngineer = meId != null && assessment.assigned_engineer_user_id === meId;
+  // Review: only a user holding an ACTIVE reviewer/approver assignment (or admin).
+  const isAssignedReviewer = assignments.some(
+    (a) => a.user_id === meId && (a.assignment_role === "REVIEWER" || a.assignment_role === "APPROVER")
+  );
   const showDelegate = assessment.state === "PENDING_OFFICE_DELEGATION" && canDelegateBranch(roles);
   const showAssignEngineer = assessment.state === "PENDING_ENGINEER_ASSIGNMENT" && canAssignEngineer(roles);
-  const showSubmit = (assessment.state === "DRAFT" || assessment.state === "REVISION_REQUESTED");
-  const showReview = assessment.state === "SUBMITTED";
+  const showSubmit =
+    (assessment.state === "DRAFT" || assessment.state === "REVISION_REQUESTED") && (isAssignedEngineer || admin);
+  const showReview = assessment.state === "SUBMITTED" && (isAssignedReviewer || admin);
+  // Finalize: Office Chief (canDelegateBranch covers office chief) or Admin.
   const showFinalize = assessment.state === "APPROVED" && canDelegateBranch(roles);
 
   return (
@@ -335,7 +346,7 @@ function AssessmentDetailPanel({
           </div>
         )}
 
-        {showSubmit && isAssignedEngineer && (
+        {showSubmit && (
           <button
             disabled={busy}
             onClick={() => run(() => submitAssessment(assessment.id, notes))}
