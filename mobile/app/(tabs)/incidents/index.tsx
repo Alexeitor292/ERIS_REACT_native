@@ -36,6 +36,7 @@ import {
   type TriageDisposition,
 } from "@/src/api/assessments";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
+import IncidentWorkflowTree from "@/src/components/IncidentWorkflowTree";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 import { queueIncidentMapPreload } from "@/src/offline/mapPreload";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "@/src/utils/precision";
@@ -450,6 +451,9 @@ export default function IncidentsTabScreen() {
   const [postMile, setPostMile] = useState("");
   const [pendingIncidentFiles, setPendingIncidentFiles] = useState<PendingIncidentUpload[]>([]);
   const [editingIncidentId, setEditingIncidentId] = useState<number | null>(null);
+  // Bumped on every successful screen refresh/mutation so the embedded workflow
+  // tree refetches without polling.
+  const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
   const [editingLocked, setEditingLocked] = useState(false);
   const [revisionEditableFields, setRevisionEditableFields] = useState<string[] | null>(null);
   const [datePickerKey, setDatePickerKey] = useState<"firstObservedAt" | "firstOccurredAt" | null>(null);
@@ -521,6 +525,9 @@ export default function IncidentsTabScreen() {
       ]);
       setMe(userRes);
       setItems(incidentsRes.items ?? []);
+      // Signal the embedded workflow tree to refetch after a successful refresh
+      // (load runs on focus and after every mutation of the open incident).
+      setWorkflowRefreshKey((k) => k + 1);
 
       if (userRes.roles.includes("ADMIN")) {
         const userList = await apiFetch<{ items: AdminUser[] }>("/admin/users", { token });
@@ -542,6 +549,30 @@ export default function IncidentsTabScreen() {
   useEffect(() => {
     load().catch(() => {});
   }, [load]);
+
+  // Latest guard values for the focus refresh, read through a ref so the focus
+  // callback stays stable and fires only on focus-gain (not on every change).
+  const focusRefreshRef = useRef({ isDetailRoute, busy, canEditIncidentInForm, load });
+  focusRefreshRef.current = { isDetailRoute, busy, canEditIncidentInForm, load };
+
+  // When the incident detail screen regains focus (e.g. after performing office
+  // delegation / engineer assignment / submission / review / finalization /
+  // resolution on another screen), refresh through the existing load() so the
+  // embedded workflow tree is never stale. load() bumps workflowRefreshKey, which
+  // the tree consumes as a silent refresh (no spinner flash). Guarded to avoid
+  // disrupting an actively-edited form or an in-flight save, and offline-safe via
+  // load()'s own error handling. Role scoping is unchanged (load uses scope=mobile).
+  useFocusEffect(
+    useCallback(() => {
+      const s = focusRefreshRef.current;
+      // Only on the detail route, when the form is read-only (not actively being
+      // edited) and no save/mutation is in progress. Initial open is handled by
+      // the mount effect above (the form is not hydrated/locked yet here).
+      if (s.isDetailRoute && !s.busy && !s.canEditIncidentInForm) {
+        s.load().catch(() => {});
+      }
+    }, []),
+  );
 
   const openDraft = (linkedSubmissionId: number | null) => {
     if (!linkedSubmissionId) return;
@@ -1361,6 +1392,9 @@ export default function IncidentsTabScreen() {
                     <View style={styles.detailSaveSpacer} />
                   )}
                 </View>
+              ) : null}
+              {isDetailRoute && editingIncidentId != null ? (
+                <IncidentWorkflowTree incidentId={editingIncidentId} refreshKey={workflowRefreshKey} />
               ) : null}
               {!isDetailRoute ? (
                 <>

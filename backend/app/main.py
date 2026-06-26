@@ -32,6 +32,7 @@ from .routes.gisa import router as gisa_router
 from .migrations_check import check_migration_head
 from .routes.incidents import router as incidents_router
 from .routes.assessments import router as assessments_router
+from .routes.workflow_tree import router as workflow_tree_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_reviewer, is_operational_user, require_is_owner_or_admin
 from .precision import normalize_post_mile, normalize_route, round_coordinate
@@ -89,6 +90,7 @@ app.include_router(arcgis_router)
 app.include_router(gisa_router)
 app.include_router(incidents_router)
 app.include_router(assessments_router)
+app.include_router(workflow_tree_router)
 app.include_router(road_inventory_router)
 
 app.add_middleware(

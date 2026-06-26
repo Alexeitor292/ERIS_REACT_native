@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import { triageIncident, type TriageDisposition } from "../api/assessments";
+import { WorkflowTreeModal } from "../components/WorkflowTree";
 import type { AdminUser, Incident, IncidentStatus } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canTriage } from "../utils/roleModel";
@@ -85,6 +86,7 @@ export default function IncidentsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState<IncidentCreateForm>(EMPTY_FORM);
   const [pendingFiles, setPendingFiles] = useState<PendingIncidentUpload[]>([]);
+  const [workflowIncidentId, setWorkflowIncidentId] = useState<number | null>(null);
 
   async function load() {
     setBusy(true);
@@ -511,6 +513,13 @@ export default function IncidentsPage() {
                     </td>
                     <td className="px-3 py-3 text-right">
                       <div className="inline-flex flex-wrap justify-end gap-1.5">
+                        <button
+                          onClick={() => setWorkflowIncidentId(incident.id)}
+                          className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs font-semibold hover:brightness-95"
+                          title="View workflow"
+                        >
+                          Workflow
+                        </button>
                         {canTriage(me?.roles) && incident.current_stage === "COORDINATOR_REVIEW" ? (
                           <button
                             onClick={() => triageIncidentAction(incident.id)}
@@ -566,6 +575,9 @@ export default function IncidentsPage() {
           </table>
         </div>
       </div>
+      {workflowIncidentId != null ? (
+        <WorkflowTreeModal incidentId={workflowIncidentId} onClose={() => setWorkflowIncidentId(null)} />
+      ) : null}
     </AppShell>
   );
 }
