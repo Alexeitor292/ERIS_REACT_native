@@ -23,37 +23,49 @@ def _pts(pairs: list[tuple[float, float | None]]) -> list[dict]:
 
 class TestClassify:
     def test_flat(self):
-        cls, conf = ep._classify(_pts([(-20, 100.0), (0, 100.0), (20, 100.0)]))
+        cls, conf, reason = ep._classify(_pts([(-20, 100.0), (0, 100.0), (20, 100.0)]))
         assert cls == "FLAT"
         assert conf is not None and 0.0 <= conf <= 1.0
+        assert reason == "CLASSIFIED"
 
     def test_left_high(self):
         # left well above center, right well below center
-        cls, _ = ep._classify(_pts([(-20, 130.0), (0, 100.0), (20, 70.0)]))
+        cls, _, reason = ep._classify(_pts([(-20, 130.0), (0, 100.0), (20, 70.0)]))
         assert cls == "LEFT_HIGH"
+        assert reason == "CLASSIFIED"
 
     def test_right_high(self):
-        cls, _ = ep._classify(_pts([(-20, 70.0), (0, 100.0), (20, 130.0)]))
+        cls, _, _ = ep._classify(_pts([(-20, 70.0), (0, 100.0), (20, 130.0)]))
         assert cls == "RIGHT_HIGH"
 
     def test_bowl_both_sides_high(self):
-        cls, _ = ep._classify(_pts([(-20, 130.0), (0, 100.0), (20, 130.0)]))
+        cls, _, _ = ep._classify(_pts([(-20, 130.0), (0, 100.0), (20, 130.0)]))
         assert cls == "BOWL"
 
     def test_crown_both_sides_low(self):
-        cls, _ = ep._classify(_pts([(-20, 70.0), (0, 100.0), (20, 70.0)]))
+        cls, _, _ = ep._classify(_pts([(-20, 70.0), (0, 100.0), (20, 70.0)]))
         assert cls == "CROWN"
 
-    def test_unknown_when_a_side_missing(self):
-        # no right-side points
-        cls, conf = ep._classify(_pts([(-20, 130.0), (0, 100.0)]))
+    def test_insufficient_when_a_side_missing(self):
+        # no right-side points -> not enough valid samples, not a real failure
+        cls, conf, reason = ep._classify(_pts([(-20, 130.0), (0, 100.0)]))
         assert cls == "UNKNOWN"
         assert conf is None
+        assert reason == "INSUFFICIENT_VALID_SAMPLES"
 
-    def test_unknown_when_elevations_none(self):
-        cls, conf = ep._classify(_pts([(-20, None), (0, None), (20, None)]))
+    def test_insufficient_when_elevations_none(self):
+        cls, conf, reason = ep._classify(_pts([(-20, None), (0, None), (20, None)]))
         assert cls == "UNKNOWN"
         assert conf is None
+        assert reason == "INSUFFICIENT_VALID_SAMPLES"
+
+    def test_ambiguous_when_one_side_high_other_flat(self):
+        # Left clearly high, right ~level with center: a real but mixed shape that
+        # does not fit a single canonical class -> honestly AMBIGUOUS_TERRAIN.
+        cls, conf, reason = ep._classify(_pts([(-20, 130.0), (0, 100.0), (20, 101.0)]))
+        assert cls == "UNKNOWN"
+        assert conf is None
+        assert reason == "AMBIGUOUS_TERRAIN"
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +134,13 @@ class TestFetchElevationProfile:
         assert pts[0]["offset_m"] == 0.0
         assert pts[0]["elevation_ft"] == 42.0
         assert result["classification"] == "UNKNOWN"
+        # The avoidable "no bearing" case is explicitly diagnosed, not a failure.
+        assert result["classification_reason"] == "ROAD_BEARING_UNAVAILABLE"
         meta = result["profile"]["metadata"]
         assert meta["road_bearing_deg_used"] is None
+        assert meta["classification_reason"] == "ROAD_BEARING_UNAVAILABLE"
         assert "classification_note" in meta
+        assert "Road bearing could not be resolved" in meta["classification_note"]
 
     def test_real_relief_classifies_from_points(self):
         # Left high, right low — classification is derived from the sampled points,
@@ -150,4 +166,6 @@ class TestFetchElevationProfile:
         pts = result["profile"]["points"]
         assert all(p["elevation_ft"] is None for p in pts)
         assert result["classification"] == "UNKNOWN"
+        # Bearing present but USGS returned no valid samples -> insufficient samples.
+        assert result["classification_reason"] == "INSUFFICIENT_VALID_SAMPLES"
         assert result["error"] is None

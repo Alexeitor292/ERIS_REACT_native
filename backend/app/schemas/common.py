@@ -221,6 +221,18 @@ class ElevationProfileRequest(BaseModel):
     force: bool | None = None
 
 
+class TerrainGridRequest(BaseModel):
+    """Build a road-aligned 2D USGS terrain elevation grid. Dimensions/spacing
+    are additionally clamped server-side (see services/terrain_grid.py)."""
+
+    road_bearing_deg: float | None = Field(default=None, ge=0, lt=360)
+    rows: int | None = Field(default=None, ge=3, le=15)
+    columns: int | None = Field(default=None, ge=3, le=15)
+    along_spacing_m: float | None = Field(default=None, ge=5, le=50)
+    cross_spacing_m: float | None = Field(default=None, ge=5, le=50)
+    force: bool | None = None
+
+
 # ---------------------------------------------------------------------------
 # Assessment Routing & Authority Model
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { RoadCrossSectionRenderer } from "./RoadCrossSectionRenderer";
 import { buildMeasurementDiagramData } from "../measurements/buildMeasurementDiagramData";
-import type { DiagramTemplate, FailureSide, TerrainSideShape } from "../measurements/measurementDiagramModel";
+import { DIAGRAM_TEMPLATE_LABELS, type DiagramTemplate, type FailureSide, type TerrainSideShape } from "../measurements/measurementDiagramModel";
 import type { GisaElevationProfile } from "../api/submissions";
 import { lockLandscape, unlockOrientation } from "../utils/screenOrientation";
 
@@ -24,7 +24,7 @@ const TEMPLATES: { key: DiagramTemplate | "AUTO"; label: string }[] = [
   { key: "AUTO", label: "AUTO" },
   { key: "LANDSLIDE_THROUGH_ROAD", label: "THROUGH" },
   { key: "LANDSLIDE_ABOVE_ROAD", label: "ABOVE" },
-  { key: "LANDSLIDE_BELOW_ROAD_SLIPOUT", label: "SLIPOUT" },
+  { key: "LANDSLIDE_BELOW_ROAD_SLIPOUT", label: "BELOW ROAD" },
 ];
 
 const FAILURE_SIDES: { key: FailureSide; label: string }[] = [
@@ -43,9 +43,9 @@ const TERRAIN_SHAPES: { key: TerrainSideShape | "AUTO"; label: string }[] = [
 ];
 
 const TEMPLATE_SHORT: Record<DiagramTemplate, string> = {
-  LANDSLIDE_THROUGH_ROAD: "through road",
-  LANDSLIDE_ABOVE_ROAD: "above road",
-  LANDSLIDE_BELOW_ROAD_SLIPOUT: "slipout",
+  LANDSLIDE_THROUGH_ROAD: DIAGRAM_TEMPLATE_LABELS.LANDSLIDE_THROUGH_ROAD.short,
+  LANDSLIDE_ABOVE_ROAD: DIAGRAM_TEMPLATE_LABELS.LANDSLIDE_ABOVE_ROAD.short,
+  LANDSLIDE_BELOW_ROAD_SLIPOUT: DIAGRAM_TEMPLATE_LABELS.LANDSLIDE_BELOW_ROAD_SLIPOUT.short,
 };
 
 const TERRAIN_SHORT: Record<TerrainSideShape, string> = {

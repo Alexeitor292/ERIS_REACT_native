@@ -19,7 +19,20 @@ import type { RoadCrossSection } from "./roadCrossSectionModel";
 export type DiagramTemplate =
   | "LANDSLIDE_THROUGH_ROAD"
   | "LANDSLIDE_ABOVE_ROAD"
+  // Internal key retained for backward compatibility. The "_SLIPOUT" suffix is a
+  // legacy Caltrans synonym; it is NOT shown to users — see DIAGRAM_TEMPLATE_LABELS.
   | "LANDSLIDE_BELOW_ROAD_SLIPOUT";
+
+/**
+ * User-facing labels for each diagram template. The internal enum keys are kept
+ * stable (and are not persisted anywhere), but the approved user-facing term for
+ * LANDSLIDE_BELOW_ROAD_SLIPOUT is "Landslide Below Road" — never "Slipout".
+ */
+export const DIAGRAM_TEMPLATE_LABELS: Record<DiagramTemplate, { full: string; short: string }> = {
+  LANDSLIDE_THROUGH_ROAD: { full: "Landslide Through Road", short: "through road" },
+  LANDSLIDE_ABOVE_ROAD: { full: "Landslide Above Road", short: "above road" },
+  LANDSLIDE_BELOW_ROAD_SLIPOUT: { full: "Landslide Below Road", short: "below road" },
+};
 
 export type FailureSide = "LT" | "RT" | "BOTH";
 

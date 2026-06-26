@@ -92,19 +92,22 @@ Material from the high-side cut slope (uphill of the road) has failed and moved 
 
 ---
 
-### LANDSLIDE_BELOW_ROAD_SLIPOUT
+### Landslide Below Road
 
-**Reference**: V2-SLIPOUTMODEL(1).pdf
+Internal template key: `LANDSLIDE_BELOW_ROAD_SLIPOUT` (kept for backward
+compatibility; the user-facing label is always "Landslide Below Road").
 
-Fill material supporting the road embankment has slipped downhill on the low side. The road shoulder or travel lane hangs over the void left by the slipped material.
+**Reference**: V2-SLIPOUTMODEL(1).pdf (source filename retained)
+
+Fill material supporting the road embankment has failed downhill on the low side. The road shoulder or travel lane hangs over the void left by the displaced material.
 
 - Overlay: hatched wedge from the road edge downward into the fill slope
 - Fill slope line (green) with slope angle label
 - Measurement labels: H-S (slope height), Φ-SS (landslide slope angle)
 - Failure side: LT or RT (which side the fill embankment is failing)
-- Auto terrain shape inferred from failure side (the non-slipout side is the cut/high side):
-  - LT → RIGHT_HIGH (cut on right, fill/slipout on left)
-  - RT → LEFT_HIGH (cut on left, fill/slipout on right)
+- Auto terrain shape inferred from failure side (the non-failure side is the cut/high side):
+  - LT → RIGHT_HIGH (cut on right, below-road failure on left)
+  - RT → LEFT_HIGH (cut on left, below-road failure on right)
   - BOTH → BOWL (fill on both sides — road on full embankment)
 
 ---
@@ -134,7 +137,7 @@ The terrain profile controls the shape of the ground surface drawn beside the ro
 | Failure type fields checked | Inferred template |
 |---|---|
 | `failure_rock_fall`, `failure_topple`, `failure_flow` | ABOVE_ROAD |
-| `failure_surficial_failure`, `failure_scoured_toe`, `failure_erosion`, `failure_washout` | BELOW_ROAD_SLIPOUT |
+| `failure_surficial_failure`, `failure_scoured_toe`, `failure_erosion`, `failure_washout` | Landslide Below Road |
 | `failure_slide`, `failure_spread`, `failure_compound`, or no match | THROUGH_ROAD |
 
 Priority: first match wins (above > below > through).
@@ -164,7 +167,7 @@ Each diagram section shows the data source in a badge and the source/assumption 
 All three selectors (template, failure side, terrain shape) are local UI state only. They are not persisted to the backend. Each time the user opens the measurement diagram, the template and terrain reset to AUTO.
 
 To manually override:
-1. **Template row**: tap THROUGH / ABOVE / SLIPOUT instead of AUTO
+1. **Template row**: tap THROUGH / ABOVE / BELOW ROAD instead of AUTO
 2. **Failure side row**: tap LT SIDE / RT SIDE / BOTH (hidden for THROUGH_ROAD template)
 3. **Terrain row**: tap L-High / R-High / Bowl / Crown / Flat instead of Auto
 
@@ -221,7 +224,7 @@ labels, LT/RT chips, and failure overlays are drawn on top and remain the priori
 
 ## Future improvements
 
-- Add GEO/map-derived landslide template classification (ABOVE / SLIPOUT / THROUGH) so Template AUTO can resolve from spatial evidence rather than defaulting to THROUGH
+- Add GEO/map-derived landslide template classification (ABOVE / BELOW ROAD / THROUGH) so Template AUTO can resolve from spatial evidence rather than defaulting to THROUGH
 - Add scarp height annotation to terrain profile
 - Support cut/fill depth callouts on terrain surface
 - Add lightweight unit coverage for `buildTerrainAppearance` once a mobile test runner is in place

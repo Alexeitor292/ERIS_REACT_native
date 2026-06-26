@@ -50,9 +50,11 @@ from .schemas.common import (
     SubmissionCreate,
     SubmissionPermissionsReplace,
     SubmissionTitlePatch,
+    TerrainGridRequest,
     WorkflowAction,
 )
 from .services import elevation_profile as elevation_profile_svc
+from .services import terrain_grid as terrain_grid_svc
 from .services.gisa_validation import (
     validate_action_code_group,
     validate_distribution_code,
@@ -554,6 +556,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           road_inventory_snapshot_json, road_inventory_match_method, road_inventory_checked_at,
           elevation_profile_json, elevation_profile_source, elevation_profile_checked_at,
           elevation_profile_classification, elevation_profile_confidence, elevation_profile_error,
+          elevation_terrain_grid_json, elevation_terrain_source, elevation_terrain_checked_at, elevation_terrain_error,
           updated_by_user_id, created_at, updated_at
         FROM submission_gisa
         WHERE submission_id = :sid
@@ -609,16 +612,47 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
     ep_conf = d.pop("elevation_profile_confidence", None)
     ep_err = d.pop("elevation_profile_error", None)
     if ep_source is not None or ep_at is not None:
+        ep_reason = None
+        if isinstance(ep_json_raw, dict):
+            ep_meta = ep_json_raw.get("metadata")
+            if isinstance(ep_meta, dict):
+                ep_reason = ep_meta.get("classification_reason")
         d["elevation_profile"] = {
             "source": ep_source,
             "checked_at": str(ep_at) if ep_at is not None else None,
             "classification": ep_class,
+            "classification_reason": ep_reason,
             "confidence": float(ep_conf) if ep_conf is not None else None,
             "profile": ep_json_raw,
             "error": ep_err,
         }
     else:
         d["elevation_profile"] = None
+
+    # Build nested elevation_terrain (3D Terrain grid) from flat DB columns.
+    et_grid_raw = d.pop("elevation_terrain_grid_json", None)
+    if isinstance(et_grid_raw, str):
+        try:
+            et_grid_raw = json.loads(et_grid_raw)
+        except Exception:
+            et_grid_raw = None
+    et_source = d.pop("elevation_terrain_source", None)
+    et_at = d.pop("elevation_terrain_checked_at", None)
+    et_err = d.pop("elevation_terrain_error", None)
+    if et_source is not None or et_at is not None:
+        # The stored JSON already carries source/checked_at/grid/bearing/error; the
+        # flat columns are a fast index. Return the full stored object when present.
+        if isinstance(et_grid_raw, dict):
+            d["elevation_terrain"] = et_grid_raw
+        else:
+            d["elevation_terrain"] = {
+                "source": et_source,
+                "checked_at": str(et_at) if et_at is not None else None,
+                "error": et_err,
+                "grid": None,
+            }
+    else:
+        d["elevation_terrain"] = None
 
     # Normalize MySQL/MariaDB tinyint(1) values to JSON booleans for API consistency.
     bool_fields = {
@@ -2427,6 +2461,55 @@ def patch_gisa(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _resolve_gisa_road_bearing(
+    lat: float, lon: float, row: dict, payload_bearing: float | None
+) -> tuple[float | None, str | None]:
+    """Resolve the road bearing for elevation/terrain sampling, in priority order:
+    explicit request > road_inventory_snapshot > ArcGIS postmile geometry > None.
+
+    Shared by the elevation-profile and terrain-grid endpoints so a derivable
+    bearing reaches USGS sampling on a (forced) refresh in both. Returns
+    (bearing_deg_or_None, source_or_None)."""
+    if payload_bearing is not None:
+        return float(payload_bearing), "request"
+
+    ri_snap_raw = row.get("road_inventory_snapshot_json")
+    ri_snap: dict | None = None
+    if isinstance(ri_snap_raw, str):
+        try:
+            ri_snap = json.loads(ri_snap_raw)
+        except Exception:
+            ri_snap = None
+    elif isinstance(ri_snap_raw, dict):
+        ri_snap = ri_snap_raw
+    if ri_snap:
+        snap_bearing = ri_snap.get("road_bearing_deg")
+        if snap_bearing is not None:
+            try:
+                bf = float(snap_bearing)
+                if math.isfinite(bf) and 0.0 <= bf < 360.0:
+                    return bf, "road_inventory_snapshot"
+            except (TypeError, ValueError):
+                pass
+
+    # Auto-derive from ArcGIS postmile geometry when request and snapshot are missing.
+    try:
+        pm_float = _safe_float(row.get("post_mile"))
+        auto_bearing = _derive_road_bearing_from_postmile_layer(
+            lat=lat,
+            lon=lon,
+            route=row.get("route") or None,
+            county=row.get("county") or None,
+            post_mile=pm_float,
+            district=row.get("district") or None,
+        )
+        if auto_bearing is not None:
+            return auto_bearing, "arcgis_postmile_geometry"
+    except Exception:
+        pass  # Network/ArcGIS errors are non-fatal; bearing remains None
+    return None, None
+
+
 @app.post("/submissions/{submission_id}/gisa/elevation-profile")
 def enrich_gisa_elevation_profile(
     submission_id: int = Path(..., ge=1),
@@ -2472,12 +2555,18 @@ def enrich_gisa_elevation_profile(
             except Exception:
                 ep_json_raw = None
         ep_conf = row["elevation_profile_confidence"]
+        cached_reason = None
+        if isinstance(ep_json_raw, dict):
+            meta = ep_json_raw.get("metadata")
+            if isinstance(meta, dict):
+                cached_reason = meta.get("classification_reason")
         return {
             "submission_id": submission_id,
             "elevation_profile": {
                 "source": existing_source,
                 "checked_at": str(row["elevation_profile_checked_at"]) if row["elevation_profile_checked_at"] else None,
                 "classification": row["elevation_profile_classification"],
+                "classification_reason": cached_reason,
                 "confidence": float(ep_conf) if ep_conf is not None else None,
                 "profile": ep_json_raw,
                 "error": row["elevation_profile_error"],
@@ -2485,49 +2574,9 @@ def enrich_gisa_elevation_profile(
         }
 
     # Resolve road bearing: payload > road_inventory_snapshot > arcgis_postmile_geometry > None
-    resolved_bearing: float | None = None
-    bearing_source: str | None = None
-    if payload.road_bearing_deg is not None:
-        resolved_bearing = float(payload.road_bearing_deg)
-        bearing_source = "request"
-    else:
-        ri_snap_raw = row["road_inventory_snapshot_json"]
-        ri_snap: dict | None = None
-        if isinstance(ri_snap_raw, str):
-            try:
-                ri_snap = json.loads(ri_snap_raw)
-            except Exception:
-                pass
-        elif isinstance(ri_snap_raw, dict):
-            ri_snap = ri_snap_raw
-        if ri_snap:
-            snap_bearing = ri_snap.get("road_bearing_deg")
-            if snap_bearing is not None:
-                try:
-                    bf = float(snap_bearing)
-                    if math.isfinite(bf) and 0.0 <= bf < 360.0:
-                        resolved_bearing = bf
-                        bearing_source = "road_inventory_snapshot"
-                except (TypeError, ValueError):
-                    pass
-
-    # Auto-derive bearing from ArcGIS postmile geometry when request and snapshot are missing
-    if resolved_bearing is None:
-        try:
-            pm_float = _safe_float(row["post_mile"])
-            auto_bearing = _derive_road_bearing_from_postmile_layer(
-                lat=float(lat),
-                lon=float(lon),
-                route=row["route"] or None,
-                county=row["county"] or None,
-                post_mile=pm_float,
-                district=row["district"] or None,
-            )
-            if auto_bearing is not None:
-                resolved_bearing = auto_bearing
-                bearing_source = "arcgis_postmile_geometry"
-        except Exception:
-            pass  # Network/ArcGIS errors are non-fatal; bearing remains None
+    resolved_bearing, bearing_source = _resolve_gisa_road_bearing(
+        float(lat), float(lon), dict(row), payload.road_bearing_deg
+    )
 
     # Fetch from USGS EPQS
     result = elevation_profile_svc.fetch_elevation_profile(
@@ -2579,11 +2628,99 @@ def enrich_gisa_elevation_profile(
             "source": result["source"],
             "checked_at": result["checked_at"],
             "classification": result["classification"],
+            "classification_reason": result.get("classification_reason"),
             "confidence": result["confidence"],
             "profile": result.get("profile"),
             "error": result["error"],
         },
     }
+
+
+@app.post("/submissions/{submission_id}/gisa/terrain-grid")
+def build_gisa_terrain_grid(
+    submission_id: int = Path(..., ge=1),
+    payload: TerrainGridRequest = TerrainGridRequest(),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Build (and cache) the road-aligned USGS 3DEP terrain elevation grid for
+    the '3D Terrain' view. Mirrors the elevation-profile refresh: the grid is
+    cached on submission_gisa and only re-queried from USGS when force=true."""
+    require_can_edit_submission(submission_id, db, user)
+
+    row = db.execute(text("""
+        SELECT latitude, longitude,
+               route, county, post_mile, district,
+               road_inventory_snapshot_json,
+               elevation_terrain_source, elevation_terrain_checked_at,
+               elevation_terrain_grid_json, elevation_terrain_error
+        FROM submission_gisa
+        WHERE submission_id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="GISA data not found for this submission")
+
+    lat = row["latitude"]
+    lon = row["longitude"]
+    if lat is None or lon is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot build terrain grid: GISA latitude/longitude are not set",
+        )
+
+    force = bool(payload.force) if payload.force is not None else False
+
+    # Return the cached grid unless a rebuild is forced (do not re-query USGS).
+    existing_source = row["elevation_terrain_source"]
+    if existing_source and not force:
+        grid_raw = row["elevation_terrain_grid_json"]
+        if isinstance(grid_raw, str):
+            try:
+                grid_raw = json.loads(grid_raw)
+            except Exception:
+                grid_raw = None
+        if isinstance(grid_raw, dict):
+            return {"submission_id": submission_id, "terrain": grid_raw, "cached": True}
+
+    resolved_bearing, bearing_source = _resolve_gisa_road_bearing(
+        float(lat), float(lon), dict(row), payload.road_bearing_deg
+    )
+
+    result = terrain_grid_svc.fetch_terrain_grid(
+        lat=float(lat),
+        lon=float(lon),
+        road_bearing_deg=resolved_bearing,
+        rows=int(payload.rows) if payload.rows is not None else terrain_grid_svc.DEFAULT_ROWS,
+        cols=int(payload.columns) if payload.columns is not None else terrain_grid_svc.DEFAULT_COLS,
+        along_spacing_m=float(payload.along_spacing_m) if payload.along_spacing_m is not None else terrain_grid_svc.DEFAULT_ALONG_SPACING_M,
+        cross_spacing_m=float(payload.cross_spacing_m) if payload.cross_spacing_m is not None else terrain_grid_svc.DEFAULT_CROSS_SPACING_M,
+    )
+    result["road_bearing_source"] = bearing_source
+
+    grid_json_str = json.dumps(result)
+    try:
+        db.execute(text("""
+            UPDATE submission_gisa
+            SET elevation_terrain_grid_json  = :grid_json,
+                elevation_terrain_source     = :source,
+                elevation_terrain_checked_at = :checked_at,
+                elevation_terrain_error      = :error
+            WHERE submission_id = :sid
+        """), {
+            "sid": submission_id,
+            "grid_json": grid_json_str,
+            "source": result["source"],
+            "checked_at": result["checked_at"],
+            "error": result["error"],
+        })
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"submission_id": submission_id, "terrain": result, "cached": False}
 
 
 @app.put("/submissions/{submission_id}/gisa/incident-types")
