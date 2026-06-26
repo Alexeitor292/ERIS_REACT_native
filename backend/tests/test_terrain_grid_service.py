@@ -7,9 +7,74 @@ in the no-DB CI job.
 
 from __future__ import annotations
 
+import time
 from unittest.mock import patch
 
+import pytest
+
 from app.services import terrain_grid as tg
+
+
+class TestOddDimensions:
+    def test_even_rows_rejected(self):
+        with patch.object(tg, "_fetch_elevation_ft", return_value=10.0):
+            with pytest.raises(ValueError, match="odd"):
+                tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=10, cols=11)
+
+    def test_even_cols_rejected(self):
+        with patch.object(tg, "_fetch_elevation_ft", return_value=10.0):
+            with pytest.raises(ValueError, match="odd"):
+                tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=11, cols=8)
+
+    def test_odd_out_of_range_is_clamped_and_stays_odd(self):
+        with patch.object(tg, "_fetch_elevation_ft", return_value=10.0):
+            res = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=99, cols=99)
+        assert res["grid"]["rows"] == tg.MAX_DIM and res["grid"]["columns"] == tg.MAX_DIM
+        assert res["grid"]["rows"] % 2 == 1 and res["grid"]["columns"] % 2 == 1
+
+    def test_center_is_a_real_sample_for_odd_grid(self):
+        with patch.object(tg, "_fetch_elevation_ft", return_value=42.0):
+            res = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=90.0, rows=11, cols=11)
+        pts = res["grid"]["points"]
+        center = next(p for p in pts if p["row"] == 5 and p["column"] == 5)
+        assert abs(center["lat"] - 37.0) < 1e-6 and abs(center["lon"] - (-122.0)) < 1e-6
+        assert center["elevation_ft"] == 42.0
+
+
+class TestTimeBudget:
+    def test_partial_data_on_slow_upstream(self, monkeypatch):
+        # Tiny budget; some points resolve instantly, the rest "hang" past the
+        # budget -> we keep the partial valid data and never fabricate elevations.
+        monkeypatch.setattr(tg, "TOTAL_BUILD_BUDGET_S", 0.4)
+        calls = {"n": 0}
+
+        def slow(lat, lon):
+            calls["n"] += 1
+            if calls["n"] <= 5:
+                return 100.0
+            time.sleep(2.0)  # exceeds the 0.4s budget
+            return 100.0
+
+        with patch.object(tg, "_fetch_elevation_ft", side_effect=slow):
+            res = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=11, cols=11)
+        grid = res["grid"]
+        assert 0 < grid["valid_sample_count"] < grid["sample_count"]
+        assert grid["partial"] is True
+        assert res["error"] and "partial" in res["error"].lower()
+        # Unresolved points stay null — no synthetic elevations.
+        assert any(p["elevation_ft"] is None for p in grid["points"])
+
+    def test_full_outage_within_budget_reports_no_data(self, monkeypatch):
+        monkeypatch.setattr(tg, "TOTAL_BUILD_BUDGET_S", 0.4)
+
+        def hang(lat, lon):
+            time.sleep(2.0)
+            return 100.0
+
+        with patch.object(tg, "_fetch_elevation_ft", side_effect=hang):
+            res = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+        assert res["grid"]["valid_sample_count"] == 0
+        assert res["error"] is not None
 
 
 class TestBuildGridPoints:

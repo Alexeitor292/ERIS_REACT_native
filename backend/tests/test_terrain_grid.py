@@ -226,6 +226,21 @@ class TestTerrainGrid:
         finally:
             _cleanup(incident_id)
 
+    def test_even_dimensions_rejected_422(self, client_db, admin_token):
+        """Even rows/columns are rejected before any USGS work (odd-only)."""
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            for body in ({"rows": 10, "force": True}, {"columns": 8, "force": True}):
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/terrain-grid",
+                    json=body,
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+                assert resp.status_code == 422, resp.text
+                assert "odd" in resp.text.lower()
+        finally:
+            _cleanup(incident_id)
+
     def test_permission_denied_for_non_editor(self, client_db, admin_token):
         """A user who is not owner/editor/admin cannot build the terrain grid (403),
         matching existing submission edit access rules."""

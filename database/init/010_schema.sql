@@ -473,6 +473,17 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     observations_notes TEXT NULL,
     geometry_json JSON NULL,
 
+    -- Section Q: 3D Terrain elevation grid (USGS 3DEP / EPQS) cache.
+    -- NOTE: these columns are also added by Alembic migration 0010_gisa_terrain_grid
+    -- for databases created before this feature. To keep the fresh-init path
+    -- (init SQL -> stamp 0001 -> upgrade head) and the migration path conflict-free,
+    -- migration 0010 uses ADD COLUMN IF NOT EXISTS, so re-applying it over a
+    -- fresh-init schema that already has these columns is a safe no-op.
+    elevation_terrain_grid_json JSON NULL,
+    elevation_terrain_source VARCHAR(64) NULL,
+    elevation_terrain_checked_at DATETIME NULL,
+    elevation_terrain_error TEXT NULL,
+
     -- Section P: Audit metadata
     updated_by_user_id BIGINT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

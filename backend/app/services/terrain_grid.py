@@ -26,7 +26,9 @@ resolve are returned with elevation_ft = null.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime
 
 from .elevation_profile import EPQS_SOURCE, _fetch_elevation_ft, _offset_point
@@ -43,6 +45,10 @@ MAX_DIM = 15          # caps total points at 15×15 = 225
 MIN_SPACING_M = 5.0
 MAX_SPACING_M = 50.0
 _MAX_WORKERS = 6      # bounded concurrency against USGS EPQS
+# Overall wall-clock budget for one grid build. A USGS EPQS outage must not leave
+# the request hanging for minutes — when the budget is hit we stop waiting and
+# return whatever valid points we have (partial terrain), never fabricating data.
+TOTAL_BUILD_BUDGET_S = 25.0
 
 
 def _clamp_int(value: int, lo: int, hi: int) -> int:
@@ -117,9 +123,18 @@ def fetch_terrain_grid(
     """
     Sample a road-aligned 2D elevation grid around (lat, lon) from USGS EPQS.
 
+    rows/cols must be ODD so the incident location is an actual center sample;
+    even values raise ValueError. Dimensions are clamped to [MIN_DIM, MAX_DIM]
+    and spacing to [MIN_SPACING_M, MAX_SPACING_M].
+
     Returns a dict with: source, checked_at, road_bearing_deg_used,
     road_bearing_source (None — the endpoint fills this in), grid{...}, error.
     """
+    if int(rows) % 2 == 0 or int(cols) % 2 == 0:
+        raise ValueError(
+            "Terrain grid rows and columns must be odd so the incident location is a center sample"
+        )
+    # Clamping odd values to the odd bounds [3, 15] preserves oddness.
     rows = _clamp_int(rows, MIN_DIM, MAX_DIM)
     cols = _clamp_int(cols, MIN_DIM, MAX_DIM)
     along_spacing_m = _clamp_float(along_spacing_m, MIN_SPACING_M, MAX_SPACING_M)
@@ -135,21 +150,52 @@ def fetch_terrain_grid(
 
     error: str | None = None
     valid = 0
+    timed_out = False
+    sample_count = rows * cols
+    # Bounded concurrency + an overall time budget. We submit all points, then
+    # collect results until either everything is done or the budget elapses; on
+    # timeout we stop waiting and keep the partial (real) data we already have.
+    executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
     try:
-        # Bounded concurrency — never fire an unbounded number of USGS requests.
-        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-            elevations = list(
-                executor.map(lambda p: _fetch_elevation_ft(p["lat"], p["lon"]), points)
+        future_to_idx = {
+            executor.submit(_fetch_elevation_ft, p["lat"], p["lon"]): i
+            for i, p in enumerate(points)
+        }
+        try:
+            for fut in as_completed(future_to_idx, timeout=TOTAL_BUILD_BUDGET_S):
+                idx = future_to_idx[fut]
+                try:
+                    elev = fut.result()
+                except Exception:
+                    elev = None
+                if elev is not None:
+                    points[idx]["elevation_ft"] = round(elev, 2)
+                    valid += 1
+        except FuturesTimeoutError:
+            timed_out = True
+            logger.warning(
+                "Terrain grid time budget (%.0fs) exceeded lat=%.6f lon=%.6f; returning %d/%d points",
+                TOTAL_BUILD_BUDGET_S, lat, lon, valid, sample_count,
             )
-        for p, elev in zip(points, elevations):
-            if elev is not None:
-                p["elevation_ft"] = round(elev, 2)
-                valid += 1
-        if valid == 0:
-            error = "USGS EPQS returned no valid elevation samples for this grid."
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Terrain grid failed lat=%.6f lon=%.6f: %s", lat, lon, exc)
         error = str(exc)
+    finally:
+        # Do not block on stragglers; cancel queued work and let any in-flight
+        # requests finish in the background.
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    if error is None:
+        if valid == 0:
+            error = (
+                "USGS EPQS did not return any valid elevation samples"
+                + (" within the time budget." if timed_out else " for this grid.")
+            )
+        elif timed_out:
+            error = (
+                f"USGS EPQS was slow/unavailable; built partial terrain "
+                f"({valid} of {sample_count} points within the time budget)."
+            )
 
     return {
         "source": EPQS_SOURCE,
@@ -163,8 +209,9 @@ def fetch_terrain_grid(
             "cross_road_spacing_m": cross_spacing_m,
             "extent_along_m": round(along_spacing_m * (rows - 1), 1),
             "extent_cross_m": round(cross_spacing_m * (cols - 1), 1),
-            "sample_count": rows * cols,
+            "sample_count": sample_count,
             "valid_sample_count": valid,
+            "partial": bool(timed_out and valid > 0),
             "points": points,
         },
         "error": error,

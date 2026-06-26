@@ -2885,6 +2885,10 @@ export default function SubmissionDetailScreen() {
 
       const subRes = (await getSubmission(token, id)) as SubmissionDetail;
       setData(subRes);
+      // A normal reload is authoritative: drop any transient build override so the
+      // server-loaded elevation_terrain is shown.
+      setLocalTerrain(undefined);
+      setTerrainError(null);
       const g = subRes.gisa || {};
       const loadedDistrictContacts = parseDistrictContacts(g.district_contact ?? "");
       const countyCode = countyCodeFromNameOrCode(g.county ?? "");
@@ -2991,6 +2995,15 @@ export default function SubmissionDetailScreen() {
       setLoading(false);
     }
   }, [token, id, isLocalId, hydrateAttachmentUrls, hydrateLocalAttachmentUris, applyEditorState, incidentTypesFromFormState]);
+
+  // Reset all transient terrain UI state when the submission id changes so a
+  // build for one submission can never leak into (or override) another.
+  useEffect(() => {
+    setLocalTerrain(undefined);
+    setTerrainError(null);
+    setTerrainBuilding(false);
+    setTerrainView("profile");
+  }, [id]);
 
   useEffect(() => { load(); }, [load]);
 

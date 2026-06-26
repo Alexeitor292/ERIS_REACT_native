@@ -155,6 +155,7 @@ export function TerrainRelief({ terrain }: { terrain: GisaTerrainGrid | null | u
   const my = py(mr, mc, markerElev);
 
   const bearing = terrain.road_bearing_deg_used;
+  const hasBearing = bearing != null;
   const checked = terrain.checked_at ? terrain.checked_at.slice(0, 16).replace("T", " ") : "—";
   const extentAlong = grid.extent_along_m ?? grid.along_road_spacing_m * (rows - 1);
   const extentCross = grid.extent_cross_m ?? grid.cross_road_spacing_m * (cols - 1);
@@ -163,19 +164,24 @@ export function TerrainRelief({ terrain }: { terrain: GisaTerrainGrid | null | u
     <div className="rounded border border-[var(--line)] bg-[#0f172a] p-2">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2 px-1">
         <span className="text-xs font-semibold text-emerald-400">3D Terrain (Terrain Relief)</span>
-        <span className="text-[10px] text-[color:#94a3b8]">
-          {bearing != null ? `Road bearing ${Math.round(bearing)}°` : "No road bearing — aligned to north"}
+        <span className={`text-[10px] ${hasBearing ? "text-[color:#94a3b8]" : "text-amber-300"}`}>
+          {hasBearing ? `Road bearing ${Math.round(bearing!)}°` : "North-aligned terrain relief — road orientation unavailable"}
         </span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Terrain relief surface from sampled USGS elevation grid">
         {quads}
-        {ribbon}
+        {/* Roadway ribbon + LT/RT only when a road bearing was resolved; otherwise
+            the grid is merely north-aligned and left/right of the road is unknown. */}
+        {hasBearing ? ribbon : null}
         {/* incident marker */}
         <circle cx={mx} cy={my} r={4.5} fill={C.marker} stroke="#fff" strokeWidth={1} />
         <text x={mx + 7} y={my - 6} fontSize={9} fill={C.ink}>Incident</text>
-        {/* left/right (cross-road) orientation */}
-        <text x={px(rows - 1, 0)} y={py(rows - 1, 0, elev[rows - 1][0] ?? min) + 16} fontSize={9} fill="#60a5fa" textAnchor="middle">LT (left)</text>
-        <text x={px(rows - 1, cols - 1)} y={py(rows - 1, cols - 1, elev[rows - 1][cols - 1] ?? min) + 16} fontSize={9} fill="#34d399" textAnchor="middle">RT (right)</text>
+        {hasBearing ? (
+          <>
+            <text x={px(rows - 1, 0)} y={py(rows - 1, 0, elev[rows - 1][0] ?? min) + 16} fontSize={9} fill="#60a5fa" textAnchor="middle">LT (left)</text>
+            <text x={px(rows - 1, cols - 1)} y={py(rows - 1, cols - 1, elev[rows - 1][cols - 1] ?? min) + 16} fontSize={9} fill="#34d399" textAnchor="middle">RT (right)</text>
+          </>
+        ) : null}
         {/* legend */}
         <g transform={`translate(${W - 150}, 12)`}>
           <text x={0} y={8} fontSize={8.5} fill={C.text}>Elevation (ft)</text>

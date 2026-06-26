@@ -97,7 +97,9 @@ Material from the high-side cut slope (uphill of the road) has failed and moved 
 Internal template key: `LANDSLIDE_BELOW_ROAD_SLIPOUT` (kept for backward
 compatibility; the user-facing label is always "Landslide Below Road").
 
-**Reference**: V2-SLIPOUTMODEL(1).pdf (source filename retained)
+**Reference**: internal Caltrans Below Road model diagram (the underlying source
+asset keeps its original filename internally; the legacy filename is not product
+terminology).
 
 Fill material supporting the road embankment has failed downhill on the low side. The road shoulder or travel lane hangs over the void left by the displaced material.
 
@@ -114,7 +116,7 @@ Fill material supporting the road embankment has failed downhill on the low side
 
 ## Terrain Side Shapes
 
-The terrain profile controls the shape of the ground surface drawn beside the road. Shapes are approximations — actual elevation data is not yet connected.
+The terrain profile controls the shape of the ground surface drawn beside the road. These named shapes are a coarse summary; the renderers now draw the **actual sampled USGS 3DEP / EPQS elevation** — the 1-D cross-section profile and the 2-D "3D Terrain" relief grid — when available, falling back to these schematic shapes only when no elevation samples exist. See `docs/elevation-profile-enrichment.md`.
 
 | Shape | Left side | Right side | Typical use |
 |---|---|---|---|

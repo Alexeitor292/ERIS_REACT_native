@@ -77,7 +77,9 @@ export function TerrainReliefView({ terrain }: { terrain?: GisaTerrainGrid | nul
       {terrain?.road_bearing_deg_used != null ? (
         <Text style={styles.sub}>Road bearing {Math.round(terrain.road_bearing_deg_used)}°</Text>
       ) : (
-        <Text style={styles.sub}>No bearing — north-aligned</Text>
+        <Text style={[styles.sub, { color: "#fbbf24", maxWidth: "62%", textAlign: "right" }]}>
+          North-aligned terrain relief — road orientation unavailable
+        </Text>
       )}
     </View>
   );
@@ -100,6 +102,7 @@ export function TerrainReliefView({ terrain }: { terrain?: GisaTerrainGrid | nul
   const W = Math.max(1, width);
   const H = Math.round(W * 0.62);
   const { rows, cols, elev, min, max, relief } = view;
+  const hasBearing = terrain.road_bearing_deg_used != null;
 
   const padX = 26;
   const padTop = 18;
@@ -156,11 +159,16 @@ export function TerrainReliefView({ terrain }: { terrain?: GisaTerrainGrid | nul
       {W > 1 ? (
         <Svg width={W} height={H}>
           <G>{quads}</G>
-          <G>{ribbon}</G>
+          {/* Roadway ribbon + LT/RT only when a road bearing was resolved. */}
+          {hasBearing ? <G>{ribbon}</G> : null}
           <Circle cx={mx} cy={my} r={4} fill={C.marker} stroke="#fff" strokeWidth={1} />
           <SvgText x={mx + 6} y={my - 5} fontSize={8} fill={C.ink}>Incident</SvgText>
-          <SvgText x={px(rows - 1, 0)} y={py(rows - 1, 0, elev[rows - 1][0] ?? min) + 13} fontSize={8} fill="#60a5fa" textAnchor="middle">LT</SvgText>
-          <SvgText x={px(rows - 1, cols - 1)} y={py(rows - 1, cols - 1, elev[rows - 1][cols - 1] ?? min) + 13} fontSize={8} fill="#34d399" textAnchor="middle">RT</SvgText>
+          {hasBearing ? (
+            <>
+              <SvgText x={px(rows - 1, 0)} y={py(rows - 1, 0, elev[rows - 1][0] ?? min) + 13} fontSize={8} fill="#60a5fa" textAnchor="middle">LT</SvgText>
+              <SvgText x={px(rows - 1, cols - 1)} y={py(rows - 1, cols - 1, elev[rows - 1][cols - 1] ?? min) + 13} fontSize={8} fill="#34d399" textAnchor="middle">RT</SvgText>
+            </>
+          ) : null}
           <G x={W - 118} y={8}>
             <SvgText x={0} y={7} fontSize={7.5} fill={C.text}>Elev (ft)</SvgText>
             {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (

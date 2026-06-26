@@ -18,9 +18,13 @@ These columns are write-once from the terrain-grid build endpoint and are
 intentionally not touched by the GISA PATCH endpoint. This mirrors the
 elevation_profile_* columns added in 0007.
 
-NOTE: Following the established convention (see 0001_baseline), post-baseline
-schema lives only in migrations; database/init/010_schema.sql is the frozen
-baseline and is intentionally NOT modified here.
+NOTE: ERIS treats database/init/010_schema.sql as the authoritative fresh-install
+schema, so these columns are ALSO declared there. The fresh-install bootstrap is
+init SQL -> `alembic stamp 0001_baseline` -> `alembic upgrade head`, which replays
+this migration over a schema that already has the columns. To keep both the
+fresh-init path and the existing-database upgrade path conflict-free, this
+migration uses ADD COLUMN IF NOT EXISTS / DROP COLUMN IF EXISTS (MariaDB), so it
+is a safe no-op when the columns already exist and still adds them to older DBs.
 """
 
 from alembic import op
@@ -35,10 +39,10 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE submission_gisa
-          ADD COLUMN elevation_terrain_grid_json  JSON         NULL,
-          ADD COLUMN elevation_terrain_source     VARCHAR(64)  NULL,
-          ADD COLUMN elevation_terrain_checked_at DATETIME     NULL,
-          ADD COLUMN elevation_terrain_error      TEXT         NULL
+          ADD COLUMN IF NOT EXISTS elevation_terrain_grid_json  JSON         NULL,
+          ADD COLUMN IF NOT EXISTS elevation_terrain_source     VARCHAR(64)  NULL,
+          ADD COLUMN IF NOT EXISTS elevation_terrain_checked_at DATETIME     NULL,
+          ADD COLUMN IF NOT EXISTS elevation_terrain_error      TEXT         NULL
         """
     )
 
@@ -47,9 +51,9 @@ def downgrade() -> None:
     op.execute(
         """
         ALTER TABLE submission_gisa
-          DROP COLUMN elevation_terrain_grid_json,
-          DROP COLUMN elevation_terrain_source,
-          DROP COLUMN elevation_terrain_checked_at,
-          DROP COLUMN elevation_terrain_error
+          DROP COLUMN IF EXISTS elevation_terrain_grid_json,
+          DROP COLUMN IF EXISTS elevation_terrain_source,
+          DROP COLUMN IF EXISTS elevation_terrain_checked_at,
+          DROP COLUMN IF EXISTS elevation_terrain_error
         """
     )

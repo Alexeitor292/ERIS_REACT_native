@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoginRequest(BaseModel):
@@ -222,8 +222,9 @@ class ElevationProfileRequest(BaseModel):
 
 
 class TerrainGridRequest(BaseModel):
-    """Build a road-aligned 2D USGS terrain elevation grid. Dimensions/spacing
-    are additionally clamped server-side (see services/terrain_grid.py)."""
+    """Build a road-aligned 2D USGS terrain elevation grid. Dimensions must be
+    ODD (so the incident location is an actual center sample) and are
+    additionally clamped/validated server-side (see services/terrain_grid.py)."""
 
     road_bearing_deg: float | None = Field(default=None, ge=0, lt=360)
     rows: int | None = Field(default=None, ge=3, le=15)
@@ -231,6 +232,15 @@ class TerrainGridRequest(BaseModel):
     along_spacing_m: float | None = Field(default=None, ge=5, le=50)
     cross_spacing_m: float | None = Field(default=None, ge=5, le=50)
     force: bool | None = None
+
+    @field_validator("rows", "columns")
+    @classmethod
+    def _must_be_odd(cls, v: int | None) -> int | None:
+        if v is not None and v % 2 == 0:
+            raise ValueError(
+                "must be an odd number between 3 and 15 so the incident location is a center sample"
+            )
+        return v
 
 
 # ---------------------------------------------------------------------------
