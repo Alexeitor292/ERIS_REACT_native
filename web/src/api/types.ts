@@ -107,6 +107,7 @@ export type GisaTerrainGrid = {
     extent_cross_m?: number;
     sample_count?: number;
     valid_sample_count?: number;
+    partial?: boolean;
     points: TerrainGridPoint[];
   } | null;
   error: string | null;

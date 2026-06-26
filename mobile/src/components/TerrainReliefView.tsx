@@ -103,6 +103,10 @@ export function TerrainReliefView({ terrain }: { terrain?: GisaTerrainGrid | nul
   const H = Math.round(W * 0.62);
   const { rows, cols, elev, min, max, relief } = view;
   const hasBearing = terrain.road_bearing_deg_used != null;
+  // Partial coverage: the mesh is real but some USGS samples were unavailable or
+  // exceeded the build time budget. Keep the mesh visible and say so plainly.
+  const sampleCount = grid.sample_count ?? grid.rows * grid.columns;
+  const isPartial = valid > 0 && !!terrain.error;
 
   const padX = 26;
   const padTop = 18;
@@ -156,6 +160,16 @@ export function TerrainReliefView({ terrain }: { terrain?: GisaTerrainGrid | nul
   return (
     <View style={styles.wrapper} onLayout={onLayout}>
       {header}
+      {isPartial ? (
+        <View style={styles.partialBox}>
+          <Text style={styles.partialText}>
+            <Text style={styles.partialBold}>Partial terrain coverage. </Text>
+            Some USGS samples were unavailable or exceeded the time budget — {valid} of{" "}
+            {sampleCount} grid points returned elevation. The mesh shows only real samples;
+            missing cells are intentionally left blank (not interpolated or invented).
+          </Text>
+        </View>
+      ) : null}
       {W > 1 ? (
         <Svg width={W} height={H}>
           <G>{quads}</G>
@@ -199,6 +213,18 @@ const styles = StyleSheet.create({
   sub: { fontSize: 8.5, color: C.text },
   emptyBox: { paddingHorizontal: 12, paddingVertical: 18, alignItems: "center" },
   emptyText: { fontSize: 10, color: C.text, textAlign: "center" },
+  partialBox: {
+    marginHorizontal: 8,
+    marginBottom: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(245,158,11,0.4)",
+    backgroundColor: "rgba(245,158,11,0.12)",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  partialText: { fontSize: 9, color: "#fcd34d", lineHeight: 13 },
+  partialBold: { fontWeight: "700", color: "#fde68a" },
   metaGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8, paddingTop: 4, gap: 2 },
   meta: { fontSize: 9, color: C.text, width: "50%" },
   metaVal: { color: C.ink },

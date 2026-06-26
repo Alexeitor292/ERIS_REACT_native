@@ -2688,15 +2688,20 @@ def build_gisa_terrain_grid(
         float(lat), float(lon), dict(row), payload.road_bearing_deg
     )
 
-    result = terrain_grid_svc.fetch_terrain_grid(
-        lat=float(lat),
-        lon=float(lon),
-        road_bearing_deg=resolved_bearing,
-        rows=int(payload.rows) if payload.rows is not None else terrain_grid_svc.DEFAULT_ROWS,
-        cols=int(payload.columns) if payload.columns is not None else terrain_grid_svc.DEFAULT_COLS,
-        along_spacing_m=float(payload.along_spacing_m) if payload.along_spacing_m is not None else terrain_grid_svc.DEFAULT_ALONG_SPACING_M,
-        cross_spacing_m=float(payload.cross_spacing_m) if payload.cross_spacing_m is not None else terrain_grid_svc.DEFAULT_CROSS_SPACING_M,
-    )
+    try:
+        result = terrain_grid_svc.fetch_terrain_grid(
+            lat=float(lat),
+            lon=float(lon),
+            road_bearing_deg=resolved_bearing,
+            rows=int(payload.rows) if payload.rows is not None else terrain_grid_svc.DEFAULT_ROWS,
+            cols=int(payload.columns) if payload.columns is not None else terrain_grid_svc.DEFAULT_COLS,
+            along_spacing_m=float(payload.along_spacing_m) if payload.along_spacing_m is not None else terrain_grid_svc.DEFAULT_ALONG_SPACING_M,
+            cross_spacing_m=float(payload.cross_spacing_m) if payload.cross_spacing_m is not None else terrain_grid_svc.DEFAULT_CROSS_SPACING_M,
+        )
+    except terrain_grid_svc.TerrainBuildBusyError as busy:
+        # Another terrain build is already sampling USGS EPQS process-wide. Fail
+        # fast with a controlled 503 rather than waiting behind it.
+        raise HTTPException(status_code=503, detail=str(busy))
     result["road_bearing_source"] = bearing_source
 
     grid_json_str = json.dumps(result)

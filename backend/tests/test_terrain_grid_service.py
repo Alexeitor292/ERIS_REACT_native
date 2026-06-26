@@ -77,6 +77,53 @@ class TestTimeBudget:
         assert res["error"] is not None
 
 
+class TestGlobalConcurrencyGuard:
+    def test_busy_raises_when_guard_held(self):
+        # Simulate an in-flight build by holding the process-wide guard, then a
+        # second build must fail fast (not block, not exceed the worker cap).
+        assert tg._BUILD_SEMAPHORE.acquire(blocking=False)
+        try:
+            with patch.object(tg, "_fetch_elevation_ft", return_value=10.0):
+                with pytest.raises(tg.TerrainBuildBusyError):
+                    tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+        finally:
+            tg._BUILD_SEMAPHORE.release()
+
+    def test_guard_released_after_success(self):
+        with patch.object(tg, "_fetch_elevation_ft", return_value=10.0):
+            tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+        # The guard is free again — a fresh non-blocking acquire succeeds.
+        assert tg._BUILD_SEMAPHORE.acquire(blocking=False)
+        tg._BUILD_SEMAPHORE.release()
+
+    def test_guard_released_after_internal_failure(self, monkeypatch):
+        # Force the build to blow up inside the executor block; the finally must
+        # still release the process-wide guard so the backend is not wedged.
+        def boom(*args, **kwargs):
+            raise RuntimeError("scheduler exploded")
+
+        monkeypatch.setattr(tg, "as_completed", boom)
+        with patch.object(tg, "_fetch_elevation_ft", return_value=10.0):
+            res = tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+        assert res["error"] is not None  # the failure was reported, not swallowed
+        # ...and crucially the guard was released despite the error.
+        assert tg._BUILD_SEMAPHORE.acquire(blocking=False)
+        tg._BUILD_SEMAPHORE.release()
+
+    def test_guard_released_after_timeout(self, monkeypatch):
+        # A time-budget timeout must also release the guard in finally.
+        monkeypatch.setattr(tg, "TOTAL_BUILD_BUDGET_S", 0.3)
+
+        def hang(lat, lon):
+            time.sleep(2.0)
+            return 100.0
+
+        with patch.object(tg, "_fetch_elevation_ft", side_effect=hang):
+            tg.fetch_terrain_grid(37.0, -122.0, road_bearing_deg=0.0, rows=3, cols=3)
+        assert tg._BUILD_SEMAPHORE.acquire(blocking=False)
+        tg._BUILD_SEMAPHORE.release()
+
+
 class TestBuildGridPoints:
     def test_size_and_indices(self):
         pts = tg.build_grid_points(37.0, -122.0, 90.0, rows=11, cols=11, along_spacing_m=20.0, cross_spacing_m=20.0)

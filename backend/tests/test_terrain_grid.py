@@ -241,6 +241,28 @@ class TestTerrainGrid:
         finally:
             _cleanup(incident_id)
 
+    def test_busy_returns_503(self, client_db, admin_token):
+        """A second simultaneous build (process-wide guard held) gets a controlled
+        503 — not a multi-second wait behind the in-flight build."""
+        from unittest.mock import patch
+        from app.services.terrain_grid import TerrainBuildBusyError
+
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            busy = TerrainBuildBusyError(
+                "Terrain sampling is already in progress. Please try again shortly."
+            )
+            with patch(_PATCH_TARGET, side_effect=busy):
+                resp = client_db.post(
+                    f"/submissions/{sub_id}/gisa/terrain-grid",
+                    json={"road_bearing_deg": 90.0, "force": True},
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                )
+            assert resp.status_code == 503, resp.text
+            assert "already in progress" in resp.text.lower()
+        finally:
+            _cleanup(incident_id)
+
     def test_permission_denied_for_non_editor(self, client_db, admin_token):
         """A user who is not owner/editor/admin cannot build the terrain grid (403),
         matching existing submission edit access rules."""

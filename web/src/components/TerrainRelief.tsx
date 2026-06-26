@@ -159,6 +159,10 @@ export function TerrainRelief({ terrain }: { terrain: GisaTerrainGrid | null | u
   const checked = terrain.checked_at ? terrain.checked_at.slice(0, 16).replace("T", " ") : "—";
   const extentAlong = grid.extent_along_m ?? grid.along_road_spacing_m * (rows - 1);
   const extentCross = grid.extent_cross_m ?? grid.cross_road_spacing_m * (cols - 1);
+  // Partial coverage: the mesh is real but some USGS samples were unavailable or
+  // exceeded the build time budget. Keep the mesh visible and say so plainly.
+  const sampleCount = grid.sample_count ?? grid.rows * grid.columns;
+  const isPartial = valid > 0 && !!terrain.error;
 
   return (
     <div className="rounded border border-[var(--line)] bg-[#0f172a] p-2">
@@ -168,6 +172,14 @@ export function TerrainRelief({ terrain }: { terrain: GisaTerrainGrid | null | u
           {hasBearing ? `Road bearing ${Math.round(bearing!)}°` : "North-aligned terrain relief — road orientation unavailable"}
         </span>
       </div>
+      {isPartial ? (
+        <div className="mx-1 mb-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+          <span className="font-semibold">Partial terrain coverage.</span> Some USGS
+          samples were unavailable or exceeded the time budget — {valid} of {sampleCount} grid
+          points returned elevation. The mesh below shows only real samples; missing cells are
+          intentionally left blank (not interpolated or invented).
+        </div>
+      ) : null}
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Terrain relief surface from sampled USGS elevation grid">
         {quads}
         {/* Roadway ribbon + LT/RT only when a road bearing was resolved; otherwise

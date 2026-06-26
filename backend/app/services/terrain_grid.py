@@ -26,6 +26,7 @@ resolve are returned with elevation_ft = null.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -34,6 +35,13 @@ from datetime import datetime
 from .elevation_profile import EPQS_SOURCE, _fetch_elevation_ft, _offset_point
 
 logger = logging.getLogger("eris.terrain")
+
+
+class TerrainBuildBusyError(RuntimeError):
+    """Raised when another terrain-grid build is already in progress process-wide.
+
+    The endpoint maps this to HTTP 503 so a (forced) rebuild fails fast instead of
+    queuing behind an in-flight build for up to the whole time budget."""
 
 # Server-side limits.
 DEFAULT_ROWS = 11
@@ -49,6 +57,14 @@ _MAX_WORKERS = 6      # bounded concurrency against USGS EPQS
 # the request hanging for minutes — when the budget is hit we stop waiting and
 # return whatever valid points we have (partial terrain), never fabricating data.
 TOTAL_BUILD_BUDGET_S = 25.0
+
+# Process-wide guard. Each build already caps USGS EPQS at _MAX_WORKERS concurrent
+# requests, but several simultaneous (forced) rebuilds would multiply that. A
+# binary semaphore lets only ONE build run at a time across the whole backend, so
+# total live EPQS requests never exceed the per-build _MAX_WORKERS maximum. It is
+# acquired non-blocking: a second concurrent build fails fast (TerrainBuildBusyError
+# -> HTTP 503) rather than waiting up to TOTAL_BUILD_BUDGET_S behind the first.
+_BUILD_SEMAPHORE = threading.BoundedSemaphore(1)
 
 
 def _clamp_int(value: int, lo: int, hi: int) -> int:
@@ -152,38 +168,49 @@ def fetch_terrain_grid(
     valid = 0
     timed_out = False
     sample_count = rows * cols
-    # Bounded concurrency + an overall time budget. We submit all points, then
-    # collect results until either everything is done or the budget elapses; on
-    # timeout we stop waiting and keep the partial (real) data we already have.
-    executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
+
+    # Acquire the process-wide build guard BEFORE submitting any USGS work. Fail
+    # fast if another build holds it — do not wait behind it.
+    if not _BUILD_SEMAPHORE.acquire(blocking=False):
+        raise TerrainBuildBusyError(
+            "Terrain sampling is already in progress. Please try again shortly."
+        )
     try:
-        future_to_idx = {
-            executor.submit(_fetch_elevation_ft, p["lat"], p["lon"]): i
-            for i, p in enumerate(points)
-        }
+        # Bounded concurrency + an overall time budget. We submit all points, then
+        # collect results until either everything is done or the budget elapses; on
+        # timeout we stop waiting and keep the partial (real) data we already have.
+        executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
         try:
-            for fut in as_completed(future_to_idx, timeout=TOTAL_BUILD_BUDGET_S):
-                idx = future_to_idx[fut]
-                try:
-                    elev = fut.result()
-                except Exception:
-                    elev = None
-                if elev is not None:
-                    points[idx]["elevation_ft"] = round(elev, 2)
-                    valid += 1
-        except FuturesTimeoutError:
-            timed_out = True
-            logger.warning(
-                "Terrain grid time budget (%.0fs) exceeded lat=%.6f lon=%.6f; returning %d/%d points",
-                TOTAL_BUILD_BUDGET_S, lat, lon, valid, sample_count,
-            )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Terrain grid failed lat=%.6f lon=%.6f: %s", lat, lon, exc)
-        error = str(exc)
+            future_to_idx = {
+                executor.submit(_fetch_elevation_ft, p["lat"], p["lon"]): i
+                for i, p in enumerate(points)
+            }
+            try:
+                for fut in as_completed(future_to_idx, timeout=TOTAL_BUILD_BUDGET_S):
+                    idx = future_to_idx[fut]
+                    try:
+                        elev = fut.result()
+                    except Exception:
+                        elev = None
+                    if elev is not None:
+                        points[idx]["elevation_ft"] = round(elev, 2)
+                        valid += 1
+            except FuturesTimeoutError:
+                timed_out = True
+                logger.warning(
+                    "Terrain grid time budget (%.0fs) exceeded lat=%.6f lon=%.6f; returning %d/%d points",
+                    TOTAL_BUILD_BUDGET_S, lat, lon, valid, sample_count,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Terrain grid failed lat=%.6f lon=%.6f: %s", lat, lon, exc)
+            error = str(exc)
+        finally:
+            # Do not block on stragglers; cancel queued work and let any in-flight
+            # requests finish in the background.
+            executor.shutdown(wait=False, cancel_futures=True)
     finally:
-        # Do not block on stragglers; cancel queued work and let any in-flight
-        # requests finish in the background.
-        executor.shutdown(wait=False, cancel_futures=True)
+        # Always release the process-wide guard — on success, error, or timeout.
+        _BUILD_SEMAPHORE.release()
 
     if error is None:
         if valid == 0:
