@@ -1,5 +1,12 @@
 # Workflows (As Implemented / Target)
 
+> **Updated:** The incident-to-technical-work flow is now modeled as an
+> **Assessment** (the official product concept). The "GISA submission" described
+> below is the legacy *implementation* of the Assessment technical form and is
+> kept for backward compatibility. For the current workflow, role/permission
+> matrix, District→GeoTech Office routing, and assessment-level review
+> assignments, see [assessment-routing-authority-model.md](assessment-routing-authority-model.md).
+
 ## Submission Workflow
 
 Status progression (submission record):
