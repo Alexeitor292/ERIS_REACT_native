@@ -26,6 +26,7 @@ import {
   isElementFullscreen,
   isValidIncidentLocation,
   overlayAvailability,
+  sceneAnchorKey,
   sceneContainerClass,
   supportsFullscreenApi,
   terrainSceneErrorMessage,
@@ -86,10 +87,15 @@ export default function InteractiveTerrainScene({
   const [warning, setWarning] = useState<ServiceWarning>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const vp = useMemo(() => initialViewpointFor(location), [location]);
+  // Derive STABLE coordinate primitives so a new inline `location` object on each
+  // parent render does not recreate the SceneView (which would reset the camera).
+  const lat = location?.latitude ?? null;
+  const lon = location?.longitude ?? null;
+  const anchorKey = sceneAnchorKey(location); // same value for equal coords
+  const vp = useMemo(() => initialViewpointFor({ latitude: lat, longitude: lon }), [lat, lon]);
   const available = useMemo(
-    () => overlayAvailability({ location, terrain, geometryJson }),
-    [location, terrain, geometryJson],
+    () => overlayAvailability({ location: { latitude: lat, longitude: lon }, terrain, geometryJson }),
+    [lat, lon, terrain, geometryJson],
   );
 
   const [toggles, setToggles] = useState<OverlayToggles>({
@@ -126,7 +132,8 @@ export default function InteractiveTerrainScene({
 
     esriConfig.assetsPath = "/assets";
     // Browser-safe, domain-restricted ArcGIS key (never the backend server key).
-    const envApiKey = (import.meta as { env?: Record<string, string> }).env?.VITE_ARCGIS_API_KEY;
+    // Direct `import.meta.env.VITE_*` access so Vite statically inlines it at build.
+    const envApiKey = import.meta.env.VITE_ARCGIS_API_KEY;
     if (envApiKey) esriConfig.apiKey = String(envApiKey);
 
     setStatus("loading");
@@ -194,9 +201,11 @@ export default function InteractiveTerrainScene({
       elevHealthRef.current = OK_HEALTH;
       view.destroy();
     };
-    // Recreated per incident anchor and on retry; basemap/overlays handled below.
+    // Recreated ONLY when the incident coordinates change (anchorKey) or on Retry
+    // (reloadKey) — not when the parent passes a new inline location object.
+    // basemap/overlay/toggle changes are handled by the live effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vp, reloadKey]);
+  }, [anchorKey, reloadKey]);
 
   const retry = useCallback(() => {
     setErrorKind("unknown");
@@ -250,7 +259,7 @@ export default function InteractiveTerrainScene({
     if (!overlay) return;
     overlay.removeAll();
 
-    const validLoc = isValidIncidentLocation(location);
+    const validLoc = isValidIncidentLocation({ latitude: lat, longitude: lon });
 
     if (toggles.terrainExtent && available.terrainExtent) {
       const ring = gridBoundingRing(terrain?.grid?.points ?? null);
@@ -271,7 +280,7 @@ export default function InteractiveTerrainScene({
 
     if (toggles.roadBearing && available.roadBearing && validLoc) {
       const bearing = terrain?.road_bearing_deg_used as number;
-      const [a, b] = bearingLineEndpoints(location!.latitude as number, location!.longitude as number, bearing, 130);
+      const [a, b] = bearingLineEndpoints(lat as number, lon as number, bearing, 130);
       overlay.add(
         new Graphic({
           geometry: new Polyline({ paths: [[a, b]], spatialReference: WGS84 }),
@@ -289,8 +298,8 @@ export default function InteractiveTerrainScene({
       overlay.add(
         new Graphic({
           geometry: new Point({
-            longitude: location!.longitude as number,
-            latitude: location!.latitude as number,
+            longitude: lon as number,
+            latitude: lat as number,
             spatialReference: WGS84,
           }),
           symbol: {
@@ -304,7 +313,7 @@ export default function InteractiveTerrainScene({
         }),
       );
     }
-  }, [toggles, available, location, terrain, geometryJson]);
+  }, [toggles, available, lat, lon, terrain, geometryJson]);
 
   // ---- Fullscreen (real Fullscreen API + CSS fallback) -----------------------
   const toggleFullscreen = useCallback(async () => {
@@ -385,13 +394,7 @@ export default function InteractiveTerrainScene({
     );
   }
 
-  const summary = incidentSummaryLine({
-    route,
-    postMile,
-    county,
-    latitude: location?.latitude ?? null,
-    longitude: location?.longitude ?? null,
-  });
+  const summary = incidentSummaryLine({ route, postMile, county, latitude: lat, longitude: lon });
 
   const fsHeightStyle = fullscreen ? (nativeFs ? { height: "100vh" } : undefined) : { height };
 

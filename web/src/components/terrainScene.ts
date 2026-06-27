@@ -52,6 +52,18 @@ export function isValidIncidentLocation(
   );
 }
 
+/**
+ * Stable string key for the scene's camera anchor, derived purely from the
+ * incident coordinates. Two DISTINCT location objects with equal lat/lon yield
+ * the SAME key — so the SceneView is recreated only when the coordinates
+ * actually change, never on a parent re-render that merely passes a new object
+ * instance. Returns null for invalid coordinates.
+ */
+export function sceneAnchorKey(loc: IncidentLocation | null | undefined): string | null {
+  if (!isValidIncidentLocation(loc)) return null;
+  return `${loc.latitude},${loc.longitude}`;
+}
+
 export type InitialViewpoint = {
   target: [number, number]; // [lon, lat]
   tilt: number;

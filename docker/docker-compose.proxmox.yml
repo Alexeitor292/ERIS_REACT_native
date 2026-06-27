@@ -51,6 +51,9 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}
         VITE_API_BASE: ${VITE_API_BASE}
+        # Browser-safe, domain-restricted ArcGIS key — build-time only, never a
+        # backend secret. Empty unless set in docker/.env.proxmox.
+        VITE_ARCGIS_API_KEY: ${VITE_ARCGIS_API_KEY:-}
     container_name: eris_web
     restart: unless-stopped
     ports:

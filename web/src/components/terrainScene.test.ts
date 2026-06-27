@@ -24,6 +24,7 @@ import {
   isValidIncidentLocation,
   nextFullscreen,
   overlayAvailability,
+  sceneAnchorKey,
   sceneContainerClass,
   supportsFullscreenApi,
   terrainSceneErrorMessage,
@@ -47,6 +48,22 @@ test("missing / invalid incident coordinates are handled safely (no camera fly-t
   assert.equal(initialViewpointFor({ latitude: 200, longitude: -121 }), null, "out-of-range rejected");
   assert.equal(initialViewpointFor({ latitude: NaN, longitude: -121 }), null);
   assert.equal(isValidIncidentLocation({ latitude: 38.5, longitude: -121.5 }), true);
+});
+
+test("scene anchor key is stable across separate object instances with equal coords", () => {
+  const a = { latitude: 38.5816, longitude: -121.4944 };
+  const b = { latitude: 38.5816, longitude: -121.4944 }; // distinct object, same values
+  assert.notStrictEqual(a, b, "must be different object instances");
+  // Equal coordinates -> identical anchor key (so the SceneView is NOT recreated).
+  assert.equal(sceneAnchorKey(a), sceneAnchorKey(b));
+  assert.deepEqual(initialViewpointFor(a), initialViewpointFor(b));
+  // Changing a coordinate changes the key (SceneView SHOULD recreate).
+  assert.notEqual(sceneAnchorKey(a), sceneAnchorKey({ latitude: 38.6, longitude: -121.4944 }));
+  assert.notEqual(sceneAnchorKey(a), sceneAnchorKey({ latitude: 38.5816, longitude: -121.5 }));
+  // Invalid coordinates -> null (safe empty state, no anchor).
+  assert.equal(sceneAnchorKey(null), null);
+  assert.equal(sceneAnchorKey({ latitude: 0, longitude: 0 }), null);
+  assert.equal(sceneAnchorKey({ latitude: null, longitude: -121.5 }), null);
 });
 
 test("imagery/terrain mode toggle maps to truthful Esri basemaps", () => {

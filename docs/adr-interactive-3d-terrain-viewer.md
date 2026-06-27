@@ -147,3 +147,31 @@ bearing. No left/right labels are drawn unless a bearing is known. No geometry i
    3D Terrain view, and scrolls it into view. **No access token is ever placed in the URL** —
    the browser uses its own ERIS WebUI session and **may require a separate login** unless a
    secure SSO/session handoff exists (documented in-app and here).
+
+## Addendum — deployment wiring & camera stability (2026-06-26)
+
+**ArcGIS key Docker wiring (actual, not just documented).**
+- `web/Dockerfile`: `ARG VITE_ARCGIS_API_KEY=""` + `ENV VITE_ARCGIS_API_KEY=$VITE_ARCGIS_API_KEY`
+  before `RUN ... npm run build` (also raised the build heap with
+  `NODE_OPTIONS=--max-old-space-size=4096`, since the SceneView bundle OOM'd the container's
+  default Node heap).
+- `docker/docker-compose.proxmox.yml`: `services.web.build.args` now includes
+  `VITE_ARCGIS_API_KEY: ${VITE_ARCGIS_API_KEY:-}`.
+- `docker/.env.proxmox.example` documents that the ERIS server's `docker/.env.proxmox` must set
+  `VITE_ARCGIS_API_KEY=<restricted browser key>`.
+- It is **not** added to the backend service's `environment:` block and the component reads it
+  only via `import.meta.env.VITE_ARCGIS_API_KEY`. (Because the backend service shares
+  `env_file: .env.proxmox`, the browser key is visible in the backend's runtime env the same
+  way `VITE_API_BASE_URL` already is — inert and not a secret; the backend reads `ARCGIS_API_KEY`,
+  a different, untouched variable.)
+- Verified end-to-end: with a harmless probe value, `docker compose build web` embeds the value
+  into the served SceneView chunk (no real key printed or committed). `import.meta.env.VITE_*`
+  is accessed directly so Vite statically inlines it at build time.
+
+**SceneView no longer recreated on every parent render.** `SubmissionDetailPage` passes a new
+inline `location` object each render; the component now derives stable `lat`/`lon` primitives and
+a `sceneAnchorKey`, and the view-creation effect depends on `[anchorKey, reloadKey]` — so the
+SceneView (and the user's camera) is recreated **only** when the incident latitude/longitude
+changes or Retry is pressed. Terrain/geometry/toggle overlays still update live (separate effect
+keyed on the stable primitives). `sceneAnchorKey` has a unit test proving equal coordinates in
+separate object instances yield the same anchor.
