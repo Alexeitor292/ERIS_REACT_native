@@ -82,6 +82,70 @@ export function partPathFor(finalPath: string): string {
   return `${finalPath}.part`;
 }
 
+// ---- Durable download state machine (pure) --------------------------------
+
+export type ReconcileContext = {
+  finalExists: boolean; // verified .mspk on disk
+  partExists: boolean; // temporary .part on disk
+  hasResumeData: boolean; // a usable persisted resumable snapshot
+  hasActiveTask: boolean; // an in-memory download task exists THIS session
+};
+
+/**
+ * Reconcile one persisted record against on-disk reality (run on app startup and
+ * when the panel loads). Recovers records left mid-flight by a crash/OS kill:
+ *  - READY needs its final file, else FAILED;
+ *  - DOWNLOADING with no live task -> PAUSED if it can resume, else FAILED;
+ *  - PAUSED that can't resume -> FAILED.
+ */
+export function reconcileRecord(
+  status: OfflineSceneStatus,
+  ctx: ReconcileContext,
+): { status: OfflineSceneStatus; error: string | null } {
+  switch (status) {
+    case "READY":
+      return ctx.finalExists
+        ? { status: "READY", error: null }
+        : { status: "FAILED", error: "Downloaded package file is missing; re-download required." };
+    case "DOWNLOADING":
+      if (ctx.hasActiveTask) return { status: "DOWNLOADING", error: null };
+      if (ctx.partExists && ctx.hasResumeData) return { status: "PAUSED", error: null };
+      return { status: "FAILED", error: "Download interrupted; retry required." };
+    case "PAUSED":
+      if (ctx.partExists && ctx.hasResumeData) return { status: "PAUSED", error: null };
+      return { status: "FAILED", error: "Download cannot be resumed; retry required." };
+    default:
+      return { status, error: null }; // PENDING / FAILED unchanged
+  }
+}
+
+/**
+ * Only the worker whose generation matches the record's current generation may
+ * promote READY / mark FAILED / delete the .part. A paused or superseded worker
+ * (older generation) must do nothing — this guarantees a single authoritative
+ * completion path per download generation.
+ */
+export function shouldApplyWorkerResult(currentGen: number, workerGen: number): boolean {
+  return currentGen === workerGen;
+}
+
+/** Whether a record can be resumed in place, or must restart from scratch. */
+export function resumeDecision(
+  meta: Pick<OfflineScenePackageMeta, "resumeSnapshot">,
+  partExists: boolean,
+): "resume" | "restart" {
+  const snap = meta.resumeSnapshot as { url?: string; fileUri?: string } | null;
+  return partExists && !!snap && !!snap.url && !!snap.fileUri ? "resume" : "restart";
+}
+
+/** Files to remove when deleting a package (final + temporary). */
+export function cleanupTargets(finalPath: string | null, partPath: string | null): string[] {
+  const out: string[] = [];
+  if (finalPath) out.push(finalPath);
+  if (partPath && partPath !== finalPath) out.push(partPath);
+  return out;
+}
+
 export function sizeMatches(expected: number, actual: number): boolean {
   return Number.isFinite(expected) && Number.isFinite(actual) && expected > 0 && expected === actual;
 }

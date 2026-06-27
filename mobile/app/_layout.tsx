@@ -13,6 +13,7 @@ import AnimatedSplash from "@/src/ui/AnimatedSplash";
 import { UiSettingsProvider, useUiSettings } from "@/src/ui/UiSettingsContext";
 import { startOfflineSyncLoop, stopOfflineSyncLoop } from "@/src/offline/syncLoop";
 import { syncArcgisRuntimeConfig } from "@/src/offline/arcgisRuntimeConfig";
+import { reconcileAllPackages } from "@/src/offline/offlineScenePackages";
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -115,6 +116,8 @@ export default function RootLayout() {
 
   useEffect(() => {
     startOfflineSyncLoop(12000);
+    // Recover any offline 3D packages left mid-download by a crash/OS kill.
+    reconcileAllPackages().catch(() => {});
     return () => {
       stopOfflineSyncLoop();
     };

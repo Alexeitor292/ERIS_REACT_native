@@ -590,6 +590,10 @@ CREATE TABLE IF NOT EXISTS offline_scene_packages (
     object_key VARCHAR(512) NOT NULL,
     sha256 CHAR(64) NOT NULL,
     size_bytes BIGINT NOT NULL,
+    -- Durable object identity (immutable MinIO version id + etag) to detect any
+    -- replacement of the object behind a registered package.
+    object_version_id VARCHAR(128) NULL,
+    object_etag VARCHAR(128) NULL,
     -- Bounded incident area (never statewide).
     min_lat DOUBLE NOT NULL,
     min_lon DOUBLE NOT NULL,

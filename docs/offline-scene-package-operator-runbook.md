@@ -12,8 +12,9 @@ field download + airplane-mode test → retire/replace**.
 
 ## 0. One-time: create the private MinIO bucket
 
-The packages live in a **private** bucket `eris-offline-scenes` (never anonymous,
-never the uploads bucket). Run once per environment:
+The packages live in a **private, versioned, object-locked** bucket
+`eris-offline-scenes` (never anonymous, never the uploads bucket). Run once per
+environment:
 
 ```sh
 MINIO_ENDPOINT=http://<minio-host>:9800 \
@@ -21,9 +22,14 @@ MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-pass> \
 sh docker/scripts/create-offline-scenes-bucket.sh
 ```
 
-The ERIS backend reads it with the existing MinIO credentials; mobile never gets
-those credentials. Confirm `mc anonymous get erisminio/eris-offline-scenes` prints
-`none`.
+The script is **fail-closed**: it creates the bucket **`mc mb --with-lock`** (object
+lock ⇒ versioning ⇒ append-only immutability) and exits **nonzero** unless it can
+confirm anonymous access is `none` **and** versioning is `Enabled`. **Object lock
+can only be enabled at creation** — if a non-locked `eris-offline-scenes` already
+exists, the script rejects it and you must recreate it. The ERIS backend reads the
+bucket with the existing MinIO credentials (mobile never gets them) and will
+**refuse** to register a package if the bucket is missing (it never auto-creates an
+unprovisioned bucket).
 
 ---
 

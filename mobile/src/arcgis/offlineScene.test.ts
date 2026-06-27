@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  cleanupTargets,
   describeScope,
   formatBytes,
   formatPackageAge,
@@ -12,7 +13,10 @@ import {
   metaFromDescriptor,
   needsRefresh,
   partPathFor,
+  reconcileRecord,
+  resumeDecision,
   shaMatches,
+  shouldApplyWorkerResult,
   sizeMatches,
   summarizeStorage,
   type OfflineScenePackageMeta,
@@ -128,4 +132,66 @@ test("integrity helpers: part path, size + sha matching", () => {
   assert.equal(shaMatches("ABCdef", "abcdef"), true); // case-insensitive
   assert.equal(shaMatches("abc", "abd"), false);
   assert.equal(shaMatches(null, "abc"), false);
+});
+
+test("state machine: app restart during DOWNLOADING reconciles safely", () => {
+  // No in-memory task after restart, no resume data, no .part -> FAILED retry.
+  assert.deepEqual(
+    reconcileRecord("DOWNLOADING", { finalExists: false, partExists: false, hasResumeData: false, hasActiveTask: false }),
+    { status: "FAILED", error: "Download interrupted; retry required." },
+  );
+  // Crash mid-download but a .part + persisted resume data exist -> PAUSED (Resume).
+  assert.deepEqual(
+    reconcileRecord("DOWNLOADING", { finalExists: false, partExists: true, hasResumeData: true, hasActiveTask: false }),
+    { status: "PAUSED", error: null },
+  );
+  // Still actively downloading this session -> stays DOWNLOADING.
+  assert.deepEqual(
+    reconcileRecord("DOWNLOADING", { finalExists: false, partExists: true, hasResumeData: true, hasActiveTask: true }),
+    { status: "DOWNLOADING", error: null },
+  );
+});
+
+test("state machine: explicit Pause yields a resumable PAUSED record", () => {
+  // After Pause the record is PAUSED with .part + resume data; reconcile keeps it PAUSED.
+  assert.deepEqual(
+    reconcileRecord("PAUSED", { finalExists: false, partExists: true, hasResumeData: true, hasActiveTask: false }),
+    { status: "PAUSED", error: null },
+  );
+  // PAUSED that can no longer resume -> FAILED retry.
+  assert.deepEqual(
+    reconcileRecord("PAUSED", { finalExists: false, partExists: false, hasResumeData: false, hasActiveTask: false }),
+    { status: "FAILED", error: "Download cannot be resumed; retry required." },
+  );
+});
+
+test("state machine: READY without its file fails to a clear recovery state", () => {
+  assert.deepEqual(
+    reconcileRecord("READY", { finalExists: true, partExists: false, hasResumeData: false, hasActiveTask: false }),
+    { status: "READY", error: null },
+  );
+  assert.deepEqual(
+    reconcileRecord("READY", { finalExists: false, partExists: false, hasResumeData: false, hasActiveTask: false }),
+    { status: "FAILED", error: "Downloaded package file is missing; re-download required." },
+  );
+});
+
+test("resume-after-restart decision: resume vs restart (expired grant)", () => {
+  const withSnap = { resumeSnapshot: { url: "https://x/y?sig=1", fileUri: "file:///p.part" } } as OfflineScenePackageMeta;
+  assert.equal(resumeDecision(withSnap, true), "resume"); // usable state + .part
+  assert.equal(resumeDecision(withSnap, false), "restart"); // .part gone
+  // No usable snapshot (e.g. expired/cleared) -> restart from a fresh grant.
+  assert.equal(resumeDecision({ resumeSnapshot: null } as OfflineScenePackageMeta, true), "restart");
+});
+
+test("delete while PAUSED removes both final and .part", () => {
+  assert.deepEqual(cleanupTargets("/p/7.mspk", "/p/7.mspk.part"), ["/p/7.mspk", "/p/7.mspk.part"]);
+  assert.deepEqual(cleanupTargets("/p/7.mspk", null), ["/p/7.mspk"]);
+  assert.deepEqual(cleanupTargets(null, "/p/7.mspk.part"), ["/p/7.mspk.part"]);
+});
+
+test("single authoritative completion path: only current generation applies", () => {
+  assert.equal(shouldApplyWorkerResult(3, 3), true); // current worker
+  assert.equal(shouldApplyWorkerResult(4, 3), false); // superseded by Pause/Delete/new start
+  assert.equal(shouldApplyWorkerResult(3, 2), false); // older generation never promotes/fails
 });

@@ -162,14 +162,28 @@ def put_object_bytes(*, object_key: str, data: bytes, content_type: str, bucket:
         raise RuntimeError(f"MinIO put_object failed bucket={bucket_name} key={object_key}: {e}") from e
 
 
+def bucket_exists(bucket: str) -> bool:
+    """True if the bucket exists. Raises RuntimeError if MinIO is unreachable."""
+    client = _client()
+    try:
+        return bool(client.bucket_exists(bucket))
+    except S3Error as e:
+        raise RuntimeError(f"MinIO bucket_exists failed for bucket={bucket}: {e}") from e
+
+
 def stat_object(*, object_key: str, bucket: str | None = None) -> dict | None:
-    """HEAD an object. Returns {"size": int, "etag": str} or None when it does not
-    exist. Raises RuntimeError only on non-NoSuchKey MinIO errors."""
+    """HEAD an object. Returns {"size", "etag", "version_id"} (version_id may be
+    None when the bucket is unversioned) or None when the object does not exist.
+    Raises RuntimeError only on non-NoSuchKey MinIO errors."""
     bucket_name = bucket or settings.MINIO_BUCKET
     client = _client()
     try:
         st = client.stat_object(bucket_name, object_key)
-        return {"size": int(st.size), "etag": str(st.etag).strip('"')}
+        return {
+            "size": int(st.size),
+            "etag": str(st.etag).strip('"'),
+            "version_id": getattr(st, "version_id", None),
+        }
     except S3Error as e:
         if getattr(e, "code", "") in ("NoSuchKey", "NoSuchObject", "NoSuchBucket"):
             return None

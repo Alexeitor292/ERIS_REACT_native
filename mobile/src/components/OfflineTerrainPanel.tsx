@@ -27,9 +27,9 @@ import { supportsOfflineTerrainScene } from "../arcgis/ArcGISNative";
 import {
   deleteOfflineScenePackage,
   downloadOfflineSceneArea,
-  getOfflineScenePackage,
   openDownloadedScene,
   pauseDownload,
+  reconcilePackage,
   resumeDownload,
 } from "../offline/offlineScenePackages";
 
@@ -78,7 +78,9 @@ export function OfflineTerrainPanel({
 
   const reloadMeta = useCallback(async () => {
     try {
-      setMeta(await getOfflineScenePackage(submissionId));
+      // Reconcile on load so a record left mid-download by a crash/OS kill is
+      // recovered (PAUSED w/ Resume, or FAILED w/ Retry) — never a dead spinner.
+      setMeta(await reconcilePackage(submissionId));
     } catch {
       /* ignore */
     }
@@ -154,10 +156,11 @@ export function OfflineTerrainPanel({
     try {
       const result = await resumeDownload(submissionId, (p) => setProgress(p.fraction));
       if (result) {
-        setMeta(result);
-        // Resumable expired (PAUSED with no resumable) -> restart from a fresh grant.
-        if (result.status === "PAUSED") await onDownload();
-        else if (result.status === "FAILED") setError(result.error ?? "Resume failed.");
+        setMeta(result.meta);
+        // Could not resume (no usable state, or the presigned URL expired) ->
+        // restart from a fresh ERIS grant.
+        if (!result.resumed) await onDownload();
+        else if (result.meta.status === "FAILED") setError(result.meta.error ?? "Resume failed.");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

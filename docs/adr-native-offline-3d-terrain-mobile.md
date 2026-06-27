@@ -200,3 +200,39 @@ step — ERIS does not generate packages from USGS yet. **Android** remains unsu
 renderer (no reproducible plugin) and the two native methods added here (`sha256OfFile`,
 `validateScenePackage`) are iOS-only. **EAS rebuild is still required** for the native viewer +
 integrity bridge.
+
+## Addendum — durability, immutability, provenance (2026-06-27)
+
+**Durable mobile download state machine.** A persisted record is now reconciled against on-disk
+reality on app startup (`reconcileAllPackages`) and on panel load (`reconcilePackage`):
+READY without its final file → FAILED (re-download); DOWNLOADING with no live task → PAUSED if a
+`.part` + persisted resume snapshot exist, else FAILED ("Download interrupted; retry required.");
+PAUSED that cannot resume → FAILED. A **per-submission generation counter** guarantees a **single
+authoritative completion path**: Pause/Delete/new-start bump the generation, and a worker only
+promotes READY / marks FAILED / deletes the `.part` if its generation is still current — so a paused
+or superseded `downloadAsync` can never later clobber state (`shouldApplyWorkerResult`). Pause flips
+the UI to PAUSED immediately and persists the resumable snapshot; resume reconstructs the Expo
+`DownloadResumable` from that snapshot (works after a restart). An expired presigned URL surfaces as
+a failed/needs-restart resume → the UI fetches a fresh ERIS grant and restarts. Delete bumps the
+generation, removes **both** final `.mspk` and `.part`, clears resumable state, and removes the
+registry entry. Pure-tested: restart-during-DOWNLOADING, explicit Pause, resume-after-restart,
+expired-grant retry, delete-while-PAUSED, and no-duplicate-completion.
+
+**Fail-closed MinIO + real immutability.** `docker/scripts/create-offline-scenes-bucket.sh` removes
+`|| true`: it creates the bucket **`mc mb --with-lock`** (object lock ⇒ versioning), **fails nonzero**
+unless anonymous access is verified `none` AND versioning is verified `Enabled`, and prints no success
+otherwise (object lock can only be set at creation, so a non-locked existing bucket is rejected). The
+backend **no longer silently creates** the bucket — registration `bucket_exists()`-checks and returns
+409 if it is missing/unprovisioned. Registration enforces the **canonical immutable key**
+`submissions/{submission_id}/{package_version}/scene.mspk` (a differing supplied `object_key` → 422)
+and captures the object's **immutable version id + etag**; the descriptor requires catalog row +
+object present + **matching size + matching version id/etag**, so a same-size replacement is detected
+and reported unavailable. New catalog columns `object_version_id`, `object_etag`.
+
+**USGS provenance enforced.** `elevation_source` is a server-enforced `Literal["USGS_3DEP"]` (any other
+value → 422), and a READY registration **requires** non-empty `elevation_dataset`,
+`elevation_version`, `elevation_resolution`, and `basemap_or_imagery_source`.
+
+**Not done yet.** The feature is **not** validated until a real ArcGIS Pro-authored `.mspk` (USGS 3DEP)
+is hosted in private MinIO, downloaded by an **iOS EAS development build**, and opened in **Airplane
+Mode**. No EAS build has been made on this branch.

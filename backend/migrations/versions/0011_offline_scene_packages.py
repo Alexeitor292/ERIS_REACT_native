@@ -38,6 +38,8 @@ def upgrade() -> None:
             object_key VARCHAR(512) NOT NULL,
             sha256 CHAR(64) NOT NULL,
             size_bytes BIGINT NOT NULL,
+            object_version_id VARCHAR(128) NULL,
+            object_etag VARCHAR(128) NULL,
             min_lat DOUBLE NOT NULL,
             min_lon DOUBLE NOT NULL,
             max_lat DOUBLE NOT NULL,

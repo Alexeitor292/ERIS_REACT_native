@@ -22,7 +22,7 @@ from .db import get_db
 from .config import settings
 from .auth import decode_token
 from .deps import get_current_user, require_roles
-from .storage import ensure_bucket, ensure_bucket_exists, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url, stat_object, sha256_of_object
+from .storage import ensure_bucket, ensure_bucket_exists, bucket_exists, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url, stat_object, sha256_of_object
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
@@ -2742,13 +2742,23 @@ def _newest_ready_scene_package(db: Session, submission_id: int) -> dict | None:
 
 
 def _scene_object_present(catalog: dict) -> bool:
-    """True only when the exact MinIO object exists with the catalog's size.
+    """True only when the exact MinIO object exists with the catalog's size AND a
+    matching durable object identity (immutable version id, else etag). This
+    detects any replacement/tamper of the object behind a registered package.
     Storage errors are treated as not-present (honest offline-unavailable)."""
     try:
         st = stat_object(object_key=catalog["object_key"], bucket=catalog["minio_bucket"])
     except Exception:
         return False
-    return st is not None and int(st["size"]) == int(catalog["size_bytes"])
+    if st is None or int(st["size"]) != int(catalog["size_bytes"]):
+        return False
+    cat_vid = catalog.get("object_version_id")
+    if cat_vid:
+        return str(st.get("version_id") or "") == str(cat_vid)
+    cat_etag = catalog.get("object_etag")
+    if cat_etag:
+        return str(st.get("etag") or "") == str(cat_etag)
+    return True  # legacy rows without a stored identity fall back to size-only
 
 
 @app.get("/submissions/{submission_id}/gisa/offline-scene-package")
@@ -2835,9 +2845,14 @@ def register_offline_scene_package(
         raise HTTPException(status_code=422, detail="Invalid bounds (need min < max, within lat/lon ranges).")
 
     bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
-    object_key = payload.object_key or offline_scene_svc.make_scene_object_key(
-        payload.submission_id, payload.package_version
-    )
+    # Canonical, immutable object key — the only key shape we accept.
+    canonical_key = offline_scene_svc.make_scene_object_key(payload.submission_id, payload.package_version)
+    if payload.object_key is not None and payload.object_key != canonical_key:
+        raise HTTPException(
+            status_code=422,
+            detail=f"object_key must be the canonical immutable key '{canonical_key}' (or omitted).",
+        )
+    object_key = canonical_key
 
     # Duplicate (immutable) version for this submission?
     dup = db.execute(text("""
@@ -2852,10 +2867,20 @@ def register_offline_scene_package(
     if dup_key:
         raise HTTPException(status_code=409, detail="This object key is already registered (immutable).")
 
+    # Do NOT silently create the bucket — it must be pre-provisioned private +
+    # versioned/locked by the operator setup script before any package is stored.
     try:
-        ensure_bucket_exists(bucket)
+        exists = bucket_exists(bucket)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Offline-scenes bucket unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"Offline-scenes storage unreachable: {e}")
+    if not exists:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Offline-scenes bucket '{bucket}' does not exist. An operator must provision it "
+                "privately with versioning/object-lock first (docker/scripts/create-offline-scenes-bucket.sh)."
+            ),
+        )
 
     # HEAD: object must exist, size must match.
     st = stat_object(object_key=object_key, bucket=bucket)
@@ -2872,6 +2897,10 @@ def register_offline_scene_package(
     if actual_sha.lower() != payload.sha256.lower():
         raise HTTPException(status_code=409, detail="SHA-256 mismatch; refusing to mark READY.")
 
+    # Capture durable object identity at registration time.
+    object_version_id = st.get("version_id")
+    object_etag = st.get("etag")
+
     try:
         db.execute(text("""
             UPDATE offline_scene_packages SET status='RETIRED', retired_at=NOW()
@@ -2880,11 +2909,13 @@ def register_offline_scene_package(
         db.execute(text("""
             INSERT INTO offline_scene_packages
               (submission_id, status, package_version, minio_bucket, object_key, sha256, size_bytes,
+               object_version_id, object_etag,
                min_lat, min_lon, max_lat, max_lon, center_lat, center_lon, radius_m,
                elevation_source, elevation_dataset, elevation_version, elevation_resolution,
                basemap_or_imagery_source, content_signature, uploaded_at, uploaded_by, notes)
             VALUES
               (:submission_id, 'READY', :package_version, :bucket, :object_key, :sha256, :size_bytes,
+               :object_version_id, :object_etag,
                :min_lat, :min_lon, :max_lat, :max_lon, :center_lat, :center_lon, :radius_m,
                :elevation_source, :elevation_dataset, :elevation_version, :elevation_resolution,
                :basemap, :content_signature, NOW(), :uploaded_by, :notes)
@@ -2895,6 +2926,8 @@ def register_offline_scene_package(
             "object_key": object_key,
             "sha256": payload.sha256.lower(),
             "size_bytes": int(payload.size_bytes),
+            "object_version_id": object_version_id,
+            "object_etag": object_etag,
             "min_lat": payload.min_lat, "min_lon": payload.min_lon,
             "max_lat": payload.max_lat, "max_lon": payload.max_lon,
             "center_lat": payload.center_lat, "center_lon": payload.center_lon,

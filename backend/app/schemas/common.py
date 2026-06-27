@@ -309,6 +309,8 @@ class OfflineScenePackageRegister(BaseModel):
 
     submission_id: int = Field(..., ge=1)
     package_version: str = Field(..., min_length=1, max_length=64)
+    # Optional; when provided it MUST equal the canonical immutable key
+    # submissions/{submission_id}/{package_version}/scene.mspk (enforced in endpoint).
     object_key: str | None = Field(default=None, max_length=512)
     size_bytes: int = Field(..., ge=1)
     sha256: str = Field(..., min_length=64, max_length=64)
@@ -319,11 +321,13 @@ class OfflineScenePackageRegister(BaseModel):
     center_lat: float = Field(..., ge=-90, le=90)
     center_lon: float = Field(..., ge=-180, le=180)
     radius_m: float = Field(..., gt=0)
-    elevation_source: str = Field(default="USGS_3DEP", max_length=64)
-    elevation_dataset: str | None = Field(default=None, max_length=128)
-    elevation_version: str | None = Field(default=None, max_length=64)
-    elevation_resolution: str | None = Field(default=None, max_length=64)
-    basemap_or_imagery_source: str | None = Field(default=None, max_length=255)
+    # USGS 3DEP is the authoritative offline elevation source — server-enforced.
+    elevation_source: Literal["USGS_3DEP"] = "USGS_3DEP"
+    # Provenance is REQUIRED for a READY package (registration only creates READY).
+    elevation_dataset: str = Field(..., min_length=1, max_length=128)
+    elevation_version: str = Field(..., min_length=1, max_length=64)
+    elevation_resolution: str = Field(..., min_length=1, max_length=64)
+    basemap_or_imagery_source: str = Field(..., min_length=1, max_length=255)
     content_signature: str = Field(..., min_length=1, max_length=64)
     notes: str | None = Field(default=None, max_length=2000)
 

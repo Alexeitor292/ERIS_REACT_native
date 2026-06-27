@@ -12,10 +12,13 @@
 import * as FileSystem from "expo-file-system/legacy";
 
 import {
+  cleanupTargets,
   metaFromDescriptor,
   needsRefresh,
   partPathFor,
+  reconcileRecord,
   shaMatches,
+  shouldApplyWorkerResult,
   sizeMatches,
   type OfflineScenePackageMeta,
   type SceneAreaDescriptor,
@@ -100,11 +103,74 @@ export async function getOfflineScenePackage(submissionId: number): Promise<Offl
 
 // In-memory resumable downloads, so pause/resume works within a session.
 const _resumables = new Map<number, FileSystem.DownloadResumable>();
+// Per-submission download generation. Each download/resume start bumps it; Pause
+// and Delete also bump it to SUPERSEDE any running worker. A worker only applies
+// its result if its generation is still current — the single authoritative
+// completion path per generation. Survives only within a session (after a restart
+// reconcile recovers persisted records).
+const _gen = new Map<number, number>();
+
+function nextGen(id: number): number {
+  const g = (_gen.get(id) ?? 0) + 1;
+  _gen.set(id, g);
+  return g;
+}
+function isCurrentGen(id: number, gen: number): boolean {
+  return shouldApplyWorkerResult(_gen.get(id) ?? 0, gen);
+}
 
 export type DownloadProgress = { totalBytes: number; writtenBytes: number; fraction: number };
 
 function toNativePath(uri: string): string {
   return decodeURI(uri.replace(/^file:\/\//, ""));
+}
+
+/** Persist only the resumable snapshot (for crash/restart resume) without racing
+ *  the rest of the record. No-op if the record changed generation meanwhile. */
+async function persistSnapshot(id: number, gen: number, snapshot: unknown): Promise<void> {
+  if (!isCurrentGen(id, gen)) return;
+  const meta = await getOfflineScenePackage(id);
+  if (!meta || meta.status !== "DOWNLOADING") return;
+  await saveMeta({ ...meta, resumeSnapshot: snapshot });
+}
+
+/**
+ * Reconcile one persisted record against on-disk reality. Run on app startup and
+ * panel load so a record left DOWNLOADING/PAUSED by a crash is recovered to a
+ * truthful status (PAUSED w/ Resume, or FAILED w/ Retry) instead of a stuck
+ * spinner with a dead Pause button.
+ */
+export async function reconcilePackage(submissionId: number): Promise<OfflineScenePackageMeta | null> {
+  const meta = await getOfflineScenePackage(submissionId);
+  if (!meta) return null;
+  const finalUri = packagePath(submissionId);
+  const partUri = partPathFor(finalUri);
+  const [finalInfo, partInfo] = await Promise.all([
+    FileSystem.getInfoAsync(finalUri),
+    FileSystem.getInfoAsync(partUri),
+  ]);
+  const snap = meta.resumeSnapshot as { url?: string; fileUri?: string } | null;
+  const next = reconcileRecord(meta.status, {
+    finalExists: finalInfo.exists,
+    partExists: partInfo.exists,
+    hasResumeData: !!snap && !!snap.url && !!snap.fileUri,
+    hasActiveTask: _resumables.has(submissionId),
+  });
+  if (next.status === meta.status && next.error === (meta.error ?? null)) return meta;
+  const reconciled: OfflineScenePackageMeta = {
+    ...meta,
+    status: next.status,
+    error: next.error,
+    localPath: next.status === "READY" ? finalUri : meta.status === "READY" ? null : meta.localPath,
+  };
+  await saveMeta(reconciled);
+  return reconciled;
+}
+
+/** Reconcile every persisted record (call once on app startup). */
+export async function reconcileAllPackages(): Promise<void> {
+  const reg = await readRegistry();
+  for (const m of reg.items) await reconcilePackage(m.submissionId);
 }
 
 /**
@@ -188,22 +254,46 @@ export async function downloadOfflineSceneArea(args: {
     status: "DOWNLOADING",
     localPath: null,
     partPath: partUri,
+    resumeSnapshot: null,
   };
   await saveMeta(meta);
 
+  // Fresh start: clear any stale .part from a previous interrupted attempt.
+  try {
+    await FileSystem.deleteAsync(partUri, { idempotent: true });
+  } catch {
+    /* ignore */
+  }
+
+  const myGen = nextGen(descriptor.submission_id);
+  let lastBucket = -1;
   const resumable = FileSystem.createDownloadResumable(grant.url, partUri, {}, (p) => {
     const total = p.totalBytesExpectedToWrite || 0;
     const written = p.totalBytesWritten || 0;
-    onProgress?.({ totalBytes: total, writtenBytes: written, fraction: total > 0 ? written / total : 0 });
+    const fraction = total > 0 ? written / total : 0;
+    onProgress?.({ totalBytes: total, writtenBytes: written, fraction });
+    // Throttled snapshot persistence (~every 10%) so a crash mid-download can resume.
+    const bucket = Math.floor(fraction * 10);
+    if (bucket > lastBucket) {
+      lastBucket = bucket;
+      try {
+        void persistSnapshot(descriptor.submission_id, myGen, resumable.savable());
+      } catch {
+        /* ignore */
+      }
+    }
   });
   _resumables.set(descriptor.submission_id, resumable);
 
   try {
     const result = await resumable.downloadAsync();
+    // Superseded by Pause/Delete/another start -> do NOTHING (no promote, no delete).
+    if (!isCurrentGen(descriptor.submission_id, myGen)) return meta;
     _resumables.delete(descriptor.submission_id);
     if (!result?.uri) throw new Error("Download did not produce a file.");
     return await verifyAndPromote(meta, result.uri, onProgress);
   } catch (e: unknown) {
+    if (!isCurrentGen(descriptor.submission_id, myGen)) return meta; // superseded: leave .part/state alone
     _resumables.delete(descriptor.submission_id);
     try {
       await FileSystem.deleteAsync(partUri, { idempotent: true });
@@ -224,86 +314,99 @@ export async function downloadOfflineSceneArea(args: {
 
 export async function pauseDownload(submissionId: number): Promise<void> {
   const r = _resumables.get(submissionId);
-  if (!r) return;
-  try {
-    await r.pauseAsync();
-  } catch {
-    /* ignore */
-  }
   const meta = await getOfflineScenePackage(submissionId);
+  // Immediately reflect PAUSED so the UI never shows a dead spinner.
   if (meta && (meta.status === "DOWNLOADING" || meta.status === "PENDING")) {
-    // Persist the resumable snapshot so the download can resume after an app restart.
-    let snapshot: unknown | null = null;
-    try {
-      snapshot = r.savable();
-    } catch {
-      snapshot = null;
+    // Bump generation FIRST so the running worker's completion becomes a no-op.
+    nextGen(submissionId);
+    let snapshot: unknown | null = meta.resumeSnapshot ?? null;
+    if (r) {
+      try {
+        await r.pauseAsync();
+      } catch {
+        /* ignore */
+      }
+      try {
+        snapshot = r.savable();
+      } catch {
+        /* keep last snapshot */
+      }
     }
+    _resumables.delete(submissionId);
     await saveMeta({ ...meta, status: "PAUSED", resumeSnapshot: snapshot });
   }
 }
 
+/** Result of a resume attempt. `resumed:false` => caller should restart from a
+ *  fresh grant (e.g. presigned URL expired or no usable resume state). */
+export type ResumeResult = { meta: OfflineScenePackageMeta; resumed: boolean };
+
 export async function resumeDownload(
   submissionId: number,
   onProgress?: (p: DownloadProgress) => void,
-): Promise<OfflineScenePackageMeta | null> {
+): Promise<ResumeResult | null> {
   const meta = await getOfflineScenePackage(submissionId);
   if (!meta) return null;
   if (!supportsScenePackageIntegrity()) {
     const failed: OfflineScenePackageMeta = { ...meta, status: "FAILED", error: "Integrity bridge missing; rebuild the app." };
     await saveMeta(failed);
-    return failed;
+    return { meta: failed, resumed: true };
   }
 
-  let r = _resumables.get(submissionId);
-  if (!r) {
-    // Reconstruct from the persisted snapshot (resume after app restart).
-    const snap = meta.resumeSnapshot as
-      | { url?: string; fileUri?: string; options?: FileSystem.DownloadOptions; resumeData?: string }
-      | null;
-    if (snap?.url && snap?.fileUri) {
-      r = FileSystem.createDownloadResumable(
-        snap.url,
-        snap.fileUri,
-        snap.options ?? {},
-        (p) => {
-          const total = p.totalBytesExpectedToWrite || 0;
-          const written = p.totalBytesWritten || 0;
-          onProgress?.({ totalBytes: total, writtenBytes: written, fraction: total > 0 ? written / total : 0 });
-        },
-        snap.resumeData,
-      );
-    }
-  }
-  if (!r) {
-    // No resumable (e.g. URL expired). Caller should refresh the descriptor/grant
-    // and restart the download; keep PAUSED so the UI shows Resume/Retry.
+  // Reconstruct from the persisted snapshot (resume after app restart).
+  const snap = meta.resumeSnapshot as
+    | { url?: string; fileUri?: string; options?: FileSystem.DownloadOptions; resumeData?: string }
+    | null;
+  if (!snap?.url || !snap?.fileUri) {
+    // No usable resume state -> caller restarts from a fresh grant.
     await saveMeta({ ...meta, status: "PAUSED" });
-    return meta;
+    return { meta, resumed: false };
   }
 
+  const myGen = nextGen(submissionId);
+  const r = FileSystem.createDownloadResumable(
+    snap.url,
+    snap.fileUri,
+    snap.options ?? {},
+    (p) => {
+      const total = p.totalBytesExpectedToWrite || 0;
+      const written = p.totalBytesWritten || 0;
+      onProgress?.({ totalBytes: total, writtenBytes: written, fraction: total > 0 ? written / total : 0 });
+    },
+    snap.resumeData,
+  );
+  _resumables.set(submissionId, r);
   await saveMeta({ ...meta, status: "DOWNLOADING" });
   try {
     const result = await r.resumeAsync();
+    if (!isCurrentGen(submissionId, myGen)) return { meta, resumed: true }; // superseded
     _resumables.delete(submissionId);
     if (!result?.uri) throw new Error("Resume did not produce a file.");
-    return await verifyAndPromote(meta, result.uri, onProgress);
+    const promoted = await verifyAndPromote(meta, result.uri, onProgress);
+    return { meta: promoted, resumed: true };
   } catch (e: unknown) {
+    if (!isCurrentGen(submissionId, myGen)) return { meta, resumed: true };
     _resumables.delete(submissionId);
     const failed: OfflineScenePackageMeta = { ...meta, status: "FAILED", error: e instanceof Error ? e.message : String(e) };
     await saveMeta(failed);
-    return failed;
+    // An expired URL surfaces as a failed resume -> let the caller restart fresh.
+    return { meta: failed, resumed: false };
   }
 }
 
 export async function deleteOfflineScenePackage(submissionId: number): Promise<void> {
+  // Supersede any in-flight worker so it can't recreate files/registry after us.
+  nextGen(submissionId);
+  _resumables.delete(submissionId);
   const meta = await getOfflineScenePackage(submissionId);
-  const path = meta?.localPath ?? packagePath(submissionId);
-  try {
-    const info = await FileSystem.getInfoAsync(path);
-    if (info.exists) await FileSystem.deleteAsync(path, { idempotent: true });
-  } catch {
-    /* ignore file errors */
+  const finalUri = meta?.localPath ?? packagePath(submissionId);
+  const partUri = meta?.partPath ?? partPathFor(packagePath(submissionId));
+  for (const target of cleanupTargets(finalUri, partUri)) {
+    try {
+      await FileSystem.deleteAsync(target, { idempotent: true });
+    } catch {
+      /* ignore file errors */
+    }
   }
   const reg = await readRegistry();
   await writeRegistry({ ...reg, items: reg.items.filter((x) => x.submissionId !== submissionId) });
