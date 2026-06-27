@@ -86,10 +86,10 @@ class TestAlembicScripts:
         heads = self._script_dir().get_heads()
         assert heads, "No Alembic head revisions found in migration scripts"
 
-    def test_incident_triage_fields_is_head(self):
+    def test_terrain_grid_is_head(self):
         heads = self._script_dir().get_heads()
-        assert "0009_incident_triage_fields" in heads, (
-            f"0009_incident_triage_fields not in heads: {heads}"
+        assert "0010_gisa_terrain_grid" in heads, (
+            f"0010_gisa_terrain_grid not in heads: {heads}"
         )
 
     def test_baseline_in_chain(self):

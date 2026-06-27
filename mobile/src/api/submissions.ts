@@ -109,12 +109,19 @@ export type GisaRoadInventoryContext = {
   snapshot: Record<string, unknown> | null;
 };
 
+export type ClassificationReason =
+  | "CLASSIFIED"
+  | "ROAD_BEARING_UNAVAILABLE"
+  | "INSUFFICIENT_VALID_SAMPLES"
+  | "AMBIGUOUS_TERRAIN";
+
 export type GisaElevationProfileMetadata = {
   road_bearing_deg_used: number | null;
   road_bearing_source: string | null;
   half_width_m: number;
   spacing_m: number;
   classification_requires_bearing: boolean;
+  classification_reason?: ClassificationReason | null;
   classification_note?: string;
 };
 
@@ -122,6 +129,7 @@ export type GisaElevationProfile = {
   source: string | null;
   checked_at: string | null;
   classification: string | null;
+  classification_reason?: ClassificationReason | null;
   confidence: number | null;
   profile: {
     points?: Array<{
@@ -136,6 +144,36 @@ export type GisaElevationProfile = {
   error: string | null;
 };
 
+export type TerrainGridPoint = {
+  row: number;
+  column: number;
+  along_offset_m?: number;
+  cross_offset_m?: number;
+  lat: number;
+  lon: number;
+  elevation_ft: number | null;
+};
+
+export type GisaTerrainGrid = {
+  source: string | null;
+  checked_at: string | null;
+  road_bearing_deg_used: number | null;
+  road_bearing_source: string | null;
+  grid: {
+    rows: number;
+    columns: number;
+    along_road_spacing_m: number;
+    cross_road_spacing_m: number;
+    extent_along_m?: number;
+    extent_cross_m?: number;
+    sample_count?: number;
+    valid_sample_count?: number;
+    partial?: boolean;
+    points: TerrainGridPoint[];
+  } | null;
+  error: string | null;
+};
+
 export async function fetchElevationProfile(
   token: string,
   id: string,
@@ -143,6 +181,17 @@ export async function fetchElevationProfile(
 ) {
   return apiFetch<{ elevation_profile: GisaElevationProfile }>(
     `/submissions/${id}/gisa/elevation-profile`,
+    { method: "POST", token, body: payload },
+  );
+}
+
+export async function buildTerrainGrid(
+  token: string,
+  id: string,
+  payload: { road_bearing_deg?: number | null; force?: boolean | null } = {},
+) {
+  return apiFetch<{ terrain: GisaTerrainGrid; cached?: boolean }>(
+    `/submissions/${id}/gisa/terrain-grid`,
     { method: "POST", token, body: payload },
   );
 }

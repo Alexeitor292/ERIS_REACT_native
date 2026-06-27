@@ -643,7 +643,7 @@ function renderAboveRoadOverlay(
 }
 
 /**
- * Draws a below-road (low-side slipout) overlay on one Caltrans side.
+ * Draws a Landslide Below Road (low-side failure) overlay on one Caltrans side.
  */
 function renderBelowRoadOneSide(
   data: MeasurementDiagramData,

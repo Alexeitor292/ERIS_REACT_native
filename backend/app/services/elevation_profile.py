@@ -36,6 +36,26 @@ VALID_CLASSIFICATIONS = frozenset(
     {"LEFT_HIGH", "RIGHT_HIGH", "BOWL", "CROWN", "FLAT", "UNKNOWN"}
 )
 
+# Machine-readable explanation for the classification outcome. Distinguishes the
+# avoidable "no road bearing" / "not enough samples" cases from genuinely
+# ambiguous terrain, so the UI never shows an unexplained UNKNOWN.
+CLASSIFICATION_REASONS = frozenset(
+    {"CLASSIFIED", "ROAD_BEARING_UNAVAILABLE", "INSUFFICIENT_VALID_SAMPLES", "AMBIGUOUS_TERRAIN"}
+)
+
+_REASON_NOTES = {
+    "ROAD_BEARING_UNAVAILABLE": (
+        "Road bearing could not be resolved, so only center elevation is available."
+    ),
+    "INSUFFICIENT_VALID_SAMPLES": (
+        "Not enough valid USGS elevation samples on both sides of the road to classify the terrain."
+    ),
+    "AMBIGUOUS_TERRAIN": (
+        "Terrain is mixed/ambiguous: the sampled cross-section does not match a single shape."
+    ),
+    "CLASSIFIED": None,
+}
+
 # Minimum elevation difference (feet) on each side to consider it "high" or "low".
 _THRESHOLD_FT = 5.0
 # Denominator for normalising confidence to [0, 1].
@@ -112,13 +132,17 @@ def _offset_point(lat: float, lon: float, bearing_deg: float, distance_m: float)
 # Classification
 # ---------------------------------------------------------------------------
 
-def _classify(profile_points: list[dict]) -> tuple[str, float | None]:
+def _classify(profile_points: list[dict]) -> tuple[str, float | None, str]:
     """
     Classify terrain shape from cross-section elevation points.
     left  = offset_m < -1
     right = offset_m > +1
     center = |offset_m| <= 1
-    Returns (classification, confidence 0-1 or None).
+    Returns (classification, confidence 0-1 or None, classification_reason).
+
+    classification_reason is one of CLASSIFICATION_REASONS and distinguishes
+    INSUFFICIENT_VALID_SAMPLES (not enough valid USGS points) from
+    AMBIGUOUS_TERRAIN (real but mixed shape) so an UNKNOWN result is explainable.
     """
     left_elevs = [
         p["elevation_ft"] for p in profile_points
@@ -134,7 +158,7 @@ def _classify(profile_points: list[dict]) -> tuple[str, float | None]:
     ]
 
     if not left_elevs or not right_elevs or not center_elevs:
-        return ("UNKNOWN", None)
+        return ("UNKNOWN", None, "INSUFFICIENT_VALID_SAMPLES")
 
     center = sum(center_elevs) / len(center_elevs)
     left_diff = (sum(left_elevs) / len(left_elevs)) - center   # positive = left is higher
@@ -157,10 +181,11 @@ def _classify(profile_points: list[dict]) -> tuple[str, float | None]:
         cls = "FLAT"
         conf = min(1.0, 1.0 - max(abs(left_diff), abs(right_diff)) / t)
     else:
-        cls = "UNKNOWN"
-        conf = None
+        # One side high, the other near-level: a real but mixed cross-section that
+        # does not fit a single canonical shape. Honestly ambiguous, not a failure.
+        return ("UNKNOWN", None, "AMBIGUOUS_TERRAIN")
 
-    return (cls, round(conf, 4) if conf is not None else None)
+    return (cls, round(conf, 4) if conf is not None else None, "CLASSIFIED")
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +219,7 @@ def fetch_elevation_profile(
     error: str | None = None
     classification = "UNKNOWN"
     confidence: float | None = None
+    classification_reason = "ROAD_BEARING_UNAVAILABLE"
 
     try:
         if road_bearing_deg is not None:
@@ -219,10 +245,11 @@ def fetch_elevation_profile(
                     "source": EPQS_SOURCE,
                 })
 
-            classification, confidence = _classify(profile_points)
+            classification, confidence, classification_reason = _classify(profile_points)
 
         else:
-            # No road bearing — centre point only; classification is UNKNOWN
+            # No road bearing — centre point only; classification is UNKNOWN and
+            # the reason is ROAD_BEARING_UNAVAILABLE (set above), not a failure.
             elev = _fetch_elevation_ft(lat, lon)
             profile_points.append({
                 "offset_m": 0.0,
@@ -236,22 +263,28 @@ def fetch_elevation_profile(
         logger.error("Elevation profile failed lat=%.6f lon=%.6f: %s", lat, lon, exc)
         error = str(exc)
 
+    # A hard error (exception) overrides the reason — we couldn't sample at all.
+    if error is not None:
+        classification_reason = "INSUFFICIENT_VALID_SAMPLES"
+
+    classification_note = _REASON_NOTES.get(classification_reason)
+
     profile_meta: dict = {
         "road_bearing_deg_used": road_bearing_deg,
         "road_bearing_source": None,  # endpoint fills this in after resolving source
         "half_width_m": half_width_m,
         "spacing_m": spacing_m,
         "classification_requires_bearing": True,
+        "classification_reason": classification_reason,
     }
-    if road_bearing_deg is None:
-        profile_meta["classification_note"] = (
-            "No road bearing was provided; only center elevation was sampled."
-        )
+    if classification_note:
+        profile_meta["classification_note"] = classification_note
 
     return {
         "source": EPQS_SOURCE,
         "checked_at": checked_at,
         "classification": classification,
+        "classification_reason": classification_reason,
         "confidence": confidence,
         "profile": {"points": profile_points, "metadata": profile_meta},
         "error": error,

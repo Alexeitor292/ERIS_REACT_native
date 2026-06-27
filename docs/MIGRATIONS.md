@@ -7,7 +7,7 @@ after the initial baseline.
 
 | Layer | Purpose |
 |---|---|
-| `database/init/010_schema.sql` | Bootstrap schema for **fresh installs only** — defines the initial 19 tables as of baseline commit `ce447ab`. Do not add new columns here after the baseline. |
+| `database/init/010_schema.sql` | Authoritative bootstrap schema for **fresh installs**. Defines the initial 19 tables as of baseline commit `ce447ab`. Prefer adding post-baseline schema only via Alembic. If a column is *also* declared here (e.g. `submission_gisa.elevation_terrain_*`), the corresponding migration **must** use `ADD COLUMN IF NOT EXISTS` so the fresh-init → `stamp 0001` → `upgrade head` path stays conflict-free. |
 | `database/init/020_seed.sql` | Dev/bootstrap seed data (roles + local users). Idempotent; safe to re-run. |
 | `backend/migrations/versions/` | Alembic revisions. All schema changes **after** the baseline live here. |
 | `backend/app/main.py` `startup()` | Calls `check_migration_head()` — fails fast if DB is not at Alembic head. No DDL is executed. |
