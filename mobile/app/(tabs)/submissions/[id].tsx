@@ -5335,7 +5335,12 @@ export default function SubmissionDetailScreen() {
                                   onPress={async () => {
                                     if (!canOpenFull) return;
                                     try {
-                                      await WebBrowser.openBrowserAsync(`${WEB_APP_URL}/submissions/${id}`);
+                                      // Deep-link straight to this submission's 3D Terrain section.
+                                      // No access token is ever placed in the URL; the WebUI uses
+                                      // its own browser session (may require a separate ERIS login).
+                                      await WebBrowser.openBrowserAsync(
+                                        `${WEB_APP_URL}/submissions/${encodeURIComponent(String(id))}?section=terrain`,
+                                      );
                                     } catch {
                                       Alert.alert("Could not open", "The 3D map could not be opened in the browser.");
                                     }
@@ -5352,6 +5357,12 @@ export default function SubmissionDetailScreen() {
                                 </Pressable>
                               );
                             })()}
+                            {WEB_APP_URL && !isLocalId ? (
+                              <Text style={[elevStyles.noProfileText, { color: palette.muted, marginBottom: 6 }]}>
+                                Opens in your browser and jumps to the 3D Terrain section. You may need to sign in to the
+                                ERIS WebUI separately (no token is sent in the link).
+                              </Text>
+                            ) : null}
                             {!WEB_APP_URL ? (
                               <Text style={[elevStyles.noProfileText, { color: palette.muted, marginBottom: 6 }]}>
                                 The full interactive 3D scene opens in the WebUI. Set EXPO_PUBLIC_WEB_URL to enable the

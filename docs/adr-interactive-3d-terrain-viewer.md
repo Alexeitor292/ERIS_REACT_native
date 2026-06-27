@@ -103,3 +103,47 @@ compatibility are all untouched — this change is additive (a new viewer + a de
 
 No road centerline polyline is drawn, because ERIS does not store one — only the derived
 bearing. No left/right labels are drawn unless a bearing is known. No geometry is invented.
+
+## Addendum — review-fix decisions (2026-06-26)
+
+1. **Real full screen.** The "Full screen" button uses the browser **Fullscreen API**
+   (`element.requestFullscreen()`) on the viewer container when available, falling back to
+   the fixed-inset CSS layout otherwise. A `fullscreenchange` listener keeps the button,
+   **Esc**, and native browser controls in sync; exiting restores body scrolling and resizes
+   the SceneView. Logic (`supportsFullscreenApi`, `isElementFullscreen`, `sceneContainerClass`)
+   is unit-tested.
+
+2. **Reliable failure handling.** Terrain failure is **no longer inferred from
+   `ground.layers.length`**. After the view loads we `loadAll()` the basemap and ground and
+   evaluate each layer's real `loadStatus`/`loadError` (`evaluateLayerHealth`). `deriveSceneHealth`
+   maps that to: both-failed → blocking error; one-failed → non-blocking amber banner (imagery
+   ⇒ "switch to topographic"; elevation ⇒ "terrain flat"); access/auth (`isArcgisAccessError`:
+   401/403/498/499 or token/api-key/forbidden text) → a specific "service rejected access /
+   set VITE_ARCGIS_API_KEY" message. **Retry fully recreates** the SceneView/map/layers via a
+   `reloadKey` that re-runs the creation effect (it never just re-calls `when()` on an errored
+   view). The USGS sampled-relief card stays available as the fallback.
+
+3. **Complete GeoJSON.** `extractRenderableGeometries` flattens raw Geometry, **Feature**,
+   **FeatureCollection**, **GeometryCollection**, and all six primitive types, validating
+   coordinate arrays before any ArcGIS geometry is built. `overlayAvailability.uploadedGeometry`
+   is driven by `geoJsonRenderable`, so a present-but-unrenderable object leaves the overlay
+   **disabled**. FeatureCollection and GeometryCollection are covered by tests.
+
+4. **Production ArcGIS config.** `web/.env.example` documents **`VITE_ARCGIS_API_KEY`** — a
+   **browser-safe** key that must be **referrer-restricted to `https://eris.camposlabs.org`**.
+   It is read only via `import.meta.env`; the backend `ARCGIS_API_KEY` (from
+   `/arcgis/runtime-config`, for the mobile native runtime) is **never** exposed to the
+   frontend. Because Vite inlines `VITE_*` at **build time**, the `.env.example` documents the
+   exact **Docker build-arg** wiring (`ARG`/`ENV` before `RUN npm run build`, compose
+   `build.args`). A visible scene error appears when ArcGIS rejects access.
+
+5. **Performance.** `InteractiveTerrainScene` is **`React.lazy` + `Suspense`** in
+   `SubmissionDetailPage`; SceneView's 3D modules download only when the user opens the 3D
+   Terrain tab. The Suspense fallback reuses the loading panel. The main submission bundle no
+   longer eagerly includes the 3D renderer (separate chunk).
+
+6. **Mobile handoff.** "Open full 3D map" opens the exact synced submission route
+   `/(submissions)/{id}?section=terrain`; the WebUI reads `section=terrain`, switches to the
+   3D Terrain view, and scrolls it into view. **No access token is ever placed in the URL** —
+   the browser uses its own ERIS WebUI session and **may require a separate login** unless a
+   secure SSO/session handoff exists (documented in-app and here).

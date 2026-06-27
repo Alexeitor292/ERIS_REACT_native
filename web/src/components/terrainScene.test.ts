@@ -12,13 +12,20 @@ import assert from "node:assert/strict";
 import {
   basemapIdFor,
   bearingLineEndpoints,
+  deriveSceneHealth,
+  evaluateLayerHealth,
+  extractRenderableGeometries,
+  geoJsonRenderable,
   gridBoundingRing,
   incidentSummaryLine,
   initialViewpointFor,
+  isArcgisAccessError,
+  isElementFullscreen,
   isValidIncidentLocation,
   nextFullscreen,
   overlayAvailability,
   sceneContainerClass,
+  supportsFullscreenApi,
   terrainSceneErrorMessage,
   DEFAULT_SCENE_TILT,
 } from "./terrainScene.ts";
@@ -50,8 +57,25 @@ test("imagery/terrain mode toggle maps to truthful Esri basemaps", () => {
 test("full-screen control toggles and pins the container to the viewport", () => {
   assert.equal(nextFullscreen(false), true);
   assert.equal(nextFullscreen(true), false);
+  // CSS fallback pins to the viewport; native fullscreen lets the browser size it.
   assert.match(sceneContainerClass(true), /fixed inset-0/);
+  assert.match(sceneContainerClass(true, false), /fixed inset-0/);
+  assert.doesNotMatch(sceneContainerClass(true, true), /fixed inset-0/);
+  assert.match(sceneContainerClass(true, true), /bg-black/);
   assert.doesNotMatch(sceneContainerClass(false), /fixed inset-0/);
+});
+
+test("Fullscreen API support detection + element matching (drives Esc sync)", () => {
+  assert.equal(supportsFullscreenApi({ fullscreenEnabled: true }), true);
+  assert.equal(supportsFullscreenApi({ fullscreenEnabled: false }), false);
+  assert.equal(supportsFullscreenApi(null), false);
+  // An element without requestFullscreen means the API can't be used on it.
+  assert.equal(supportsFullscreenApi({ fullscreenEnabled: true }, {}), false);
+  assert.equal(supportsFullscreenApi({ fullscreenEnabled: true }, { requestFullscreen: () => {} }), true);
+  const el = {} as unknown as Element;
+  assert.equal(isElementFullscreen({ fullscreenElement: el }, el), true);
+  assert.equal(isElementFullscreen({ fullscreenElement: null }, el), false);
+  assert.equal(isElementFullscreen(null, el), false);
 });
 
 test("no road bearing / no geometry => no fake road or geometry overlays", () => {
@@ -133,4 +157,102 @@ test("incident summary line is safe with partial data", () => {
     "Rte 080  ·  PM 5.0  ·  ALA  ·  38.50000, -121.50000",
   );
   assert.equal(incidentSummaryLine({}), "Location unavailable");
+});
+
+test("GeoJSON: raw geometry, Feature, FeatureCollection, GeometryCollection all extract", () => {
+  // raw geometry
+  assert.equal(extractRenderableGeometries({ type: "Point", coordinates: [-121, 38] }).length, 1);
+  // Feature
+  assert.equal(
+    extractRenderableGeometries({ type: "Feature", geometry: { type: "LineString", coordinates: [[0, 0], [1, 1]] } }).length,
+    1,
+  );
+  // FeatureCollection (Point + Polygon)
+  const fc = {
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", geometry: { type: "Point", coordinates: [0, 0] } },
+      { type: "Feature", geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } },
+    ],
+  };
+  const fcGeoms = extractRenderableGeometries(fc);
+  assert.deepEqual(fcGeoms.map((g) => g.type), ["Point", "Polygon"]);
+  // GeometryCollection (Point + MultiPoint)
+  const gc = {
+    type: "GeometryCollection",
+    geometries: [
+      { type: "Point", coordinates: [0, 0] },
+      { type: "MultiPoint", coordinates: [[1, 1], [2, 2]] },
+    ],
+  };
+  assert.equal(extractRenderableGeometries(gc).length, 2);
+});
+
+test("GeoJSON validation rejects malformed geometry and disables the overlay", () => {
+  assert.equal(geoJsonRenderable(null), false);
+  assert.equal(geoJsonRenderable({}), false);
+  assert.equal(geoJsonRenderable({ type: "Point", coordinates: [] }), false);
+  assert.equal(geoJsonRenderable({ type: "Point", coordinates: ["x", "y"] }), false);
+  assert.equal(geoJsonRenderable({ type: "LineString", coordinates: [[0, 0]] }), false); // < 2 points
+  assert.equal(geoJsonRenderable({ type: "Polygon", coordinates: [[[0, 0], [1, 0]]] }), false); // ring < 3
+  assert.equal(geoJsonRenderable({ type: "FeatureCollection", features: [] }), false);
+  assert.equal(
+    geoJsonRenderable({ type: "GeometryCollection", geometries: [{ type: "Point", coordinates: [1] }] }),
+    false,
+  );
+  assert.equal(geoJsonRenderable({ type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }), true);
+
+  // Overlay availability must follow renderability, not mere presence.
+  const malformed = overlayAvailability({
+    location: { latitude: 38.5, longitude: -121.5 },
+    terrain: null,
+    geometryJson: { type: "LineString", coordinates: [[0, 0]] },
+  });
+  assert.equal(malformed.uploadedGeometry, false);
+});
+
+test("layer health uses loadStatus (not counts); access errors are detected", () => {
+  assert.deepEqual(evaluateLayerHealth([]), { failed: false, access: false });
+  assert.deepEqual(evaluateLayerHealth([{ loadStatus: "loaded" }]), { failed: false, access: false });
+  assert.deepEqual(
+    evaluateLayerHealth([{ loadStatus: "failed", loadError: new Error("network down") }]),
+    { failed: true, access: false },
+  );
+  assert.deepEqual(
+    evaluateLayerHealth([{ loadStatus: "failed", loadError: { message: "Token Required" } }]),
+    { failed: true, access: true },
+  );
+  assert.equal(isArcgisAccessError({ details: { httpStatus: 403 } }), true);
+  assert.equal(isArcgisAccessError({ message: "Invalid API Key" }), true);
+  assert.equal(isArcgisAccessError(new Error("timeout")), false);
+  assert.equal(isArcgisAccessError(null), false);
+});
+
+test("scene health: both failed blocks; one failed warns; access surfaces", () => {
+  const ok = { failed: false, access: false };
+  assert.deepEqual(deriveSceneHealth(ok, ok), { blocking: null, warning: null });
+  assert.deepEqual(deriveSceneHealth({ failed: true, access: false }, ok), {
+    blocking: null,
+    warning: { kind: "imagery" },
+  });
+  assert.deepEqual(deriveSceneHealth(ok, { failed: true, access: false }), {
+    blocking: null,
+    warning: { kind: "elevation" },
+  });
+  assert.deepEqual(deriveSceneHealth({ failed: true, access: false }, { failed: true, access: false }), {
+    blocking: "both",
+    warning: null,
+  });
+  assert.deepEqual(deriveSceneHealth({ failed: true, access: true }, { failed: true, access: false }), {
+    blocking: "access",
+    warning: null,
+  });
+  assert.deepEqual(deriveSceneHealth({ failed: true, access: true }, ok), {
+    blocking: null,
+    warning: { kind: "access" },
+  });
+});
+
+test("error message covers the ArcGIS access-rejected case", () => {
+  assert.match(terrainSceneErrorMessage("access"), /api key|access|authoriz/i);
 });

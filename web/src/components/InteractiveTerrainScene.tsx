@@ -16,14 +16,24 @@ import type { GisaTerrainGrid } from "../api/types";
 import {
   basemapIdFor,
   bearingLineEndpoints,
+  deriveSceneHealth,
+  evaluateLayerHealth,
+  extractRenderableGeometries,
   gridBoundingRing,
   incidentSummaryLine,
   initialViewpointFor,
+  isArcgisAccessError,
+  isElementFullscreen,
   isValidIncidentLocation,
   overlayAvailability,
   sceneContainerClass,
+  supportsFullscreenApi,
   terrainSceneErrorMessage,
+  type GeoJsonGeometry,
+  type LayerLike,
   type SceneBasemapMode,
+  type SceneLoadFailure,
+  type ServiceHealth,
 } from "./terrainScene";
 
 type Props = {
@@ -38,6 +48,7 @@ type Props = {
 };
 
 type SceneStatus = "loading" | "ready" | "error";
+type ServiceWarning = { kind: "imagery" | "elevation" | "access" } | null;
 
 type OverlayToggles = {
   incidentMarker: boolean;
@@ -47,6 +58,7 @@ type OverlayToggles = {
 };
 
 const WGS84 = SpatialReference.WGS84;
+const OK_HEALTH: ServiceHealth = { failed: false, access: false };
 
 export default function InteractiveTerrainScene({
   location = null,
@@ -58,15 +70,21 @@ export default function InteractiveTerrainScene({
   incidentLabel = null,
   height = 460,
 }: Props) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<SceneView | null>(null);
   const mapRef = useRef<Map | null>(null);
   const overlayRef = useRef<GraphicsLayer | null>(null);
+  const elevHealthRef = useRef<ServiceHealth>(OK_HEALTH);
+  const nativeFsRef = useRef(false);
 
   const [fullscreen, setFullscreen] = useState(false);
+  const [nativeFs, setNativeFs] = useState(false);
   const [basemapMode, setBasemapMode] = useState<SceneBasemapMode>("satellite");
   const [status, setStatus] = useState<SceneStatus>("loading");
-  const [errorKind, setErrorKind] = useState<"elevation" | "imagery" | "both" | "unknown">("unknown");
+  const [errorKind, setErrorKind] = useState<SceneLoadFailure>("unknown");
+  const [warning, setWarning] = useState<ServiceWarning>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const vp = useMemo(() => initialViewpointFor(location), [location]);
   const available = useMemo(
@@ -74,13 +92,14 @@ export default function InteractiveTerrainScene({
     [location, terrain, geometryJson],
   );
 
-  // Default each overlay ON only where real data backs it.
   const [toggles, setToggles] = useState<OverlayToggles>({
     incidentMarker: true,
     roadBearing: true,
     terrainExtent: false,
     uploadedGeometry: true,
   });
+
+  nativeFsRef.current = nativeFs;
 
   const goToIncident = useCallback(() => {
     const view = viewRef.current;
@@ -90,22 +109,36 @@ export default function InteractiveTerrainScene({
       .catch(() => {});
   }, [vp]);
 
-  // ---- Create the SceneView once (only with a valid incident anchor). --------
+  const applyHealth = useCallback((imagery: ServiceHealth, elevation: ServiceHealth) => {
+    const health = deriveSceneHealth(imagery, elevation);
+    if (health.blocking) {
+      setErrorKind(health.blocking);
+      setStatus("error");
+    } else {
+      setWarning(health.warning);
+      setStatus("ready");
+    }
+  }, []);
+
+  // ---- Create the SceneView (and fully recreate on retry via reloadKey) ------
   useEffect(() => {
     if (!containerRef.current || !vp) return;
 
     esriConfig.assetsPath = "/assets";
+    // Browser-safe, domain-restricted ArcGIS key (never the backend server key).
     const envApiKey = (import.meta as { env?: Record<string, string> }).env?.VITE_ARCGIS_API_KEY;
     if (envApiKey) esriConfig.apiKey = String(envApiKey);
 
+    setStatus("loading");
+    setWarning(null);
+
     const overlay = new GraphicsLayer({ title: "Operational overlays" });
-    // Drape overlays on the terrain surface (truthful — follows real elevation).
     (overlay as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "on-the-ground" };
     overlayRef.current = overlay;
 
     const map = new Map({
       basemap: basemapIdFor(basemapMode),
-      ground: "world-elevation", // real Esri streaming elevation surface
+      ground: "world-elevation",
       layers: [overlay],
     });
     mapRef.current = map;
@@ -124,22 +157,32 @@ export default function InteractiveTerrainScene({
 
     let cancelled = false;
     view
-      .when(() => {
+      .when(async () => {
         if (cancelled) return;
-        setStatus("ready");
-        // Frame obliquely on the incident once the surface is ready.
         view
           .goTo(
             { target: [vp.target[0], vp.target[1]], tilt: vp.tilt, heading: vp.heading, zoom: vp.zoom },
             { animate: false },
           )
           .catch(() => {});
-      })
-      .catch(() => {
+        // Probe REAL service health from layer loadStatus/loadError (not counts).
+        await Promise.allSettled([
+          map.basemap?.loadAll?.() ?? Promise.resolve(null),
+          map.ground?.loadAll?.() ?? Promise.resolve(null),
+        ]);
         if (cancelled) return;
-        // Distinguish elevation vs imagery failure where we can.
-        const groundFailed = (map.ground?.layers?.length ?? 0) === 0;
-        setErrorKind(groundFailed ? "both" : "imagery");
+        const imagery = evaluateLayerHealth(
+          (map.basemap?.baseLayers?.toArray?.() ?? []) as unknown as LayerLike[],
+        );
+        const elevation = evaluateLayerHealth(
+          (map.ground?.layers?.toArray?.() ?? []) as unknown as LayerLike[],
+        );
+        elevHealthRef.current = elevation;
+        applyHealth(imagery, elevation);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setErrorKind(isArcgisAccessError(err) ? "access" : "unknown");
         setStatus("error");
       });
 
@@ -148,11 +191,19 @@ export default function InteractiveTerrainScene({
       overlayRef.current = null;
       mapRef.current = null;
       viewRef.current = null;
+      elevHealthRef.current = OK_HEALTH;
       view.destroy();
     };
-    // Created once per incident anchor; basemap/overlay changes are handled below.
+    // Recreated per incident anchor and on retry; basemap/overlays handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vp]);
+  }, [vp, reloadKey]);
+
+  const retry = useCallback(() => {
+    setErrorKind("unknown");
+    setWarning(null);
+    setStatus("loading");
+    setReloadKey((k) => k + 1); // tears down and recreates the view/map/layers
+  }, []);
 
   // ---- Home / Compass widgets ------------------------------------------------
   useEffect(() => {
@@ -170,16 +221,28 @@ export default function InteractiveTerrainScene({
     };
   }, [status]);
 
-  // ---- Basemap (satellite / topographic) toggle ------------------------------
+  // ---- Basemap (satellite / topographic) toggle + imagery re-probe -----------
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    try {
-      map.basemap = Basemap.fromId(basemapIdFor(basemapMode));
-    } catch {
-      /* keep current basemap */
-    }
-  }, [basemapMode]);
+    const bm = Basemap.fromId(basemapIdFor(basemapMode));
+    if (!bm) return;
+    map.basemap = bm;
+    if (status !== "ready") return;
+    let cancelled = false;
+    (bm.loadAll?.() ?? Promise.resolve(null))
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled) return;
+        const imagery = evaluateLayerHealth(
+          (bm.baseLayers?.toArray?.() ?? []) as unknown as LayerLike[],
+        );
+        applyHealth(imagery, elevHealthRef.current);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [basemapMode, status, applyHealth]);
 
   // ---- Rebuild overlays when toggles / data change ---------------------------
   useEffect(() => {
@@ -189,7 +252,6 @@ export default function InteractiveTerrainScene({
 
     const validLoc = isValidIncidentLocation(location);
 
-    // Terrain sample extent (real sampled grid boundary).
     if (toggles.terrainExtent && available.terrainExtent) {
       const ring = gridBoundingRing(terrain?.grid?.points ?? null);
       if (ring) {
@@ -207,7 +269,6 @@ export default function InteractiveTerrainScene({
       }
     }
 
-    // Road bearing direction (ONLY when a real bearing was resolved).
     if (toggles.roadBearing && available.roadBearing && validLoc) {
       const bearing = terrain?.road_bearing_deg_used as number;
       const [a, b] = bearingLineEndpoints(location!.latitude as number, location!.longitude as number, bearing, 130);
@@ -220,12 +281,10 @@ export default function InteractiveTerrainScene({
       );
     }
 
-    // Uploaded incident geometry (only when present).
     if (toggles.uploadedGeometry && available.uploadedGeometry && geometryJson) {
-      addGeoJson(overlay, geometryJson);
+      for (const geom of extractRenderableGeometries(geometryJson)) addGeoJsonGeometry(overlay, geom);
     }
 
-    // Incident marker on top.
     if (toggles.incidentMarker && validLoc) {
       overlay.add(
         new Graphic({
@@ -247,14 +306,59 @@ export default function InteractiveTerrainScene({
     }
   }, [toggles, available, location, terrain, geometryJson]);
 
-  // ---- Resize after fullscreen layout change ---------------------------------
+  // ---- Fullscreen (real Fullscreen API + CSS fallback) -----------------------
+  const toggleFullscreen = useCallback(async () => {
+    const el = wrapperRef.current;
+    if (!fullscreen) {
+      if (el && supportsFullscreenApi(document, el)) {
+        try {
+          await el.requestFullscreen();
+          return; // fullscreenchange handler sets state
+        } catch {
+          /* fall back to CSS */
+        }
+      }
+      setNativeFs(false);
+      setFullscreen(true);
+      return;
+    }
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+        return;
+      } catch {
+        /* fall back */
+      }
+    }
+    setNativeFs(false);
+    setFullscreen(false);
+  }, [fullscreen]);
+
+  // Keep button/state synced with Esc and native browser fullscreen controls.
+  useEffect(() => {
+    const onChange = () => {
+      const active = isElementFullscreen(document, wrapperRef.current);
+      if (active) {
+        setNativeFs(true);
+        setFullscreen(true);
+      } else if (nativeFsRef.current) {
+        setNativeFs(false);
+        setFullscreen(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // ---- Restore scrolling + resize SceneView on fullscreen change -------------
   useEffect(() => {
     const view = viewRef.current;
-    if (!view) return;
     const id = window.setTimeout(() => {
-      (view as unknown as { resize?: () => void }).resize?.();
+      (view as unknown as { resize?: () => void } | null)?.resize?.();
     }, 180);
-    if (fullscreen) {
+    // Only lock body scroll for the CSS fallback; native fullscreen is handled
+    // by the browser. Always restored on cleanup.
+    if (fullscreen && !nativeFs) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
@@ -263,7 +367,7 @@ export default function InteractiveTerrainScene({
       };
     }
     return () => window.clearTimeout(id);
-  }, [fullscreen]);
+  }, [fullscreen, nativeFs]);
 
   // ---- Missing-coordinate safe empty state -----------------------------------
   if (!vp) {
@@ -289,9 +393,11 @@ export default function InteractiveTerrainScene({
     longitude: location?.longitude ?? null,
   });
 
+  const fsHeightStyle = fullscreen ? (nativeFs ? { height: "100vh" } : undefined) : { height };
+
   return (
-    <div className={sceneContainerClass(fullscreen)} style={fullscreen ? undefined : { height }}>
-      <div ref={containerRef} className="absolute inset-0" style={fullscreen ? undefined : { height }} />
+    <div ref={wrapperRef} className={sceneContainerClass(fullscreen, nativeFs)} style={fsHeightStyle}>
+      <div ref={containerRef} className="absolute inset-0" />
 
       {/* Incident summary + attribution panel */}
       <div className="pointer-events-none absolute left-2 top-2 z-10 max-w-[min(92%,360px)] rounded-md bg-black/55 px-2.5 py-1.5 text-white backdrop-blur-sm">
@@ -331,7 +437,7 @@ export default function InteractiveTerrainScene({
           </button>
           <button
             type="button"
-            onClick={() => setFullscreen((v) => !v)}
+            onClick={toggleFullscreen}
             className="rounded bg-white/85 px-2 py-1 text-[10px] font-medium text-slate-800 shadow hover:bg-white"
             title={fullscreen ? "Exit full screen" : "Full screen"}
           >
@@ -339,6 +445,13 @@ export default function InteractiveTerrainScene({
           </button>
         </div>
       </div>
+
+      {/* Non-blocking service warning (one of imagery/elevation failed) */}
+      {status === "ready" && warning && (
+        <div className="absolute left-1/2 top-2 z-10 max-w-[min(92%,460px)] -translate-x-1/2 rounded-md border border-amber-400/50 bg-amber-500/90 px-2.5 py-1 text-center text-[10px] font-medium text-slate-900 shadow">
+          {terrainSceneErrorMessage(warning.kind)}
+        </div>
+      )}
 
       {/* Overlay toggles (only those backed by real data) */}
       <div className="absolute bottom-2 left-2 z-10 flex flex-wrap gap-1.5 rounded-md bg-black/55 px-2 py-1.5 backdrop-blur-sm">
@@ -378,7 +491,7 @@ export default function InteractiveTerrainScene({
         </div>
       )}
 
-      {/* Error state */}
+      {/* Blocking error state */}
       {status === "error" && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0f172a]/85 p-6 text-center">
           <div className="max-w-md text-xs text-white/90">
@@ -386,11 +499,7 @@ export default function InteractiveTerrainScene({
             <div>{terrainSceneErrorMessage(errorKind)}</div>
             <button
               type="button"
-              onClick={() => {
-                setStatus("loading");
-                const view = viewRef.current;
-                view?.when(() => setStatus("ready")).catch(() => setStatus("error"));
-              }}
+              onClick={retry}
               className="mt-3 rounded bg-white/90 px-3 py-1 text-[11px] font-medium text-slate-900 hover:bg-white"
             >
               Retry
@@ -434,10 +543,8 @@ function OverlayChip({
   );
 }
 
-/** Add a GeoJSON geometry (Point/LineString/Polygon + Multi*) as overlay graphics. */
-function addGeoJson(layer: GraphicsLayer, geojson: Record<string, unknown>) {
-  const type = String(geojson.type ?? "").toLowerCase();
-  const coords = geojson.coordinates as unknown;
+/** Render a single validated GeoJSON geometry primitive as overlay graphic(s). */
+function addGeoJsonGeometry(layer: GraphicsLayer, geom: GeoJsonGeometry) {
   const lineSym = { type: "simple-line", color: [20, 93, 203, 0.95], width: 3 } as never;
   const fillSym = {
     type: "simple-fill",
@@ -451,8 +558,7 @@ function addGeoJson(layer: GraphicsLayer, geojson: Record<string, unknown>) {
     outline: { color: [255, 255, 255, 1], width: 1.5 },
   } as never;
 
-  const addPoint = (c: unknown) => {
-    if (!Array.isArray(c) || c.length < 2) return;
+  const addPoint = (c: number[]) =>
     layer.add(
       new Graphic({
         geometry: new Point({ x: Number(c[0]), y: Number(c[1]), spatialReference: WGS84 }),
@@ -460,46 +566,42 @@ function addGeoJson(layer: GraphicsLayer, geojson: Record<string, unknown>) {
         attributes: { __overlay: "uploaded_geometry" },
       }),
     );
-  };
-  const addLine = (paths: unknown) => {
-    if (!Array.isArray(paths)) return;
+  const addLine = (paths: number[][][]) =>
     layer.add(
       new Graphic({
-        geometry: new Polyline({ paths: paths as number[][][], spatialReference: WGS84 }),
+        geometry: new Polyline({ paths, spatialReference: WGS84 }),
         symbol: lineSym,
         attributes: { __overlay: "uploaded_geometry" },
       }),
     );
-  };
-  const addPolygon = (rings: unknown) => {
-    if (!Array.isArray(rings)) return;
+  const addPolygon = (rings: number[][][]) =>
     layer.add(
       new Graphic({
-        geometry: new Polygon({ rings: rings as number[][][], spatialReference: WGS84 }),
+        geometry: new Polygon({ rings, spatialReference: WGS84 }),
         symbol: fillSym,
         attributes: { __overlay: "uploaded_geometry" },
       }),
     );
-  };
 
-  switch (type) {
-    case "point":
-      addPoint(coords);
+  const c = geom.coordinates;
+  switch (geom.type) {
+    case "Point":
+      addPoint(c as number[]);
       break;
-    case "multipoint":
-      (coords as unknown[])?.forEach?.(addPoint);
+    case "MultiPoint":
+      (c as number[][]).forEach(addPoint);
       break;
-    case "linestring":
-      addLine([coords]);
+    case "LineString":
+      addLine([c as number[][]]);
       break;
-    case "multilinestring":
-      addLine(coords);
+    case "MultiLineString":
+      addLine(c as number[][][]);
       break;
-    case "polygon":
-      addPolygon(coords);
+    case "Polygon":
+      addPolygon(c as number[][][]);
       break;
-    case "multipolygon":
-      (coords as unknown[])?.forEach?.(addPolygon);
+    case "MultiPolygon":
+      (c as number[][][][]).forEach(addPolygon);
       break;
     default:
       break;
