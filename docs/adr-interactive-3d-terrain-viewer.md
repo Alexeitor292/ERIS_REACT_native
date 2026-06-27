@@ -135,7 +135,9 @@ bearing. No left/right labels are drawn unless a bearing is known. No geometry i
    `/arcgis/runtime-config`, for the mobile native runtime) is **never** exposed to the
    frontend. Because Vite inlines `VITE_*` at **build time**, the `.env.example` documents the
    exact **Docker build-arg** wiring (`ARG`/`ENV` before `RUN npm run build`, compose
-   `build.args`). A visible scene error appears when ArcGIS rejects access.
+   `build.args`) — supplied as a **shell-only build variable**, never placed in
+   `docker/.env.proxmox` (which the backend loads via `env_file:`). A visible scene error
+   appears when ArcGIS rejects access.
 
 5. **Performance.** `InteractiveTerrainScene` is **`React.lazy` + `Suspense`** in
    `SubmissionDetailPage`; SceneView's 3D modules download only when the user opens the 3D
@@ -155,18 +157,31 @@ bearing. No left/right labels are drawn unless a bearing is known. No geometry i
   before `RUN ... npm run build` (also raised the build heap with
   `NODE_OPTIONS=--max-old-space-size=4096`, since the SceneView bundle OOM'd the container's
   default Node heap).
-- `docker/docker-compose.proxmox.yml`: `services.web.build.args` now includes
-  `VITE_ARCGIS_API_KEY: ${VITE_ARCGIS_API_KEY:-}`.
-- `docker/.env.proxmox.example` documents that the ERIS server's `docker/.env.proxmox` must set
-  `VITE_ARCGIS_API_KEY=<restricted browser key>`.
-- It is **not** added to the backend service's `environment:` block and the component reads it
-  only via `import.meta.env.VITE_ARCGIS_API_KEY`. (Because the backend service shares
-  `env_file: .env.proxmox`, the browser key is visible in the backend's runtime env the same
-  way `VITE_API_BASE_URL` already is — inert and not a secret; the backend reads `ARCGIS_API_KEY`,
-  a different, untouched variable.)
-- Verified end-to-end: with a harmless probe value, `docker compose build web` embeds the value
-  into the served SceneView chunk (no real key printed or committed). `import.meta.env.VITE_*`
-  is accessed directly so Vite statically inlines it at build time.
+- `docker/docker-compose.proxmox.yml`: `services.web.build.args` includes
+  `VITE_ARCGIS_API_KEY: ${VITE_ARCGIS_API_KEY:-}` (Compose substitutes it from the **shell**).
+- **Deployment isolation (corrected):** the key is supplied **only as a shell environment
+  variable** at build time and is **NOT** placed in `docker/.env.proxmox`. The backend service
+  loads that whole file via `env_file:`, so anything in it would leak into the backend
+  container's environment; keeping the key shell-only lets Compose substitute the web build arg
+  while the backend env_file stays limited to `.env.proxmox`. The documented flow:
+
+  ```sh
+  export VITE_ARCGIS_API_KEY='your-browser-safe-restricted-key'
+  docker compose --env-file .env.proxmox \
+    -f docker-compose.yml -f docker-compose.proxmox.yml \
+    up -d --build web
+  unset VITE_ARCGIS_API_KEY
+  ```
+
+  `docker/.env.proxmox.example` now explicitly says the key must **not** go in that file, and
+  `web/.env.example` documents the shell-only flow. The component reads it only via
+  `import.meta.env.VITE_ARCGIS_API_KEY`; the backend `ARCGIS_API_KEY` is a different, untouched
+  variable that is never exposed to the frontend.
+- Verified end-to-end with a harmless probe supplied **only via the shell** (never in
+  `.env.proxmox`, never printed or committed): the rendered **web `build.args` contains** the
+  probe, the rendered **backend `environment` does NOT contain `VITE_ARCGIS_API_KEY`**, and
+  `docker compose build web` embeds the value into the served SceneView chunk.
+  `import.meta.env.VITE_*` is accessed directly so Vite statically inlines it at build time.
 
 **SceneView no longer recreated on every parent render.** `SubmissionDetailPage` passes a new
 inline `location` object each render; the component now derives stable `lat`/`lon` primitives and
