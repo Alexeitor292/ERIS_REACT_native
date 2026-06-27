@@ -13,7 +13,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from "react-native";
 
 import type { GisaTerrainGrid } from "../api/submissions";
-import { getOfflineScenePackageDescriptor } from "../api/submissions";
+import { getOfflineScenePackageDescriptor, getOfflineSceneDownloadGrant } from "../api/submissions";
 import { getToken } from "../auth/tokenStore";
 import {
   describeScope,
@@ -30,6 +30,7 @@ import {
   getOfflineScenePackage,
   openDownloadedScene,
   pauseDownload,
+  resumeDownload,
 } from "../offline/offlineScenePackages";
 
 type Props = {
@@ -112,7 +113,7 @@ export function OfflineTerrainPanel({
     if (!descriptor || !descriptor.available) {
       Alert.alert(
         "Offline 3D unavailable",
-        descriptor?.reason ?? "No offline 3D area is available for this incident yet.",
+        descriptor?.reason ?? "No offline 3D package has been prepared for this incident yet.",
       );
       return;
     }
@@ -120,8 +121,13 @@ export function OfflineTerrainPanel({
     setBusy(true);
     setProgress(0);
     try {
+      const t = await getToken();
+      if (!t) throw new Error("Not signed in.");
+      // Mint a short-lived presigned URL (role-checked); MinIO stays private.
+      const grant = await getOfflineSceneDownloadGrant(t, String(submissionId));
       const result = await downloadOfflineSceneArea({
         descriptor,
+        grant,
         incidentId,
         onProgress: (p) => setProgress(p.fraction),
       });
@@ -129,16 +135,37 @@ export function OfflineTerrainPanel({
       if (result.status === "FAILED") setError(result.error ?? "Download failed.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      await reloadMeta();
     } finally {
       setBusy(false);
       setProgress(null);
     }
-  }, [descriptor, incidentId]);
+  }, [descriptor, incidentId, submissionId, reloadMeta]);
 
   const onPause = useCallback(async () => {
     await pauseDownload(submissionId);
     await reloadMeta();
   }, [submissionId, reloadMeta]);
+
+  const onResume = useCallback(async () => {
+    setError(null);
+    setBusy(true);
+    setProgress(0);
+    try {
+      const result = await resumeDownload(submissionId, (p) => setProgress(p.fraction));
+      if (result) {
+        setMeta(result);
+        // Resumable expired (PAUSED with no resumable) -> restart from a fresh grant.
+        if (result.status === "PAUSED") await onDownload();
+        else if (result.status === "FAILED") setError(result.error ?? "Resume failed.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }, [submissionId, onDownload]);
 
   const onOpen = useCallback(async () => {
     setError(null);
@@ -173,6 +200,8 @@ export function OfflineTerrainPanel({
 
   const ready = meta?.status === "READY";
   const downloading = meta?.status === "DOWNLOADING" || busy;
+  const paused = meta?.status === "PAUSED" && !busy;
+  const failed = meta?.status === "FAILED" && !busy;
 
   return (
     <View style={styles.wrapper}>
@@ -200,7 +229,7 @@ export function OfflineTerrainPanel({
         <Text style={styles.btnPrimaryText}>Open native 3D terrain</Text>
       </Pressable>
 
-      {/* Download / progress */}
+      {/* Download / Pause / Resume / Retry */}
       {!ready ? (
         downloading ? (
           <View style={styles.row}>
@@ -212,33 +241,61 @@ export function OfflineTerrainPanel({
               <Text style={styles.btnSmallText}>Pause</Text>
             </Pressable>
           </View>
+        ) : paused ? (
+          <View style={styles.row}>
+            <Text style={styles.progressText}>Paused</Text>
+            <Pressable onPress={onResume} style={styles.btnSmall}>
+              <Text style={styles.btnSmallText}>Resume</Text>
+            </Pressable>
+          </View>
+        ) : failed ? (
+          <Pressable onPress={onDownload} disabled={!descriptor?.available} style={[styles.btnSecondary, !descriptor?.available && styles.btnDisabled]}>
+            <Text style={styles.btnSecondaryText}>Retry download</Text>
+          </Pressable>
         ) : (
+          // Download is ONLY enabled when a verified READY catalog package exists.
           <Pressable
             onPress={onDownload}
-            disabled={!nativeSupported || !hasCoords || isLocalId}
-            style={[styles.btnSecondary, (!nativeSupported || !hasCoords || isLocalId) && styles.btnDisabled]}
+            disabled={!nativeSupported || !hasCoords || isLocalId || !descriptor?.available}
+            style={[
+              styles.btnSecondary,
+              (!nativeSupported || !hasCoords || isLocalId || !descriptor?.available) && styles.btnDisabled,
+            ]}
           >
-            <Text style={styles.btnSecondaryText}>
-              {descriptor?.available ? "Download offline 3D area" : "Check offline 3D availability"}
-            </Text>
+            <Text style={styles.btnSecondaryText}>Download offline 3D area</Text>
           </Pressable>
         )
       ) : null}
 
-      {/* Scope / size estimate before download */}
-      {!ready && descriptor?.available ? (
-        <Text style={styles.scope}>Scope: {describeScope(descriptor)}</Text>
+      {/* Prepared-package details (real catalog values) before download */}
+      {!ready && descriptor?.available && descriptor.package ? (
+        <>
+          <Text style={styles.scope}>{describeScope(descriptor)}</Text>
+          <Text style={styles.attr}>
+            v{descriptor.package.version} · elevation {descriptor.package.elevation_source ?? "—"}
+            {descriptor.package.elevation.resolution ? ` (${descriptor.package.elevation.resolution})` : ""}
+            {descriptor.package.basemap_or_imagery_source ? ` · imagery: ${descriptor.package.basemap_or_imagery_source}` : ""}
+          </Text>
+        </>
       ) : null}
-      {!ready && descriptor && !descriptor.available ? (
-        <Text style={styles.note}>{descriptor.reason}</Text>
+      {/* Honest "none prepared" / "missing" state — never an estimate-as-if-created */}
+      {!ready && !downloading && !paused && descriptor && !descriptor.available ? (
+        <Text style={styles.note}>
+          {descriptor.reason ?? "No offline 3D package has been prepared for this incident yet."}
+        </Text>
       ) : null}
 
-      {/* Status of a downloaded package */}
+      {/* Status of a downloaded, verified package */}
       {ready ? (
         <View style={styles.statusBox}>
           <Text style={styles.statusLine}>
-            Version {meta?.packageVersion?.slice(0, 8) ?? "—"} · {formatBytes(meta?.sizeBytes)} ·{" "}
-            {formatPackageAge(meta?.downloadedAt ?? null)}
+            v{meta?.packageVersion ?? "—"} · {formatBytes(meta?.sizeBytes)} · {formatPackageAge(meta?.downloadedAt ?? null)}
+          </Text>
+          <Text style={styles.attr}>
+            Elevation: {meta?.elevationSource ?? "—"}
+            {meta?.elevationDataset ? ` · ${meta.elevationDataset}` : ""}
+            {meta?.elevationResolution ? ` (${meta.elevationResolution})` : ""}
+            {meta?.basemapSource ? ` · imagery: ${meta.basemapSource}` : ""}
           </Text>
           {refreshNeeded ? (
             <Text style={styles.refreshLine}>Incident data changed — an update is available. Re-download to refresh.</Text>
@@ -269,6 +326,7 @@ const styles = StyleSheet.create({
   badgeMuted: { color: "#94a3b8", fontSize: 9, fontWeight: "600" },
   note: { color: "#94a3b8", fontSize: 10, marginBottom: 6, lineHeight: 14 },
   scope: { color: "#cbd5e1", fontSize: 10, marginTop: 4 },
+  attr: { color: "#94a3b8", fontSize: 9, marginTop: 2, lineHeight: 13 },
   row: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
   progressText: { color: "#cbd5e1", fontSize: 11, flex: 1 },
   btnPrimary: { backgroundColor: "#2563eb", borderRadius: 6, paddingVertical: 9, alignItems: "center", marginBottom: 6 },

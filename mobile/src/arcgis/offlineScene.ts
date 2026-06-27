@@ -19,13 +19,22 @@ export type OfflineScenePackageMeta = {
   center: { lat: number; lon: number };
   radiusM: number;
   bounds: { minLat: number; minLon: number; maxLat: number; maxLon: number };
-  // Package identity + lifecycle.
+  // Package identity + integrity (from the catalog).
   contentSignature: string; // server content version at download time
   packageVersion: string;
+  expectedSha256: string; // catalog sha256 — verified before READY
+  expectedSizeBytes: number; // catalog size — verified before READY
+  // Source attribution (what the field user is actually viewing).
+  elevationSource: string | null;
+  elevationDataset: string | null;
+  elevationResolution: string | null;
+  basemapSource: string | null;
+  // Lifecycle.
   status: OfflineSceneStatus;
-  sizeBytes: number;
-  estimatedSizeMb: number | null;
-  localPath: string | null; // native file path to the .mspk, when READY
+  sizeBytes: number; // actual bytes on disk once READY
+  localPath: string | null; // verified final .mspk path, when READY
+  partPath: string | null; // temporary .part path while downloading
+  resumeSnapshot: unknown | null; // FileSystem resumable savable() for resume-after-restart
   downloadedAt: string | null;
   requestedAt: string;
   error: string | null;
@@ -44,12 +53,43 @@ export type SceneAreaDescriptor = {
   package: {
     format: string;
     version: string;
-    estimated_size_mb: number;
-    download_url: string | null;
-    source: string | null;
+    size_bytes: number;
+    sha256: string;
+    elevation_source: string | null;
+    elevation: { dataset: string | null; version: string | null; resolution: string | null };
+    basemap_or_imagery_source: string | null;
+    created_at: string | null;
+    uploaded_at: string | null;
+    // Protected ERIS download path (NOT a raw MinIO URL).
+    download_path: string | null;
   } | null;
   content_signature: string | null;
 };
+
+/** Protected download response (mirrors the .../download endpoint). */
+export type SceneDownloadGrant = {
+  submission_id: number;
+  url: string; // short-lived presigned URL
+  expires_in_seconds: number;
+  object_key: string;
+  sha256: string;
+  size_bytes: number;
+  package_version: string;
+  content_signature: string;
+};
+
+export function partPathFor(finalPath: string): string {
+  return `${finalPath}.part`;
+}
+
+export function sizeMatches(expected: number, actual: number): boolean {
+  return Number.isFinite(expected) && Number.isFinite(actual) && expected > 0 && expected === actual;
+}
+
+export function shaMatches(expected: string | null | undefined, actual: string | null | undefined): boolean {
+  if (!expected || !actual) return false;
+  return expected.trim().toLowerCase() === actual.trim().toLowerCase();
+}
 
 export function formatBytes(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n) || n <= 0) return "0 MB";
@@ -114,12 +154,16 @@ export function summarizeStorage(metas: OfflineScenePackageMeta[]): {
   return { count: metas.length, readyCount, totalBytes };
 }
 
-/** Human description of the bounded download scope, for the pre-download prompt. */
+/**
+ * Human description of the prepared package, for the pre-download prompt. Shows
+ * the REAL catalog size (not an estimate) and the elevation source.
+ */
 export function describeScope(descriptor: SceneAreaDescriptor | null | undefined): string {
-  if (!descriptor || !descriptor.area) return "Area unavailable";
+  if (!descriptor || !descriptor.area || !descriptor.package) return "No package prepared";
   const km = (descriptor.area.radius_m / 1000).toFixed(descriptor.area.radius_m < 1000 ? 2 : 1);
-  const size = descriptor.package ? `~${descriptor.package.estimated_size_mb} MB` : "size unknown";
-  return `${km} km radius around the incident · ${size}`;
+  const size = formatBytes(descriptor.package.size_bytes);
+  const elev = descriptor.package.elevation_source ?? "elevation";
+  return `${km} km radius · ${size} · ${elev}`;
 }
 
 /** Build the initial local metadata record from a server descriptor at request time. */
@@ -129,6 +173,7 @@ export function metaFromDescriptor(
   nowISO: string,
 ): OfflineScenePackageMeta | null {
   if (!descriptor.available || !descriptor.area || !descriptor.package) return null;
+  const pkg = descriptor.package;
   return {
     submissionId: descriptor.submission_id,
     incidentId,
@@ -140,12 +185,19 @@ export function metaFromDescriptor(
       maxLat: descriptor.area.bounds.max_lat,
       maxLon: descriptor.area.bounds.max_lon,
     },
-    contentSignature: descriptor.content_signature ?? descriptor.package.version,
-    packageVersion: descriptor.package.version,
+    contentSignature: descriptor.content_signature ?? pkg.version,
+    packageVersion: pkg.version,
+    expectedSha256: pkg.sha256,
+    expectedSizeBytes: pkg.size_bytes,
+    elevationSource: pkg.elevation_source,
+    elevationDataset: pkg.elevation.dataset,
+    elevationResolution: pkg.elevation.resolution,
+    basemapSource: pkg.basemap_or_imagery_source,
     status: "PENDING",
     sizeBytes: 0,
-    estimatedSizeMb: descriptor.package.estimated_size_mb,
     localPath: null,
+    partPath: null,
+    resumeSnapshot: null,
     downloadedAt: null,
     requestedAt: nowISO,
     error: null,

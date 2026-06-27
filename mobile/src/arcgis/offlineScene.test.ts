@@ -11,6 +11,9 @@ import {
   isStale,
   metaFromDescriptor,
   needsRefresh,
+  partPathFor,
+  shaMatches,
+  sizeMatches,
   summarizeStorage,
   type OfflineScenePackageMeta,
   type SceneAreaDescriptor,
@@ -26,7 +29,18 @@ function descriptor(overrides: Partial<SceneAreaDescriptor> = {}): SceneAreaDesc
       radius_m: 1500,
       bounds: { min_lat: 38.48, min_lon: -121.52, max_lat: 38.52, max_lon: -121.48 },
     },
-    package: { format: "mspk", version: "abc123", estimated_size_mb: 42, download_url: "https://x/y.mspk", source: "configured_scene_package_host" },
+    package: {
+      format: "mspk",
+      version: "abc123",
+      size_bytes: 42 * 1024 * 1024,
+      sha256: "a".repeat(64),
+      elevation_source: "USGS_3DEP",
+      elevation: { dataset: "3DEP 1m", version: "2024", resolution: "1m" },
+      basemap_or_imagery_source: "Caltrans imagery",
+      created_at: "2026-06-27T00:00:00",
+      uploaded_at: "2026-06-27T01:00:00",
+      download_path: "/submissions/7/gisa/offline-scene-package/download",
+    },
     content_signature: "abc123",
     ...overrides,
   };
@@ -86,20 +100,32 @@ test("summarizeStorage totals bytes and counts ready packages", () => {
   assert.equal(s.totalBytes, 15 * 1024 * 1024);
 });
 
-test("describeScope shows bounded radius + size estimate", () => {
-  assert.match(describeScope(descriptor()), /1\.5 km radius around the incident · ~42 MB/);
-  assert.equal(describeScope({ ...descriptor(), area: null }), "Area unavailable");
+test("describeScope shows bounded radius + REAL catalog size + elevation source", () => {
+  assert.match(describeScope(descriptor()), /1\.5 km radius · 42 MB · USGS_3DEP/);
+  assert.equal(describeScope({ ...descriptor(), area: null }), "No package prepared");
 });
 
-test("metaFromDescriptor maps an available descriptor; null when unavailable", () => {
+test("metaFromDescriptor maps an available descriptor incl. integrity + attribution", () => {
   const m = metaFromDescriptor(descriptor(), 99, "2026-06-26T00:00:00Z");
   assert.ok(m);
   assert.equal(m!.submissionId, 7);
-  assert.equal(m!.incidentId, 99);
   assert.equal(m!.status, "PENDING");
-  assert.equal(m!.radiusM, 1500);
-  assert.equal(m!.contentSignature, "abc123");
-  assert.equal(m!.bounds.minLat, 38.48);
+  assert.equal(m!.expectedSha256, "a".repeat(64));
+  assert.equal(m!.expectedSizeBytes, 42 * 1024 * 1024);
+  assert.equal(m!.elevationSource, "USGS_3DEP");
+  assert.equal(m!.elevationResolution, "1m");
+  assert.equal(m!.basemapSource, "Caltrans imagery");
+  assert.equal(m!.localPath, null);
   // unavailable -> null (no package to track)
   assert.equal(metaFromDescriptor({ ...descriptor(), available: false, package: null, area: null }, 99, "2026-06-26T00:00:00Z"), null);
+});
+
+test("integrity helpers: part path, size + sha matching", () => {
+  assert.equal(partPathFor("/docs/offline-scenes/7.mspk"), "/docs/offline-scenes/7.mspk.part");
+  assert.equal(sizeMatches(500, 500), true);
+  assert.equal(sizeMatches(500, 499), false);
+  assert.equal(sizeMatches(0, 0), false); // zero is never a valid match
+  assert.equal(shaMatches("ABCdef", "abcdef"), true); // case-insensitive
+  assert.equal(shaMatches("abc", "abd"), false);
+  assert.equal(shaMatches(null, "abc"), false);
 });

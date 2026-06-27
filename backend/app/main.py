@@ -22,7 +22,7 @@ from .db import get_db
 from .config import settings
 from .auth import decode_token
 from .deps import get_current_user, require_roles
-from .storage import ensure_bucket, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url
+from .storage import ensure_bucket, ensure_bucket_exists, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url, stat_object, sha256_of_object
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
@@ -51,6 +51,7 @@ from .schemas.common import (
     SubmissionPermissionsReplace,
     SubmissionTitlePatch,
     TerrainGridRequest,
+    OfflineScenePackageRegister,
     WorkflowAction,
 )
 from .services import elevation_profile as elevation_profile_svc
@@ -2729,65 +2730,194 @@ def build_gisa_terrain_grid(
     return {"submission_id": submission_id, "terrain": result, "cached": False}
 
 
+def _newest_ready_scene_package(db: Session, submission_id: int) -> dict | None:
+    """Newest READY catalog row for a submission (the descriptor's chosen package)."""
+    row = db.execute(text("""
+        SELECT * FROM offline_scene_packages
+        WHERE submission_id = :sid AND status = 'READY'
+        ORDER BY uploaded_at DESC, id DESC
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+    return dict(row) if row else None
+
+
+def _scene_object_present(catalog: dict) -> bool:
+    """True only when the exact MinIO object exists with the catalog's size.
+    Storage errors are treated as not-present (honest offline-unavailable)."""
+    try:
+        st = stat_object(object_key=catalog["object_key"], bucket=catalog["minio_bucket"])
+    except Exception:
+        return False
+    return st is not None and int(st["size"]) == int(catalog["size_bytes"])
+
+
 @app.get("/submissions/{submission_id}/gisa/offline-scene-package")
 def get_gisa_offline_scene_package(
     submission_id: int = Path(..., ge=1),
-    radius_m: float | None = None,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Bounded offline 3D scene-package descriptor for the mobile native viewer.
+    """Offline 3D scene-package descriptor for the mobile native viewer.
 
-    Returns the area bounds (incident radius, never statewide), an estimated
-    package size, a content signature (for refresh detection), and the download
-    URL when a scene-package host is configured. When no host is configured, or
-    the incident has no coordinates, available=False with a clear reason — the
-    app then shows an honest offline-unavailable state. This does NOT generate
-    the .mspk (that is enterprise infrastructure); it only describes it."""
+    available is True ONLY when ERIS has a READY catalog row AND the exact MinIO
+    object is present with matching size. Otherwise available=False with a precise
+    reason ("no package prepared yet" / "missing from storage"). All values come
+    from the catalog row — never from a base-URL string. ERIS does not generate
+    the .mspk; an operator authors and registers it (see the operator runbook)."""
     require_can_view_submission(submission_id, db, user)
 
-    row = db.execute(text("""
-        SELECT latitude, longitude,
-               route, county, post_mile, district,
-               road_inventory_snapshot_json,
-               geometry_json, updated_at
-        FROM submission_gisa
-        WHERE submission_id = :sid
-        LIMIT 1
-    """), {"sid": submission_id}).mappings().first()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="GISA data not found for this submission")
-
-    lat = row["latitude"]
-    lon = row["longitude"]
-
-    road_bearing_deg = None
-    if lat is not None and lon is not None:
-        try:
-            road_bearing_deg, _ = _resolve_gisa_road_bearing(float(lat), float(lon), dict(row), None)
-        except Exception:
-            road_bearing_deg = None
-
-    geometry_json = row["geometry_json"]
-    if isinstance(geometry_json, str):
-        try:
-            geometry_json = json.loads(geometry_json)
-        except Exception:
-            geometry_json = None
-
-    updated_at = row["updated_at"]
-    descriptor = offline_scene_svc.build_scene_area_descriptor(
-        submission_id=submission_id,
-        lat=float(lat) if lat is not None else None,
-        lon=float(lon) if lon is not None else None,
-        radius_m=radius_m,
-        gisa_updated_at=str(updated_at) if updated_at is not None else None,
-        geometry_json=geometry_json,
-        road_bearing_deg=road_bearing_deg,
-        package_base_url=settings.ARCGIS_SCENE_PACKAGE_BASE_URL,
+    catalog = _newest_ready_scene_package(db, submission_id)
+    object_present = _scene_object_present(catalog) if catalog else False
+    download_path = (
+        f"/submissions/{submission_id}/gisa/offline-scene-package/download"
+        if (catalog and object_present)
+        else None
     )
-    return descriptor
+    return offline_scene_svc.descriptor_from_catalog(
+        submission_id=submission_id,
+        catalog=catalog,
+        object_present=object_present,
+        download_path=download_path,
+    )
+
+
+@app.get("/submissions/{submission_id}/gisa/offline-scene-package/download")
+def download_gisa_offline_scene_package(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Mint a SHORT-LIVED presigned URL for the newest READY package, only after
+    a role/access check. Mobile never receives MinIO credentials; the bucket stays
+    private. On expiry the app re-requests this to resume/retry the download."""
+    require_can_view_submission(submission_id, db, user)
+
+    catalog = _newest_ready_scene_package(db, submission_id)
+    if catalog is None:
+        raise HTTPException(status_code=404, detail="No offline 3D package prepared for this incident.")
+    if not _scene_object_present(catalog):
+        raise HTTPException(status_code=409, detail="The prepared package is missing or changed in storage.")
+
+    ttl = int(settings.OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS)
+    try:
+        url = presign_get(catalog["object_key"], bucket=catalog["minio_bucket"], expires_seconds=ttl)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not mint download URL: {e}")
+    return {
+        "submission_id": submission_id,
+        "url": url,
+        "expires_in_seconds": ttl,
+        "object_key": catalog["object_key"],
+        "sha256": catalog["sha256"],
+        "size_bytes": int(catalog["size_bytes"]),
+        "package_version": catalog["package_version"],
+        "content_signature": catalog["content_signature"],
+    }
+
+
+@app.post("/admin/offline-scene-packages")
+def register_offline_scene_package(
+    payload: OfflineScenePackageRegister = ...,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["ADMIN"])),
+):
+    """ADMIN-only registration of an operator-uploaded .mspk.
+
+    Verifies the MinIO object exists, its size matches, and its SHA-256 matches
+    BEFORE marking READY. Rejects missing objects, size/hash mismatch, duplicate
+    versions, and invalid bounds. Retires any prior READY package for the
+    submission (kept for audit). Objects are immutable — never overwritten."""
+    sub = db.execute(text("SELECT id FROM submissions WHERE id = :id"), {"id": payload.submission_id}).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    if not offline_scene_svc.validate_bounds(payload.min_lat, payload.min_lon, payload.max_lat, payload.max_lon):
+        raise HTTPException(status_code=422, detail="Invalid bounds (need min < max, within lat/lon ranges).")
+
+    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    object_key = payload.object_key or offline_scene_svc.make_scene_object_key(
+        payload.submission_id, payload.package_version
+    )
+
+    # Duplicate (immutable) version for this submission?
+    dup = db.execute(text("""
+        SELECT id FROM offline_scene_packages
+        WHERE submission_id = :s AND package_version = :v
+    """), {"s": payload.submission_id, "v": payload.package_version}).first()
+    if dup:
+        raise HTTPException(status_code=409, detail="A package with this version already exists (immutable).")
+
+    # Object-key collision (never overwrite/reuse an immutable key).
+    dup_key = db.execute(text("SELECT id FROM offline_scene_packages WHERE object_key = :k"), {"k": object_key}).first()
+    if dup_key:
+        raise HTTPException(status_code=409, detail="This object key is already registered (immutable).")
+
+    try:
+        ensure_bucket_exists(bucket)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Offline-scenes bucket unavailable: {e}")
+
+    # HEAD: object must exist, size must match.
+    st = stat_object(object_key=object_key, bucket=bucket)
+    if st is None:
+        raise HTTPException(status_code=404, detail=f"MinIO object not found: {bucket}/{object_key}")
+    if int(st["size"]) != int(payload.size_bytes):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Object size mismatch: stored {st['size']} bytes != expected {payload.size_bytes}.",
+        )
+
+    # Verify SHA-256 (stream-hash) before marking READY.
+    actual_sha = sha256_of_object(object_key=object_key, bucket=bucket)
+    if actual_sha.lower() != payload.sha256.lower():
+        raise HTTPException(status_code=409, detail="SHA-256 mismatch; refusing to mark READY.")
+
+    try:
+        db.execute(text("""
+            UPDATE offline_scene_packages SET status='RETIRED', retired_at=NOW()
+            WHERE submission_id = :s AND status = 'READY'
+        """), {"s": payload.submission_id})
+        db.execute(text("""
+            INSERT INTO offline_scene_packages
+              (submission_id, status, package_version, minio_bucket, object_key, sha256, size_bytes,
+               min_lat, min_lon, max_lat, max_lon, center_lat, center_lon, radius_m,
+               elevation_source, elevation_dataset, elevation_version, elevation_resolution,
+               basemap_or_imagery_source, content_signature, uploaded_at, uploaded_by, notes)
+            VALUES
+              (:submission_id, 'READY', :package_version, :bucket, :object_key, :sha256, :size_bytes,
+               :min_lat, :min_lon, :max_lat, :max_lon, :center_lat, :center_lon, :radius_m,
+               :elevation_source, :elevation_dataset, :elevation_version, :elevation_resolution,
+               :basemap, :content_signature, NOW(), :uploaded_by, :notes)
+        """), {
+            "submission_id": payload.submission_id,
+            "package_version": payload.package_version,
+            "bucket": bucket,
+            "object_key": object_key,
+            "sha256": payload.sha256.lower(),
+            "size_bytes": int(payload.size_bytes),
+            "min_lat": payload.min_lat, "min_lon": payload.min_lon,
+            "max_lat": payload.max_lat, "max_lon": payload.max_lon,
+            "center_lat": payload.center_lat, "center_lon": payload.center_lon,
+            "radius_m": payload.radius_m,
+            "elevation_source": payload.elevation_source,
+            "elevation_dataset": payload.elevation_dataset,
+            "elevation_version": payload.elevation_version,
+            "elevation_resolution": payload.elevation_resolution,
+            "basemap": payload.basemap_or_imagery_source,
+            "content_signature": payload.content_signature,
+            "uploaded_by": user["id"],
+            "notes": payload.notes,
+        })
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    row = db.execute(text("""
+        SELECT * FROM offline_scene_packages
+        WHERE submission_id = :s AND package_version = :v
+    """), {"s": payload.submission_id, "v": payload.package_version}).mappings().first()
+    return {"registered": True, "package": dict(row) if row else None}
 
 
 @app.put("/submissions/{submission_id}/gisa/incident-types")

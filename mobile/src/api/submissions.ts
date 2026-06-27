@@ -1,7 +1,7 @@
 import { apiFetch } from "./client";
 import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
 import { prepareUploadFile } from "../utils/uploadFile";
-import type { SceneAreaDescriptor } from "../arcgis/offlineScene";
+import type { SceneAreaDescriptor, SceneDownloadGrant } from "../arcgis/offlineScene";
 
 export async function getSubmission(token: string, id: string) {
   return apiFetch(`/submissions/${id}`, { token });
@@ -205,6 +205,13 @@ export async function getOfflineScenePackageDescriptor(
   const q = radiusM != null ? `?radius_m=${encodeURIComponent(String(radiusM))}` : "";
   return apiFetch<SceneAreaDescriptor>(
     `/submissions/${id}/gisa/offline-scene-package${q}`,
+    { method: "GET", token },
+  );
+}
+
+export async function getOfflineSceneDownloadGrant(token: string, id: string) {
+  return apiFetch<SceneDownloadGrant>(
+    `/submissions/${id}/gisa/offline-scene-package/download`,
     { method: "GET", token },
   );
 }

@@ -147,3 +147,56 @@ eas build --platform android --profile development
 6. **Settings → Offline 3D terrain areas** → **Delete** the area; reopen the submission → it now
    shows offline-unavailable. **Re-download** to confirm replacement; change incident geometry
    server-side, reconnect → verify the "update available" refresh prompt.
+
+## Addendum — real catalog + private MinIO + integrity (2026-06-27)
+
+The placeholder "base URL means available" approach is replaced by a real, MinIO-backed
+catalog. See also `docs/offline-scene-package-operator-runbook.md`.
+
+**Authoritative data model.** USGS **3DEP** raster DEM is the offline elevation source;
+operators author bounded `.mspk` in **ArcGIS Pro / Enterprise**; binaries live in a **private**
+MinIO bucket **`eris-offline-scenes`** (never anonymous, not the uploads bucket); **ERIS owns
+authorization, catalog, lifecycle, and signed download**.
+
+**Catalog table `offline_scene_packages`** (init schema + Alembic `0011`, idempotent CREATE TABLE
+IF NOT EXISTS): `id, submission_id, status(READY|RETIRED|FAILED), package_version, minio_bucket,
+object_key, sha256, size_bytes, min/max/center lat-lon, radius_m, elevation_source(USGS_3DEP),
+elevation_dataset/version/resolution, basemap_or_imagery_source, content_signature, created_at,
+uploaded_at, uploaded_by, retired_at, notes`. Unique `(submission_id, package_version)` and unique
+`object_key`. **Objects are immutable**; a replacement is a new version and the prior READY row is
+**RETIRED** (audited). The descriptor serves the **newest READY** row.
+
+**Availability is verified, never inferred.** `GET …/offline-scene-package` returns `available:true`
+**only** when a READY catalog row exists **and** a live MinIO **HEAD** confirms the object exists
+with the catalog's size. Otherwise `available:false` with a precise reason ("none prepared" /
+"missing from storage"). Values come from the catalog row, never a base-URL string.
+
+**Secure download.** `GET …/offline-scene-package/download` mints a **short-lived presigned URL**
+(default 900 s, `OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS`) only after the role/access check. Mobile
+never receives MinIO credentials; the bucket stays private. On expiry the app re-requests the grant
+and resumes/restarts.
+
+**ADMIN registration.** `POST /admin/offline-scene-packages` (ADMIN only) HEADs the object, verifies
+**exact size** and **SHA-256** (stream-hashed server-side) before marking READY, retires prior READY
+versions, and rejects missing object / size or hash mismatch / duplicate version / invalid bounds /
+non-ADMIN. It never infers readiness from a URL.
+
+**Mobile integrity + lifecycle.** Downloads go to a temporary **`.part`** file; before READY the app
+verifies **(1) byte size, (2) SHA-256 (native `sha256OfFile`, CommonCrypto — no JS crypto dep),
+(3) the `.mspk` actually loads as an `AGSMobileScenePackage` (native `validateScenePackage`)**, then
+**atomically** renames `.part` → final. A package is **never** READY just because a file exists; on
+failure it stays **FAILED** with cleanup. Pause/resume persists the resumable snapshot **across app
+restarts**; a visible **Resume** button drives PAUSED. The UI shows real **version, exact size,
+USGS 3DEP attribution, age, offline-ready**, a clear **"No offline package prepared"** state, and
+correct **Download/Pause/Resume/Retry/Delete/Update** — no size *estimate* shown as if a package
+exists.
+
+**Config.** New `MINIO_OFFLINE_SCENES_BUCKET` (default `eris-offline-scenes`) and
+`OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS` (default 900). `ARCGIS_SCENE_PACKAGE_BASE_URL` is removed.
+
+**Still requires ArcGIS Pro:** package *authoring* (bounded local scene + 3DEP elevation + approved
+offline basemap + mobile-optimized `.mspk` with online layers excluded) remains a manual operator
+step — ERIS does not generate packages from USGS yet. **Android** remains unsupported for the native
+renderer (no reproducible plugin) and the two native methods added here (`sha256OfFile`,
+`validateScenePackage`) are iOS-only. **EAS rebuild is still required** for the native viewer +
+integrity bridge.

@@ -572,3 +572,53 @@ CREATE TABLE IF NOT EXISTS submission_gisa_actions (
     CONSTRAINT chk_gisa_actions_group
       CHECK (action_group IN ('IMMEDIATE', 'FOLLOW_UP'))
 ) ENGINE=InnoDB;
+
+-- Offline 3D scene-package catalog.
+-- Authoritative record of operator-authored, MinIO-stored .mspk packages for the
+-- mobile native 3D terrain viewer. A submission is offline-available ONLY when a
+-- READY row here exists AND its MinIO object is present with matching size.
+-- Objects are immutable; a replacement is a NEW package_version and the prior
+-- READY row is RETIRED (kept for audit). See Alembic 0011_offline_scene_packages
+-- and docs/offline-scene-package-operator-runbook.md.
+CREATE TABLE IF NOT EXISTS offline_scene_packages (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'READY',          -- READY | RETIRED | FAILED
+    package_version VARCHAR(64) NOT NULL,
+    -- Immutable MinIO location (private bucket; no anonymous access).
+    minio_bucket VARCHAR(128) NOT NULL,
+    object_key VARCHAR(512) NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    -- Bounded incident area (never statewide).
+    min_lat DOUBLE NOT NULL,
+    min_lon DOUBLE NOT NULL,
+    max_lat DOUBLE NOT NULL,
+    max_lon DOUBLE NOT NULL,
+    center_lat DOUBLE NOT NULL,
+    center_lon DOUBLE NOT NULL,
+    radius_m DOUBLE NOT NULL,
+    -- Source attribution (what the field user is actually viewing).
+    elevation_source VARCHAR(64) NOT NULL DEFAULT 'USGS_3DEP',
+    elevation_dataset VARCHAR(128) NULL,
+    elevation_version VARCHAR(64) NULL,
+    elevation_resolution VARCHAR(64) NULL,
+    basemap_or_imagery_source VARCHAR(255) NULL,
+    content_signature VARCHAR(64) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    uploaded_at DATETIME NULL,
+    uploaded_by BIGINT NULL,
+    retired_at DATETIME NULL,
+    notes TEXT NULL,
+    PRIMARY KEY (id),
+    -- One row per (submission, version); object keys are globally unique/immutable.
+    CONSTRAINT uq_osp_submission_version UNIQUE (submission_id, package_version),
+    CONSTRAINT uq_osp_object_key UNIQUE (object_key),
+    CONSTRAINT fk_osp_submission
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_osp_uploaded_by
+      FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_osp_submission_status (submission_id, status),
+    CONSTRAINT chk_osp_status
+      CHECK (status IN ('READY', 'RETIRED', 'FAILED'))
+) ENGINE=InnoDB;

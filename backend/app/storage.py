@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from datetime import timedelta
@@ -159,6 +160,38 @@ def put_object_bytes(*, object_key: str, data: bytes, content_type: str, bucket:
         )
     except S3Error as e:
         raise RuntimeError(f"MinIO put_object failed bucket={bucket_name} key={object_key}: {e}") from e
+
+
+def stat_object(*, object_key: str, bucket: str | None = None) -> dict | None:
+    """HEAD an object. Returns {"size": int, "etag": str} or None when it does not
+    exist. Raises RuntimeError only on non-NoSuchKey MinIO errors."""
+    bucket_name = bucket or settings.MINIO_BUCKET
+    client = _client()
+    try:
+        st = client.stat_object(bucket_name, object_key)
+        return {"size": int(st.size), "etag": str(st.etag).strip('"')}
+    except S3Error as e:
+        if getattr(e, "code", "") in ("NoSuchKey", "NoSuchObject", "NoSuchBucket"):
+            return None
+        raise RuntimeError(f"MinIO stat_object failed bucket={bucket_name} key={object_key}: {e}") from e
+
+
+def sha256_of_object(*, object_key: str, bucket: str | None = None, chunk_size: int = 1024 * 1024) -> str:
+    """Stream an object and return its SHA-256 hex digest (no full in-memory load)."""
+    bucket_name = bucket or settings.MINIO_BUCKET
+    client = _client()
+    h = hashlib.sha256()
+    try:
+        obj = client.get_object(bucket_name, object_key)
+        try:
+            for chunk in obj.stream(chunk_size):
+                h.update(chunk)
+        finally:
+            obj.close()
+            obj.release_conn()
+    except S3Error as e:
+        raise RuntimeError(f"MinIO sha256_of_object failed bucket={bucket_name} key={object_key}: {e}") from e
+    return h.hexdigest()
 
 
 def get_object_bytes(*, object_key: str, bucket: str | None = None) -> tuple[bytes, str]:

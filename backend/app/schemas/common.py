@@ -297,3 +297,40 @@ class AssessmentReviewRequest(BaseModel):
 
 class AssessmentFinalizeRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class OfflineScenePackageRegister(BaseModel):
+    """ADMIN registration of an operator-authored, MinIO-stored .mspk package.
+
+    The object must already be uploaded to the private offline-scenes bucket.
+    ERIS HEADs it, verifies size + SHA-256, then marks it READY (retiring any
+    prior READY version). object_key is optional — when omitted, ERIS derives the
+    immutable submissions/{id}/{version}/scene.mspk key."""
+
+    submission_id: int = Field(..., ge=1)
+    package_version: str = Field(..., min_length=1, max_length=64)
+    object_key: str | None = Field(default=None, max_length=512)
+    size_bytes: int = Field(..., ge=1)
+    sha256: str = Field(..., min_length=64, max_length=64)
+    min_lat: float = Field(..., ge=-90, le=90)
+    min_lon: float = Field(..., ge=-180, le=180)
+    max_lat: float = Field(..., ge=-90, le=90)
+    max_lon: float = Field(..., ge=-180, le=180)
+    center_lat: float = Field(..., ge=-90, le=90)
+    center_lon: float = Field(..., ge=-180, le=180)
+    radius_m: float = Field(..., gt=0)
+    elevation_source: str = Field(default="USGS_3DEP", max_length=64)
+    elevation_dataset: str | None = Field(default=None, max_length=128)
+    elevation_version: str | None = Field(default=None, max_length=64)
+    elevation_resolution: str | None = Field(default=None, max_length=64)
+    basemap_or_imagery_source: str | None = Field(default=None, max_length=255)
+    content_signature: str = Field(..., min_length=1, max_length=64)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("sha256")
+    @classmethod
+    def _sha_hex(cls, v: str) -> str:
+        s = v.strip().lower()
+        if len(s) != 64 or any(c not in "0123456789abcdef" for c in s):
+            raise ValueError("sha256 must be 64 hex characters")
+        return s

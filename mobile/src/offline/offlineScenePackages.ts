@@ -14,10 +14,21 @@ import * as FileSystem from "expo-file-system/legacy";
 import {
   metaFromDescriptor,
   needsRefresh,
+  partPathFor,
+  shaMatches,
+  sizeMatches,
   type OfflineScenePackageMeta,
   type SceneAreaDescriptor,
+  type SceneDownloadGrant,
 } from "../arcgis/offlineScene";
-import { openOfflineTerrainScene, supportsOfflineTerrainScene, type OpenOfflineSceneParams } from "../arcgis/ArcGISNative";
+import {
+  openOfflineTerrainScene,
+  sha256OfFile,
+  supportsOfflineTerrainScene,
+  supportsScenePackageIntegrity,
+  validateScenePackage,
+  type OpenOfflineSceneParams,
+} from "../arcgis/ArcGISNative";
 
 const DIR_NAME = "offline-scenes";
 const REGISTRY_VERSION = 1;
@@ -92,62 +103,122 @@ const _resumables = new Map<number, FileSystem.DownloadResumable>();
 
 export type DownloadProgress = { totalBytes: number; writtenBytes: number; fraction: number };
 
+function toNativePath(uri: string): string {
+  return decodeURI(uri.replace(/^file:\/\//, ""));
+}
+
 /**
- * Download (or re-download) the bounded offline scene package for a submission.
- * Bounded by the server descriptor's incident-radius area — never statewide.
- * Reports progress and is resumable (pause/retry). Persists metadata throughout.
+ * Verify a finished .part download and atomically promote it to the final path.
+ * NEVER marks READY merely because a file exists:
+ *   1) exact byte size, 2) SHA-256 (native), 3) the .mspk actually loads as an
+ *   AGSMobileScenePackage (native), then 4) atomic rename .part -> final.
+ * Throws on any failure so the caller records FAILED + cleans up.
+ */
+async function verifyAndPromote(
+  meta: OfflineScenePackageMeta,
+  partUri: string,
+  onProgress?: (p: DownloadProgress) => void,
+): Promise<OfflineScenePackageMeta> {
+  const info = await FileSystem.getInfoAsync(partUri);
+  const actualSize = info.exists ? info.size : 0;
+  if (!sizeMatches(meta.expectedSizeBytes, actualSize)) {
+    throw new Error(`Size mismatch: got ${actualSize} bytes, expected ${meta.expectedSizeBytes}.`);
+  }
+  const actualSha = await sha256OfFile(toNativePath(partUri));
+  if (!shaMatches(meta.expectedSha256, actualSha)) {
+    throw new Error("SHA-256 mismatch — the download is corrupted.");
+  }
+  const loads = await validateScenePackage(toNativePath(partUri));
+  if (!loads) {
+    throw new Error("The downloaded file is not a valid 3D scene package.");
+  }
+  const finalUri = packagePath(meta.submissionId);
+  try {
+    await FileSystem.deleteAsync(finalUri, { idempotent: true });
+  } catch {
+    /* ignore */
+  }
+  await FileSystem.moveAsync({ from: partUri, to: finalUri });
+  const ready: OfflineScenePackageMeta = {
+    ...meta,
+    status: "READY",
+    localPath: finalUri,
+    partPath: null,
+    resumeSnapshot: null,
+    sizeBytes: actualSize,
+    downloadedAt: new Date().toISOString(),
+    error: null,
+  };
+  await saveMeta(ready);
+  onProgress?.({ totalBytes: actualSize, writtenBytes: actualSize, fraction: 1 });
+  return ready;
+}
+
+/**
+ * Download a bounded offline scene package to a temporary .part file, then verify
+ * (size + SHA-256 + real package load) and atomically promote to READY. Requires
+ * the native integrity bridge (EAS dev build). The `grant` carries the short-lived
+ * presigned URL and the authoritative size/sha for THIS download.
  */
 export async function downloadOfflineSceneArea(args: {
   descriptor: SceneAreaDescriptor;
+  grant: SceneDownloadGrant;
   incidentId: number | null;
   onProgress?: (p: DownloadProgress) => void;
 }): Promise<OfflineScenePackageMeta> {
-  const { descriptor, incidentId, onProgress } = args;
-  if (!descriptor.available || !descriptor.package?.download_url) {
+  const { descriptor, grant, incidentId, onProgress } = args;
+  if (!descriptor.available || !descriptor.package) {
     throw new Error(descriptor.reason ?? "No offline scene package is available for this area.");
+  }
+  if (!supportsScenePackageIntegrity()) {
+    throw new Error(
+      "This app build cannot verify offline packages. Install an EAS development build to enable the native 3D viewer + integrity checks.",
+    );
   }
   await ensureDir();
 
   const initial = metaFromDescriptor(descriptor, incidentId, new Date().toISOString());
   if (!initial) throw new Error("Offline area descriptor is incomplete.");
-  const dest = packagePath(descriptor.submission_id);
+  const partUri = partPathFor(packagePath(descriptor.submission_id));
 
-  let meta: OfflineScenePackageMeta = { ...initial, status: "DOWNLOADING", localPath: dest };
+  const meta: OfflineScenePackageMeta = {
+    ...initial,
+    expectedSha256: grant.sha256,
+    expectedSizeBytes: grant.size_bytes,
+    status: "DOWNLOADING",
+    localPath: null,
+    partPath: partUri,
+  };
   await saveMeta(meta);
 
-  const resumable = FileSystem.createDownloadResumable(
-    descriptor.package.download_url,
-    dest,
-    {},
-    (p) => {
-      const total = p.totalBytesExpectedToWrite || 0;
-      const written = p.totalBytesWritten || 0;
-      onProgress?.({ totalBytes: total, writtenBytes: written, fraction: total > 0 ? written / total : 0 });
-    },
-  );
+  const resumable = FileSystem.createDownloadResumable(grant.url, partUri, {}, (p) => {
+    const total = p.totalBytesExpectedToWrite || 0;
+    const written = p.totalBytesWritten || 0;
+    onProgress?.({ totalBytes: total, writtenBytes: written, fraction: total > 0 ? written / total : 0 });
+  });
   _resumables.set(descriptor.submission_id, resumable);
 
   try {
     const result = await resumable.downloadAsync();
     _resumables.delete(descriptor.submission_id);
     if (!result?.uri) throw new Error("Download did not produce a file.");
-    const info = await FileSystem.getInfoAsync(result.uri);
-    const size = info.exists ? info.size : 0;
-    meta = {
-      ...meta,
-      status: "READY",
-      localPath: result.uri,
-      sizeBytes: size,
-      downloadedAt: new Date().toISOString(),
-      error: null,
-    };
-    await saveMeta(meta);
-    return meta;
+    return await verifyAndPromote(meta, result.uri, onProgress);
   } catch (e: unknown) {
     _resumables.delete(descriptor.submission_id);
-    meta = { ...meta, status: "FAILED", error: e instanceof Error ? e.message : String(e) };
-    await saveMeta(meta);
-    return meta;
+    try {
+      await FileSystem.deleteAsync(partUri, { idempotent: true });
+    } catch {
+      /* ignore */
+    }
+    const failed: OfflineScenePackageMeta = {
+      ...meta,
+      status: "FAILED",
+      partPath: null,
+      resumeSnapshot: null,
+      error: e instanceof Error ? e.message : String(e),
+    };
+    await saveMeta(failed);
+    return failed;
   }
 }
 
@@ -160,34 +231,63 @@ export async function pauseDownload(submissionId: number): Promise<void> {
     /* ignore */
   }
   const meta = await getOfflineScenePackage(submissionId);
-  if (meta && meta.status === "DOWNLOADING") await saveMeta({ ...meta, status: "PAUSED" });
+  if (meta && (meta.status === "DOWNLOADING" || meta.status === "PENDING")) {
+    // Persist the resumable snapshot so the download can resume after an app restart.
+    let snapshot: unknown | null = null;
+    try {
+      snapshot = r.savable();
+    } catch {
+      snapshot = null;
+    }
+    await saveMeta({ ...meta, status: "PAUSED", resumeSnapshot: snapshot });
+  }
 }
 
 export async function resumeDownload(
   submissionId: number,
   onProgress?: (p: DownloadProgress) => void,
 ): Promise<OfflineScenePackageMeta | null> {
-  const r = _resumables.get(submissionId);
   const meta = await getOfflineScenePackage(submissionId);
-  if (!r || !meta) return meta;
+  if (!meta) return null;
+  if (!supportsScenePackageIntegrity()) {
+    const failed: OfflineScenePackageMeta = { ...meta, status: "FAILED", error: "Integrity bridge missing; rebuild the app." };
+    await saveMeta(failed);
+    return failed;
+  }
+
+  let r = _resumables.get(submissionId);
+  if (!r) {
+    // Reconstruct from the persisted snapshot (resume after app restart).
+    const snap = meta.resumeSnapshot as
+      | { url?: string; fileUri?: string; options?: FileSystem.DownloadOptions; resumeData?: string }
+      | null;
+    if (snap?.url && snap?.fileUri) {
+      r = FileSystem.createDownloadResumable(
+        snap.url,
+        snap.fileUri,
+        snap.options ?? {},
+        (p) => {
+          const total = p.totalBytesExpectedToWrite || 0;
+          const written = p.totalBytesWritten || 0;
+          onProgress?.({ totalBytes: total, writtenBytes: written, fraction: total > 0 ? written / total : 0 });
+        },
+        snap.resumeData,
+      );
+    }
+  }
+  if (!r) {
+    // No resumable (e.g. URL expired). Caller should refresh the descriptor/grant
+    // and restart the download; keep PAUSED so the UI shows Resume/Retry.
+    await saveMeta({ ...meta, status: "PAUSED" });
+    return meta;
+  }
+
   await saveMeta({ ...meta, status: "DOWNLOADING" });
   try {
     const result = await r.resumeAsync();
     _resumables.delete(submissionId);
     if (!result?.uri) throw new Error("Resume did not produce a file.");
-    const info = await FileSystem.getInfoAsync(result.uri);
-    const size = info.exists ? info.size : 0;
-    const ready: OfflineScenePackageMeta = {
-      ...meta,
-      status: "READY",
-      localPath: result.uri,
-      sizeBytes: size,
-      downloadedAt: new Date().toISOString(),
-      error: null,
-    };
-    await saveMeta(ready);
-    onProgress?.({ totalBytes: size, writtenBytes: size, fraction: 1 });
-    return ready;
+    return await verifyAndPromote(meta, result.uri, onProgress);
   } catch (e: unknown) {
     _resumables.delete(submissionId);
     const failed: OfflineScenePackageMeta = { ...meta, status: "FAILED", error: e instanceof Error ? e.message : String(e) };
@@ -224,19 +324,16 @@ export async function clearStalePackages(maxAgeDays = DEFAULT_STALE_DAYS): Promi
 }
 
 /**
- * If the server's content signature changed since download, re-download. Returns
- * the (possibly refreshed) meta. No-ops offline or when the server has no package.
+ * Whether the downloaded package is stale versus the server's newest READY one
+ * (content signature changed). The UI fetches a fresh grant and re-downloads when
+ * this is true; offline or with no server package, the local copy is kept.
  */
-export async function refreshIfNeeded(
+export async function isRefreshNeeded(
   submissionId: number,
   serverDescriptor: SceneAreaDescriptor | null,
-  incidentId: number | null,
-  onProgress?: (p: DownloadProgress) => void,
-): Promise<OfflineScenePackageMeta | null> {
+): Promise<boolean> {
   const local = await getOfflineScenePackage(submissionId);
-  if (!local) return null;
-  if (!needsRefresh(local, serverDescriptor)) return local;
-  return downloadOfflineSceneArea({ descriptor: serverDescriptor as SceneAreaDescriptor, incidentId, onProgress });
+  return needsRefresh(local, serverDescriptor);
 }
 
 /**

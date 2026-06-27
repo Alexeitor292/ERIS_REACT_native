@@ -1,20 +1,19 @@
 """
-Offline 3D scene-package descriptor service.
+Offline 3D scene-package catalog + descriptor service.
 
-ERIS does NOT stream Esri World Imagery/Elevation to the field offline (that is
-neither licensed for redistribution nor available without a network). Instead the
-mobile native 3D terrain viewer opens a *bounded, locally stored* offline scene
-package (Esri Mobile Scene Package, .mspk) for a single incident area.
+ERIS does NOT generate Mobile Scene Packages (.mspk). The authoritative model is:
+  * USGS 3DEP raster DEM is the offline elevation/terrain source.
+  * An operator authors a bounded .mspk in ArcGIS Pro / ArcGIS Enterprise.
+  * The .mspk binary lives in a PRIVATE MinIO bucket (eris-offline-scenes),
+    under an immutable key submissions/{submission_id}/{package_version}/scene.mspk.
+  * ERIS owns the authorization, catalog, lifecycle, and signed-download layer.
 
-This module computes the bounded area descriptor the mobile app needs BEFORE it
-downloads: the area bounds (from an incident radius), an estimated package size,
-a content signature (for refresh detection), and the download URL when a package
-host/generator is configured. Actually GENERATING the .mspk is server/enterprise
-infrastructure (ArcGIS Pro / Enterprise offline packaging) — see the ADR; when no
-host is configured this returns available=False with a clear reason rather than
-pretending an offline package exists.
+A submission is "available for offline 3D" ONLY when ERIS has a READY catalog row
+AND the exact MinIO object still exists with the catalog's size. Availability is
+NEVER inferred from a configured base URL.
 
-All functions here are pure (no DB, no network) so they unit-test in the no-DB job.
+This module is pure (no DB, no MinIO) so it unit-tests in the no-DB job; the DB
+catalog rows and MinIO HEAD are supplied by the endpoint/registration layer.
 """
 
 from __future__ import annotations
@@ -23,13 +22,15 @@ import hashlib
 import json
 import math
 
+ELEVATION_SOURCE_3DEP = "USGS_3DEP"
+
 # Bounded-by-default download scope. Statewide is never the default.
 DEFAULT_RADIUS_M = 1500.0
 MIN_RADIUS_M = 250.0
 MAX_RADIUS_M = 8000.0  # ~200 km^2 ceiling keeps a field download sane
 
-# Rough size model for a draped imagery + elevation scene package, per km^2.
-# These are ESTIMATES surfaced to the user before download, not guarantees.
+# Rough size model used ONLY for operator sanity checks, never surfaced as if a
+# package already exists (the UI shows the real catalog size_bytes instead).
 _IMAGERY_MB_PER_KM2 = 6.5
 _ELEVATION_MB_PER_KM2 = 1.8
 _PACKAGE_OVERHEAD_MB = 4.0
@@ -64,13 +65,11 @@ def bounding_box(lat: float, lon: float, radius_m: float) -> dict:
 
 
 def area_km2(radius_m: float) -> float:
-    """Area of the (2*radius_m) square bounding box, in km^2."""
     side_km = (2.0 * radius_m) / 1000.0
     return side_km * side_km
 
 
 def estimate_package_size_mb(radius_m: float) -> float:
-    """Estimated offline scene-package size (imagery + elevation + overhead)."""
     a = area_km2(radius_m)
     mb = a * (_IMAGERY_MB_PER_KM2 + _ELEVATION_MB_PER_KM2) + _PACKAGE_OVERHEAD_MB
     return round(mb, 1)
@@ -83,9 +82,9 @@ def content_signature(
     road_bearing_deg: float | None,
     radius_m: float,
 ) -> str:
-    """Stable short signature of the inputs that affect the packaged scene. The
-    mobile app stores this with a downloaded package and re-downloads when the
-    server signature changes (incident geometry/bearing/area moved)."""
+    """Stable short signature of the inputs that affect the packaged scene. Stored
+    with a registered package; the mobile app re-downloads when the newest READY
+    catalog package's signature differs from the one it downloaded."""
     payload = {
         "u": gisa_updated_at or "",
         "g": geometry_json if isinstance(geometry_json, (dict, list)) else None,
@@ -96,66 +95,102 @@ def content_signature(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def build_scene_area_descriptor(
+def make_scene_object_key(submission_id: int, package_version: str) -> str:
+    """Immutable, versioned object key. Never reused/overwritten."""
+    safe_ver = "".join(c for c in str(package_version) if c.isalnum() or c in "-_.")
+    return f"submissions/{int(submission_id)}/{safe_ver}/scene.mspk"
+
+
+def validate_bounds(min_lat, min_lon, max_lat, max_lon) -> bool:
+    try:
+        a, b, c, d = float(min_lat), float(min_lon), float(max_lat), float(max_lon)
+    except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(v) for v in (a, b, c, d)):
+        return False
+    if not (-90 <= a <= 90 and -90 <= c <= 90 and -180 <= b <= 180 and -180 <= d <= 180):
+        return False
+    return a < c and b < d
+
+
+def unavailable(submission_id: int, reason: str) -> dict:
+    return {
+        "submission_id": submission_id,
+        "available": False,
+        "reason": reason,
+        "area": None,
+        "package": None,
+        "content_signature": None,
+    }
+
+
+def descriptor_from_catalog(
     *,
     submission_id: int,
-    lat: float | None,
-    lon: float | None,
-    radius_m: float | None,
-    gisa_updated_at: str | None,
-    geometry_json: object | None,
-    road_bearing_deg: float | None,
-    package_base_url: str | None,
+    catalog: dict | None,
+    object_present: bool,
+    download_path: str | None,
 ) -> dict:
-    """Assemble the bounded offline scene-package descriptor for a submission.
+    """Build the descriptor from the newest READY catalog row.
 
-    available=False (with a reason) when there are no coordinates or no package
-    host is configured — the app then shows an honest "offline-unavailable" state
-    instead of a broken download.
+    available is True ONLY when a READY catalog row exists AND its MinIO object is
+    present (object_present). Otherwise available is False with a precise reason.
+    All values come from the catalog row — never from a base-URL string.
     """
-    if lat is None or lon is None:
-        return {
-            "submission_id": submission_id,
-            "available": False,
-            "reason": "Incident has no coordinates; cannot bound an offline area.",
-            "area": None,
-            "package": None,
-            "content_signature": None,
-        }
+    if catalog is None:
+        return unavailable(submission_id, "No offline 3D package has been prepared for this incident yet.")
 
-    r = clamp_radius_m(radius_m)
-    bounds = bounding_box(float(lat), float(lon), r)
-    sig = content_signature(
-        gisa_updated_at=gisa_updated_at,
-        geometry_json=geometry_json,
-        road_bearing_deg=road_bearing_deg,
-        radius_m=r,
-    )
-    size_mb = estimate_package_size_mb(r)
-
-    base = (package_base_url or "").rstrip("/")
-    available = bool(base)
-    download_url = f"{base}/submissions/{submission_id}/scene.mspk?sig={sig}" if available else None
-    reason = None if available else (
-        "No offline scene-package host is configured (ARCGIS_SCENE_PACKAGE_BASE_URL). "
-        "A Caltrans/enterprise-hosted or pre-generated .mspk for this area is required."
-    )
+    if not object_present:
+        return unavailable(
+            submission_id,
+            "The prepared offline package is missing from secure storage; an operator must re-upload/re-register it.",
+        )
 
     return {
         "submission_id": submission_id,
-        "available": available,
-        "reason": reason,
+        "available": True,
+        "reason": None,
         "area": {
-            "center": {"lat": round(float(lat), 6), "lon": round(float(lon), 6)},
-            "radius_m": r,
-            "bounds": bounds,
+            "center": {
+                "lat": _f(catalog.get("center_lat")),
+                "lon": _f(catalog.get("center_lon")),
+            },
+            "radius_m": _f(catalog.get("radius_m")),
+            "bounds": {
+                "min_lat": _f(catalog.get("min_lat")),
+                "min_lon": _f(catalog.get("min_lon")),
+                "max_lat": _f(catalog.get("max_lat")),
+                "max_lon": _f(catalog.get("max_lon")),
+            },
         },
         "package": {
             "format": "mspk",
-            "version": sig,
-            "estimated_size_mb": size_mb,
-            "download_url": download_url,
-            "source": "configured_scene_package_host" if available else None,
+            "version": catalog.get("package_version"),
+            "size_bytes": int(catalog.get("size_bytes") or 0),
+            "sha256": catalog.get("sha256"),
+            "elevation_source": catalog.get("elevation_source") or ELEVATION_SOURCE_3DEP,
+            "elevation": {
+                "dataset": catalog.get("elevation_dataset"),
+                "version": catalog.get("elevation_version"),
+                "resolution": catalog.get("elevation_resolution"),
+            },
+            "basemap_or_imagery_source": catalog.get("basemap_or_imagery_source"),
+            "created_at": _s(catalog.get("created_at")),
+            "uploaded_at": _s(catalog.get("uploaded_at")),
+            # Protected, role-checked download (short-lived presigned URL minted by
+            # the download endpoint). Mobile never receives MinIO credentials.
+            "download_path": download_path,
         },
-        "content_signature": sig,
+        "content_signature": catalog.get("content_signature"),
     }
+
+
+def _f(v) -> float | None:
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _s(v) -> str | None:
+    return None if v is None else str(v)

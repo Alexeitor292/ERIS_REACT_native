@@ -19,6 +19,10 @@ type ArcGisNativeModule = {
   // the supplied params. The .mspk download/management itself is done in JS
   // (expo-file-system); this only renders. paramsJson: see OpenOfflineSceneParams.
   openOfflineTerrainScene(paramsJson: string): Promise<void>;
+  // Integrity (native, no JS crypto dependency): SHA-256 of a local file, and a
+  // real load-check that the .mspk opens as an AGSMobileScenePackage.
+  sha256OfFile(path: string): Promise<string>;
+  validateScenePackage(path: string): Promise<boolean>;
 };
 
 export type OpenOfflineSceneParams = {
@@ -61,6 +65,24 @@ export function supportsMissionCenterMap(): boolean {
 
 export function supportsOfflineTerrainScene(): boolean {
   return hasMethod("openOfflineTerrainScene");
+}
+
+export function supportsScenePackageIntegrity(): boolean {
+  return hasMethod("sha256OfFile") && hasMethod("validateScenePackage");
+}
+
+export async function sha256OfFile(path: string): Promise<string> {
+  if (!hasMethod("sha256OfFile")) {
+    throw new Error("Native SHA-256 missing in this app build. Rebuild the app (EAS dev build).");
+  }
+  return requireArcGisModule().sha256OfFile(path);
+}
+
+export async function validateScenePackage(path: string): Promise<boolean> {
+  if (!hasMethod("validateScenePackage")) {
+    throw new Error("Native scene-package validation missing in this app build. Rebuild the app (EAS dev build).");
+  }
+  return requireArcGisModule().validateScenePackage(path);
 }
 
 export async function openOfflineTerrainScene(params: OpenOfflineSceneParams): Promise<void> {

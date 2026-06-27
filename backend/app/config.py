@@ -65,12 +65,13 @@ class Settings(BaseSettings):
     ARCGIS_LICENSE_EXPIRES_AT: str | None = Field(default=None)
     ARCGIS_MMPK_URL: str | None = Field(default=None)
     ARCGIS_CONFIG_OFFLINE_TTL_HOURS: int = Field(default=168)
-    # Base URL of the host that serves/generates bounded offline 3D scene packages
-    # (.mspk) per submission area. When unset, the mobile native 3D terrain viewer
-    # reports offline-unavailable instead of pretending a package exists. The
-    # actual package generation is enterprise infrastructure (see the offline
-    # scene-package ADR); this is NOT the same as the streamed WebUI basemap.
-    ARCGIS_SCENE_PACKAGE_BASE_URL: str | None = Field(default=None)
+    # Private MinIO bucket holding operator-authored offline 3D scene packages
+    # (.mspk). Separate from the uploads bucket; never made anonymous/public.
+    # Availability is decided by the catalog table + a live object HEAD, NOT by a
+    # base-URL string. Mobile never receives MinIO credentials — it gets a
+    # short-lived presigned URL from the protected download endpoint.
+    MINIO_OFFLINE_SCENES_BUCKET: str = Field(default="eris-offline-scenes")
+    OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS: int = Field(default=900)
 
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
