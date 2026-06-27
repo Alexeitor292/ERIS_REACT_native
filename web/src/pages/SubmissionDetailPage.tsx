@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaElevationProfile, GisaLookups, GisaTerrainGrid, SubmissionDetail } from "../api/types";
 import { TerrainRelief } from "../components/TerrainRelief";
+import InteractiveTerrainScene from "../components/InteractiveTerrainScene";
 import { friendlyFieldLabel, friendlyFieldValue, fieldDescription, terrainLabel } from "../utils/roadInventoryGlossary";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
@@ -2055,23 +2056,43 @@ export default function SubmissionDetailPage() {
                           ))}
                         </div>
 
-                        {/* 3D Terrain panel */}
+                        {/* 3D Terrain panel — primary interactive scene + USGS diagnostic card */}
                         {terrainView === "terrain" && (
                           <div className="mb-2">
-                            <div className="mb-1 flex flex-wrap items-center gap-2">
-                              <button
-                                disabled={terrainFetching}
-                                onClick={() => fetchTerrain(true)}
-                                className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-90 hover:opacity-100 disabled:opacity-40"
-                              >
-                                {terrainFetching ? "Building…" : data.gisa?.elevation_terrain ? "Rebuild terrain" : "Build terrain"}
-                              </button>
-                              <span className="text-[9px] italic text-muted">
-                                Samples an 11×11 USGS 3DEP grid (~200×200 m), road-aligned. Cached after first build.
-                              </span>
-                            </div>
-                            <TerrainRelief terrain={data.gisa?.elevation_terrain ?? null} />
-                            {terrainError && <div className="mt-1 text-[10px] text-[var(--error)]">{terrainError}</div>}
+                            {/* Primary: navigable, satellite-on-real-terrain 3D scene */}
+                            <InteractiveTerrainScene
+                              location={{ latitude: data.gisa?.latitude ?? null, longitude: data.gisa?.longitude ?? null }}
+                              terrain={data.gisa?.elevation_terrain ?? null}
+                              geometryJson={(data.gisa?.geometry_json as Record<string, unknown> | null) ?? null}
+                              route={data.gisa?.route ?? null}
+                              postMile={data.gisa?.post_mile ?? null}
+                              county={data.gisa?.county ?? null}
+                              incidentLabel={`Submission #${data.submission.id}`}
+                            />
+
+                            {/* Diagnostic: USGS sampled relief (the old SVG view), demoted */}
+                            <details className="mt-2 rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1.5">
+                              <summary className="cursor-pointer text-[11px] font-medium text-[var(--ink)]">
+                                USGS sampled relief (diagnostic)
+                              </summary>
+                              <div className="mt-2">
+                                <div className="mb-1 flex flex-wrap items-center gap-2">
+                                  <button
+                                    disabled={terrainFetching}
+                                    onClick={() => fetchTerrain(true)}
+                                    className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-90 hover:opacity-100 disabled:opacity-40"
+                                  >
+                                    {terrainFetching ? "Building…" : data.gisa?.elevation_terrain ? "Rebuild terrain" : "Build terrain"}
+                                  </button>
+                                  <span className="text-[9px] italic text-muted">
+                                    Samples an 11×11 USGS 3DEP grid (~200×200 m), road-aligned. Cached; feeds the
+                                    classification and the scene&apos;s sample-extent overlay.
+                                  </span>
+                                </div>
+                                <TerrainRelief terrain={data.gisa?.elevation_terrain ?? null} />
+                                {terrainError && <div className="mt-1 text-[10px] text-[var(--error)]">{terrainError}</div>}
+                              </div>
+                            </details>
                           </div>
                         )}
 

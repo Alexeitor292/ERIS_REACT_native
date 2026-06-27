@@ -3,6 +3,7 @@ import { View, Text, TextInput, Pressable, ScrollView, Alert, Image, ActivityInd
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
+import * as WebBrowser from "expo-web-browser";
 import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
@@ -44,6 +45,7 @@ import { MeasurementDiagramRenderer } from "../../../src/components/MeasurementD
 import { RoadElevationProfileChart } from "../../../src/components/RoadElevationProfileChart";
 import { TerrainReliefView } from "../../../src/components/TerrainReliefView";
 import { buildTerrainAppearance } from "../../../src/measurements/buildTerrainAppearance";
+import { WEB_APP_URL } from "../../../src/config";
 
 type OptionItem = { code: string; label: string };
 type UserInfo = { id: number; roles: string[] };
@@ -5324,6 +5326,43 @@ export default function SubmissionDetailScreen() {
                                 </Text>
                               </Pressable>
                             )}
+                            {/* Mobile has no native 3D SceneView; offer the full
+                                interactive WebUI scene in the device browser. */}
+                            {(() => {
+                              const canOpenFull = !!WEB_APP_URL && !isLocalId;
+                              return (
+                                <Pressable
+                                  onPress={async () => {
+                                    if (!canOpenFull) return;
+                                    try {
+                                      await WebBrowser.openBrowserAsync(`${WEB_APP_URL}/submissions/${id}`);
+                                    } catch {
+                                      Alert.alert("Could not open", "The 3D map could not be opened in the browser.");
+                                    }
+                                  }}
+                                  disabled={!canOpenFull}
+                                  accessibilityRole="button"
+                                  style={[
+                                    elevStyles.refreshBtn,
+                                    { alignSelf: "flex-start", marginBottom: 6, backgroundColor: "#1d4ed8" },
+                                    !canOpenFull && { opacity: 0.45 },
+                                  ]}
+                                >
+                                  <Text style={[elevStyles.refreshBtnText, { color: "#fff" }]}>Open full 3D map ↗</Text>
+                                </Pressable>
+                              );
+                            })()}
+                            {!WEB_APP_URL ? (
+                              <Text style={[elevStyles.noProfileText, { color: palette.muted, marginBottom: 6 }]}>
+                                The full interactive 3D scene opens in the WebUI. Set EXPO_PUBLIC_WEB_URL to enable the
+                                in-app link. The card below is the USGS sampled-relief diagnostic.
+                              </Text>
+                            ) : isLocalId ? (
+                              <Text style={[elevStyles.noProfileText, { color: palette.muted, marginBottom: 6 }]}>
+                                Sync this draft to open it in the full 3D WebUI map. The card below is the USGS
+                                sampled-relief diagnostic.
+                              </Text>
+                            ) : null}
                             <TerrainReliefView terrain={terrain} />
                             {terrainError ? <Text style={[elevStyles.noProfileText, { color: "#f87171" }]}>{terrainError}</Text> : null}
                           </View>
