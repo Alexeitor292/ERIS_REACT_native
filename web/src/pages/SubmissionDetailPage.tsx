@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { GisaElevationProfile, GisaLookups, GisaTerrainGrid, SubmissionDetail } from "../api/types";
 import { TerrainRelief } from "../components/TerrainRelief";
+// Lazy-loaded so ArcGIS SceneView's heavy 3D modules are fetched only when the
+// user actually opens the 3D Terrain tab — the normal page never eagerly loads it.
+const InteractiveTerrainScene = lazy(() => import("../components/InteractiveTerrainScene"));
 import { friendlyFieldLabel, friendlyFieldValue, fieldDescription, terrainLabel } from "../utils/roadInventoryGlossary";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
@@ -438,6 +441,19 @@ export default function SubmissionDetailPage() {
   const [terrainFetching, setTerrainFetching] = useState(false);
   const [terrainError, setTerrainError] = useState<string | null>(null);
   const [riDetailsOpen, setRiDetailsOpen] = useState(false);
+  const [searchParams] = useSearchParams();
+  const deepLinkTerrain = searchParams.get("section") === "terrain";
+
+  // Deep link (e.g. the mobile "Open full 3D map" handoff: /submissions/:id?section=terrain):
+  // open the 3D Terrain view and scroll it into view once the page is mounted.
+  useEffect(() => {
+    if (!deepLinkTerrain) return;
+    setTerrainView("terrain");
+    const t = window.setTimeout(() => {
+      document.getElementById("terrain-3d-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [deepLinkTerrain]);
 
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
@@ -2055,23 +2071,58 @@ export default function SubmissionDetailPage() {
                           ))}
                         </div>
 
-                        {/* 3D Terrain panel */}
+                        {/* 3D Terrain panel — primary interactive scene + USGS diagnostic card */}
                         {terrainView === "terrain" && (
-                          <div className="mb-2">
-                            <div className="mb-1 flex flex-wrap items-center gap-2">
-                              <button
-                                disabled={terrainFetching}
-                                onClick={() => fetchTerrain(true)}
-                                className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-90 hover:opacity-100 disabled:opacity-40"
-                              >
-                                {terrainFetching ? "Building…" : data.gisa?.elevation_terrain ? "Rebuild terrain" : "Build terrain"}
-                              </button>
-                              <span className="text-[9px] italic text-muted">
-                                Samples an 11×11 USGS 3DEP grid (~200×200 m), road-aligned. Cached after first build.
-                              </span>
-                            </div>
-                            <TerrainRelief terrain={data.gisa?.elevation_terrain ?? null} />
-                            {terrainError && <div className="mt-1 text-[10px] text-[var(--error)]">{terrainError}</div>}
+                          <div className="mb-2" id="terrain-3d-section">
+                            {/* Primary: navigable, satellite-on-real-terrain 3D scene.
+                                Lazy + Suspense: the SceneView chunk downloads only now. */}
+                            <Suspense
+                              fallback={
+                                <div
+                                  className="flex items-center justify-center rounded-lg border border-[var(--line)] bg-[#0f172a]/80 text-center"
+                                  style={{ height: 460 }}
+                                >
+                                  <div className="text-xs text-white/85">
+                                    <div className="mx-auto mb-2 h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                                    Loading 3D terrain & imagery…
+                                  </div>
+                                </div>
+                              }
+                            >
+                              <InteractiveTerrainScene
+                                location={{ latitude: data.gisa?.latitude ?? null, longitude: data.gisa?.longitude ?? null }}
+                                terrain={data.gisa?.elevation_terrain ?? null}
+                                geometryJson={(data.gisa?.geometry_json as Record<string, unknown> | null) ?? null}
+                                route={data.gisa?.route ?? null}
+                                postMile={data.gisa?.post_mile ?? null}
+                                county={data.gisa?.county ?? null}
+                                incidentLabel={`Submission #${data.submission.id}`}
+                              />
+                            </Suspense>
+
+                            {/* Diagnostic: USGS sampled relief (the old SVG view), demoted */}
+                            <details className="mt-2 rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1.5">
+                              <summary className="cursor-pointer text-[11px] font-medium text-[var(--ink)]">
+                                USGS sampled relief (diagnostic)
+                              </summary>
+                              <div className="mt-2">
+                                <div className="mb-1 flex flex-wrap items-center gap-2">
+                                  <button
+                                    disabled={terrainFetching}
+                                    onClick={() => fetchTerrain(true)}
+                                    className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-90 hover:opacity-100 disabled:opacity-40"
+                                  >
+                                    {terrainFetching ? "Building…" : data.gisa?.elevation_terrain ? "Rebuild terrain" : "Build terrain"}
+                                  </button>
+                                  <span className="text-[9px] italic text-muted">
+                                    Samples an 11×11 USGS 3DEP grid (~200×200 m), road-aligned. Cached; feeds the
+                                    classification and the scene&apos;s sample-extent overlay.
+                                  </span>
+                                </div>
+                                <TerrainRelief terrain={data.gisa?.elevation_terrain ?? null} />
+                                {terrainError && <div className="mt-1 text-[10px] text-[var(--error)]">{terrainError}</div>}
+                              </div>
+                            </details>
                           </div>
                         )}
 
