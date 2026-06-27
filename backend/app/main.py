@@ -54,6 +54,7 @@ from .schemas.common import (
     WorkflowAction,
 )
 from .services import elevation_profile as elevation_profile_svc
+from .services import offline_scene as offline_scene_svc
 from .services import terrain_grid as terrain_grid_svc
 from .services.gisa_validation import (
     validate_action_code_group,
@@ -2726,6 +2727,67 @@ def build_gisa_terrain_grid(
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"submission_id": submission_id, "terrain": result, "cached": False}
+
+
+@app.get("/submissions/{submission_id}/gisa/offline-scene-package")
+def get_gisa_offline_scene_package(
+    submission_id: int = Path(..., ge=1),
+    radius_m: float | None = None,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Bounded offline 3D scene-package descriptor for the mobile native viewer.
+
+    Returns the area bounds (incident radius, never statewide), an estimated
+    package size, a content signature (for refresh detection), and the download
+    URL when a scene-package host is configured. When no host is configured, or
+    the incident has no coordinates, available=False with a clear reason — the
+    app then shows an honest offline-unavailable state. This does NOT generate
+    the .mspk (that is enterprise infrastructure); it only describes it."""
+    require_can_view_submission(submission_id, db, user)
+
+    row = db.execute(text("""
+        SELECT latitude, longitude,
+               route, county, post_mile, district,
+               road_inventory_snapshot_json,
+               geometry_json, updated_at
+        FROM submission_gisa
+        WHERE submission_id = :sid
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="GISA data not found for this submission")
+
+    lat = row["latitude"]
+    lon = row["longitude"]
+
+    road_bearing_deg = None
+    if lat is not None and lon is not None:
+        try:
+            road_bearing_deg, _ = _resolve_gisa_road_bearing(float(lat), float(lon), dict(row), None)
+        except Exception:
+            road_bearing_deg = None
+
+    geometry_json = row["geometry_json"]
+    if isinstance(geometry_json, str):
+        try:
+            geometry_json = json.loads(geometry_json)
+        except Exception:
+            geometry_json = None
+
+    updated_at = row["updated_at"]
+    descriptor = offline_scene_svc.build_scene_area_descriptor(
+        submission_id=submission_id,
+        lat=float(lat) if lat is not None else None,
+        lon=float(lon) if lon is not None else None,
+        radius_m=radius_m,
+        gisa_updated_at=str(updated_at) if updated_at is not None else None,
+        geometry_json=geometry_json,
+        road_bearing_deg=road_bearing_deg,
+        package_base_url=settings.ARCGIS_SCENE_PACKAGE_BASE_URL,
+    )
+    return descriptor
 
 
 @app.put("/submissions/{submission_id}/gisa/incident-types")

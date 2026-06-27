@@ -14,6 +14,23 @@ type ArcGisNativeModule = {
   getSketchGeoJson(): Promise<string>; // returns GeoJSON or Esri JSON geometry string
   getSketchImagePath(): Promise<string>;
   clearSketch(): Promise<void>;
+  // Native offline 3D terrain SceneView. Opens a locally-downloaded .mspk
+  // (Mobile Scene Package) with local elevation + basemap; renders overlays from
+  // the supplied params. The .mspk download/management itself is done in JS
+  // (expo-file-system); this only renders. paramsJson: see OpenOfflineSceneParams.
+  openOfflineTerrainScene(paramsJson: string): Promise<void>;
+};
+
+export type OpenOfflineSceneParams = {
+  packagePath: string; // local file path to the downloaded .mspk
+  incident: { lat: number; lon: number };
+  incidentLabel?: string | null;
+  geometry?: unknown | null; // uploaded incident geometry (GeoJSON or Esri JSON)
+  roadBearingDeg?: number | null; // only drawn when a real bearing exists
+  sampleExtent?: { minLat: number; minLon: number; maxLat: number; maxLon: number } | null;
+  packageVersion?: string | null;
+  downloadedAt?: string | null;
+  sizeBytes?: number | null;
 };
 
 const { ArcGis } = NativeModules as { ArcGis: ArcGisNativeModule };
@@ -40,6 +57,19 @@ function hasMethod(name: ArcGisMethodName): boolean {
 
 export function supportsMissionCenterMap(): boolean {
   return hasMethod("setMissionIncidents") && hasMethod("startMissionCenterMap");
+}
+
+export function supportsOfflineTerrainScene(): boolean {
+  return hasMethod("openOfflineTerrainScene");
+}
+
+export async function openOfflineTerrainScene(params: OpenOfflineSceneParams): Promise<void> {
+  if (!hasMethod("openOfflineTerrainScene")) {
+    throw new Error(
+      "Native 3D terrain viewer missing in this app build. Rebuild the app (EAS dev build) to include the latest native ArcGIS module.",
+    );
+  }
+  return requireArcGisModule().openOfflineTerrainScene(JSON.stringify(params));
 }
 
 export async function loadMmpk(path: string) {

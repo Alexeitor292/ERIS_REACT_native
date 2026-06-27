@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     ARCGIS_LICENSE_EXPIRES_AT: str | None = Field(default=None)
     ARCGIS_MMPK_URL: str | None = Field(default=None)
     ARCGIS_CONFIG_OFFLINE_TTL_HOURS: int = Field(default=168)
+    # Base URL of the host that serves/generates bounded offline 3D scene packages
+    # (.mspk) per submission area. When unset, the mobile native 3D terrain viewer
+    # reports offline-unavailable instead of pretending a package exists. The
+    # actual package generation is enterprise infrastructure (see the offline
+    # scene-package ADR); this is NOT the same as the streamed WebUI basemap.
+    ARCGIS_SCENE_PACKAGE_BASE_URL: str | None = Field(default=None)
 
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

@@ -8,6 +8,7 @@
 #import "ArcGisSketchViewController.h"
 #import "ArcGisMissionCenterViewController.h"
 #import "ArcGisPencilSketchViewController.h"
+#import "ArcGisTerrainSceneViewController.h"
 
 @implementation ArcGisModule
 
@@ -179,6 +180,25 @@ RCT_REMAP_METHOD(startMissionCenterMap,
     }
 
     ArcGisMissionCenterViewController *vc = [[ArcGisMissionCenterViewController alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [root presentViewController:nav animated:YES completion:nil];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(openOfflineTerrainScene,
+                 openOfflineTerrainScene:(NSString *)paramsJson
+                 resolverOpenOfflineScene:(RCTPromiseResolveBlock)resolve
+                 rejecterOpenOfflineScene:(RCTPromiseRejectBlock)reject) {
+  [ArcGisSketchStore setOfflineSceneParamsJson:paramsJson];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *root = RCTPresentedViewController();
+    if (root == nil) {
+      reject(@"E_OPEN_OFFLINE_SCENE", @"No active view controller.", nil);
+      return;
+    }
+    ArcGisTerrainSceneViewController *vc = [[ArcGisTerrainSceneViewController alloc] init];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     [root presentViewController:nav animated:YES completion:nil];

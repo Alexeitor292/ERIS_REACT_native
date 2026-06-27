@@ -16,6 +16,8 @@ const IOS_FILES = [
   "ArcGisSketchViewController.m",
   "ArcGisMissionCenterViewController.h",
   "ArcGisMissionCenterViewController.m",
+  "ArcGisTerrainSceneViewController.h",
+  "ArcGisTerrainSceneViewController.m",
 ];
 
 function patchPodfile(podfileContent) {

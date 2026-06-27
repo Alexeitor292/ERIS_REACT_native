@@ -1,6 +1,7 @@
 import { apiFetch } from "./client";
 import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
 import { prepareUploadFile } from "../utils/uploadFile";
+import type { SceneAreaDescriptor } from "../arcgis/offlineScene";
 
 export async function getSubmission(token: string, id: string) {
   return apiFetch(`/submissions/${id}`, { token });
@@ -193,6 +194,18 @@ export async function buildTerrainGrid(
   return apiFetch<{ terrain: GisaTerrainGrid; cached?: boolean }>(
     `/submissions/${id}/gisa/terrain-grid`,
     { method: "POST", token, body: payload },
+  );
+}
+
+export async function getOfflineScenePackageDescriptor(
+  token: string,
+  id: string,
+  radiusM?: number | null,
+) {
+  const q = radiusM != null ? `?radius_m=${encodeURIComponent(String(radiusM))}` : "";
+  return apiFetch<SceneAreaDescriptor>(
+    `/submissions/${id}/gisa/offline-scene-package${q}`,
+    { method: "GET", token },
   );
 }
 

@@ -25,6 +25,12 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSString *)latestSketchImagePath;
 + (void)setLatestSketchImagePath:(nullable NSString *)value;
 
+// Params JSON for the native offline 3D terrain SceneView (see
+// OpenOfflineSceneParams in ArcGISNative.ts): packagePath, incident lat/lon,
+// uploaded geometry, road bearing, sample extent, version/age/size.
++ (nullable NSString *)offlineSceneParamsJson;
++ (void)setOfflineSceneParamsJson:(nullable NSString *)value;
+
 @end
 
 NS_ASSUME_NONNULL_END

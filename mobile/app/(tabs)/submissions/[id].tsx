@@ -44,6 +44,7 @@ import {
 import { MeasurementDiagramRenderer } from "../../../src/components/MeasurementDiagramRenderer";
 import { RoadElevationProfileChart } from "../../../src/components/RoadElevationProfileChart";
 import { TerrainReliefView } from "../../../src/components/TerrainReliefView";
+import { OfflineTerrainPanel } from "../../../src/components/OfflineTerrainPanel";
 import { buildTerrainAppearance } from "../../../src/measurements/buildTerrainAppearance";
 import { WEB_APP_URL } from "../../../src/config";
 
@@ -5326,8 +5327,23 @@ export default function SubmissionDetailScreen() {
                                 </Text>
                               </Pressable>
                             )}
-                            {/* Mobile has no native 3D SceneView; offer the full
-                                interactive WebUI scene in the device browser. */}
+                            {/* PRIMARY mobile experience: native, immersive,
+                                offline 3D terrain (downloaded scene package). */}
+                            {!isLocalId ? (
+                              <OfflineTerrainPanel
+                                submissionId={Number(id)}
+                                incidentId={(data?.gisa as { incident_id?: number } | undefined)?.incident_id ?? null}
+                                latitude={data?.gisa?.latitude ?? null}
+                                longitude={data?.gisa?.longitude ?? null}
+                                geometry={(data?.gisa?.geometry_json as Record<string, unknown> | null) ?? null}
+                                terrain={terrain}
+                                incidentLabel={`Submission #${id}`}
+                                isLocalId={isLocalId}
+                              />
+                            ) : null}
+
+                            {/* OPTIONAL fallback: open the connected WebUI 3D scene
+                                in the device browser (requires a network + login). */}
                             {(() => {
                               const canOpenFull = !!WEB_APP_URL && !isLocalId;
                               return (

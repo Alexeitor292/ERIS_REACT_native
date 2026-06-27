@@ -9,6 +9,7 @@ static NSNumber *_initialLatitude = nil;
 static NSNumber *_initialLongitude = nil;
 static NSString *_missionIncidentsJson = nil;
 static NSString *_latestSketchImagePath = nil;
+static NSString *_offlineSceneParamsJson = nil;
 
 + (NSString *)latestGeoJson {
   return _latestGeoJson;
@@ -64,6 +65,14 @@ static NSString *_latestSketchImagePath = nil;
 
 + (void)setLatestSketchImagePath:(NSString *)value {
   _latestSketchImagePath = value;
+}
+
++ (NSString *)offlineSceneParamsJson {
+  return _offlineSceneParamsJson;
+}
+
++ (void)setOfflineSceneParamsJson:(NSString *)value {
+  _offlineSceneParamsJson = value;
 }
 
 @end

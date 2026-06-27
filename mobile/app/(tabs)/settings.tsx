@@ -3,6 +3,7 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-n
 import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
+import { OfflineStorageManager } from "@/src/components/OfflineStorageManager";
 
 function Choice({
   label,
@@ -92,6 +93,11 @@ export default function SettingsScreen() {
           <Text style={[styles.subtitle, { color: palette.muted, marginBottom: 0, marginTop: 8 }]}>
             4x uses accessibility sizing for text and a layout-safe component scale cap.
           </Text>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>Offline 3D terrain areas</Text>
+          <OfflineStorageManager palette={palette} />
         </View>
       </ScrollView>
       </Animated.View>
