@@ -22,6 +22,7 @@ export type OfflineScenePackageMeta = {
   // Package identity + integrity (from the catalog).
   contentSignature: string; // server content version at download time
   packageVersion: string;
+  packageFormat: string; // "eristerrain" (auto USGS-3DEP bundle) or "mspk"
   expectedSha256: string; // catalog sha256 — verified before READY
   expectedSizeBytes: number; // catalog size — verified before READY
   // Source attribution (what the field user is actually viewing).
@@ -32,7 +33,8 @@ export type OfflineScenePackageMeta = {
   // Lifecycle.
   status: OfflineSceneStatus;
   sizeBytes: number; // actual bytes on disk once READY
-  localPath: string | null; // verified final .mspk path, when READY
+  localPath: string | null; // verified final package path, when READY
+  extractedDir: string | null; // extracted eristerrain dir (manifest+grid+hillshade)
   partPath: string | null; // temporary .part path while downloading
   resumeSnapshot: unknown | null; // FileSystem resumable savable() for resume-after-restart
   downloadedAt: string | null;
@@ -75,6 +77,7 @@ export type SceneDownloadGrant = {
   sha256: string;
   size_bytes: number;
   package_version: string;
+  package_format: string;
   content_signature: string;
 };
 
@@ -326,6 +329,7 @@ export function metaFromDescriptor(
     },
     contentSignature: descriptor.content_signature ?? pkg.version,
     packageVersion: pkg.version,
+    packageFormat: pkg.format || "eristerrain",
     expectedSha256: pkg.sha256,
     expectedSizeBytes: pkg.size_bytes,
     elevationSource: pkg.elevation_source,
@@ -335,6 +339,7 @@ export function metaFromDescriptor(
     status: "PENDING",
     sizeBytes: 0,
     localPath: null,
+    extractedDir: null,
     partPath: null,
     resumeSnapshot: null,
     downloadedAt: null,

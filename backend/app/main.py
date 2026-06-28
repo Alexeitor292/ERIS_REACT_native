@@ -2823,6 +2823,7 @@ def download_gisa_offline_scene_package(
         "sha256": catalog["sha256"],
         "size_bytes": int(catalog["size_bytes"]),
         "package_version": catalog["package_version"],
+        "package_format": catalog.get("package_format") or "eristerrain",
         "content_signature": catalog["content_signature"],
     }
 

@@ -26,7 +26,9 @@ type ArcGisNativeModule = {
 };
 
 export type OpenOfflineSceneParams = {
-  packagePath: string; // local file path to the downloaded .mspk
+  packagePath: string; // local file path to the downloaded package
+  packageFormat?: string; // "eristerrain" (default) or "mspk"
+  extractedDir?: string | null; // extracted eristerrain dir (manifest+grid+hillshade)
   incident: { lat: number; lon: number };
   incidentLabel?: string | null;
   geometry?: unknown | null; // uploaded incident geometry (GeoJSON or Esri JSON)

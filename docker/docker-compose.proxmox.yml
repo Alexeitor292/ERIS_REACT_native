@@ -51,7 +51,7 @@ services:
   offline-scene-worker:
     build:
       context: ../backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     container_name: eris_offline_scene_worker
     restart: unless-stopped
     command: ["python", "-m", "app.worker.offline_scene_worker"]

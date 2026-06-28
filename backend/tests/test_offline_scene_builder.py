@@ -1,11 +1,18 @@
 """
-Pure unit tests for the automatic offline package builder (no DB/network).
+Pure unit tests for the automatic offline package builder (no DB/network/rasterio).
 Run: pytest -m "not db" tests/test_offline_scene_builder.py
 """
 
 from __future__ import annotations
 
+import io
+import json
+import zipfile
+
+import numpy as np
+
 from app.services import offline_scene_builder as bld
+from app.services import offline_scene_terrain as terrain_fmt
 
 
 def _ctx():
@@ -20,61 +27,74 @@ def _ctx():
     }
 
 
-def _real_dem() -> bytes:
-    # A minimal but real-looking TIFF (correct magic + enough bytes).
-    return b"II*\x00" + b"\x00" * 400
+def _grid_and_meta(rows=4, cols=4):
+    heights = np.arange(rows * cols, dtype=np.float32).reshape(rows, cols)
+    data, stats = terrain_fmt.encode_height_grid(heights)
+    meta = terrain_fmt.build_terrain_metadata(stats, _ctx()["bounds"], terrain_fmt.grid_sha256(data))
+    return data, meta
+
+
+def _usgs():
+    return {"dataset": "USGS 3DEP", "version": "2026-06-27", "resolution": "3.4 m/px", "service": "https://x"}
 
 
 def test_export_params_and_resolution():
-    p = bld.export_image_params({"min_lat": 38.48, "min_lon": -121.52, "max_lat": 38.52, "max_lon": -121.48}, 1024)
+    p = bld.export_image_params({"min_lat": 38.48, "min_lon": -121.52, "max_lat": 38.52, "max_lon": -121.48}, 256)
     assert p["bbox"] == "-121.52,38.48,-121.48,38.52"
-    assert p["size"] == "1024,1024"
-    assert p["bboxSR"] == "4326"
-    res = bld.aoi_resolution_m({"min_lon": -121.52, "max_lon": -121.48, "min_lat": 38.48, "max_lat": 38.52}, 38.5, 1024)
-    assert res > 0
+    assert p["size"] == "256,256"
+    assert bld.aoi_resolution_m({"min_lon": -121.52, "max_lon": -121.48, "min_lat": 38.48, "max_lat": 38.52}, 38.5, 256) > 0
 
 
-def test_manifest_records_usgs_provenance():
-    usgs = {"dataset": "USGS 3DEP", "version": "2026-06-27", "resolution": "3.4 m/px", "service": "https://x"}
-    basemap = {"provider": "usgs_hillshade", "source_label": "USGS 3DEP hillshade (terrain relief)", "has_imagery": False}
-    m = bld.build_manifest(_ctx(), usgs, basemap)
-    assert m["format"] == "eristerrain"
+def test_manifest_records_terrain_and_provenance():
+    _, meta = _grid_and_meta()
+    basemap = {"provider": "usgs_hillshade", "source_label": "USGS 3DEP hillshade", "has_imagery": False, "has_hillshade": True}
+    m = bld.build_manifest(_ctx(), _usgs(), basemap, meta)
+    assert m["format"] == "eristerrain" and m["format_version"] == bld.FORMAT_VERSION
     assert m["elevation"]["source"] == "USGS_3DEP"
-    assert m["elevation"]["resolution"] == "3.4 m/px"
-    assert m["content_signature"] == "sig123"
-    assert m["files"]["dem"] == "dem.tif"
+    assert m["terrain"]["encoding"] == "float32"
+    assert m["files"]["terrain"] == "elevation-grid.bin"
+    assert m["files"]["hillshade"] == "hillshade.png"  # included because has_hillshade
 
 
 def test_assemble_and_validate_roundtrip_ok():
-    usgs = {"dataset": "USGS 3DEP", "version": "2026-06-27", "resolution": "3.4 m/px"}
-    basemap = {"provider": "usgs_hillshade", "source_label": "USGS 3DEP hillshade", "has_imagery": False}
-    manifest = bld.build_manifest(_ctx(), usgs, basemap)
-    pkg = bld.assemble_bundle(_real_dem(), b"\x89PNGfake", _ctx()["overlays"], manifest)
+    grid, meta = _grid_and_meta()
+    basemap = {"source_label": "USGS 3DEP hillshade", "has_hillshade": True}
+    manifest = bld.build_manifest(_ctx(), _usgs(), basemap, meta)
+    pkg = bld.assemble_bundle(grid, b"\x89PNGfake", _ctx()["overlays"], manifest)
     ok, reason = bld.validate_bundle_bytes(pkg)
     assert ok is True and reason is None
+    # The grid is present and decodes to the expected dimensions.
+    with zipfile.ZipFile(io.BytesIO(pkg)) as zf:
+        g = zf.read("elevation-grid.bin")
+    assert len(g) == meta["rows"] * meta["columns"] * 4
 
 
 def test_validate_rejects_bad_bundles():
-    # Not a zip.
-    ok, _ = bld.validate_bundle_bytes(b"not a zip")
-    assert ok is False
-    # Zip missing manifest / dem, wrong format, non-TIFF DEM, too-small DEM.
-    usgs = {"dataset": "d", "version": "v", "resolution": "r"}
-    basemap = {"source_label": "x"}
-    good_manifest = bld.build_manifest(_ctx(), usgs, basemap)
+    assert bld.validate_bundle_bytes(b"not a zip")[0] is False
 
-    # DEM that is not a real TIFF.
-    bad_dem = bld.assemble_bundle(b"\x00" * 400, b"", _ctx()["overlays"], good_manifest)
-    ok, reason = bld.validate_bundle_bytes(bad_dem)
-    assert ok is False and "TIFF" in reason
+    grid, meta = _grid_and_meta()
+    basemap = {"source_label": "x", "has_hillshade": False}
+    manifest = bld.build_manifest(_ctx(), _usgs(), basemap, meta)
 
-    # DEM too small.
-    small = bld.assemble_bundle(b"II*\x00", b"", _ctx()["overlays"], good_manifest)
-    ok, reason = bld.validate_bundle_bytes(small)
-    assert ok is False and "small" in reason.lower()
+    # Wrong grid size for the declared dimensions.
+    bad_size = bld.assemble_bundle(grid[:-4], b"", {}, manifest)
+    ok, reason = bld.validate_bundle_bytes(bad_size)
+    assert ok is False and "byte length" in reason
+
+    # Corrupted grid bytes -> checksum mismatch (same length).
+    corrupt = bytearray(grid)
+    corrupt[0] ^= 0xFF
+    ok, reason = bld.validate_bundle_bytes(bld.assemble_bundle(bytes(corrupt), b"", {}, manifest))
+    assert ok is False and "checksum" in reason
 
     # Wrong format in manifest.
-    bad_fmt = dict(good_manifest)
-    bad_fmt["format"] = "mspk"
-    ok, reason = bld.validate_bundle_bytes(bld.assemble_bundle(_real_dem(), b"", {}, bad_fmt))
+    bad_fmt = dict(manifest); bad_fmt["format"] = "mspk"
+    ok, reason = bld.validate_bundle_bytes(bld.assemble_bundle(grid, b"", {}, bad_fmt))
     assert ok is False and "format" in reason.lower()
+
+    # Missing terrain grid entry (build a zip without it).
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+    ok, reason = bld.validate_bundle_bytes(buf.getvalue())
+    assert ok is False and "missing terrain grid" in reason

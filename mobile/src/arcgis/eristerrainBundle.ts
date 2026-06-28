@@ -1,0 +1,233 @@
+// Pure parsing/validation/decoding for the ERIS offline terrain bundle
+// ('eristerrain') — a STORED (uncompressed) ZIP produced by the worker:
+//   manifest.json, elevation-grid.bin (float32 LE height grid), hillshade.png?, overlays.json
+//
+// No react-native/expo imports (so it unit-tests under node --test), and no
+// decompression dependency (entries are STORED). The native renderer consumes
+// the extracted files; this module validates structure, rejects path traversal,
+// verifies per-entry CRC-32, validates the manifest + terrain metadata, and
+// decodes the height grid + coordinate transform.
+
+export type ZipEntry = {
+  name: string;
+  method: number;
+  crc32: number;
+  compSize: number;
+  uncompSize: number;
+  localOffset: number;
+};
+
+const SIG_EOCD = 0x06054b50;
+const SIG_CEN = 0x02014b50;
+const SIG_LOC = 0x04034b50;
+
+function dv(bytes: Uint8Array): DataView {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+function utf8Decode(bytes: Uint8Array): string {
+  // Minimal UTF-8 decoder (filenames + JSON are ASCII/UTF-8).
+  let out = "";
+  for (let i = 0; i < bytes.length; ) {
+    const b = bytes[i++];
+    if (b < 0x80) out += String.fromCharCode(b);
+    else if (b >= 0xc0 && b < 0xe0) out += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i++] & 0x3f));
+    else if (b >= 0xe0 && b < 0xf0)
+      out += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
+    else {
+      const cp = ((b & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
+      const c = cp - 0x10000;
+      out += String.fromCharCode(0xd800 + (c >> 10), 0xdc00 + (c & 0x3ff));
+    }
+  }
+  return out;
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+export function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/** Reject path-traversal / absolute / drive-letter entry names. */
+export function isUnsafeEntryName(name: string): boolean {
+  if (!name || name.length > 255) return true;
+  if (name.startsWith("/") || name.startsWith("\\")) return true;
+  if (/^[a-zA-Z]:/.test(name)) return true;
+  return name.split(/[\\/]/).some((p) => p === ".." || p === "");
+}
+
+export function parseZipEntries(bytes: Uint8Array): ZipEntry[] {
+  const d = dv(bytes);
+  let eocd = -1;
+  const minScan = Math.max(0, bytes.length - 22 - 65536);
+  for (let i = bytes.length - 22; i >= minScan; i--) {
+    if (d.getUint32(i, true) === SIG_EOCD) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("not a valid package archive (no EOCD)");
+  const total = d.getUint16(eocd + 10, true);
+  let off = d.getUint32(eocd + 16, true);
+  const entries: ZipEntry[] = [];
+  for (let n = 0; n < total; n++) {
+    if (off + 46 > bytes.length || d.getUint32(off, true) !== SIG_CEN) throw new Error("corrupt central directory");
+    const method = d.getUint16(off + 10, true);
+    const crc = d.getUint32(off + 16, true);
+    const compSize = d.getUint32(off + 20, true);
+    const uncompSize = d.getUint32(off + 24, true);
+    const nameLen = d.getUint16(off + 28, true);
+    const extraLen = d.getUint16(off + 30, true);
+    const cmtLen = d.getUint16(off + 32, true);
+    const localOffset = d.getUint32(off + 42, true);
+    const name = utf8Decode(bytes.subarray(off + 46, off + 46 + nameLen));
+    entries.push({ name, method, crc32: crc >>> 0, compSize, uncompSize, localOffset });
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return entries;
+}
+
+/** Read a STORED (method 0) entry's raw bytes. */
+export function readStoredEntry(bytes: Uint8Array, e: ZipEntry): Uint8Array {
+  if (e.method !== 0) throw new Error(`unsupported compression method ${e.method} (expected STORED)`);
+  const d = dv(bytes);
+  if (d.getUint32(e.localOffset, true) !== SIG_LOC) throw new Error("corrupt local file header");
+  const nameLen = d.getUint16(e.localOffset + 26, true);
+  const extraLen = d.getUint16(e.localOffset + 28, true);
+  const start = e.localOffset + 30 + nameLen + extraLen;
+  const end = start + e.uncompSize;
+  if (end > bytes.length) throw new Error("entry extends past archive");
+  return bytes.subarray(start, end);
+}
+
+export type TerrainMeta = {
+  file: string;
+  rows: number;
+  columns: number;
+  encoding: string;
+  byte_order: string;
+  no_data_value: number;
+  min_elevation_m: number;
+  max_elevation_m: number;
+  vertical_units: string;
+  bounds: { min_lat: number; min_lon: number; max_lat: number; max_lon: number };
+  local_transform: { origin_lon: number; origin_lat: number; lon_per_col: number; lat_per_row: number };
+  sha256?: string;
+};
+
+export type EristerrainManifest = {
+  format: string;
+  format_version: number;
+  terrain: TerrainMeta;
+  elevation: { source: string; dataset?: string; version?: string; resolution?: string };
+  overlays?: unknown;
+  [k: string]: unknown;
+};
+
+export function validateTerrainMeta(t: unknown): { ok: boolean; reason?: string } {
+  if (!t || typeof t !== "object") return { ok: false, reason: "missing terrain metadata" };
+  const m = t as Partial<TerrainMeta>;
+  const rows = Number(m.rows);
+  const cols = Number(m.columns);
+  if (!Number.isInteger(rows) || !Number.isInteger(cols) || rows < 2 || cols < 2 || rows > 4096 || cols > 4096) {
+    return { ok: false, reason: "invalid terrain dimensions" };
+  }
+  if (m.encoding !== "float32") return { ok: false, reason: "unsupported terrain encoding" };
+  if (m.no_data_value == null) return { ok: false, reason: "missing no_data_value" };
+  const b = m.bounds;
+  if (!b || b.min_lat >= b.max_lat || b.min_lon >= b.max_lon) return { ok: false, reason: "invalid terrain bounds" };
+  if (!m.local_transform) return { ok: false, reason: "missing local_transform" };
+  return { ok: true };
+}
+
+export function validateBundleManifest(m: unknown): { ok: boolean; reason?: string } {
+  if (!m || typeof m !== "object") return { ok: false, reason: "missing manifest" };
+  const man = m as Partial<EristerrainManifest>;
+  if (man.format !== "eristerrain") return { ok: false, reason: "not an eristerrain bundle" };
+  if (Number(man.format_version ?? 0) < 2) return { ok: false, reason: "unsupported manifest format_version" };
+  if ((man.elevation as { source?: string } | undefined)?.source !== "USGS_3DEP") {
+    return { ok: false, reason: "elevation source is not USGS_3DEP" };
+  }
+  return validateTerrainMeta(man.terrain);
+}
+
+export type ExtractedBundle = { manifest: EristerrainManifest; files: Record<string, Uint8Array> };
+
+/**
+ * Validate + extract the bundle: reject unsafe names, verify CRC-32 of each
+ * required entry, validate the manifest + terrain metadata, and confirm the
+ * height grid byte length matches the declared dimensions. Throws on any failure.
+ */
+export function extractAndValidateBundle(bytes: Uint8Array): ExtractedBundle {
+  const entries = parseZipEntries(bytes);
+  for (const e of entries) {
+    if (isUnsafeEntryName(e.name)) throw new Error(`unsafe archive entry: ${e.name}`);
+  }
+  const byName = new Map(entries.map((e) => [e.name, e]));
+
+  const manEntry = byName.get("manifest.json");
+  if (!manEntry) throw new Error("missing manifest.json");
+  const manBytes = readStoredEntry(bytes, manEntry);
+  if (crc32(manBytes) !== (manEntry.crc32 >>> 0)) throw new Error("manifest checksum mismatch");
+  let manifest: EristerrainManifest;
+  try {
+    manifest = JSON.parse(utf8Decode(manBytes));
+  } catch {
+    throw new Error("malformed manifest.json");
+  }
+  const v = validateBundleManifest(manifest);
+  if (!v.ok) throw new Error(v.reason ?? "invalid manifest");
+
+  const gridName = manifest.terrain.file || "elevation-grid.bin";
+  const gridEntry = byName.get(gridName);
+  if (!gridEntry) throw new Error(`missing terrain grid ${gridName}`);
+  const gridBytes = readStoredEntry(bytes, gridEntry);
+  const expected = manifest.terrain.rows * manifest.terrain.columns * 4;
+  if (gridBytes.byteLength !== expected) throw new Error("terrain grid byte length does not match dimensions");
+  if (crc32(gridBytes) !== (gridEntry.crc32 >>> 0)) throw new Error("terrain grid checksum mismatch");
+
+  const files: Record<string, Uint8Array> = { "manifest.json": manBytes, [gridName]: gridBytes };
+  for (const opt of ["hillshade.png", "overlays.json"]) {
+    const e = byName.get(opt);
+    if (e) {
+      const b = readStoredEntry(bytes, e);
+      if (crc32(b) === (e.crc32 >>> 0)) files[opt] = b;
+    }
+  }
+  return { manifest, files };
+}
+
+/** Decode the float32 LE height grid into a Float32Array (no-data preserved). */
+export function decodeHeightGrid(data: Uint8Array, rows: number, cols: number): Float32Array {
+  if (data.byteLength !== rows * cols * 4) throw new Error("height grid size mismatch");
+  const d = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const out = new Float32Array(rows * cols);
+  for (let i = 0; i < out.length; i++) out[i] = d.getFloat32(i * 4, true);
+  return out;
+}
+
+/** Grid (col,row) -> [lon, lat] via the manifest local transform. */
+export function gridCellToLonLat(t: TerrainMeta, col: number, row: number): [number, number] {
+  const lt = t.local_transform;
+  return [lt.origin_lon + col * lt.lon_per_col, lt.origin_lat + row * lt.lat_per_row];
+}
+
+/** Incident lon/lat -> nearest grid (col,row). */
+export function lonLatToGridCell(t: TerrainMeta, lon: number, lat: number): { col: number; row: number } {
+  const lt = t.local_transform;
+  return {
+    col: Math.round((lon - lt.origin_lon) / lt.lon_per_col),
+    row: Math.round((lat - lt.origin_lat) / lt.lat_per_row),
+  };
+}

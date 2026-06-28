@@ -10,6 +10,7 @@
 #import "ArcGisMissionCenterViewController.h"
 #import "ArcGisPencilSketchViewController.h"
 #import "ArcGisTerrainSceneViewController.h"
+#import "ErisTerrainSceneViewController.h"
 
 @implementation ArcGisModule
 
@@ -193,13 +194,28 @@ RCT_REMAP_METHOD(openOfflineTerrainScene,
                  resolverOpenOfflineScene:(RCTPromiseResolveBlock)resolve
                  rejecterOpenOfflineScene:(RCTPromiseRejectBlock)reject) {
   [ArcGisSketchStore setOfflineSceneParamsJson:paramsJson];
+  // Route by package format: 'mspk' -> ArcGIS Runtime SceneView; 'eristerrain'
+  // (default) -> native SceneKit terrain renderer. An eristerrain bundle is NEVER
+  // loaded as an Esri AGSMobileScenePackage.
+  NSString *format = @"eristerrain";
+  NSData *jd = [paramsJson dataUsingEncoding:NSUTF8StringEncoding];
+  id parsed = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
+  if ([parsed isKindOfClass:[NSDictionary class]]) {
+    NSString *f = ((NSDictionary *)parsed)[@"packageFormat"];
+    if ([f isKindOfClass:[NSString class]] && f.length > 0) format = f;
+  }
   dispatch_async(dispatch_get_main_queue(), ^{
     UIViewController *root = RCTPresentedViewController();
     if (root == nil) {
       reject(@"E_OPEN_OFFLINE_SCENE", @"No active view controller.", nil);
       return;
     }
-    ArcGisTerrainSceneViewController *vc = [[ArcGisTerrainSceneViewController alloc] init];
+    UIViewController *vc;
+    if ([format isEqualToString:@"mspk"]) {
+      vc = [[ArcGisTerrainSceneViewController alloc] init];
+    } else {
+      vc = [[ErisTerrainSceneViewController alloc] init];
+    }
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     [root presentViewController:nav animated:YES completion:nil];

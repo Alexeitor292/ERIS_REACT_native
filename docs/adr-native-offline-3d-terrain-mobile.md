@@ -287,3 +287,69 @@ licensing/sourcing work: **offline draped satellite/aerial imagery** (the hillsh
 add a licensed offline imagery provider behind `OFFLINE_SCENE_IMAGERY_PROVIDER`; and the **native runtime
 renderer for the `eristerrain` bundle** (AGSScene from local DEM + hillshade) plus the integrity bridge still
 require an **EAS dev build + device airplane-mode validation** (not done on this branch).
+
+## Addendum — native eristerrain format + renderer (2026-06-27)
+
+Closes the format gap: the worker emits `eristerrain` but the phone previously validated/opened
+everything as `.mspk`. Now the format is explicit **end to end** (backend descriptor + download grant →
+mobile `SceneAreaDescriptor`/`SceneDownloadGrant`/registry meta/`OpenOfflineSceneParams` → native bridge →
+view controller) and **an `eristerrain` bundle is never loaded through `AGSMobileScenePackage`**.
+
+**Exact eristerrain manifest schema (`format_version: 2`):**
+```json
+{
+  "format": "eristerrain", "format_version": 2,
+  "submission_id": 7, "package_version": "g20260627...-<jobId>",
+  "generated_at": "<iso>",
+  "area": {"center": {"lat","lon"}, "radius_m", "bounds": {"min_lat","min_lon","max_lat","max_lon"}},
+  "elevation": {"source": "USGS_3DEP", "dataset", "version", "resolution", "service"},
+  "terrain": {
+    "file": "elevation-grid.bin", "rows", "columns",
+    "encoding": "float32", "byte_order": "little",
+    "no_data_value": -9999.0, "min_elevation_m", "max_elevation_m", "vertical_units": "meters",
+    "bounds": {"min_lat","min_lon","max_lat","max_lon"},
+    "local_transform": {"origin_lon","origin_lat","lon_per_col","lat_per_row"},
+    "sha256": "<sha256 of elevation-grid.bin>"
+  },
+  "basemap": {"provider","source_label","has_imagery","has_hillshade"},
+  "overlays": {"incident":{...},"geometry":...,"roadBearingDeg":...,"sampleExtent":...},
+  "content_signature": "...",
+  "files": {"manifest","terrain","hillshade?","overlays"}
+}
+```
+Bundle = a **STORED (uncompressed) ZIP**: `manifest.json`, `elevation-grid.bin` (raw little-endian float32,
+row-major, row 0 = north edge; no-data cells store `no_data_value`), optional `hillshade.png`, `overlays.json`.
+STORED so the mobile client reads entries with no decompressor.
+
+**Worker DEM decoding dependency choice:** **rasterio** (bundled GDAL via manylinux wheels) in a dedicated
+worker image (`backend/Dockerfile.worker` + `requirements-worker.txt`; compose `offline-scene-worker` builds
+it). `offline_scene_terrain.decode_dem_tiff` decodes the real 3DEP GeoTIFF, downsamples to a mobile-sane grid
+(`OFFLINE_SCENE_GRID_PX`, default 256), converts the source no-data to NaN, and `encode_height_grid` emits the
+canonical float32 grid (no-data → `-9999.0`, min/max over valid cells). A TIFF magic-byte test is **not** used
+as validation; the bundle is validated by decoding to a real grid whose byte length + SHA-256 match the manifest.
+
+**Native renderer (`ErisTerrainSceneViewController`, SceneKit):** reads the extracted dir (manifest + grid +
+hillshade), builds a height-field `SCNGeometry` mesh from the float32 grid (no-data flattened), drapes
+`hillshade.png` as the diffuse texture, places the incident marker + road-bearing (only when real) via the
+manifest's `local_transform`, and provides orbit/pan/zoom/tilt (SCNView camera control) + North + reset-to-incident
++ a version/source status pill. The ArcGIS-Runtime `ArcGisTerrainSceneViewController` remains for `mspk`. The
+native bridge `openOfflineTerrainScene` routes by `packageFormat`.
+
+**Mobile validation/extraction (`eristerrainBundle.ts`, pure + unit-tested):** parses the STORED zip, rejects
+path-traversal entries, verifies per-entry **CRC-32**, validates the manifest + terrain metadata + grid
+dimensions, and decodes the height grid + coordinate transform. The manager downloads to `.part`, verifies
+byte size + package SHA-256 (native), then — for `eristerrain` — **validates + extracts** the bundle to a
+per-package dir and verifies the grid's manifest SHA-256 natively **before** marking READY; for `mspk` it keeps
+the `AGSMobileScenePackage` load check. A package is never READY until its declared-format validation passes.
+
+**Manual acceptance test (must pass before EAS sign-off):**
+1. Tap **Prepare offline 3D area** on a submission with coordinates; wait for the worker to produce a
+   USGS-3DEP `eristerrain` package and the job to reach READY → **Download** → **Downloaded**.
+2. Install an **iOS EAS development build** and download the package on the device.
+3. Enable **Airplane Mode**.
+4. **Open native 3D terrain** → verify (no network): an actual terrain **mesh** from the height grid, the
+   **hillshade texture**, the incident marker + overlays, and **orbit / pan / zoom / tilt / North / Reset**.
+
+**What remains unsupported:** licensed **offline draped imagery** (only USGS hillshade relief today); the
+native renderer + integrity bridge are **code-complete but unvalidated on device** (need the EAS dev build);
+**Android** native rendering (no reproducible plugin). No EAS build was made on this branch.

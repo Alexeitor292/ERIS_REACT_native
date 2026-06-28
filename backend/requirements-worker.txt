@@ -1,0 +1,8 @@
+# Offline 3D scene-package generation worker dependencies.
+# Extends the API requirements with the geospatial stack needed to decode the
+# USGS 3DEP DEM GeoTIFF into the canonical mobile height grid. rasterio ships a
+# bundled GDAL via manylinux wheels, so no system GDAL is required.
+-r requirements.txt
+numpy>=1.26
+rasterio>=1.3
+Pillow>=10

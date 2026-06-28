@@ -32,6 +32,7 @@ import {
   validateScenePackage,
   type OpenOfflineSceneParams,
 } from "../arcgis/ArcGISNative";
+import { extractAndValidateBundle } from "../arcgis/eristerrainBundle";
 
 const DIR_NAME = "offline-scenes";
 const REGISTRY_VERSION = 1;
@@ -125,6 +126,97 @@ function toNativePath(uri: string): string {
   return decodeURI(uri.replace(/^file:\/\//, ""));
 }
 
+const _B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function base64ToBytes(b64: string): Uint8Array {
+  const clean = b64.replace(/[^A-Za-z0-9+/]/g, "");
+  const len = Math.floor((clean.length * 3) / 4);
+  const out = new Uint8Array(len);
+  let p = 0;
+  for (let i = 0; i < clean.length; i += 4) {
+    const a = _B64.indexOf(clean[i]);
+    const b = _B64.indexOf(clean[i + 1]);
+    const c = _B64.indexOf(clean[i + 2]);
+    const d = _B64.indexOf(clean[i + 3]);
+    if (p < len) out[p++] = (a << 2) | (b >> 4);
+    if (p < len && c >= 0) out[p++] = ((b & 15) << 4) | (c >> 2);
+    if (p < len && d >= 0) out[p++] = ((c & 3) << 6) | d;
+  }
+  return out;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    out += _B64[a >> 2] + _B64[((a & 3) << 4) | (b >> 4)];
+    out += i + 1 < bytes.length ? _B64[((b & 15) << 2) | (c >> 6)] : "=";
+    out += i + 2 < bytes.length ? _B64[c & 63] : "=";
+  }
+  return out;
+}
+
+function utf8FromBytes(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; ) {
+    const b = bytes[i++];
+    if (b < 0x80) s += String.fromCharCode(b);
+    else if (b < 0xe0) s += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i++] & 0x3f));
+    else s += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
+  }
+  return s;
+}
+
+function extractedDirFor(submissionId: number): string {
+  return `${baseDir()}/${submissionId}-extracted`;
+}
+
+/**
+ * Validate + extract an eristerrain bundle next to its package: reject path
+ * traversal, verify CRC + manifest + terrain dimensions, write the manifest /
+ * height grid / hillshade / overlays into a per-package directory, and verify the
+ * grid's manifest SHA-256 natively. Returns the extracted directory.
+ */
+async function validateAndExtractEristerrain(partUri: string, submissionId: number): Promise<string> {
+  const b64 = await FileSystem.readAsStringAsync(partUri, { encoding: FileSystem.EncodingType.Base64 });
+  const bytes = base64ToBytes(b64);
+  const { manifest, files } = extractAndValidateBundle(bytes); // throws on any invalidity
+
+  const dir = extractedDirFor(submissionId);
+  try {
+    await FileSystem.deleteAsync(dir, { idempotent: true });
+  } catch {
+    /* ignore */
+  }
+  await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+
+  const gridName = manifest.terrain.file || "elevation-grid.bin";
+  await FileSystem.writeAsStringAsync(`${dir}/manifest.json`, utf8FromBytes(files["manifest.json"]));
+  await FileSystem.writeAsStringAsync(`${dir}/${gridName}`, bytesToBase64(files[gridName]), {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  if (files["hillshade.png"]) {
+    await FileSystem.writeAsStringAsync(`${dir}/hillshade.png`, bytesToBase64(files["hillshade.png"]), {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  }
+  if (files["overlays.json"]) {
+    await FileSystem.writeAsStringAsync(`${dir}/overlays.json`, utf8FromBytes(files["overlays.json"]));
+  }
+
+  // Verify the manifest's grid SHA-256 natively against the extracted grid file.
+  const declaredSha = manifest.terrain.sha256;
+  if (declaredSha) {
+    const gridSha = await sha256OfFile(toNativePath(`${dir}/${gridName}`));
+    if (!shaMatches(declaredSha, gridSha)) {
+      throw new Error("Extracted terrain grid failed SHA-256 verification.");
+    }
+  }
+  return dir;
+}
+
 /** Persist only the resumable snapshot (for crash/restart resume) without racing
  *  the rest of the record. No-op if the record changed generation meanwhile. */
 async function persistSnapshot(id: number, gen: number, snapshot: unknown): Promise<void> {
@@ -194,10 +286,18 @@ async function verifyAndPromote(
   if (!shaMatches(meta.expectedSha256, actualSha)) {
     throw new Error("SHA-256 mismatch — the download is corrupted.");
   }
-  const loads = await validateScenePackage(toNativePath(partUri));
-  if (!loads) {
-    throw new Error("The downloaded file is not a valid 3D scene package.");
+
+  // Format-aware validation. NEVER mark READY until the package validates as its
+  // declared format — an eristerrain bundle is never loaded as an Esri .mspk.
+  let extractedDir: string | null = null;
+  if (meta.packageFormat === "mspk") {
+    const loads = await validateScenePackage(toNativePath(partUri));
+    if (!loads) throw new Error("The downloaded file is not a valid .mspk scene package.");
+  } else {
+    // eristerrain (default): validate + extract the bundle (throws on invalidity).
+    extractedDir = await validateAndExtractEristerrain(partUri, meta.submissionId);
   }
+
   const finalUri = packagePath(meta.submissionId);
   try {
     await FileSystem.deleteAsync(finalUri, { idempotent: true });
@@ -209,6 +309,7 @@ async function verifyAndPromote(
     ...meta,
     status: "READY",
     localPath: finalUri,
+    extractedDir,
     partPath: null,
     resumeSnapshot: null,
     sizeBytes: actualSize,
@@ -408,6 +509,12 @@ export async function deleteOfflineScenePackage(submissionId: number): Promise<v
       /* ignore file errors */
     }
   }
+  // Remove the extracted eristerrain directory too.
+  try {
+    await FileSystem.deleteAsync(meta?.extractedDir ?? extractedDirFor(submissionId), { idempotent: true });
+  } catch {
+    /* ignore */
+  }
   const reg = await readRegistry();
   await writeRegistry({ ...reg, items: reg.items.filter((x) => x.submissionId !== submissionId) });
 }
@@ -462,9 +569,15 @@ export async function openDownloadedScene(
   if (!info.exists) {
     throw new Error("The offline package file is missing. Delete and re-download the area.");
   }
+  // eristerrain renders from the extracted directory; mspk opens the file directly.
+  if (meta.packageFormat !== "mspk" && !meta.extractedDir) {
+    throw new Error("The terrain bundle was not extracted. Delete and re-download the area.");
+  }
   await openOfflineTerrainScene({
     ...overlay,
     packagePath: meta.localPath,
+    packageFormat: meta.packageFormat,
+    extractedDir: meta.extractedDir,
     packageVersion: meta.packageVersion,
     downloadedAt: meta.downloadedAt,
     sizeBytes: meta.sizeBytes,

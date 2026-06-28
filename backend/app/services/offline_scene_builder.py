@@ -32,9 +32,11 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..storage import put_object_bytes
 from . import offline_scene as offline_scene_svc
+from . import offline_scene_terrain as terrain_fmt
 from .offline_scene_catalog import register_ready_package
 
 BUNDLE_FORMAT = "eristerrain"
+FORMAT_VERSION = 2  # canonical height-grid bundle (v1 was a raw-TIFF prototype)
 _TIFF_MAGICS = (b"II*\x00", b"MM\x00*")
 _M_PER_DEG_LAT = 111_320.0
 
@@ -53,10 +55,18 @@ def aoi_resolution_m(bounds: dict, center_lat: float, px: int) -> float:
     return round(width_m / max(1, px), 2)
 
 
-def build_manifest(ctx: dict, usgs_meta: dict, basemap_meta: dict) -> dict:
+def build_manifest(ctx: dict, usgs_meta: dict, basemap_meta: dict, terrain_meta: dict) -> dict:
+    has_hillshade = bool(basemap_meta.get("has_hillshade"))
+    files = {
+        "manifest": "manifest.json",
+        "terrain": terrain_meta["file"],
+        "overlays": "overlays.json",
+    }
+    if has_hillshade:
+        files["hillshade"] = "hillshade.png"
     return {
         "format": BUNDLE_FORMAT,
-        "format_version": 1,
+        "format_version": FORMAT_VERSION,
         "submission_id": ctx["submission_id"],
         "package_version": ctx["package_version"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -68,19 +78,23 @@ def build_manifest(ctx: dict, usgs_meta: dict, basemap_meta: dict) -> dict:
             "resolution": usgs_meta.get("resolution"),
             "service": usgs_meta.get("service"),
         },
+        "terrain": terrain_meta,
         "basemap": basemap_meta,
         "overlays": ctx.get("overlays") or {},
         "content_signature": ctx["content_signature"],
-        "files": {"dem": "dem.tif", "hillshade": "hillshade.png", "overlays": "overlays.json", "manifest": "manifest.json"},
+        "files": files,
     }
 
 
-def assemble_bundle(dem_bytes: bytes, hillshade_bytes: bytes, overlays: dict, manifest: dict) -> bytes:
-    """Zip the bundle deterministically (manifest + DEM + hillshade + overlays)."""
+def assemble_bundle(grid_bytes: bytes, hillshade_bytes: bytes, overlays: dict, manifest: dict) -> bytes:
+    """Zip the bundle deterministically (manifest + height grid + hillshade + overlays)."""
+    grid_name = manifest.get("terrain", {}).get("file", terrain_fmt.HEIGHT_GRID_FILE)
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    # STORED (uncompressed) so the mobile client reads entries without a zlib
+    # decompressor; float32 grids + PNG are not meaningfully compressible anyway.
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, sort_keys=True, separators=(",", ":")))
-        zf.writestr("dem.tif", dem_bytes)
+        zf.writestr(grid_name, grid_bytes)
         if hillshade_bytes:
             zf.writestr("hillshade.png", hillshade_bytes)
         zf.writestr("overlays.json", json.dumps(overlays or {}, sort_keys=True, separators=(",", ":")))
@@ -89,25 +103,33 @@ def assemble_bundle(dem_bytes: bytes, hillshade_bytes: bytes, overlays: dict, ma
 
 def validate_bundle_bytes(package_bytes: bytes) -> tuple[bool, str | None]:
     """Structural validation that this opens as a real ERIS terrain bundle: a valid
-    zip with a manifest, a non-trivial DEM that is a real TIFF (magic bytes), and a
-    recognized format. Returns (ok, reason)."""
+    zip, a v2+ manifest, USGS_3DEP provenance, valid terrain metadata, and a height
+    grid whose byte length AND checksum match the manifest. Returns (ok, reason)."""
     try:
         with zipfile.ZipFile(io.BytesIO(package_bytes)) as zf:
             names = set(zf.namelist())
             if "manifest.json" not in names:
                 return False, "missing manifest.json"
-            if "dem.tif" not in names:
-                return False, "missing dem.tif"
             manifest = json.loads(zf.read("manifest.json"))
             if manifest.get("format") != BUNDLE_FORMAT:
                 return False, f"unexpected format {manifest.get('format')!r}"
+            if int(manifest.get("format_version", 0)) < FORMAT_VERSION:
+                return False, "unsupported manifest format_version"
             if manifest.get("elevation", {}).get("source") != offline_scene_svc.ELEVATION_SOURCE_3DEP:
                 return False, "elevation source is not USGS_3DEP"
-            dem = zf.read("dem.tif")
-            if len(dem) < 256:
-                return False, "DEM too small to be real 3DEP coverage"
-            if not dem.startswith(_TIFF_MAGICS):
-                return False, "DEM is not a valid TIFF (3DEP fetch likely failed)"
+            terrain = manifest.get("terrain") or {}
+            ok, reason = terrain_fmt.validate_terrain_metadata(terrain)
+            if not ok:
+                return False, reason
+            grid_name = terrain.get("file", terrain_fmt.HEIGHT_GRID_FILE)
+            if grid_name not in names:
+                return False, f"missing terrain grid {grid_name}"
+            grid = zf.read(grid_name)
+            expected = int(terrain["rows"]) * int(terrain["columns"]) * 4
+            if len(grid) != expected:
+                return False, "terrain grid byte length does not match dimensions"
+            if terrain.get("sha256") and terrain_fmt.grid_sha256(grid) != terrain["sha256"]:
+                return False, "terrain grid checksum mismatch"
     except zipfile.BadZipFile:
         return False, "not a valid package archive"
     except Exception as e:  # pragma: no cover - defensive
@@ -197,22 +219,22 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         return resp.content
 
     def prepare_source_data(self, ctx: dict, progress=None) -> dict:
-        px = int(settings.OFFLINE_SCENE_EXPORT_PX)
-        base = export_image_params(ctx["bounds"], px)
-        # Real 32-bit float elevation (the local terrain surface).
-        dem_bytes = self._export({**base, "format": "tiff", "pixelType": "F32"})
+        grid_px = int(settings.OFFLINE_SCENE_GRID_PX)
+        hs_px = int(settings.OFFLINE_SCENE_EXPORT_PX)
+        # Real 32-bit float elevation DEM (decoded to a height grid in build_package).
+        dem_bytes = self._export({**export_image_params(ctx["bounds"], grid_px), "format": "tiff", "pixelType": "F32"})
         if not dem_bytes or not dem_bytes.startswith(_TIFF_MAGICS):
             raise OfflineSceneBuildError("USGS 3DEP did not return a valid DEM for this area.")
         if progress:
             progress("BUILDING_TERRAIN", "Rendering hillshade from USGS 3DEP")
-        # Server-rendered hillshade (licence-clean relief imagery).
+        # Server-rendered hillshade (licence-clean relief texture).
         hillshade_bytes = b""
         try:
             rule = json.dumps({"rasterFunction": "Hillshade Gray"})
-            hillshade_bytes = self._export({**base, "format": "png", "renderingRule": rule})
+            hillshade_bytes = self._export({**export_image_params(ctx["bounds"], hs_px), "format": "png", "renderingRule": rule})
         except Exception:
-            hillshade_bytes = b""  # terrain still works from the DEM alone
-        resolution = aoi_resolution_m(ctx["bounds"], ctx["center"]["lat"], px)
+            hillshade_bytes = b""  # terrain mesh still renders from the height grid alone
+        resolution = aoi_resolution_m(ctx["bounds"], ctx["center"]["lat"], grid_px)
         usgs_meta = {
             "dataset": settings.OFFLINE_SCENE_3DEP_DATASET,
             "version": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -223,12 +245,17 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             "provider": settings.OFFLINE_SCENE_IMAGERY_PROVIDER,
             "source_label": "USGS 3DEP hillshade (terrain relief)" if hillshade_bytes else "USGS 3DEP terrain relief",
             "has_imagery": False,
+            "has_hillshade": bool(hillshade_bytes),
         }
         return {"dem_bytes": dem_bytes, "hillshade_bytes": hillshade_bytes, "usgs_meta": usgs_meta, "basemap_meta": basemap_meta}
 
     def build_package(self, ctx: dict, source: dict, progress=None) -> bytes:
-        manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"])
-        return assemble_bundle(source["dem_bytes"], source.get("hillshade_bytes") or b"", ctx.get("overlays") or {}, manifest)
+        # Decode the real USGS 3DEP DEM (handles no-data) into the canonical height grid.
+        heights = terrain_fmt.decode_dem_tiff(source["dem_bytes"], max_dim=int(settings.OFFLINE_SCENE_GRID_PX))
+        grid_bytes, stats = terrain_fmt.encode_height_grid(heights)
+        terrain_meta = terrain_fmt.build_terrain_metadata(stats, ctx["bounds"], terrain_fmt.grid_sha256(grid_bytes))
+        manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"], terrain_meta)
+        return assemble_bundle(grid_bytes, source.get("hillshade_bytes") or b"", ctx.get("overlays") or {}, manifest)
 
 
 def get_builder() -> OfflineScenePackageBuilder:
