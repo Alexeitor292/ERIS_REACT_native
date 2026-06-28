@@ -13,14 +13,24 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from "react-native";
 
 import type { GisaTerrainGrid } from "../api/submissions";
-import { getOfflineScenePackageDescriptor, getOfflineSceneDownloadGrant } from "../api/submissions";
+import {
+  getOfflineScenePackageDescriptor,
+  getOfflineSceneDownloadGrant,
+  generateOfflineScenePackage,
+  getOfflineSceneJob,
+  cancelOfflineSceneJob,
+  retryOfflineSceneJob,
+} from "../api/submissions";
 import { getToken } from "../auth/tokenStore";
 import {
   describeScope,
   formatBytes,
   formatPackageAge,
+  jobIsActive,
+  jobStatusLine,
   needsRefresh,
   type OfflineScenePackageMeta,
+  type OfflineSceneJob,
   type SceneAreaDescriptor,
 } from "../arcgis/offlineScene";
 import { supportsOfflineTerrainScene } from "../arcgis/ArcGISNative";
@@ -69,6 +79,7 @@ export function OfflineTerrainPanel({
 }: Props) {
   const [meta, setMeta] = useState<OfflineScenePackageMeta | null>(null);
   const [descriptor, setDescriptor] = useState<SceneAreaDescriptor | null>(null);
+  const [job, setJob] = useState<OfflineSceneJob | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,26 +101,93 @@ export function OfflineTerrainPanel({
     reloadMeta();
   }, [reloadMeta]);
 
-  // Best-effort descriptor fetch (needs network; silently ignored offline).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (isLocalId) return;
-      try {
-        const t = await getToken();
-        if (!t || cancelled) return;
-        const d = await getOfflineScenePackageDescriptor(t, String(submissionId));
-        if (!cancelled) setDescriptor(d);
-      } catch {
-        /* offline or unavailable — keep null */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadDescriptor = useCallback(async () => {
+    if (isLocalId) return;
+    try {
+      const t = await getToken();
+      if (!t) return;
+      setDescriptor(await getOfflineScenePackageDescriptor(t, String(submissionId)));
+    } catch {
+      /* offline or unavailable — keep null */
+    }
   }, [submissionId, isLocalId]);
 
+  const loadJob = useCallback(async () => {
+    if (isLocalId) return;
+    try {
+      const t = await getToken();
+      if (!t) return;
+      const res = await getOfflineSceneJob(t, String(submissionId));
+      setJob(res.job);
+    } catch {
+      /* offline — keep last known */
+    }
+  }, [submissionId, isLocalId]);
+
+  // Best-effort descriptor + job fetch (needs network; silently ignored offline).
+  useEffect(() => {
+    loadDescriptor();
+    loadJob();
+  }, [loadDescriptor, loadJob]);
+
+  // Poll the generation job while it is active; when it finishes, refresh the
+  // descriptor so a freshly-generated READY package becomes downloadable.
+  useEffect(() => {
+    if (!job || !jobIsActive(job.status)) return;
+    const id = setInterval(async () => {
+      const t = await getToken();
+      if (!t) return;
+      try {
+        const res = await getOfflineSceneJob(t, String(submissionId));
+        setJob(res.job);
+        if (res.job && !jobIsActive(res.job.status)) {
+          if (res.job.status === "READY") await loadDescriptor();
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [job, submissionId, loadDescriptor]);
+
   const refreshNeeded = useMemo(() => needsRefresh(meta, descriptor), [meta, descriptor]);
+
+  const onPrepare = useCallback(async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const t = await getToken();
+      if (!t) throw new Error("Not signed in.");
+      const res = await generateOfflineScenePackage(t, String(submissionId));
+      setJob(res.job);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [submissionId]);
+
+  const onCancelJob = useCallback(async () => {
+    try {
+      const t = await getToken();
+      if (!t) return;
+      const res = await cancelOfflineSceneJob(t, String(submissionId));
+      setJob(res.job);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [submissionId]);
+
+  const onRetryJob = useCallback(async () => {
+    try {
+      const t = await getToken();
+      if (!t) return;
+      const res = await retryOfflineSceneJob(t, String(submissionId));
+      setJob(res.job);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [submissionId]);
 
   const onDownload = useCallback(async () => {
     if (!descriptor || !descriptor.available) {
@@ -205,6 +283,7 @@ export function OfflineTerrainPanel({
   const downloading = meta?.status === "DOWNLOADING" || busy;
   const paused = meta?.status === "PAUSED" && !busy;
   const failed = meta?.status === "FAILED" && !busy;
+  const jobActive = jobIsActive(job?.status);
 
   return (
     <View style={styles.wrapper}>
@@ -255,18 +334,45 @@ export function OfflineTerrainPanel({
           <Pressable onPress={onDownload} disabled={!descriptor?.available} style={[styles.btnSecondary, !descriptor?.available && styles.btnDisabled]}>
             <Text style={styles.btnSecondaryText}>Retry download</Text>
           </Pressable>
-        ) : (
-          // Download is ONLY enabled when a verified READY catalog package exists.
+        ) : descriptor?.available ? (
+          // A verified READY catalog package exists -> download it.
           <Pressable
             onPress={onDownload}
-            disabled={!nativeSupported || !hasCoords || isLocalId || !descriptor?.available}
-            style={[
-              styles.btnSecondary,
-              (!nativeSupported || !hasCoords || isLocalId || !descriptor?.available) && styles.btnDisabled,
-            ]}
+            disabled={!nativeSupported || !hasCoords || isLocalId}
+            style={[styles.btnSecondary, (!nativeSupported || !hasCoords || isLocalId) && styles.btnDisabled]}
           >
             <Text style={styles.btnSecondaryText}>Download offline 3D area</Text>
           </Pressable>
+        ) : (
+          // No package yet -> AUTOMATIC ERIS generation (Prepare -> progress -> Download).
+          <View>
+            {jobActive ? (
+              <View style={styles.row}>
+                <ActivityIndicator size="small" color="#93c5fd" />
+                <Text style={styles.progressText}>{jobStatusLine(job)}</Text>
+                <Pressable onPress={onCancelJob} style={styles.btnSmall}>
+                  <Text style={styles.btnSmallText}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : job?.status === "FAILED" ? (
+              <View>
+                <Text style={styles.errorText}>{jobStatusLine(job)}</Text>
+                <View style={styles.row}>
+                  <Pressable onPress={onRetryJob} style={styles.btnSmall}>
+                    <Text style={styles.btnSmallText}>Retry</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <Pressable
+                onPress={onPrepare}
+                disabled={!nativeSupported || !hasCoords || isLocalId || busy}
+                style={[styles.btnSecondary, (!nativeSupported || !hasCoords || isLocalId || busy) && styles.btnDisabled]}
+              >
+                <Text style={styles.btnSecondaryText}>{busy ? "Starting…" : "Prepare offline 3D area"}</Text>
+              </Pressable>
+            )}
+          </View>
         )
       ) : null}
 
@@ -281,10 +387,10 @@ export function OfflineTerrainPanel({
           </Text>
         </>
       ) : null}
-      {/* Honest "none prepared" / "missing" state — never an estimate-as-if-created */}
-      {!ready && !downloading && !paused && descriptor && !descriptor.available ? (
+      {/* Context for the automatic generation: what the prepared package contains. */}
+      {!ready && !downloading && !paused && descriptor && !descriptor.available && !jobActive && job?.status !== "FAILED" ? (
         <Text style={styles.note}>
-          {descriptor.reason ?? "No offline 3D package has been prepared for this incident yet."}
+          ERIS builds a bounded offline 3D area from USGS 3DEP terrain (relief). No desktop GIS, no manual steps.
         </Text>
       ) : null}
 

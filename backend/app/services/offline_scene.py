@@ -95,10 +95,14 @@ def content_signature(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def make_scene_object_key(submission_id: int, package_version: str) -> str:
+PACKAGE_FORMAT_EXT = {"eristerrain": "scene.eristerrain", "mspk": "scene.mspk"}
+
+
+def make_scene_object_key(submission_id: int, package_version: str, package_format: str = "eristerrain") -> str:
     """Immutable, versioned object key. Never reused/overwritten."""
     safe_ver = "".join(c for c in str(package_version) if c.isalnum() or c in "-_.")
-    return f"submissions/{int(submission_id)}/{safe_ver}/scene.mspk"
+    filename = PACKAGE_FORMAT_EXT.get(package_format, "scene.eristerrain")
+    return f"submissions/{int(submission_id)}/{safe_ver}/{filename}"
 
 
 def validate_bounds(min_lat, min_lon, max_lat, max_lon) -> bool:
@@ -164,7 +168,7 @@ def descriptor_from_catalog(
             },
         },
         "package": {
-            "format": "mspk",
+            "format": catalog.get("package_format") or "eristerrain",
             "version": catalog.get("package_version"),
             "size_bytes": int(catalog.get("size_bytes") or 0),
             "sha256": catalog.get("sha256"),

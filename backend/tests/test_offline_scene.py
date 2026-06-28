@@ -185,8 +185,8 @@ class TestRegistration:
     def test_object_missing_rejected(self, client_db, admin_token):
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
-            with patch("app.main.bucket_exists", return_value=True), \
-                 patch("app.main.stat_object", return_value=None):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True), \
+                 patch("app.services.offline_scene_catalog.stat_object", return_value=None):
                 r = client_db.post(_REG, json=_reg_body(sub_id), headers={"Authorization": f"Bearer {admin_token}"})
             assert r.status_code == 404
         finally:
@@ -195,8 +195,8 @@ class TestRegistration:
     def test_size_mismatch_rejected(self, client_db, admin_token):
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
-            with patch("app.main.bucket_exists", return_value=True), \
-                 patch("app.main.stat_object", return_value=_stat(999)):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True), \
+                 patch("app.services.offline_scene_catalog.stat_object", return_value=_stat(999)):
                 r = client_db.post(_REG, json=_reg_body(sub_id, size=500), headers={"Authorization": f"Bearer {admin_token}"})
             assert r.status_code == 409
             assert "size" in r.text.lower()
@@ -206,9 +206,9 @@ class TestRegistration:
     def test_hash_mismatch_rejected(self, client_db, admin_token):
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
-            with patch("app.main.bucket_exists", return_value=True), \
-                 patch("app.main.stat_object", return_value=_stat(500)), \
-                 patch("app.main.sha256_of_object", return_value="c" * 64):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True), \
+                 patch("app.services.offline_scene_catalog.stat_object", return_value=_stat(500)), \
+                 patch("app.services.offline_scene_catalog.sha256_of_object", return_value="c" * 64):
                 r = client_db.post(_REG, json=_reg_body(sub_id, sha="b" * 64, size=500), headers={"Authorization": f"Bearer {admin_token}"})
             assert r.status_code == 409
             assert "sha" in r.text.lower()
@@ -220,7 +220,7 @@ class TestRegistration:
         try:
             body = _reg_body(sub_id)
             body["min_lat"], body["max_lat"] = 38.9, 38.4  # min > max
-            with patch("app.main.bucket_exists", return_value=True):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True):
                 r = client_db.post(_REG, json=body, headers={"Authorization": f"Bearer {admin_token}"})
             assert r.status_code == 422
         finally:
@@ -230,26 +230,26 @@ class TestRegistration:
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
             # Register v1.
-            with patch("app.main.bucket_exists", return_value=True), \
-                 patch("app.main.stat_object", return_value=_stat(500)), \
-                 patch("app.main.sha256_of_object", return_value="b" * 64):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True), \
+                 patch("app.services.offline_scene_catalog.stat_object", return_value=_stat(500)), \
+                 patch("app.services.offline_scene_catalog.sha256_of_object", return_value="b" * 64):
                 r1 = client_db.post(_REG, json=_reg_body(sub_id, version="v1", sha="b" * 64, size=500),
                                     headers={"Authorization": f"Bearer {admin_token}"})
             assert r1.status_code == 200, r1.text
             assert r1.json()["package"]["status"] == "READY"
 
             # Duplicate v1 rejected (immutable).
-            with patch("app.main.bucket_exists", return_value=True), \
-                 patch("app.main.stat_object", return_value=_stat(500)), \
-                 patch("app.main.sha256_of_object", return_value="b" * 64):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True), \
+                 patch("app.services.offline_scene_catalog.stat_object", return_value=_stat(500)), \
+                 patch("app.services.offline_scene_catalog.sha256_of_object", return_value="b" * 64):
                 rdup = client_db.post(_REG, json=_reg_body(sub_id, version="v1", sha="b" * 64, size=500),
                                       headers={"Authorization": f"Bearer {admin_token}"})
             assert rdup.status_code == 409
 
             # Register v2 -> v1 retired, descriptor uses v2.
-            with patch("app.main.bucket_exists", return_value=True), \
-                 patch("app.main.stat_object", return_value=_stat(600)), \
-                 patch("app.main.sha256_of_object", return_value="d" * 64):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True), \
+                 patch("app.services.offline_scene_catalog.stat_object", return_value=_stat(600)), \
+                 patch("app.services.offline_scene_catalog.sha256_of_object", return_value="d" * 64):
                 r2 = client_db.post(_REG, json=_reg_body(sub_id, version="v2", sha="d" * 64, size=600),
                                     headers={"Authorization": f"Bearer {admin_token}"})
             assert r2.status_code == 200, r2.text
@@ -274,7 +274,7 @@ class TestRegistration:
         """Backend must NOT silently create the bucket; missing bucket -> 409."""
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
-            with patch("app.main.bucket_exists", return_value=False):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=False):
                 r = client_db.post(_REG, json=_reg_body(sub_id), headers={"Authorization": f"Bearer {admin_token}"})
             assert r.status_code == 409
             assert "bucket" in r.text.lower()
@@ -287,7 +287,7 @@ class TestRegistration:
         try:
             body = _reg_body(sub_id, version="v1")
             body["object_key"] = f"submissions/{sub_id}/v1/WRONG.mspk"
-            with patch("app.main.bucket_exists", return_value=True):
+            with patch("app.services.offline_scene_catalog.bucket_exists", return_value=True):
                 r = client_db.post(_REG, json=body, headers={"Authorization": f"Bearer {admin_token}"})
             assert r.status_code == 422
             assert "canonical" in r.text.lower()

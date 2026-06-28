@@ -44,6 +44,42 @@ services:
       timeout: 5s
       retries: 10
 
+  # Automatic offline 3D scene-package generation worker. Separate process so
+  # long USGS-3DEP terrain jobs never run in the API request path. Reuses the
+  # backend image; claims QUEUED jobs from MariaDB and writes verified packages
+  # to the private offline-scenes MinIO bucket.
+  offline-scene-worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: eris_offline_scene_worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker.offline_scene_worker"]
+    env_file:
+      - .env.proxmox
+    environment:
+      TZ: ${TZ:-America/Los_Angeles}
+      ENV: ${ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_NAME: ${MARIADB_DATABASE}
+      DB_USER: ${MARIADB_USER}
+      DB_PASS: ${MARIADB_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
+      MINIO_BUCKET: ${MINIO_BUCKET:-eris-uploads}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_OFFLINE_SCENES_BUCKET: ${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
+      OFFLINE_SCENE_DEV_MODE: ${OFFLINE_SCENE_DEV_MODE:-true}
+      OFFLINE_SCENE_MAX_RADIUS_M: ${OFFLINE_SCENE_MAX_RADIUS_M:-3000}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
   web:
     build:
       context: ../web

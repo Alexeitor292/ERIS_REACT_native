@@ -82,6 +82,81 @@ export function partPathFor(finalPath: string): string {
   return `${finalPath}.part`;
 }
 
+// ---- Automatic generation job states (server-side pipeline) ----------------
+
+export type OfflineSceneJobStatus =
+  | "QUEUED"
+  | "FETCHING_USGS_3DEP"
+  | "BUILDING_TERRAIN"
+  | "BUILDING_BASEMAP"
+  | "PACKAGING"
+  | "VERIFYING"
+  | "UPLOADING"
+  | "REGISTERING"
+  | "READY"
+  | "FAILED"
+  | "CANCELLED";
+
+export type OfflineSceneJob = {
+  id: number;
+  submission_id: number;
+  status: OfflineSceneJobStatus;
+  progress_pct: number;
+  status_message: string | null;
+  retry_count: number;
+  error_details: string | null;
+  result_package_version: string | null;
+  area: {
+    center: { lat: number; lon: number };
+    radius_m: number;
+    bounds: { min_lat: number; min_lon: number; max_lat: number; max_lon: number };
+  } | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+const JOB_TERMINAL: ReadonlySet<OfflineSceneJobStatus> = new Set(["READY", "FAILED", "CANCELLED"]);
+
+export function jobIsTerminal(status: OfflineSceneJobStatus | null | undefined): boolean {
+  return !!status && JOB_TERMINAL.has(status);
+}
+
+/** Active = a generation job is running and the UI should keep polling. */
+export function jobIsActive(status: OfflineSceneJobStatus | null | undefined): boolean {
+  return !!status && !JOB_TERMINAL.has(status);
+}
+
+/** Human progress line for the generation pipeline (drives the mobile UX copy). */
+export function jobStatusLine(job: Pick<OfflineSceneJob, "status" | "progress_pct" | "error_details"> | null | undefined): string {
+  if (!job) return "Prepare offline 3D area";
+  const p = Math.max(0, Math.min(100, job.progress_pct ?? 0));
+  switch (job.status) {
+    case "QUEUED":
+      return "Queued — preparing terrain…";
+    case "FETCHING_USGS_3DEP":
+      return `Preparing terrain: ${p}% — downloading USGS 3DEP`;
+    case "BUILDING_TERRAIN":
+      return `Preparing terrain: ${p}% — building terrain relief`;
+    case "BUILDING_BASEMAP":
+    case "PACKAGING":
+      return `Building offline terrain package: ${p}%`;
+    case "VERIFYING":
+      return `Verifying package: ${p}%`;
+    case "UPLOADING":
+      return `Uploading package: ${p}%`;
+    case "REGISTERING":
+      return `Finalizing: ${p}%`;
+    case "READY":
+      return "Ready to download";
+    case "CANCELLED":
+      return "Preparation cancelled";
+    case "FAILED":
+      return job.error_details ? `Failed — ${job.error_details}` : "Preparation failed";
+    default:
+      return "Preparing offline 3D area…";
+  }
+}
+
 // ---- Durable download state machine (pure) --------------------------------
 
 export type ReconcileContext = {

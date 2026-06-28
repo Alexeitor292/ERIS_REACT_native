@@ -72,6 +72,24 @@ class Settings(BaseSettings):
     # short-lived presigned URL from the protected download endpoint.
     MINIO_OFFLINE_SCENES_BUCKET: str = Field(default="eris-offline-scenes")
     OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS: int = Field(default=900)
+    # --- Automatic offline 3D package-generation pipeline (worker) ---
+    OFFLINE_SCENE_WORKER_POLL_SECONDS: int = Field(default=5)
+    OFFLINE_SCENE_WORKER_CONCURRENCY: int = Field(default=1)
+    OFFLINE_SCENE_JOB_STALE_SECONDS: int = Field(default=900)
+    # Dev mode keeps AOIs/sizes conservative for laptop/dev runs.
+    OFFLINE_SCENE_DEV_MODE: bool = Field(default=True)
+    OFFLINE_SCENE_MAX_RADIUS_M: float = Field(default=3000.0)
+    # USGS 3DEP raster elevation ImageServer (authoritative terrain source).
+    OFFLINE_SCENE_3DEP_IMAGESERVER: str = Field(
+        default="https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
+    )
+    OFFLINE_SCENE_3DEP_DATASET: str = Field(default="USGS 3DEP (3DEPElevation ImageServer)")
+    OFFLINE_SCENE_EXPORT_PX: int = Field(default=1024)
+    OFFLINE_SCENE_FETCH_TIMEOUT_S: int = Field(default=60)
+    # Basemap/imagery provider for the generated package. "usgs_hillshade" is the
+    # licence-clean default (server-rendered hillshade from USGS 3DEP). A licensed
+    # offline imagery provider can be added later without redesigning the pipeline.
+    OFFLINE_SCENE_IMAGERY_PROVIDER: str = Field(default="usgs_hillshade")
 
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

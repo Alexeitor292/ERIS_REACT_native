@@ -1,9 +1,18 @@
 # Operator runbook: offline 3D scene packages (.mspk)
 
-Audience: ERIS GIS operators / admins. This is a **manual** workflow — ERIS does
-**not** auto-generate packages from USGS yet. ERIS provides storage, catalog,
-verification, secure delivery, and mobile handling; **ArcGIS Pro authoring is an
-operator step**.
+> **PRIMARY PATH IS NOW AUTOMATIC.** ERIS generates a bounded offline 3D package
+> on demand (USGS 3DEP terrain → `eristerrain` bundle) via the `offline-scene-worker`
+> service — a user just taps **Prepare offline 3D area**. No desktop GIS, no manual
+> clipping/hashing/upload. See the "automatic package generation pipeline" addendum
+> in `docs/adr-native-offline-3d-terrain-mobile.md`.
+>
+> This runbook now covers **(a) one-time private bucket provisioning** (still
+> required) and **(b) the optional ADMIN manual-override path** for registering an
+> externally-authored enterprise **`.mspk`**. The automatic path needs only step 0.
+
+Audience: ERIS GIS operators / admins. The **manual `.mspk`** workflow below is an
+optional override; ERIS provides storage, catalog, verification, secure delivery,
+automatic generation, and mobile handling.
 
 Lifecycle: **author (ArcGIS Pro) → upload (private MinIO) → register (ERIS ADMIN) →
 field download + airplane-mode test → retire/replace**.

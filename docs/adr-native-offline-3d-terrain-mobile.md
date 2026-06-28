@@ -236,3 +236,54 @@ value → 422), and a READY registration **requires** non-empty `elevation_datas
 **Not done yet.** The feature is **not** validated until a real ArcGIS Pro-authored `.mspk` (USGS 3DEP)
 is hosted in private MinIO, downloaded by an **iOS EAS development build**, and opened in **Airplane
 Mode**. No EAS build has been made on this branch.
+
+## Addendum — automatic package generation pipeline (2026-06-27)
+
+Manual ArcGIS Pro authoring is **no longer the ERIS workflow**. An authorized user taps **Prepare
+offline 3D area**; ERIS generates the bounded package automatically.
+
+**Package-format decision (item 7) — Option B, an ERIS terrain bundle (`eristerrain`).** Discovery:
+the Linux worker has `requests`/`numpy`/`Pillow` but **no `rasterio` and no `arcpy`/ArcGIS Pro**.
+Automated true-`.mspk` authoring requires ArcGIS Pro (Windows + per-seat license) — not reproducible
+on a server worker. So the auto-generated package is a **zip bundle** (`scene.eristerrain`) containing a
+**clipped USGS 3DEP DEM** (`dem.tif`), a **server-rendered hillshade** (`hillshade.png`), ERIS overlays,
+and a `manifest.json` (provenance). It is rendered natively at runtime by building an `AGSScene` from the
+local DEM + hillshade (no `.mspk` needed). The format is validated structurally (real TIFF DEM, recognized
+manifest) — a file is never "valid" just because it ends in `.mspk`. The `.mspk` path remains supported
+(catalog `package_format`), registerable via the ADMIN override endpoint, for an enterprise ArcGIS pipeline
+later.
+
+**Pipeline.** `offline_scene_jobs` table (Alembic 0012) + a separate **worker Docker service**
+(`offline-scene-worker`, reuses the backend image, `python -m app.worker.offline_scene_worker`). Endpoints:
+`POST …/offline-scene-package/generate` (edit-perm, coordinates required, bounded AOI, duplicate-job
+prevention, returns a QUEUED job), `GET …/job` (mobile polling), `…/job/cancel`, `…/job/retry`. Job states:
+QUEUED → FETCHING_USGS_3DEP → BUILDING_TERRAIN → BUILDING_BASEMAP → PACKAGING → VERIFYING → UPLOADING →
+REGISTERING → READY / FAILED / CANCELLED. The worker safely claims jobs (`FOR UPDATE SKIP LOCKED`),
+recovers stale running jobs on startup, writes progress to the DB, and **only registers a READY catalog
+package after the bundle validates AND the verified MinIO upload + catalog SHA/size/identity checks pass**
+(a failed build never creates a READY catalog row). Builder provider interface
+(`OfflineScenePackageBuilder`: prepare_source_data / build_package / validate_package / upload_and_register)
+with `HillshadeReliefBuilder` today; an approved licensed offline-imagery provider can be added behind the
+same interface via `OFFLINE_SCENE_IMAGERY_PROVIDER`.
+
+**Basemap strategy.** MVP default is **USGS-3DEP hillshade (terrain relief)** — licence-clean, no streamed
+Esri/Google/online tiles cached for offline. When no offline imagery provider is configured the package is
+clearly labelled "USGS 3DEP terrain relief". Imagery is a provider setting for future licensed sources.
+
+**Mobile UX.** The "No offline package prepared" dead-end is replaced by **Prepare offline 3D area →
+Preparing terrain: NN% — downloading USGS 3DEP → Building offline terrain package → Ready to download →
+Download → Downloaded / ready offline**, with **Cancel** while active and **Retry** on failure (polled from
+`…/job`). The native viewer stays primary; WebUI scene stays the connected desktop analysis; browser handoff
+stays a temporary fallback.
+
+**Worker deployment.** Long terrain jobs run in the separate `offline-scene-worker` service, never the API
+request process. Bounded concurrency (1 by default), dev mode with small AOIs (`OFFLINE_SCENE_MAX_RADIUS_M`),
+and the bundle is assembled **in memory** (no temp DEM/package files written to disk or Git).
+
+**Licensing / what's automatic today vs. blocked.** Fully automatic now: USGS 3DEP elevation + hillshade
+acquisition, bounded clipping, package build/validate/upload/register, mobile prepare→download. **No
+dedicated ArcGIS/Windows worker license is required** for the `eristerrain` path. Still requires
+licensing/sourcing work: **offline draped satellite/aerial imagery** (the hillshade is relief, not imagery) —
+add a licensed offline imagery provider behind `OFFLINE_SCENE_IMAGERY_PROVIDER`; and the **native runtime
+renderer for the `eristerrain` bundle** (AGSScene from local DEM + hillshade) plus the integrity bridge still
+require an **EAS dev build + device airplane-mode validation** (not done on this branch).

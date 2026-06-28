@@ -590,6 +590,8 @@ CREATE TABLE IF NOT EXISTS offline_scene_packages (
     object_key VARCHAR(512) NOT NULL,
     sha256 CHAR(64) NOT NULL,
     size_bytes BIGINT NOT NULL,
+    -- Package format: 'eristerrain' (auto-generated USGS-3DEP bundle) or 'mspk'.
+    package_format VARCHAR(32) NOT NULL DEFAULT 'mspk',
     -- Durable object identity (immutable MinIO version id + etag) to detect any
     -- replacement of the object behind a registered package.
     object_version_id VARCHAR(128) NULL,
@@ -625,4 +627,47 @@ CREATE TABLE IF NOT EXISTS offline_scene_packages (
     INDEX idx_osp_submission_status (submission_id, status),
     CONSTRAINT chk_osp_status
       CHECK (status IN ('READY', 'RETIRED', 'FAILED'))
+) ENGINE=InnoDB;
+
+-- Offline 3D scene-package GENERATION jobs.
+-- Durable queue for the automatic pipeline: an authorized user requests a
+-- bounded package; a separate worker fetches USGS 3DEP terrain, builds + verifies
+-- a bounded offline package, uploads it to private MinIO, and registers it in
+-- offline_scene_packages. No manual ArcGIS Pro authoring. See Alembic 0012.
+CREATE TABLE IF NOT EXISTS offline_scene_jobs (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    requested_by BIGINT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
+    progress_pct INT NOT NULL DEFAULT 0,
+    status_message VARCHAR(255) NULL,
+    center_lat DOUBLE NULL,
+    center_lon DOUBLE NULL,
+    radius_m DOUBLE NULL,
+    min_lat DOUBLE NULL,
+    min_lon DOUBLE NULL,
+    max_lat DOUBLE NULL,
+    max_lon DOUBLE NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    error_details TEXT NULL,
+    result_package_id BIGINT NULL,
+    result_package_version VARCHAR(64) NULL,
+    usgs_source_metadata JSON NULL,
+    basemap_source_metadata JSON NULL,
+    worker_id VARCHAR(64) NULL,
+    worker_log_ref VARCHAR(255) NULL,
+    claimed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_osj_submission
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_osj_requested_by
+      FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_osj_submission_status (submission_id, status),
+    INDEX idx_osj_status (status),
+    CONSTRAINT chk_osj_status CHECK (status IN (
+      'QUEUED','FETCHING_USGS_3DEP','BUILDING_TERRAIN','BUILDING_BASEMAP',
+      'PACKAGING','VERIFYING','UPLOADING','REGISTERING','READY','FAILED','CANCELLED'
+    ))
 ) ENGINE=InnoDB;

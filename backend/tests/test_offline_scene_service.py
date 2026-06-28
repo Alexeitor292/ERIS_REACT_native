@@ -32,9 +32,11 @@ class TestRadiusAndBounds:
 
 class TestObjectKey:
     def test_immutable_versioned_key(self):
-        assert osvc.make_scene_object_key(42, "v2026-06-27a") == "submissions/42/v2026-06-27a/scene.mspk"
+        # Default format is the auto-generated ERIS terrain bundle.
+        assert osvc.make_scene_object_key(42, "v2026-06-27a") == "submissions/42/v2026-06-27a/scene.eristerrain"
+        assert osvc.make_scene_object_key(42, "v1", "mspk") == "submissions/42/v1/scene.mspk"
         # sanitizes unsafe chars
-        assert osvc.make_scene_object_key(7, "a/b c") == "submissions/7/abc/scene.mspk"
+        assert osvc.make_scene_object_key(7, "a/b c", "eristerrain") == "submissions/7/abc/scene.eristerrain"
 
 
 class TestContentSignature:

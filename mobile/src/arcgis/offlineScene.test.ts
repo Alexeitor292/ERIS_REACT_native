@@ -10,6 +10,9 @@ import {
   formatBytes,
   formatPackageAge,
   isStale,
+  jobIsActive,
+  jobIsTerminal,
+  jobStatusLine,
   metaFromDescriptor,
   needsRefresh,
   partPathFor,
@@ -194,4 +197,23 @@ test("single authoritative completion path: only current generation applies", ()
   assert.equal(shouldApplyWorkerResult(3, 3), true); // current worker
   assert.equal(shouldApplyWorkerResult(4, 3), false); // superseded by Pause/Delete/new start
   assert.equal(shouldApplyWorkerResult(3, 2), false); // older generation never promotes/fails
+});
+
+test("generation job state: active/terminal classification", () => {
+  assert.equal(jobIsActive("QUEUED"), true);
+  assert.equal(jobIsActive("FETCHING_USGS_3DEP"), true);
+  assert.equal(jobIsActive("READY"), false);
+  assert.equal(jobIsActive("FAILED"), false);
+  assert.equal(jobIsActive(null), false);
+  assert.equal(jobIsTerminal("READY"), true);
+  assert.equal(jobIsTerminal("CANCELLED"), true);
+  assert.equal(jobIsTerminal("PACKAGING"), false);
+});
+
+test("generation job status lines drive the mobile UX copy", () => {
+  assert.equal(jobStatusLine(null), "Prepare offline 3D area");
+  assert.match(jobStatusLine({ status: "FETCHING_USGS_3DEP", progress_pct: 35, error_details: null }), /Preparing terrain: 35% — downloading USGS 3DEP/);
+  assert.match(jobStatusLine({ status: "PACKAGING", progress_pct: 70, error_details: null }), /Building offline terrain package/);
+  assert.equal(jobStatusLine({ status: "READY", progress_pct: 100, error_details: null }), "Ready to download");
+  assert.match(jobStatusLine({ status: "FAILED", progress_pct: 0, error_details: "USGS 3DEP coverage unavailable" }), /Failed — USGS 3DEP coverage unavailable/);
 });

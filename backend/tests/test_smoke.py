@@ -86,10 +86,10 @@ class TestAlembicScripts:
         heads = self._script_dir().get_heads()
         assert heads, "No Alembic head revisions found in migration scripts"
 
-    def test_offline_scene_packages_is_head(self):
+    def test_offline_scene_jobs_is_head(self):
         heads = self._script_dir().get_heads()
-        assert "0011_offline_scene_packages" in heads, (
-            f"0011_offline_scene_packages not in heads: {heads}"
+        assert "0012_offline_scene_jobs" in heads, (
+            f"0012_offline_scene_jobs not in heads: {heads}"
         )
 
     def test_baseline_in_chain(self):

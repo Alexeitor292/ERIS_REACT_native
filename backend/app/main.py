@@ -56,6 +56,8 @@ from .schemas.common import (
 )
 from .services import elevation_profile as elevation_profile_svc
 from .services import offline_scene as offline_scene_svc
+from .services import offline_scene_jobs as offline_scene_jobs_svc
+from .services.offline_scene_catalog import register_ready_package, PackageRegistrationError
 from .services import terrain_grid as terrain_grid_svc
 from .services.gisa_validation import (
     validate_action_code_group,
@@ -2825,6 +2827,113 @@ def download_gisa_offline_scene_package(
     }
 
 
+def _job_public(job: dict | None) -> dict | None:
+    """Safe job projection for the mobile client (no worker internals)."""
+    if not job:
+        return None
+    return {
+        "id": job["id"],
+        "submission_id": job["submission_id"],
+        "status": job["status"],
+        "progress_pct": job["progress_pct"],
+        "status_message": job["status_message"],
+        "retry_count": job["retry_count"],
+        "error_details": job["error_details"],
+        "result_package_version": job["result_package_version"],
+        "area": {
+            "center": {"lat": job["center_lat"], "lon": job["center_lon"]},
+            "radius_m": job["radius_m"],
+            "bounds": {
+                "min_lat": job["min_lat"], "min_lon": job["min_lon"],
+                "max_lat": job["max_lat"], "max_lon": job["max_lon"],
+            },
+        },
+        "created_at": str(job["created_at"]) if job.get("created_at") is not None else None,
+        "updated_at": str(job["updated_at"]) if job.get("updated_at") is not None else None,
+    }
+
+
+@app.post("/submissions/{submission_id}/gisa/offline-scene-package/generate", status_code=202)
+def generate_offline_scene_package(
+    submission_id: int = Path(..., ge=1),
+    radius_m: float | None = None,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Request AUTOMATIC generation of a bounded offline 3D package. Confirms the
+    incident has coordinates, enforces edit permission, computes a bounded AOI,
+    prevents duplicate active jobs, creates a QUEUED job, and returns immediately.
+    A separate worker fetches USGS 3DEP, builds + verifies + uploads + registers
+    the package. No manual ArcGIS Pro authoring is involved."""
+    require_can_edit_submission(submission_id, db, user)
+
+    row = db.execute(text("SELECT latitude, longitude FROM submission_gisa WHERE submission_id=:s LIMIT 1"),
+                     {"s": submission_id}).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="GISA data not found for this submission")
+    lat, lon = row["latitude"], row["longitude"]
+    if lat is None or lon is None:
+        raise HTTPException(status_code=400, detail="Cannot prepare an offline area: incident has no coordinates.")
+
+    # Bounded AOI (incident radius, never statewide; capped by dev limit).
+    radius = offline_scene_svc.clamp_radius_m(radius_m)
+    radius = min(radius, float(settings.OFFLINE_SCENE_MAX_RADIUS_M))
+    bounds = offline_scene_svc.bounding_box(float(lat), float(lon), radius)
+    aoi = {"center": {"lat": float(lat), "lon": float(lon)}, "radius_m": radius, "bounds": bounds}
+
+    # Prevent duplicate active jobs for the same submission.
+    active = offline_scene_jobs_svc.get_active_job(db, submission_id)
+    if active:
+        raise HTTPException(status_code=409, detail="A package-generation job is already in progress.")
+
+    job = offline_scene_jobs_svc.create_job(db, submission_id=submission_id, requested_by=user["id"], aoi=aoi)
+    return {"job": _job_public(job)}
+
+
+@app.get("/submissions/{submission_id}/gisa/offline-scene-package/job")
+def get_offline_scene_package_job(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Latest generation job for the submission (for mobile progress polling)."""
+    require_can_view_submission(submission_id, db, user)
+    job = offline_scene_jobs_svc.get_latest_job(db, submission_id)
+    return {"job": _job_public(job)}
+
+
+@app.post("/submissions/{submission_id}/gisa/offline-scene-package/job/cancel")
+def cancel_offline_scene_package_job(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_edit_submission(submission_id, db, user)
+    active = offline_scene_jobs_svc.get_active_job(db, submission_id)
+    if not active:
+        raise HTTPException(status_code=404, detail="No active generation job to cancel.")
+    if not offline_scene_jobs_svc.can_cancel(active["status"]):
+        raise HTTPException(status_code=409, detail="This job can no longer be cancelled.")
+    job = offline_scene_jobs_svc.cancel_job(db, active["id"])
+    return {"job": _job_public(job)}
+
+
+@app.post("/submissions/{submission_id}/gisa/offline-scene-package/job/retry")
+def retry_offline_scene_package_job(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_edit_submission(submission_id, db, user)
+    latest = offline_scene_jobs_svc.get_latest_job(db, submission_id)
+    if not latest:
+        raise HTTPException(status_code=404, detail="No generation job to retry.")
+    if not offline_scene_jobs_svc.can_retry(latest["status"]):
+        raise HTTPException(status_code=409, detail="Only a FAILED job can be retried.")
+    job = offline_scene_jobs_svc.retry_job(db, latest["id"])
+    return {"job": _job_public(job)}
+
+
 @app.post("/admin/offline-scene-packages")
 def register_offline_scene_package(
     payload: OfflineScenePackageRegister = ...,
@@ -2841,116 +2950,32 @@ def register_offline_scene_package(
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    if not offline_scene_svc.validate_bounds(payload.min_lat, payload.min_lon, payload.max_lat, payload.max_lon):
-        raise HTTPException(status_code=422, detail="Invalid bounds (need min < max, within lat/lon ranges).")
-
-    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
-    # Canonical, immutable object key — the only key shape we accept.
-    canonical_key = offline_scene_svc.make_scene_object_key(payload.submission_id, payload.package_version)
-    if payload.object_key is not None and payload.object_key != canonical_key:
-        raise HTTPException(
-            status_code=422,
-            detail=f"object_key must be the canonical immutable key '{canonical_key}' (or omitted).",
-        )
-    object_key = canonical_key
-
-    # Duplicate (immutable) version for this submission?
-    dup = db.execute(text("""
-        SELECT id FROM offline_scene_packages
-        WHERE submission_id = :s AND package_version = :v
-    """), {"s": payload.submission_id, "v": payload.package_version}).first()
-    if dup:
-        raise HTTPException(status_code=409, detail="A package with this version already exists (immutable).")
-
-    # Object-key collision (never overwrite/reuse an immutable key).
-    dup_key = db.execute(text("SELECT id FROM offline_scene_packages WHERE object_key = :k"), {"k": object_key}).first()
-    if dup_key:
-        raise HTTPException(status_code=409, detail="This object key is already registered (immutable).")
-
-    # Do NOT silently create the bucket — it must be pre-provisioned private +
-    # versioned/locked by the operator setup script before any package is stored.
+    # Manual override path registers an operator-uploaded .mspk. The PRIMARY path
+    # is automatic generation via .../offline-scene-package/generate.
     try:
-        exists = bucket_exists(bucket)
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Offline-scenes storage unreachable: {e}")
-    if not exists:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Offline-scenes bucket '{bucket}' does not exist. An operator must provision it "
-                "privately with versioning/object-lock first (docker/scripts/create-offline-scenes-bucket.sh)."
-            ),
+        row = register_ready_package(
+            db,
+            submission_id=payload.submission_id,
+            package_version=payload.package_version,
+            sha256=payload.sha256,
+            size_bytes=payload.size_bytes,
+            min_lat=payload.min_lat, min_lon=payload.min_lon,
+            max_lat=payload.max_lat, max_lon=payload.max_lon,
+            center_lat=payload.center_lat, center_lon=payload.center_lon, radius_m=payload.radius_m,
+            elevation_source=payload.elevation_source,
+            elevation_dataset=payload.elevation_dataset,
+            elevation_version=payload.elevation_version,
+            elevation_resolution=payload.elevation_resolution,
+            basemap_or_imagery_source=payload.basemap_or_imagery_source,
+            content_signature=payload.content_signature,
+            package_format="mspk",
+            object_key=payload.object_key,
+            uploaded_by=user["id"],
+            notes=payload.notes,
         )
-
-    # HEAD: object must exist, size must match.
-    st = stat_object(object_key=object_key, bucket=bucket)
-    if st is None:
-        raise HTTPException(status_code=404, detail=f"MinIO object not found: {bucket}/{object_key}")
-    if int(st["size"]) != int(payload.size_bytes):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Object size mismatch: stored {st['size']} bytes != expected {payload.size_bytes}.",
-        )
-
-    # Verify SHA-256 (stream-hash) before marking READY.
-    actual_sha = sha256_of_object(object_key=object_key, bucket=bucket)
-    if actual_sha.lower() != payload.sha256.lower():
-        raise HTTPException(status_code=409, detail="SHA-256 mismatch; refusing to mark READY.")
-
-    # Capture durable object identity at registration time.
-    object_version_id = st.get("version_id")
-    object_etag = st.get("etag")
-
-    try:
-        db.execute(text("""
-            UPDATE offline_scene_packages SET status='RETIRED', retired_at=NOW()
-            WHERE submission_id = :s AND status = 'READY'
-        """), {"s": payload.submission_id})
-        db.execute(text("""
-            INSERT INTO offline_scene_packages
-              (submission_id, status, package_version, minio_bucket, object_key, sha256, size_bytes,
-               object_version_id, object_etag,
-               min_lat, min_lon, max_lat, max_lon, center_lat, center_lon, radius_m,
-               elevation_source, elevation_dataset, elevation_version, elevation_resolution,
-               basemap_or_imagery_source, content_signature, uploaded_at, uploaded_by, notes)
-            VALUES
-              (:submission_id, 'READY', :package_version, :bucket, :object_key, :sha256, :size_bytes,
-               :object_version_id, :object_etag,
-               :min_lat, :min_lon, :max_lat, :max_lon, :center_lat, :center_lon, :radius_m,
-               :elevation_source, :elevation_dataset, :elevation_version, :elevation_resolution,
-               :basemap, :content_signature, NOW(), :uploaded_by, :notes)
-        """), {
-            "submission_id": payload.submission_id,
-            "package_version": payload.package_version,
-            "bucket": bucket,
-            "object_key": object_key,
-            "sha256": payload.sha256.lower(),
-            "size_bytes": int(payload.size_bytes),
-            "object_version_id": object_version_id,
-            "object_etag": object_etag,
-            "min_lat": payload.min_lat, "min_lon": payload.min_lon,
-            "max_lat": payload.max_lat, "max_lon": payload.max_lon,
-            "center_lat": payload.center_lat, "center_lon": payload.center_lon,
-            "radius_m": payload.radius_m,
-            "elevation_source": payload.elevation_source,
-            "elevation_dataset": payload.elevation_dataset,
-            "elevation_version": payload.elevation_version,
-            "elevation_resolution": payload.elevation_resolution,
-            "basemap": payload.basemap_or_imagery_source,
-            "content_signature": payload.content_signature,
-            "uploaded_by": user["id"],
-            "notes": payload.notes,
-        })
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-    row = db.execute(text("""
-        SELECT * FROM offline_scene_packages
-        WHERE submission_id = :s AND package_version = :v
-    """), {"s": payload.submission_id, "v": payload.package_version}).mappings().first()
-    return {"registered": True, "package": dict(row) if row else None}
+    except PackageRegistrationError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    return {"registered": True, "package": row}
 
 
 @app.put("/submissions/{submission_id}/gisa/incident-types")
