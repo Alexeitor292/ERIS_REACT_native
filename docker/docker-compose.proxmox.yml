@@ -44,11 +44,35 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      # Block startup until the private offline-scenes bucket is provisioned +
+      # posture-verified (fail-closed). Zero manual host-side steps.
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
       interval: 15s
       timeout: 5s
       retries: 10
+
+  # One-shot bootstrap: create + verify the PRIVATE, versioned (object-lock)
+  # offline-scenes bucket before backend/worker start. Fails closed (nonzero) if
+  # the bucket cannot be made private + immutable, blocking the dependents. Does
+  # not touch the uploads bucket.
+  minio-init:
+    image: minio/mc:latest
+    container_name: eris_minio_init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_OFFLINE_SCENES_BUCKET: ${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
+    entrypoint: ["/bin/sh", "/scripts/bootstrap-offline-scenes-bucket.sh"]
+    volumes:
+      - ./scripts:/scripts:ro
 
   # Automatic offline 3D scene-package generation worker. Separate process so
   # long USGS-3DEP terrain jobs never run in the API request path. Reuses the
@@ -88,6 +112,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      minio-init:
+        condition: service_completed_successfully
 
   web:
     build:
