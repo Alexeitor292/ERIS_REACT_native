@@ -1,4 +1,4 @@
-# Operator runbook: offline 3D scene packages (.mspk)
+# Operator runbook: offline 3D scene packages (automatic `eristerrain` + optional `.mspk`)
 
 > **PRIMARY PATH IS NOW AUTOMATIC.** ERIS generates a bounded offline 3D package
 > on demand (USGS 3DEP terrain → `eristerrain` bundle) via the `offline-scene-worker`
@@ -19,26 +19,92 @@ field download + airplane-mode test → retire/replace**.
 
 ---
 
-## 0. One-time: create the private MinIO bucket
+## 0. Deployment (ZERO manual steps) + private bucket bootstrap
 
-The packages live in a **private, versioned, object-locked** bucket
-`eris-offline-scenes` (never anonymous, never the uploads bucket). Run once per
-environment:
+The full stack comes up with one command; the private offline-scenes bucket is
+provisioned automatically — **no host-side script to remember**.
 
 ```sh
-MINIO_ENDPOINT=http://<minio-host>:9800 \
-MINIO_ROOT_USER=<root-user> MINIO_ROOT_PASSWORD=<root-pass> \
-sh docker/scripts/create-offline-scenes-bucket.sh
+cd docker
+# One-time: copy the env template and fill in secrets (see "Required env" below).
+cp .env.proxmox.example .env.proxmox && $EDITOR .env.proxmox
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml up -d --build
 ```
 
-The script is **fail-closed**: it creates the bucket **`mc mb --with-lock`** (object
-lock ⇒ versioning ⇒ append-only immutability) and exits **nonzero** unless it can
-confirm anonymous access is `none` **and** versioning is `Enabled`. **Object lock
-can only be enabled at creation** — if a non-locked `eris-offline-scenes` already
-exists, the script rejects it and you must recreate it. The ERIS backend reads the
-bucket with the existing MinIO credentials (mobile never gets them) and will
-**refuse** to register a package if the bucket is missing (it never auto-creates an
-unprovisioned bucket).
+**Bucket bootstrap (`minio-init`):** a one-shot init service (`minio/mc`) runs the
+fail-closed `docker/scripts/bootstrap-offline-scenes-bucket.sh` **before** backend
+and `offline-scene-worker` start (they `depends_on: minio-init:
+service_completed_successfully`). It creates `eris-offline-scenes` **`mc mb
+--with-lock`** (object lock + versioning) only if absent, verifies anonymous access
+is `none` and versioning is `Enabled`, and **exits nonzero** (blocking the whole
+stack) if the bucket cannot be made private + immutable. It never touches the
+uploads bucket and never recreates an existing one.
+
+**Immutability — accurate wording:** ERIS relies on **application-level
+immutability**: canonical, versioned, never-overwritten object keys
+(`submissions/{id}/{version}/scene.{ext}`) plus a strictly private bucket policy.
+The bucket is created with **object lock enabled (capability) + versioning**; a
+governed **WORM retention period** (e.g. `mc retention set`) is a separate operator
+decision and is **not** implied by versioning alone. Do not describe versioning by
+itself as WORM.
+
+**Standalone MinIO (non-compose):** if MinIO is managed outside this compose stack,
+run the equivalent one-time script yourself:
+
+```sh
+MINIO_ENDPOINT=http://<minio-host>:9800 MINIO_ROOT_USER=<u> MINIO_ROOT_PASSWORD=<p> \
+  sh docker/scripts/create-offline-scenes-bucket.sh
+```
+
+### Required env (docker/.env.proxmox)
+
+| Var | Purpose |
+|---|---|
+| `MARIADB_*` | DB name/user/password (backend + worker share). |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO credentials (backend/worker/init only; **never** sent to mobile). |
+| `MINIO_OFFLINE_SCENES_BUCKET` | Private bucket name (default `eris-offline-scenes`). |
+| `OFFLINE_SCENE_DEV_MODE` | `false` in prod → MinIO posture problems fail closed. |
+| `OFFLINE_SCENE_MAX_RADIUS_M` | Single authoritative AOI ceiling (default `3000`). |
+| `OFFLINE_SCENE_MAX_PACKAGE_MB` | Max registered/downloadable package size (default `512`). |
+| `VITE_ARCGIS_API_KEY` | Browser-only web build arg — **must NOT** be in this env file (supply as a shell var at web build). |
+
+### Worker health checks (operations)
+
+- `GET /ops/offline-scene/health` (**ADMIN**) → `{healthy, bucket:{name,status},
+  queue:{queued,running,failed}, workers:[{worker_id, age_seconds, alive, ...}],
+  orphaned_objects_unresolved, dev_mode}`. Sanitized — no MinIO creds/endpoints.
+  `healthy` is true when the bucket is present AND at least one worker heartbeat is
+  fresh.
+- Workers write a durable heartbeat every poll (even when idle) to
+  `offline_scene_worker_heartbeats`; structured logs carry `worker_id / job_id /
+  submission_id / stage / package_version`.
+- Concurrency = **worker replicas** (scale the `offline-scene-worker` service); jobs
+  are claimed with `FOR UPDATE SKIP LOCKED`, so replicas never double-process.
+
+### Rollback / retry
+
+- **Failed job:** `POST /submissions/{id}/gisa/offline-scene-package/job/retry`
+  (edit permission) re-queues a `FAILED` job. Stale running jobs (dead worker) are
+  auto-requeued after `OFFLINE_SCENE_JOB_STALE_SECONDS`.
+- **Cancel:** `.../job/cancel` is authoritative at every stage — a cancelled job is
+  never marked READY and never creates a READY catalog row.
+- **Bad package already READY:** it is immutable; publish a **new** `package_version`
+  (auto path: re-run Prepare; manual path: register a new version). ERIS retires the
+  prior READY row (kept for audit) and serves the newest READY.
+- **Bucket/stack rollback:** `docker compose ... down` then re-`up` re-runs
+  `minio-init` idempotently; an existing correctly-postured bucket is accepted as-is.
+
+### Package lifecycle & cleanup
+
+- **Orphaned objects:** if a job is cancelled after the object upload but before
+  registration, the object is recorded in `offline_scene_orphaned_objects`
+  (unresolved) and is **never** referenced by a READY row (not downloadable). An
+  operator reconciles/removes these out-of-band, honoring the bucket's
+  retention/versioning controls, and marks the row `resolved`. The unresolved count
+  surfaces in the ops health endpoint.
+- **Retire/replace:** see §10.
+- **Device cleanup:** users delete local packages from **Settings → Offline 3D
+  terrain areas**; the app also clears packages older than its stale threshold.
 
 ---
 
