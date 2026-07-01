@@ -695,3 +695,15 @@ CREATE TABLE IF NOT EXISTS offline_scene_orphaned_objects (
     INDEX idx_osoo_resolved (resolved),
     INDEX idx_osoo_job (job_id)
 ) ENGINE=InnoDB;
+
+-- Durable worker liveness signal (heartbeat every poll) so operations can see a
+-- worker is alive even when the queue is idle. See Alembic 0014.
+CREATE TABLE IF NOT EXISTS offline_scene_worker_heartbeats (
+    worker_id VARCHAR(64) NOT NULL,
+    last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    jobs_processed BIGINT NOT NULL DEFAULT 0,
+    last_stage VARCHAR(48) NULL,
+    PRIMARY KEY (worker_id),
+    INDEX idx_oswh_last_seen (last_seen)
+) ENGINE=InnoDB;

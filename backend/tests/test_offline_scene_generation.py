@@ -366,3 +366,26 @@ class TestDownloadAuthorization:
         other = login.json()["access_token"]
         r = client_db.post("/admin/offline-scene-packages", json={}, headers={"Authorization": f"Bearer {other}"})
         assert r.status_code in (401, 403)  # admin-only
+
+
+class TestOpsHealth:
+    def test_health_is_admin_only_and_sanitized(self, client_db, admin_token):
+        # Non-admin denied.
+        login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
+        other = login.json()["access_token"]
+        assert client_db.get("/ops/offline-scene/health", headers={"Authorization": f"Bearer {other}"}).status_code in (401, 403)
+        # Admin gets a sanitized ops view (no MinIO creds/endpoint leaked).
+        with patch("app.storage.bucket_exists", return_value=True):
+            r = client_db.get("/ops/offline-scene/health", headers={"Authorization": f"Bearer {admin_token}"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert set(["healthy", "bucket", "queue", "workers", "orphaned_objects_unresolved"]).issubset(body.keys())
+        blob = str(body).lower()
+        assert "secret" not in blob and "password" not in blob and "://" not in blob  # no creds/endpoints
+
+    def test_worker_heartbeat_recorded(self, client_db, admin_token):
+        from app.db import SessionLocal
+        with SessionLocal() as db:
+            jobs.heartbeat(db, "w-health-test", last_stage="idle")
+            wh = jobs.worker_health(db, alive_within_seconds=120)
+        assert any(w["worker_id"] == "w-health-test" and w["alive"] for w in wh["workers"])

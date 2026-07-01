@@ -2990,6 +2990,36 @@ def register_offline_scene_package(
     return {"registered": True, "package": row}
 
 
+@app.get("/ops/offline-scene/health")
+def offline_scene_ops_health(
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["ADMIN"])),
+):
+    """ADMIN ops health for the offline-scene pipeline: queue depth, live workers,
+    unresolved orphaned objects, and private-bucket posture. Sanitized — no MinIO
+    credentials, endpoints, or unbounded internals are returned."""
+    from .storage import bucket_exists
+    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    try:
+        bucket_ok = bool(bucket_exists(bucket))
+        bucket_status = "ok" if bucket_ok else "missing"
+    except Exception:
+        bucket_ok = False
+        bucket_status = "unreachable"
+    queue = offline_scene_jobs_svc.queue_health(db)
+    workers = offline_scene_jobs_svc.worker_health(db, alive_within_seconds=max(60, 4 * int(settings.OFFLINE_SCENE_WORKER_POLL_SECONDS)))
+    orphans = offline_scene_jobs_svc.orphaned_object_count(db, unresolved_only=True)
+    healthy = bucket_ok and workers["any_alive"]
+    return {
+        "healthy": healthy,
+        "bucket": {"name": bucket, "status": bucket_status},  # name only; no endpoint/creds
+        "queue": queue,
+        "workers": workers,
+        "orphaned_objects_unresolved": orphans,
+        "dev_mode": bool(settings.OFFLINE_SCENE_DEV_MODE),
+    }
+
+
 @app.put("/submissions/{submission_id}/gisa/incident-types")
 def replace_incident_types(
     submission_id: int = Path(..., ge=1),

@@ -88,8 +88,8 @@ class TestAlembicScripts:
 
     def test_offline_scene_jobs_is_head(self):
         heads = self._script_dir().get_heads()
-        assert "0013_offline_scene_orphans" in heads, (
-            f"0013_offline_scene_orphans not in heads: {heads}"
+        assert "0014_offline_scene_worker_hb" in heads, (
+            f"0014_offline_scene_worker_hb not in heads: {heads}"
         )
 
     def test_baseline_in_chain(self):

@@ -180,28 +180,69 @@ def process_job(db: Session, job: dict, builder=None) -> dict:
         return jobs.get_job(db, job_id)  # type: ignore[return-value]
 
 
+def _slog(msg: str, job: dict | None = None, **ctx) -> None:
+    """Structured worker log: always carries worker_id, and job/submission/version
+    /stage when available. One key=value line, easy to grep/ship."""
+    fields = {"worker_id": WORKER_ID}
+    if job:
+        fields.update({
+            "job_id": job.get("id"),
+            "submission_id": job.get("submission_id"),
+            "stage": job.get("status"),
+            "package_version": job.get("result_package_version"),
+        })
+    fields.update(ctx)
+    logger.info("offline_scene_worker %s | %s", msg, " ".join(f"{k}={v}" for k, v in fields.items() if v is not None))
+
+
+def verify_bucket_posture_or_fail() -> None:
+    """Startup fail-closed check that the private offline-scenes bucket exists. In
+    production (DEV_MODE off) a missing/unreachable bucket EXITS the worker nonzero
+    so orchestration surfaces it; in dev it only warns so a laptop can iterate."""
+    from ..storage import bucket_exists
+    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    try:
+        ok = bucket_exists(bucket)
+        problem = None if ok else f"offline-scenes bucket '{bucket}' does not exist"
+    except Exception as e:
+        problem = f"offline-scenes storage unreachable: {e}"
+    if problem:
+        if settings.OFFLINE_SCENE_DEV_MODE:
+            logger.warning("DEV_MODE: %s (continuing; provision via the minio-init service)", problem)
+        else:
+            logger.error("FAIL-CLOSED: %s — provision the private bucket (minio-init) first", problem)
+            raise SystemExit(2)
+
+
 def run_once(db: Session, builder=None) -> bool:
     """Claim and process one job. Returns True if a job was processed."""
     jobs.recover_stale_jobs(db, settings.OFFLINE_SCENE_JOB_STALE_SECONDS)
     claimed = jobs.claim_next_job(db, WORKER_ID)
     if not claimed:
         return False
-    process_job(db, claimed, builder=builder)
+    _slog("claimed job", claimed)
+    final = process_job(db, claimed, builder=builder)
+    jobs.heartbeat(db, WORKER_ID, last_stage=(final or {}).get("status"), increment_processed=1)
+    _slog("finished job", final)
     return True
 
 
 def run_worker() -> None:  # pragma: no cover - long-running loop
     logging.basicConfig(level=logging.INFO)
     logger.info("offline-scene worker %s starting (poll=%ss)", WORKER_ID, settings.OFFLINE_SCENE_WORKER_POLL_SECONDS)
+    verify_bucket_posture_or_fail()
     # Startup recovery so interrupted jobs are requeued promptly.
     with SessionLocal() as db:
         n = jobs.recover_stale_jobs(db, settings.OFFLINE_SCENE_JOB_STALE_SECONDS)
         if n:
             logger.info("requeued %s interrupted job(s) on startup", n)
+        jobs.heartbeat(db, WORKER_ID, last_stage="starting")
     while True:
         try:
             with SessionLocal() as db:
                 worked = run_once(db)
+                if not worked:
+                    jobs.heartbeat(db, WORKER_ID, last_stage="idle")
         except Exception:
             logger.exception("worker loop error")
             worked = False

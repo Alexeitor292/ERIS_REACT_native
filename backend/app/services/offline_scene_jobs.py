@@ -268,6 +268,71 @@ def claim_next_job(db: Session, worker_id: str) -> dict | None:
     return get_job(db, job_id)
 
 
+def heartbeat(db: Session, worker_id: str, *, last_stage: str | None = None, increment_processed: int = 0) -> None:
+    """Upsert this worker's durable liveness signal (called every poll). Best-effort
+    — a heartbeat failure never aborts the worker loop."""
+    try:
+        db.execute(
+            text("""
+                INSERT INTO offline_scene_worker_heartbeats (worker_id, last_seen, started_at, jobs_processed, last_stage)
+                VALUES (:w, NOW(), NOW(), :inc, :stage)
+                ON DUPLICATE KEY UPDATE
+                  last_seen=NOW(),
+                  jobs_processed = jobs_processed + :inc,
+                  last_stage = COALESCE(:stage, last_stage)
+            """),
+            {"w": worker_id, "inc": int(increment_processed), "stage": last_stage},
+        )
+        db.commit()
+    except Exception:  # pragma: no cover - liveness must never break the worker
+        db.rollback()
+
+
+def queue_health(db: Session) -> dict:
+    """Queue depth by status (for ops). Pure counts — no secrets, no internals."""
+    rows = db.execute(
+        text("SELECT status, COUNT(*) AS n FROM offline_scene_jobs GROUP BY status")
+    ).mappings().all()
+    counts = {r["status"]: int(r["n"]) for r in rows}
+    return {
+        "counts": counts,
+        "queued": counts.get("QUEUED", 0),
+        "running": sum(counts.get(s, 0) for s in RUNNING_STATES),
+        "failed": counts.get("FAILED", 0),
+    }
+
+
+def worker_health(db: Session, alive_within_seconds: int = 120) -> dict:
+    """Recent worker heartbeats + whether at least one worker is alive."""
+    rows = db.execute(
+        text("""
+            SELECT worker_id, last_seen, jobs_processed, last_stage,
+                   TIMESTAMPDIFF(SECOND, last_seen, NOW()) AS age_s
+            FROM offline_scene_worker_heartbeats
+            ORDER BY last_seen DESC LIMIT 20
+        """)
+    ).mappings().all()
+    workers = [
+        {
+            "worker_id": r["worker_id"],
+            "last_seen": str(r["last_seen"]),
+            "age_seconds": int(r["age_s"]) if r["age_s"] is not None else None,
+            "jobs_processed": int(r["jobs_processed"]),
+            "last_stage": r["last_stage"],
+            "alive": r["age_s"] is not None and int(r["age_s"]) <= alive_within_seconds,
+        }
+        for r in rows
+    ]
+    return {"workers": workers, "any_alive": any(w["alive"] for w in workers)}
+
+
+def orphaned_object_count(db: Session, *, unresolved_only: bool = True) -> int:
+    q = "SELECT COUNT(*) FROM offline_scene_orphaned_objects"
+    if unresolved_only:
+        q += " WHERE resolved=0"
+    return int(db.execute(text(q)).scalar() or 0)
+
+
 def recover_stale_jobs(db: Session, stale_seconds: int = 600) -> int:
     """Requeue running jobs whose worker died (no update within stale_seconds).
     Returns the number requeued. Run on worker startup / periodically."""

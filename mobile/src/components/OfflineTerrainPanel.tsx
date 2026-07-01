@@ -10,7 +10,7 @@
  * separately; this panel is the native, offline-first path.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert, Platform } from "react-native";
 
 import type { GisaTerrainGrid } from "../api/submissions";
 import {
@@ -294,8 +294,9 @@ export function OfflineTerrainPanel({
 
       {!nativeSupported ? (
         <Text style={styles.note}>
-          The native 3D viewer isn&apos;t in this app build. Install an EAS development build (see docs) to enable
-          immersive offline 3D. You can still use the diagnostic card and the WebUI handoff below.
+          {Platform.OS === "ios"
+            ? "The native 3D viewer isn't in this app build. Install an EAS development build (see docs) to enable immersive offline 3D. You can still use the diagnostic card and the WebUI handoff below."
+            : "Native offline 3D terrain is currently iOS-only (see the Android parity plan). On this device, use the WebUI 3D handoff or the diagnostic card below."}
         </Text>
       ) : !hasCoords ? (
         <Text style={styles.note}>This incident has no coordinates, so an offline 3D area cannot be bounded.</Text>
