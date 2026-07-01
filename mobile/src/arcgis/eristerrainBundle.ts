@@ -135,6 +135,12 @@ export type EristerrainManifest = {
   [k: string]: unknown;
 };
 
+const HEX64 = /^[0-9a-fA-F]{64}$/;
+
+function isFiniteNum(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
 export function validateTerrainMeta(t: unknown): { ok: boolean; reason?: string } {
   if (!t || typeof t !== "object") return { ok: false, reason: "missing terrain metadata" };
   const m = t as Partial<TerrainMeta>;
@@ -144,10 +150,52 @@ export function validateTerrainMeta(t: unknown): { ok: boolean; reason?: string 
     return { ok: false, reason: "invalid terrain dimensions" };
   }
   if (m.encoding !== "float32") return { ok: false, reason: "unsupported terrain encoding" };
-  if (m.no_data_value == null) return { ok: false, reason: "missing no_data_value" };
+  if (m.byte_order !== "little") return { ok: false, reason: "terrain byte_order must be little" };
+  if (m.vertical_units !== "meters") return { ok: false, reason: "terrain vertical_units must be meters" };
+  if (!isFiniteNum(m.no_data_value)) return { ok: false, reason: "invalid no_data_value" };
+  if (!isFiniteNum(m.min_elevation_m) || !isFiniteNum(m.max_elevation_m) || m.min_elevation_m > m.max_elevation_m) {
+    return { ok: false, reason: "invalid min/max elevation" };
+  }
+  if (typeof m.sha256 !== "string" || !HEX64.test(m.sha256)) {
+    return { ok: false, reason: "missing or malformed terrain sha256" };
+  }
   const b = m.bounds;
-  if (!b || b.min_lat >= b.max_lat || b.min_lon >= b.max_lon) return { ok: false, reason: "invalid terrain bounds" };
-  if (!m.local_transform) return { ok: false, reason: "missing local_transform" };
+  if (
+    !b ||
+    !isFiniteNum(b.min_lat) ||
+    !isFiniteNum(b.min_lon) ||
+    !isFiniteNum(b.max_lat) ||
+    !isFiniteNum(b.max_lon) ||
+    b.min_lat >= b.max_lat ||
+    b.min_lon >= b.max_lon
+  ) {
+    return { ok: false, reason: "invalid terrain bounds" };
+  }
+  const lt = m.local_transform;
+  if (
+    !lt ||
+    !isFiniteNum(lt.origin_lon) ||
+    !isFiniteNum(lt.origin_lat) ||
+    !isFiniteNum(lt.lon_per_col) ||
+    !isFiniteNum(lt.lat_per_row)
+  ) {
+    return { ok: false, reason: "invalid local_transform" };
+  }
+  if (!(lt.lon_per_col > 0)) return { ok: false, reason: "local_transform lon_per_col must be positive" };
+  if (!(lt.lat_per_row < 0)) return { ok: false, reason: "local_transform lat_per_row must be negative" };
+  // The transform must correspond to the declared bounds + grid dimensions: row 0
+  // is the north edge (origin = NW corner), columns step east, rows step south.
+  const expLonPerCol = (b.max_lon - b.min_lon) / (cols - 1);
+  const expLatPerRow = -(b.max_lat - b.min_lat) / (rows - 1);
+  const tol = (v: number) => Math.abs(v) * 1e-3 + 1e-9;
+  if (
+    Math.abs(lt.origin_lon - b.min_lon) > tol(b.max_lon - b.min_lon) ||
+    Math.abs(lt.origin_lat - b.max_lat) > tol(b.max_lat - b.min_lat) ||
+    Math.abs(lt.lon_per_col - expLonPerCol) > tol(expLonPerCol) ||
+    Math.abs(lt.lat_per_row - expLatPerRow) > tol(expLatPerRow)
+  ) {
+    return { ok: false, reason: "local_transform inconsistent with bounds/dimensions" };
+  }
   return { ok: true };
 }
 
@@ -198,11 +246,14 @@ export function extractAndValidateBundle(bytes: Uint8Array): ExtractedBundle {
   if (crc32(gridBytes) !== (gridEntry.crc32 >>> 0)) throw new Error("terrain grid checksum mismatch");
 
   const files: Record<string, Uint8Array> = { "manifest.json": manBytes, [gridName]: gridBytes };
+  // Optional entries must still pass CRC if present — a corrupt hillshade/overlays
+  // rejects the whole bundle rather than being silently dropped.
   for (const opt of ["hillshade.png", "overlays.json"]) {
     const e = byName.get(opt);
     if (e) {
       const b = readStoredEntry(bytes, e);
-      if (crc32(b) === (e.crc32 >>> 0)) files[opt] = b;
+      if (crc32(b) !== (e.crc32 >>> 0)) throw new Error(`${opt} checksum mismatch`);
+      files[opt] = b;
     }
   }
   return { manifest, files };

@@ -353,3 +353,50 @@ the `AGSMobileScenePackage` load check. A package is never READY until its decla
 **What remains unsupported:** licensed **offline draped imagery** (only USGS hillshade relief today); the
 native renderer + integrity bridge are **code-complete but unvalidated on device** (need the EAS dev build);
 **Android** native rendering (no reproducible plugin). No EAS build was made on this branch.
+
+## Addendum 2 — code-review hardening (2026-06-28)
+
+Fixes five code-review blockers on top of the eristerrain renderer above.
+
+**1. Worker image dependency.** `HillshadeReliefBuilder` imports `requests`, which the slim API stack
+(httpx) does not pull in transitively. `requirements-worker.txt` now pins `requests>=2.31,<3` explicitly.
+`Dockerfile.worker` also installs `libexpat1` — the rasterio manylinux wheel bundles GDAL but still
+dynamically links `libexpat.so.1`, which `python:3.12-slim` strips. Regression guard:
+`backend/tests/test_worker_requirements.py` asserts every worker import (`requests`/`numpy`/`rasterio`/
+`Pillow`) is declared in the worker reqs and that the file extends `requirements.txt`. Build + in-image
+import smoke check: `docker build -f backend/Dockerfile.worker -t eris-offline-scene-worker backend` then
+`docker run --rm eris-offline-scene-worker python -c "import requests,rasterio,numpy,PIL; from app.services.offline_scene_builder import HillshadeReliefBuilder; print('worker imports OK')"`.
+
+**2. Full native overlays.** `ErisTerrainSceneViewController` now renders, draped on the mesh surface and
+clipped to the packaged bounds: the **uploaded incident geometry** (GeoJSON geometry/Feature/
+FeatureCollection/GeometryCollection and Esri `x-y`/`points`/`paths`/`rings`; Point, MultiPoint, LineString,
+Polygon and multi-equivalents), the **sample-extent rectangle** (only when provided), the incident marker,
+and the road-bearing line (only when a real bearing exists). Out-of-bounds vertices are **skipped, never
+invented**; Web Mercator coordinates are coerced to lon/lat. The coordinate math (lon/lat → grid col/row →
+mesh XZ, Web Mercator coercion, bounds clipping, sample-extent ring) lives in the unit-tested
+`src/arcgis/terrainOverlays.ts`, which the Objective-C mirrors.
+
+**3. Reset-to-incident.** Reset maps the incident through the manifest `local_transform`, frames the camera
+around the **incident** (falling back to the terrain centre only when the incident is unavailable or outside
+the packaged bounds), and pins the built-in `defaultCameraController.target` to the incident so orbit/pan/
+zoom revolve around it (a stable SceneKit look-at target, not only Euler angles). **North** restores north-up
+yaw while preserving the incident framing (same target, elevation, and zoom radius).
+
+**4. Stricter manifest validation (`eristerrainBundle.ts`).** In addition to format/version/source, terrain
+validation now requires: `sha256` present + 64 hex chars; `byte_order == little`; `vertical_units == meters`;
+finite rows/columns/bounds/no-data/min-max/transform values; `lon_per_col > 0`; `lat_per_row < 0`; and the
+`local_transform` consistent with the declared bounds + grid dimensions within a small tolerance. Every
+required entry must pass CRC-32, and a **corrupt optional `hillshade.png`/`overlays.json` now rejects the
+bundle** instead of being silently ignored. Package-level SHA-256 is still verified before extraction and the
+grid SHA-256 after extraction.
+
+**5. Tests.** Pure suites cover the new rejection cases (byte_order/vertical_units/sha256/finite/transform-
+consistency/corrupt-optional-entry) and coordinate-to-mesh mapping of a point, line, polygon, and sample
+extent, plus geometry normalization (GeoJSON + Esri) and bounds clipping.
+
+**iPhone Airplane-Mode acceptance test (still the one remaining gate — needs an iOS EAS dev build, not run
+here):** generate an `eristerrain` package for a submission **with uploaded geometry and a real road bearing**;
+download it on the device; enable Airplane Mode; open native 3D and verify, with **no network**, the terrain
+**mesh** + **hillshade texture**, the **incident marker**, the **uploaded geometry** (correct type/placement),
+the **sample-extent rectangle**, the **road-bearing line**, geometry outside the AOI clipped, and **orbit /
+pan / zoom / tilt**, **North** (north-up, framing preserved), and **Reset** (re-frames the incident).

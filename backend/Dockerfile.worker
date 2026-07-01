@@ -8,6 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# The rasterio manylinux wheel bundles GDAL but still dynamically links a few
+# base system libraries that python:*-slim strips (e.g. libexpat for GDAL's XML
+# drivers). Install just those runtime libs so `import rasterio` works.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt requirements-worker.txt ./
 RUN pip install --no-cache-dir -r requirements-worker.txt
 

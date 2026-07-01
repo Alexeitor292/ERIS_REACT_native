@@ -80,6 +80,7 @@ function makeStoredZip(files: [string, Uint8Array][]): Uint8Array {
 }
 
 const BOUNDS = { min_lat: 38.48, min_lon: -121.52, max_lat: 38.52, max_lon: -121.48 };
+const SHA64 = "a".repeat(64); // 64-hex placeholder (grid SHA-256 is verified natively post-extract)
 const TERRAIN: TerrainMeta = {
   file: "elevation-grid.bin",
   rows: 3,
@@ -92,6 +93,7 @@ const TERRAIN: TerrainMeta = {
   vertical_units: "meters",
   bounds: BOUNDS,
   local_transform: { origin_lon: -121.52, origin_lat: 38.52, lon_per_col: 0.02, lat_per_row: -0.02 },
+  sha256: SHA64,
 };
 
 function goodManifest() {
@@ -147,6 +149,89 @@ test("invalid manifest (wrong format / source) is rejected", () => {
   assert.equal(validateBundleManifest(goodManifest()).ok, true);
 });
 
+// Build a manifest whose terrain is TERRAIN with one field overridden, and assert
+// validateBundleManifest rejects it for the expected reason.
+function expectTerrainRejected(patch: Partial<TerrainMeta>, reasonRe: RegExp) {
+  const m = goodManifest();
+  m.terrain = { ...TERRAIN, ...patch } as TerrainMeta;
+  const r = validateBundleManifest(m);
+  assert.equal(r.ok, false);
+  assert.match(r.reason ?? "", reasonRe);
+}
+
+test("terrain byte_order must be little", () => {
+  expectTerrainRejected({ byte_order: "big" }, /byte_order/);
+});
+
+test("terrain vertical_units must be meters", () => {
+  expectTerrainRejected({ vertical_units: "feet" }, /vertical_units/);
+});
+
+test("terrain sha256 must be present and 64 hex chars", () => {
+  expectTerrainRejected({ sha256: undefined }, /sha256/);
+  expectTerrainRejected({ sha256: "abc" }, /sha256/);
+  expectTerrainRejected({ sha256: "z".repeat(64) }, /sha256/); // non-hex
+});
+
+test("non-finite bounds / elevations are rejected", () => {
+  expectTerrainRejected({ bounds: { ...BOUNDS, max_lat: Number.NaN } }, /bounds/);
+  expectTerrainRejected({ min_elevation_m: 9, max_elevation_m: 1 }, /min\/max elevation/);
+  expectTerrainRejected({ no_data_value: Number.POSITIVE_INFINITY }, /no_data_value/);
+});
+
+test("local_transform sign + consistency with bounds/dimensions is enforced", () => {
+  // lon_per_col must be positive, lat_per_row must be negative.
+  expectTerrainRejected(
+    { local_transform: { origin_lon: -121.52, origin_lat: 38.52, lon_per_col: -0.02, lat_per_row: -0.02 } },
+    /lon_per_col must be positive/,
+  );
+  expectTerrainRejected(
+    { local_transform: { origin_lon: -121.52, origin_lat: 38.52, lon_per_col: 0.02, lat_per_row: 0.02 } },
+    /lat_per_row must be negative/,
+  );
+  // A transform that does not match the declared bounds + grid dimensions.
+  expectTerrainRejected(
+    { local_transform: { origin_lon: -121.52, origin_lat: 38.52, lon_per_col: 0.04, lat_per_row: -0.02 } },
+    /inconsistent with bounds/,
+  );
+  // Wrong origin (must be the NW corner = min_lon / max_lat).
+  expectTerrainRejected(
+    { local_transform: { origin_lon: -120.0, origin_lat: 38.52, lon_per_col: 0.02, lat_per_row: -0.02 } },
+    /inconsistent with bounds/,
+  );
+});
+
+// Corrupt a STORED entry's first data byte in place (header CRC unchanged -> CRC mismatch).
+function corruptEntryData(bundle: Uint8Array, name: string): Uint8Array {
+  const entry = parseZipEntries(bundle).find((e) => e.name === name);
+  assert.ok(entry, `entry ${name} not found`);
+  const d = new DataView(bundle.buffer, bundle.byteOffset, bundle.byteLength);
+  const nameLen = d.getUint16(entry!.localOffset + 26, true);
+  const extraLen = d.getUint16(entry!.localOffset + 28, true);
+  const dataStart = entry!.localOffset + 30 + nameLen + extraLen;
+  bundle[dataStart] ^= 0xff;
+  return bundle;
+}
+
+test("a corrupted OPTIONAL hillshade.png rejects the bundle (not silently ignored)", () => {
+  const grid = f32le([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const manifest = new TextEncoder().encode(JSON.stringify(goodManifest()));
+  const hillshade = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]); // fake PNG bytes
+  const bundle = makeStoredZip([
+    ["manifest.json", manifest],
+    ["elevation-grid.bin", grid],
+    ["hillshade.png", hillshade],
+  ]);
+  corruptEntryData(bundle, "hillshade.png");
+  assert.throws(() => extractAndValidateBundle(bundle), /hillshade\.png checksum mismatch/);
+});
+
+test("a corrupted OPTIONAL overlays.json rejects the bundle (not silently ignored)", () => {
+  const bundle = goodBundle();
+  corruptEntryData(bundle, "overlays.json");
+  assert.throws(() => extractAndValidateBundle(bundle), /overlays\.json checksum mismatch/);
+});
+
 test("missing height grid is rejected", () => {
   const noGrid = makeStoredZip([["manifest.json", new TextEncoder().encode(JSON.stringify(goodManifest()))]]);
   assert.throws(() => extractAndValidateBundle(noGrid), /missing terrain grid/);
@@ -154,7 +239,14 @@ test("missing height grid is rejected", () => {
 
 test("height grid size mismatch is rejected", () => {
   const m = goodManifest();
-  m.terrain = { ...TERRAIN, rows: 4, columns: 4 }; // declare 4x4 but provide 3x3 bytes
+  // Declare 4x4 (with a transform consistent with 4x4) but provide only 3x3 bytes,
+  // isolating the byte-length check from the transform-consistency check.
+  m.terrain = {
+    ...TERRAIN,
+    rows: 4,
+    columns: 4,
+    local_transform: { origin_lon: -121.52, origin_lat: 38.52, lon_per_col: 0.04 / 3, lat_per_row: -0.04 / 3 },
+  };
   const bundle = makeStoredZip([
     ["manifest.json", new TextEncoder().encode(JSON.stringify(m))],
     ["elevation-grid.bin", f32le([1, 2, 3, 4, 5, 6, 7, 8, 9])],
