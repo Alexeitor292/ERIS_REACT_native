@@ -52,6 +52,52 @@ class TestRadiusAndBounds:
         assert osvc.validate_bounds("x", 0, 1, 1) is False
 
 
+class TestDefensiveMetadataParsing:
+    """Malformed stored GISA metadata must never crash the worker (no .get() on a
+    non-dict); it degrades to 'no overlay'."""
+
+    def test_coerce_json_obj(self):
+        assert osvc.coerce_json_obj({"a": 1}) == {"a": 1}
+        assert osvc.coerce_json_obj([1, 2]) == [1, 2]
+        assert osvc.coerce_json_obj('{"a": 1}') == {"a": 1}
+        assert osvc.coerce_json_obj("not json") is None
+        assert osvc.coerce_json_obj('"a string"') is None  # valid JSON but not obj/list
+        assert osvc.coerce_json_obj(None) is None
+        assert osvc.coerce_json_obj(42) is None
+
+    def test_parse_geometry_accepts_geojson_and_esri(self):
+        assert osvc.parse_geometry({"type": "Point", "coordinates": [1, 2]}) == {"type": "Point", "coordinates": [1, 2]}
+        assert osvc.parse_geometry('{"x": 1, "y": 2}') == {"x": 1, "y": 2}
+        assert osvc.parse_geometry("garbage") is None
+        assert osvc.parse_geometry(None) is None
+
+    def test_extract_road_bearing_defensive(self):
+        assert osvc.extract_road_bearing({"road_bearing_deg": 90}) == 90.0
+        assert osvc.extract_road_bearing('{"road_bearing_deg": 45.5}') == 45.5
+        assert osvc.extract_road_bearing({"road_bearing_deg": None}) is None
+        assert osvc.extract_road_bearing({"road_bearing_deg": "NNE"}) is None  # non-numeric
+        assert osvc.extract_road_bearing({"road_bearing_deg": True}) is None  # bool is not a bearing
+        assert osvc.extract_road_bearing("not-a-dict") is None
+        assert osvc.extract_road_bearing([1, 2, 3]) is None  # list, not dict
+        assert osvc.extract_road_bearing(None) is None
+
+    def test_extract_sample_extent_defensive(self):
+        good = {"grid": {"points": [{"lat": 38.4, "lon": -121.6}, {"lat": 38.6, "lon": -121.4}]}}
+        assert osvc.extract_sample_extent(good) == {
+            "minLat": 38.4, "minLon": -121.6, "maxLat": 38.6, "maxLon": -121.4,
+        }
+        assert osvc.extract_sample_extent(__import__("json").dumps(good)) is not None  # JSON string ok
+        # Malformed shapes never raise -> None.
+        assert osvc.extract_sample_extent({"grid": "not-a-dict"}) is None
+        assert osvc.extract_sample_extent({"grid": {"points": "not-a-list"}}) is None
+        assert osvc.extract_sample_extent({"grid": {"points": ["not-a-dict", 5]}}) is None
+        assert osvc.extract_sample_extent({"grid": {"points": [{"lat": "x", "lon": None}]}}) is None
+        assert osvc.extract_sample_extent({"grid": {"points": []}}) is None
+        assert osvc.extract_sample_extent("garbage") is None
+        assert osvc.extract_sample_extent(None) is None
+        assert osvc.extract_sample_extent([1, 2, 3]) is None
+
+
 class TestObjectKey:
     def test_immutable_versioned_key(self):
         # Default format is the auto-generated ERIS terrain bundle.

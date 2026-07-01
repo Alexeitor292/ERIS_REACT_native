@@ -10,7 +10,6 @@ catalog package after validation + verified upload succeed.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import socket
@@ -50,39 +49,12 @@ def _build_context(db: Session, job: dict) -> dict:
     if not row or row["latitude"] is None or row["longitude"] is None:
         raise OfflineSceneBuildError("Submission has no coordinates; cannot build a bounded area.")
 
-    geometry = row["geometry_json"]
-    if isinstance(geometry, str):
-        try:
-            geometry = json.loads(geometry)
-        except Exception:
-            geometry = None
-
-    bearing = None
-    snap = row["road_inventory_snapshot_json"]
-    if isinstance(snap, str):
-        try:
-            snap = json.loads(snap)
-        except Exception:
-            snap = None
-    if isinstance(snap, dict) and snap.get("road_bearing_deg") is not None:
-        try:
-            bearing = float(snap["road_bearing_deg"])
-        except (TypeError, ValueError):
-            bearing = None
-
-    sample_extent = None
-    terrain = row["elevation_terrain_grid_json"]
-    if isinstance(terrain, str):
-        try:
-            terrain = json.loads(terrain)
-        except Exception:
-            terrain = None
-    pts = (terrain or {}).get("grid", {}).get("points") if isinstance(terrain, dict) else None
-    if isinstance(pts, list) and pts:
-        lats = [p["lat"] for p in pts if isinstance(p.get("lat"), (int, float))]
-        lons = [p["lon"] for p in pts if isinstance(p.get("lon"), (int, float))]
-        if lats and lons:
-            sample_extent = {"minLat": min(lats), "minLon": min(lons), "maxLat": max(lats), "maxLon": max(lons)}
+    # All three fields may be malformed / JSON strings / wrong shape. Parse them
+    # through defensive helpers that never call .get() on a non-dict, so a bad row
+    # degrades to "no overlay" rather than crashing the job.
+    geometry = offline_scene_svc.parse_geometry(row["geometry_json"])
+    bearing = offline_scene_svc.extract_road_bearing(row["road_inventory_snapshot_json"])
+    sample_extent = offline_scene_svc.extract_sample_extent(row["elevation_terrain_grid_json"])
 
     # Enforce the ONE authoritative AOI maximum at worker execution too — never
     # trust the stored/client radius or bounds blindly. Recompute the AOI from the

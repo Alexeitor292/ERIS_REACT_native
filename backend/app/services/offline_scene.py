@@ -139,6 +139,72 @@ def content_signature(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+# ---- defensive parsing of stored GISA metadata -----------------------------
+# Stored geometry / road-inventory snapshot / terrain grid JSON may be malformed,
+# a JSON string, or the wrong shape. These helpers NEVER raise and NEVER call
+# .get()/index into a value before confirming its type, so a bad row degrades to
+# "no overlay" instead of crashing the worker.
+
+def coerce_json_obj(raw):
+    """Return raw as a dict/list (parsing a JSON string if needed), else None."""
+    if isinstance(raw, (dict, list)):
+        return raw
+    if isinstance(raw, str):
+        try:
+            v = json.loads(raw)
+        except Exception:
+            return None
+        return v if isinstance(v, (dict, list)) else None
+    return None
+
+
+def _finite_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def parse_geometry(raw):
+    """Uploaded incident geometry as a dict/list (GeoJSON or Esri JSON), else None."""
+    return coerce_json_obj(raw)
+
+
+def extract_road_bearing(snapshot) -> float | None:
+    """Road bearing (deg) from a road-inventory snapshot, or None. Defensive."""
+    snap = coerce_json_obj(snapshot)
+    if not isinstance(snap, dict):
+        return None
+    val = snap.get("road_bearing_deg")
+    if not _finite_number(val):
+        return None
+    return float(val)
+
+
+def extract_sample_extent(terrain) -> dict | None:
+    """Bounding box {minLat,minLon,maxLat,maxLon} of the USGS grid points, or None.
+    Every level is type-checked before .get()/indexing so malformed stored terrain
+    JSON (grid not a dict, points not a list, point not a dict) never raises."""
+    t = coerce_json_obj(terrain)
+    if not isinstance(t, dict):
+        return None
+    grid = t.get("grid")
+    if not isinstance(grid, dict):
+        return None
+    pts = grid.get("points")
+    if not isinstance(pts, list) or not pts:
+        return None
+    lats: list[float] = []
+    lons: list[float] = []
+    for p in pts:
+        if not isinstance(p, dict):
+            continue
+        la, lo = p.get("lat"), p.get("lon")
+        if _finite_number(la) and _finite_number(lo):
+            lats.append(float(la))
+            lons.append(float(lo))
+    if not lats or not lons:
+        return None
+    return {"minLat": min(lats), "minLon": min(lons), "maxLat": max(lats), "maxLon": max(lons)}
+
+
 PACKAGE_FORMAT_EXT = {"eristerrain": "scene.eristerrain", "mspk": "scene.mspk"}
 
 
