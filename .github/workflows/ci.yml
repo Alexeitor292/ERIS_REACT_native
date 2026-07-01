@@ -131,11 +131,13 @@ jobs:
       - name: Build offline-scene worker image
         run: docker build -f backend/Dockerfile.worker -t eris-offline-scene-worker backend
       - name: In-container import smoke test
+        # Settings() (imported transitively) requires JWT_SECRET + DB_PASS; pass
+        # placeholders so a bare import does not fail on missing config.
         run: |
-          docker run --rm eris-offline-scene-worker python -c "import requests, rasterio, numpy, PIL; from app.worker.offline_scene_worker import run_worker; from app.services.offline_scene_builder import HillshadeReliefBuilder; print('worker imports OK')"
+          docker run --rm -e JWT_SECRET=ci_placeholder -e DB_PASS=ci_placeholder eris-offline-scene-worker python -c "import requests, rasterio, numpy, PIL; from app.worker.offline_scene_worker import run_worker; from app.services.offline_scene_builder import HillshadeReliefBuilder; print('worker imports OK')"
       - name: DEM decode fixture (mocked USGS raster, no MinIO)
         run: |
-          docker run --rm eris-offline-scene-worker python -c "
+          docker run --rm -e JWT_SECRET=ci_placeholder -e DB_PASS=ci_placeholder eris-offline-scene-worker python -c "
           import numpy as np, rasterio
           from rasterio.io import MemoryFile
           from rasterio.transform import from_origin
