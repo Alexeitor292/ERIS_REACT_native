@@ -85,6 +85,46 @@ export function partPathFor(finalPath: string): string {
   return `${finalPath}.part`;
 }
 
+// ---- Format-aware local package paths --------------------------------------
+// eristerrain bundles are stored as `<id>.eristerrain`; real Esri packages as
+// `<id>.mspk`. Older builds always wrote `<id>.mspk` regardless of the real
+// format — see needsLegacyPathMigration for the one-time migration.
+
+/** Canonical file extension for a package format (default: eristerrain). */
+export function packageExt(format: string | null | undefined): string {
+  return (format || "eristerrain") === "mspk" ? "mspk" : "eristerrain";
+}
+
+/** Format-aware local filename for a package (`<id>.<ext>`). */
+export function packageFileName(submissionId: number, format: string | null | undefined): string {
+  return `${submissionId}.${packageExt(format)}`;
+}
+
+/** The legacy always-".mspk" filename older builds wrote regardless of format. */
+export function legacyPackageFileName(submissionId: number): string {
+  return `${submissionId}.mspk`;
+}
+
+/**
+ * A READY package whose on-disk file uses the legacy ".mspk" name but whose real
+ * format is eristerrain should be migrated to the ".eristerrain" name. Pure so it
+ * is unit-testable; the manager performs the actual rename + registry update.
+ */
+export function needsLegacyPathMigration(
+  meta: Pick<OfflineScenePackageMeta, "status" | "packageFormat" | "localPath">,
+): boolean {
+  if (meta.status !== "READY" || !meta.localPath) return false;
+  if (packageExt(meta.packageFormat) === "mspk") return false; // real mspk keeps .mspk
+  return meta.localPath.endsWith(".mspk");
+}
+
+/** Whether a downloaded package is opened via the native ArcGIS Runtime .mspk
+ *  path (true) or the native eristerrain renderer (false). An eristerrain bundle
+ *  must NEVER be opened as an AGSMobileScenePackage. */
+export function usesMspkRuntime(format: string | null | undefined): boolean {
+  return packageExt(format) === "mspk";
+}
+
 // ---- Automatic generation job states (server-side pipeline) ----------------
 
 export type OfflineSceneJobStatus =

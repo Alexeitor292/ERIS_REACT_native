@@ -13,8 +13,12 @@ import {
   jobIsActive,
   jobIsTerminal,
   jobStatusLine,
+  legacyPackageFileName,
   metaFromDescriptor,
+  needsLegacyPathMigration,
   needsRefresh,
+  packageExt,
+  packageFileName,
   partPathFor,
   reconcileRecord,
   resumeDecision,
@@ -22,6 +26,7 @@ import {
   shouldApplyWorkerResult,
   sizeMatches,
   summarizeStorage,
+  usesMspkRuntime,
   type OfflineScenePackageMeta,
   type SceneAreaDescriptor,
 } from "./offlineScene.ts";
@@ -216,4 +221,47 @@ test("generation job status lines drive the mobile UX copy", () => {
   assert.match(jobStatusLine({ status: "PACKAGING", progress_pct: 70, error_details: null }), /Building offline terrain package/);
   assert.equal(jobStatusLine({ status: "READY", progress_pct: 100, error_details: null }), "Ready to download");
   assert.match(jobStatusLine({ status: "FAILED", progress_pct: 0, error_details: "USGS 3DEP coverage unavailable" }), /Failed — USGS 3DEP coverage unavailable/);
+});
+
+test("format-aware package paths: eristerrain vs mspk (never .mspk for a bundle)", () => {
+  assert.equal(packageExt("eristerrain"), "eristerrain");
+  assert.equal(packageExt("mspk"), "mspk");
+  assert.equal(packageExt(undefined), "eristerrain"); // default
+  assert.equal(packageExt("weird"), "eristerrain"); // unknown -> safe default
+  assert.equal(packageFileName(7, "eristerrain"), "7.eristerrain");
+  assert.equal(packageFileName(7, "mspk"), "7.mspk");
+  assert.equal(packageFileName(7, null), "7.eristerrain");
+  assert.equal(legacyPackageFileName(7), "7.mspk");
+});
+
+test("open routing: eristerrain uses the native renderer, mspk uses ArcGIS Runtime", () => {
+  assert.equal(usesMspkRuntime("mspk"), true);
+  assert.equal(usesMspkRuntime("eristerrain"), false);
+  assert.equal(usesMspkRuntime(undefined), false); // default bundle never loads as AGSMobileScenePackage
+});
+
+test("legacy path migration: a READY .mspk-named eristerrain package is migrated", () => {
+  const base = {
+    status: "READY" as const,
+    localPath: "/docs/offline-scenes/7.mspk",
+  };
+  // eristerrain package saved under the legacy `.mspk` name -> migrate.
+  assert.equal(needsLegacyPathMigration({ ...base, packageFormat: "eristerrain" }), true);
+  // A real mspk package keeps `.mspk` -> no migration.
+  assert.equal(needsLegacyPathMigration({ ...base, packageFormat: "mspk" }), false);
+  // Already on the canonical name -> no migration.
+  assert.equal(
+    needsLegacyPathMigration({ status: "READY", packageFormat: "eristerrain", localPath: "/docs/offline-scenes/7.eristerrain" }),
+    false,
+  );
+  // Not READY / no localPath -> never migrate mid-flight.
+  assert.equal(needsLegacyPathMigration({ status: "DOWNLOADING", packageFormat: "eristerrain", localPath: "/docs/7.mspk" }), false);
+  assert.equal(needsLegacyPathMigration({ status: "READY", packageFormat: "eristerrain", localPath: null }), false);
+});
+
+test("cleanupTargets works for both formats", () => {
+  assert.deepEqual(cleanupTargets("/p/7.eristerrain", "/p/7.eristerrain.part"), [
+    "/p/7.eristerrain",
+    "/p/7.eristerrain.part",
+  ]);
 });

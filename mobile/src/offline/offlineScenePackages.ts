@@ -1,9 +1,12 @@
 // Offline 3D scene-package manager.
 //
-// Downloads, stores, and tracks bounded Mobile Scene Packages (.mspk) for the
-// native 3D terrain viewer. The download + file management is pure JS via
-// expo-file-system (resumable download => pause/retry; getInfoAsync => size).
-// Only the final SceneView render is native (openOfflineTerrainScene).
+// Downloads, stores, and tracks bounded offline terrain packages for the native
+// 3D viewer. Two formats: the auto-generated `eristerrain` bundle (default,
+// stored `<id>.eristerrain`, rendered by the native SceneKit terrain viewer) and
+// optional Esri `.mspk` (stored `<id>.mspk`, opened via ArcGIS Runtime). An
+// eristerrain bundle is NEVER opened as an AGSMobileScenePackage. The download +
+// file management is pure JS via expo-file-system (resumable download =>
+// pause/retry; getInfoAsync => size). Only the final render is native.
 //
 // Package metadata is persisted in a JSON registry alongside the package files
 // in the app's document directory. Incident edits/photos/forms are unaffected —
@@ -14,12 +17,15 @@ import * as FileSystem from "expo-file-system/legacy";
 import {
   cleanupTargets,
   metaFromDescriptor,
+  needsLegacyPathMigration,
   needsRefresh,
+  packageFileName,
   partPathFor,
   reconcileRecord,
   shaMatches,
   shouldApplyWorkerResult,
   sizeMatches,
+  usesMspkRuntime,
   type OfflineScenePackageMeta,
   type SceneAreaDescriptor,
   type SceneDownloadGrant,
@@ -45,8 +51,16 @@ function baseDir(): string {
   return `${root.replace(/\/+$/, "")}/${DIR_NAME}`;
 }
 
-function packagePath(submissionId: number): string {
-  return `${baseDir()}/${submissionId}.mspk`;
+// Format-aware final package path. eristerrain -> `<id>.eristerrain`, mspk ->
+// `<id>.mspk`. Callers pass the meta/descriptor format; when a READY record
+// already has a localPath (incl. a legacy `<id>.mspk` eristerrain file), prefer
+// that stored path so existing downloads keep working.
+function packagePath(submissionId: number, format: string | null | undefined): string {
+  return `${baseDir()}/${packageFileName(submissionId, format)}`;
+}
+
+function finalPathForMeta(meta: OfflineScenePackageMeta): string {
+  return meta.localPath ?? packagePath(meta.submissionId, meta.packageFormat);
 }
 
 function registryPath(): string {
@@ -233,10 +247,14 @@ async function persistSnapshot(id: number, gen: number, snapshot: unknown): Prom
  * spinner with a dead Pause button.
  */
 export async function reconcilePackage(submissionId: number): Promise<OfflineScenePackageMeta | null> {
-  const meta = await getOfflineScenePackage(submissionId);
+  let meta = await getOfflineScenePackage(submissionId);
   if (!meta) return null;
-  const finalUri = packagePath(submissionId);
-  const partUri = partPathFor(finalUri);
+  // One-time legacy migration: a READY eristerrain package saved under the old
+  // always-".mspk" filename is renamed to the canonical ".eristerrain" name.
+  meta = await migrateLegacyPackagePath(meta);
+  // Prefer the stored localPath (handles legacy names); else the format path.
+  const finalUri = finalPathForMeta(meta);
+  const partUri = meta.partPath ?? partPathFor(packagePath(submissionId, meta.packageFormat));
   const [finalInfo, partInfo] = await Promise.all([
     FileSystem.getInfoAsync(finalUri),
     FileSystem.getInfoAsync(partUri),
@@ -259,6 +277,36 @@ export async function reconcilePackage(submissionId: number): Promise<OfflineSce
   return reconciled;
 }
 
+/**
+ * Rename a legacy `<id>.mspk` file that actually holds an eristerrain package to
+ * the canonical `<id>.eristerrain` path, and update the registry. No-op unless a
+ * migration is needed and the legacy file is present. Best-effort: on any FS error
+ * the original record is returned unchanged (reconcile will still work off it).
+ */
+async function migrateLegacyPackagePath(meta: OfflineScenePackageMeta): Promise<OfflineScenePackageMeta> {
+  if (!needsLegacyPathMigration(meta) || !meta.localPath) return meta;
+  const canonical = packagePath(meta.submissionId, meta.packageFormat);
+  if (canonical === meta.localPath) return meta;
+  try {
+    const [legacyInfo, canonicalInfo] = await Promise.all([
+      FileSystem.getInfoAsync(meta.localPath),
+      FileSystem.getInfoAsync(canonical),
+    ]);
+    if (!legacyInfo.exists) return meta; // nothing to migrate
+    if (!canonicalInfo.exists) {
+      await FileSystem.moveAsync({ from: meta.localPath, to: canonical });
+    } else {
+      // Canonical already exists — drop the stale legacy file.
+      await FileSystem.deleteAsync(meta.localPath, { idempotent: true });
+    }
+    const migrated = { ...meta, localPath: canonical };
+    await saveMeta(migrated);
+    return migrated;
+  } catch {
+    return meta;
+  }
+}
+
 /** Reconcile every persisted record (call once on app startup). */
 export async function reconcileAllPackages(): Promise<void> {
   const reg = await readRegistry();
@@ -266,11 +314,14 @@ export async function reconcileAllPackages(): Promise<void> {
 }
 
 /**
- * Verify a finished .part download and atomically promote it to the final path.
- * NEVER marks READY merely because a file exists:
- *   1) exact byte size, 2) SHA-256 (native), 3) the .mspk actually loads as an
- *   AGSMobileScenePackage (native), then 4) atomic rename .part -> final.
- * Throws on any failure so the caller records FAILED + cleans up.
+ * Verify a finished .part download and atomically promote it to the format-aware
+ * final path (`<id>.eristerrain` or `<id>.mspk`). NEVER marks READY merely because
+ * a file exists:
+ *   1) exact byte size, 2) SHA-256 (native), 3) declared-format validation —
+ *   eristerrain: validate + extract the bundle (grid SHA-256 verified natively);
+ *   mspk: it actually loads as an AGSMobileScenePackage (native) — then
+ *   4) atomic rename .part -> final. An eristerrain bundle is never loaded as
+ *   an Esri .mspk. Throws on any failure so the caller records FAILED + cleans up.
  */
 async function verifyAndPromote(
   meta: OfflineScenePackageMeta,
@@ -290,7 +341,7 @@ async function verifyAndPromote(
   // Format-aware validation. NEVER mark READY until the package validates as its
   // declared format — an eristerrain bundle is never loaded as an Esri .mspk.
   let extractedDir: string | null = null;
-  if (meta.packageFormat === "mspk") {
+  if (usesMspkRuntime(meta.packageFormat)) {
     const loads = await validateScenePackage(toNativePath(partUri));
     if (!loads) throw new Error("The downloaded file is not a valid .mspk scene package.");
   } else {
@@ -298,7 +349,7 @@ async function verifyAndPromote(
     extractedDir = await validateAndExtractEristerrain(partUri, meta.submissionId);
   }
 
-  const finalUri = packagePath(meta.submissionId);
+  const finalUri = packagePath(meta.submissionId, meta.packageFormat);
   try {
     await FileSystem.deleteAsync(finalUri, { idempotent: true });
   } catch {
@@ -346,7 +397,7 @@ export async function downloadOfflineSceneArea(args: {
 
   const initial = metaFromDescriptor(descriptor, incidentId, new Date().toISOString());
   if (!initial) throw new Error("Offline area descriptor is incomplete.");
-  const partUri = partPathFor(packagePath(descriptor.submission_id));
+  const partUri = partPathFor(packagePath(descriptor.submission_id, initial.packageFormat));
 
   const meta: OfflineScenePackageMeta = {
     ...initial,
@@ -500,9 +551,12 @@ export async function deleteOfflineScenePackage(submissionId: number): Promise<v
   nextGen(submissionId);
   _resumables.delete(submissionId);
   const meta = await getOfflineScenePackage(submissionId);
-  const finalUri = meta?.localPath ?? packagePath(submissionId);
-  const partUri = meta?.partPath ?? partPathFor(packagePath(submissionId));
-  for (const target of cleanupTargets(finalUri, partUri)) {
+  const fmt = meta?.packageFormat;
+  const finalUri = meta?.localPath ?? packagePath(submissionId, fmt);
+  const partUri = meta?.partPath ?? partPathFor(packagePath(submissionId, fmt));
+  // Also remove a possible legacy `<id>.mspk` file for a now-`.eristerrain` record.
+  const legacyUri = packagePath(submissionId, "mspk");
+  for (const target of [...cleanupTargets(finalUri, partUri), legacyUri]) {
     try {
       await FileSystem.deleteAsync(target, { idempotent: true });
     } catch {
@@ -570,7 +624,7 @@ export async function openDownloadedScene(
     throw new Error("The offline package file is missing. Delete and re-download the area.");
   }
   // eristerrain renders from the extracted directory; mspk opens the file directly.
-  if (meta.packageFormat !== "mspk" && !meta.extractedDir) {
+  if (!usesMspkRuntime(meta.packageFormat) && !meta.extractedDir) {
     throw new Error("The terrain bundle was not extracted. Delete and re-download the area.");
   }
   await openOfflineTerrainScene({
