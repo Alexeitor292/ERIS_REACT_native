@@ -1,6 +1,6 @@
 """offline 3D scene-package orphaned-object audit
 
-Revision ID: 0013_offline_scene_orphaned_objects
+Revision ID: 0013_offline_scene_orphans
 Revises: 0012_offline_scene_jobs
 Create Date: 2026-06-28
 
@@ -17,7 +17,7 @@ paths conflict-free.
 
 from alembic import op
 
-revision = "0013_offline_scene_orphaned_objects"
+revision = "0013_offline_scene_orphans"
 down_revision = "0012_offline_scene_jobs"
 branch_labels = None
 depends_on = None

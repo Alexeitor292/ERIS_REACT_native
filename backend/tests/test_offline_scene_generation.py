@@ -347,14 +347,17 @@ class TestAtomicDuplicateJobPrevention:
 
 
 class TestDownloadAuthorization:
-    def test_download_requires_view_permission(self, client_db, admin_token):
+    def test_download_requires_auth_and_never_leaks_storage(self, client_db, admin_token):
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
-            login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
-            other = login.json()["access_token"]
+            # Unauthenticated -> 401; never returns a presigned URL or storage internals.
+            anon = client_db.get(f"/submissions/{sub_id}/gisa/offline-scene-package/download")
+            assert anon.status_code == 401
+            # Authorized viewer but NO prepared package -> 404 (no URL leak), not 500.
             r = client_db.get(f"/submissions/{sub_id}/gisa/offline-scene-package/download",
-                              headers={"Authorization": f"Bearer {other}"})
-            assert r.status_code == 403  # no read access -> forbidden (not a leak of storage internals)
+                              headers={"Authorization": f"Bearer {admin_token}"})
+            assert r.status_code == 404
+            assert "url" not in r.json()
         finally:
             _cleanup(incident_id, sub_id)
 
