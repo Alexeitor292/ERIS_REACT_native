@@ -19,7 +19,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # requirements-worker.txt = API deps + the geospatial stack (numpy/rasterio/
+        # Pillow/requests) that the offline-scene tests import at module load.
+        run: pip install -r requirements-worker.txt
       - name: Compile all backend + migration sources
         run: python -m compileall -q app migrations
       - name: Alembic script check (single linear head)
@@ -65,7 +67,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # requirements-worker.txt = API deps + the geospatial stack (numpy/rasterio/
+        # Pillow/requests) that the offline-scene tests import at module load.
+        run: pip install -r requirements-worker.txt
       - name: Initialize authoritative schema + seed
         run: |
           mysql -h 127.0.0.1 -u root -prootpassword eris < ../database/init/010_schema.sql
@@ -110,17 +114,27 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      # Empty database (no init schema) -> the migration chain must build it all.
-      - name: alembic upgrade head from a clean DB
+        # requirements-worker.txt = API deps + the geospatial stack (numpy/rasterio/
+        # Pillow/requests) that the offline-scene tests import at module load.
+        run: pip install -r requirements-worker.txt
+      # Clean DB -> authoritative init schema -> migrate to head. ERIS treats
+      # database/init/010_schema.sql as authoritative; migrations are idempotent
+      # overlays (CREATE TABLE / ADD COLUMN IF NOT EXISTS). This validates the full
+      # chain applies cleanly over a fresh init and lands at head.
+      - name: Load authoritative init schema
+        run: mysql -h 127.0.0.1 -u root -prootpassword eris_migtest < ../database/init/010_schema.sql
+      - name: alembic stamp baseline + upgrade head
         run: |
+          alembic stamp 0001_baseline
           alembic upgrade head
           alembic current | grep -q "0014_offline_scene_worker_hb"
-      - name: Assert key tables exist after migrations
+      - name: alembic upgrade head is idempotent (no-op on re-run)
+        run: alembic upgrade head
+      - name: Assert key tables exist at head
         run: |
           for t in submissions offline_scene_packages offline_scene_jobs offline_scene_orphaned_objects offline_scene_worker_heartbeats; do
             mysql -h 127.0.0.1 -u root -prootpassword -e "SELECT 1 FROM $t LIMIT 1;" eris_migtest \
-              || { echo "missing table $t after base->head"; exit 1; }
+              || { echo "missing table $t at head"; exit 1; }
           done
 
   worker-image:
@@ -210,7 +224,8 @@ jobs:
 
   ios-native:
     name: iOS native compile (simulator, no signing)
-    runs-on: macos-14
+    # macos-15 ships Xcode 16.x (React Native / Expo SDK 54 require Xcode >= 16.1).
+    runs-on: macos-15
     defaults:
       run:
         working-directory: mobile
@@ -250,8 +265,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure PyYAML for the isolation check
+        run: python3 -m pip install --quiet pyyaml
       - name: Validate base compose
         run: docker compose --env-file docker/.env.example -f docker/docker-compose.yml config >/dev/null
+      - name: Provide .env.proxmox for validation
+        # The proxmox services reference `env_file: .env.proxmox` (the real file,
+        # gitignored); seed it from the committed example so `config` can resolve it.
+        working-directory: docker
+        run: cp .env.proxmox.example .env.proxmox
       - name: Validate production (proxmox) compose overlay
         working-directory: docker
         run: docker compose --env-file .env.proxmox.example -f docker-compose.yml -f docker-compose.proxmox.yml config > /tmp/rendered.yml
