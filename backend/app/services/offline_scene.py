@@ -1,19 +1,23 @@
 """
 Offline 3D scene-package catalog + descriptor service.
 
-ERIS does NOT generate Mobile Scene Packages (.mspk). The authoritative model is:
-  * USGS 3DEP raster DEM is the offline elevation/terrain source.
-  * An operator authors a bounded .mspk in ArcGIS Pro / ArcGIS Enterprise.
-  * The .mspk binary lives in a PRIVATE MinIO bucket (eris-offline-scenes),
-    under an immutable key submissions/{submission_id}/{package_version}/scene.mspk.
+Authoritative model (automatic generation — no manual ArcGIS Pro authoring):
+  * USGS 3DEP is the offline elevation/terrain source.
+  * When an authorized user requests it, ERIS AUTOMATICALLY generates a bounded
+    `eristerrain` package (worker: fetch 3DEP -> build height grid + hillshade ->
+    validate -> upload -> register). `.mspk` remains an optional future
+    enterprise/ArcGIS path handled by the same catalog/download layer.
+  * The package binary lives in a PRIVATE MinIO bucket (eris-offline-scenes) under
+    an immutable key submissions/{submission_id}/{package_version}/scene.{ext}.
   * ERIS owns the authorization, catalog, lifecycle, and signed-download layer.
 
 A submission is "available for offline 3D" ONLY when ERIS has a READY catalog row
-AND the exact MinIO object still exists with the catalog's size. Availability is
-NEVER inferred from a configured base URL.
+AND the exact MinIO object still exists with the catalog's size + durable identity.
+Availability is NEVER inferred from a configured base URL.
 
-This module is pure (no DB, no MinIO) so it unit-tests in the no-DB job; the DB
-catalog rows and MinIO HEAD are supplied by the endpoint/registration layer.
+This module is pure (no DB, no MinIO, no settings import) so it unit-tests in the
+no-DB job; the DB catalog rows and MinIO HEAD are supplied by the endpoint/worker
+layer, and the authoritative configured maxima are INJECTED by those callers.
 """
 
 from __future__ import annotations
@@ -27,7 +31,11 @@ ELEVATION_SOURCE_3DEP = "USGS_3DEP"
 # Bounded-by-default download scope. Statewide is never the default.
 DEFAULT_RADIUS_M = 1500.0
 MIN_RADIUS_M = 250.0
-MAX_RADIUS_M = 8000.0  # ~200 km^2 ceiling keeps a field download sane
+# Absolute hard ceiling (~200 km^2). The CONFIGURED max (settings
+# OFFLINE_SCENE_MAX_RADIUS_M) is the authoritative operational maximum and is
+# itself capped by this so a misconfiguration can never go statewide/unbounded.
+HARD_MAX_RADIUS_M = 8000.0
+MAX_RADIUS_M = HARD_MAX_RADIUS_M  # back-compat alias (absolute ceiling)
 
 # Rough size model used ONLY for operator sanity checks, never surfaced as if a
 # package already exists (the UI shows the real catalog size_bytes instead).
@@ -38,16 +46,52 @@ _PACKAGE_OVERHEAD_MB = 4.0
 _M_PER_DEG_LAT = 111_320.0
 
 
-def clamp_radius_m(radius_m: float | None) -> float:
+def effective_max_radius_m(max_radius_m: float | None = None) -> float:
+    """The authoritative operational maximum, capped by the absolute hard ceiling.
+    Callers pass settings.OFFLINE_SCENE_MAX_RADIUS_M; the module never imports
+    settings (stays pure/testable). A misconfigured/oversized value is clamped to
+    HARD_MAX_RADIUS_M so a package can never be statewide/unbounded."""
+    if max_radius_m is None:
+        return HARD_MAX_RADIUS_M
+    try:
+        m = float(max_radius_m)
+    except (TypeError, ValueError):
+        return HARD_MAX_RADIUS_M
+    if not math.isfinite(m) or m <= 0:
+        return HARD_MAX_RADIUS_M
+    return max(MIN_RADIUS_M, min(HARD_MAX_RADIUS_M, m))
+
+
+def clamp_radius_m(radius_m: float | None, max_radius_m: float | None = None) -> float:
+    """Clamp a (possibly client-supplied) radius into [MIN_RADIUS_M, effective max].
+    The SAME call is used at the generate endpoint, job creation, and worker
+    execution, so all three enforce the one authoritative maximum — the worker
+    never trusts a stored/client radius blindly."""
+    hi = effective_max_radius_m(max_radius_m)
     if radius_m is None:
-        return DEFAULT_RADIUS_M
+        return min(DEFAULT_RADIUS_M, hi)
     try:
         r = float(radius_m)
     except (TypeError, ValueError):
-        return DEFAULT_RADIUS_M
+        return min(DEFAULT_RADIUS_M, hi)
     if not math.isfinite(r):
-        return DEFAULT_RADIUS_M
-    return max(MIN_RADIUS_M, min(MAX_RADIUS_M, r))
+        return min(DEFAULT_RADIUS_M, hi)
+    return max(MIN_RADIUS_M, min(hi, r))
+
+
+def exceeds_size_limit(size_bytes: int | None, max_mb: int | float | None) -> bool:
+    """True when a package exceeds the configured size policy. Used before catalog
+    registration AND before minting a mobile download grant. A non-positive/invalid
+    limit disables the check (returns False). Device memory is never the limit."""
+    try:
+        if max_mb is None:
+            return False
+        limit = float(max_mb) * 1024.0 * 1024.0
+        if limit <= 0:
+            return False
+        return int(size_bytes or 0) > limit
+    except (TypeError, ValueError):
+        return False
 
 
 def bounding_box(lat: float, lon: float, radius_m: float) -> dict:

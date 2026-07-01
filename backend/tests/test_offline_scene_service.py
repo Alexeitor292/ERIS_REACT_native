@@ -14,8 +14,30 @@ class TestRadiusAndBounds:
     def test_radius_clamped_and_default(self):
         assert osvc.clamp_radius_m(None) == osvc.DEFAULT_RADIUS_M
         assert osvc.clamp_radius_m(10) == osvc.MIN_RADIUS_M
-        assert osvc.clamp_radius_m(999999) == osvc.MAX_RADIUS_M  # never statewide
+        assert osvc.clamp_radius_m(999999) == osvc.MAX_RADIUS_M  # never statewide (hard ceiling)
         assert osvc.clamp_radius_m(1500) == 1500.0
+
+    def test_radius_enforces_injected_configured_max(self):
+        # The authoritative configured max (settings.OFFLINE_SCENE_MAX_RADIUS_M) is
+        # injected by callers (endpoint, job creation, worker) and enforced here.
+        assert osvc.clamp_radius_m(5000, 3000) == 3000.0  # over configured max -> capped
+        assert osvc.clamp_radius_m(2000, 3000) == 2000.0  # under -> unchanged
+        assert osvc.clamp_radius_m(None, 1000) == 1000.0  # default capped by a small max
+        # A misconfigured max cannot exceed the absolute hard ceiling.
+        assert osvc.clamp_radius_m(999999, 10 ** 9) == osvc.HARD_MAX_RADIUS_M
+        # Invalid configured max falls back to the hard ceiling.
+        assert osvc.clamp_radius_m(999999, 0) == osvc.HARD_MAX_RADIUS_M
+        assert osvc.clamp_radius_m(999999, float("nan")) == osvc.HARD_MAX_RADIUS_M
+
+    def test_exceeds_size_limit(self):
+        mb = 1024 * 1024
+        assert osvc.exceeds_size_limit(200 * mb, 512) is False
+        assert osvc.exceeds_size_limit(513 * mb, 512) is True
+        assert osvc.exceeds_size_limit(512 * mb, 512) is False  # exactly at limit is allowed
+        # A disabled/invalid limit never rejects.
+        assert osvc.exceeds_size_limit(10 ** 12, 0) is False
+        assert osvc.exceeds_size_limit(10 ** 12, None) is False
+        assert osvc.exceeds_size_limit(None, 512) is False
 
     def test_bounding_box_centered(self):
         b = osvc.bounding_box(38.5, -121.5, 1500.0)

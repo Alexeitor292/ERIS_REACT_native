@@ -2772,10 +2772,11 @@ def get_gisa_offline_scene_package(
     """Offline 3D scene-package descriptor for the mobile native viewer.
 
     available is True ONLY when ERIS has a READY catalog row AND the exact MinIO
-    object is present with matching size. Otherwise available=False with a precise
-    reason ("no package prepared yet" / "missing from storage"). All values come
-    from the catalog row — never from a base-URL string. ERIS does not generate
-    the .mspk; an operator authors and registers it (see the operator runbook)."""
+    object is present with matching size + durable identity. Otherwise
+    available=False with a precise reason ("no package prepared yet" / "missing
+    from storage"). All values come from the catalog row — never from a base-URL
+    string. The package is generated automatically by the ERIS worker from USGS
+    3DEP (see the operator runbook); no manual ArcGIS Pro authoring is involved."""
     require_can_view_submission(submission_id, db, user)
 
     catalog = _newest_ready_scene_package(db, submission_id)
@@ -2809,6 +2810,13 @@ def download_gisa_offline_scene_package(
         raise HTTPException(status_code=404, detail="No offline 3D package prepared for this incident.")
     if not _scene_object_present(catalog):
         raise HTTPException(status_code=409, detail="The prepared package is missing or changed in storage.")
+    # Enforce the max package-size policy before minting a download grant, so an
+    # over-policy package (e.g. from a relaxed past config) is never downloadable.
+    if offline_scene_svc.exceeds_size_limit(catalog.get("size_bytes"), settings.OFFLINE_SCENE_MAX_PACKAGE_MB):
+        raise HTTPException(
+            status_code=409,
+            detail=f"The prepared package exceeds the {settings.OFFLINE_SCENE_MAX_PACKAGE_MB} MB download policy.",
+        )
 
     ttl = int(settings.OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS)
     try:
@@ -2876,9 +2884,10 @@ def generate_offline_scene_package(
     if lat is None or lon is None:
         raise HTTPException(status_code=400, detail="Cannot prepare an offline area: incident has no coordinates.")
 
-    # Bounded AOI (incident radius, never statewide; capped by dev limit).
-    radius = offline_scene_svc.clamp_radius_m(radius_m)
-    radius = min(radius, float(settings.OFFLINE_SCENE_MAX_RADIUS_M))
+    # Bounded AOI (incident radius, never statewide). ONE authoritative maximum
+    # (settings.OFFLINE_SCENE_MAX_RADIUS_M, itself capped by the absolute hard
+    # ceiling) enforced here, at job creation, and again at worker execution.
+    radius = offline_scene_svc.clamp_radius_m(radius_m, settings.OFFLINE_SCENE_MAX_RADIUS_M)
     bounds = offline_scene_svc.bounding_box(float(lat), float(lon), radius)
     aoi = {"center": {"lat": float(lat), "lon": float(lon)}, "radius_m": radius, "bounds": bounds}
 

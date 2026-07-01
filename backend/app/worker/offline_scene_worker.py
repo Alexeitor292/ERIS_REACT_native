@@ -84,7 +84,13 @@ def _build_context(db: Session, job: dict) -> dict:
         if lats and lons:
             sample_extent = {"minLat": min(lats), "minLon": min(lons), "maxLat": max(lats), "maxLon": max(lons)}
 
-    radius_m = float(job["radius_m"])
+    # Enforce the ONE authoritative AOI maximum at worker execution too — never
+    # trust the stored/client radius or bounds blindly. Recompute the AOI from the
+    # incident centre + clamped radius so a tampered/oversized job row cannot make
+    # the worker fetch a statewide extent.
+    center_lat, center_lon = float(row["latitude"]), float(row["longitude"])
+    radius_m = offline_scene_svc.clamp_radius_m(job["radius_m"], settings.OFFLINE_SCENE_MAX_RADIUS_M)
+    bounds = offline_scene_svc.bounding_box(center_lat, center_lon, radius_m)
     content_sig = offline_scene_svc.content_signature(
         gisa_updated_at=str(row["updated_at"]) if row["updated_at"] is not None else None,
         geometry_json=geometry,
@@ -96,12 +102,9 @@ def _build_context(db: Session, job: dict) -> dict:
         "submission_id": sid,
         "package_version": version,
         "requested_by": job.get("requested_by"),
-        "center": {"lat": float(row["latitude"]), "lon": float(row["longitude"])},
+        "center": {"lat": center_lat, "lon": center_lon},
         "radius_m": radius_m,
-        "bounds": {
-            "min_lat": float(job["min_lat"]), "min_lon": float(job["min_lon"]),
-            "max_lat": float(job["max_lat"]), "max_lon": float(job["max_lon"]),
-        },
+        "bounds": bounds,
         "content_signature": content_sig,
         "overlays": {
             "incident": {"lat": float(row["latitude"]), "lon": float(row["longitude"])},
@@ -145,6 +148,14 @@ def process_job(db: Session, job: dict, builder=None) -> dict:
         ok, reason = builder.validate_package(package_bytes)
         if not ok:
             raise OfflineSceneBuildError(f"Package failed validation: {reason}")
+
+        # Enforce the max package-size policy BEFORE any upload/registration, so an
+        # oversized package is never stored or presented as downloadable.
+        if offline_scene_svc.exceeds_size_limit(len(package_bytes), settings.OFFLINE_SCENE_MAX_PACKAGE_MB):
+            raise OfflineSceneBuildError(
+                f"Package is {len(package_bytes)} bytes, exceeding the "
+                f"{settings.OFFLINE_SCENE_MAX_PACKAGE_MB} MB policy limit."
+            )
 
         progress("UPLOADING", "Uploading verified package to secure storage")
         jobs.update_job(db, job_id, status="REGISTERING", progress_pct=jobs.progress_for("REGISTERING"),

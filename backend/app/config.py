@@ -74,11 +74,25 @@ class Settings(BaseSettings):
     OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS: int = Field(default=900)
     # --- Automatic offline 3D package-generation pipeline (worker) ---
     OFFLINE_SCENE_WORKER_POLL_SECONDS: int = Field(default=5)
-    OFFLINE_SCENE_WORKER_CONCURRENCY: int = Field(default=1)
+    # Worker concurrency is achieved by running MULTIPLE worker CONTAINERS
+    # (compose `deploy.replicas` / scaling); each worker process handles one job at
+    # a time and jobs are claimed with `FOR UPDATE SKIP LOCKED`, so replicas never
+    # double-claim. There is deliberately no in-process concurrency knob (a dead
+    # setting that silently controls nothing). Default posture is a single worker.
     OFFLINE_SCENE_JOB_STALE_SECONDS: int = Field(default=900)
-    # Dev mode keeps AOIs/sizes conservative for laptop/dev runs.
-    OFFLINE_SCENE_DEV_MODE: bool = Field(default=True)
+    # Production posture. FALSE by default and in prod compose. When FALSE, MinIO
+    # offline-bucket posture problems (missing bucket, anonymous access, no
+    # versioning) FAIL CLOSED instead of warning; when TRUE (local/dev) they warn
+    # so a laptop run without a fully-provisioned MinIO can still iterate.
+    OFFLINE_SCENE_DEV_MODE: bool = Field(default=False)
+    # Single authoritative AOI ceiling. Enforced identically at the generate
+    # endpoint, job creation, AND worker execution (see offline_scene.clamp_radius_m).
+    # An absolute hard ceiling (offline_scene.HARD_MAX_RADIUS_M) caps this even if
+    # misconfigured, so a package is never statewide/unbounded.
     OFFLINE_SCENE_MAX_RADIUS_M: float = Field(default=3000.0)
+    # Maximum registered package size (policy, NOT device memory). Enforced before
+    # catalog registration (worker) and before minting a mobile download grant.
+    OFFLINE_SCENE_MAX_PACKAGE_MB: int = Field(default=512)
     # USGS 3DEP raster elevation ImageServer (authoritative terrain source).
     OFFLINE_SCENE_3DEP_IMAGESERVER: str = Field(
         default="https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"

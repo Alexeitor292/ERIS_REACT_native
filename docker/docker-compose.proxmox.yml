@@ -28,6 +28,12 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-eris-uploads}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_OFFLINE_SCENES_BUCKET: ${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
+      # Offline-scene policy — MUST match the worker so the API enforces the same
+      # AOI/size limits at the generate + download endpoints.
+      OFFLINE_SCENE_DEV_MODE: ${OFFLINE_SCENE_DEV_MODE:-false}
+      OFFLINE_SCENE_MAX_RADIUS_M: ${OFFLINE_SCENE_MAX_RADIUS_M:-3000}
+      OFFLINE_SCENE_MAX_PACKAGE_MB: ${OFFLINE_SCENE_MAX_PACKAGE_MB:-512}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALG: ${JWT_ALG:-HS256}
       JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES:-120}
@@ -72,8 +78,11 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_OFFLINE_SCENES_BUCKET: ${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
-      OFFLINE_SCENE_DEV_MODE: ${OFFLINE_SCENE_DEV_MODE:-true}
+      # Production posture: dev mode OFF unless explicitly overridden. When OFF,
+      # MinIO offline-bucket posture problems fail closed rather than warn.
+      OFFLINE_SCENE_DEV_MODE: ${OFFLINE_SCENE_DEV_MODE:-false}
       OFFLINE_SCENE_MAX_RADIUS_M: ${OFFLINE_SCENE_MAX_RADIUS_M:-3000}
+      OFFLINE_SCENE_MAX_PACKAGE_MB: ${OFFLINE_SCENE_MAX_PACKAGE_MB:-512}
     depends_on:
       mariadb:
         condition: service_healthy
