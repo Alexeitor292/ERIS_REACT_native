@@ -200,6 +200,55 @@ export function jobStatusLine(job: Pick<OfflineSceneJob, "status" | "progress_pc
   }
 }
 
+// ---- Durable registry serialization + atomic recovery (pure) ---------------
+
+/** A minimal in-process serial mutex: runExclusive callbacks run one-at-a-time,
+ *  in call order, even when each awaits. Used to serialize registry
+ *  read-modify-write so concurrent saves never lose each other's records. */
+export type SerialMutex = { runExclusive: <T>(fn: () => Promise<T> | T) => Promise<T> };
+
+export function createSerialMutex(): SerialMutex {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    runExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+      const run = tail.then(() => fn());
+      // Keep the chain alive regardless of outcome, without unhandled rejections.
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+  };
+}
+
+export type RegistryShape = { version: number; items: unknown[] };
+
+/** True when a parsed value is a well-formed registry at the expected version. */
+export function isValidRegistry(parsed: unknown, version: number): parsed is RegistryShape {
+  return (
+    !!parsed &&
+    typeof parsed === "object" &&
+    (parsed as RegistryShape).version === version &&
+    Array.isArray((parsed as RegistryShape).items)
+  );
+}
+
+/**
+ * Decide which registry file to trust after a crash. Writes go temp -> rename, so:
+ *  - a valid main is authoritative (any leftover temp is stale -> clean up);
+ *  - main missing/corrupt but a valid temp means a crash mid-rename -> recover temp;
+ *  - neither valid -> start empty (clean up any garbage temp).
+ */
+export function chooseRegistrySource(s: {
+  mainValid: boolean;
+  tmpValid: boolean;
+}): { use: "main" | "tmp" | "empty"; cleanupTmp: boolean } {
+  if (s.mainValid) return { use: "main", cleanupTmp: true };
+  if (s.tmpValid) return { use: "tmp", cleanupTmp: false };
+  return { use: "empty", cleanupTmp: true };
+}
+
 // ---- Durable download state machine (pure) --------------------------------
 
 export type ReconcileContext = {

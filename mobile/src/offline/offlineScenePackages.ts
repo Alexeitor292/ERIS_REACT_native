@@ -16,6 +16,8 @@ import * as FileSystem from "expo-file-system/legacy";
 
 import {
   cleanupTargets,
+  createSerialMutex,
+  isValidRegistry,
   metaFromDescriptor,
   needsLegacyPathMigration,
   needsRefresh,
@@ -67,6 +69,10 @@ function registryPath(): string {
   return `${baseDir()}/registry.json`;
 }
 
+function registryTmpPath(): string {
+  return `${registryPath()}.tmp`;
+}
+
 async function ensureDir(): Promise<void> {
   const info = await FileSystem.getInfoAsync(baseDir());
   if (!info.exists) {
@@ -74,24 +80,55 @@ async function ensureDir(): Promise<void> {
   }
 }
 
-async function readRegistry(): Promise<Registry> {
+// A single module-level mutex serializes every registry read-modify-write so
+// concurrent downloads / progress snapshots / pauses / deletes / reconciliation
+// never race and lose each other's records.
+const _registryMutex = createSerialMutex();
+
+async function parseRegistryFile(path: string): Promise<Registry | null> {
   try {
-    const info = await FileSystem.getInfoAsync(registryPath());
-    if (!info.exists) return { version: REGISTRY_VERSION, items: [] };
-    const raw = await FileSystem.readAsStringAsync(registryPath());
+    const info = await FileSystem.getInfoAsync(path);
+    if (!info.exists) return null;
+    const raw = await FileSystem.readAsStringAsync(path);
     const parsed = JSON.parse(raw);
-    if (parsed?.version !== REGISTRY_VERSION || !Array.isArray(parsed?.items)) {
-      return { version: REGISTRY_VERSION, items: [] };
-    }
-    return parsed as Registry;
+    return isValidRegistry(parsed, REGISTRY_VERSION) ? (parsed as Registry) : null;
   } catch {
-    return { version: REGISTRY_VERSION, items: [] };
+    return null;
   }
 }
 
-async function writeRegistry(reg: Registry): Promise<void> {
+// Read the authoritative registry: a valid main file wins; if it is missing or
+// corrupt (e.g. a crash mid-rename), recover from the temp file; else empty.
+async function readRegistryRaw(): Promise<Registry> {
+  const main = await parseRegistryFile(registryPath());
+  if (main) return main;
+  const tmp = await parseRegistryFile(registryTmpPath());
+  if (tmp) return tmp;
+  return { version: REGISTRY_VERSION, items: [] };
+}
+
+// Atomic write: serialize to a temp file, then rename over the main file. A crash
+// between the two leaves a valid temp that readRegistryRaw recovers from.
+async function writeRegistryAtomic(reg: Registry): Promise<void> {
   await ensureDir();
-  await FileSystem.writeAsStringAsync(registryPath(), JSON.stringify(reg));
+  await FileSystem.writeAsStringAsync(registryTmpPath(), JSON.stringify(reg));
+  await FileSystem.deleteAsync(registryPath(), { idempotent: true });
+  await FileSystem.moveAsync({ from: registryTmpPath(), to: registryPath() });
+}
+
+// Serialized read-modify-write: a FRESH read + atomic write under the mutex, so
+// two concurrent mutations never lose each other's records.
+async function mutateRegistry(fn: (reg: Registry) => Registry): Promise<Registry> {
+  return _registryMutex.runExclusive(async () => {
+    const reg = await readRegistryRaw();
+    const next = fn(reg);
+    await writeRegistryAtomic(next);
+    return next;
+  });
+}
+
+async function readRegistry(): Promise<Registry> {
+  return _registryMutex.runExclusive(readRegistryRaw);
 }
 
 function upsert(items: OfflineScenePackageMeta[], next: OfflineScenePackageMeta): OfflineScenePackageMeta[] {
@@ -103,8 +140,7 @@ function upsert(items: OfflineScenePackageMeta[], next: OfflineScenePackageMeta)
 }
 
 async function saveMeta(meta: OfflineScenePackageMeta): Promise<void> {
-  const reg = await readRegistry();
-  await writeRegistry({ ...reg, items: upsert(reg.items, meta) });
+  await mutateRegistry((reg) => ({ ...reg, items: upsert(reg.items, meta) }));
 }
 
 export async function listOfflineScenePackages(): Promise<OfflineScenePackageMeta[]> {
@@ -569,8 +605,7 @@ export async function deleteOfflineScenePackage(submissionId: number): Promise<v
   } catch {
     /* ignore */
   }
-  const reg = await readRegistry();
-  await writeRegistry({ ...reg, items: reg.items.filter((x) => x.submissionId !== submissionId) });
+  await mutateRegistry((reg) => ({ ...reg, items: reg.items.filter((x) => x.submissionId !== submissionId) }));
 }
 
 /** Delete READY packages older than maxAgeDays. Returns deleted submission IDs. */

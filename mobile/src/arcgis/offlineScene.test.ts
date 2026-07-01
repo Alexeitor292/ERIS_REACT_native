@@ -5,11 +5,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  chooseRegistrySource,
   cleanupTargets,
+  createSerialMutex,
   describeScope,
   formatBytes,
   formatPackageAge,
   isStale,
+  isValidRegistry,
   jobIsActive,
   jobIsTerminal,
   jobStatusLine,
@@ -264,4 +267,66 @@ test("cleanupTargets works for both formats", () => {
     "/p/7.eristerrain",
     "/p/7.eristerrain.part",
   ]);
+});
+
+// ---- Phase 2C: durable registry serialization + recovery -------------------
+
+const _delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test("serial mutex: concurrent read-modify-write never loses records", async () => {
+  const mutex = createSerialMutex();
+  // Simulate the racy registry pattern: read snapshot -> await -> write back.
+  // Without the mutex the later writers would clobber earlier ones (lost update).
+  let store: { items: number[] } = { items: [] };
+  const addRecord = (id: number) =>
+    mutex.runExclusive(async () => {
+      const snapshot = store; // read
+      await _delay(5); // yield (would cause interleaving without the lock)
+      store = { items: [...snapshot.items, id] }; // modify + write
+    });
+  await Promise.all([addRecord(1), addRecord(2), addRecord(3), addRecord(4)]);
+  assert.deepEqual([...store.items].sort((a, b) => a - b), [1, 2, 3, 4]); // all present
+});
+
+test("serial mutex runs operations in call order (pause during progress persist)", async () => {
+  const mutex = createSerialMutex();
+  const order: number[] = [];
+  // A slow "progress snapshot" started first, then a fast "pause": pause must wait.
+  const progress = mutex.runExclusive(async () => {
+    await _delay(15);
+    order.push(1);
+  });
+  const pause = mutex.runExclusive(async () => {
+    await _delay(1);
+    order.push(2);
+  });
+  await Promise.all([progress, pause]);
+  assert.deepEqual(order, [1, 2]);
+});
+
+test("serial mutex isolates a rejecting op (delete-while-completing keeps the chain alive)", async () => {
+  const mutex = createSerialMutex();
+  const done: string[] = [];
+  const failing = mutex.runExclusive(async () => {
+    throw new Error("completion superseded");
+  });
+  await assert.rejects(failing, /superseded/);
+  await mutex.runExclusive(async () => {
+    done.push("delete-applied");
+  });
+  assert.deepEqual(done, ["delete-applied"]);
+});
+
+test("registry validity + crash-recovery source selection", () => {
+  assert.equal(isValidRegistry({ version: 1, items: [] }, 1), true);
+  assert.equal(isValidRegistry({ version: 2, items: [] }, 1), false); // wrong version
+  assert.equal(isValidRegistry({ version: 1, items: "nope" }, 1), false); // items not array
+  assert.equal(isValidRegistry(null, 1), false);
+  assert.equal(isValidRegistry("garbage", 1), false);
+  // main valid -> use main, clean up any stale temp.
+  assert.deepEqual(chooseRegistrySource({ mainValid: true, tmpValid: true }), { use: "main", cleanupTmp: true });
+  // main corrupt but temp valid -> recover temp (crash mid-rename).
+  assert.deepEqual(chooseRegistrySource({ mainValid: false, tmpValid: true }), { use: "tmp", cleanupTmp: false });
+  // neither -> empty, clean up garbage temp.
+  assert.deepEqual(chooseRegistrySource({ mainValid: false, tmpValid: false }), { use: "empty", cleanupTmp: true });
 });
