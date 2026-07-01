@@ -2891,12 +2891,14 @@ def generate_offline_scene_package(
     bounds = offline_scene_svc.bounding_box(float(lat), float(lon), radius)
     aoi = {"center": {"lat": float(lat), "lon": float(lon)}, "radius_m": radius, "bounds": bounds}
 
-    # Prevent duplicate active jobs for the same submission.
-    active = offline_scene_jobs_svc.get_active_job(db, submission_id)
-    if active:
+    # Prevent duplicate active jobs ATOMICALLY: create_job_if_none_active locks the
+    # submission row, re-checks for an active job, and inserts only if none — so two
+    # simultaneous requests yield exactly one active job (the other gets 409).
+    job, created = offline_scene_jobs_svc.create_job_if_none_active(
+        db, submission_id=submission_id, requested_by=user["id"], aoi=aoi
+    )
+    if not created:
         raise HTTPException(status_code=409, detail="A package-generation job is already in progress.")
-
-    job = offline_scene_jobs_svc.create_job(db, submission_id=submission_id, requested_by=user["id"], aoi=aoi)
     return {"job": _job_public(job)}
 
 

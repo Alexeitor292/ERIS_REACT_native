@@ -46,6 +46,7 @@ def _cleanup(incident_id, sub_id=None):
     from sqlalchemy import text
     with engine.begin() as conn:
         if sub_id is not None:
+            conn.execute(text("DELETE FROM offline_scene_orphaned_objects WHERE submission_id=:s"), {"s": sub_id})
             conn.execute(text("DELETE FROM offline_scene_jobs WHERE submission_id=:s"), {"s": sub_id})
             conn.execute(text("DELETE FROM offline_scene_packages WHERE submission_id=:s"), {"s": sub_id})
         conn.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
@@ -247,3 +248,118 @@ class TestWorker:
             assert job["status"] == "QUEUED"
         finally:
             _cleanup(incident_id, sub_id)
+
+
+class TestCancellationAuthority:
+    """A CANCELLED job is authoritative — the worker must never mark it READY nor
+    create a READY catalog row, at any stage."""
+
+    def _claimed_ctx(self, sub_id):
+        """Claim the QUEUED job and build the worker context for service-level tests."""
+        from app.db import SessionLocal
+        with SessionLocal() as db:
+            claimed = jobs.claim_next_job(db, "w-test")
+            ctx = worker._build_context(db, claimed)
+            return claimed["id"], ctx
+
+    def test_cancelled_before_processing_stays_cancelled_no_ready(self, client_db, admin_token):
+        from app.db import engine
+        from sqlalchemy import text
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            client_db.post(_GEN.format(sid=sub_id), headers={"Authorization": f"Bearer {admin_token}"})
+            client_db.post(_CANCEL.format(sid=sub_id), headers={"Authorization": f"Bearer {admin_token}"})
+            # The claim would move QUEUED->FETCHING, but the job is CANCELLED so it is
+            # not claimable; even if the worker runs, it must not resurrect the job.
+            _run_worker_once(_FakeBuilder())
+            s = client_db.get(_JOB.format(sid=sub_id), headers={"Authorization": f"Bearer {admin_token}"})
+            assert s.json()["job"]["status"] == "CANCELLED"
+            with engine.connect() as conn:
+                n = conn.execute(text("SELECT COUNT(*) FROM offline_scene_packages WHERE submission_id=:s"), {"s": sub_id}).scalar()
+            assert n == 0
+        finally:
+            _cleanup(incident_id, sub_id)
+
+    def test_conditional_update_cannot_overwrite_cancelled(self, client_db, admin_token):
+        from app.db import SessionLocal
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            client_db.post(_GEN.format(sid=sub_id), headers={"Authorization": f"Bearer {admin_token}"})
+            job_id, _ = self._claimed_ctx(sub_id)  # now FETCHING_USGS_3DEP
+            client_db.post(_CANCEL.format(sid=sub_id), headers={"Authorization": f"Bearer {admin_token}"})
+            with SessionLocal() as db:
+                applied = jobs.update_job_if_active(db, job_id, status="READY", progress_pct=100)
+                assert applied is False  # cannot overwrite CANCELLED
+                assert jobs.get_job(db, job_id)["status"] == "CANCELLED"
+        finally:
+            _cleanup(incident_id, sub_id)
+
+    def test_cancel_before_registration_orphans_object_and_registers_nothing(self, client_db, admin_token):
+        from app.db import engine, SessionLocal
+        from sqlalchemy import text
+        from app.services.offline_scene_catalog import JobCancelledError
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            client_db.post(_GEN.format(sid=sub_id), headers={"Authorization": f"Bearer {admin_token}"})
+            job_id, ctx = self._claimed_ctx(sub_id)
+            # User cancels while the job is running (after upload would occur, before register).
+            client_db.post(_CANCEL.format(sid=sub_id), headers={"Authorization": f"Bearer {admin_token}"})
+            builder = _FakeBuilder()
+            with patch("app.services.offline_scene_builder.put_object_bytes", return_value=None), \
+                 patch("app.services.offline_scene_catalog.bucket_exists", return_value=True), \
+                 patch("app.services.offline_scene_catalog.stat_object",
+                       return_value={"size": len(_PKG_BYTES), "etag": "e1", "version_id": "v1"}), \
+                 patch("app.services.offline_scene_catalog.sha256_of_object", return_value=_PKG_SHA):
+                with SessionLocal() as db:
+                    with pytest.raises(JobCancelledError):
+                        builder.upload_and_register(db, ctx, _PKG_BYTES, {
+                            "usgs_meta": {"dataset": "USGS 3DEP", "version": "v", "resolution": "3 m/px"},
+                            "basemap_meta": {"source_label": "USGS 3DEP hillshade"},
+                        }, job_id=job_id)
+            with engine.connect() as conn:
+                pkgs = conn.execute(text("SELECT COUNT(*) FROM offline_scene_packages WHERE submission_id=:s"), {"s": sub_id}).scalar()
+                orphans = conn.execute(text("SELECT COUNT(*) FROM offline_scene_orphaned_objects WHERE submission_id=:s"), {"s": sub_id}).scalar()
+            assert pkgs == 0  # a cancelled job never yields a READY catalog row
+            assert orphans == 1  # the uploaded object is auditable as orphaned
+        finally:
+            _cleanup(incident_id, sub_id)
+
+
+class TestAtomicDuplicateJobPrevention:
+    def test_create_job_if_none_active_yields_exactly_one(self, client_db, admin_token):
+        from app.db import SessionLocal
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            aoi = {"center": {"lat": 37.7, "lon": -122.4}, "radius_m": 1500.0,
+                   "bounds": {"min_lat": 37.6, "min_lon": -122.5, "max_lat": 37.8, "max_lon": -122.3}}
+            with SessionLocal() as db:
+                job1, created1 = jobs.create_job_if_none_active(db, submission_id=sub_id, requested_by=None, aoi=aoi)
+                job2, created2 = jobs.create_job_if_none_active(db, submission_id=sub_id, requested_by=None, aoi=aoi)
+            assert created1 is True and created2 is False
+            assert job1["id"] == job2["id"]  # the second returns the existing active job
+            from app.db import engine
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                n = conn.execute(text("SELECT COUNT(*) FROM offline_scene_jobs WHERE submission_id=:s AND status='QUEUED'"), {"s": sub_id}).scalar()
+            assert n == 1  # exactly one active job
+        finally:
+            _cleanup(incident_id, sub_id)
+
+
+class TestDownloadAuthorization:
+    def test_download_requires_view_permission(self, client_db, admin_token):
+        incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
+        try:
+            login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
+            other = login.json()["access_token"]
+            r = client_db.get(f"/submissions/{sub_id}/gisa/offline-scene-package/download",
+                              headers={"Authorization": f"Bearer {other}"})
+            assert r.status_code == 403  # no read access -> forbidden (not a leak of storage internals)
+        finally:
+            _cleanup(incident_id, sub_id)
+
+    def test_admin_registration_requires_admin(self, client_db, admin_token):
+        login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
+        other = login.json()["access_token"]
+        r = client_db.post("/admin/offline-scene-packages", json={}, headers={"Authorization": f"Bearer {other}"})
+        assert r.status_code in (401, 403)  # admin-only

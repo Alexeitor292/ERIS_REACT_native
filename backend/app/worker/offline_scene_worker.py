@@ -25,11 +25,16 @@ from ..db import SessionLocal
 from ..services import offline_scene as offline_scene_svc
 from ..services import offline_scene_jobs as jobs
 from ..services.offline_scene_builder import OfflineSceneBuildError, get_builder
-from ..services.offline_scene_catalog import PackageRegistrationError
+from ..services.offline_scene_catalog import JobCancelledError, PackageRegistrationError
 
 logger = logging.getLogger("eris.offline_scene_worker")
 
 WORKER_ID = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+
+
+class _JobAborted(Exception):
+    """Internal: the job became terminal (cancelled) mid-flight — abort cleanly
+    WITHOUT marking FAILED, so a user CANCELLED is never overwritten."""
 
 
 def _job_cancelled(db: Session, job_id: int) -> bool:
@@ -88,30 +93,43 @@ def _build_context(db: Session, job: dict) -> dict:
 
 
 def process_job(db: Session, job: dict, builder=None) -> dict:
-    """Run the full pipeline for one claimed job. Returns the final job row."""
+    """Run the full pipeline for one claimed job. Returns the final job row.
+
+    Cancellation is authoritative at every stage: all progress transitions are
+    CONDITIONAL (update_job_if_active) so they can never overwrite a user CANCELLED;
+    cancellation is re-checked before each irreversible boundary; and the final
+    catalog registration + job READY happen atomically with a last cancel re-check
+    (see register_ready_package), so a cancelled job never yields a READY catalog
+    row. An object uploaded just before a cancel is orphaned + audited, never
+    presented as downloadable."""
     builder = builder or get_builder()
     job_id = job["id"]
 
     def progress(status: str, message: str):
-        jobs.update_job(db, job_id, status=status, progress_pct=jobs.progress_for(status), status_message=message)
+        # Conditional: if it doesn't apply, the job is terminal (cancelled) -> abort.
+        if not jobs.update_job_if_active(
+            db, job_id, status=status, progress_pct=jobs.progress_for(status), status_message=message
+        ):
+            raise _JobAborted()
+
+    def ensure_active():
+        if _job_cancelled(db, job_id):
+            raise _JobAborted()
 
     try:
-        if _job_cancelled(db, job_id):
-            return jobs.get_job(db, job_id)  # type: ignore[return-value]
-
+        ensure_active()
         ctx = _build_context(db, job)
 
         # FETCHING_USGS_3DEP (already set by claim) -> prepare source data.
         source = builder.prepare_source_data(ctx, progress=progress)
-        jobs.update_job(
+        if not jobs.update_job_if_active(
             db, job_id, status="BUILDING_BASEMAP",
             progress_pct=jobs.progress_for("BUILDING_BASEMAP"),
             status_message="Preparing terrain relief basemap",
             usgs_source_metadata=source.get("usgs_meta"),
             basemap_source_metadata=source.get("basemap_meta"),
-        )
-        if _job_cancelled(db, job_id):
-            return jobs.get_job(db, job_id)  # type: ignore[return-value]
+        ):
+            raise _JobAborted()
 
         progress("PACKAGING", "Assembling offline terrain package")
         package_bytes = builder.build_package(ctx, source, progress=progress)
@@ -129,25 +147,37 @@ def process_job(db: Session, job: dict, builder=None) -> dict:
                 f"{settings.OFFLINE_SCENE_MAX_PACKAGE_MB} MB policy limit."
             )
 
+        # Irreversible boundary: re-check cancellation immediately before upload.
+        ensure_active()
         progress("UPLOADING", "Uploading verified package to secure storage")
-        jobs.update_job(db, job_id, status="REGISTERING", progress_pct=jobs.progress_for("REGISTERING"),
-                        status_message="Registering package in catalog")
-        catalog_row = builder.upload_and_register(db, ctx, package_bytes, source)
+        if not jobs.update_job_if_active(
+            db, job_id, status="REGISTERING", progress_pct=jobs.progress_for("REGISTERING"),
+            status_message="Registering package in catalog",
+        ):
+            raise _JobAborted()
 
-        return jobs.update_job(
-            db, job_id, status="READY", progress_pct=100,
-            status_message="Offline 3D package ready to download",
-            result_package_id=catalog_row.get("id"),
-            result_package_version=ctx["package_version"],
-        )  # type: ignore[return-value]
+        # Upload + atomic finalize: registers the catalog READY row AND marks the
+        # job READY in one transaction, guarded by a final cancel re-check. Raises
+        # JobCancelledError (object orphaned + audited) if cancelled at the last moment.
+        builder.upload_and_register(db, ctx, package_bytes, source, job_id=job_id)
+        return jobs.get_job(db, job_id)  # type: ignore[return-value]
+    except _JobAborted:
+        logger.info("offline-scene job %s aborted: cancelled by user", job_id)
+        return jobs.get_job(db, job_id)  # type: ignore[return-value]
+    except JobCancelledError:
+        logger.info("offline-scene job %s cancelled during registration; object orphaned + audited", job_id)
+        return jobs.get_job(db, job_id)  # type: ignore[return-value]
     except (OfflineSceneBuildError, PackageRegistrationError) as e:
         logger.warning("offline-scene job %s failed: %s", job_id, e)
-        return jobs.update_job(db, job_id, status="FAILED", progress_pct=0,
-                               status_message="Generation failed", error_details=str(e))  # type: ignore[return-value]
+        # Conditional so a cancel that raced the failure is not overwritten.
+        jobs.update_job_if_active(db, job_id, status="FAILED", progress_pct=0,
+                                  status_message="Generation failed", error_details=str(e))
+        return jobs.get_job(db, job_id)  # type: ignore[return-value]
     except Exception as e:  # pragma: no cover - defensive
         logger.exception("offline-scene job %s crashed", job_id)
-        return jobs.update_job(db, job_id, status="FAILED", progress_pct=0,
-                               status_message="Generation failed", error_details=str(e))  # type: ignore[return-value]
+        jobs.update_job_if_active(db, job_id, status="FAILED", progress_pct=0,
+                                  status_message="Generation failed", error_details=str(e))
+        return jobs.get_job(db, job_id)  # type: ignore[return-value]
 
 
 def run_once(db: Session, builder=None) -> bool:

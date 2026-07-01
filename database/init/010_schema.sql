@@ -671,3 +671,27 @@ CREATE TABLE IF NOT EXISTS offline_scene_jobs (
       'PACKAGING','VERIFYING','UPLOADING','REGISTERING','READY','FAILED','CANCELLED'
     ))
 ) ENGINE=InnoDB;
+
+-- Audit trail for immutable MinIO objects uploaded but intentionally NOT
+-- registered (e.g. the generation job was CANCELLED between upload and catalog
+-- registration). Never referenced by a READY catalog row, so never downloadable;
+-- operators reconcile these out-of-band. See Alembic 0013.
+CREATE TABLE IF NOT EXISTS offline_scene_orphaned_objects (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    job_id BIGINT NULL,
+    minio_bucket VARCHAR(255) NOT NULL,
+    object_key VARCHAR(1024) NOT NULL,
+    sha256 CHAR(64) NULL,
+    size_bytes BIGINT NULL,
+    reason VARCHAR(255) NOT NULL DEFAULT 'cancelled_before_registration',
+    resolved TINYINT(1) NOT NULL DEFAULT 0,
+    resolved_by BIGINT NULL,
+    resolution_notes VARCHAR(512) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME NULL,
+    PRIMARY KEY (id),
+    INDEX idx_osoo_submission (submission_id),
+    INDEX idx_osoo_resolved (resolved),
+    INDEX idx_osoo_job (job_id)
+) ENGINE=InnoDB;

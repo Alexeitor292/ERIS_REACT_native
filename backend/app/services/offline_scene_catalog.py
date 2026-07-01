@@ -24,6 +24,12 @@ class PackageRegistrationError(Exception):
         self.status_code = status_code
 
 
+class JobCancelledError(PackageRegistrationError):
+    """The generation job was CANCELLED before its package could be registered.
+    Nothing is written to the catalog; the already-uploaded immutable object is
+    orphaned (never referenced by a READY row) and recorded for operator cleanup."""
+
+
 def register_ready_package(
     db: Session,
     *,
@@ -44,6 +50,7 @@ def register_ready_package(
     uploaded_by: int | None = None,
     notes: str | None = None,
     verify_sha: bool = True,
+    job_id: int | None = None,
 ) -> dict:
     if elevation_source != offline_scene_svc.ELEVATION_SOURCE_3DEP:
         raise PackageRegistrationError("elevation_source must be USGS_3DEP", 422)
@@ -100,11 +107,24 @@ def register_ready_package(
             raise PackageRegistrationError("SHA-256 mismatch; refusing to mark READY.", 409)
 
     try:
+        # If this registration belongs to a generation job, do a FINAL cancellation
+        # re-check under a row lock, INSIDE the same transaction as the catalog
+        # insert + job READY mark. Either the job was not cancelled -> catalog READY
+        # row AND job READY commit atomically; or it was cancelled -> the whole
+        # transaction rolls back, so a cancelled job NEVER yields a READY catalog row.
+        if job_id is not None:
+            jrow = db.execute(
+                text("SELECT status FROM offline_scene_jobs WHERE id=:j FOR UPDATE"), {"j": job_id}
+            ).first()
+            if jrow and jrow[0] == "CANCELLED":
+                db.rollback()
+                raise JobCancelledError("Job was cancelled before registration; package not registered.", 409)
+
         db.execute(text("""
             UPDATE offline_scene_packages SET status='RETIRED', retired_at=NOW()
             WHERE submission_id=:s AND status='READY'
         """), {"s": submission_id})
-        db.execute(text("""
+        ins = db.execute(text("""
             INSERT INTO offline_scene_packages
               (submission_id, status, package_version, package_format, minio_bucket, object_key,
                sha256, size_bytes, object_version_id, object_etag,
@@ -129,6 +149,16 @@ def register_ready_package(
             "basemap": basemap_or_imagery_source, "content_signature": content_signature,
             "uploaded_by": uploaded_by, "notes": notes,
         })
+        # Mark the owning job READY in the SAME transaction (conditional: a cancel
+        # that landed after our re-check but before commit cannot be overwritten).
+        if job_id is not None:
+            db.execute(text("""
+                UPDATE offline_scene_jobs
+                SET status='READY', progress_pct=100,
+                    status_message='Offline 3D package ready to download',
+                    result_package_id=:pid, result_package_version=:pv
+                WHERE id=:j AND status NOT IN ('READY','FAILED','CANCELLED')
+            """), {"pid": ins.lastrowid, "pv": package_version, "j": job_id})
         db.commit()
     except PackageRegistrationError:
         raise
