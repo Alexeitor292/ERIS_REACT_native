@@ -17,6 +17,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import {
   cleanupTargets,
   createSerialMutex,
+  downloadHttpError,
   isValidRegistry,
   metaFromDescriptor,
   needsLegacyPathMigration,
@@ -479,6 +480,10 @@ export async function downloadOfflineSceneArea(args: {
     if (!isCurrentGen(descriptor.submission_id, myGen)) return meta;
     _resumables.delete(descriptor.submission_id);
     if (!result?.uri) throw new Error("Download did not produce a file.");
+    // A non-2xx response body is an error page (e.g. presigned-URL 403), NOT a
+    // package — surface the real HTTP cause and never size/SHA-validate the body.
+    const httpErr = downloadHttpError(result.status);
+    if (httpErr) throw new Error(httpErr);
     return await verifyAndPromote(meta, result.uri, onProgress);
   } catch (e: unknown) {
     if (!isCurrentGen(descriptor.submission_id, myGen)) return meta; // superseded: leave .part/state alone
@@ -570,6 +575,8 @@ export async function resumeDownload(
     if (!isCurrentGen(submissionId, myGen)) return { meta, resumed: true }; // superseded
     _resumables.delete(submissionId);
     if (!result?.uri) throw new Error("Resume did not produce a file.");
+    const httpErr = downloadHttpError(result.status);
+    if (httpErr) throw new Error(httpErr);
     const promoted = await verifyAndPromote(meta, result.uri, onProgress);
     return { meta: promoted, resumed: true };
   } catch (e: unknown) {

@@ -242,3 +242,49 @@ for offline redistribution.
 - **Expiry/retry:** if a signed URL expires mid-download, the app re-requests the
   descriptor/grant to get a fresh URL and resumes/restarts. Pause/resume state
   (including resumable data) is persisted across app restarts.
+- **Presigning host:** grants are signed **directly against `MINIO_PUBLIC_ENDPOINT`**
+  (the externally reachable host, e.g. `https://files.camposlabs.org`) using
+  `MINIO_REGION` (default `us-east-1`), so the SigV4 `Host` matches the host the
+  device connects to. There is **no** post-sign host rewrite (which would produce
+  `SignatureDoesNotMatch`/403 and a tiny error body the client mis-reads as a size
+  mismatch). Internal storage ops still use the in-cluster `MINIO_ENDPOINT`.
+
+## Verify the protected download end-to-end (post-deploy)
+
+Run on the ERIS server after deploy. `C` is the compose invocation:
+
+```sh
+C="docker compose --env-file docker/.env.proxmox -f docker/docker-compose.yml -f docker/docker-compose.proxmox.yml"
+set -a; . docker/.env.proxmox; set +a   # load MARIADB_ROOT_PASSWORD etc.
+
+# 1) Newest READY package: object key + authoritative catalog size.
+read OBJECT_KEY SIZE_BYTES <<EOF
+$($C exec -T mariadb mariadb -u root -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE" -N -B -e \
+  "SELECT object_key, size_bytes FROM offline_scene_packages WHERE status='READY' ORDER BY id DESC LIMIT 1;")
+EOF
+echo "object_key=$OBJECT_KEY size_bytes=$SIZE_BYTES"
+
+# 2) Generate a FRESH grant (signed against the public host; no credentials exposed).
+URL="$($C exec -T backend python -c "
+from app.storage import presign_get
+from app.config import settings
+print(presign_get('$OBJECT_KEY', bucket=settings.MINIO_OFFLINE_SCENES_BUCKET, expires_seconds=300))
+")"
+case "$URL" in https://files.camposlabs.org/*) : ;; *) echo "UNEXPECTED grant host: $URL"; exit 1;; esac
+
+# 3) Fetch the grant through files.camposlabs.org: assert HTTP 200 + EXACT size.
+HTTP_SIZE="$(curl -sS -o /tmp/scene.eristerrain -w '%{http_code} %{size_download}' "$URL")"
+echo "grant fetch: $HTTP_SIZE"
+[ "$HTTP_SIZE" = "200 $SIZE_BYTES" ] || { echo "FAIL: expected '200 $SIZE_BYTES'"; exit 1; }
+
+# 4) The object must NOT be anonymously readable (no signature -> denied).
+ANON_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://files.camposlabs.org/eris-offline-scenes/$OBJECT_KEY")"
+echo "anonymous (unsigned) access code: $ANON_CODE"
+case "$ANON_CODE" in 401|403) echo "OK: anonymous access denied";; *) echo "FAIL: bucket is not private ($ANON_CODE)"; exit 1;; esac
+
+echo "OK: protected offline-scene download verified (200 + exact size; private)."
+```
+
+This confirms the presigned grant works through the public proxy at the exact
+catalog size, and that the package/bucket is not anonymously exposed. It never
+prints MinIO credentials.

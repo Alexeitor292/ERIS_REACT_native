@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", validation_alias="MINIO_ROOT_USER")
     MINIO_SECRET_KEY: str = Field(default="minio_root_password", validation_alias="MINIO_ROOT_PASSWORD")
     MINIO_PUBLIC_ENDPOINT: str | None = Field(default=None)
+    # Region used when GENERATING presigned URLs. Set explicitly (MinIO's default
+    # is us-east-1) so presigning is purely local — it must NOT round-trip a
+    # GetBucketLocation call to the public endpoint at sign time. Override only if
+    # the MinIO server is configured with a non-default site region.
+    MINIO_REGION: str = Field(default="us-east-1")
     # "presigned" (default): return MinIO presigned GET URLs.
     # "public": return deterministic direct object URLs via MINIO_PUBLIC_ENDPOINT.
     STORAGE_URL_MODE: str = Field(default="presigned")

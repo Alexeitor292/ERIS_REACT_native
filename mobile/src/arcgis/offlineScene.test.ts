@@ -9,6 +9,7 @@ import {
   cleanupTargets,
   createSerialMutex,
   describeScope,
+  downloadHttpError,
   formatBytes,
   formatPackageAge,
   isStale,
@@ -224,6 +225,20 @@ test("generation job status lines drive the mobile UX copy", () => {
   assert.match(jobStatusLine({ status: "PACKAGING", progress_pct: 70, error_details: null }), /Building offline terrain package/);
   assert.equal(jobStatusLine({ status: "READY", progress_pct: 100, error_details: null }), "Ready to download");
   assert.match(jobStatusLine({ status: "FAILED", progress_pct: 0, error_details: "USGS 3DEP coverage unavailable" }), /Failed — USGS 3DEP coverage unavailable/);
+});
+
+test("download HTTP status is inspected before size/SHA (403 != 'size mismatch')", () => {
+  // The real-device failure: a presigned-URL 403 wrote a 535-byte error body that
+  // was then reported as "size mismatch". Now a non-2xx status is a clear HTTP error.
+  assert.equal(downloadHttpError(403), "Offline terrain download failed: HTTP 403");
+  assert.equal(downloadHttpError(401), "Offline terrain download failed: HTTP 401");
+  assert.equal(downloadHttpError(404), "Offline terrain download failed: HTTP 404");
+  assert.equal(downloadHttpError(500), "Offline terrain download failed: HTTP 500");
+  // Success statuses (and an absent status) pass through to size + SHA validation.
+  assert.equal(downloadHttpError(200), null);
+  assert.equal(downloadHttpError(206), null);
+  assert.equal(downloadHttpError(null), null);
+  assert.equal(downloadHttpError(undefined), null);
 });
 
 test("format-aware package paths: eristerrain vs mspk (never .mspk for a bundle)", () => {
