@@ -3,12 +3,38 @@
 # Runs inside a `minio/mc` init container BEFORE backend + offline-scene-worker.
 #
 # FAIL-CLOSED: exits NONZERO (blocking the dependent services) unless the bucket
-# is confirmed (1) present, (2) private (anonymous = none), and (3) versioned via
+# is confirmed (1) present, (2) private (no anonymous access), and (3) versioned via
 # object lock (append-only immutability). Object lock can only be set at creation,
 # so an existing bucket WITHOUT it is REJECTED (recreate it) rather than silently
 # accepted. The uploads bucket (MINIO_BUCKET) is NOT touched.
 set -eu
 
+# --- pure, testable policy check --------------------------------------------
+# Decide whether `mc anonymous get` output describes a SECURE (no public access)
+# bucket. Fail-closed: reject any exposure wording first, then accept ONLY known
+# secure wording, and reject anything unrecognized. Different mc versions phrase a
+# locked-down bucket differently, e.g.:
+#   "... is `none`" / "... is `private`" / "no anonymous ... set" / "... is not set"
+# and an EXPOSED bucket as: download / upload / public / list / custom.
+# (mc's --json output is not relied on: the minio/mc image ships no jq, and the
+#  text wording below is stable + explicitly enumerated.)
+# Returns 0 = secure, 1 = insecure/unknown.
+anon_policy_is_secure() {
+  _lc="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$_lc" in
+    *download*|*upload*|*public*|*list*|*custom*) return 1 ;;  # anonymous exposure
+  esac
+  case "$_lc" in
+    *none*|*private*|*"no anonymous"*|*"is not set"*) return 0 ;;  # locked down
+    *) return 1 ;;  # unrecognized -> fail closed
+  esac
+}
+
+# When sourced by the shell test (BOOTSTRAP_LIB_ONLY=1), define the helpers only
+# and stop before touching env/MinIO. `return` is valid because we are sourced.
+[ "${BOOTSTRAP_LIB_ONLY:-}" = "1" ] && return 0
+
+# --- configuration ----------------------------------------------------------
 BUCKET="${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}"
 ALIAS="erisminio"
 ENDPOINT="${MINIO_ENDPOINT:-http://minio:9000}"
@@ -34,13 +60,10 @@ else
   mc mb --with-lock "$ALIAS/$BUCKET" || fail "could not create '$BUCKET' with object lock"
 fi
 
-# (1) No anonymous access — enforce + verify (no '|| true').
+# (1) No anonymous access — enforce + verify (no '|| true' on the set).
 mc anonymous set none "$ALIAS/$BUCKET" || fail "could not set anonymous=none on '$BUCKET'"
 ANON="$(mc anonymous get "$ALIAS/$BUCKET" 2>/dev/null || true)"
-case "$ANON" in
-  *none*|*"no anonymous"*|*"is not set"*) : ;;
-  *) fail "bucket '$BUCKET' anonymous policy is not 'none' (got: $ANON)";;
-esac
+anon_policy_is_secure "$ANON" || fail "bucket '$BUCKET' anonymous policy is not none/private (got: $ANON)"
 
 # (2) Versioning must be ENABLED (object lock requires it).
 VER="$(mc version info "$ALIAS/$BUCKET" 2>/dev/null || true)"
