@@ -1,0 +1,26 @@
+# Offline 3D scene-package generation worker image.
+# Same app code as the API, plus the geospatial stack (rasterio/GDAL via wheels)
+# for decoding USGS 3DEP DEM GeoTIFFs into the canonical mobile height grid.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# The rasterio manylinux wheel bundles GDAL but still dynamically links a few
+# base system libraries that python:*-slim strips (e.g. libexpat for GDAL's XML
+# drivers). Install just those runtime libs so `import rasterio` works.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-worker.txt ./
+RUN pip install --no-cache-dir -r requirements-worker.txt
+
+COPY app ./app
+COPY assets ./assets
+COPY alembic.ini .
+COPY migrations ./migrations
+
+CMD ["python", "-m", "app.worker.offline_scene_worker"]

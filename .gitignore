@@ -28,6 +28,11 @@ mobile/.git.nested.backup/
 tmp_gisa_xfa/
 backups/
 
+# ---- local agent / tooling state (not application source) ----
+.claude/
+.cursor/
+.aider*
+
 # ---- expo / eas / react-native native artifacts ----
 mobile/.expo/
 mobile/.expo-shared/

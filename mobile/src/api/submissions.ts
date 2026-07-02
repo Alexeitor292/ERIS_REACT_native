@@ -1,6 +1,7 @@
 import { apiFetch } from "./client";
 import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
 import { prepareUploadFile } from "../utils/uploadFile";
+import type { SceneAreaDescriptor, SceneDownloadGrant, OfflineSceneJob } from "../arcgis/offlineScene";
 
 export async function getSubmission(token: string, id: string) {
   return apiFetch(`/submissions/${id}`, { token });
@@ -193,6 +194,55 @@ export async function buildTerrainGrid(
   return apiFetch<{ terrain: GisaTerrainGrid; cached?: boolean }>(
     `/submissions/${id}/gisa/terrain-grid`,
     { method: "POST", token, body: payload },
+  );
+}
+
+export async function getOfflineScenePackageDescriptor(
+  token: string,
+  id: string,
+  radiusM?: number | null,
+) {
+  const q = radiusM != null ? `?radius_m=${encodeURIComponent(String(radiusM))}` : "";
+  return apiFetch<SceneAreaDescriptor>(
+    `/submissions/${id}/gisa/offline-scene-package${q}`,
+    { method: "GET", token },
+  );
+}
+
+export async function getOfflineSceneDownloadGrant(token: string, id: string) {
+  return apiFetch<SceneDownloadGrant>(
+    `/submissions/${id}/gisa/offline-scene-package/download`,
+    { method: "GET", token },
+  );
+}
+
+// --- Automatic generation (jobs) ---
+export async function generateOfflineScenePackage(token: string, id: string, radiusM?: number | null) {
+  const q = radiusM != null ? `?radius_m=${encodeURIComponent(String(radiusM))}` : "";
+  return apiFetch<{ job: OfflineSceneJob | null }>(
+    `/submissions/${id}/gisa/offline-scene-package/generate${q}`,
+    { method: "POST", token },
+  );
+}
+
+export async function getOfflineSceneJob(token: string, id: string) {
+  return apiFetch<{ job: OfflineSceneJob | null }>(
+    `/submissions/${id}/gisa/offline-scene-package/job`,
+    { method: "GET", token },
+  );
+}
+
+export async function cancelOfflineSceneJob(token: string, id: string) {
+  return apiFetch<{ job: OfflineSceneJob | null }>(
+    `/submissions/${id}/gisa/offline-scene-package/job/cancel`,
+    { method: "POST", token },
+  );
+}
+
+export async function retryOfflineSceneJob(token: string, id: string) {
+  return apiFetch<{ job: OfflineSceneJob | null }>(
+    `/submissions/${id}/gisa/offline-scene-package/job/retry`,
+    { method: "POST", token },
   );
 }
 

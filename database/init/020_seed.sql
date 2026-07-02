@@ -1,5 +1,5 @@
-USE eris;
-
+-- Database-agnostic seed (no `USE <db>;`): the caller selects the target DB
+-- (docker-entrypoint MARIADB_DATABASE, or `mysql <dbname> < 020_seed.sql`).
 INSERT INTO roles (name, description) VALUES
 ('FIELD_WORKER', 'Can create and submit field reports'),
 ('MAINTENANCE', 'Can create maintenance incident reports'),

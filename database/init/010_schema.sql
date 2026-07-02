@@ -1,4 +1,9 @@
-USE eris;
+-- Authoritative fresh-install schema. Intentionally DATABASE-AGNOSTIC: it does
+-- NOT hardcode `USE <db>;` / `CREATE DATABASE`, so it loads into whatever database
+-- the caller selects — the MariaDB docker-entrypoint (MARIADB_DATABASE=eris), or a
+-- `mysql <dbname> < 010_schema.sql` target such as the CI clean-migration DB
+-- (eris_migtest). A hardcoded `USE eris;` here previously broke that path with
+-- "Unknown database 'eris'". Keep this file free of USE/CREATE DATABASE.
 SET NAMES utf8mb4;
 
 -- ============================================================
@@ -571,4 +576,139 @@ CREATE TABLE IF NOT EXISTS submission_gisa_actions (
     INDEX idx_gisa_actions_code (action_code),
     CONSTRAINT chk_gisa_actions_group
       CHECK (action_group IN ('IMMEDIATE', 'FOLLOW_UP'))
+) ENGINE=InnoDB;
+
+-- Offline 3D scene-package catalog.
+-- Authoritative record of operator-authored, MinIO-stored .mspk packages for the
+-- mobile native 3D terrain viewer. A submission is offline-available ONLY when a
+-- READY row here exists AND its MinIO object is present with matching size.
+-- Objects are immutable; a replacement is a NEW package_version and the prior
+-- READY row is RETIRED (kept for audit). See Alembic 0011_offline_scene_packages
+-- and docs/offline-scene-package-operator-runbook.md.
+CREATE TABLE IF NOT EXISTS offline_scene_packages (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'READY',          -- READY | RETIRED | FAILED
+    package_version VARCHAR(64) NOT NULL,
+    -- Immutable MinIO location (private bucket; no anonymous access).
+    minio_bucket VARCHAR(128) NOT NULL,
+    object_key VARCHAR(512) NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    -- Package format: 'eristerrain' (auto-generated USGS-3DEP bundle) or 'mspk'.
+    package_format VARCHAR(32) NOT NULL DEFAULT 'mspk',
+    -- Durable object identity (immutable MinIO version id + etag) to detect any
+    -- replacement of the object behind a registered package.
+    object_version_id VARCHAR(128) NULL,
+    object_etag VARCHAR(128) NULL,
+    -- Bounded incident area (never statewide).
+    min_lat DOUBLE NOT NULL,
+    min_lon DOUBLE NOT NULL,
+    max_lat DOUBLE NOT NULL,
+    max_lon DOUBLE NOT NULL,
+    center_lat DOUBLE NOT NULL,
+    center_lon DOUBLE NOT NULL,
+    radius_m DOUBLE NOT NULL,
+    -- Source attribution (what the field user is actually viewing).
+    elevation_source VARCHAR(64) NOT NULL DEFAULT 'USGS_3DEP',
+    elevation_dataset VARCHAR(128) NULL,
+    elevation_version VARCHAR(64) NULL,
+    elevation_resolution VARCHAR(64) NULL,
+    basemap_or_imagery_source VARCHAR(255) NULL,
+    content_signature VARCHAR(64) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    uploaded_at DATETIME NULL,
+    uploaded_by BIGINT NULL,
+    retired_at DATETIME NULL,
+    notes TEXT NULL,
+    PRIMARY KEY (id),
+    -- One row per (submission, version); object keys are globally unique/immutable.
+    CONSTRAINT uq_osp_submission_version UNIQUE (submission_id, package_version),
+    CONSTRAINT uq_osp_object_key UNIQUE (object_key),
+    CONSTRAINT fk_osp_submission
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_osp_uploaded_by
+      FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_osp_submission_status (submission_id, status),
+    CONSTRAINT chk_osp_status
+      CHECK (status IN ('READY', 'RETIRED', 'FAILED'))
+) ENGINE=InnoDB;
+
+-- Offline 3D scene-package GENERATION jobs.
+-- Durable queue for the automatic pipeline: an authorized user requests a
+-- bounded package; a separate worker fetches USGS 3DEP terrain, builds + verifies
+-- a bounded offline package, uploads it to private MinIO, and registers it in
+-- offline_scene_packages. No manual ArcGIS Pro authoring. See Alembic 0012.
+CREATE TABLE IF NOT EXISTS offline_scene_jobs (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    requested_by BIGINT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
+    progress_pct INT NOT NULL DEFAULT 0,
+    status_message VARCHAR(255) NULL,
+    center_lat DOUBLE NULL,
+    center_lon DOUBLE NULL,
+    radius_m DOUBLE NULL,
+    min_lat DOUBLE NULL,
+    min_lon DOUBLE NULL,
+    max_lat DOUBLE NULL,
+    max_lon DOUBLE NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    error_details TEXT NULL,
+    result_package_id BIGINT NULL,
+    result_package_version VARCHAR(64) NULL,
+    usgs_source_metadata JSON NULL,
+    basemap_source_metadata JSON NULL,
+    worker_id VARCHAR(64) NULL,
+    worker_log_ref VARCHAR(255) NULL,
+    claimed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_osj_submission
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_osj_requested_by
+      FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_osj_submission_status (submission_id, status),
+    INDEX idx_osj_status (status),
+    CONSTRAINT chk_osj_status CHECK (status IN (
+      'QUEUED','FETCHING_USGS_3DEP','BUILDING_TERRAIN','BUILDING_BASEMAP',
+      'PACKAGING','VERIFYING','UPLOADING','REGISTERING','READY','FAILED','CANCELLED'
+    ))
+) ENGINE=InnoDB;
+
+-- Audit trail for immutable MinIO objects uploaded but intentionally NOT
+-- registered (e.g. the generation job was CANCELLED between upload and catalog
+-- registration). Never referenced by a READY catalog row, so never downloadable;
+-- operators reconcile these out-of-band. See Alembic 0013.
+CREATE TABLE IF NOT EXISTS offline_scene_orphaned_objects (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    job_id BIGINT NULL,
+    minio_bucket VARCHAR(255) NOT NULL,
+    object_key VARCHAR(1024) NOT NULL,
+    sha256 CHAR(64) NULL,
+    size_bytes BIGINT NULL,
+    reason VARCHAR(255) NOT NULL DEFAULT 'cancelled_before_registration',
+    resolved TINYINT(1) NOT NULL DEFAULT 0,
+    resolved_by BIGINT NULL,
+    resolution_notes VARCHAR(512) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME NULL,
+    PRIMARY KEY (id),
+    INDEX idx_osoo_submission (submission_id),
+    INDEX idx_osoo_resolved (resolved),
+    INDEX idx_osoo_job (job_id)
+) ENGINE=InnoDB;
+
+-- Durable worker liveness signal (heartbeat every poll) so operations can see a
+-- worker is alive even when the queue is idle. See Alembic 0014.
+CREATE TABLE IF NOT EXISTS offline_scene_worker_heartbeats (
+    worker_id VARCHAR(64) NOT NULL,
+    last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    jobs_processed BIGINT NOT NULL DEFAULT 0,
+    last_stage VARCHAR(48) NULL,
+    PRIMARY KEY (worker_id),
+    INDEX idx_oswh_last_seen (last_seen)
 ) ENGINE=InnoDB;

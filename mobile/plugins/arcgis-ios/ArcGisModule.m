@@ -3,11 +3,14 @@
 #import <ArcGIS/ArcGIS.h>
 #import <React/RCTUtils.h>
 #import <UIKit/UIKit.h>
+#import <CommonCrypto/CommonDigest.h>
 
 #import "ArcGisSketchStore.h"
 #import "ArcGisSketchViewController.h"
 #import "ArcGisMissionCenterViewController.h"
 #import "ArcGisPencilSketchViewController.h"
+#import "ArcGisTerrainSceneViewController.h"
+#import "ErisTerrainSceneViewController.h"
 
 @implementation ArcGisModule
 
@@ -184,6 +187,98 @@ RCT_REMAP_METHOD(startMissionCenterMap,
     [root presentViewController:nav animated:YES completion:nil];
     resolve(nil);
   });
+}
+
+RCT_REMAP_METHOD(openOfflineTerrainScene,
+                 openOfflineTerrainScene:(NSString *)paramsJson
+                 resolverOpenOfflineScene:(RCTPromiseResolveBlock)resolve
+                 rejecterOpenOfflineScene:(RCTPromiseRejectBlock)reject) {
+  [ArcGisSketchStore setOfflineSceneParamsJson:paramsJson];
+  // Route by package format: 'mspk' -> ArcGIS Runtime SceneView; 'eristerrain'
+  // (default) -> native SceneKit terrain renderer. An eristerrain bundle is NEVER
+  // loaded as an Esri AGSMobileScenePackage.
+  NSString *format = @"eristerrain";
+  NSData *jd = [paramsJson dataUsingEncoding:NSUTF8StringEncoding];
+  id parsed = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
+  if ([parsed isKindOfClass:[NSDictionary class]]) {
+    NSString *f = ((NSDictionary *)parsed)[@"packageFormat"];
+    if ([f isKindOfClass:[NSString class]] && f.length > 0) format = f;
+  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *root = RCTPresentedViewController();
+    if (root == nil) {
+      reject(@"E_OPEN_OFFLINE_SCENE", @"No active view controller.", nil);
+      return;
+    }
+    UIViewController *vc;
+    if ([format isEqualToString:@"mspk"]) {
+      vc = [[ArcGisTerrainSceneViewController alloc] init];
+    } else {
+      vc = [[ErisTerrainSceneViewController alloc] init];
+    }
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [root presentViewController:nav animated:YES completion:nil];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(sha256OfFile,
+                 sha256OfFile:(NSString *)path
+                 resolverSha256:(RCTPromiseResolveBlock)resolve
+                 rejecterSha256:(RCTPromiseRejectBlock)reject) {
+  if (path == nil || path.length == 0) {
+    reject(@"E_SHA256", @"File path is empty.", nil);
+    return;
+  }
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    NSError *err = nil;
+    NSFileHandle *fh = [NSFileHandle fileHandleForReadingFromURL:[NSURL fileURLWithPath:path] error:&err];
+    if (fh == nil || err != nil) {
+      reject(@"E_SHA256", err.localizedDescription ?: @"Could not open file for hashing.", err);
+      return;
+    }
+    CC_SHA256_CTX ctx;
+    CC_SHA256_Init(&ctx);
+    @try {
+      while (YES) {
+        @autoreleasepool {
+          NSData *chunk = [fh readDataOfLength:1024 * 1024];
+          if (chunk.length == 0) break;
+          CC_SHA256_Update(&ctx, chunk.bytes, (CC_LONG)chunk.length);
+        }
+      }
+    } @finally {
+      [fh closeFile];
+    }
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256_Final(digest, &ctx);
+    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+      [hex appendFormat:@"%02x", digest[i]];
+    }
+    resolve([hex copy]);
+  });
+}
+
+RCT_REMAP_METHOD(validateScenePackage,
+                 validateScenePackage:(NSString *)path
+                 resolverValidatePkg:(RCTPromiseResolveBlock)resolve
+                 rejecterValidatePkg:(RCTPromiseRejectBlock)reject) {
+  if (path == nil || path.length == 0 ||
+      ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+    reject(@"E_VALIDATE_PKG", @"Scene package file not found.", nil);
+    return;
+  }
+  AGSMobileScenePackage *pkg = [[AGSMobileScenePackage alloc] initWithFileURL:[NSURL fileURLWithPath:path]];
+  [pkg loadWithCompletion:^(NSError *_Nullable error) {
+    if (error != nil) {
+      reject(@"E_VALIDATE_PKG", error.localizedDescription ?: @"Package failed to load.", error);
+      return;
+    }
+    // A valid offline 3D package must contain at least one usable scene.
+    resolve(@(pkg.scenes.count > 0));
+  }];
 }
 
 RCT_REMAP_METHOD(startPencilSketch,

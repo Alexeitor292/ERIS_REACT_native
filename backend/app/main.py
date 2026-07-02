@@ -22,7 +22,7 @@ from .db import get_db
 from .config import settings
 from .auth import decode_token
 from .deps import get_current_user, require_roles
-from .storage import ensure_bucket, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url
+from .storage import ensure_bucket, ensure_bucket_exists, bucket_exists, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url, stat_object, sha256_of_object
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
@@ -51,9 +51,13 @@ from .schemas.common import (
     SubmissionPermissionsReplace,
     SubmissionTitlePatch,
     TerrainGridRequest,
+    OfflineScenePackageRegister,
     WorkflowAction,
 )
 from .services import elevation_profile as elevation_profile_svc
+from .services import offline_scene as offline_scene_svc
+from .services import offline_scene_jobs as offline_scene_jobs_svc
+from .services.offline_scene_catalog import register_ready_package, PackageRegistrationError
 from .services import terrain_grid as terrain_grid_svc
 from .services.gisa_validation import (
     validate_action_code_group,
@@ -2726,6 +2730,294 @@ def build_gisa_terrain_grid(
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"submission_id": submission_id, "terrain": result, "cached": False}
+
+
+def _newest_ready_scene_package(db: Session, submission_id: int) -> dict | None:
+    """Newest READY catalog row for a submission (the descriptor's chosen package)."""
+    row = db.execute(text("""
+        SELECT * FROM offline_scene_packages
+        WHERE submission_id = :sid AND status = 'READY'
+        ORDER BY uploaded_at DESC, id DESC
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+    return dict(row) if row else None
+
+
+def _scene_object_present(catalog: dict) -> bool:
+    """True only when the exact MinIO object exists with the catalog's size AND a
+    matching durable object identity (immutable version id, else etag). This
+    detects any replacement/tamper of the object behind a registered package.
+    Storage errors are treated as not-present (honest offline-unavailable)."""
+    try:
+        st = stat_object(object_key=catalog["object_key"], bucket=catalog["minio_bucket"])
+    except Exception:
+        return False
+    if st is None or int(st["size"]) != int(catalog["size_bytes"]):
+        return False
+    cat_vid = catalog.get("object_version_id")
+    if cat_vid:
+        return str(st.get("version_id") or "") == str(cat_vid)
+    cat_etag = catalog.get("object_etag")
+    if cat_etag:
+        return str(st.get("etag") or "") == str(cat_etag)
+    return True  # legacy rows without a stored identity fall back to size-only
+
+
+@app.get("/submissions/{submission_id}/gisa/offline-scene-package")
+def get_gisa_offline_scene_package(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Offline 3D scene-package descriptor for the mobile native viewer.
+
+    available is True ONLY when ERIS has a READY catalog row AND the exact MinIO
+    object is present with matching size + durable identity. Otherwise
+    available=False with a precise reason ("no package prepared yet" / "missing
+    from storage"). All values come from the catalog row — never from a base-URL
+    string. The package is generated automatically by the ERIS worker from USGS
+    3DEP (see the operator runbook); no manual ArcGIS Pro authoring is involved."""
+    require_can_view_submission(submission_id, db, user)
+
+    catalog = _newest_ready_scene_package(db, submission_id)
+    object_present = _scene_object_present(catalog) if catalog else False
+    download_path = (
+        f"/submissions/{submission_id}/gisa/offline-scene-package/download"
+        if (catalog and object_present)
+        else None
+    )
+    return offline_scene_svc.descriptor_from_catalog(
+        submission_id=submission_id,
+        catalog=catalog,
+        object_present=object_present,
+        download_path=download_path,
+    )
+
+
+@app.get("/submissions/{submission_id}/gisa/offline-scene-package/download")
+def download_gisa_offline_scene_package(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Mint a SHORT-LIVED presigned URL for the newest READY package, only after
+    a role/access check. Mobile never receives MinIO credentials; the bucket stays
+    private. On expiry the app re-requests this to resume/retry the download."""
+    require_can_view_submission(submission_id, db, user)
+
+    catalog = _newest_ready_scene_package(db, submission_id)
+    if catalog is None:
+        raise HTTPException(status_code=404, detail="No offline 3D package prepared for this incident.")
+    if not _scene_object_present(catalog):
+        raise HTTPException(status_code=409, detail="The prepared package is missing or changed in storage.")
+    # Enforce the max package-size policy before minting a download grant, so an
+    # over-policy package (e.g. from a relaxed past config) is never downloadable.
+    if offline_scene_svc.exceeds_size_limit(catalog.get("size_bytes"), settings.OFFLINE_SCENE_MAX_PACKAGE_MB):
+        raise HTTPException(
+            status_code=409,
+            detail=f"The prepared package exceeds the {settings.OFFLINE_SCENE_MAX_PACKAGE_MB} MB download policy.",
+        )
+
+    ttl = int(settings.OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS)
+    try:
+        url = presign_get(catalog["object_key"], bucket=catalog["minio_bucket"], expires_seconds=ttl)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not mint download URL: {e}")
+    return {
+        "submission_id": submission_id,
+        "url": url,
+        "expires_in_seconds": ttl,
+        "object_key": catalog["object_key"],
+        "sha256": catalog["sha256"],
+        "size_bytes": int(catalog["size_bytes"]),
+        "package_version": catalog["package_version"],
+        "package_format": catalog.get("package_format") or "eristerrain",
+        "content_signature": catalog["content_signature"],
+    }
+
+
+def _job_public(job: dict | None) -> dict | None:
+    """Safe job projection for the mobile client (no worker internals)."""
+    if not job:
+        return None
+    return {
+        "id": job["id"],
+        "submission_id": job["submission_id"],
+        "status": job["status"],
+        "progress_pct": job["progress_pct"],
+        "status_message": job["status_message"],
+        "retry_count": job["retry_count"],
+        "error_details": job["error_details"],
+        "result_package_version": job["result_package_version"],
+        "area": {
+            "center": {"lat": job["center_lat"], "lon": job["center_lon"]},
+            "radius_m": job["radius_m"],
+            "bounds": {
+                "min_lat": job["min_lat"], "min_lon": job["min_lon"],
+                "max_lat": job["max_lat"], "max_lon": job["max_lon"],
+            },
+        },
+        "created_at": str(job["created_at"]) if job.get("created_at") is not None else None,
+        "updated_at": str(job["updated_at"]) if job.get("updated_at") is not None else None,
+    }
+
+
+@app.post("/submissions/{submission_id}/gisa/offline-scene-package/generate", status_code=202)
+def generate_offline_scene_package(
+    submission_id: int = Path(..., ge=1),
+    radius_m: float | None = None,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Request AUTOMATIC generation of a bounded offline 3D package. Confirms the
+    incident has coordinates, enforces edit permission, computes a bounded AOI,
+    prevents duplicate active jobs, creates a QUEUED job, and returns immediately.
+    A separate worker fetches USGS 3DEP, builds + verifies + uploads + registers
+    the package. No manual ArcGIS Pro authoring is involved."""
+    require_can_edit_submission(submission_id, db, user)
+
+    row = db.execute(text("SELECT latitude, longitude FROM submission_gisa WHERE submission_id=:s LIMIT 1"),
+                     {"s": submission_id}).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="GISA data not found for this submission")
+    lat, lon = row["latitude"], row["longitude"]
+    if lat is None or lon is None:
+        raise HTTPException(status_code=400, detail="Cannot prepare an offline area: incident has no coordinates.")
+
+    # Bounded AOI (incident radius, never statewide). ONE authoritative maximum
+    # (settings.OFFLINE_SCENE_MAX_RADIUS_M, itself capped by the absolute hard
+    # ceiling) enforced here, at job creation, and again at worker execution.
+    radius = offline_scene_svc.clamp_radius_m(radius_m, settings.OFFLINE_SCENE_MAX_RADIUS_M)
+    bounds = offline_scene_svc.bounding_box(float(lat), float(lon), radius)
+    aoi = {"center": {"lat": float(lat), "lon": float(lon)}, "radius_m": radius, "bounds": bounds}
+
+    # Prevent duplicate active jobs ATOMICALLY: create_job_if_none_active locks the
+    # submission row, re-checks for an active job, and inserts only if none — so two
+    # simultaneous requests yield exactly one active job (the other gets 409).
+    job, created = offline_scene_jobs_svc.create_job_if_none_active(
+        db, submission_id=submission_id, requested_by=user["id"], aoi=aoi
+    )
+    if not created:
+        raise HTTPException(status_code=409, detail="A package-generation job is already in progress.")
+    return {"job": _job_public(job)}
+
+
+@app.get("/submissions/{submission_id}/gisa/offline-scene-package/job")
+def get_offline_scene_package_job(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Latest generation job for the submission (for mobile progress polling)."""
+    require_can_view_submission(submission_id, db, user)
+    job = offline_scene_jobs_svc.get_latest_job(db, submission_id)
+    return {"job": _job_public(job)}
+
+
+@app.post("/submissions/{submission_id}/gisa/offline-scene-package/job/cancel")
+def cancel_offline_scene_package_job(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_edit_submission(submission_id, db, user)
+    active = offline_scene_jobs_svc.get_active_job(db, submission_id)
+    if not active:
+        raise HTTPException(status_code=404, detail="No active generation job to cancel.")
+    if not offline_scene_jobs_svc.can_cancel(active["status"]):
+        raise HTTPException(status_code=409, detail="This job can no longer be cancelled.")
+    job = offline_scene_jobs_svc.cancel_job(db, active["id"])
+    return {"job": _job_public(job)}
+
+
+@app.post("/submissions/{submission_id}/gisa/offline-scene-package/job/retry")
+def retry_offline_scene_package_job(
+    submission_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    require_can_edit_submission(submission_id, db, user)
+    latest = offline_scene_jobs_svc.get_latest_job(db, submission_id)
+    if not latest:
+        raise HTTPException(status_code=404, detail="No generation job to retry.")
+    if not offline_scene_jobs_svc.can_retry(latest["status"]):
+        raise HTTPException(status_code=409, detail="Only a FAILED job can be retried.")
+    job = offline_scene_jobs_svc.retry_job(db, latest["id"])
+    return {"job": _job_public(job)}
+
+
+@app.post("/admin/offline-scene-packages")
+def register_offline_scene_package(
+    payload: OfflineScenePackageRegister = ...,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["ADMIN"])),
+):
+    """ADMIN-only registration of an operator-uploaded .mspk.
+
+    Verifies the MinIO object exists, its size matches, and its SHA-256 matches
+    BEFORE marking READY. Rejects missing objects, size/hash mismatch, duplicate
+    versions, and invalid bounds. Retires any prior READY package for the
+    submission (kept for audit). Objects are immutable — never overwritten."""
+    sub = db.execute(text("SELECT id FROM submissions WHERE id = :id"), {"id": payload.submission_id}).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    # Manual override path registers an operator-uploaded .mspk. The PRIMARY path
+    # is automatic generation via .../offline-scene-package/generate.
+    try:
+        row = register_ready_package(
+            db,
+            submission_id=payload.submission_id,
+            package_version=payload.package_version,
+            sha256=payload.sha256,
+            size_bytes=payload.size_bytes,
+            min_lat=payload.min_lat, min_lon=payload.min_lon,
+            max_lat=payload.max_lat, max_lon=payload.max_lon,
+            center_lat=payload.center_lat, center_lon=payload.center_lon, radius_m=payload.radius_m,
+            elevation_source=payload.elevation_source,
+            elevation_dataset=payload.elevation_dataset,
+            elevation_version=payload.elevation_version,
+            elevation_resolution=payload.elevation_resolution,
+            basemap_or_imagery_source=payload.basemap_or_imagery_source,
+            content_signature=payload.content_signature,
+            package_format="mspk",
+            object_key=payload.object_key,
+            uploaded_by=user["id"],
+            notes=payload.notes,
+        )
+    except PackageRegistrationError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    return {"registered": True, "package": row}
+
+
+@app.get("/ops/offline-scene/health")
+def offline_scene_ops_health(
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["ADMIN"])),
+):
+    """ADMIN ops health for the offline-scene pipeline: queue depth, live workers,
+    unresolved orphaned objects, and private-bucket posture. Sanitized — no MinIO
+    credentials, endpoints, or unbounded internals are returned."""
+    from .storage import bucket_exists
+    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    try:
+        bucket_ok = bool(bucket_exists(bucket))
+        bucket_status = "ok" if bucket_ok else "missing"
+    except Exception:
+        bucket_ok = False
+        bucket_status = "unreachable"
+    queue = offline_scene_jobs_svc.queue_health(db)
+    workers = offline_scene_jobs_svc.worker_health(db, alive_within_seconds=max(60, 4 * int(settings.OFFLINE_SCENE_WORKER_POLL_SECONDS)))
+    orphans = offline_scene_jobs_svc.orphaned_object_count(db, unresolved_only=True)
+    healthy = bucket_ok and workers["any_alive"]
+    return {
+        "healthy": healthy,
+        "bucket": {"name": bucket, "status": bucket_status},  # name only; no endpoint/creds
+        "queue": queue,
+        "workers": workers,
+        "orphaned_objects_unresolved": orphans,
+        "dev_mode": bool(settings.OFFLINE_SCENE_DEV_MODE),
+    }
 
 
 @app.put("/submissions/{submission_id}/gisa/incident-types")

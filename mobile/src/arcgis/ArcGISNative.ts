@@ -14,6 +14,29 @@ type ArcGisNativeModule = {
   getSketchGeoJson(): Promise<string>; // returns GeoJSON or Esri JSON geometry string
   getSketchImagePath(): Promise<string>;
   clearSketch(): Promise<void>;
+  // Native offline 3D terrain SceneView. Opens a locally-downloaded .mspk
+  // (Mobile Scene Package) with local elevation + basemap; renders overlays from
+  // the supplied params. The .mspk download/management itself is done in JS
+  // (expo-file-system); this only renders. paramsJson: see OpenOfflineSceneParams.
+  openOfflineTerrainScene(paramsJson: string): Promise<void>;
+  // Integrity (native, no JS crypto dependency): SHA-256 of a local file, and a
+  // real load-check that the .mspk opens as an AGSMobileScenePackage.
+  sha256OfFile(path: string): Promise<string>;
+  validateScenePackage(path: string): Promise<boolean>;
+};
+
+export type OpenOfflineSceneParams = {
+  packagePath: string; // local file path to the downloaded package
+  packageFormat?: string; // "eristerrain" (default) or "mspk"
+  extractedDir?: string | null; // extracted eristerrain dir (manifest+grid+hillshade)
+  incident: { lat: number; lon: number };
+  incidentLabel?: string | null;
+  geometry?: unknown | null; // uploaded incident geometry (GeoJSON or Esri JSON)
+  roadBearingDeg?: number | null; // only drawn when a real bearing exists
+  sampleExtent?: { minLat: number; minLon: number; maxLat: number; maxLon: number } | null;
+  packageVersion?: string | null;
+  downloadedAt?: string | null;
+  sizeBytes?: number | null;
 };
 
 const { ArcGis } = NativeModules as { ArcGis: ArcGisNativeModule };
@@ -40,6 +63,37 @@ function hasMethod(name: ArcGisMethodName): boolean {
 
 export function supportsMissionCenterMap(): boolean {
   return hasMethod("setMissionIncidents") && hasMethod("startMissionCenterMap");
+}
+
+export function supportsOfflineTerrainScene(): boolean {
+  return hasMethod("openOfflineTerrainScene");
+}
+
+export function supportsScenePackageIntegrity(): boolean {
+  return hasMethod("sha256OfFile") && hasMethod("validateScenePackage");
+}
+
+export async function sha256OfFile(path: string): Promise<string> {
+  if (!hasMethod("sha256OfFile")) {
+    throw new Error("Native SHA-256 missing in this app build. Rebuild the app (EAS dev build).");
+  }
+  return requireArcGisModule().sha256OfFile(path);
+}
+
+export async function validateScenePackage(path: string): Promise<boolean> {
+  if (!hasMethod("validateScenePackage")) {
+    throw new Error("Native scene-package validation missing in this app build. Rebuild the app (EAS dev build).");
+  }
+  return requireArcGisModule().validateScenePackage(path);
+}
+
+export async function openOfflineTerrainScene(params: OpenOfflineSceneParams): Promise<void> {
+  if (!hasMethod("openOfflineTerrainScene")) {
+    throw new Error(
+      "Native 3D terrain viewer missing in this app build. Rebuild the app (EAS dev build) to include the latest native ArcGIS module.",
+    );
+  }
+  return requireArcGisModule().openOfflineTerrainScene(JSON.stringify(params));
 }
 
 export async function loadMmpk(path: string) {

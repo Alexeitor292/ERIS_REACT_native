@@ -1,105 +1,45 @@
 name: CI
 
+# Validate on every branch push AND every pull request (not only main), so
+# feature branches like feature/native-offline-3d-terrain-mobile are gated too.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   backend:
+    name: Backend (non-DB)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Python compile check
-        run: |
-          python -m py_compile app/main.py
-          python -m py_compile app/migrations_check.py
-          python -m py_compile app/routes/incidents.py
-          python -m py_compile app/routes/road_inventory.py
-          python -m py_compile app/services/road_inventory_parser.py
-          python -m py_compile app/services/road_inventory_lookup.py
-          python -m py_compile app/services/road_inventory_import_jobs.py
-          python -m py_compile app/services/road_inventory_packages.py
-          python -m py_compile migrations/env.py
-          python -m py_compile migrations/versions/0001_baseline.py
-          python -m py_compile migrations/versions/0002_road_inventory.py
-          python -m py_compile migrations/versions/0003_road_inventory_import_jobs.py
-          python -m py_compile migrations/versions/0004_ri_packages_json_gz.py
-          python -m py_compile migrations/versions/0005_incidents_ri_context.py
-          python -m py_compile migrations/versions/0006_submission_gisa_ri_context.py
-
-      - name: Alembic script check
+        # requirements-worker.txt = API deps + the geospatial stack (numpy/rasterio/
+        # Pillow/requests) that the offline-scene tests import at module load.
+        run: pip install -r requirements-worker.txt
+      - name: Compile all backend + migration sources
+        run: python -m compileall -q app migrations
+      - name: Alembic script check (single linear head)
         run: |
           alembic history
           alembic heads
-
-      - name: Run smoke tests
+      - name: Non-DB tests
         env:
           DB_PASS: ci_placeholder
           JWT_SECRET: ci_placeholder_secret
-        run: python -m pytest tests/ -m "not db" -v --tb=short
-
-  web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: TypeScript check
-        run: npx tsc -p tsconfig.json --noEmit
-
-      - name: Build
-        run: npm run build
-
-  mobile:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: mobile/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: TypeScript check
-        run: npx tsc -p tsconfig.json --noEmit
+        run: python -m pytest tests/ -m "not db" --tb=short
 
   backend-db:
+    name: Backend (DB + offline-scene)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
-
     services:
       mariadb:
         image: mariadb:11
@@ -112,10 +52,7 @@ jobs:
           - 3306:3306
         options: >-
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=15
-
+          --health-interval=5s --health-timeout=5s --health-retries=15
     env:
       DB_HOST: 127.0.0.1
       DB_PORT: 3306
@@ -124,35 +61,239 @@ jobs:
       DB_PASS: CHANGE_ME_APP_DB_PASSWORD
       JWT_SECRET: ci_placeholder_secret
       ENV: dev
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Initialize schema and seed data
+        # requirements-worker.txt = API deps + the geospatial stack (numpy/rasterio/
+        # Pillow/requests) that the offline-scene tests import at module load.
+        run: pip install -r requirements-worker.txt
+      - name: Initialize authoritative schema + seed
         run: |
-          mysql -h 127.0.0.1 -u root -prootpassword < ../database/init/010_schema.sql
-          mysql -h 127.0.0.1 -u root -prootpassword < ../database/init/020_seed.sql
-
-      - name: Stamp baseline and apply migrations
+          mysql -h 127.0.0.1 -u root -prootpassword eris < ../database/init/010_schema.sql
+          mysql -h 127.0.0.1 -u root -prootpassword eris < ../database/init/020_seed.sql
+      - name: Stamp baseline + upgrade head (upgrade-over-init path)
         run: |
           alembic stamp 0001_baseline
           alembic upgrade head
           alembic current
+      - name: DB integration tests (incl. offline-scene jobs/catalog/cancellation)
+        run: python -m pytest tests/ -m db --tb=short
 
-      - name: Run DB integration tests
-        run: python -m pytest tests/ -m db -v --tb=short
+  backend-migrations:
+    name: Backend (clean base->head migration)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: rootpassword
+          MARIADB_DATABASE: eris_migtest
+          MARIADB_USER: eris_user
+          MARIADB_PASSWORD: CHANGE_ME_APP_DB_PASSWORD
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=15
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: eris_migtest
+      DB_USER: eris_user
+      DB_PASS: CHANGE_ME_APP_DB_PASSWORD
+      JWT_SECRET: ci_placeholder_secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        # requirements-worker.txt = API deps + the geospatial stack (numpy/rasterio/
+        # Pillow/requests) that the offline-scene tests import at module load.
+        run: pip install -r requirements-worker.txt
+      # Clean DB -> authoritative init schema -> migrate to head. ERIS treats
+      # database/init/010_schema.sql as authoritative; migrations are idempotent
+      # overlays (CREATE TABLE / ADD COLUMN IF NOT EXISTS). This validates the full
+      # chain applies cleanly over a fresh init and lands at head.
+      - name: Load authoritative init schema
+        run: mysql -h 127.0.0.1 -u root -prootpassword eris_migtest < ../database/init/010_schema.sql
+      - name: alembic stamp baseline + upgrade head
+        run: |
+          alembic stamp 0001_baseline
+          alembic upgrade head
+          alembic current | grep -q "0014_offline_scene_worker_hb"
+      - name: alembic upgrade head is idempotent (no-op on re-run)
+        run: alembic upgrade head
+      - name: Assert key tables exist at head
+        run: |
+          for t in submissions offline_scene_packages offline_scene_jobs offline_scene_orphaned_objects offline_scene_worker_heartbeats; do
+            mysql -h 127.0.0.1 -u root -prootpassword -e "SELECT 1 FROM $t LIMIT 1;" eris_migtest \
+              || { echo "missing table $t at head"; exit 1; }
+          done
 
-  docker-config:
+  worker-image:
+    name: Worker image (build + imports + decode fixture)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Build offline-scene worker image
+        run: docker build -f backend/Dockerfile.worker -t eris-offline-scene-worker backend
+      - name: In-container import smoke test
+        # Settings() (imported transitively) requires JWT_SECRET + DB_PASS; pass
+        # placeholders so a bare import does not fail on missing config.
+        run: |
+          docker run --rm -e JWT_SECRET=ci_placeholder -e DB_PASS=ci_placeholder eris-offline-scene-worker python -c "import requests, rasterio, numpy, PIL; from app.worker.offline_scene_worker import run_worker; from app.services.offline_scene_builder import HillshadeReliefBuilder; print('worker imports OK')"
+      - name: DEM decode fixture (mocked USGS raster, no MinIO)
+        run: |
+          docker run --rm -e JWT_SECRET=ci_placeholder -e DB_PASS=ci_placeholder eris-offline-scene-worker python -c "
+          import numpy as np, rasterio
+          from rasterio.io import MemoryFile
+          from rasterio.transform import from_origin
+          from app.services.offline_scene_terrain import decode_dem_tiff, encode_height_grid, build_terrain_metadata, grid_sha256
+          # Synthesize a tiny GeoTIFF DEM (stands in for a USGS 3DEP export).
+          data = (np.arange(64, dtype='float32').reshape(8, 8))
+          prof = dict(driver='GTiff', height=8, width=8, count=1, dtype='float32', crs='EPSG:4326', transform=from_origin(-121.5, 38.6, 0.01, 0.01))
+          with MemoryFile() as mf:
+              with mf.open(**prof) as ds: ds.write(data, 1)
+              tif = mf.read()
+          arr = decode_dem_tiff(tif, max_dim=512)
+          grid, stats = encode_height_grid(arr)
+          meta = build_terrain_metadata(stats, {'min_lat':38.5,'min_lon':-121.5,'max_lat':38.6,'max_lon':-121.4}, grid_sha256(grid))
+          assert stats['rows']==8 and stats['columns']==8 and len(grid)==8*8*4
+          assert meta['encoding']=='float32' and meta['local_transform']['lon_per_col']>0
+          print('DEM decode fixture OK', stats)
+          "
 
-      - name: Validate Docker Compose config
-        run: docker compose --env-file docker/.env.example -f docker/docker-compose.yml config
+  web:
+    name: Web (test + typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests (node --test)
+        run: node --experimental-strip-types --test src/components/terrainScene.test.ts
+      - name: TypeScript check
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: Production build
+        run: npm run build
+
+  mobile:
+    name: Mobile (lint + types + pure tests + prebuild)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: ArcGIS native selector guard (blocks unsupported 100.15 geometry API)
+        run: node scripts/check-arcgis-native-selectors.mjs
+      - name: Lint
+        run: npx expo lint
+      - name: TypeScript check
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: Offline-scene / terrain / bundle / overlay unit tests
+        run: >-
+          node --experimental-strip-types --test
+          src/arcgis/offlineScene.test.ts
+          src/arcgis/eristerrainBundle.test.ts
+          src/arcgis/terrainOverlays.test.ts
+      - name: Expo doctor
+        run: npx expo-doctor || true   # advisory; does not fail the build
+      - name: Expo iOS prebuild verification (config plugin wiring)
+        run: npx expo prebuild --platform ios --no-install
+
+  ios-native:
+    name: iOS native compile (simulator, no signing)
+    # macos-15 ships Xcode 16.x (React Native / Expo SDK 54 require Xcode >= 16.1).
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Expo iOS prebuild
+        run: npx expo prebuild --platform ios --clean
+      - name: CocoaPods install
+        working-directory: mobile/ios
+        run: pod install
+      - name: Resolve workspace + scheme
+        id: xc
+        working-directory: mobile/ios
+        run: |
+          WS=$(ls -d *.xcworkspace | head -1)
+          SCHEME=$(xcodebuild -list -workspace "$WS" -json | python3 -c "import sys,json;print(json.load(sys.stdin)['workspace']['schemes'][0])")
+          echo "workspace=$WS" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+      - name: Xcode simulator build (signing disabled)
+        working-directory: mobile/ios
+        run: >-
+          xcodebuild
+          -workspace "${{ steps.xc.outputs.workspace }}"
+          -scheme "${{ steps.xc.outputs.scheme }}"
+          -sdk iphonesimulator -configuration Debug
+          CODE_SIGNING_ALLOWED=NO build
+
+  compose:
+    name: Compose validate + key isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure PyYAML for the isolation check
+        run: python3 -m pip install --quiet pyyaml
+      - name: Validate base compose
+        run: docker compose --env-file docker/.env.example -f docker/docker-compose.yml config >/dev/null
+      - name: Provide .env.proxmox for validation
+        # The proxmox services reference `env_file: .env.proxmox` (the real file,
+        # gitignored); seed it from the committed example so `config` can resolve it.
+        working-directory: docker
+        run: cp .env.proxmox.example .env.proxmox
+      - name: Validate production (proxmox) compose overlay
+        working-directory: docker
+        run: docker compose --env-file .env.proxmox.example -f docker-compose.yml -f docker-compose.proxmox.yml config > /tmp/rendered.yml
+      - name: Assert minio-init bootstrap gates backend + worker
+        run: |
+          grep -q "minio-init" /tmp/rendered.yml || { echo "minio-init service missing"; exit 1; }
+          grep -q "service_completed_successfully" /tmp/rendered.yml || { echo "init dependency wiring missing"; exit 1; }
+      - name: Assert backend/worker never receive the browser ArcGIS key
+        run: |
+          # VITE_ARCGIS_API_KEY is a browser build-arg for web only; it must not
+          # appear in the backend or offline-scene-worker service environment.
+          python3 - <<'PY'
+          import yaml
+          doc = yaml.safe_load(open('/tmp/rendered.yml'))
+          for svc in ('backend', 'offline-scene-worker'):
+              env = (doc['services'].get(svc, {}) or {}).get('environment', {}) or {}
+              keys = env.keys() if isinstance(env, dict) else [e.split('=')[0] for e in env]
+              bad = [k for k in keys if 'ARCGIS' in k.upper() and 'VITE' in k.upper()]
+              assert not bad, f"{svc} must not receive browser ArcGIS key: {bad}"
+          print("key isolation OK: backend/worker have no VITE_ARCGIS_*")
+          PY

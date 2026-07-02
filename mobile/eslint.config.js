@@ -5,6 +5,7 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // *.test.ts run under Node's built-in test runner (node --test), not RN.
+    ignores: ['dist/*', '**/*.test.ts'],
   },
 ]);
