@@ -148,6 +148,40 @@
   return [[AGSGraphic alloc] initWithGeometry:pt symbol:sym attributes:nil];
 }
 
+// ArcGIS Runtime 100.15 multipart geometries are IMMUTABLE and are constructed
+// with the geometry BUILDER classes (AGSPolylineBuilder / AGSPolygonBuilder, base
+// AGSMultipartBuilder) via -addPointWithX:y: then -toGeometry. The immutable
+// geometry / point-collection classes have no mutating add-or-init constructors
+// in 100.15 (using them was the EAS compile failure this replaced). All overlays
+// are WGS84; `pairs` are [lon, lat] arrays (GeoJSON order). Returns nil for
+// undersized/degenerate input so callers render nothing (never crash).
+
+- (nullable AGSPolyline *)polylineFromLonLatPairs:(NSArray *)pairs {
+  if (![pairs isKindOfClass:[NSArray class]]) return nil;
+  AGSPolylineBuilder *builder = [[AGSPolylineBuilder alloc] initWithSpatialReference:AGSSpatialReference.WGS84];
+  NSUInteger n = 0;
+  for (id pair in pairs) {
+    if ([pair isKindOfClass:[NSArray class]] && [(NSArray *)pair count] >= 2) {
+      [builder addPointWithX:[pair[0] doubleValue] y:[pair[1] doubleValue]];
+      n++;
+    }
+  }
+  return n >= 2 ? [builder toGeometry] : nil;  // a line needs >= 2 vertices
+}
+
+- (nullable AGSPolygon *)polygonFromLonLatPairs:(NSArray *)pairs {
+  if (![pairs isKindOfClass:[NSArray class]]) return nil;
+  AGSPolygonBuilder *builder = [[AGSPolygonBuilder alloc] initWithSpatialReference:AGSSpatialReference.WGS84];
+  NSUInteger n = 0;
+  for (id pair in pairs) {
+    if ([pair isKindOfClass:[NSArray class]] && [(NSArray *)pair count] >= 2) {
+      [builder addPointWithX:[pair[0] doubleValue] y:[pair[1] doubleValue]];
+      n++;
+    }
+  }
+  return n >= 3 ? [builder toGeometry] : nil;  // a polygon ring needs >= 3 vertices
+}
+
 - (void)renderOverlaysWithParams:(NSDictionary *)p {
   [self.overlay.graphics removeAllObjects];
 
@@ -167,13 +201,15 @@
     double cosLat = cos(self.incidentLat * M_PI / 180.0);
     if (fabs(cosLat) < 1e-6) cosLat = 1e-6;
     double dLon = (sin(rad) * halfLenM) / (111320.0 * cosLat);
-    AGSPointCollection *coll = [[AGSPointCollection alloc] initWithSpatialReference:AGSSpatialReference.WGS84];
-    [coll addPoint:[AGSPoint pointWithX:self.incidentLon - dLon y:self.incidentLat - dLat spatialReference:AGSSpatialReference.WGS84]];
-    [coll addPoint:[AGSPoint pointWithX:self.incidentLon + dLon y:self.incidentLat + dLat spatialReference:AGSSpatialReference.WGS84]];
-    AGSPolyline *line = [[AGSPolyline alloc] initWithPoints:coll.array];
-    AGSSimpleLineSymbol *ls = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
-                                                                   color:[UIColor colorWithRed:0.98 green:0.80 blue:0.13 alpha:0.95] width:3];
-    [self.overlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:line symbol:ls attributes:nil]];
+    AGSPolyline *line = [self polylineFromLonLatPairs:@[
+      @[@(self.incidentLon - dLon), @(self.incidentLat - dLat)],
+      @[@(self.incidentLon + dLon), @(self.incidentLat + dLat)],
+    ]];
+    if (line != nil) {
+      AGSSimpleLineSymbol *ls = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
+                                                                     color:[UIColor colorWithRed:0.98 green:0.80 blue:0.13 alpha:0.95] width:3];
+      [self.overlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:line symbol:ls attributes:nil]];
+    }
   }
 
   // Terrain sample extent (only when present).
@@ -183,17 +219,19 @@
     NSNumber *minLat = e[@"minLat"], *minLon = e[@"minLon"], *maxLat = e[@"maxLat"], *maxLon = e[@"maxLon"];
     if ([minLat isKindOfClass:[NSNumber class]] && [minLon isKindOfClass:[NSNumber class]] &&
         [maxLat isKindOfClass:[NSNumber class]] && [maxLon isKindOfClass:[NSNumber class]]) {
-      AGSPointCollection *ring = [[AGSPointCollection alloc] initWithSpatialReference:AGSSpatialReference.WGS84];
-      [ring addPoint:[AGSPoint pointWithX:minLon.doubleValue y:minLat.doubleValue spatialReference:AGSSpatialReference.WGS84]];
-      [ring addPoint:[AGSPoint pointWithX:maxLon.doubleValue y:minLat.doubleValue spatialReference:AGSSpatialReference.WGS84]];
-      [ring addPoint:[AGSPoint pointWithX:maxLon.doubleValue y:maxLat.doubleValue spatialReference:AGSSpatialReference.WGS84]];
-      [ring addPoint:[AGSPoint pointWithX:minLon.doubleValue y:maxLat.doubleValue spatialReference:AGSSpatialReference.WGS84]];
-      AGSPolygon *poly = [[AGSPolygon alloc] initWithPoints:ring.array];
-      AGSSimpleLineSymbol *outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
-                                                                          color:[UIColor colorWithRed:0.22 green:0.74 blue:0.97 alpha:0.9] width:1.5];
-      AGSSimpleFillSymbol *fill = [[AGSSimpleFillSymbol alloc] initWithStyle:AGSSimpleFillSymbolStyleSolid
-                                                                       color:[UIColor colorWithRed:0.22 green:0.74 blue:0.97 alpha:0.08] outline:outline];
-      [self.overlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:poly symbol:fill attributes:nil]];
+      AGSPolygon *poly = [self polygonFromLonLatPairs:@[
+        @[@(minLon.doubleValue), @(minLat.doubleValue)],
+        @[@(maxLon.doubleValue), @(minLat.doubleValue)],
+        @[@(maxLon.doubleValue), @(maxLat.doubleValue)],
+        @[@(minLon.doubleValue), @(maxLat.doubleValue)],
+      ]];
+      if (poly != nil) {
+        AGSSimpleLineSymbol *outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
+                                                                            color:[UIColor colorWithRed:0.22 green:0.74 blue:0.97 alpha:0.9] width:1.5];
+        AGSSimpleFillSymbol *fill = [[AGSSimpleFillSymbol alloc] initWithStyle:AGSSimpleFillSymbolStyleSolid
+                                                                         color:[UIColor colorWithRed:0.22 green:0.74 blue:0.97 alpha:0.08] outline:outline];
+        [self.overlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:poly symbol:fill attributes:nil]];
+      }
     }
   }
 
@@ -214,24 +252,16 @@
     UIColor *blue = [UIColor colorWithRed:0.08 green:0.36 blue:0.80 alpha:0.92];
     [self.overlay.graphics addObject:[self pointGraphicAtLat:[c[1] doubleValue] lon:[c[0] doubleValue] color:blue size:10]];
   } else if ([type isEqualToString:@"linestring"] && [coords isKindOfClass:[NSArray class]]) {
-    AGSPointCollection *coll = [[AGSPointCollection alloc] initWithSpatialReference:AGSSpatialReference.WGS84];
-    for (id pair in (NSArray *)coords) {
-      if ([pair isKindOfClass:[NSArray class]] && [(NSArray *)pair count] >= 2)
-        [coll addPoint:[AGSPoint pointWithX:[pair[0] doubleValue] y:[pair[1] doubleValue] spatialReference:AGSSpatialReference.WGS84]];
+    AGSPolyline *line = [self polylineFromLonLatPairs:(NSArray *)coords];
+    if (line != nil) {
+      AGSSimpleLineSymbol *ls = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
+                                                                     color:[UIColor colorWithRed:0.08 green:0.36 blue:0.80 alpha:0.95] width:3];
+      [self.overlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:line symbol:ls attributes:nil]];
     }
-    AGSPolyline *line = [[AGSPolyline alloc] initWithPoints:coll.array];
-    AGSSimpleLineSymbol *ls = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
-                                                                   color:[UIColor colorWithRed:0.08 green:0.36 blue:0.80 alpha:0.95] width:3];
-    [self.overlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:line symbol:ls attributes:nil]];
   } else if ([type isEqualToString:@"polygon"] && [coords isKindOfClass:[NSArray class]] && [(NSArray *)coords count] > 0) {
     NSArray *ringArr = [(NSArray *)coords firstObject];
-    if ([ringArr isKindOfClass:[NSArray class]]) {
-      AGSPointCollection *ring = [[AGSPointCollection alloc] initWithSpatialReference:AGSSpatialReference.WGS84];
-      for (id pair in ringArr) {
-        if ([pair isKindOfClass:[NSArray class]] && [(NSArray *)pair count] >= 2)
-          [ring addPoint:[AGSPoint pointWithX:[pair[0] doubleValue] y:[pair[1] doubleValue] spatialReference:AGSSpatialReference.WGS84]];
-      }
-      AGSPolygon *poly = [[AGSPolygon alloc] initWithPoints:ring.array];
+    AGSPolygon *poly = [self polygonFromLonLatPairs:ringArr];
+    if (poly != nil) {
       AGSSimpleLineSymbol *outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid
                                                                           color:[UIColor colorWithRed:0.86 green:0.15 blue:0.15 alpha:0.95] width:2];
       AGSSimpleFillSymbol *fill = [[AGSSimpleFillSymbol alloc] initWithStyle:AGSSimpleFillSymbolStyleSolid

@@ -207,6 +207,8 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: ArcGIS native selector guard (blocks unsupported 100.15 geometry API)
+        run: node scripts/check-arcgis-native-selectors.mjs
       - name: Lint
         run: npx expo lint
       - name: TypeScript check
