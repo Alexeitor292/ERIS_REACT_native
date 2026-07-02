@@ -313,6 +313,20 @@ export function cleanupTargets(finalPath: string | null, partPath: string | null
   return out;
 }
 
+/**
+ * A non-2xx download response body is an error page (e.g. an S3
+ * SignatureDoesNotMatch / AccessDenied XML), NOT a terrain package. Inspect the
+ * HTTP status BEFORE any size/SHA validation so we report the real cause
+ * ("...HTTP 403") instead of a misleading "size mismatch". Returns an error
+ * message for a non-2xx status, or null for success (2xx) / when the platform
+ * omitted the status (size + SHA still guard that path).
+ */
+export function downloadHttpError(status: number | null | undefined): string | null {
+  if (status == null) return null;
+  if (status >= 200 && status < 300) return null;
+  return `Offline terrain download failed: HTTP ${status}`;
+}
+
 export function sizeMatches(expected: number, actual: number): boolean {
   return Number.isFinite(expected) && Number.isFinite(actual) && expected > 0 && expected === actual;
 }

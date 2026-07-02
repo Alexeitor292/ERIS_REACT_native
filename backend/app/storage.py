@@ -6,7 +6,6 @@ import uuid
 from datetime import timedelta
 from typing import BinaryIO
 from io import BytesIO
-from urllib.parse import urlparse, urlunparse
 
 from minio import Minio
 from minio.error import S3Error
@@ -22,12 +21,40 @@ def _endpoint_no_scheme(url: str) -> tuple[str, bool]:
 
 
 def _client() -> Minio:
+    """Internal MinIO client for storage operations (bucket checks, upload, stat,
+    hashing, object reads) against the in-cluster endpoint (MINIO_ENDPOINT)."""
     endpoint, secure = _endpoint_no_scheme(settings.MINIO_ENDPOINT)
     return Minio(
         endpoint,
         access_key=settings.MINIO_ACCESS_KEY,
         secret_key=settings.MINIO_SECRET_KEY,
         secure=secure,
+    )
+
+
+def _presign_client() -> Minio:
+    """MinIO client used ONLY to GENERATE presigned URLs.
+
+    It signs against the EXTERNALLY reachable host (MINIO_PUBLIC_ENDPOINT) when
+    configured, so the SigV4 signature's Host matches the host the mobile/browser
+    client actually connects to. This replaces the old approach of signing against
+    the internal host and rewriting the URL host afterward — rewriting the host
+    after signing invalidates the signature (SignatureDoesNotMatch / AccessDenied
+    through the public proxy). Falls back to the internal MINIO_ENDPOINT when no
+    public endpoint is configured. Same credentials; HTTPS preserved from the
+    endpoint's scheme.
+    """
+    public_endpoint = (settings.MINIO_PUBLIC_ENDPOINT or "").strip()
+    source = public_endpoint or settings.MINIO_ENDPOINT
+    endpoint, secure = _endpoint_no_scheme(source)
+    return Minio(
+        endpoint,
+        access_key=settings.MINIO_ACCESS_KEY,
+        secret_key=settings.MINIO_SECRET_KEY,
+        secure=secure,
+        # Explicit region => presigning is local; no GetBucketLocation round-trip
+        # to the (possibly anonymous-blocked) public endpoint at sign time.
+        region=settings.MINIO_REGION,
     )
 
 
@@ -59,30 +86,17 @@ def ensure_bucket_exists(bucket: str) -> None:
 
 
 def presign_get(object_key: str, *, bucket: str | None = None, expires_seconds: int = 900) -> str:
+    """Generate a presigned GET URL signed directly against the externally reachable
+    host (MINIO_PUBLIC_ENDPOINT when configured, else MINIO_ENDPOINT). No post-sign
+    host rewrite — the URL is valid as-is through the public proxy."""
     bucket_name = bucket or settings.MINIO_BUCKET
-    client = _client()
+    client = _presign_client()
     try:
-        signed = client.presigned_get_object(
+        return client.presigned_get_object(
             bucket_name,
             object_key,
             expires=timedelta(seconds=expires_seconds),
         )
-        public_endpoint = (settings.MINIO_PUBLIC_ENDPOINT or "").strip()
-        if public_endpoint:
-            signed_parts = urlparse(signed)
-            pub_parts = urlparse(public_endpoint)
-            scheme = pub_parts.scheme or signed_parts.scheme
-            netloc = pub_parts.netloc or pub_parts.path or signed_parts.netloc
-            if netloc:
-                signed = urlunparse((
-                    scheme,
-                    netloc,
-                    signed_parts.path,
-                    signed_parts.params,
-                    signed_parts.query,
-                    signed_parts.fragment,
-                ))
-        return signed
     except S3Error as e:
         raise RuntimeError(f"MinIO presign_get failed bucket={bucket_name} key={object_key}: {e}") from e
 
@@ -107,8 +121,8 @@ def object_public_url(bucket: str, object_key: str) -> str:
 def object_access_url(bucket: str, object_key: str, expires_seconds: int = 900) -> str:
     """Return the appropriate access URL based on STORAGE_URL_MODE.
 
-    presigned (default): returns a MinIO presigned GET URL (with MINIO_PUBLIC_ENDPOINT
-      rewriting applied if configured).
+    presigned (default): returns a MinIO presigned GET URL signed directly against
+      MINIO_PUBLIC_ENDPOINT when configured (no post-sign host rewrite).
     public: returns a deterministic direct URL via object_public_url().
     """
     if settings.STORAGE_URL_MODE == "public":
