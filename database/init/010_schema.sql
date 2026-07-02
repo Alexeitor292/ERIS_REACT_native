@@ -1,4 +1,9 @@
-USE eris;
+-- Authoritative fresh-install schema. Intentionally DATABASE-AGNOSTIC: it does
+-- NOT hardcode `USE <db>;` / `CREATE DATABASE`, so it loads into whatever database
+-- the caller selects — the MariaDB docker-entrypoint (MARIADB_DATABASE=eris), or a
+-- `mysql <dbname> < 010_schema.sql` target such as the CI clean-migration DB
+-- (eris_migtest). A hardcoded `USE eris;` here previously broke that path with
+-- "Unknown database 'eris'". Keep this file free of USE/CREATE DATABASE.
 SET NAMES utf8mb4;
 
 -- ============================================================
