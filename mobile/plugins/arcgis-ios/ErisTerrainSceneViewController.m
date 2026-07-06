@@ -4,6 +4,107 @@
 
 #import "ArcGisSketchStore.h"
 
+#pragma mark - Layers sheet
+
+// Polished native sheet for the terrain viewer's layer control. Sections:
+//   Base surface (Terrain Relief / Satellite / Hybrid — last two disabled when
+//   imagery was not packaged), Operational overlays (Roads, Incident/Geometry,
+//   Package Boundary, Overview), Appearance (terrain relief intensity). Reports
+//   changes via an onChange block. Never triggers a network request.
+@interface ErisLayersSheetVC : UITableViewController
+@property(nonatomic, assign) NSInteger baseSurface;   // 0 terrain, 1 satellite, 2 hybrid
+@property(nonatomic, assign) BOOL imageryAvailable;
+@property(nonatomic, assign) BOOL roadsAvailable, overviewAvailable;
+@property(nonatomic, assign) BOOL showRoads, showOverlays, showBoundary, showOverview;
+@property(nonatomic, assign) CGFloat reliefIntensity;
+@property(nonatomic, copy) void (^onChange)(ErisLayersSheetVC *sheet);
+@end
+
+@implementation ErisLayersSheetVC
+
+- (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
+
+- (void)viewDidLoad {
+  [super viewDidLoad];
+  self.title = @"Layers";
+  self.navigationItem.rightBarButtonItem =
+      [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
+}
+
+- (void)done { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)notify { if (self.onChange) self.onChange(self); }
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 3; }
+
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
+  return s == 0 ? 3 : (s == 1 ? 4 : 1);
+}
+
+- (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
+  return s == 0 ? @"Base surface" : (s == 1 ? @"Operational overlays" : @"Appearance");
+}
+
+- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
+  UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+  cell.selectionStyle = UITableViewCellSelectionStyleNone;
+  if (ip.section == 0) {
+    NSArray *titles = @[@"Terrain Relief", @"Satellite / Aerial Imagery", @"Hybrid: Satellite + Terrain Relief"];
+    cell.textLabel.text = titles[ip.row];
+    BOOL enabled = (ip.row == 0) || self.imageryAvailable;
+    cell.textLabel.enabled = enabled;
+    cell.userInteractionEnabled = enabled;
+    cell.accessoryType = (self.baseSurface == ip.row) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    if (!enabled) cell.detailTextLabel.text = @"Not packaged";
+    cell.accessibilityLabel = [NSString stringWithFormat:@"%@%@", titles[ip.row],
+                               enabled ? (self.baseSurface == ip.row ? @", selected" : @"") : @", unavailable"];
+  } else if (ip.section == 1) {
+    NSArray *titles = @[@"Road Context", @"Incident / Submitted Geometry", @"Package Boundary", @"Overview Map"];
+    cell.textLabel.text = titles[ip.row];
+    UISwitch *sw = [[UISwitch alloc] init];
+    sw.tag = ip.row;
+    BOOL enabled = YES, on = NO;
+    if (ip.row == 0) { on = self.showRoads; enabled = self.roadsAvailable; }
+    else if (ip.row == 1) { on = self.showOverlays; }
+    else if (ip.row == 2) { on = self.showBoundary; }
+    else { on = self.showOverview; enabled = self.overviewAvailable; }
+    sw.on = on; sw.enabled = enabled;
+    if (!enabled) cell.textLabel.enabled = NO;
+    [sw addTarget:self action:@selector(onSwitch:) forControlEvents:UIControlEventValueChanged];
+    sw.accessibilityLabel = titles[ip.row];
+    cell.accessoryView = sw;
+  } else {
+    cell.textLabel.text = @"Terrain relief intensity";
+    UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(0, 0, 160, 30)];
+    sl.minimumValue = 0.2f; sl.maximumValue = 1.0f; sl.value = (float)self.reliefIntensity;
+    sl.accessibilityLabel = @"Terrain relief intensity";
+    [sl addTarget:self action:@selector(onSlider:) forControlEvents:UIControlEventValueChanged];
+    cell.accessoryView = sl;
+  }
+  return cell;
+}
+
+- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
+  if (ip.section != 0) return;
+  if (ip.row != 0 && !self.imageryAvailable) return;   // never select an unavailable surface
+  self.baseSurface = ip.row;
+  [t reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+  [self notify];
+}
+
+- (void)onSwitch:(UISwitch *)sw {
+  switch (sw.tag) {
+    case 0: self.showRoads = sw.on; break;
+    case 1: self.showOverlays = sw.on; break;
+    case 2: self.showBoundary = sw.on; break;
+    default: self.showOverview = sw.on; break;
+  }
+  [self notify];
+}
+
+- (void)onSlider:(UISlider *)sl { self.reliefIntensity = sl.value; [self notify]; }
+
+@end
+
 // Renders the ERIS 'eristerrain' offline terrain bundle as a SceneKit mesh.
 //
 // Reads the extracted bundle directory (manifest.json + elevation-grid.bin +
@@ -21,7 +122,16 @@
 // The coordinate math (lon/lat -> grid col/row -> mesh XZ, Web Mercator coercion,
 // bounds clipping) mirrors the unit-tested reference in src/arcgis/terrainOverlays.ts
 // — keep the two in sync. Camera controls: orbit/pan/zoom/tilt (SCNView camera
-// control) plus North and reset-to-incident. Everything is local — no network.
+// control) plus North and reset-to-incident.
+//
+// Offline CONTEXT LAYERS (packaged inside the bundle, read from local files only):
+//   * a Layers control (base surface Terrain/Satellite/Hybrid — the latter two
+//     enabled only when imagery.png was packaged; overlay toggles; relief intensity);
+//   * packaged roads.geojson draped on the surface;
+//   * a north-up 2D overview.png inset (lower-right);
+//   * a Package Details sheet (sources/provenance) from the status pill.
+// Everything is LOCAL — the terrain view controller makes NO network request.
+// Corrupt/absent optional assets degrade that one layer; the base terrain stays up.
 @interface ErisTerrainSceneViewController ()
 @property(nonatomic, strong) SCNView *scnView;
 @property(nonatomic, strong) SCNNode *cameraNode;
@@ -38,6 +148,21 @@
 @property(nonatomic, strong) NSDictionary *manifest;
 @property(nonatomic, strong) NSDictionary *terrainMeta;
 @property(nonatomic, strong) UILabel *statusLabel;
+// --- context layers (roads / imagery / overview) ---
+@property(nonatomic, copy) NSString *extractedDir;
+@property(nonatomic, strong) NSDictionary *contextLayers;    // manifest.context_layers
+@property(nonatomic, strong) UIImage *hillshadeImage;        // hillshade.png (relief), if present
+@property(nonatomic, strong) UIImage *imageryImage;          // imagery.png (aerial), if present + valid
+@property(nonatomic, strong) SCNNode *overlaysNode;          // incident / geometry / sample-extent / bearing
+@property(nonatomic, strong) SCNNode *roadsNode;             // packaged roads.geojson
+@property(nonatomic, strong) SCNNode *boundaryNode;          // package boundary ring
+@property(nonatomic, strong) UIImageView *overviewView;      // north-up 2D inset (lower-right)
+@property(nonatomic, assign) NSInteger baseSurface;          // 0 terrain, 1 satellite, 2 hybrid
+@property(nonatomic, assign) BOOL showRoads;
+@property(nonatomic, assign) BOOL showOverlays;
+@property(nonatomic, assign) BOOL showBoundary;
+@property(nonatomic, assign) BOOL showOverview;
+@property(nonatomic, assign) CGFloat reliefIntensity;        // hillshade blend in hybrid (0..1)
 @end
 
 @implementation ErisTerrainSceneViewController
@@ -47,6 +172,13 @@
   self.view.backgroundColor = [UIColor blackColor];
   self.title = @"3D Terrain (offline)";
   self.worldSize = 100.0f;
+  // Default field experience: Terrain relief + Roads + Overview + incident marker.
+  self.baseSurface = 0;         // terrain relief (satellite/hybrid enabled only when imagery packaged)
+  self.showRoads = YES;
+  self.showOverlays = YES;      // incident + submitted geometry
+  self.showBoundary = NO;
+  self.showOverview = YES;
+  self.reliefIntensity = 0.85f;
 
   self.scnView = [[SCNView alloc] initWithFrame:self.view.bounds];
   self.scnView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -64,6 +196,11 @@
   self.statusLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
   self.statusLabel.layer.cornerRadius = 6;
   self.statusLabel.clipsToBounds = YES;
+  self.statusLabel.userInteractionEnabled = YES;
+  self.statusLabel.isAccessibilityElement = YES;
+  self.statusLabel.accessibilityHint = @"Shows offline package details";
+  [self.statusLabel addGestureRecognizer:
+      [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onShowDetails)]];
   [self.view addSubview:self.statusLabel];
   UILayoutGuide *g = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
@@ -74,7 +211,11 @@
 
   self.navigationItem.rightBarButtonItem =
       [[UIBarButtonItem alloc] initWithTitle:@"Close" style:UIBarButtonItemStyleDone target:self action:@selector(onClose)];
+  UIBarButtonItem *layers = [[UIBarButtonItem alloc] initWithTitle:@"Layers" style:UIBarButtonItemStylePlain
+                                                            target:self action:@selector(onLayers)];
+  layers.accessibilityLabel = @"Layers";
   self.navigationItem.leftBarButtonItems = @[
+    layers,
     [[UIBarButtonItem alloc] initWithTitle:@"Reset" style:UIBarButtonItemStylePlain target:self action:@selector(resetToIncident)],
     [[UIBarButtonItem alloc] initWithTitle:@"North" style:UIBarButtonItemStylePlain target:self action:@selector(resetNorth)],
   ];
@@ -119,22 +260,63 @@
   float relief = (float)MAX(1.0, self.maxE - self.minE);
   self.vExag = (self.worldSize * 0.35f) / relief;             // vertical exaggeration to read terrain
 
+  self.extractedDir = dir;
   SCNNode *terrain = [self buildTerrainNode];
-  // Drape the local hillshade as the diffuse texture, when present.
-  NSString *hsPath = [dir stringByAppendingPathComponent:@"hillshade.png"];
-  if ([[NSFileManager defaultManager] fileExistsAtPath:hsPath]) {
-    UIImage *hs = [UIImage imageWithContentsOfFile:hsPath];
-    if (hs) terrain.geometry.firstMaterial.diffuse.contents = hs;
-  }
   self.terrainNode = terrain;
   [self.scnView.scene.rootNode addChildNode:terrain];
 
+  // Container nodes so each overlay layer can be toggled independently.
+  self.overlaysNode = [SCNNode node];
+  self.roadsNode = [SCNNode node];
+  self.boundaryNode = [SCNNode node];
+  [self.scnView.scene.rootNode addChildNode:self.overlaysNode];
+  [self.scnView.scene.rootNode addChildNode:self.roadsNode];
+  [self.scnView.scene.rootNode addChildNode:self.boundaryNode];
+
+  [self loadContextTextures:dir];   // hillshade + optional aerial imagery (local files only)
+  [self applyBaseSurface];          // set the terrain material from the current base surface
+
   [self addLighting];
   [self computeFocusTargetFromParams:p];
-  [self addOverlaysFromParams:p];
+  [self addOverlaysFromParams:p];   // incident / geometry / sample-extent / bearing -> overlaysNode
+  [self buildRoadsLayer];           // packaged roads.geojson -> roadsNode
+  [self buildBoundaryLayer];        // package boundary ring -> boundaryNode
+  [self buildOverviewInset];        // north-up 2D inset (lower-right)
+  [self applyLayerVisibility];
   [self setupCamera];
   [self updateStatusWithParams:p];
 }
+
+// Load local textures (hillshade + optional aerial imagery) and the manifest's
+// context_layers. NEVER touches the network — reads only the extracted files.
+- (void)loadContextTextures:(NSString *)dir {
+  self.contextLayers = [self.manifest[@"context_layers"] isKindOfClass:[NSDictionary class]]
+                           ? self.manifest[@"context_layers"] : @{};
+  NSString *hsPath = [dir stringByAppendingPathComponent:@"hillshade.png"];
+  if ([[NSFileManager defaultManager] fileExistsAtPath:hsPath]) {
+    self.hillshadeImage = [UIImage imageWithContentsOfFile:hsPath];
+  }
+  // Aerial imagery is used ONLY when the manifest declared it available AND the
+  // file loads as a valid image (defensive: a corrupt image just disables imagery).
+  if ([self layerAvailable:@"imagery"]) {
+    NSString *imgPath = [dir stringByAppendingPathComponent:@"imagery.png"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:imgPath]) {
+      self.imageryImage = [UIImage imageWithContentsOfFile:imgPath];
+    }
+  }
+  if (self.imageryImage == nil && self.baseSurface != 0) {
+    self.baseSurface = 0;  // no imagery -> force terrain relief
+  }
+}
+
+// Whether a named context layer is declared available in the manifest.
+- (BOOL)layerAvailable:(NSString *)name {
+  NSDictionary *layer = [self.contextLayers[name] isKindOfClass:[NSDictionary class]] ? self.contextLayers[name] : nil;
+  id file = layer[@"file"];
+  return layer != nil && [layer[@"available"] boolValue] && [file isKindOfClass:[NSString class]] && [file length] > 0;
+}
+
+- (BOOL)imageryUsable { return self.imageryImage != nil; }
 
 // Build a height-field mesh. World X = east (col), Z = south (row), Y = elevation.
 - (SCNNode *)buildTerrainNode {
@@ -285,7 +467,7 @@
       pin.geometry.firstMaterial.diffuse.contents = [UIColor colorWithRed:0.14 green:0.39 blue:0.92 alpha:1.0];
       pin.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
       pin.position = pos;
-      [self.scnView.scene.rootNode addChildNode:pin];
+      [self.overlaysNode addChildNode:pin];
     }
   }
 
@@ -309,7 +491,7 @@
       SCNNode *line = [self polylineFromPoints:@[[NSValue valueWithSCNVector3:a], [NSValue valueWithSCNVector3:b]]
                                          color:[UIColor colorWithRed:0.98 green:0.80 blue:0.13 alpha:1.0]
                                         closed:NO];
-      if (line) [self.scnView.scene.rootNode addChildNode:line];
+      if (line) [self.overlaysNode addChildNode:line];
     }
   }
 }
@@ -328,7 +510,7 @@
     [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:self.worldSize * 0.015f]]];
   }
   SCNNode *rect = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.42 green:0.84 blue:0.96 alpha:1.0] closed:NO];
-  if (rect) [self.scnView.scene.rootNode addChildNode:rect];
+  if (rect) [self.overlaysNode addChildNode:rect];
 }
 
 // Render normalized overlay primitives draped on the surface. Out-of-bounds
@@ -353,14 +535,14 @@
         dot.geometry.firstMaterial.diffuse.contents = lineColor;
         dot.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
         dot.position = [v SCNVector3Value];
-        [self.scnView.scene.rootNode addChildNode:dot];
+        [self.overlaysNode addChildNode:dot];
       }
     } else if ([kind isEqualToString:@"line"]) {
       SCNNode *ln = [self polylineFromPoints:pts color:lineColor closed:NO];
-      if (ln) [self.scnView.scene.rootNode addChildNode:ln];
+      if (ln) [self.overlaysNode addChildNode:ln];
     } else if ([kind isEqualToString:@"polygon"]) {
       SCNNode *poly = [self polylineFromPoints:pts color:lineColor closed:YES];
-      if (poly) [self.scnView.scene.rootNode addChildNode:poly];
+      if (poly) [self.overlaysNode addChildNode:poly];
     }
   }
 }
@@ -550,7 +732,17 @@ static NSArray *erisAsArray(id v) {
   NSString *version = [p[@"packageVersion"] isKindOfClass:[NSString class]] ? p[@"packageVersion"] : @"—";
   NSDictionary *elev = [self.manifest[@"elevation"] isKindOfClass:[NSDictionary class]] ? self.manifest[@"elevation"] : @{};
   NSString *src = [elev[@"dataset"] isKindOfClass:[NSString class]] ? elev[@"dataset"] : @"USGS 3DEP";
-  self.statusLabel.text = [NSString stringWithFormat:@"  Offline terrain · v%@\n  %@  ", version, src];
+  // Distinguish hillshade relief from real aerial imagery — never claim imagery
+  // when the package only has hillshade.
+  NSMutableArray<NSString *> *tags = [NSMutableArray arrayWithObject:src];
+  // Truthful: never "Roads" when the package only holds a derived road-bearing line.
+  if ([self layerAvailable:@"roads"]) [tags addObject:[self describeRoadContext]];
+  if ([self imageryUsable]) [tags addObject:@"Aerial imagery"];
+  else if (self.hillshadeImage) [tags addObject:@"Hillshade relief"];
+  self.statusLabel.text = [NSString stringWithFormat:@"  Offline terrain · v%@\n  %@  ",
+                           version, [tags componentsJoinedByString:@" · "]];
+  self.statusLabel.accessibilityLabel =
+      [NSString stringWithFormat:@"Offline terrain version %@, %@", version, [tags componentsJoinedByString:@", "]];
 }
 
 - (void)showFatal:(NSString *)message {
@@ -566,6 +758,231 @@ static NSArray *erisAsArray(id v) {
     [l.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:32],
     [l.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-32],
   ]];
+}
+
+#pragma mark - Base surface (terrain / satellite / hybrid) + layer visibility
+
+// Set the terrain mesh material from the current base surface. All textures are
+// local; imagery is used ONLY when packaged + it loaded as a valid image. Hybrid
+// blends aerial imagery with hillshade relief via the material's multiply layer.
+- (void)applyBaseSurface {
+  SCNMaterial *mat = self.terrainNode.geometry.firstMaterial;
+  if (mat == nil) return;
+  mat.multiply.contents = nil;
+  mat.multiply.intensity = 1.0;
+  UIImage *diffuse = nil;
+  if (self.baseSurface == 1 && self.imageryImage != nil) {           // satellite / aerial imagery
+    diffuse = self.imageryImage;
+  } else if (self.baseSurface == 2 && self.imageryImage != nil) {    // hybrid: imagery x hillshade
+    diffuse = self.imageryImage;
+    if (self.hillshadeImage != nil) {
+      mat.multiply.contents = self.hillshadeImage;
+      mat.multiply.intensity = MAX(0.0, MIN(1.0, self.reliefIntensity));
+    }
+  } else {                                                           // terrain relief (default)
+    diffuse = self.hillshadeImage;
+  }
+  mat.diffuse.contents = diffuse != nil ? (id)diffuse : (id)[UIColor colorWithRed:0.45 green:0.42 blue:0.36 alpha:1.0];
+}
+
+- (void)applyLayerVisibility {
+  self.roadsNode.hidden = !self.showRoads;
+  self.overlaysNode.hidden = !self.showOverlays;
+  self.boundaryNode.hidden = !self.showBoundary;
+  self.overviewView.hidden = !self.showOverview;
+}
+
+#pragma mark - Packaged roads / boundary / overview inset
+
+// Drape packaged roads.geojson onto the mesh surface. Defensive: a corrupt/absent
+// file yields no roads (never a crash). Only LineString-like features are rendered
+// (roads are lines); out-of-bounds vertices are skipped (no invented geometry).
+- (void)buildRoadsLayer {
+  if (![self layerAvailable:@"roads"]) return;
+  NSData *data = [NSData dataWithContentsOfFile:[self.extractedDir stringByAppendingPathComponent:@"roads.geojson"]];
+  id gj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+  if (![gj isKindOfClass:[NSDictionary class]]) return;
+  UIColor *roadColor = [UIColor colorWithRed:0.98 green:0.82 blue:0.36 alpha:1.0];
+  for (id feat in erisAsArray(((NSDictionary *)gj)[@"features"])) {
+    if (![feat isKindOfClass:[NSDictionary class]]) continue;
+    NSArray<NSDictionary *> *prims = [self primitivesFromGeometry:((NSDictionary *)feat)[@"geometry"]];
+    for (NSDictionary *prim in prims) {
+      if (![prim[@"kind"] isEqualToString:@"line"]) continue;
+      NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+      for (NSArray *c in prim[@"coords"]) {
+        double lon = [c[0] doubleValue], lat = [c[1] doubleValue];
+        double col, row;
+        if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) continue;
+        if (![self inBoundsCol:col row:row]) continue;
+        [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:self.worldSize * 0.018f]]];
+      }
+      SCNNode *ln = [self polylineFromPoints:pts color:roadColor closed:NO];
+      if (ln) [self.roadsNode addChildNode:ln];
+    }
+  }
+}
+
+// Package boundary = the terrain grid's four corners, draped + closed.
+- (void)buildBoundaryLayer {
+  double corners[4][2] = {
+    {0, 0}, {(double)(self.cols - 1), 0}, {(double)(self.cols - 1), (double)(self.rows - 1)}, {0, (double)(self.rows - 1)}};
+  NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+  for (int i = 0; i < 4; i++) {
+    [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:corners[i][0] row:corners[i][1] lift:self.worldSize * 0.01f]]];
+  }
+  SCNNode *ring = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.55 green:0.75 blue:0.95 alpha:0.9] closed:YES];
+  if (ring) [self.boundaryNode addChildNode:ring];
+}
+
+// North-up 2D overview inset (lower-right). Server-rendered overview.png with a
+// centre indicator. Fully offline; readable on dark backgrounds; "Overview" label.
+- (void)buildOverviewInset {
+  if (![self layerAvailable:@"overview"]) return;
+  NSString *path = [self.extractedDir stringByAppendingPathComponent:@"overview.png"];
+  if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return;
+  UIImage *img = [UIImage imageWithContentsOfFile:path];
+  if (img == nil) return;
+  UIImageView *iv = [[UIImageView alloc] initWithImage:img];
+  iv.translatesAutoresizingMaskIntoConstraints = NO;
+  iv.contentMode = UIViewContentModeScaleAspectFit;
+  iv.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
+  iv.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.5].CGColor;
+  iv.layer.borderWidth = 1.0; iv.layer.cornerRadius = 6.0; iv.clipsToBounds = YES;
+  iv.isAccessibilityElement = YES; iv.accessibilityLabel = @"Overview";
+  [self.view addSubview:iv];
+  UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
+  [NSLayoutConstraint activateConstraints:@[
+    [iv.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-10],
+    [iv.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-10],
+    [iv.widthAnchor constraintEqualToConstant:124],
+    [iv.heightAnchor constraintEqualToConstant:124],
+  ]];
+  self.overviewView = iv;
+}
+
+#pragma mark - Layers + Package Details
+
+- (void)onLayers {
+  ErisLayersSheetVC *sheet = [[ErisLayersSheetVC alloc] init];
+  sheet.baseSurface = self.baseSurface;
+  sheet.imageryAvailable = [self imageryUsable];
+  sheet.roadsAvailable = [self layerAvailable:@"roads"];
+  sheet.overviewAvailable = (self.overviewView != nil);
+  sheet.showRoads = self.showRoads;
+  sheet.showOverlays = self.showOverlays;
+  sheet.showBoundary = self.showBoundary;
+  sheet.showOverview = self.showOverview;
+  sheet.reliefIntensity = self.reliefIntensity;
+  __weak typeof(self) weakSelf = self;
+  sheet.onChange = ^(ErisLayersSheetVC *s) {
+    typeof(self) me = weakSelf;
+    if (me == nil) return;
+    me.baseSurface = s.baseSurface;
+    me.showRoads = s.showRoads;
+    me.showOverlays = s.showOverlays;
+    me.showBoundary = s.showBoundary;
+    me.showOverview = s.showOverview;
+    me.reliefIntensity = s.reliefIntensity;
+    [me applyBaseSurface];
+    [me applyLayerVisibility];
+  };
+  UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:sheet];
+  nav.modalPresentationStyle = UIModalPresentationFormSheet;
+  [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)dismissPresented { [self dismissViewControllerAnimated:YES completion:nil]; }
+
+- (void)onShowDetails {
+  UIViewController *vc = [[UIViewController alloc] init];
+  vc.title = @"Package Details";
+  vc.view.backgroundColor = [UIColor systemBackgroundColor];
+  vc.navigationItem.rightBarButtonItem =
+      [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissPresented)];
+  UITextView *tv = [[UITextView alloc] initWithFrame:CGRectZero];
+  tv.translatesAutoresizingMaskIntoConstraints = NO;
+  tv.editable = NO;
+  tv.font = [UIFont systemFontOfSize:14];
+  tv.backgroundColor = [UIColor clearColor];
+  tv.text = [self packageDetailsText];
+  [vc.view addSubview:tv];
+  UILayoutGuide *guide = vc.view.safeAreaLayoutGuide;
+  [NSLayoutConstraint activateConstraints:@[
+    [tv.topAnchor constraintEqualToAnchor:guide.topAnchor constant:12],
+    [tv.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:16],
+    [tv.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-16],
+    [tv.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-12],
+  ]];
+  UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+  nav.modalPresentationStyle = UIModalPresentationFormSheet;
+  [self presentViewController:nav animated:YES completion:nil];
+}
+
+// Truthful road-context description (mirrors describeRoadContext in offlineScene.ts).
+// Never claims "roads"/"routes"/"street network" for a bearing-only package.
+- (NSString *)describeRoadContext {
+  NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : nil;
+  if (roads == nil || ![roads[@"available"] boolValue]) return @"No road context packaged";
+  NSArray *kinds = [roads[@"road_kinds"] isKindOfClass:[NSArray class]] ? roads[@"road_kinds"] : @[];
+  if ([kinds containsObject:@"road_centerline"]) return @"Feature service road network";
+  if ([kinds containsObject:@"road_inventory"]) return @"Road inventory geometry";
+  if ([kinds containsObject:@"road_bearing"]) return @"Road bearing context";
+  return @"Road context packaged";
+}
+
+- (NSString *)layerSourceLabel:(NSString *)name {
+  NSDictionary *layer = [self.contextLayers[name] isKindOfClass:[NSDictionary class]] ? self.contextLayers[name] : nil;
+  NSDictionary *src = [layer[@"source"] isKindOfClass:[NSDictionary class]] ? layer[@"source"] : nil;
+  id a = src[@"attribution"] ?: (src[@"dataset"] ?: src[@"provider"]);
+  return [a isKindOfClass:[NSString class]] ? a : nil;
+}
+
+- (NSString *)packageDetailsText {
+  NSDictionary *p = [self params];
+  NSDictionary *elev = [self.manifest[@"elevation"] isKindOfClass:[NSDictionary class]] ? self.manifest[@"elevation"] : @{};
+  NSDictionary *area = [self.manifest[@"area"] isKindOfClass:[NSDictionary class]] ? self.manifest[@"area"] : @{};
+  NSMutableString *s = [NSMutableString string];
+  [s appendFormat:@"Elevation: %@ · %@\n", elev[@"source"] ?: @"USGS_3DEP", elev[@"dataset"] ?: @"USGS 3DEP"];
+  if ([self imageryUsable]) {
+    [s appendFormat:@"Aerial imagery: %@\n", [self layerSourceLabel:@"imagery"] ?: @"packaged"];
+  } else {
+    [s appendString:self.hillshadeImage ? @"Surface texture: USGS 3DEP hillshade relief (no aerial imagery)\n"
+                                        : @"Surface texture: none (elevation mesh only)\n"];
+  }
+  // Truthful road context + packaged feature count (never overstates "roads").
+  if ([self layerAvailable:@"roads"]) {
+    NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : @{};
+    NSInteger count = [roads[@"feature_count"] respondsToSelector:@selector(integerValue)] ? [roads[@"feature_count"] integerValue] : 0;
+    NSString *srcLabel = [self layerSourceLabel:@"roads"];
+    [s appendFormat:@"Road context: %@ (%ld feature%@)%@\n", [self describeRoadContext], (long)count,
+                    count == 1 ? @"" : @"s", srcLabel ? [@" · " stringByAppendingString:srcLabel] : @""];
+  } else {
+    [s appendString:@"Road context: No road context packaged\n"];
+  }
+  [s appendFormat:@"Package version: %@\n", [p[@"packageVersion"] isKindOfClass:[NSString class]] ? p[@"packageVersion"] : @"—"];
+  if ([self.manifest[@"generated_at"] isKindOfClass:[NSString class]]) [s appendFormat:@"Created: %@\n", self.manifest[@"generated_at"]];
+  if ([area[@"radius_m"] respondsToSelector:@selector(doubleValue)]) {
+    [s appendFormat:@"Area radius: %.0f m\n", [area[@"radius_m"] doubleValue]];
+  }
+  [s appendString:@"Offline-ready: yes (no network required)\n"];
+  // Unavailable optional layers + why.
+  NSMutableArray<NSString *> *unavailable = [NSMutableArray array];
+  for (NSString *name in @[@"imagery", @"roads", @"overview"]) {
+    if (![self layerAvailable:name]) {
+      NSDictionary *layer = [self.contextLayers[name] isKindOfClass:[NSDictionary class]] ? self.contextLayers[name] : nil;
+      NSString *reason = [layer[@"reason"] isKindOfClass:[NSString class]] ? layer[@"reason"] : @"unavailable";
+      [unavailable addObject:[NSString stringWithFormat:@"%@ (%@)", name, reason]];
+    }
+  }
+  if (unavailable.count) [s appendFormat:@"Unavailable layers: %@\n", [unavailable componentsJoinedByString:@", "]];
+  // Combined attribution.
+  NSMutableArray<NSString *> *attr = [NSMutableArray array];
+  for (NSString *name in @[@"imagery", @"roads"]) {
+    NSString *a = [self layerSourceLabel:name];
+    if (a && ![attr containsObject:a]) [attr addObject:a];
+  }
+  if (attr.count) [s appendFormat:@"\nAttribution: %@", [attr componentsJoinedByString:@"; "]];
+  return s;
 }
 
 @end

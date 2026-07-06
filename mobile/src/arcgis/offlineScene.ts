@@ -85,6 +85,90 @@ export function partPathFor(finalPath: string): string {
   return `${finalPath}.part`;
 }
 
+// ---- Offline context-layer availability + display (pure) -------------------
+// A compact summary of which base surface + overlays a downloaded package
+// actually contains, derived from the bundle manifest (see
+// eristerrainBundle.summarizeContextLayers). Used for the status pill, the
+// Package Details sheet, and the native Layers control.
+
+export type ContextLayersSummary = {
+  hillshade: boolean;
+  roads: boolean;
+  imagery: boolean;
+  overview: boolean;
+  roadsReason?: string | null;
+  imageryReason?: string | null;
+  elevationSource?: string | null;
+  imagerySource?: string | null;
+  roadSource?: string | null;
+  roadContext?: string | null; // truthful road-context description (see describeRoadContext)
+  roadFeatureCount?: number | null;
+  attribution?: string[];
+};
+
+/**
+ * Truthful one-line description of the packaged road context — NEVER claims
+ * "roads"/"routes"/"street network" when the package only holds a derived
+ * road-bearing line. Ranked by the richest feature kind present:
+ * feature-service centerlines > road-inventory geometry > bearing line.
+ */
+export function describeRoadContext(
+  roads?: { available?: boolean; road_kinds?: string[]; feature_count?: number } | null,
+): string {
+  if (!roads || roads.available !== true) return "No road context packaged";
+  const kinds = Array.isArray(roads.road_kinds) ? roads.road_kinds : [];
+  if (kinds.includes("road_centerline")) return "Feature service road network";
+  if (kinds.includes("road_inventory")) return "Road inventory geometry";
+  if (kinds.includes("road_bearing")) return "Road bearing context";
+  return "Road context packaged";
+}
+
+export type BaseSurface = "terrain" | "satellite" | "hybrid";
+
+/** The base-surface options a package supports. Satellite/Hybrid require real
+ *  packaged imagery — never offered from hillshade alone. */
+export function availableBaseSurfaces(s: Pick<ContextLayersSummary, "imagery">): BaseSurface[] {
+  return s.imagery ? ["terrain", "satellite", "hybrid"] : ["terrain"];
+}
+
+/** Whether a base surface can be selected for this package (imagery-gated). */
+export function baseSurfaceAvailable(s: Pick<ContextLayersSummary, "imagery">, surface: BaseSurface): boolean {
+  return surface === "terrain" ? true : !!s.imagery;
+}
+
+/**
+ * Short pill line describing what the user is viewing. CRITICALLY distinguishes
+ * hillshade RELIEF from real aerial IMAGERY — never claims "aerial imagery" when
+ * the package only contains hillshade.
+ */
+export function describePackagedLayers(s: ContextLayersSummary): string {
+  const parts: string[] = [`${s.elevationSource || "USGS 3DEP"} elevation`];
+  // Truthful road context (never a bare "Roads" claim for a bearing-only package).
+  if (s.roads) parts.push(s.roadContext || describeRoadContext({ available: true, road_kinds: [] }));
+  if (s.imagery) parts.push("Aerial imagery");
+  else if (s.hillshade) parts.push("Hillshade relief");
+  return parts.join(" · ");
+}
+
+/** Human availability label for a layer (for the Layers control / details sheet). */
+export function layerAvailabilityLabel(available: boolean, reason?: string | null): string {
+  if (available) return "Included";
+  switch (reason) {
+    case "not_configured":
+      return "Not available (not configured)";
+    case "source_error":
+      return "Not available (source error)";
+    case "too_large":
+      return "Not available (size limit)";
+    case "no_data":
+      return "Not available (no data)";
+    case "disabled":
+      return "Not available (disabled)";
+    default:
+      return "Not available";
+  }
+}
+
 // ---- Format-aware local package paths --------------------------------------
 // eristerrain bundles are stored as `<id>.eristerrain`; real Esri packages as
 // `<id>.mspk`. Older builds always wrote `<id>.mspk` regardless of the real

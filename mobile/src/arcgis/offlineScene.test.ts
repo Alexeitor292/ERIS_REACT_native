@@ -5,11 +5,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  availableBaseSurfaces,
+  baseSurfaceAvailable,
   chooseRegistrySource,
   cleanupTargets,
   createSerialMutex,
+  describePackagedLayers,
+  describeRoadContext,
   describeScope,
   downloadHttpError,
+  layerAvailabilityLabel,
   formatBytes,
   formatPackageAge,
   isStale,
@@ -344,4 +349,60 @@ test("registry validity + crash-recovery source selection", () => {
   assert.deepEqual(chooseRegistrySource({ mainValid: false, tmpValid: true }), { use: "tmp", cleanupTmp: false });
   // neither -> empty, clean up garbage temp.
   assert.deepEqual(chooseRegistrySource({ mainValid: false, tmpValid: false }), { use: "empty", cleanupTmp: true });
+});
+
+// ---- context-layer display strings + availability (Phase: context layers) ---
+
+test("describeRoadContext is truthful (never claims 'roads' for a bearing line)", () => {
+  assert.equal(describeRoadContext(null), "No road context packaged");
+  assert.equal(describeRoadContext({ available: false }), "No road context packaged");
+  assert.equal(describeRoadContext({ available: true, road_kinds: ["road_bearing"] }), "Road bearing context");
+  assert.equal(
+    describeRoadContext({ available: true, road_kinds: ["road_bearing", "road_inventory"] }),
+    "Road inventory geometry",
+  );
+  assert.equal(
+    describeRoadContext({ available: true, road_kinds: ["road_bearing", "road_inventory", "road_centerline"] }),
+    "Feature service road network",
+  );
+  assert.equal(describeRoadContext({ available: true, road_kinds: [] }), "Road context packaged");
+});
+
+test("describePackagedLayers distinguishes hillshade relief from aerial imagery + truthful road context", () => {
+  // Imagery present -> "Aerial imagery"; roads described truthfully (bearing-only).
+  assert.equal(
+    describePackagedLayers({
+      hillshade: true, roads: true, roadContext: "Road bearing context", imagery: true, overview: true, elevationSource: "USGS_3DEP",
+    }),
+    "USGS_3DEP elevation · Road bearing context · Aerial imagery",
+  );
+  // Only hillshade -> "Hillshade relief", NOT imagery; road inventory geometry.
+  assert.equal(
+    describePackagedLayers({
+      hillshade: true, roads: true, roadContext: "Road inventory geometry", imagery: false, overview: true, elevationSource: "USGS_3DEP",
+    }),
+    "USGS_3DEP elevation · Road inventory geometry · Hillshade relief",
+  );
+  // No roads, no imagery, no hillshade -> just elevation.
+  assert.equal(
+    describePackagedLayers({ hillshade: false, roads: false, imagery: false, overview: false }),
+    "USGS 3DEP elevation",
+  );
+});
+
+test("base-surface availability is imagery-gated (Satellite/Hybrid need imagery)", () => {
+  assert.deepEqual(availableBaseSurfaces({ imagery: false }), ["terrain"]);
+  assert.deepEqual(availableBaseSurfaces({ imagery: true }), ["terrain", "satellite", "hybrid"]);
+  assert.equal(baseSurfaceAvailable({ imagery: false }, "terrain"), true);
+  assert.equal(baseSurfaceAvailable({ imagery: false }, "satellite"), false);
+  assert.equal(baseSurfaceAvailable({ imagery: false }, "hybrid"), false);
+  assert.equal(baseSurfaceAvailable({ imagery: true }, "satellite"), true);
+});
+
+test("layerAvailabilityLabel maps reasons to clear copy", () => {
+  assert.equal(layerAvailabilityLabel(true), "Included");
+  assert.match(layerAvailabilityLabel(false, "not_configured"), /not configured/);
+  assert.match(layerAvailabilityLabel(false, "too_large"), /size limit/);
+  assert.match(layerAvailabilityLabel(false, "source_error"), /source error/);
+  assert.equal(layerAvailabilityLabel(false), "Not available");
 });

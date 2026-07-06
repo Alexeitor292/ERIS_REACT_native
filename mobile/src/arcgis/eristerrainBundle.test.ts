@@ -5,6 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  contextLayerAvailable,
+  contextLayerReason,
   crc32,
   decodeHeightGrid,
   extractAndValidateBundle,
@@ -12,6 +14,7 @@ import {
   isUnsafeEntryName,
   lonLatToGridCell,
   parseZipEntries,
+  summarizeContextLayers,
   validateBundleManifest,
   type TerrainMeta,
 } from "./eristerrainBundle.ts";
@@ -279,4 +282,109 @@ test("local coordinate mapping: incident lon/lat -> grid cell and back", () => {
 
 test("not-a-zip input is rejected", () => {
   assert.throws(() => extractAndValidateBundle(new Uint8Array([1, 2, 3, 4])), /not a valid package archive/);
+});
+
+// ---- context layers (roads / imagery / overview) ---------------------------
+
+const enc = (s: string) => new TextEncoder().encode(s);
+const ROADS = enc('{"type":"FeatureCollection","features":[]}');
+
+function manifestWithRoads(overrides: Record<string, unknown> = {}) {
+  const m = goodManifest() as Record<string, unknown>;
+  m.context_layers = {
+    roads: {
+      available: true, file: "roads.geojson", sha256: "b".repeat(64), bytes: ROADS.length,
+      feature_count: 1, road_kinds: ["road_bearing"], ...overrides,
+    },
+    imagery: { available: false, reason: "not_configured" },
+    overview: { available: false, reason: "disabled" },
+  };
+  m.files = { manifest: "manifest.json", terrain: "elevation-grid.bin", roads: "roads.geojson", hillshade: "hillshade.png" };
+  return m;
+}
+
+function bundleWith(manifestObj: unknown, entries: [string, Uint8Array][]): Uint8Array {
+  return makeStoredZip([
+    ["manifest.json", enc(JSON.stringify(manifestObj))],
+    ["elevation-grid.bin", f32le([1, 2, 3, 4, 5, 6, 7, 8, 9])],
+    ...entries,
+  ]);
+}
+
+test("legacy bundle without context_layers still opens (unavailable, not corrupt)", () => {
+  const { manifest } = extractAndValidateBundle(goodBundle());
+  assert.equal(contextLayerAvailable(manifest, "roads"), false);
+  assert.equal(contextLayerAvailable(manifest, "imagery"), false);
+  const s = summarizeContextLayers(manifest);
+  assert.equal(s.roads, false);
+  assert.equal(s.imagery, false);
+});
+
+test("declared-available roads asset is validated + extracted", () => {
+  const bundle = bundleWith(manifestWithRoads(), [["roads.geojson", ROADS]]);
+  const { manifest, files } = extractAndValidateBundle(bundle);
+  assert.ok(files["roads.geojson"]);
+  assert.equal(contextLayerAvailable(manifest, "roads"), true);
+  assert.equal(contextLayerAvailable(manifest, "imagery"), false);
+  assert.equal(contextLayerReason(manifest, "imagery"), "not_configured");
+});
+
+test("declared-available context asset that is MISSING fails closed", () => {
+  const bundle = bundleWith(manifestWithRoads(), []); // roads declared but not packaged
+  assert.throws(() => extractAndValidateBundle(bundle), /missing context asset roads\.geojson/);
+});
+
+test("declared-available context asset with a CORRUPT body fails closed", () => {
+  const bundle = bundleWith(manifestWithRoads(), [["roads.geojson", ROADS]]);
+  const entries = parseZipEntries(bundle);
+  const e = entries.find((x) => x.name === "roads.geojson")!;
+  const d = new DataView(bundle.buffer, bundle.byteOffset, bundle.byteLength);
+  const nameLen = d.getUint16(e.localOffset + 26, true);
+  const extraLen = d.getUint16(e.localOffset + 28, true);
+  bundle[e.localOffset + 30 + nameLen + extraLen] ^= 0xff;
+  assert.throws(() => extractAndValidateBundle(bundle), /roads\.geojson checksum mismatch/);
+});
+
+test("declared-available context asset with wrong byte count fails closed", () => {
+  const bundle = bundleWith(manifestWithRoads({ bytes: ROADS.length + 5 }), [["roads.geojson", ROADS]]);
+  assert.throws(() => extractAndValidateBundle(bundle), /roads\.geojson size mismatch/);
+});
+
+test("available:false layer is ignored even if a stray file exists", () => {
+  const m = manifestWithRoads();
+  (m.context_layers as Record<string, unknown>).roads = { available: false, reason: "no_data" };
+  const bundle = bundleWith(m, [["roads.geojson", ROADS]]); // present but not declared available
+  const { manifest } = extractAndValidateBundle(bundle);
+  assert.equal(contextLayerAvailable(manifest, "roads"), false);
+  assert.equal(contextLayerReason(manifest, "roads"), "no_data");
+});
+
+test("summarizeContextLayers reflects hillshade + roads + imagery", () => {
+  const m = manifestWithRoads();
+  (m.context_layers as Record<string, unknown>).imagery = {
+    available: true, file: "imagery.png", sha256: "c".repeat(64), bytes: 3,
+    source: { provider: "usgs_naip", attribution: "USDA NAIP via USGS" },
+  };
+  m.files = { ...(m.files as object), imagery: "imagery.png" };
+  const s = summarizeContextLayers(m as never);
+  assert.equal(s.hillshade, true); // files.hillshade present
+  assert.equal(s.roads, true);
+  assert.equal(s.imagery, true);
+  assert.equal(s.imagerySource, "USDA NAIP via USGS");
+  assert.ok((s.attribution ?? []).includes("USDA NAIP via USGS"));
+  // Truthful road context from the packaged feature kinds + count.
+  assert.equal(s.roadContext, "Road bearing context");
+  assert.equal(s.roadFeatureCount, 1);
+});
+
+test("summarizeContextLayers road context: inventory vs feature-service vs none", () => {
+  const inv = manifestWithRoads({ road_kinds: ["road_bearing", "road_inventory"], feature_count: 3 });
+  assert.equal(summarizeContextLayers(inv as never).roadContext, "Road inventory geometry");
+  const net = manifestWithRoads({ road_kinds: ["road_centerline"], feature_count: 42 });
+  const ns = summarizeContextLayers(net as never);
+  assert.equal(ns.roadContext, "Feature service road network");
+  assert.equal(ns.roadFeatureCount, 42);
+  // No roads packaged.
+  const legacy = summarizeContextLayers(goodManifest() as never);
+  assert.equal(legacy.roadContext, "No road context packaged");
 });

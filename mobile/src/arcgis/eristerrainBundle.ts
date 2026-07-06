@@ -126,14 +126,124 @@ export type TerrainMeta = {
   sha256?: string;
 };
 
+export type ContextLayerSource = {
+  provider?: string;
+  dataset?: string;
+  retrieved_at?: string;
+  attribution?: string;
+  resolution?: string;
+  service?: string;
+};
+
+export type ContextLayerMeta = {
+  available: boolean;
+  file?: string;
+  sha256?: string;
+  bytes?: number;
+  reason?: string;
+  width?: number;
+  height?: number;
+  feature_count?: number; // roads: number of packaged features
+  road_kinds?: string[]; // roads: distinct feature kinds (road_bearing/inventory/centerline)
+  source?: ContextLayerSource;
+  [k: string]: unknown;
+};
+
+export type ContextLayers = {
+  roads?: ContextLayerMeta;
+  imagery?: ContextLayerMeta;
+  overview?: ContextLayerMeta;
+  [k: string]: ContextLayerMeta | undefined;
+};
+
 export type EristerrainManifest = {
   format: string;
   format_version: number;
   terrain: TerrainMeta;
   elevation: { source: string; dataset?: string; version?: string; resolution?: string };
   overlays?: unknown;
+  context_layers?: ContextLayers;
   [k: string]: unknown;
 };
+
+/** Named optional context layers that may be packaged inside a bundle. */
+export const CONTEXT_LAYER_NAMES = ["roads", "imagery", "overview"] as const;
+export type ContextLayerName = (typeof CONTEXT_LAYER_NAMES)[number];
+
+/** Whether a named context layer is present + declared available in a manifest.
+ *  Absent block / absent layer => false (unavailable, NEVER treated as corrupt). */
+export function contextLayerAvailable(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+  name: ContextLayerName,
+): boolean {
+  const layer = manifest?.context_layers?.[name];
+  return !!layer && layer.available === true && typeof layer.file === "string" && !!layer.file;
+}
+
+/** Reason a layer is unavailable (for the UI), or null when it IS available. */
+export function contextLayerReason(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+  name: ContextLayerName,
+): string | null {
+  if (contextLayerAvailable(manifest, name)) return null;
+  const layer = manifest?.context_layers?.[name];
+  return (layer && typeof layer.reason === "string" && layer.reason) || "unavailable";
+}
+
+function layerSourceLabel(layer: ContextLayerMeta | undefined): string | null {
+  const s = layer?.source;
+  if (!s) return null;
+  return s.attribution || s.dataset || s.provider || null;
+}
+
+// Truthful road-context label — mirrors describeRoadContext() in offlineScene.ts
+// and the Objective-C describeRoadContext (kept in sync). Inlined here to keep this
+// pure module free of runtime cross-module imports (node --test resolution).
+function roadContextLabel(roads: ContextLayerMeta | undefined): string {
+  if (!roads || roads.available !== true) return "No road context packaged";
+  const kinds = Array.isArray(roads.road_kinds) ? roads.road_kinds : [];
+  if (kinds.includes("road_centerline")) return "Feature service road network";
+  if (kinds.includes("road_inventory")) return "Road inventory geometry";
+  if (kinds.includes("road_bearing")) return "Road bearing context";
+  return "Road context packaged";
+}
+
+/**
+ * Compact, UI-ready summary of a package's base surface + overlays, derived from
+ * the manifest. `hasHillshade` comes from the presence of a hillshade.png entry
+ * (the manifest `files.hillshade`), which the caller can pass; if omitted we infer
+ * it from manifest.files. Distinguishes hillshade relief from real aerial imagery.
+ */
+export function summarizeContextLayers(
+  manifest: EristerrainManifest | null | undefined,
+): import("./offlineScene").ContextLayersSummary {
+  const cl = (manifest?.context_layers ?? {}) as ContextLayers;
+  const files = (manifest?.files ?? {}) as Record<string, unknown>;
+  const hillshade = typeof files.hillshade === "string" && !!files.hillshade;
+  const roads = contextLayerAvailable(manifest, "roads");
+  const imagery = contextLayerAvailable(manifest, "imagery");
+  const overview = contextLayerAvailable(manifest, "overview");
+  const attribution: string[] = [];
+  for (const name of CONTEXT_LAYER_NAMES) {
+    const a = cl[name]?.source?.attribution;
+    if (a && !attribution.includes(a)) attribution.push(a);
+  }
+  const roadCount = typeof cl.roads?.feature_count === "number" ? cl.roads.feature_count : null;
+  return {
+    hillshade,
+    roads,
+    imagery,
+    overview,
+    roadsReason: contextLayerReason(manifest, "roads"),
+    imageryReason: contextLayerReason(manifest, "imagery"),
+    elevationSource: manifest?.elevation?.source ?? null,
+    imagerySource: layerSourceLabel(cl.imagery),
+    roadSource: layerSourceLabel(cl.roads),
+    roadContext: roadContextLabel(cl.roads),
+    roadFeatureCount: roadCount,
+    attribution,
+  };
+}
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -255,6 +365,27 @@ export function extractAndValidateBundle(bytes: Uint8Array): ExtractedBundle {
       if (crc32(b) !== (e.crc32 >>> 0)) throw new Error(`${opt} checksum mismatch`);
       files[opt] = b;
     }
+  }
+
+  // Context layers: every DECLARED-available asset must be present + pass CRC + its
+  // declared byte count. An absent block / layer is unavailable (NOT corrupt); a
+  // declared-available-but-missing/corrupt asset fails the bundle closed. (The whole
+  // package SHA-256 is already verified before extraction, so per-entry CRC + byte
+  // count gives strong integrity for these assets.)
+  const ctxLayers = (manifest.context_layers ?? {}) as ContextLayers;
+  for (const name of CONTEXT_LAYER_NAMES) {
+    const layer = ctxLayers[name];
+    if (!layer || layer.available !== true) continue;
+    const fname = layer.file;
+    if (typeof fname !== "string" || !fname) throw new Error(`context layer ${name} available but has no file`);
+    const e = byName.get(fname);
+    if (!e) throw new Error(`missing context asset ${fname}`);
+    const b = readStoredEntry(bytes, e);
+    if (crc32(b) !== (e.crc32 >>> 0)) throw new Error(`context asset ${fname} checksum mismatch`);
+    if (typeof layer.bytes === "number" && b.byteLength !== layer.bytes) {
+      throw new Error(`context asset ${fname} size mismatch`);
+    }
+    files[fname] = b;
   }
   return { manifest, files };
 }

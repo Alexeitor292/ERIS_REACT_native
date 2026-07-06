@@ -256,6 +256,19 @@ async function validateAndExtractEristerrain(partUri: string, submissionId: numb
   if (files["overlays.json"]) {
     await FileSystem.writeAsStringAsync(`${dir}/overlays.json`, utf8FromBytes(files["overlays.json"]));
   }
+  // Context-layer assets (present only when the manifest declared them available
+  // and they passed CRC + byte-count validation above). roads is text; the PNGs
+  // are binary. The native renderer reads whichever exist; absent = layer off.
+  if (files["roads.geojson"]) {
+    await FileSystem.writeAsStringAsync(`${dir}/roads.geojson`, utf8FromBytes(files["roads.geojson"]));
+  }
+  for (const png of ["imagery.png", "overview.png"]) {
+    if (files[png]) {
+      await FileSystem.writeAsStringAsync(`${dir}/${png}`, bytesToBase64(files[png]), {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+  }
 
   // Verify the manifest's grid SHA-256 natively against the extracted grid file.
   const declaredSha = manifest.terrain.sha256;

@@ -111,6 +111,42 @@ class Settings(BaseSettings):
     # offline imagery provider can be added later without redesigning the pipeline.
     OFFLINE_SCENE_IMAGERY_PROVIDER: str = Field(default="usgs_hillshade")
 
+    # --- Offline context layers (roads / imagery / overview) --------------------
+    # Packaged INSIDE the .eristerrain bundle at build time; never fetched during
+    # the mobile download or while viewing offline. Each layer fails GRACEFULLY:
+    # a source failure marks that layer unavailable (with a reason) and never
+    # corrupts/deletes the valid terrain package. All assets count toward
+    # OFFLINE_SCENE_MAX_PACKAGE_MB.
+    #
+    # Roads: default source is ERIS-authoritative data already in the build context
+    # (submitted geometry + resolved road-bearing segment + road-inventory line
+    # geometry), clipped to bounds + buffer — no third-party provider. An opt-in
+    # ArcGIS FeatureServer adapter (documented, license-reviewed by the operator)
+    # can broaden coverage.
+    OFFLINE_SCENE_ROADS_ENABLED: bool = Field(default=True)
+    OFFLINE_SCENE_ROAD_SOURCE: str = Field(default="eris_internal")  # eris_internal | arcgis_feature_service
+    OFFLINE_SCENE_ROAD_SOURCE_URL: str | None = Field(default=None)  # required for arcgis_feature_service
+    OFFLINE_SCENE_ROAD_BUFFER_M: float = Field(default=250.0)        # bounds buffer for clipping
+    OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S: int = Field(default=30)
+
+    # Aerial/satellite imagery drape. OPT-IN: NAIP (USGS/USDA, public domain) is the
+    # intended licence-clean provider, but must be validated on a live worker before
+    # we claim "satellite imagery", so it defaults OFF. When off/uncovered/too-large/
+    # failed, the package is built WITHOUT imagery (manifest reason recorded) unless
+    # OFFLINE_SCENE_IMAGERY_MANDATORY is true.
+    OFFLINE_SCENE_IMAGERY_ENABLED: bool = Field(default=False)
+    OFFLINE_SCENE_IMAGERY_MANDATORY: bool = Field(default=False)
+    OFFLINE_SCENE_IMAGERY_EXPORT_URL: str = Field(
+        default="https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer"
+    )
+    OFFLINE_SCENE_IMAGERY_MAX_PX: int = Field(default=1024)
+    OFFLINE_SCENE_IMAGERY_FETCH_TIMEOUT_S: int = Field(default=45)
+
+    # North-up 2D overview inset, server-rendered (Pillow) from package bounds +
+    # roads + incident + geometry. Licence-clean; no external data.
+    OFFLINE_SCENE_OVERVIEW_ENABLED: bool = Field(default=True)
+    OFFLINE_SCENE_OVERVIEW_PX: int = Field(default=512)
+
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 

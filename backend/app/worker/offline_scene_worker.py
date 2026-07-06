@@ -60,6 +60,10 @@ def _build_context(db: Session, job: dict) -> dict:
     geometry = offline_scene_svc.parse_geometry(row["geometry_json"])
     bearing = offline_scene_svc.extract_road_bearing(row["road_inventory_snapshot_json"])
     sample_extent = offline_scene_svc.extract_sample_extent(row["elevation_terrain_grid_json"])
+    # Line geometry from the road-inventory snapshot (for the packaged roads layer);
+    # defensively parsed — absent/wrong-shape degrades to "no road inventory line".
+    _snap = offline_scene_svc.coerce_json_obj(row["road_inventory_snapshot_json"])
+    road_inv_geom = _snap.get("geometry") if isinstance(_snap, dict) else None
 
     # Enforce the ONE authoritative AOI maximum at worker execution too — never
     # trust the stored/client radius or bounds blindly. Recompute the AOI from the
@@ -83,6 +87,7 @@ def _build_context(db: Session, job: dict) -> dict:
         "radius_m": radius_m,
         "bounds": bounds,
         "content_signature": content_sig,
+        "road_inventory_geometry": road_inv_geom,
         "overlays": {
             "incident": {"lat": float(row["latitude"]), "lon": float(row["longitude"])},
             "geometry": geometry,

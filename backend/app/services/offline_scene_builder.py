@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import math
 import zipfile
 from abc import ABC, abstractmethod
@@ -32,8 +33,11 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..storage import put_object_bytes
 from . import offline_scene as offline_scene_svc
+from . import offline_scene_context as context_fmt
 from . import offline_scene_terrain as terrain_fmt
 from .offline_scene_catalog import JobCancelledError, register_ready_package
+
+logger = logging.getLogger("eris.offline_scene_builder")
 
 BUNDLE_FORMAT = "eristerrain"
 FORMAT_VERSION = 2  # canonical height-grid bundle (v1 was a raw-TIFF prototype)
@@ -55,7 +59,9 @@ def aoi_resolution_m(bounds: dict, center_lat: float, px: int) -> float:
     return round(width_m / max(1, px), 2)
 
 
-def build_manifest(ctx: dict, usgs_meta: dict, basemap_meta: dict, terrain_meta: dict) -> dict:
+def build_manifest(
+    ctx: dict, usgs_meta: dict, basemap_meta: dict, terrain_meta: dict, context_layers: dict | None = None
+) -> dict:
     has_hillshade = bool(basemap_meta.get("has_hillshade"))
     files = {
         "manifest": "manifest.json",
@@ -64,6 +70,10 @@ def build_manifest(ctx: dict, usgs_meta: dict, basemap_meta: dict, terrain_meta:
     }
     if has_hillshade:
         files["hillshade"] = "hillshade.png"
+    # Record each declared-available context asset in the files map.
+    for name, layer in (context_layers or {}).items():
+        if isinstance(layer, dict) and layer.get("available") and layer.get("file"):
+            files[name] = layer["file"]
     return {
         "format": BUNDLE_FORMAT,
         "format_version": FORMAT_VERSION,
@@ -80,14 +90,21 @@ def build_manifest(ctx: dict, usgs_meta: dict, basemap_meta: dict, terrain_meta:
         },
         "terrain": terrain_meta,
         "basemap": basemap_meta,
+        # Backward compatible: legacy readers ignore context_layers; new readers
+        # treat an absent block / layer as "unavailable" (never corrupt).
+        "context_layers": context_layers or {},
         "overlays": ctx.get("overlays") or {},
         "content_signature": ctx["content_signature"],
         "files": files,
     }
 
 
-def assemble_bundle(grid_bytes: bytes, hillshade_bytes: bytes, overlays: dict, manifest: dict) -> bytes:
-    """Zip the bundle deterministically (manifest + height grid + hillshade + overlays)."""
+def assemble_bundle(
+    grid_bytes: bytes, hillshade_bytes: bytes, overlays: dict, manifest: dict,
+    extra_assets: dict[str, bytes] | None = None,
+) -> bytes:
+    """Zip the bundle deterministically (manifest + height grid + hillshade +
+    overlays + any context assets: roads.geojson / imagery.png / overview.png)."""
     grid_name = manifest.get("terrain", {}).get("file", terrain_fmt.HEIGHT_GRID_FILE)
     buf = io.BytesIO()
     # STORED (uncompressed) so the mobile client reads entries without a zlib
@@ -98,6 +115,9 @@ def assemble_bundle(grid_bytes: bytes, hillshade_bytes: bytes, overlays: dict, m
         if hillshade_bytes:
             zf.writestr("hillshade.png", hillshade_bytes)
         zf.writestr("overlays.json", json.dumps(overlays or {}, sort_keys=True, separators=(",", ":")))
+        for name, data in (extra_assets or {}).items():
+            if data:
+                zf.writestr(name, data)
     return buf.getvalue()
 
 
@@ -130,6 +150,24 @@ def validate_bundle_bytes(package_bytes: bytes) -> tuple[bool, str | None]:
                 return False, "terrain grid byte length does not match dimensions"
             if terrain.get("sha256") and terrain_fmt.grid_sha256(grid) != terrain["sha256"]:
                 return False, "terrain grid checksum mismatch"
+            # Context layers: metadata structure + every DECLARED-available asset
+            # must be present and match its sha256 (and byte count when declared).
+            # Absent block / layer = unavailable, not an error (backward compatible).
+            context_layers = manifest.get("context_layers") or {}
+            ok, reason = context_fmt.validate_context_layers(context_layers)
+            if not ok:
+                return False, reason
+            for name, layer in context_layers.items():
+                if not (isinstance(layer, dict) and layer.get("available")):
+                    continue
+                fname = layer.get("file")
+                if fname not in names:
+                    return False, f"missing context asset {fname}"
+                data = zf.read(fname)
+                if layer.get("sha256") and context_fmt.sha256_hex(data) != layer["sha256"]:
+                    return False, f"context asset {fname} checksum mismatch"
+                if layer.get("bytes") is not None and len(data) != int(layer["bytes"]):
+                    return False, f"context asset {fname} size mismatch"
     except zipfile.BadZipFile:
         return False, "not a valid package archive"
     except Exception as e:  # pragma: no cover - defensive
@@ -271,8 +309,131 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         heights = terrain_fmt.decode_dem_tiff(source["dem_bytes"], max_dim=int(settings.OFFLINE_SCENE_GRID_PX))
         grid_bytes, stats = terrain_fmt.encode_height_grid(heights)
         terrain_meta = terrain_fmt.build_terrain_metadata(stats, ctx["bounds"], terrain_fmt.grid_sha256(grid_bytes))
-        manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"], terrain_meta)
-        return assemble_bundle(grid_bytes, source.get("hillshade_bytes") or b"", ctx.get("overlays") or {}, manifest)
+        hillshade_bytes = source.get("hillshade_bytes") or b""
+        base_bytes = len(grid_bytes) + len(hillshade_bytes)
+        context_layers, assets = self._build_context_layers(ctx, base_bytes, progress=progress)
+        manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"], terrain_meta, context_layers)
+        return assemble_bundle(grid_bytes, hillshade_bytes, ctx.get("overlays") or {}, manifest, assets)
+
+    def _build_context_layers(self, ctx: dict, base_bytes: int, progress=None) -> tuple[dict, dict]:
+        """Collect roads / optional imagery / overview into (context_layers, assets).
+        Every layer degrades gracefully — a source failure marks the layer
+        unavailable and NEVER corrupts the terrain package. Assets count toward
+        OFFLINE_SCENE_MAX_PACKAGE_MB; the last, skippable asset (imagery) is dropped
+        (reason 'too_large') before it could exceed the limit."""
+        layers: dict = {}
+        assets: dict = {}
+        max_bytes = int(settings.OFFLINE_SCENE_MAX_PACKAGE_MB) * 1024 * 1024
+        running = int(base_bytes)
+        sid = ctx.get("submission_id")
+
+        def _emit(msg: str):
+            if progress:
+                progress("PACKAGING", msg)
+
+        def _log(layer: str, outcome: str, **kv):
+            logger.info("offline-scene context layer submission=%s version=%s layer=%s outcome=%s %s",
+                        sid, ctx.get("package_version"), layer, outcome,
+                        " ".join(f"{k}={v}" for k, v in kv.items()))
+
+        # --- Roads (default: ERIS-internal; opt-in external ArcGIS adapter) ---
+        roads_geojson = None
+        if settings.OFFLINE_SCENE_ROADS_ENABLED:
+            _emit("Collecting road context")
+            try:
+                external = []
+                if settings.OFFLINE_SCENE_ROAD_SOURCE == "arcgis_feature_service" and settings.OFFLINE_SCENE_ROAD_SOURCE_URL:
+                    bbuf = context_fmt.bounds_with_buffer(ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M)
+                    external = context_fmt.fetch_arcgis_road_features(
+                        bbuf, source_url=settings.OFFLINE_SCENE_ROAD_SOURCE_URL,
+                        timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
+                    )
+                geojson, count = context_fmt.roads_geojson_from_context(
+                    {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M
+                )
+                roads_geojson = geojson if count > 0 else None
+                if count > 0:
+                    data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
+                    if running + len(data) <= max_bytes:
+                        src = {
+                            "provider": settings.OFFLINE_SCENE_ROAD_SOURCE,
+                            "dataset": "ERIS road context (bearing + road inventory)",
+                            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                            "attribution": "Caltrans / ERIS road context",
+                        }
+                        kinds = context_fmt.road_kinds_from_geojson(geojson)
+                        layers["roads"] = context_fmt.available_layer(
+                            context_fmt.ROADS_FILE, data, src, feature_count=count, road_kinds=kinds
+                        )
+                        assets[context_fmt.ROADS_FILE] = data
+                        running += len(data)
+                        _log("roads", "packaged", features=count, bytes=len(data))
+                    else:
+                        layers["roads"] = context_fmt.unavailable_layer("too_large")
+                        _log("roads", "skipped_too_large", bytes=len(data))
+                else:
+                    layers["roads"] = context_fmt.unavailable_layer("no_data")
+                    _log("roads", "no_data")
+            except Exception as e:  # never corrupt the package on a road-source failure
+                layers["roads"] = context_fmt.unavailable_layer("source_error")
+                _log("roads", "source_error", error=str(e)[:120])
+        else:
+            layers["roads"] = context_fmt.unavailable_layer("disabled")
+
+        # --- Overview inset (server-rendered; licence-clean) ---
+        if settings.OFFLINE_SCENE_OVERVIEW_ENABLED:
+            _emit("Creating overview map")
+            try:
+                overlays = ctx.get("overlays") or {}
+                px = int(settings.OFFLINE_SCENE_OVERVIEW_PX)
+                png = context_fmt.render_overview_png(
+                    bounds=ctx["bounds"], incident=overlays.get("incident"), roads_geojson=roads_geojson,
+                    geometry=overlays.get("geometry"), sample_extent=overlays.get("sampleExtent"), px=px,
+                )
+                if running + len(png) <= max_bytes:
+                    src = {"provider": "eris_render", "attribution": "ERIS-rendered overview"}
+                    layers["overview"] = context_fmt.available_layer(
+                        context_fmt.OVERVIEW_FILE, png, src, width=px, height=px
+                    )
+                    assets[context_fmt.OVERVIEW_FILE] = png
+                    running += len(png)
+                    _log("overview", "packaged", bytes=len(png))
+                else:
+                    layers["overview"] = context_fmt.unavailable_layer("too_large")
+                    _log("overview", "skipped_too_large", bytes=len(png))
+            except Exception as e:
+                layers["overview"] = context_fmt.unavailable_layer("render_error")
+                _log("overview", "render_error", error=str(e)[:120])
+
+        # --- Aerial imagery (opt-in; skippable last) ---
+        if settings.OFFLINE_SCENE_IMAGERY_ENABLED:
+            _emit("Preparing aerial imagery")
+            try:
+                px = min(int(settings.OFFLINE_SCENE_IMAGERY_MAX_PX), 4096)
+                data, src = context_fmt.fetch_imagery_png(
+                    ctx["bounds"], export_url=settings.OFFLINE_SCENE_IMAGERY_EXPORT_URL, px=px,
+                    timeout_s=int(settings.OFFLINE_SCENE_IMAGERY_FETCH_TIMEOUT_S), session=self._session,
+                )
+                if running + len(data) <= max_bytes:
+                    layers["imagery"] = context_fmt.available_layer(
+                        context_fmt.IMAGERY_FILE, data, src, width=px, height=px, bounds=dict(ctx["bounds"])
+                    )
+                    assets[context_fmt.IMAGERY_FILE] = data
+                    running += len(data)
+                    _log("imagery", "packaged", bytes=len(data))
+                else:
+                    layers["imagery"] = context_fmt.unavailable_layer("too_large")
+                    _log("imagery", "skipped_too_large", bytes=len(data))
+            except Exception as e:
+                if settings.OFFLINE_SCENE_IMAGERY_MANDATORY:
+                    raise OfflineSceneBuildError(f"Mandatory aerial imagery could not be retrieved: {e}") from e
+                layers["imagery"] = context_fmt.unavailable_layer("source_error")
+                _log("imagery", "source_error", error=str(e)[:120])
+        else:
+            layers["imagery"] = context_fmt.unavailable_layer("not_configured")
+
+        _emit("Validating offline context layers")
+        return layers, assets
 
 
 def get_builder() -> OfflineScenePackageBuilder:

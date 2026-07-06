@@ -288,3 +288,58 @@ echo "OK: protected offline-scene download verified (200 + exact size; private).
 This confirms the presigned grant works through the public proxy at the exact
 catalog size, and that the package/bucket is not anonymously exposed. It never
 prints MinIO credentials.
+
+## Context layers (roads / imagery / overview)
+
+Offline terrain packages combine elevation, terrain relief, road context, and an
+optional aerial-imagery drape into a portable field map. Once downloaded, the
+package works with **no cellular service** — the iOS viewer reads only local files.
+
+**What each layer is + where it comes from**
+- **Elevation + hillshade** — USGS 3DEP (public domain). Always packaged.
+- **Roads** (`roads.geojson`) — ERIS-authoritative by default (resolved
+  road-bearing segment + road-inventory line geometry), clipped to the package
+  bounds + `OFFLINE_SCENE_ROAD_BUFFER_M`. No third-party provider unless an
+  operator opts into `OFFLINE_SCENE_ROAD_SOURCE=arcgis_feature_service` with a
+  license-reviewed `OFFLINE_SCENE_ROAD_SOURCE_URL`.
+- **Overview** (`overview.png`) — ERIS server-rendered north-up inset.
+- **Aerial imagery** (`imagery.png`) — **opt-in**, USGS/USDA NAIP (public domain).
+  `OFFLINE_SCENE_IMAGERY_ENABLED=false` by default; enable + validate on a worker
+  with network before relying on it. When off/unavailable, Satellite/Hybrid show
+  as unavailable in the app and hillshade + roads keep working.
+
+**Config knobs:** see `backend/app/config.py` `OFFLINE_SCENE_ROADS_*`,
+`OFFLINE_SCENE_IMAGERY_*`, `OFFLINE_SCENE_OVERVIEW_*`. All context assets count
+toward `OFFLINE_SCENE_MAX_PACKAGE_MB`; imagery is skipped (not fatal) if it would
+exceed the cap. A road/imagery source failure marks that layer unavailable and
+never corrupts the terrain package (`OFFLINE_SCENE_IMAGERY_MANDATORY=true` opts
+into hard-failing the job if imagery cannot be retrieved).
+
+**Verify a generated package includes roads/overview/imagery metadata + checksums.**
+Download the object with the presigned grant (see the verification block above),
+then inspect the manifest without a full client:
+
+```sh
+python - "$OBJECT_KEY" <<'PY'
+import sys, zipfile, json, hashlib
+z = zipfile.ZipFile("/tmp/scene.eristerrain")
+m = json.loads(z.read("manifest.json"))
+cl = m.get("context_layers", {})
+print("format_version:", m.get("format_version"))
+for name in ("roads", "imagery", "overview"):
+    layer = cl.get(name) or {}
+    if layer.get("available"):
+        data = z.read(layer["file"])
+        ok = hashlib.sha256(data).hexdigest() == layer.get("sha256") and len(data) == layer.get("bytes")
+        print(f"{name}: available file={layer['file']} bytes={len(data)} sha_ok={ok} source={layer.get('source')}")
+    else:
+        print(f"{name}: unavailable reason={layer.get('reason')}")
+PY
+```
+Every `available` layer must be present with a matching SHA-256 + byte count, and
+its `source` must carry provenance only (no credentials/tokens).
+
+**Airplane-Mode iPhone test:** see ADR "Addendum 3" — verify roads draped on the
+surface, the north-up overview inset, Layers toggles, Terrain/Satellite/Hybrid
+switching (only when imagery packaged), and the Package Details sheet, all with the
+device in Airplane Mode.
