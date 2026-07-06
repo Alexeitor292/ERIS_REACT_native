@@ -58,7 +58,7 @@
     cell.accessibilityLabel = [NSString stringWithFormat:@"%@%@", titles[ip.row],
                                enabled ? (self.baseSurface == ip.row ? @", selected" : @"") : @", unavailable"];
   } else if (ip.section == 1) {
-    NSArray *titles = @[@"Roads and Routes", @"Incident / Submitted Geometry", @"Package Boundary", @"Overview Map"];
+    NSArray *titles = @[@"Road Context", @"Incident / Submitted Geometry", @"Package Boundary", @"Overview Map"];
     cell.textLabel.text = titles[ip.row];
     UISwitch *sw = [[UISwitch alloc] init];
     sw.tag = ip.row;
@@ -735,7 +735,8 @@ static NSArray *erisAsArray(id v) {
   // Distinguish hillshade relief from real aerial imagery — never claim imagery
   // when the package only has hillshade.
   NSMutableArray<NSString *> *tags = [NSMutableArray arrayWithObject:src];
-  if ([self layerAvailable:@"roads"]) [tags addObject:@"Roads packaged"];
+  // Truthful: never "Roads" when the package only holds a derived road-bearing line.
+  if ([self layerAvailable:@"roads"]) [tags addObject:[self describeRoadContext]];
   if ([self imageryUsable]) [tags addObject:@"Aerial imagery"];
   else if (self.hillshadeImage) [tags addObject:@"Hillshade relief"];
   self.statusLabel.text = [NSString stringWithFormat:@"  Offline terrain · v%@\n  %@  ",
@@ -917,6 +918,18 @@ static NSArray *erisAsArray(id v) {
   [self presentViewController:nav animated:YES completion:nil];
 }
 
+// Truthful road-context description (mirrors describeRoadContext in offlineScene.ts).
+// Never claims "roads"/"routes"/"street network" for a bearing-only package.
+- (NSString *)describeRoadContext {
+  NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : nil;
+  if (roads == nil || ![roads[@"available"] boolValue]) return @"No road context packaged";
+  NSArray *kinds = [roads[@"road_kinds"] isKindOfClass:[NSArray class]] ? roads[@"road_kinds"] : @[];
+  if ([kinds containsObject:@"road_centerline"]) return @"Feature service road network";
+  if ([kinds containsObject:@"road_inventory"]) return @"Road inventory geometry";
+  if ([kinds containsObject:@"road_bearing"]) return @"Road bearing context";
+  return @"Road context packaged";
+}
+
 - (NSString *)layerSourceLabel:(NSString *)name {
   NSDictionary *layer = [self.contextLayers[name] isKindOfClass:[NSDictionary class]] ? self.contextLayers[name] : nil;
   NSDictionary *src = [layer[@"source"] isKindOfClass:[NSDictionary class]] ? layer[@"source"] : nil;
@@ -936,7 +949,16 @@ static NSArray *erisAsArray(id v) {
     [s appendString:self.hillshadeImage ? @"Surface texture: USGS 3DEP hillshade relief (no aerial imagery)\n"
                                         : @"Surface texture: none (elevation mesh only)\n"];
   }
-  if ([self layerAvailable:@"roads"]) [s appendFormat:@"Roads: %@\n", [self layerSourceLabel:@"roads"] ?: @"ERIS road context"];
+  // Truthful road context + packaged feature count (never overstates "roads").
+  if ([self layerAvailable:@"roads"]) {
+    NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : @{};
+    NSInteger count = [roads[@"feature_count"] respondsToSelector:@selector(integerValue)] ? [roads[@"feature_count"] integerValue] : 0;
+    NSString *srcLabel = [self layerSourceLabel:@"roads"];
+    [s appendFormat:@"Road context: %@ (%ld feature%@)%@\n", [self describeRoadContext], (long)count,
+                    count == 1 ? @"" : @"s", srcLabel ? [@" · " stringByAppendingString:srcLabel] : @""];
+  } else {
+    [s appendString:@"Road context: No road context packaged\n"];
+  }
   [s appendFormat:@"Package version: %@\n", [p[@"packageVersion"] isKindOfClass:[NSString class]] ? p[@"packageVersion"] : @"—"];
   if ([self.manifest[@"generated_at"] isKindOfClass:[NSString class]]) [s appendFormat:@"Created: %@\n", self.manifest[@"generated_at"]];
   if ([area[@"radius_m"] respondsToSelector:@selector(doubleValue)]) {

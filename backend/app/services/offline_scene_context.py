@@ -201,6 +201,43 @@ def unavailable_layer(reason: str) -> dict:
     return {"available": False, "reason": str(reason)[:80]}
 
 
+# ---- truthful road-context description --------------------------------------
+# Do NOT claim "roads" / "routes" / "street network" when the package only holds a
+# derived road-bearing line. Describe exactly what was packaged.
+ROAD_CONTEXT_NONE = "No road context packaged"
+ROAD_CONTEXT_BEARING = "Road bearing context"
+ROAD_CONTEXT_INVENTORY = "Road inventory geometry"
+ROAD_CONTEXT_FEATURE_SERVICE = "Feature service road network"
+
+
+def road_kinds_from_geojson(geojson: dict | None) -> list:
+    """Distinct feature `properties.kind` values present in a roads FeatureCollection
+    (e.g. road_bearing / road_inventory / road_centerline). Sorted, defensive."""
+    kinds: list = []
+    for f in (geojson or {}).get("features") or []:
+        props = (f or {}).get("properties") if isinstance(f, dict) else None
+        k = props.get("kind") if isinstance(props, dict) else None
+        if isinstance(k, str) and k and k not in kinds:
+            kinds.append(k)
+    return sorted(kinds)
+
+
+def describe_road_context(roads_layer: dict | None) -> str:
+    """Truthful one-line description of the packaged road context, by richest kind
+    present: feature-service centerlines > road-inventory geometry > bearing line."""
+    if not isinstance(roads_layer, dict) or not roads_layer.get("available"):
+        return ROAD_CONTEXT_NONE
+    kinds = roads_layer.get("road_kinds") or []
+    if "road_centerline" in kinds:
+        return ROAD_CONTEXT_FEATURE_SERVICE
+    if "road_inventory" in kinds:
+        return ROAD_CONTEXT_INVENTORY
+    if "road_bearing" in kinds:
+        return ROAD_CONTEXT_BEARING
+    # available but unclassified kinds -> honest, non-overstating fallback.
+    return "Road context packaged"
+
+
 def validate_context_layers(context_layers) -> tuple[bool, str | None]:
     """Structural validation of the manifest context_layers block (metadata only;
     asset presence/CRC/SHA is checked by the bundle validator). Absent block or

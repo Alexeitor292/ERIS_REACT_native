@@ -76,6 +76,41 @@ class TestRoadsGeoJson:
             assert count == 0
 
 
+class TestRoadContextDescription:
+    """Truthful road-context labels — never claim 'roads'/'routes'/'street map'
+    when the package only holds a derived road-bearing line."""
+
+    def test_no_road_context(self):
+        assert ctxmod.describe_road_context(None) == ctxmod.ROAD_CONTEXT_NONE
+        assert ctxmod.describe_road_context({"available": False, "reason": "no_data"}) == ctxmod.ROAD_CONTEXT_NONE
+
+    def test_bearing_only(self):
+        layer = ctxmod.available_layer(ctxmod.ROADS_FILE, b"{}", None, road_kinds=["road_bearing"])
+        assert ctxmod.describe_road_context(layer) == ctxmod.ROAD_CONTEXT_BEARING
+        assert ctxmod.describe_road_context(layer) == "Road bearing context"
+
+    def test_road_inventory_geometry(self):
+        layer = ctxmod.available_layer(ctxmod.ROADS_FILE, b"{}", None, road_kinds=["road_bearing", "road_inventory"])
+        assert ctxmod.describe_road_context(layer) == ctxmod.ROAD_CONTEXT_INVENTORY
+
+    def test_feature_service_network(self):
+        layer = ctxmod.available_layer(
+            ctxmod.ROADS_FILE, b"{}", None, road_kinds=["road_bearing", "road_inventory", "road_centerline"]
+        )
+        assert ctxmod.describe_road_context(layer) == ctxmod.ROAD_CONTEXT_FEATURE_SERVICE
+
+    def test_kinds_extracted_from_geojson(self):
+        gj = {"features": [
+            {"properties": {"kind": "road_bearing"}},
+            {"properties": {"kind": "road_inventory"}},
+            {"properties": {"kind": "road_inventory"}},
+            {"nope": 1},
+        ]}
+        assert ctxmod.road_kinds_from_geojson(gj) == ["road_bearing", "road_inventory"]
+        assert ctxmod.road_kinds_from_geojson(None) == []
+        assert ctxmod.road_kinds_from_geojson({"features": "bad"}) == []
+
+
 class TestSourceSanitization:
     def test_strips_query_and_disallowed_keys(self):
         src = {

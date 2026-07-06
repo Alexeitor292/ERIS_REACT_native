@@ -361,7 +361,10 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                             "retrieved_at": datetime.now(timezone.utc).isoformat(),
                             "attribution": "Caltrans / ERIS road context",
                         }
-                        layers["roads"] = context_fmt.available_layer(context_fmt.ROADS_FILE, data, src, feature_count=count)
+                        kinds = context_fmt.road_kinds_from_geojson(geojson)
+                        layers["roads"] = context_fmt.available_layer(
+                            context_fmt.ROADS_FILE, data, src, feature_count=count, road_kinds=kinds
+                        )
                         assets[context_fmt.ROADS_FILE] = data
                         running += len(data)
                         _log("roads", "packaged", features=count, bytes=len(data))

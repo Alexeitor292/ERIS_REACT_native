@@ -101,8 +101,27 @@ export type ContextLayersSummary = {
   elevationSource?: string | null;
   imagerySource?: string | null;
   roadSource?: string | null;
+  roadContext?: string | null; // truthful road-context description (see describeRoadContext)
+  roadFeatureCount?: number | null;
   attribution?: string[];
 };
+
+/**
+ * Truthful one-line description of the packaged road context — NEVER claims
+ * "roads"/"routes"/"street network" when the package only holds a derived
+ * road-bearing line. Ranked by the richest feature kind present:
+ * feature-service centerlines > road-inventory geometry > bearing line.
+ */
+export function describeRoadContext(
+  roads?: { available?: boolean; road_kinds?: string[]; feature_count?: number } | null,
+): string {
+  if (!roads || roads.available !== true) return "No road context packaged";
+  const kinds = Array.isArray(roads.road_kinds) ? roads.road_kinds : [];
+  if (kinds.includes("road_centerline")) return "Feature service road network";
+  if (kinds.includes("road_inventory")) return "Road inventory geometry";
+  if (kinds.includes("road_bearing")) return "Road bearing context";
+  return "Road context packaged";
+}
 
 export type BaseSurface = "terrain" | "satellite" | "hybrid";
 
@@ -124,7 +143,8 @@ export function baseSurfaceAvailable(s: Pick<ContextLayersSummary, "imagery">, s
  */
 export function describePackagedLayers(s: ContextLayersSummary): string {
   const parts: string[] = [`${s.elevationSource || "USGS 3DEP"} elevation`];
-  if (s.roads) parts.push("Roads packaged");
+  // Truthful road context (never a bare "Roads" claim for a bearing-only package).
+  if (s.roads) parts.push(s.roadContext || describeRoadContext({ available: true, road_kinds: [] }));
   if (s.imagery) parts.push("Aerial imagery");
   else if (s.hillshade) parts.push("Hillshade relief");
   return parts.join(" · ");

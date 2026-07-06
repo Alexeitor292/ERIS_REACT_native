@@ -143,6 +143,8 @@ export type ContextLayerMeta = {
   reason?: string;
   width?: number;
   height?: number;
+  feature_count?: number; // roads: number of packaged features
+  road_kinds?: string[]; // roads: distinct feature kinds (road_bearing/inventory/centerline)
   source?: ContextLayerSource;
   [k: string]: unknown;
 };
@@ -194,6 +196,18 @@ function layerSourceLabel(layer: ContextLayerMeta | undefined): string | null {
   return s.attribution || s.dataset || s.provider || null;
 }
 
+// Truthful road-context label — mirrors describeRoadContext() in offlineScene.ts
+// and the Objective-C describeRoadContext (kept in sync). Inlined here to keep this
+// pure module free of runtime cross-module imports (node --test resolution).
+function roadContextLabel(roads: ContextLayerMeta | undefined): string {
+  if (!roads || roads.available !== true) return "No road context packaged";
+  const kinds = Array.isArray(roads.road_kinds) ? roads.road_kinds : [];
+  if (kinds.includes("road_centerline")) return "Feature service road network";
+  if (kinds.includes("road_inventory")) return "Road inventory geometry";
+  if (kinds.includes("road_bearing")) return "Road bearing context";
+  return "Road context packaged";
+}
+
 /**
  * Compact, UI-ready summary of a package's base surface + overlays, derived from
  * the manifest. `hasHillshade` comes from the presence of a hillshade.png entry
@@ -214,6 +228,7 @@ export function summarizeContextLayers(
     const a = cl[name]?.source?.attribution;
     if (a && !attribution.includes(a)) attribution.push(a);
   }
+  const roadCount = typeof cl.roads?.feature_count === "number" ? cl.roads.feature_count : null;
   return {
     hillshade,
     roads,
@@ -224,6 +239,8 @@ export function summarizeContextLayers(
     elevationSource: manifest?.elevation?.source ?? null,
     imagerySource: layerSourceLabel(cl.imagery),
     roadSource: layerSourceLabel(cl.roads),
+    roadContext: roadContextLabel(cl.roads),
+    roadFeatureCount: roadCount,
     attribution,
   };
 }

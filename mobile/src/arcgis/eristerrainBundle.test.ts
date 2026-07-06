@@ -292,7 +292,10 @@ const ROADS = enc('{"type":"FeatureCollection","features":[]}');
 function manifestWithRoads(overrides: Record<string, unknown> = {}) {
   const m = goodManifest() as Record<string, unknown>;
   m.context_layers = {
-    roads: { available: true, file: "roads.geojson", sha256: "b".repeat(64), bytes: ROADS.length, ...overrides },
+    roads: {
+      available: true, file: "roads.geojson", sha256: "b".repeat(64), bytes: ROADS.length,
+      feature_count: 1, road_kinds: ["road_bearing"], ...overrides,
+    },
     imagery: { available: false, reason: "not_configured" },
     overview: { available: false, reason: "disabled" },
   };
@@ -369,4 +372,19 @@ test("summarizeContextLayers reflects hillshade + roads + imagery", () => {
   assert.equal(s.imagery, true);
   assert.equal(s.imagerySource, "USDA NAIP via USGS");
   assert.ok((s.attribution ?? []).includes("USDA NAIP via USGS"));
+  // Truthful road context from the packaged feature kinds + count.
+  assert.equal(s.roadContext, "Road bearing context");
+  assert.equal(s.roadFeatureCount, 1);
+});
+
+test("summarizeContextLayers road context: inventory vs feature-service vs none", () => {
+  const inv = manifestWithRoads({ road_kinds: ["road_bearing", "road_inventory"], feature_count: 3 });
+  assert.equal(summarizeContextLayers(inv as never).roadContext, "Road inventory geometry");
+  const net = manifestWithRoads({ road_kinds: ["road_centerline"], feature_count: 42 });
+  const ns = summarizeContextLayers(net as never);
+  assert.equal(ns.roadContext, "Feature service road network");
+  assert.equal(ns.roadFeatureCount, 42);
+  // No roads packaged.
+  const legacy = summarizeContextLayers(goodManifest() as never);
+  assert.equal(legacy.roadContext, "No road context packaged");
 });

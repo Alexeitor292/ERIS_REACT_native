@@ -11,6 +11,7 @@ import {
   cleanupTargets,
   createSerialMutex,
   describePackagedLayers,
+  describeRoadContext,
   describeScope,
   downloadHttpError,
   layerAvailabilityLabel,
@@ -352,16 +353,35 @@ test("registry validity + crash-recovery source selection", () => {
 
 // ---- context-layer display strings + availability (Phase: context layers) ---
 
-test("describePackagedLayers distinguishes hillshade relief from aerial imagery", () => {
-  // Imagery present -> "Aerial imagery" (never claimed from hillshade alone).
+test("describeRoadContext is truthful (never claims 'roads' for a bearing line)", () => {
+  assert.equal(describeRoadContext(null), "No road context packaged");
+  assert.equal(describeRoadContext({ available: false }), "No road context packaged");
+  assert.equal(describeRoadContext({ available: true, road_kinds: ["road_bearing"] }), "Road bearing context");
   assert.equal(
-    describePackagedLayers({ hillshade: true, roads: true, imagery: true, overview: true, elevationSource: "USGS_3DEP" }),
-    "USGS_3DEP elevation · Roads packaged · Aerial imagery",
+    describeRoadContext({ available: true, road_kinds: ["road_bearing", "road_inventory"] }),
+    "Road inventory geometry",
   );
-  // Only hillshade -> "Hillshade relief", NOT imagery.
   assert.equal(
-    describePackagedLayers({ hillshade: true, roads: true, imagery: false, overview: true, elevationSource: "USGS_3DEP" }),
-    "USGS_3DEP elevation · Roads packaged · Hillshade relief",
+    describeRoadContext({ available: true, road_kinds: ["road_bearing", "road_inventory", "road_centerline"] }),
+    "Feature service road network",
+  );
+  assert.equal(describeRoadContext({ available: true, road_kinds: [] }), "Road context packaged");
+});
+
+test("describePackagedLayers distinguishes hillshade relief from aerial imagery + truthful road context", () => {
+  // Imagery present -> "Aerial imagery"; roads described truthfully (bearing-only).
+  assert.equal(
+    describePackagedLayers({
+      hillshade: true, roads: true, roadContext: "Road bearing context", imagery: true, overview: true, elevationSource: "USGS_3DEP",
+    }),
+    "USGS_3DEP elevation · Road bearing context · Aerial imagery",
+  );
+  // Only hillshade -> "Hillshade relief", NOT imagery; road inventory geometry.
+  assert.equal(
+    describePackagedLayers({
+      hillshade: true, roads: true, roadContext: "Road inventory geometry", imagery: false, overview: true, elevationSource: "USGS_3DEP",
+    }),
+    "USGS_3DEP elevation · Road inventory geometry · Hillshade relief",
   );
   // No roads, no imagery, no hillshade -> just elevation.
   assert.equal(
