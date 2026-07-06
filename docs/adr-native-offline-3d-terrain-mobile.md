@@ -450,3 +450,74 @@ download it on the device; enable Airplane Mode; open native 3D and verify, with
 **mesh** + **hillshade texture**, the **incident marker**, the **uploaded geometry** (correct type/placement),
 the **sample-extent rectangle**, the **road-bearing line**, geometry outside the AOI clipped, and **orbit /
 pan / zoom / tilt**, **North** (north-up, framing preserved), and **Reset** (re-frames the incident).
+
+## Addendum 3 — offline geographic context layers (2026-07-02)
+
+Adds packaged, fully-offline geographic context to the native iOS terrain viewer:
+road/route context, an optional aerial-imagery drape, a north-up 2D overview
+inset, and per-layer provenance — a Google-Maps-style *layered* field map that
+still works with **zero connectivity after download**. Design note:
+`docs/design/offline-terrain-context-layers.md`.
+
+**What is packaged (inside the `.eristerrain` bundle, build-time only):**
+
+| Layer | Asset | Source | Default | Fully offline after download |
+|---|---|---|---|---|
+| Elevation mesh | `elevation-grid.bin` | USGS 3DEP (public domain) | on | yes |
+| Hillshade relief | `hillshade.png` | USGS 3DEP rendered relief (public domain) | on when available | yes |
+| Roads / routes | `roads.geojson` | **ERIS-authoritative** (resolved road-bearing segment + road-inventory line geometry), clipped to bounds+buffer; opt-in ArcGIS FeatureServer adapter | on | yes |
+| Overview inset | `overview.png` | **server-rendered** (Pillow) from bounds+roads+incident+geometry | on | yes |
+| Aerial imagery | `imagery.png` | **USGS/USDA NAIP** (public domain) via config adapter | **off (opt-in)** | yes |
+
+**Data-source / licensing decisions.** Roads use ERIS-authoritative data only (no
+third-party provider added by default); a documented, license-reviewed opt-in
+ArcGIS FeatureServer adapter can broaden coverage. Imagery uses NAIP (USGS/USDA,
+public domain) but ships **disabled** until validated on a live worker — until
+then the manifest records `imagery.available=false, reason="not_configured"` and
+the iOS Layers sheet shows Satellite/Hybrid as **Not packaged**. No Google / Apple
+/ Bing / Mapbox imagery. Layer `source` blocks carry provider/dataset/attribution/
+retrieved_at only — sanitized (URL query stripped; **never** credentials).
+
+**Manifest (backward compatible).** New `context_layers` block; legacy packages
+without it open exactly as before (all optional layers "unavailable", never
+corrupt). Every declared-`available` asset is verified (presence + SHA-256 + byte
+count + per-entry CRC-32) on the backend and again on the device before extraction;
+a declared-available-but-missing/corrupt asset fails the bundle closed, while
+absent layers just don't render. Context assets count toward
+`OFFLINE_SCENE_MAX_PACKAGE_MB`; optional imagery is the last, skippable asset
+(dropped `too_large` before exceeding the cap).
+
+**Fetched only during package generation (worker):** roads (only for the opt-in
+external adapter — the default `eris_internal` source needs no network) and NAIP
+imagery (when enabled). **Nothing** is fetched during the mobile download or while
+viewing offline; the terrain view controller makes no network request.
+
+**Config knobs:** `OFFLINE_SCENE_ROADS_ENABLED` / `_ROAD_SOURCE` (`eris_internal` |
+`arcgis_feature_service`) / `_ROAD_SOURCE_URL` / `_ROAD_BUFFER_M` /
+`_ROAD_FETCH_TIMEOUT_S`; `OFFLINE_SCENE_IMAGERY_ENABLED` (default false) /
+`_IMAGERY_MANDATORY` / `_IMAGERY_EXPORT_URL` / `_IMAGERY_MAX_PX` /
+`_IMAGERY_FETCH_TIMEOUT_S`; `OFFLINE_SCENE_OVERVIEW_ENABLED` / `_OVERVIEW_PX`.
+
+**Size / resolution tradeoffs.** roads.geojson is tiny (a few features). overview
+is a small PNG (`OFFLINE_SCENE_OVERVIEW_PX`, default 512). Imagery dominates size
+(`OFFLINE_SCENE_IMAGERY_MAX_PX`, default 1024) and is skipped rather than blowing
+the package budget.
+
+**Platform statement.** iOS is the supported native offline-terrain target.
+**Android is NOT** a native offline-terrain target (unchanged); no browser/WebView
+substitution is used for "native offline".
+
+**What is NOT proven yet (honest):** live NAIP imagery is adapter-complete but
+default-off + unvalidated against the live service; the native iOS build is
+compiled by CI (macOS), not on the Windows dev box; the real-device Airplane-Mode
+acceptance below is a manual gate, not claimed as passed.
+
+**Airplane-Mode manual acceptance (extends the base test):** on a submission with
+coordinates + a real road bearing, prepare + download the package on an iOS dev
+build; enable Airplane Mode; open native 3D and verify with **no network**: terrain
+mesh + hillshade, incident marker, roads draped on the surface, the north-up
+overview inset (lower-right), and — via **Layers** — toggling Roads / Overlays /
+Boundary / Overview, and (only if imagery was packaged) switching Terrain /
+Satellite / Hybrid; tap the status pill for Package Details; confirm the pill never
+claims "aerial imagery" when only hillshade is packaged, and that a package without
+imagery shows Satellite/Hybrid as unavailable.
