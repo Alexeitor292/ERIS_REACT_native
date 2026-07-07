@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "check:native-selectors": "node scripts/check-arcgis-native-selectors.mjs",
-    "test": "node scripts/check-arcgis-native-selectors.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts"
+    "check:terrain-texcoord": "node scripts/check-terrain-texcoord-contract.mjs",
+    "test": "node scripts/check-arcgis-native-selectors.mjs && node scripts/check-terrain-texcoord-contract.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
