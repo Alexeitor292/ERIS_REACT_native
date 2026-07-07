@@ -209,6 +209,8 @@ jobs:
         run: npm ci
       - name: ArcGIS native selector guard (blocks unsupported 100.15 geometry API)
         run: node scripts/check-arcgis-native-selectors.mjs
+      - name: Terrain texcoord source-contract (blocks CGPoint UV stride regression)
+        run: node scripts/check-terrain-texcoord-contract.mjs
       - name: Lint
         run: npx expo lint
       - name: TypeScript check

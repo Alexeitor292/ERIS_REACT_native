@@ -4,6 +4,17 @@
 
 #import "ArcGisSketchStore.h"
 
+// Packed two-float texture coordinate for the SceneKit texcoord source. MUST NOT
+// use CGPoint: CGPoint holds two CGFloat (double, 16 bytes) on 64-bit iOS, but the
+// texcoord source declares floatComponents:YES / bytesPerComponent:sizeof(float),
+// so SceneKit would read partial double bytes as floats -> corrupt UVs (diagonal
+// stripe artifact). This struct is exactly two float32 (8 bytes), matching the
+// declared component layout and stride.
+typedef struct {
+  float u;
+  float v;
+} ErisTerrainTexCoord;
+
 #pragma mark - Layers sheet
 
 // Polished native sheet for the terrain viewer's layer control. Sections:
@@ -326,7 +337,7 @@
 
   NSUInteger vcount = (NSUInteger)(rows * cols);
   SCNVector3 *verts = malloc(sizeof(SCNVector3) * vcount);
-  CGPoint *uvs = malloc(sizeof(CGPoint) * vcount);
+  ErisTerrainTexCoord *uvs = malloc(sizeof(ErisTerrainTexCoord) * vcount);  // packed 2x float32
   for (NSInteger r = 0; r < rows; r++) {
     for (NSInteger c = 0; c < cols; c++) {
       NSUInteger i = (NSUInteger)(r * cols + c);
@@ -336,7 +347,8 @@
       float z = ((float)r / (float)(rows - 1) - 0.5f) * (2.0f * ws);
       float y = (float)((e - self.minE)) * self.vExag;
       verts[i] = SCNVector3Make(x, y, z);
-      uvs[i] = CGPointMake((float)c / (float)(cols - 1), (float)r / (float)(rows - 1));
+      // u = c/(cols-1), v = r/(rows-1) — aligns the aerial/hillshade texture to the mesh.
+      uvs[i] = (ErisTerrainTexCoord){.u = (float)c / (float)(cols - 1), .v = (float)r / (float)(rows - 1)};
     }
   }
   // Two triangles per quad.
@@ -353,14 +365,14 @@
   }
 
   SCNGeometrySource *vSrc = [SCNGeometrySource geometrySourceWithVertices:verts count:vcount];
-  SCNGeometrySource *uvSrc = [SCNGeometrySource geometrySourceWithData:[NSData dataWithBytes:uvs length:sizeof(CGPoint) * vcount]
+  SCNGeometrySource *uvSrc = [SCNGeometrySource geometrySourceWithData:[NSData dataWithBytes:uvs length:sizeof(ErisTerrainTexCoord) * vcount]
                                                               semantic:SCNGeometrySourceSemanticTexcoord
                                                            vectorCount:vcount
                                                        floatComponents:YES
                                                    componentsPerVector:2
                                                      bytesPerComponent:sizeof(float)
                                                             dataOffset:0
-                                                            dataStride:sizeof(CGPoint)];
+                                                            dataStride:sizeof(ErisTerrainTexCoord)];
   SCNGeometryElement *el = [SCNGeometryElement geometryElementWithData:[NSData dataWithBytes:idx length:sizeof(int) * icount]
                                                         primitiveType:SCNGeometryPrimitiveTypeTriangles
                                                        primitiveCount:icount / 3
@@ -368,6 +380,11 @@
   SCNGeometry *geo = [SCNGeometry geometryWithSources:@[vSrc, uvSrc] elements:@[el]];
   SCNMaterial *mat = [SCNMaterial material];
   mat.diffuse.contents = [UIColor colorWithRed:0.45 green:0.42 blue:0.36 alpha:1.0];
+  // Clamp in both directions — the texture maps 1:1 onto the mesh; never tile/repeat.
+  mat.diffuse.wrapS = SCNWrapModeClamp;
+  mat.diffuse.wrapT = SCNWrapModeClamp;
+  mat.multiply.wrapS = SCNWrapModeClamp;
+  mat.multiply.wrapT = SCNWrapModeClamp;
   mat.doubleSided = YES;
   geo.firstMaterial = mat;
   free(verts); free(uvs); free(idx);
@@ -783,6 +800,12 @@ static NSArray *erisAsArray(id v) {
     diffuse = self.hillshadeImage;
   }
   mat.diffuse.contents = diffuse != nil ? (id)diffuse : (id)[UIColor colorWithRed:0.45 green:0.42 blue:0.36 alpha:1.0];
+  // Always clamp (both directions) on every (re)assignment — the aerial/hillshade
+  // texture maps 1:1 onto the mesh UVs; never tile/repeat.
+  mat.diffuse.wrapS = SCNWrapModeClamp;
+  mat.diffuse.wrapT = SCNWrapModeClamp;
+  mat.multiply.wrapS = SCNWrapModeClamp;
+  mat.multiply.wrapT = SCNWrapModeClamp;
 }
 
 - (void)applyLayerVisibility {
