@@ -11,7 +11,8 @@
     "lint": "expo lint",
     "check:native-selectors": "node scripts/check-arcgis-native-selectors.mjs",
     "check:terrain-texcoord": "node scripts/check-terrain-texcoord-contract.mjs",
-    "test": "node scripts/check-arcgis-native-selectors.mjs && node scripts/check-terrain-texcoord-contract.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts"
+    "check:terrain-exaggeration": "node scripts/check-terrain-exaggeration-contract.mjs",
+    "test": "node scripts/check-arcgis-native-selectors.mjs && node scripts/check-terrain-texcoord-contract.mjs && node scripts/check-terrain-exaggeration-contract.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts src/arcgis/terrainScale.test.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
