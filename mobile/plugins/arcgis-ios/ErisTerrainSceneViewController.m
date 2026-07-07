@@ -22,12 +22,37 @@ typedef struct {
 //   imagery was not packaged), Operational overlays (Roads, Incident/Geometry,
 //   Package Boundary, Overview), Appearance (terrain relief intensity). Reports
 //   changes via an onChange block. Never triggers a network request.
+// Vertical-exaggeration slider policy (mirrors terrainScale.ts).
+static const CGFloat kErisVertExagMin = 0.5f;
+static const CGFloat kErisVertExagMax = 3.0f;
+static const CGFloat kErisVertExagStep = 0.1f;
+
+static CGFloat ErisSnapExag(CGFloat v) {
+  if (!isfinite(v)) return 1.0f;
+  CGFloat c = MAX(kErisVertExagMin, MIN(kErisVertExagMax, v));
+  return roundf(c / kErisVertExagStep) * kErisVertExagStep;
+}
+
+// Human label for an exaggeration value (matches exaggerationLabel in terrainScale.ts).
+static NSString *ErisExagLabel(CGFloat value) {
+  CGFloat x = ErisSnapExag(value);
+  NSString *tag = x <= 0.6f ? @"Flattened"
+                : x < 1.0f  ? @"Reduced relief"
+                : x == 1.0f ? @"True scale"
+                : x <= 1.5f ? @"Field relief"
+                : x <= 2.0f ? @"Enhanced relief"
+                            : @"High relief";
+  return [NSString stringWithFormat:@"%.1f× %@", x, tag];  // e.g. "1.0x True scale"
+}
+
 @interface ErisLayersSheetVC : UITableViewController
 @property(nonatomic, assign) NSInteger baseSurface;   // 0 terrain, 1 satellite, 2 hybrid
 @property(nonatomic, assign) BOOL imageryAvailable;
 @property(nonatomic, assign) BOOL roadsAvailable, overviewAvailable;
 @property(nonatomic, assign) BOOL showRoads, showOverlays, showBoundary, showOverview;
-@property(nonatomic, assign) CGFloat reliefIntensity;
+@property(nonatomic, assign) CGFloat reliefIntensity;         // hillshade blend (NOT vertical exaggeration)
+@property(nonatomic, assign) CGFloat verticalExaggeration;    // display-only 0.5..3.0
+@property(nonatomic, weak) UILabel *exagValueLabel;           // live value text (no row reload while dragging)
 @property(nonatomic, copy) void (^onChange)(ErisLayersSheetVC *sheet);
 @end
 
@@ -48,7 +73,7 @@ typedef struct {
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 3; }
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
-  return s == 0 ? 3 : (s == 1 ? 4 : 1);
+  return s == 0 ? 3 : (s == 1 ? 4 : 2);  // Appearance: vertical exaggeration + hillshade intensity
 }
 
 - (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
@@ -83,12 +108,25 @@ typedef struct {
     [sw addTarget:self action:@selector(onSwitch:) forControlEvents:UIControlEventValueChanged];
     sw.accessibilityLabel = titles[ip.row];
     cell.accessoryView = sw;
+  } else if (ip.row == 0) {
+    // Vertical exaggeration — a DISPLAY setting; it does not change the packaged data.
+    cell.textLabel.text = @"Vertical exaggeration";
+    cell.detailTextLabel.text = ErisExagLabel(self.verticalExaggeration);
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    self.exagValueLabel = cell.detailTextLabel;
+    UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(0, 0, 150, 30)];
+    sl.minimumValue = (float)kErisVertExagMin; sl.maximumValue = (float)kErisVertExagMax;
+    sl.value = (float)self.verticalExaggeration;
+    sl.accessibilityLabel = @"Vertical exaggeration (display only)";
+    sl.accessibilityValue = ErisExagLabel(self.verticalExaggeration);
+    [sl addTarget:self action:@selector(onExagSlider:) forControlEvents:UIControlEventValueChanged];
+    cell.accessoryView = sl;
   } else {
-    cell.textLabel.text = @"Terrain relief intensity";
-    UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(0, 0, 160, 30)];
+    cell.textLabel.text = @"Hillshade intensity";
+    UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(0, 0, 150, 30)];
     sl.minimumValue = 0.2f; sl.maximumValue = 1.0f; sl.value = (float)self.reliefIntensity;
-    sl.accessibilityLabel = @"Terrain relief intensity";
-    [sl addTarget:self action:@selector(onSlider:) forControlEvents:UIControlEventValueChanged];
+    sl.accessibilityLabel = @"Hillshade intensity";
+    [sl addTarget:self action:@selector(onHillshadeSlider:) forControlEvents:UIControlEventValueChanged];
     cell.accessoryView = sl;
   }
   return cell;
@@ -112,7 +150,19 @@ typedef struct {
   [self notify];
 }
 
-- (void)onSlider:(UISlider *)sl { self.reliefIntensity = sl.value; [self notify]; }
+- (void)onHillshadeSlider:(UISlider *)sl { self.reliefIntensity = sl.value; [self notify]; }
+
+// Snap the slider to 0.1 increments; update the live value label + accessibility
+// value WITHOUT reloading the row (which would interrupt the in-progress drag).
+- (void)onExagSlider:(UISlider *)sl {
+  CGFloat snapped = ErisSnapExag(sl.value);
+  sl.value = (float)snapped;
+  self.verticalExaggeration = snapped;
+  NSString *label = ErisExagLabel(snapped);
+  self.exagValueLabel.text = label;
+  sl.accessibilityValue = label;
+  [self notify];
+}
 
 @end
 
@@ -143,6 +193,12 @@ typedef struct {
 //   * a Package Details sheet (sources/provenance) from the status pill.
 // Everything is LOCAL — the terrain view controller makes NO network request.
 // Corrupt/absent optional assets degrade that one layer; the base terrain stays up.
+//
+// VERTICAL EXAGGERATION (display only): the mesh + draped layers are built at
+// PHYSICAL true scale (scene-units-per-metre from the package footprint; 1.0x =
+// true scale) and Y-scaled together by exagNode for the 0.5x..3.0x control. This
+// NEVER mutates gridData (the read-only source-derived elevation grid) or any
+// packaged file — it only changes SceneKit geometry/transforms in memory.
 @interface ErisTerrainSceneViewController ()
 @property(nonatomic, strong) SCNView *scnView;
 @property(nonatomic, strong) SCNNode *cameraNode;
@@ -154,8 +210,16 @@ typedef struct {
 @property(nonatomic, assign) double minE;
 @property(nonatomic, assign) double maxE;
 @property(nonatomic, assign) double noData;
-@property(nonatomic, assign) float vExag;            // vertical exaggeration (y = (e-minE)*vExag)
-@property(nonatomic, assign) SCNVector3 focusTarget; // incident (or terrain centre) world pos
+// --- physical scale (true-scale baseline derived from the package footprint) ---
+@property(nonatomic, assign) double sceneUnitsPerMeter; // horizontal AND (at 1.0x) vertical
+@property(nonatomic, assign) double halfWidthUnits;     // mesh half-extent on X (east/west)
+@property(nonatomic, assign) double halfDepthUnits;     // mesh half-extent on Z (north/south)
+@property(nonatomic, assign) double terrainWidthM;      // physical footprint width (m)
+@property(nonatomic, assign) double terrainHeightM;     // physical footprint height (m)
+@property(nonatomic, assign) CGFloat verticalExaggeration; // display-only multiplier (0.5..3.0)
+@property(nonatomic, strong) SCNNode *exagNode;         // Y-scaled container for terrain + draped layers
+@property(nonatomic, strong) NSMutableArray<SCNNode *> *markerNodes; // spheres counter-scaled to stay round
+@property(nonatomic, assign) SCNVector3 focusTarget; // incident (or terrain centre) TRUE-scale world pos
 @property(nonatomic, strong) NSDictionary *manifest;
 @property(nonatomic, strong) NSDictionary *terrainMeta;
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -189,7 +253,9 @@ typedef struct {
   self.showOverlays = YES;      // incident + submitted geometry
   self.showBoundary = NO;
   self.showOverview = YES;
-  self.reliefIntensity = 0.85f;
+  self.reliefIntensity = 0.85f;         // hillshade blend (NOT vertical exaggeration)
+  self.verticalExaggeration = 1.0f;     // display-only; 1.0x = physical true scale
+  self.markerNodes = [NSMutableArray array];
 
   self.scnView = [[SCNView alloc] initWithFrame:self.view.bounds];
   self.scnView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -264,25 +330,34 @@ typedef struct {
     [self showFatal:@"Terrain height grid is missing or the wrong size."]; return;
   }
 
-  self.gridData = gridData;                                    // retained for surface sampling
+  // gridData is the loaded raw float32 SOURCE-DERIVED elevation grid (metres). It is
+  // read-only for the lifetime of the view — the vertical-exaggeration control is a
+  // pure DISPLAY transform and NEVER mutates it or any packaged file.
+  self.gridData = gridData;
   self.noData = [self.terrainMeta[@"no_data_value"] doubleValue];
   self.minE = [self.terrainMeta[@"min_elevation_m"] doubleValue];
   self.maxE = [self.terrainMeta[@"max_elevation_m"] doubleValue];
-  float relief = (float)MAX(1.0, self.maxE - self.minE);
-  self.vExag = (self.worldSize * 0.35f) / relief;             // vertical exaggeration to read terrain
+  [self computePhysicalScale];   // true-scale scene-units/metre + aspect-correct half-extents
 
   self.extractedDir = dir;
+
+  // exagNode Y-scales the terrain + ALL draped layers together for vertical
+  // exaggeration (a DISPLAY transform only). Lights + camera stay on rootNode so
+  // they are never scaled. Everything under exagNode is built at TRUE scale (1.0x).
+  self.exagNode = [SCNNode node];
+  [self.scnView.scene.rootNode addChildNode:self.exagNode];
+
   SCNNode *terrain = [self buildTerrainNode];
   self.terrainNode = terrain;
-  [self.scnView.scene.rootNode addChildNode:terrain];
+  [self.exagNode addChildNode:terrain];
 
   // Container nodes so each overlay layer can be toggled independently.
   self.overlaysNode = [SCNNode node];
   self.roadsNode = [SCNNode node];
   self.boundaryNode = [SCNNode node];
-  [self.scnView.scene.rootNode addChildNode:self.overlaysNode];
-  [self.scnView.scene.rootNode addChildNode:self.roadsNode];
-  [self.scnView.scene.rootNode addChildNode:self.boundaryNode];
+  [self.exagNode addChildNode:self.overlaysNode];
+  [self.exagNode addChildNode:self.roadsNode];
+  [self.exagNode addChildNode:self.boundaryNode];
 
   [self loadContextTextures:dir];   // hillshade + optional aerial imagery (local files only)
   [self applyBaseSurface];          // set the terrain material from the current base surface
@@ -294,8 +369,67 @@ typedef struct {
   [self buildBoundaryLayer];        // package boundary ring -> boundaryNode
   [self buildOverviewInset];        // north-up 2D inset (lower-right)
   [self applyLayerVisibility];
+  [self applyVerticalExaggeration]; // exagNode.scale + marker counter-scales (no camera move here)
   [self setupCamera];
   [self updateStatusWithParams:p];
+}
+
+// True-scale baseline from the package footprint (NOT a magic visual constant).
+// Prefers terrain.local_transform; falls back to bounds; fails safe on degenerate
+// metadata. Mirrors physicalFootprintMeters/sceneScale in src/arcgis/terrainScale.ts.
+- (void)computePhysicalScale {
+  double minLat = 0, minLon = 0, maxLat = 0, maxLon = 0;
+  BOOL ok = NO;
+  NSDictionary *lt = [self.terrainMeta[@"local_transform"] isKindOfClass:[NSDictionary class]] ? self.terrainMeta[@"local_transform"] : nil;
+  if (lt) {
+    double originLon = [lt[@"origin_lon"] doubleValue], originLat = [lt[@"origin_lat"] doubleValue];
+    double lonPerCol = [lt[@"lon_per_col"] doubleValue], latPerRow = [lt[@"lat_per_row"] doubleValue];
+    if (isfinite(originLon) && isfinite(originLat) && lonPerCol > 0 && latPerRow < 0 && self.cols > 1 && self.rows > 1) {
+      minLon = originLon; maxLon = originLon + lonPerCol * (self.cols - 1);
+      maxLat = originLat; minLat = originLat + latPerRow * (self.rows - 1);
+      ok = YES;
+    }
+  }
+  if (!ok) {
+    NSDictionary *b = [self.terrainMeta[@"bounds"] isKindOfClass:[NSDictionary class]] ? self.terrainMeta[@"bounds"] : nil;
+    if (b) {
+      minLat = [b[@"min_lat"] doubleValue]; minLon = [b[@"min_lon"] doubleValue];
+      maxLat = [b[@"max_lat"] doubleValue]; maxLon = [b[@"max_lon"] doubleValue];
+      ok = (maxLat > minLat && maxLon > minLon);
+    }
+  }
+  double widthM = 0, heightM = 0;
+  if (ok) {
+    double midLat = (minLat + maxLat) / 2.0;
+    double cosLat = cos(midLat * M_PI / 180.0); if (fabs(cosLat) < 1e-6) cosLat = 1e-6;
+    widthM = (maxLon - minLon) * 111320.0 * fabs(cosLat);
+    heightM = (maxLat - minLat) * 111320.0;
+  }
+  if (!(widthM > 0) || !(heightM > 0)) { widthM = heightM = 1000.0; }  // degenerate -> safe square
+  self.terrainWidthM = widthM;
+  self.terrainHeightM = heightM;
+  // The larger horizontal dimension fills 2*worldSize scene units; the smaller keeps
+  // the true aspect ratio (never forced square). This factor is also the 1.0x
+  // vertical scale, so a metre up looks like a metre across.
+  double maxDim = MAX(widthM, heightM);
+  self.sceneUnitsPerMeter = (2.0 * self.worldSize) / maxDim;
+  self.halfWidthUnits = widthM * self.sceneUnitsPerMeter / 2.0;
+  self.halfDepthUnits = heightM * self.sceneUnitsPerMeter / 2.0;
+}
+
+// Apply the display-only vertical exaggeration: Y-scale the container, and
+// counter-scale marker spheres so they track the scaled surface but stay round.
+// Updates the orbit target's height WITHOUT moving/re-orienting the camera.
+- (void)applyVerticalExaggeration {
+  CGFloat e = ErisSnapExag(self.verticalExaggeration);
+  self.verticalExaggeration = e;
+  self.exagNode.scale = SCNVector3Make(1.0f, (float)e, 1.0f);
+  float inv = e > 0 ? (float)(1.0 / e) : 1.0f;
+  for (SCNNode *m in self.markerNodes) m.scale = SCNVector3Make(1.0f, inv, 1.0f);
+  if (self.cameraNode != nil) {
+    // Keep camera position/orientation/zoom; only move the orbit pivot in Y.
+    self.scnView.defaultCameraController.target = [self scaledFocusTarget];
+  }
 }
 
 // Load local textures (hillshade + optional aerial imagery) and the manifest's
@@ -329,11 +463,16 @@ typedef struct {
 
 - (BOOL)imageryUsable { return self.imageryImage != nil; }
 
-// Build a height-field mesh. World X = east (col), Z = south (row), Y = elevation.
+// Build a TRUE-SCALE height-field mesh (1.0x). World X = east (col), Z = south
+// (row), Y = elevation. X/Z use the physical footprint half-extents (aspect-correct,
+// NOT forced square); Y = (elevation - minElevation) * sceneUnitsPerMeter. Vertical
+// exaggeration is applied later as a container Y-scale (exagNode), never baked here.
 - (SCNNode *)buildTerrainNode {
   NSInteger rows = self.rows, cols = self.cols;
-  const float *h = (const float *)self.gridData.bytes;  // little-endian float32 (iOS is LE)
-  float ws = self.worldSize;                            // half-extent
+  const float *h = (const float *)self.gridData.bytes;  // little-endian float32 (iOS is LE); READ-ONLY
+  float halfX = (float)self.halfWidthUnits;
+  float halfZ = (float)self.halfDepthUnits;
+  double supm = self.sceneUnitsPerMeter;
 
   NSUInteger vcount = (NSUInteger)(rows * cols);
   SCNVector3 *verts = malloc(sizeof(SCNVector3) * vcount);
@@ -343,9 +482,9 @@ typedef struct {
       NSUInteger i = (NSUInteger)(r * cols + c);
       double e = (double)h[i];
       if (!isfinite(e) || e == self.noData) e = self.minE;        // no-data -> flat at min
-      float x = ((float)c / (float)(cols - 1) - 0.5f) * (2.0f * ws);
-      float z = ((float)r / (float)(rows - 1) - 0.5f) * (2.0f * ws);
-      float y = (float)((e - self.minE)) * self.vExag;
+      float x = ((float)c / (float)(cols - 1) - 0.5f) * (2.0f * halfX);
+      float z = ((float)r / (float)(rows - 1) - 0.5f) * (2.0f * halfZ);
+      float y = (float)((e - self.minE) * supm);                  // true scale (exag via exagNode)
       verts[i] = SCNVector3Make(x, y, z);
       // u = c/(cols-1), v = r/(rows-1) — aligns the aerial/hillshade texture to the mesh.
       uvs[i] = (ErisTerrainTexCoord){.u = (float)c / (float)(cols - 1), .v = (float)r / (float)(rows - 1)};
@@ -432,14 +571,17 @@ typedef struct {
   double e10 = [self elevAtRow:r1 col:c0], e11 = [self elevAtRow:r1 col:c1];
   double top = e00 + (e01 - e00) * fc, bot = e10 + (e11 - e10) * fc;
   double e = top + (bot - top) * fr;
-  return (float)((e - self.minE) * self.vExag);
+  return (float)((e - self.minE) * self.sceneUnitsPerMeter);   // TRUE scale (exag applied by exagNode)
 }
 
-// grid (col,row) -> world XZ on the mesh; Y = sampled surface + lift.
+// grid (col,row) -> TRUE-scale world XZ on the mesh (aspect-correct); Y = sampled
+// surface + lift. All draped content shares this true-scale space and is Y-scaled
+// together by exagNode, so it stays aligned at any vertical exaggeration.
 - (SCNVector3)surfaceWorldForCol:(double)col row:(double)row lift:(float)lift {
-  float ws = self.worldSize;
-  float x = ((float)(col / (double)(self.cols - 1)) - 0.5f) * (2.0f * ws);
-  float z = ((float)(row / (double)(self.rows - 1)) - 0.5f) * (2.0f * ws);
+  float halfX = (float)self.halfWidthUnits;
+  float halfZ = (float)self.halfDepthUnits;
+  float x = ((float)(col / (double)(self.cols - 1)) - 0.5f) * (2.0f * halfX);
+  float z = ((float)(row / (double)(self.rows - 1)) - 0.5f) * (2.0f * halfZ);
   float y = [self surfaceYAtCol:col row:row] + lift;
   return SCNVector3Make(x, y, z);
 }
@@ -485,6 +627,7 @@ typedef struct {
       pin.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
       pin.position = pos;
       [self.overlaysNode addChildNode:pin];
+      [self.markerNodes addObject:pin];   // counter-scaled so it stays round under exaggeration
     }
   }
 
@@ -553,6 +696,7 @@ typedef struct {
         dot.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
         dot.position = [v SCNVector3Value];
         [self.overlaysNode addChildNode:dot];
+        [self.markerNodes addObject:dot];   // counter-scaled to stay round under exaggeration
       }
     } else if ([kind isEqualToString:@"line"]) {
       SCNNode *ln = [self polylineFromPoints:pts color:lineColor closed:NO];
@@ -714,13 +858,20 @@ static NSArray *erisAsArray(id v) {
   [self resetToIncident];
 }
 
+// focusTarget is stored at TRUE scale; the rendered surface is Y-scaled by exagNode,
+// so the camera/orbit pivot must use the scaled height.
+- (SCNVector3)scaledFocusTarget {
+  SCNVector3 t = self.focusTarget;
+  return SCNVector3Make(t.x, t.y * (float)self.verticalExaggeration, t.z);
+}
+
 // Frame the incident (or terrain centre when the incident is unavailable/out of
 // bounds): place the camera south of and above the focus target, oriented to look
 // at it, and pin the built-in orbit controller's target to the focus so orbit /
 // pan / zoom revolve around the incident (a stable SceneKit look-at target rather
 // than only hand-set Euler angles).
 - (void)resetToIncident {
-  SCNVector3 t = self.focusTarget;
+  SCNVector3 t = [self scaledFocusTarget];
   float ws = self.worldSize;
   float height = ws * 1.2f;     // metres above the target
   float radius = ws * 1.9f;     // ground distance south of the target
@@ -735,7 +886,7 @@ static NSArray *erisAsArray(id v) {
 // height and ground radius / zoom): re-place the camera due-south of the focus at
 // the same elevation and horizontal radius, with yaw = 0.
 - (void)resetNorth {
-  SCNVector3 t = self.focusTarget;
+  SCNVector3 t = [self scaledFocusTarget];
   SCNVector3 cam = self.cameraNode.position;
   float dx = cam.x - t.x, dy = cam.y - t.y, dz = cam.z - t.z;
   float horiz = sqrtf(dx * dx + dz * dz);
@@ -896,6 +1047,7 @@ static NSArray *erisAsArray(id v) {
   sheet.showBoundary = self.showBoundary;
   sheet.showOverview = self.showOverview;
   sheet.reliefIntensity = self.reliefIntensity;
+  sheet.verticalExaggeration = self.verticalExaggeration;
   __weak typeof(self) weakSelf = self;
   sheet.onChange = ^(ErisLayersSheetVC *s) {
     typeof(self) me = weakSelf;
@@ -906,8 +1058,10 @@ static NSArray *erisAsArray(id v) {
     me.showBoundary = s.showBoundary;
     me.showOverview = s.showOverview;
     me.reliefIntensity = s.reliefIntensity;
-    [me applyBaseSurface];
+    me.verticalExaggeration = s.verticalExaggeration;
+    [me applyBaseSurface];         // hillshade intensity (hybrid multiply) may have changed
     [me applyLayerVisibility];
+    [me applyVerticalExaggeration]; // display-only Y-scale; never touches gridData/files
   };
   UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:sheet];
   nav.modalPresentationStyle = UIModalPresentationFormSheet;
@@ -965,7 +1119,12 @@ static NSArray *erisAsArray(id v) {
   NSDictionary *elev = [self.manifest[@"elevation"] isKindOfClass:[NSDictionary class]] ? self.manifest[@"elevation"] : @{};
   NSDictionary *area = [self.manifest[@"area"] isKindOfClass:[NSDictionary class]] ? self.manifest[@"area"] : @{};
   NSMutableString *s = [NSMutableString string];
-  [s appendFormat:@"Elevation: %@ · %@\n", elev[@"source"] ?: @"USGS_3DEP", elev[@"dataset"] ?: @"USGS 3DEP"];
+  // Data vs display distinction (truthful): the packaged grid is the validated
+  // source-derived elevation dataset in metres; exaggeration is display-only.
+  [s appendString:@"Elevation data: USGS 3DEP source-derived elevation grid, stored in metres\n"];
+  [s appendFormat:@"Display vertical exaggeration: %@\n", ErisExagLabel(self.verticalExaggeration)];
+  [s appendString:@"Display settings do not modify the packaged elevation data\n\n"];
+  [s appendFormat:@"Elevation source: %@ · %@\n", elev[@"source"] ?: @"USGS_3DEP", elev[@"dataset"] ?: @"USGS 3DEP"];
   if ([self imageryUsable]) {
     [s appendFormat:@"Aerial imagery: %@\n", [self layerSourceLabel:@"imagery"] ?: @"packaged"];
   } else {

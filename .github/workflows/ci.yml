@@ -211,16 +211,19 @@ jobs:
         run: node scripts/check-arcgis-native-selectors.mjs
       - name: Terrain texcoord source-contract (blocks CGPoint UV stride regression)
         run: node scripts/check-terrain-texcoord-contract.mjs
+      - name: Terrain vertical-exaggeration source-contract (physical scale + data integrity)
+        run: node scripts/check-terrain-exaggeration-contract.mjs
       - name: Lint
         run: npx expo lint
       - name: TypeScript check
         run: npx tsc -p tsconfig.json --noEmit
-      - name: Offline-scene / terrain / bundle / overlay unit tests
+      - name: Offline-scene / terrain / bundle / overlay / scale unit tests
         run: >-
           node --experimental-strip-types --test
           src/arcgis/offlineScene.test.ts
           src/arcgis/eristerrainBundle.test.ts
           src/arcgis/terrainOverlays.test.ts
+          src/arcgis/terrainScale.test.ts
       - name: Expo doctor
         run: npx expo-doctor || true   # advisory; does not fail the build
       - name: Expo iOS prebuild verification (config plugin wiring)

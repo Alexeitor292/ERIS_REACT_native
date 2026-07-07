@@ -521,3 +521,54 @@ Boundary / Overview, and (only if imagery was packaged) switching Terrain /
 Satellite / Hybrid; tap the status pill for Package Details; confirm the pill never
 claims "aerial imagery" when only hillshade is packaged, and that a package without
 imagery shows Satellite/Hybrid as unavailable.
+
+## Addendum 4 — display vertical exaggeration (2026-07-XX)
+
+Adds a user-controlled **vertical exaggeration** to the native iOS Layers sheet
+with a physically-derived **true-scale (1.0×) baseline**, while the packaged
+elevation grid stays immutable source-derived data.
+
+**Data vs display (non-negotiable).** `elevation-grid.bin` is the validated
+**source-derived** USGS 3DEP elevation dataset (float32 metres). It is read-only
+after extraction; `self.gridData` is never mutated, and no packaged file
+(`manifest.json` / `elevation-grid.bin` / `imagery.png` / `hillshade.png` /
+`roads.geojson`) is written. Vertical exaggeration is a pure **SceneKit
+geometry/transform** change in memory. (We do NOT claim the package stores the
+original USGS source TIFF — it stores the validated source-derived grid the
+renderer uses.)
+
+**True-scale calculation (1.0×).** Derived from the package footprint, not a magic
+visual constant (the old `worldSize * 0.35 / relief` normalization is removed):
+- Physical footprint in metres from `terrain.local_transform` (preferred) or
+  `bounds`: `heightM = Δlat·111320`; `widthM = Δlon·111320·cos(midLat)`.
+- `sceneUnitsPerMeter = (2·worldSize) / max(widthM, heightM)` — the larger
+  horizontal dimension fills the scene; the smaller keeps the **true aspect ratio**
+  (packages are never forced square).
+- Mesh X/Z use the aspect-correct half-extents; at 1.0× the vertical uses the SAME
+  factor: `sceneY = (elevationM − minElevationM) · sceneUnitsPerMeter`, so a metre
+  up looks like a metre across (approximately true scale).
+- At N×: `sceneY × N`. Reference math + tests: `mobile/src/arcgis/terrainScale.ts`.
+
+**Renderer design.** Terrain + all draped layers (roads, boundary, geometry,
+bearing, sample-extent) are built once at true scale under an `exagNode` container;
+the 0.5×–3.0× control just sets `exagNode.scale = (1, N, 1)`. Marker spheres are
+counter-scaled `(1, 1/N, 1)` so they track the scaled surface but stay round.
+The camera/orbit pivot follows the scaled focus height **without** resetting
+orientation/zoom. Imagery/Hybrid alignment and the packed-float2 texcoord fix are
+untouched (no UV regression); the overview inset is 2D and unaffected. No network
+request originates from the view controller.
+
+**Layers UI.** Appearance now has **Vertical exaggeration** (slider 0.5×–3.0×,
+snap 0.1×, default 1.0×, live value + accessibility value: e.g. "1.0× True scale",
+"2.0× Enhanced relief") described as a display setting, and the previous "Terrain
+relief intensity" slider is renamed **Hillshade intensity** (unchanged
+Terrain/Satellite/Hybrid blending). Package Details states: "Elevation data: USGS
+3DEP source-derived elevation grid, stored in metres / Display vertical
+exaggeration: 1.0× True scale / Display settings do not modify the packaged
+elevation data".
+
+**No regeneration / no deploy.** This is renderer-only Objective-C. Existing valid
+`.eristerrain` packages (incl. `vg20260707185444-7` and legacy packages without
+`context_layers`) work after installing the updated iOS **development build** — no
+backend deploy, worker change, manifest/format change, or package regeneration is
+required. A new native build IS required (Objective-C SceneKit changes).
