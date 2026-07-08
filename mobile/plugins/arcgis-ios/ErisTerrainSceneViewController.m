@@ -272,7 +272,9 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
 // onto its own terrain patch. imageryTiled == YES when every declared tile loaded.
 @property(nonatomic, assign) BOOL imageryTiled;
 @property(nonatomic, strong) NSArray<NSDictionary *> *imageryTileMetas; // {image,bounds,file}
-@property(nonatomic, strong) SCNNode *imageryTilesNode;      // per-tile terrain patches (drape)
+@property(nonatomic, strong) SCNNode *imageryTilesNode;      // per-tile imagery DRAPE patches (overlay above the mesh)
+@property(nonatomic, assign) NSInteger imageryPatchCount;    // built patches (diagnostics)
+@property(nonatomic, copy) NSString *imageryTilesStatus;     // "overlay drape (N patches)" | "disabled: <reason>"
 // AOI geographic bounds (from local_transform/bounds) — used to slice the whole-AOI
 // hillshade per tile in Hybrid, and shared by the true-scale math.
 @property(nonatomic, assign) double aoiMinLon, aoiMinLat, aoiMaxLon, aoiMaxLat;
@@ -645,14 +647,70 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
 // aligned. Hidden until Satellite/Hybrid selects tiled imagery.
 - (void)buildImageryTilesNode {
   if (!self.imageryTiled || self.imageryTileMetas.count == 0) return;
-  self.imageryTilesNode = [SCNNode node];
+  // RUNTIME SAFETY: validate the tile bounds (valid order + no overlap/gap surprises)
+  // BEFORE building. A bad plan disables tiled imagery entirely and falls back to
+  // single-image / terrain relief — never a broken partial tiled surface.
+  NSString *why = [self validateTileBounds];
+  if (why != nil) { [self disableTiledImagery:why]; return; }
+
+  SCNNode *node = [SCNNode node];
+  NSInteger built = 0;
   for (NSDictionary *meta in self.imageryTileMetas) {
     SCNNode *patch = [self buildImageryPatch:meta];
-    if (patch) [self.imageryTilesNode addChildNode:patch];
+    if (patch == nil) { [self disableTiledImagery:@"a tile patch could not be built"]; return; }
+    [node addChildNode:patch];
+    built++;
   }
+  // Every declared tile MUST have produced exactly one patch.
+  if (built != (NSInteger)self.imageryTileMetas.count) {
+    [self disableTiledImagery:@"patch count != tile count"];
+    return;
+  }
+  self.imageryTilesNode = node;
   self.imageryTilesNode.hidden = YES;   // shown by applyBaseSurface when tiled imagery is active
-  [self.exagNode addChildNode:self.imageryTilesNode];
+  self.imageryPatchCount = built;
+  self.imageryTilesStatus = [NSString stringWithFormat:@"overlay drape on base terrain (%ld patches)", (long)built];
+  [self.exagNode addChildNode:self.imageryTilesNode];   // under exagNode -> scales with exaggeration
 }
+
+// Disable tiled imagery at runtime and fall back to single-image (if packaged) or
+// terrain relief. Never leave a partial/broken tiled surface.
+- (void)disableTiledImagery:(NSString *)reason {
+  self.imageryTiled = NO;
+  self.imageryTileMetas = nil;
+  self.imageryTilesNode = nil;
+  self.imageryPatchCount = 0;
+  self.imageryTilesStatus = [NSString stringWithFormat:@"disabled: %@ (fell back to %@)",
+                             reason, self.imageryImage ? @"single-image imagery" : @"terrain relief"];
+  if (![self imageryUsable] && self.baseSurface != 0) self.baseSurface = 0;  // force relief if nothing usable
+}
+
+// nil if the tile bounds are valid + non-overlapping; else a short reason. Shared
+// edges are allowed (abutting tiles); only interior overlap is rejected.
+- (NSString *)validateTileBounds {
+  NSMutableArray<NSArray<NSNumber *> *> *rects = [NSMutableArray array];
+  for (NSDictionary *meta in self.imageryTileMetas) {
+    NSDictionary *b = meta[@"bounds"];
+    if (![b isKindOfClass:[NSDictionary class]]) return @"missing tile bounds";
+    double mnLon = [b[@"min_lon"] doubleValue], mxLon = [b[@"max_lon"] doubleValue];
+    double mnLat = [b[@"min_lat"] doubleValue], mxLat = [b[@"max_lat"] doubleValue];
+    if (!(mxLon > mnLon) || !(mxLat > mnLat)) return @"invalid tile bounds (min >= max)";
+    [rects addObject:@[@(mnLon), @(mxLon), @(mnLat), @(mxLat)]];
+  }
+  double eps = 1e-7;
+  for (NSUInteger i = 0; i < rects.count; i++) {
+    for (NSUInteger j = i + 1; j < rects.count; j++) {
+      double ox = MIN([rects[i][1] doubleValue], [rects[j][1] doubleValue]) - MAX([rects[i][0] doubleValue], [rects[j][0] doubleValue]);
+      double oy = MIN([rects[i][3] doubleValue], [rects[j][3] doubleValue]) - MAX([rects[i][2] doubleValue], [rects[j][2] doubleValue]);
+      if (ox > eps && oy > eps) return @"overlapping tile bounds";
+    }
+  }
+  return nil;
+}
+
+// Tiny lift so imagery patches drape ABOVE the base terrain surface (avoids z-fighting)
+// without visibly floating. In true-scale units; exagNode scales it with the terrain.
+- (float)imageryDrapeLift { return (float)(self.worldSize * 0.002); }
 
 // A height-field patch covering ONE tile's geographic bounds. Vertices are sampled
 // from the SAME grid mapping used by the base mesh + overlays (surfaceWorldForCol),
@@ -683,16 +741,17 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
   NSInteger nRows = (NSInteger)ceil(r1 - r0) + 1; nRows = MAX(2, MIN(kMaxPatchDim, nRows));
 
   NSUInteger vcount = (NSUInteger)(nRows * nCols);
+  float lift = [self imageryDrapeLift];   // drape slightly ABOVE the base mesh (no z-fight, no replacement)
   SCNVector3 *verts = malloc(sizeof(SCNVector3) * vcount);
   ErisTerrainTexCoord *uvs = malloc(sizeof(ErisTerrainTexCoord) * vcount);  // packed 2x float32 (no UV regression)
   for (NSInteger i = 0; i < nRows; i++) {
     for (NSInteger j = 0; j < nCols; j++) {
       double fu = (double)j / (double)(nCols - 1);
-      double fv = (double)i / (double)(nRows - 1);
+      double fv = (double)i / (double)(nRows - 1);   // v=0 at r0 (north edge) — matches the north-up export
       double col = c0 + fu * (c1 - c0);
       double row = r0 + fv * (r1 - r0);
       NSUInteger k = (NSUInteger)(i * nCols + j);
-      verts[k] = [self surfaceWorldForCol:col row:row lift:0];   // exact base-mesh surface (true scale)
+      verts[k] = [self surfaceWorldForCol:col row:row lift:lift];   // base-mesh surface + drape lift (true scale)
       uvs[k] = (ErisTerrainTexCoord){.u = (float)fu, .v = (float)fv};
     }
   }
@@ -1157,29 +1216,33 @@ static NSArray *erisAsArray(id v) {
 // as the terrain mesh diffuse. Hybrid blends aerial imagery with hillshade relief.
 - (void)applyBaseSurface {
   BOOL wantImagery = (self.baseSurface != 0) && [self imageryUsable];
-  // Only drape tiled patches when EVERY tile's patch actually built (a degenerate
-  // patch would leave a hole) — otherwise fall back to terrain relief, never a
-  // partial/holey surface.
-  BOOL allPatchesBuilt = self.imageryTilesNode != nil
+  // Tiled imagery is a DRAPE OVERLAY, never a replacement. It is used only when every
+  // tile patch actually built (buildImageryTilesNode disables tiled + falls back
+  // otherwise), so a holey/broken tiled surface is never shown.
+  BOOL allPatchesBuilt = self.imageryTiled && self.imageryTilesNode != nil
       && self.imageryTilesNode.childNodes.count == self.imageryTileMetas.count
       && self.imageryTileMetas.count > 0;
-  BOOL useTiles = wantImagery && self.imageryTiled && allPatchesBuilt;
+  BOOL useTiles = wantImagery && allPatchesBuilt;
 
-  // When tiled imagery is the active surface, show the patches and hide the base
-  // mesh (they coincide, so hiding avoids z-fighting); otherwise show the base mesh.
+  // REGRESSION FIX: the authoritative base terrain mesh is ALWAYS visible. Tiled
+  // imagery patches are draped slightly ABOVE it (tiny lift, see buildImageryPatch) —
+  // never hidden/replaced. This preserves true-scale relief + vertical exaggeration
+  // (the mesh geometry is authoritative) and prevents a broken tiled surface from
+  // ever becoming the terrain the user sees.
+  self.terrainNode.hidden = NO;
   self.imageryTilesNode.hidden = !useTiles;
-  self.terrainNode.hidden = useTiles;
-  if (useTiles) {
-    [self applyTiledImageryHybrid:(self.baseSurface == 2)];
-    return;
-  }
 
   SCNMaterial *mat = self.terrainNode.geometry.firstMaterial;
   if (mat == nil) return;
   mat.multiply.contents = nil;
   mat.multiply.intensity = 1.0;
   UIImage *diffuse = nil;
-  if (self.baseSurface == 1 && self.imageryImage != nil) {           // satellite (legacy single image)
+  if (useTiles) {                                                    // tiled Satellite/Hybrid (drape)
+    // Base mesh shows hillshade relief UNDER the imagery drape (seen only at grazing
+    // angles / behind any gap); the tile patches carry the aerial imagery on top.
+    diffuse = self.hillshadeImage;
+    [self applyTiledImageryHybrid:(self.baseSurface == 2)];
+  } else if (self.baseSurface == 1 && self.imageryImage != nil) {    // satellite (legacy single image)
     diffuse = self.imageryImage;
   } else if (self.baseSurface == 2 && self.imageryImage != nil) {    // hybrid: imagery x hillshade
     diffuse = self.imageryImage;
@@ -1397,6 +1460,15 @@ static NSArray *erisAsArray(id v) {
     [s appendString:self.hillshadeImage ? @"Surface texture: USGS 3DEP hillshade relief (no aerial imagery)\n"
                                         : @"Surface texture: none (elevation mesh only)\n"];
   }
+  // Imagery render diagnostics (regression triage): tiled imagery is a DRAPE OVERLAY —
+  // the base terrain mesh is never hidden/replaced.
+  if (self.imageryTiled) {
+    [s appendFormat:@"Imagery render: %@\n", self.imageryTilesStatus ?: @"tiled overlay"];
+    [s appendFormat:@"Imagery patches built: %ld of %lu tiles\n", (long)self.imageryPatchCount, (unsigned long)self.imageryTileMetas.count];
+    [s appendString:@"Base terrain mesh hidden: no (imagery drapes above it)\n"];
+  } else if (self.imageryTilesStatus.length > 0) {
+    [s appendFormat:@"Imagery render: %@\n", self.imageryTilesStatus];   // e.g. tiled disabled -> fell back
+  }
   // Truthful road context + packaged feature count (never overstates "roads").
   if ([self layerAvailable:@"roads"]) {
     NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : @{};
@@ -1406,6 +1478,18 @@ static NSArray *erisAsArray(id v) {
                     count == 1 ? @"" : @"s", srcLabel ? [@" · " stringByAppendingString:srcLabel] : @""];
   } else {
     [s appendString:@"Road context: No road context packaged\n"];
+  }
+  // Cross Section snap diagnostics (regression triage): the snap parser uses the SAME
+  // geometry parser as the visible road layer, so visible roads are snap-eligible.
+  {
+    NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : @{};
+    NSArray *kinds = [roads[@"road_kinds"] isKindOfClass:[NSArray class]] ? roads[@"road_kinds"] : @[];
+    [s appendFormat:@"Cross-section snap: %lu snap feature%@%@ · road context %@\n",
+        (unsigned long)self.roadSnapFeatures.count, self.roadSnapFeatures.count == 1 ? @"" : @"s",
+        [self hasRichRoadGeometry] ? @" (real road geometry)" : (self.roadSnapFeatures.count ? @" (bearing line only)" : @""),
+        [self layerAvailable:@"roads"] ? @"available" : @"unavailable"];
+    if (kinds.count) [s appendFormat:@"Road kinds: %@\n", [kinds componentsJoinedByString:@", "]];
+    [s appendFormat:@"Upstation bearing available: %@\n", isfinite(self.upstationHintDeg) ? @"yes" : @"no"];
   }
   // Road cross-section tool availability (offline).
   if ([self crossSectionContextAvailable]) {
@@ -1459,8 +1543,12 @@ static NSArray *erisAsArray(id v) {
   self.roadSnapFeatures = [self parseRoadSnapFeatures];
 }
 
-// roads.geojson LineStrings -> snap features {kind, coords}, richest-first
-// (inventory/centerline before the derived bearing line).
+// roads.geojson -> snap features {kind, coords}, richest-first (inventory/centerline
+// before the derived bearing line). Uses the SAME geometry parser as buildRoadsLayer
+// (primitivesFromGeometry), so every line-like geometry the renderer DRAWS is also
+// eligible for snapping — LineString, MultiLineString, Polygon rings, and Esri
+// paths/rings — not just bare LineString. If a yellow road line is visible, tapping
+// near it can snap.
 - (NSArray<NSDictionary *> *)parseRoadSnapFeatures {
   NSMutableArray *rich = [NSMutableArray array];
   NSMutableArray *bearing = [NSMutableArray array];
@@ -1471,15 +1559,33 @@ static NSArray *erisAsArray(id v) {
     if (![f isKindOfClass:[NSDictionary class]]) continue;
     NSDictionary *geom = [f[@"geometry"] isKindOfClass:[NSDictionary class]] ? f[@"geometry"] : nil;
     NSDictionary *props = [f[@"properties"] isKindOfClass:[NSDictionary class]] ? f[@"properties"] : @{};
-    if (![XsStr(geom, @"type", @"") isEqualToString:@"LineString"]) continue;
-    NSArray *coords = [geom[@"coordinates"] isKindOfClass:[NSArray class]] ? geom[@"coordinates"] : nil;
-    if (coords.count < 2) continue;
     NSString *kind = XsStr(props, @"kind", @"road");
-    NSDictionary *feat = @{@"kind": kind, @"coords": coords};
-    if ([kind isEqualToString:@"road_bearing"]) [bearing addObject:feat]; else [rich addObject:feat];
+    for (NSDictionary *prim in [self primitivesFromGeometry:geom]) {
+      NSString *pk = prim[@"kind"];
+      if (![pk isEqualToString:@"line"] && ![pk isEqualToString:@"polygon"]) continue;  // line-like only
+      NSArray *coords = prim[@"coords"];
+      if (coords.count < 2) continue;
+      NSDictionary *feat = @{@"kind": kind, @"coords": coords};
+      if ([kind isEqualToString:@"road_bearing"]) [bearing addObject:feat]; else [rich addObject:feat];
+    }
   }
-  [rich addObjectsFromArray:bearing];
+  [rich addObjectsFromArray:bearing];   // prefer real geometry; bearing line last
   return rich;
+}
+
+// Whether the tap is inside the packaged grid bounds (for the bearing fallback).
+- (BOOL)inPackageBoundsLat:(double)lat lon:(double)lon {
+  double col, row;
+  if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) return NO;
+  return [self inBoundsCol:col row:row];
+}
+
+// Whether any snap feature is real road geometry (not just the derived bearing line).
+- (BOOL)hasRichRoadGeometry {
+  for (NSDictionary *f in self.roadSnapFeatures) {
+    if (![f[@"kind"] isEqualToString:@"road_bearing"]) return YES;
+  }
+  return NO;
 }
 
 - (BOOL)crossSectionContextAvailable {
@@ -1561,14 +1667,24 @@ static NSArray *erisAsArray(id v) {
     }
   }
   double maxSnapM = 60.0, upstationDeg;
+  BOOL bearingAvailable = isfinite(self.upstationHintDeg);
   if (bestDist <= maxSnapM) {
+    // Snapped to real road geometry (road_inventory / road_centerline / bearing line).
     snapped = YES;
     upstationDeg = XsResolveUpstation(tangentDeg, self.upstationHintDeg);
-  } else if (self.roadSnapFeatures.count == 0 && isfinite(self.upstationHintDeg)) {
-    snapped = NO; snapLat = selLat; snapLon = selLon; kind = nil;
-    upstationDeg = self.upstationHintDeg;   // fallback orientation (no road geometry packaged)
+  } else if (bearingAvailable && ![self hasRichRoadGeometry] && [self inPackageBoundsLat:selLat lon:selLon]) {
+    // Only a short bearing line (or no line geometry) is packaged and the tap is
+    // beyond 60 m of it, but the tap is inside the package and the user is
+    // intentionally in Cross Section mode -> clearly-labelled BEARING FALLBACK.
+    snapped = NO; snapLat = selLat; snapLon = selLon; kind = @"bearing_fallback";
+    upstationDeg = self.upstationHintDeg;
+  } else if ([self hasRichRoadGeometry]) {
+    // Real road geometry exists but the tap is too far from it — tell the user to aim.
+    [self showCrossSectionMessage:@"No road context near tap. Try closer to the highlighted road line."];
+    return;
   } else {
-    [self showCrossSectionMessage:@"No road context near tap. Try closer to the roadway."];
+    // No geometry and no bearing at all — the package lacks road context.
+    [self showCrossSectionMessage:@"No road context packaged for this area. Regenerate the offline package with road context enabled."];
     return;
   }
 
