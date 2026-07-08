@@ -5,8 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { RoadCrossSection } from "./../measurements/roadCrossSectionModel.ts";
-import { buildCrossSectionSlice, type GridSampleResult } from "./../measurements/roadCrossSectionSlice.ts";
-import { buildSliceRenderModel, deckSpansFt } from "./roadCrossSectionSliceModel.ts";
+import { buildCrossSectionSlice, type CrossSectionSample, type GridSampleResult, type RoadCrossSectionSlice } from "./../measurements/roadCrossSectionSlice.ts";
+import { buildSliceRenderModel, deckElevationFt, deckSpansFt } from "./roadCrossSectionSliceModel.ts";
 
 const DIVIDED: RoadCrossSection = {
   lt_lane_count: 2, rt_lane_count: 2, lt_lane_width_ft: 12, rt_lane_width_ft: 12,
@@ -91,6 +91,31 @@ test("missing samples are shown honestly (No data / Outside package), never inve
   // NO_DATA distinctly rendered
   const noData = buildSliceRenderModel(sliceOf(DIVIDED, () => ({ elevationM: null, status: "NO_DATA" })));
   assert.ok(noData.stakes.every((s) => s.elevationText === "No data"));
+});
+
+test("deck elevation fallback uses ONLY on-road samples on ASYMMETRIC roads (no off-road bias)", () => {
+  // LT 1 lane (ltFt = -20), RT 3 lanes (rtFt = 44); center is NO_DATA so the fallback runs.
+  const ASYM = {
+    lt_lane_count: 1, rt_lane_count: 3, lt_lane_width_ft: 12, rt_lane_width_ft: 12,
+    lt_outside_shoulder_ft: 8, lt_inside_shoulder_ft: 0, rt_inside_shoulder_ft: 0, rt_outside_shoulder_ft: 8,
+    median_width_ft: 0, median_category: "NONE" as const, total_width_ft: 64, source: "ROAD_INVENTORY" as const,
+  };
+  const mk = (offsetFt: number, elevationFt: number | null, status: "OK" | "NO_DATA"): CrossSectionSample => ({
+    side: offsetFt < 0 ? "LT" : offsetFt > 0 ? "RT" : "CENTER", offsetFt, lat: 0, lon: 0,
+    elevationM: elevationFt == null ? null : elevationFt / 3.280839895, elevationFt, source: "USGS_3DEP_OFFLINE_GRID", status,
+  });
+  const slice = {
+    road: ASYM,
+    samples: [
+      mk(0, null, "NO_DATA"), // center missing -> fallback
+      mk(10, 100, "OK"), // on-road (RT)
+      mk(-10, 100, "OK"), // on-road (LT lane)
+      mk(-25, 50, "OK"), // OFF-road LT terrain (beyond ltFt=-20) — must NOT count
+      mk(-30, 40, "OK"), // OFF-road LT terrain — must NOT count
+    ],
+  } as unknown as RoadCrossSectionSlice;
+  // Correct deck elevation = mean of on-road samples (100, 100) = 100, NOT biased by off-road 50/40.
+  assert.equal(deckElevationFt(slice), 100);
 });
 
 test("technical overlay toggles exact dimension + stake-value labels", () => {

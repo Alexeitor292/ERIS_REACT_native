@@ -131,11 +131,16 @@ function okElevs(slice: RoadCrossSectionSlice): number[] {
 }
 
 /** Reference elevation for the roadway deck: the sampled center/median elevation when
- *  available, else the mean of available road samples, else null (flat schematic). */
-function deckElevationFt(slice: RoadCrossSectionSlice): number | null {
+ *  available, else the mean of available ON-ROAD samples (between the two shoulder
+ *  edges), else null (flat schematic). Bounds each side by ITS OWN shoulder edge so
+ *  asymmetric roads never pull off-road terrain into the deck reference. */
+export function deckElevationFt(slice: RoadCrossSectionSlice): number | null {
   const center = slice.samples.find((s) => s.offsetFt === 0 && s.status === "OK");
   if (center && center.elevationFt != null) return center.elevationFt;
-  const roadOk = slice.samples.filter((s) => Math.abs(s.offsetFt) <= Math.abs(outsideShoulderEdgesFt(slice.road).rtFt) && s.status === "OK" && s.elevationFt != null);
+  const { ltFt, rtFt } = outsideShoulderEdgesFt(slice.road);
+  const roadOk = slice.samples.filter(
+    (s) => s.offsetFt >= ltFt - 1e-9 && s.offsetFt <= rtFt + 1e-9 && s.status === "OK" && s.elevationFt != null,
+  );
   if (roadOk.length) return roadOk.reduce((a, s) => a + (s.elevationFt as number), 0) / roadOk.length;
   return null;
 }

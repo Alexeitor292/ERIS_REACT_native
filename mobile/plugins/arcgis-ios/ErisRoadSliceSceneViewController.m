@@ -87,6 +87,9 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 - (double)deckElevationFt:(BOOL *)outHasElevation {
   NSArray *samples = [self.slice[@"samples"] isKindOfClass:[NSArray class]] ? self.slice[@"samples"] : @[];
   double sum = 0; int n = 0; BOOL any = NO; double center = NAN;
+  // Bound each side by ITS OWN shoulder edge so asymmetric roads never pull off-road
+  // terrain into the deck reference elevation.
+  double ltShoulder = [self shoulderEdgeFt:@"LT"];
   double rtShoulder = [self shoulderEdgeFt:@"RT"];
   for (id s in samples) {
     if (![s isKindOfClass:[NSDictionary class]]) continue;
@@ -96,7 +99,7 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
     any = YES;
     double off = dnum(s, @"offsetFt", 0);
     if (off == 0) center = e;
-    if (fabs(off) <= fabs(rtShoulder) + 1e-6) { sum += e; n++; }
+    if (off >= ltShoulder - 1e-6 && off <= rtShoulder + 1e-6) { sum += e; n++; }
   }
   if (outHasElevation) *outHasElevation = any;
   if (!isnan(center)) return center;
