@@ -1099,7 +1099,13 @@ static NSArray *erisAsArray(id v) {
 // as the terrain mesh diffuse. Hybrid blends aerial imagery with hillshade relief.
 - (void)applyBaseSurface {
   BOOL wantImagery = (self.baseSurface != 0) && [self imageryUsable];
-  BOOL useTiles = wantImagery && self.imageryTiled && self.imageryTilesNode != nil;
+  // Only drape tiled patches when EVERY tile's patch actually built (a degenerate
+  // patch would leave a hole) — otherwise fall back to terrain relief, never a
+  // partial/holey surface.
+  BOOL allPatchesBuilt = self.imageryTilesNode != nil
+      && self.imageryTilesNode.childNodes.count == self.imageryTileMetas.count
+      && self.imageryTileMetas.count > 0;
+  BOOL useTiles = wantImagery && self.imageryTiled && allPatchesBuilt;
 
   // When tiled imagery is the active surface, show the patches and hide the base
   // mesh (they coincide, so hiding avoids z-fighting); otherwise show the base mesh.

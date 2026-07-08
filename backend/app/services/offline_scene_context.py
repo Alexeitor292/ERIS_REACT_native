@@ -275,8 +275,15 @@ def validate_context_layers(context_layers) -> tuple[bool, str | None]:
 
 
 def imagery_is_tiled(imagery_layer) -> bool:
-    """True when the imagery layer is the tiled (multi-tile JPEG) format."""
-    return isinstance(imagery_layer, dict) and imagery_layer.get("available") and imagery_layer.get("format") == "tiled"
+    """True when the imagery layer is the tiled (multi-tile JPEG) format with tiles.
+    Matches the TS/ObjC readers (require a non-empty tiles array), not just format."""
+    return (
+        isinstance(imagery_layer, dict)
+        and imagery_layer.get("available")
+        and imagery_layer.get("format") == "tiled"
+        and isinstance(imagery_layer.get("tiles"), list)
+        and len(imagery_layer["tiles"]) > 0
+    )
 
 
 def _validate_tiled_imagery_meta(layer: dict) -> tuple[bool, str | None]:

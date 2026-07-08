@@ -164,7 +164,12 @@ def plan_imagery_tiles(
             })
 
     # Effective (achieved) m/px given integer tiling: coarser (larger) of the two axes.
+    # Integer ceil tiling slightly over-provisions pixels, so this can come out finer
+    # than source-native — but REAL detail can never exceed what the source provides,
+    # so we report the honest achievable GSD clamped to source-native (never overstate).
     eff = max(width_m / (columns * tp), height_m / (rows * tp))
+    if _finite_pos(source_native_mpp):
+        eff = max(eff, float(source_native_mpp))
     return {
         "format": "tiled",
         "tile_size_px": tp,

@@ -93,11 +93,13 @@ class TestTilePlanning:
         assert len(clamped["tiles"]) < len(fine["tiles"])
         assert clamped["target_meters_per_pixel"] >= 2.0
 
-    def test_effective_resolution_is_deterministic_and_not_finer_than_target(self):
+    def test_effective_resolution_is_deterministic_and_honest(self):
         plan = imagery.plan_imagery_tiles(BOUNDS, tile_px=1024, target_mpp=0.6, source_native_mpp=0.6)
         again = imagery.plan_imagery_tiles(BOUNDS, tile_px=1024, target_mpp=0.6, source_native_mpp=0.6)
-        assert plan["effective_meters_per_pixel"] == again["effective_meters_per_pixel"]
-        # More tiles than the ideal ceil -> achieved GSD is at least as fine as target.
+        assert plan["effective_meters_per_pixel"] == again["effective_meters_per_pixel"]  # deterministic
+        # Reported effective is never overstated: real detail can't exceed source-native,
+        # and (post-clamp) never claims finer than the resolved target.
+        assert plan["effective_meters_per_pixel"] >= 0.6 - 1e-9  # not finer than source-native
         assert plan["effective_meters_per_pixel"] <= plan["target_meters_per_pixel"] + 1e-9
 
     def test_tile_count_budget_fails_precisely(self):
