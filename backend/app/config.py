@@ -139,8 +139,36 @@ class Settings(BaseSettings):
     OFFLINE_SCENE_IMAGERY_EXPORT_URL: str = Field(
         default="https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer"
     )
-    OFFLINE_SCENE_IMAGERY_MAX_PX: int = Field(default=1024)
+    OFFLINE_SCENE_IMAGERY_MAX_PX: int = Field(default=1024)  # legacy single-image export dimension
     OFFLINE_SCENE_IMAGERY_FETCH_TIMEOUT_S: int = Field(default=45)
+
+    # --- High-definition TILED aerial imagery -----------------------------------
+    # When imagery is enabled, "tiled" (default) splits the AOI into a grid of JPEG
+    # tiles packaged INSIDE the bundle at imagery/{row}/{col}.jpg. Each upstream
+    # export stays small/safe (<= tile_px, well under the ImageServer max), so total
+    # packaged detail can far exceed a single 4000px export without over-requesting
+    # beyond source-native resolution. "single" keeps the legacy one imagery.png.
+    # The DEFAULT source remains USGS/USDA NAIP (public domain) — a single large
+    # 4000px request is deliberately NOT the permanent default.
+    OFFLINE_SCENE_IMAGERY_MODE: str = Field(default="tiled")  # tiled | single
+    # Target ground sample distance. "source_native..." clamps to the operator's
+    # declared source-native m/px (never finer, so we never over-request beyond
+    # useful source detail); a bare float (e.g. "0.6") forces that metres/pixel.
+    OFFLINE_SCENE_IMAGERY_TARGET_MPP: str = Field(default="source_native_or_0.6")
+    # Operator-declared source-native ground sample distance (m/px). NAIP is ~0.6-1.0
+    # m/px depending on vintage/county; 0.6 is a safe modern default. When >0 the
+    # planner never plans finer than this. Set to the real service GSD when known.
+    OFFLINE_SCENE_IMAGERY_SOURCE_NATIVE_MPP: float = Field(default=0.6)
+    OFFLINE_SCENE_IMAGERY_TILE_PX: int = Field(default=1024)            # 1024 or 2048
+    OFFLINE_SCENE_IMAGERY_TILE_TIMEOUT_S: int = Field(default=90)
+    OFFLINE_SCENE_IMAGERY_TILE_RETRIES: int = Field(default=3)
+    OFFLINE_SCENE_IMAGERY_OVERALL_DEADLINE_S: int = Field(default=1200)
+    OFFLINE_SCENE_IMAGERY_MAX_TILES: int = Field(default=64)
+    OFFLINE_SCENE_IMAGERY_MAX_MB: int = Field(default=256)             # imagery-only budget
+    OFFLINE_SCENE_IMAGERY_JPEG_QUALITY: int = Field(default=85)
+    # Conservative per-request upstream export ceiling (ImageServer max width/height).
+    # tile_px must stay <= this; a request never approaches the service maximum.
+    OFFLINE_SCENE_IMAGERY_MAX_EXPORT_PX: int = Field(default=4096)
 
     # North-up 2D overview inset, server-rendered (Pillow) from package bounds +
     # roads + incident + geometry. Licence-clean; no external data.

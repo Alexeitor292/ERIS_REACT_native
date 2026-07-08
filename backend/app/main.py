@@ -2869,11 +2869,15 @@ def generate_offline_scene_package(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Request AUTOMATIC generation of a bounded offline 3D package. Confirms the
-    incident has coordinates, enforces edit permission, computes a bounded AOI,
-    prevents duplicate active jobs, creates a QUEUED job, and returns immediately.
-    A separate worker fetches USGS 3DEP, builds + verifies + uploads + registers
-    the package. No manual ArcGIS Pro authoring is involved."""
+    """Request AUTOMATIC generation of a bounded offline 3D package.
+
+    ENQUEUE-ONLY contract (HTTP 202): validates the incident has coordinates,
+    enforces edit permission, computes a bounded AOI, prevents duplicate active
+    jobs, creates/reuses a durable QUEUED job, and returns immediately with the job
+    id + current status + a status_url to poll. It NEVER fetches USGS 3DEP / NAIP /
+    imagery / MinIO inline — the separate offline-scene worker owns terrain fetch,
+    imagery tiling, package assembly, verification, upload, and catalog registration.
+    The frontend never holds a request open while the server builds the package."""
     require_can_edit_submission(submission_id, db, user)
 
     row = db.execute(text("SELECT latitude, longitude FROM submission_gisa WHERE submission_id=:s LIMIT 1"),
@@ -2899,7 +2903,18 @@ def generate_offline_scene_package(
     )
     if not created:
         raise HTTPException(status_code=409, detail="A package-generation job is already in progress.")
-    return {"job": _job_public(job)}
+    status_url = f"/submissions/{submission_id}/gisa/offline-scene-package/job"
+    return {
+        "accepted": True,
+        "job": _job_public(job),
+        "job_id": job["id"] if job else None,
+        "status": job["status"] if job else "QUEUED",
+        # Poll THIS with short independent requests; a failed poll must not fail the
+        # job. When the job reaches READY the package descriptor + download become
+        # available at .../offline-scene-package (and .../download).
+        "status_url": status_url,
+        "package_descriptor_url": f"/submissions/{submission_id}/gisa/offline-scene-package",
+    }
 
 
 @app.get("/submissions/{submission_id}/gisa/offline-scene-package/job")

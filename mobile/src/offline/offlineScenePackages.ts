@@ -269,6 +269,22 @@ async function validateAndExtractEristerrain(partUri: string, submissionId: numb
       });
     }
   }
+  // Tiled aerial imagery: imagery/{row}/{col}.jpg (nested — create parent dirs).
+  // Present only when the manifest declared tiled imagery available and every tile
+  // passed CRC + byte-count validation above. The native renderer reads whichever
+  // tiles exist; a missing tile would already have failed extraction closed.
+  const madeDirs = new Set<string>();
+  for (const name of Object.keys(files)) {
+    if (!/^imagery\/\d+\/\d+\.(jpg|jpeg|png)$/i.test(name)) continue;
+    const parent = name.slice(0, name.lastIndexOf("/"));
+    if (!madeDirs.has(parent)) {
+      await FileSystem.makeDirectoryAsync(`${dir}/${parent}`, { intermediates: true });
+      madeDirs.add(parent);
+    }
+    await FileSystem.writeAsStringAsync(`${dir}/${name}`, bytesToBase64(files[name]), {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  }
 
   // Verify the manifest's grid SHA-256 natively against the extracted grid file.
   const declaredSha = manifest.terrain.sha256;

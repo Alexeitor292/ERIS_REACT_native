@@ -104,6 +104,10 @@ export type ContextLayersSummary = {
   roadContext?: string | null; // truthful road-context description (see describeRoadContext)
   roadFeatureCount?: number | null;
   attribution?: string[];
+  // Imagery packaging mode + detail (tiled high-definition vs legacy single image).
+  imageryMode?: "tiled" | "single" | null;
+  imageryTileCount?: number | null;
+  imageryEffectiveMpp?: number | null;
 };
 
 /**
@@ -253,10 +257,23 @@ export function jobIsActive(status: OfflineSceneJobStatus | null | undefined): b
   return !!status && !JOB_TERMINAL.has(status);
 }
 
+/** Whether a worker status_message carries live tile-packaging progress (e.g.
+ *  "Packaging aerial imagery: 7 of 16 tiles"), which we surface verbatim. */
+function isTileProgressMessage(msg: string | null | undefined): boolean {
+  return typeof msg === "string" && /aerial imagery:\s*\d+\s+of\s+\d+\s+tiles/i.test(msg);
+}
+
 /** Human progress line for the generation pipeline (drives the mobile UX copy). */
-export function jobStatusLine(job: Pick<OfflineSceneJob, "status" | "progress_pct" | "error_details"> | null | undefined): string {
+export function jobStatusLine(
+  job: Pick<OfflineSceneJob, "status" | "progress_pct" | "error_details" | "status_message"> | null | undefined,
+): string {
   if (!job) return "Prepare offline 3D area";
   const p = Math.max(0, Math.min(100, job.progress_pct ?? 0));
+  // During packaging the worker streams a durable per-tile line ("Packaging aerial
+  // imagery: 7 of 16 tiles") — show it verbatim so field users see real progress.
+  if ((job.status === "PACKAGING" || job.status === "BUILDING_BASEMAP") && isTileProgressMessage(job.status_message)) {
+    return job.status_message as string;
+  }
   switch (job.status) {
     case "QUEUED":
       return "Queued — preparing terrain…";

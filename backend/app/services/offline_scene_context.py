@@ -36,8 +36,14 @@ from urllib.parse import urlparse, urlunparse
 _M_PER_DEG_LAT = 111_320.0
 
 ROADS_FILE = "roads.geojson"
-IMAGERY_FILE = "imagery.png"
+IMAGERY_FILE = "imagery.png"          # legacy single-image aerial drape
+IMAGERY_TILE_DIR = "imagery"          # tiled aerial imagery -> imagery/{row}/{col}.jpg
+IMAGERY_TILE_EXT = "jpg"
 OVERVIEW_FILE = "overview.png"
+
+
+def imagery_tile_file(row: int, column: int, ext: str = IMAGERY_TILE_EXT) -> str:
+    return f"{IMAGERY_TILE_DIR}/{int(row)}/{int(column)}.{ext}"
 
 # Keys allowed in a layer's `source` block (provenance only — never credentials).
 _SOURCE_ALLOWED = ("provider", "dataset", "retrieved_at", "attribution", "resolution", "service")
@@ -252,13 +258,84 @@ def validate_context_layers(context_layers) -> tuple[bool, str | None]:
             continue
         if not isinstance(layer, dict):
             return False, f"context_layers.{name} must be an object"
-        if layer.get("available"):
-            if not isinstance(layer.get("file"), str) or not layer["file"]:
-                return False, f"context_layers.{name} available but missing file"
-            sha = layer.get("sha256")
-            if not (isinstance(sha, str) and len(sha) == 64):
-                return False, f"context_layers.{name} available but missing/invalid sha256"
+        if not layer.get("available"):
+            continue
+        # Tiled imagery declares an array of tiles instead of a single `file`.
+        if name == "imagery" and layer.get("format") == "tiled":
+            ok, reason = _validate_tiled_imagery_meta(layer)
+            if not ok:
+                return False, reason
+            continue
+        if not isinstance(layer.get("file"), str) or not layer["file"]:
+            return False, f"context_layers.{name} available but missing file"
+        sha = layer.get("sha256")
+        if not (isinstance(sha, str) and len(sha) == 64):
+            return False, f"context_layers.{name} available but missing/invalid sha256"
     return True, None
+
+
+def imagery_is_tiled(imagery_layer) -> bool:
+    """True when the imagery layer is the tiled (multi-tile JPEG) format."""
+    return isinstance(imagery_layer, dict) and imagery_layer.get("available") and imagery_layer.get("format") == "tiled"
+
+
+def _validate_tiled_imagery_meta(layer: dict) -> tuple[bool, str | None]:
+    """Structure of a tiled imagery layer (metadata only; per-tile asset presence/
+    CRC/SHA is checked by the bundle validator). Every tile needs file + 64-hex sha256."""
+    tiles = layer.get("tiles")
+    if not isinstance(tiles, list) or not tiles:
+        return False, "context_layers.imagery tiled but has no tiles"
+    if not isinstance(layer.get("columns"), int) or not isinstance(layer.get("rows"), int):
+        return False, "context_layers.imagery tiled but missing columns/rows"
+    if int(layer["columns"]) * int(layer["rows"]) != len(tiles):
+        return False, "context_layers.imagery tile count does not match columns*rows"
+    seen = set()
+    for t in tiles:
+        if not isinstance(t, dict):
+            return False, "context_layers.imagery tile must be an object"
+        f = t.get("file")
+        if not isinstance(f, str) or not f:
+            return False, "context_layers.imagery tile missing file"
+        sha = t.get("sha256")
+        if not (isinstance(sha, str) and len(sha) == 64):
+            return False, f"context_layers.imagery tile {f} missing/invalid sha256"
+        rc = (t.get("row"), t.get("column"))
+        if rc in seen:
+            return False, f"context_layers.imagery duplicate tile {rc}"
+        seen.add(rc)
+    return True, None
+
+
+def tiled_imagery_tiles(imagery_layer) -> list:
+    """Declared tiles for a tiled imagery layer, else []. Defensive."""
+    if not imagery_is_tiled(imagery_layer):
+        return []
+    tiles = imagery_layer.get("tiles")
+    return tiles if isinstance(tiles, list) else []
+
+
+def tiled_imagery_layer(plan: dict, tile_metas: list, source: dict | None) -> dict:
+    """Assemble the manifest `context_layers.imagery` block for a TILED package from a
+    tile plan and the per-tile packaged metadata (file/bounds/sha256/bytes). Reports
+    the actual source + effective resolution + total imagery storage — never claims
+    ArcGIS equivalence."""
+    total_bytes = sum(int(t.get("bytes") or 0) for t in tile_metas)
+    layer = {
+        "available": True,
+        "format": "tiled",
+        "tile_size_px": int(plan["tile_size_px"]),
+        "columns": int(plan["columns"]),
+        "rows": int(plan["rows"]),
+        "target_meters_per_pixel": plan.get("target_meters_per_pixel"),
+        "effective_meters_per_pixel": plan.get("effective_meters_per_pixel"),
+        "bounds": dict(plan["bounds"]),
+        "tile_count": len(tile_metas),
+        "bytes": total_bytes,
+        "tiles": tile_metas,
+    }
+    if source:
+        layer["source"] = sanitize_source(source)
+    return layer
 
 
 # ---- overview raster pixel mapping (pure) + PNG (Pillow) --------------------
@@ -349,6 +426,66 @@ def fetch_imagery_png(bounds: dict, *, export_url: str, px: int, timeout_s: int,
     data = resp.content
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
         raise RuntimeError("imagery export did not return a PNG")
+    source = {
+        "provider": "usgs_naip",
+        "dataset": "USGS/USDA NAIP (public domain)",
+        "attribution": "USDA NAIP via USGS The National Map",
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "service": export_url,
+    }
+    return data, source
+
+
+def _export_tile_params(bounds: dict, px: int, jpeg_quality: int) -> dict:
+    bbox = f"{bounds['min_lon']},{bounds['min_lat']},{bounds['max_lon']},{bounds['max_lat']}"
+    return {
+        "bbox": bbox, "bboxSR": "4326", "imageSR": "4326",
+        "size": f"{px},{px}", "format": "jpg", "compressionQuality": str(int(jpeg_quality)),
+        "f": "image",
+    }
+
+
+def encode_jpeg(data: bytes, quality: int) -> bytes:
+    """Normalise an image to a baseline RGB JPEG at `quality` (Pillow — worker image).
+    Used only when the upstream export was not already JPEG, so aerial tiles always
+    package as compact JPEG regardless of what the service returned."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    img = Image.open(BytesIO(data)).convert("RGB")
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=int(quality), optimize=True)
+    return buf.getvalue()
+
+
+def fetch_imagery_tile(
+    bounds: dict, *, export_url: str, tile_px: int, timeout_s: int, jpeg_quality: int = 85, session=None
+) -> tuple[bytes, dict]:
+    """Fetch ONE aerial-imagery tile (JPEG) aligned to `bounds` from an ArcGIS
+    ImageServer exportImage endpoint (default NAIP, public domain). Worker-only.
+
+    Validates the response is a real image (not a JSON/HTML service error), and
+    normalises to JPEG when the service returned another format. Returns
+    (jpeg_bytes, source_meta). Raises on any failure so the caller's bounded retry
+    can decide transient-vs-terminal. NEVER embeds credentials in source_meta.
+    """
+    import requests
+
+    from . import offline_scene_imagery as imagery
+
+    s = session or requests.Session()
+    url = export_url.rstrip("/") + "/exportImage"
+    resp = s.get(url, params=_export_tile_params(bounds, tile_px, jpeg_quality), timeout=timeout_s)
+    resp.raise_for_status()
+    ctype = resp.headers.get("Content-Type", "")
+    if "json" in ctype or "html" in ctype:  # ArcGIS returns errors as JSON/HTML with HTTP 200
+        raise RuntimeError(f"imagery tile export error: {resp.text[:180]}")
+    data = resp.content
+    if not imagery.is_supported_image(data):
+        raise RuntimeError("imagery tile export did not return an image")
+    if not imagery.is_jpeg(data):
+        data = encode_jpeg(data, jpeg_quality)
     source = {
         "provider": "usgs_naip",
         "dataset": "USGS/USDA NAIP (public domain)",

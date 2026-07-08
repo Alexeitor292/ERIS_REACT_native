@@ -572,3 +572,78 @@ elevation data".
 `context_layers`) work after installing the updated iOS **development build** — no
 backend deploy, worker change, manifest/format change, or package regeneration is
 required. A new native build IS required (Objective-C SceneKit changes).
+
+## Addendum 5 — tiled HD imagery + durable async packaging (2026-07-08)
+
+Replaces the single `imagery.png` drape with a **high-definition tiled imagery**
+package, and hardens the async package-creation contract so the frontend never waits
+for worker packaging.
+
+**Why tiled.** A single whole-AOI export has hard limits: quality drops as the area
+grows, a large export can exceed the ImageServer max size or time out, and it cannot
+provide ArcGIS-style local detail. Tiling splits the AOI into a grid of JPEG tiles so
+each upstream export stays well below the service maximum and total packaged detail
+can far exceed a single 4000px export — without over-requesting beyond source-native
+resolution.
+
+**Source / licensing (unchanged posture).** Default imagery source stays **USGS/USDA
+NAIP (public domain)**; imagery is **OFF by default**. We do NOT claim visual
+equivalence with an ArcGIS map unless the operator configures the exact licensed
+service (with export/offline-cache rights + separate credentials). Package Details and
+the manifest report the ACTUAL source + effective packaged resolution. Browser-only
+ArcGIS API keys are never used in the backend/worker (CI asserts key isolation).
+
+**Tile-planning policy (`offline_scene_imagery.py`, pure + tested).** Footprint in
+metres (cos-lat) → planned m/px = `max(target, source_native)` (never finer than
+source) → `columns = ceil(widthPx/tile_px)`, `rows = ceil(heightPx/tile_px)`. Tiles
+are equal cells with **float-exact shared edges** (no gaps/overlaps), each exported
+square at `tile_px` (1024/2048, ≤ a conservative max-export ceiling). A tile-count
+budget (`OFFLINE_SCENE_IMAGERY_MAX_TILES`) fails with a precise operator reason before
+uncontrolled growth; a runtime MB budget bounds imagery bytes.
+
+**Worker download behavior.** Each tile is fetched independently, validated as a real
+image (JPEG/PNG magic — not a JSON/HTML service error), with **bounded retries +
+exponential backoff + jitter** and an overall deadline; a single timeout never fails
+the job. Per-tile progress is persisted to the job (`"Packaging aerial imagery: 7 of
+16 tiles"`, surfaced verbatim in the app). Packaging is **all-or-nothing**: a partial/
+holey imagery layer is never declared available (successful tiles are rolled back);
+with mandatory imagery, an exhausted tile fails the job with **exact coordinates + a
+sanitized upstream reason**.
+
+**Manifest + integrity (backward compatible).** `context_layers.imagery` gains
+`format:"tiled"` with `columns/rows/tile_size_px/target_meters_per_pixel/
+effective_meters_per_pixel/bounds/source` and a `tiles[]` array of
+`{row,column,file,bounds,sha256,bytes}`. Every tile gets entry-level validation
+(presence, SHA-256, byte count, ZIP CRC) on both the worker and the device; a
+declared-available tile that is missing/corrupt fails the bundle **closed**. Legacy
+single `imagery.png` packages remain fully supported (`format:"single"`/absent).
+
+**Native rendering (`ErisTerrainSceneViewController.m`).** Tiled imagery renders as
+**per-tile terrain patches** (`imageryTilesNode`): each patch is a height-field mesh
+covering one tile's geographic bounds, sampled from the SAME grid mapping as the base
+mesh + overlays (so edges coincide → seamless, no bleed), with local UV 0..1 mapping
+the tile image (clamp) and the **packed float2 texcoord retained** (no diagonal-stripe
+regression). Satellite shows the patches; Hybrid multiplies the whole-AOI hillshade
+**sliced per tile** (`multiply.contentsTransform`) at the Hillshade-intensity value.
+Patches live under `exagNode`, so true-scale terrain + vertical exaggeration + all
+draped content stay aligned. Legacy single-image rendering is the fallback. No network
+originates from the view controller (static guard + CI).
+
+**Async packaging contract (Part B).** The start endpoint is **enqueue-only**: it
+validates, creates/reuses an idempotent durable job, and returns **HTTP 202** with the
+job id, current status, and a `status_url` — it never fetches USGS 3DEP / NAIP / MinIO
+inline (unit-tested). The offline-scene worker (separate container) owns all fetch /
+tiling / assembly / verify / upload / catalog registration, with the existing lease /
+heartbeat / orphan-recovery / duplicate-prevention. The app polls with short
+independent requests; a failed poll never fails the job; there is no frontend
+wall-clock timeout; the active job is restored from server state on reopen. Download
+resume/retry stays separate from generation, behind private MinIO + presigned URLs +
+full integrity verification.
+
+**No regeneration required for existing packages.** Renderer + worker changes are
+additive and backward compatible. Existing valid `.eristerrain` packages (single-image
+or none) work after the new iOS **development build**; enabling tiled imagery is an
+operator config change that applies to newly generated packages. A new native build IS
+required (Objective-C SceneKit changes). Config: `OFFLINE_SCENE_IMAGERY_MODE`,
+`_TARGET_MPP`, `_SOURCE_NATIVE_MPP`, `_TILE_PX`, `_TILE_TIMEOUT_S`, `_TILE_RETRIES`,
+`_OVERALL_DEADLINE_S`, `_MAX_TILES`, `_MAX_MB`, `_JPEG_QUALITY`.

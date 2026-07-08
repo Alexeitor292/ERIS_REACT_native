@@ -232,6 +232,20 @@ test("generation job status lines drive the mobile UX copy", () => {
   assert.match(jobStatusLine({ status: "FAILED", progress_pct: 0, error_details: "USGS 3DEP coverage unavailable" }), /Failed — USGS 3DEP coverage unavailable/);
 });
 
+test("packaging surfaces the live per-tile imagery progress line verbatim", () => {
+  // The worker streams a durable "Packaging aerial imagery: 7 of 16 tiles" message;
+  // the mobile status line shows it verbatim so field users see real progress.
+  assert.equal(
+    jobStatusLine({ status: "PACKAGING", progress_pct: 72, error_details: null, status_message: "Packaging aerial imagery: 7 of 16 tiles" }),
+    "Packaging aerial imagery: 7 of 16 tiles",
+  );
+  // A non-tile packaging message falls back to the generic percentage copy.
+  assert.match(
+    jobStatusLine({ status: "PACKAGING", progress_pct: 70, error_details: null, status_message: "Assembling offline terrain package" }),
+    /Building offline terrain package: 70%/,
+  );
+});
+
 test("download HTTP status is inspected before size/SHA (403 != 'size mismatch')", () => {
   // The real-device failure: a presigned-URL 403 wrote a 535-byte error body that
   // was then reported as "size mismatch". Now a non-2xx status is a clear HTTP error.

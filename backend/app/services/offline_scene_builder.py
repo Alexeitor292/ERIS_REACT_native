@@ -160,6 +160,19 @@ def validate_bundle_bytes(package_bytes: bytes) -> tuple[bool, str | None]:
             for name, layer in context_layers.items():
                 if not (isinstance(layer, dict) and layer.get("available")):
                     continue
+                # Tiled imagery: every declared tile must be present + match sha256 +
+                # byte count (no partial/holey imagery ever reaches a READY package).
+                if name == "imagery" and layer.get("format") == "tiled":
+                    for t in context_fmt.tiled_imagery_tiles(layer):
+                        tname = t.get("file")
+                        if tname not in names:
+                            return False, f"missing imagery tile {tname}"
+                        tdata = zf.read(tname)
+                        if t.get("sha256") and context_fmt.sha256_hex(tdata) != t["sha256"]:
+                            return False, f"imagery tile {tname} checksum mismatch"
+                        if t.get("bytes") is not None and len(tdata) != int(t["bytes"]):
+                            return False, f"imagery tile {tname} size mismatch"
+                    continue
                 fname = layer.get("file")
                 if fname not in names:
                     return False, f"missing context asset {fname}"
@@ -260,9 +273,17 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
 
     def __init__(self, session=None):
         # Lazy import so the module loads without `requests` in pure-test contexts.
+        import random
+        import time
+
         import requests  # noqa: F401
         self._requests = requests
         self._session = session or requests.Session()
+        # Injectable clock/jitter so the tiled-imagery bounded-retry policy is testable
+        # without real sleeping. Production jitter is small + bounded.
+        self._sleep = time.sleep
+        self._monotonic = time.monotonic
+        self._jitter = lambda attempt: random.uniform(0.0, 0.5)
 
     def _export(self, params: dict) -> bytes:
         url = settings.OFFLINE_SCENE_3DEP_IMAGESERVER.rstrip("/") + "/exportImage"
@@ -406,34 +427,125 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 _log("overview", "render_error", error=str(e)[:120])
 
         # --- Aerial imagery (opt-in; skippable last) ---
-        if settings.OFFLINE_SCENE_IMAGERY_ENABLED:
-            _emit("Preparing aerial imagery")
-            try:
-                px = min(int(settings.OFFLINE_SCENE_IMAGERY_MAX_PX), 4096)
-                data, src = context_fmt.fetch_imagery_png(
-                    ctx["bounds"], export_url=settings.OFFLINE_SCENE_IMAGERY_EXPORT_URL, px=px,
-                    timeout_s=int(settings.OFFLINE_SCENE_IMAGERY_FETCH_TIMEOUT_S), session=self._session,
-                )
-                if running + len(data) <= max_bytes:
-                    layers["imagery"] = context_fmt.available_layer(
-                        context_fmt.IMAGERY_FILE, data, src, width=px, height=px, bounds=dict(ctx["bounds"])
-                    )
-                    assets[context_fmt.IMAGERY_FILE] = data
-                    running += len(data)
-                    _log("imagery", "packaged", bytes=len(data))
-                else:
-                    layers["imagery"] = context_fmt.unavailable_layer("too_large")
-                    _log("imagery", "skipped_too_large", bytes=len(data))
-            except Exception as e:
-                if settings.OFFLINE_SCENE_IMAGERY_MANDATORY:
-                    raise OfflineSceneBuildError(f"Mandatory aerial imagery could not be retrieved: {e}") from e
-                layers["imagery"] = context_fmt.unavailable_layer("source_error")
-                _log("imagery", "source_error", error=str(e)[:120])
-        else:
+        if not settings.OFFLINE_SCENE_IMAGERY_ENABLED:
             layers["imagery"] = context_fmt.unavailable_layer("not_configured")
+        elif str(settings.OFFLINE_SCENE_IMAGERY_MODE).lower() == "tiled":
+            self._build_tiled_imagery(ctx, layers, assets, running, max_bytes, _emit, _log)
+        else:
+            self._build_single_imagery(ctx, layers, assets, running, max_bytes, _log)
 
         _emit("Validating offline context layers")
         return layers, assets
+
+    def _build_single_imagery(self, ctx, layers, assets, running, max_bytes, _log):
+        """Legacy single imagery.png export (one whole-AOI aerial drape)."""
+        try:
+            px = min(int(settings.OFFLINE_SCENE_IMAGERY_MAX_PX), 4096)
+            data, src = context_fmt.fetch_imagery_png(
+                ctx["bounds"], export_url=settings.OFFLINE_SCENE_IMAGERY_EXPORT_URL, px=px,
+                timeout_s=int(settings.OFFLINE_SCENE_IMAGERY_FETCH_TIMEOUT_S), session=self._session,
+            )
+            if running + len(data) <= max_bytes:
+                layers["imagery"] = context_fmt.available_layer(
+                    context_fmt.IMAGERY_FILE, data, src, format="single", width=px, height=px, bounds=dict(ctx["bounds"])
+                )
+                assets[context_fmt.IMAGERY_FILE] = data
+                _log("imagery", "packaged_single", bytes=len(data))
+            else:
+                layers["imagery"] = context_fmt.unavailable_layer("too_large")
+                _log("imagery", "skipped_too_large", bytes=len(data))
+        except Exception as e:
+            if settings.OFFLINE_SCENE_IMAGERY_MANDATORY:
+                raise OfflineSceneBuildError(f"Mandatory aerial imagery could not be retrieved: {e}") from e
+            layers["imagery"] = context_fmt.unavailable_layer("source_error")
+            _log("imagery", "source_error", error=str(e)[:120])
+
+    def _build_tiled_imagery(self, ctx, layers, assets, running, max_bytes, _emit, _log):
+        """High-definition TILED imagery: plan a gap-free tile grid, fetch each tile
+        with bounded retries + backoff, and package all-or-nothing (a partial/holey
+        imagery layer is NEVER declared available). Persists per-tile progress. With
+        mandatory imagery, an exhausted tile fails the job with exact coordinates +
+        a sanitized upstream reason."""
+        from . import offline_scene_imagery as imagery
+
+        mandatory = bool(settings.OFFLINE_SCENE_IMAGERY_MANDATORY)
+        try:
+            target = imagery.resolve_target_mpp(
+                settings.OFFLINE_SCENE_IMAGERY_TARGET_MPP, settings.OFFLINE_SCENE_IMAGERY_SOURCE_NATIVE_MPP
+            )
+            plan = imagery.plan_imagery_tiles(
+                ctx["bounds"],
+                tile_px=int(settings.OFFLINE_SCENE_IMAGERY_TILE_PX),
+                target_mpp=target,
+                source_native_mpp=float(settings.OFFLINE_SCENE_IMAGERY_SOURCE_NATIVE_MPP),
+                max_export_px=int(settings.OFFLINE_SCENE_IMAGERY_MAX_EXPORT_PX),
+                max_tiles=int(settings.OFFLINE_SCENE_IMAGERY_MAX_TILES),
+                file_ext=context_fmt.IMAGERY_TILE_EXT,
+            )
+            imagery.assert_no_gaps_or_overlaps(plan)
+        except imagery.ImageryPlanError as e:
+            if mandatory:
+                raise OfflineSceneBuildError(f"Aerial imagery tile plan failed: {e}") from e
+            layers["imagery"] = context_fmt.unavailable_layer(f"plan_error: {str(e)[:60]}")
+            _log("imagery", "plan_error", error=str(e)[:120])
+            return
+
+        n = len(plan["tiles"])
+        imagery_budget = min(int(max_bytes) - int(running), int(settings.OFFLINE_SCENE_IMAGERY_MAX_MB) * 1024 * 1024)
+        tile_metas: list = []
+        source_meta = None
+        imagery_bytes = 0
+        current: dict | None = None
+        _emit(f"Packaging aerial imagery: 0 of {n} tiles")
+        try:
+            for i, tile in enumerate(plan["tiles"]):
+                current = tile
+
+                def _fetch(_attempt, _tile=tile):
+                    return context_fmt.fetch_imagery_tile(
+                        _tile["bounds"],
+                        export_url=settings.OFFLINE_SCENE_IMAGERY_EXPORT_URL,
+                        tile_px=int(plan["tile_size_px"]),
+                        timeout_s=int(settings.OFFLINE_SCENE_IMAGERY_TILE_TIMEOUT_S),
+                        jpeg_quality=int(settings.OFFLINE_SCENE_IMAGERY_JPEG_QUALITY),
+                        session=self._session,
+                    )
+
+                data, src = imagery.run_with_retries(
+                    _fetch,
+                    retries=int(settings.OFFLINE_SCENE_IMAGERY_TILE_RETRIES),
+                    deadline_s=float(settings.OFFLINE_SCENE_IMAGERY_OVERALL_DEADLINE_S),
+                    sleep=self._sleep, monotonic=self._monotonic, jitter=self._jitter,
+                )
+                source_meta = source_meta or src
+                imagery_bytes += len(data)
+                if imagery_bytes > imagery_budget:
+                    raise imagery.ImageryPlanError(
+                        f"imagery exceeds the {settings.OFFLINE_SCENE_IMAGERY_MAX_MB} MB budget"
+                    )
+                assets[tile["file"]] = data
+                tile_metas.append({
+                    "row": tile["row"], "column": tile["column"], "file": tile["file"],
+                    "bounds": dict(tile["bounds"]),
+                    "sha256": context_fmt.sha256_hex(data), "bytes": len(data),
+                })
+                _emit(f"Packaging aerial imagery: {i + 1} of {n} tiles")
+        except Exception as e:  # roll back ANY partial tiles — never a holey imagery layer
+            for t in plan["tiles"]:
+                assets.pop(t["file"], None)
+            coord = f"({current['row']},{current['column']})" if current else "(?)"
+            reason = imagery.sanitize_reason(e)
+            if mandatory:
+                raise OfflineSceneBuildError(
+                    f"Mandatory aerial imagery failed at tile {coord} after retries: {reason}"
+                ) from e
+            layers["imagery"] = context_fmt.unavailable_layer(f"tile_failed {coord}")
+            _log("imagery", "tile_failed", tile=coord, error=reason)
+            return
+
+        layers["imagery"] = context_fmt.tiled_imagery_layer(plan, tile_metas, source_meta)
+        _log("imagery", "packaged_tiled", tiles=n, bytes=imagery_bytes,
+             effective_mpp=plan.get("effective_meters_per_pixel"))
 
 
 def get_builder() -> OfflineScenePackageBuilder:

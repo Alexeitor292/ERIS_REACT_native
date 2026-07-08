@@ -289,6 +289,7 @@ class TestBuilderContextLayers:
 
     def test_mandatory_imagery_failure_raises(self, monkeypatch):
         monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_ENABLED", True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_MODE", "single")  # legacy single-image path
         monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_MANDATORY", True)
 
         def _boom(*a, **k):
@@ -300,6 +301,7 @@ class TestBuilderContextLayers:
 
     def test_optional_imagery_failure_degrades(self, monkeypatch):
         monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_ENABLED", True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_MODE", "single")  # legacy single-image path
         monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_MANDATORY", False)
 
         def _boom(*a, **k):
