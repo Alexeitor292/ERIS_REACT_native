@@ -11,6 +11,9 @@ import {
   decodeHeightGrid,
   extractAndValidateBundle,
   gridCellToLonLat,
+  imageryIsTiled,
+  imageryMode,
+  imageryTiles,
   isUnsafeEntryName,
   lonLatToGridCell,
   parseZipEntries,
@@ -387,4 +390,100 @@ test("summarizeContextLayers road context: inventory vs feature-service vs none"
   // No roads packaged.
   const legacy = summarizeContextLayers(goodManifest() as never);
   assert.equal(legacy.roadContext, "No road context packaged");
+});
+
+// ---- TILED aerial imagery --------------------------------------------------
+
+const TILE0 = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3, 4, 5]); // JPEG magic + body
+const TILE1 = new Uint8Array([0xff, 0xd8, 0xff, 9, 8, 7, 6, 5, 4]);
+const TILE_BOUNDS_L = { min_lat: 38.48, min_lon: -121.52, max_lat: 38.52, max_lon: -121.5 };
+const TILE_BOUNDS_R = { min_lat: 38.48, min_lon: -121.5, max_lat: 38.52, max_lon: -121.48 };
+
+function manifestWithTiledImagery(overrides: Record<string, unknown> = {}) {
+  const m = goodManifest() as Record<string, unknown>;
+  m.context_layers = {
+    roads: { available: false, reason: "disabled" },
+    overview: { available: false, reason: "disabled" },
+    imagery: {
+      available: true,
+      format: "tiled",
+      tile_size_px: 1024,
+      columns: 2,
+      rows: 1,
+      tile_count: 2,
+      target_meters_per_pixel: 0.6,
+      effective_meters_per_pixel: 0.58,
+      bytes: TILE0.length + TILE1.length,
+      bounds: BOUNDS,
+      source: { provider: "usgs_naip", attribution: "USDA NAIP via USGS" },
+      tiles: [
+        { row: 0, column: 0, file: "imagery/0/0.jpg", bounds: TILE_BOUNDS_L, sha256: "d".repeat(64), bytes: TILE0.length },
+        { row: 0, column: 1, file: "imagery/0/1.jpg", bounds: TILE_BOUNDS_R, sha256: "e".repeat(64), bytes: TILE1.length },
+      ],
+      ...overrides,
+    },
+  };
+  m.files = { manifest: "manifest.json", terrain: "elevation-grid.bin", hillshade: "hillshade.png" };
+  return m;
+}
+
+function tiledBundle(manifestObj: unknown, tiles: [string, Uint8Array][] = [["imagery/0/0.jpg", TILE0], ["imagery/0/1.jpg", TILE1]]) {
+  return bundleWith(manifestObj, tiles);
+}
+
+test("tiled imagery: manifest parses, is available, and every tile is extracted", () => {
+  const { manifest, files } = extractAndValidateBundle(tiledBundle(manifestWithTiledImagery()));
+  assert.equal(contextLayerAvailable(manifest, "imagery"), true);
+  assert.equal(imageryMode(manifest), "tiled");
+  assert.equal(imageryIsTiled(manifest.context_layers?.imagery), true);
+  const tiles = imageryTiles(manifest);
+  assert.equal(tiles.length, 2);
+  assert.ok(files["imagery/0/0.jpg"] && files["imagery/0/1.jpg"]);
+  // tile file paths + bounds preserved for the renderer's per-tile terrain patches.
+  assert.equal(tiles[0].file, "imagery/0/0.jpg");
+  assert.deepEqual(tiles[1].bounds, TILE_BOUNDS_R);
+});
+
+test("tiled imagery: summary reports mode, tile count, effective resolution, source", () => {
+  const s = summarizeContextLayers(manifestWithTiledImagery() as never);
+  assert.equal(s.imagery, true);
+  assert.equal(s.imageryMode, "tiled");
+  assert.equal(s.imageryTileCount, 2);
+  assert.equal(s.imageryEffectiveMpp, 0.58);
+  assert.equal(s.imagerySource, "USDA NAIP via USGS");
+});
+
+test("legacy single-image imagery is still recognised (backward compatible)", () => {
+  const m = goodManifest() as Record<string, unknown>;
+  m.context_layers = {
+    imagery: { available: true, file: "imagery.png", sha256: "c".repeat(64), bytes: 3, source: { provider: "usgs_naip" } },
+  };
+  m.files = { imagery: "imagery.png" };
+  assert.equal(imageryMode(m as never), "single");
+  assert.equal(imageryIsTiled((m.context_layers as Record<string, never>).imagery), false);
+  assert.equal(contextLayerAvailable(m as never, "imagery"), true);
+  assert.equal(summarizeContextLayers(m as never).imageryMode, "single");
+});
+
+test("tiled imagery: a manifest-declared tile that is MISSING fails closed", () => {
+  // Declare 2 tiles but package only the first one.
+  const bundle = tiledBundle(manifestWithTiledImagery(), [["imagery/0/0.jpg", TILE0]]);
+  assert.throws(() => extractAndValidateBundle(bundle), /missing context asset imagery\/0\/1\.jpg/);
+});
+
+test("tiled imagery: a CORRUPT tile body fails closed", () => {
+  const bundle = tiledBundle(manifestWithTiledImagery());
+  corruptEntryData(bundle, "imagery/0/1.jpg");
+  assert.throws(() => extractAndValidateBundle(bundle), /imagery\/0\/1\.jpg checksum mismatch/);
+});
+
+test("tiled imagery: a tile with the wrong byte count fails closed", () => {
+  const m = manifestWithTiledImagery();
+  (m.context_layers as { imagery: { tiles: { bytes: number }[] } }).imagery.tiles[0].bytes = TILE0.length + 3;
+  assert.throws(() => extractAndValidateBundle(tiledBundle(m)), /imagery\/0\/0\.jpg size mismatch/);
+});
+
+test("tiled imagery: tile count not matching columns*rows fails closed", () => {
+  const m = manifestWithTiledImagery({ columns: 3, rows: 1 }); // says 3 tiles, only 2 declared
+  assert.throws(() => extractAndValidateBundle(tiledBundle(m)), /tile count does not match/);
 });

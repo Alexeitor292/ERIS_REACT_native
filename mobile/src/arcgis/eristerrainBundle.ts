@@ -135,6 +135,18 @@ export type ContextLayerSource = {
   service?: string;
 };
 
+export type LonLatBounds = { min_lat: number; min_lon: number; max_lat: number; max_lon: number };
+
+/** One packaged aerial-imagery tile (tiled imagery). File is imagery/{row}/{col}.jpg. */
+export type ImageryTile = {
+  row: number;
+  column: number;
+  file: string;
+  bounds: LonLatBounds;
+  sha256?: string;
+  bytes?: number;
+};
+
 export type ContextLayerMeta = {
   available: boolean;
   file?: string;
@@ -146,6 +158,16 @@ export type ContextLayerMeta = {
   feature_count?: number; // roads: number of packaged features
   road_kinds?: string[]; // roads: distinct feature kinds (road_bearing/inventory/centerline)
   source?: ContextLayerSource;
+  // Tiled aerial imagery (format:"tiled"). Legacy single-image imagery has `file`.
+  format?: "tiled" | "single";
+  tile_size_px?: number;
+  columns?: number;
+  rows?: number;
+  tile_count?: number;
+  target_meters_per_pixel?: number;
+  effective_meters_per_pixel?: number;
+  bounds?: LonLatBounds;
+  tiles?: ImageryTile[];
   [k: string]: unknown;
 };
 
@@ -170,14 +192,41 @@ export type EristerrainManifest = {
 export const CONTEXT_LAYER_NAMES = ["roads", "imagery", "overview"] as const;
 export type ContextLayerName = (typeof CONTEXT_LAYER_NAMES)[number];
 
+/** True when an imagery layer is the tiled (multi-tile JPEG) format. */
+export function imageryIsTiled(layer: ContextLayerMeta | null | undefined): boolean {
+  return !!layer && layer.available === true && layer.format === "tiled" && Array.isArray(layer.tiles) && layer.tiles.length > 0;
+}
+
+/** Imagery packaging mode for a manifest: "tiled" (high-definition), "single"
+ *  (legacy one imagery.png), or null when no imagery is packaged. */
+export function imageryMode(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+): "tiled" | "single" | null {
+  const layer = manifest?.context_layers?.imagery;
+  if (!layer || layer.available !== true) return null;
+  if (imageryIsTiled(layer)) return "tiled";
+  return typeof layer.file === "string" && !!layer.file ? "single" : null;
+}
+
+/** Declared imagery tiles for a tiled package (else []). Defensive. */
+export function imageryTiles(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+): ImageryTile[] {
+  const layer = manifest?.context_layers?.imagery;
+  return imageryIsTiled(layer) ? (layer!.tiles as ImageryTile[]) : [];
+}
+
 /** Whether a named context layer is present + declared available in a manifest.
- *  Absent block / absent layer => false (unavailable, NEVER treated as corrupt). */
+ *  Absent block / absent layer => false (unavailable, NEVER treated as corrupt).
+ *  Tiled imagery is available via its `tiles` array (it has no single `file`). */
 export function contextLayerAvailable(
   manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
   name: ContextLayerName,
 ): boolean {
   const layer = manifest?.context_layers?.[name];
-  return !!layer && layer.available === true && typeof layer.file === "string" && !!layer.file;
+  if (!layer || layer.available !== true) return false;
+  if (name === "imagery" && imageryIsTiled(layer)) return true;
+  return typeof layer.file === "string" && !!layer.file;
 }
 
 /** Reason a layer is unavailable (for the UI), or null when it IS available. */
@@ -229,6 +278,13 @@ export function summarizeContextLayers(
     if (a && !attribution.includes(a)) attribution.push(a);
   }
   const roadCount = typeof cl.roads?.feature_count === "number" ? cl.roads.feature_count : null;
+  const imgMode = imageryMode(manifest);
+  const imgTileCount =
+    imgMode === "tiled" ? (typeof cl.imagery?.tile_count === "number" ? cl.imagery.tile_count : imageryTiles(manifest).length) : null;
+  const imgEffMpp =
+    imgMode === "tiled" && typeof cl.imagery?.effective_meters_per_pixel === "number"
+      ? cl.imagery.effective_meters_per_pixel
+      : null;
   return {
     hillshade,
     roads,
@@ -242,6 +298,9 @@ export function summarizeContextLayers(
     roadContext: roadContextLabel(cl.roads),
     roadFeatureCount: roadCount,
     attribution,
+    imageryMode: imgMode,
+    imageryTileCount: imgTileCount,
+    imageryEffectiveMpp: imgEffMpp,
   };
 }
 
@@ -373,19 +432,42 @@ export function extractAndValidateBundle(bytes: Uint8Array): ExtractedBundle {
   // package SHA-256 is already verified before extraction, so per-entry CRC + byte
   // count gives strong integrity for these assets.)
   const ctxLayers = (manifest.context_layers ?? {}) as ContextLayers;
-  for (const name of CONTEXT_LAYER_NAMES) {
-    const layer = ctxLayers[name];
-    if (!layer || layer.available !== true) continue;
-    const fname = layer.file;
-    if (typeof fname !== "string" || !fname) throw new Error(`context layer ${name} available but has no file`);
+  const extractAsset = (fname: unknown, label: string): void => {
+    if (typeof fname !== "string" || !fname) throw new Error(`${label} available but has no file`);
+    if (isUnsafeEntryName(fname)) throw new Error(`unsafe archive entry: ${fname}`);
     const e = byName.get(fname);
     if (!e) throw new Error(`missing context asset ${fname}`);
     const b = readStoredEntry(bytes, e);
     if (crc32(b) !== (e.crc32 >>> 0)) throw new Error(`context asset ${fname} checksum mismatch`);
-    if (typeof layer.bytes === "number" && b.byteLength !== layer.bytes) {
+    files[fname] = b;
+  };
+  for (const name of CONTEXT_LAYER_NAMES) {
+    const layer = ctxLayers[name];
+    if (!layer || layer.available !== true) continue;
+    // Tiled imagery: every declared tile must be present + pass CRC + its declared
+    // byte count. A manifest-declared-available tile that is missing/corrupt fails
+    // the whole bundle closed (never a holey imagery layer). Legacy single-image
+    // imagery (and roads/overview) keep the single-`file` path.
+    if (name === "imagery" && imageryIsTiled(layer)) {
+      const tiles = (layer.tiles ?? []) as ImageryTile[];
+      const cols = Number(layer.columns);
+      const rows = Number(layer.rows);
+      if (Number.isInteger(cols) && Number.isInteger(rows) && cols * rows !== tiles.length) {
+        throw new Error("imagery tile count does not match columns*rows");
+      }
+      for (const t of tiles) {
+        extractAsset(t.file, `imagery tile (${t.row},${t.column})`);
+        if (typeof t.bytes === "number" && files[t.file].byteLength !== t.bytes) {
+          throw new Error(`imagery tile ${t.file} size mismatch`);
+        }
+      }
+      continue;
+    }
+    const fname = layer.file;
+    extractAsset(fname, `context layer ${name}`);
+    if (typeof layer.bytes === "number" && files[fname as string].byteLength !== layer.bytes) {
       throw new Error(`context asset ${fname} size mismatch`);
     }
-    files[fname] = b;
   }
   return { manifest, files };
 }

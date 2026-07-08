@@ -227,7 +227,15 @@ static NSString *ErisExagLabel(CGFloat value) {
 @property(nonatomic, copy) NSString *extractedDir;
 @property(nonatomic, strong) NSDictionary *contextLayers;    // manifest.context_layers
 @property(nonatomic, strong) UIImage *hillshadeImage;        // hillshade.png (relief), if present
-@property(nonatomic, strong) UIImage *imageryImage;          // imagery.png (aerial), if present + valid
+@property(nonatomic, strong) UIImage *imageryImage;          // imagery.png (aerial, legacy single-image), if present + valid
+// Tiled high-definition aerial imagery: one JPEG per geographic tile, each mapped
+// onto its own terrain patch. imageryTiled == YES when every declared tile loaded.
+@property(nonatomic, assign) BOOL imageryTiled;
+@property(nonatomic, strong) NSArray<NSDictionary *> *imageryTileMetas; // {image,bounds,file}
+@property(nonatomic, strong) SCNNode *imageryTilesNode;      // per-tile terrain patches (drape)
+// AOI geographic bounds (from local_transform/bounds) — used to slice the whole-AOI
+// hillshade per tile in Hybrid, and shared by the true-scale math.
+@property(nonatomic, assign) double aoiMinLon, aoiMinLat, aoiMaxLon, aoiMaxLat;
 @property(nonatomic, strong) SCNNode *overlaysNode;          // incident / geometry / sample-extent / bearing
 @property(nonatomic, strong) SCNNode *roadsNode;             // packaged roads.geojson
 @property(nonatomic, strong) SCNNode *boundaryNode;          // package boundary ring
@@ -360,6 +368,7 @@ static NSString *ErisExagLabel(CGFloat value) {
   [self.exagNode addChildNode:self.boundaryNode];
 
   [self loadContextTextures:dir];   // hillshade + optional aerial imagery (local files only)
+  [self buildImageryTilesNode];     // per-tile terrain patches for tiled imagery (drape)
   [self applyBaseSurface];          // set the terrain material from the current base surface
 
   [self addLighting];
@@ -398,6 +407,8 @@ static NSString *ErisExagLabel(CGFloat value) {
       ok = (maxLat > minLat && maxLon > minLon);
     }
   }
+  // Remember the AOI bounds (used to slice the whole-AOI hillshade per imagery tile).
+  self.aoiMinLon = minLon; self.aoiMinLat = minLat; self.aoiMaxLon = maxLon; self.aoiMaxLat = maxLat;
   double widthM = 0, heightM = 0;
   if (ok) {
     double midLat = (minLat + maxLat) / 2.0;
@@ -441,27 +452,63 @@ static NSString *ErisExagLabel(CGFloat value) {
   if ([[NSFileManager defaultManager] fileExistsAtPath:hsPath]) {
     self.hillshadeImage = [UIImage imageWithContentsOfFile:hsPath];
   }
-  // Aerial imagery is used ONLY when the manifest declared it available AND the
-  // file loads as a valid image (defensive: a corrupt image just disables imagery).
+  // Aerial imagery: TILED (one JPEG per geographic tile) is preferred; a legacy
+  // single imagery.png is the backward-compatible fallback. Used ONLY when the
+  // manifest declared it available AND the file(s) load as valid images (a corrupt
+  // image just disables imagery — the terrain still renders).
+  NSDictionary *imgLayer = [self.contextLayers[@"imagery"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"imagery"] : nil;
   if ([self layerAvailable:@"imagery"]) {
-    NSString *imgPath = [dir stringByAppendingPathComponent:@"imagery.png"];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:imgPath]) {
-      self.imageryImage = [UIImage imageWithContentsOfFile:imgPath];
+    if ([imgLayer[@"format"] isEqual:@"tiled"] && [imgLayer[@"tiles"] isKindOfClass:[NSArray class]]) {
+      [self loadTiledImagery:imgLayer dir:dir];
+    } else {
+      NSString *imgPath = [dir stringByAppendingPathComponent:@"imagery.png"];
+      if ([[NSFileManager defaultManager] fileExistsAtPath:imgPath]) {
+        self.imageryImage = [UIImage imageWithContentsOfFile:imgPath];
+      }
     }
   }
-  if (self.imageryImage == nil && self.baseSurface != 0) {
-    self.baseSurface = 0;  // no imagery -> force terrain relief
+  if (![self imageryUsable] && self.baseSurface != 0) {
+    self.baseSurface = 0;  // no usable imagery -> force terrain relief
   }
 }
 
-// Whether a named context layer is declared available in the manifest.
-- (BOOL)layerAvailable:(NSString *)name {
-  NSDictionary *layer = [self.contextLayers[name] isKindOfClass:[NSDictionary class]] ? self.contextLayers[name] : nil;
-  id file = layer[@"file"];
-  return layer != nil && [layer[@"available"] boolValue] && [file isKindOfClass:[NSString class]] && [file length] > 0;
+// Load every declared imagery tile as a UIImage + its geographic bounds. imageryTiled
+// is set ONLY when ALL tiles load — a partial set would leave holes, so we fall back
+// to terrain relief rather than render an incomplete surface.
+- (void)loadTiledImagery:(NSDictionary *)imgLayer dir:(NSString *)dir {
+  NSArray *tiles = imgLayer[@"tiles"];
+  NSMutableArray<NSDictionary *> *metas = [NSMutableArray array];
+  for (id t in tiles) {
+    if (![t isKindOfClass:[NSDictionary class]]) continue;
+    NSString *file = [t[@"file"] isKindOfClass:[NSString class]] ? t[@"file"] : nil;
+    NSDictionary *b = [t[@"bounds"] isKindOfClass:[NSDictionary class]] ? t[@"bounds"] : nil;
+    if (file.length == 0 || b == nil) { metas = nil; break; }
+    NSString *path = [dir stringByAppendingPathComponent:file];
+    UIImage *img = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
+    if (img == nil) { metas = nil; break; }   // any missing/corrupt tile -> disable tiled imagery
+    [metas addObject:@{@"image": img, @"bounds": b, @"file": file}];
+  }
+  if (metas != nil && metas.count > 0) {
+    self.imageryTileMetas = metas;
+    self.imageryTiled = YES;
+  }
 }
 
-- (BOOL)imageryUsable { return self.imageryImage != nil; }
+// Whether a named context layer is declared available in the manifest. Tiled imagery
+// declares a `tiles` array instead of a single `file`.
+- (BOOL)layerAvailable:(NSString *)name {
+  NSDictionary *layer = [self.contextLayers[name] isKindOfClass:[NSDictionary class]] ? self.contextLayers[name] : nil;
+  if (layer == nil || ![layer[@"available"] boolValue]) return NO;
+  if ([name isEqualToString:@"imagery"] && [layer[@"format"] isEqual:@"tiled"]) {
+    id tiles = layer[@"tiles"];
+    return [tiles isKindOfClass:[NSArray class]] && [tiles count] > 0;
+  }
+  id file = layer[@"file"];
+  return [file isKindOfClass:[NSString class]] && [file length] > 0;
+}
+
+// Usable when a legacy single image loaded, OR all tiled imagery tiles loaded.
+- (BOOL)imageryUsable { return self.imageryImage != nil || (self.imageryTiled && self.imageryTileMetas.count > 0); }
 
 // Build a TRUE-SCALE height-field mesh (1.0x). World X = east (col), Z = south
 // (row), Y = elevation. X/Z use the physical footprint half-extents (aspect-correct,
@@ -524,6 +571,122 @@ static NSString *ErisExagLabel(CGFloat value) {
   mat.diffuse.wrapT = SCNWrapModeClamp;
   mat.multiply.wrapS = SCNWrapModeClamp;
   mat.multiply.wrapT = SCNWrapModeClamp;
+  mat.doubleSided = YES;
+  geo.firstMaterial = mat;
+  free(verts); free(uvs); free(idx);
+  return [SCNNode nodeWithGeometry:geo];
+}
+
+#pragma mark - Tiled aerial imagery (per-tile terrain patches)
+
+// Build one draped terrain patch per imagery tile so each tile texture maps ONLY
+// onto its correct geographic terrain area (no seams, no bleeding, no wrong-tile
+// mapping). Patches are children of exagNode (so vertical exaggeration scales them
+// with the terrain) and share the exact same surface sampling as the base mesh +
+// overlays, so tile edges coincide with neighbours (seamless) and everything stays
+// aligned. Hidden until Satellite/Hybrid selects tiled imagery.
+- (void)buildImageryTilesNode {
+  if (!self.imageryTiled || self.imageryTileMetas.count == 0) return;
+  self.imageryTilesNode = [SCNNode node];
+  for (NSDictionary *meta in self.imageryTileMetas) {
+    SCNNode *patch = [self buildImageryPatch:meta];
+    if (patch) [self.imageryTilesNode addChildNode:patch];
+  }
+  self.imageryTilesNode.hidden = YES;   // shown by applyBaseSurface when tiled imagery is active
+  [self.exagNode addChildNode:self.imageryTilesNode];
+}
+
+// A height-field patch covering ONE tile's geographic bounds. Vertices are sampled
+// from the SAME grid mapping used by the base mesh + overlays (surfaceWorldForCol),
+// so adjacent patches share identical edge positions (seamless). UV 0..1 maps the
+// tile image across the patch (clamp — never tile/repeat). For Hybrid, the whole-AOI
+// hillshade is sliced to this tile via the material multiply layer's contentsTransform.
+- (SCNNode *)buildImageryPatch:(NSDictionary *)meta {
+  UIImage *img = meta[@"image"];
+  NSDictionary *b = meta[@"bounds"];
+  if (![img isKindOfClass:[UIImage class]] || ![b isKindOfClass:[NSDictionary class]]) return nil;
+  double tMinLon = [b[@"min_lon"] doubleValue], tMaxLon = [b[@"max_lon"] doubleValue];
+  double tMinLat = [b[@"min_lat"] doubleValue], tMaxLat = [b[@"max_lat"] doubleValue];
+  if (!(tMaxLon > tMinLon) || !(tMaxLat > tMinLat)) return nil;
+
+  // Tile bounds -> fractional grid (col,row) range (row 0 = north edge).
+  double c0, r0, c1, r1;
+  if (![self colRowForLat:tMaxLat lon:tMinLon outCol:&c0 outRow:&r0]) return nil;  // NW corner
+  if (![self colRowForLat:tMinLat lon:tMaxLon outCol:&c1 outRow:&r1]) return nil;  // SE corner
+  // Clamp into the grid so a tile that slightly overhangs still samples valid cells.
+  c0 = MIN(MAX(c0, 0.0), (double)(self.cols - 1)); c1 = MIN(MAX(c1, 0.0), (double)(self.cols - 1));
+  r0 = MIN(MAX(r0, 0.0), (double)(self.rows - 1)); r1 = MIN(MAX(r1, 0.0), (double)(self.rows - 1));
+  if (!(c1 > c0) || !(r1 > r0)) return nil;
+
+  // Tessellate at ~grid density within the tile (so the patch shape matches the base
+  // mesh), capped for safety.
+  const NSInteger kMaxPatchDim = 64;
+  NSInteger nCols = (NSInteger)ceil(c1 - c0) + 1; nCols = MAX(2, MIN(kMaxPatchDim, nCols));
+  NSInteger nRows = (NSInteger)ceil(r1 - r0) + 1; nRows = MAX(2, MIN(kMaxPatchDim, nRows));
+
+  NSUInteger vcount = (NSUInteger)(nRows * nCols);
+  SCNVector3 *verts = malloc(sizeof(SCNVector3) * vcount);
+  ErisTerrainTexCoord *uvs = malloc(sizeof(ErisTerrainTexCoord) * vcount);  // packed 2x float32 (no UV regression)
+  for (NSInteger i = 0; i < nRows; i++) {
+    for (NSInteger j = 0; j < nCols; j++) {
+      double fu = (double)j / (double)(nCols - 1);
+      double fv = (double)i / (double)(nRows - 1);
+      double col = c0 + fu * (c1 - c0);
+      double row = r0 + fv * (r1 - r0);
+      NSUInteger k = (NSUInteger)(i * nCols + j);
+      verts[k] = [self surfaceWorldForCol:col row:row lift:0];   // exact base-mesh surface (true scale)
+      uvs[k] = (ErisTerrainTexCoord){.u = (float)fu, .v = (float)fv};
+    }
+  }
+  NSUInteger quadCount = (NSUInteger)((nRows - 1) * (nCols - 1));
+  NSUInteger icount = quadCount * 6;
+  int *idx = malloc(sizeof(int) * icount);
+  NSUInteger m = 0;
+  for (NSInteger i = 0; i < nRows - 1; i++) {
+    for (NSInteger j = 0; j < nCols - 1; j++) {
+      int tl = (int)(i * nCols + j), tr = tl + 1, bl = (int)((i + 1) * nCols + j), br = bl + 1;
+      idx[m++] = tl; idx[m++] = bl; idx[m++] = tr;
+      idx[m++] = tr; idx[m++] = bl; idx[m++] = br;
+    }
+  }
+
+  SCNGeometrySource *vSrc = [SCNGeometrySource geometrySourceWithVertices:verts count:vcount];
+  SCNGeometrySource *uvSrc = [SCNGeometrySource geometrySourceWithData:[NSData dataWithBytes:uvs length:sizeof(ErisTerrainTexCoord) * vcount]
+                                                              semantic:SCNGeometrySourceSemanticTexcoord
+                                                           vectorCount:vcount
+                                                       floatComponents:YES
+                                                   componentsPerVector:2
+                                                     bytesPerComponent:sizeof(float)
+                                                            dataOffset:0
+                                                            dataStride:sizeof(ErisTerrainTexCoord)];
+  SCNGeometryElement *el = [SCNGeometryElement geometryElementWithData:[NSData dataWithBytes:idx length:sizeof(int) * icount]
+                                                        primitiveType:SCNGeometryPrimitiveTypeTriangles
+                                                       primitiveCount:icount / 3
+                                                        bytesPerIndex:sizeof(int)];
+  SCNGeometry *geo = [SCNGeometry geometryWithSources:@[vSrc, uvSrc] elements:@[el]];
+
+  SCNMaterial *mat = [SCNMaterial material];
+  mat.diffuse.contents = img;
+  mat.diffuse.wrapS = SCNWrapModeClamp;   // one tile image, one patch — never tile/repeat
+  mat.diffuse.wrapT = SCNWrapModeClamp;
+  // Hybrid: slice the whole-AOI hillshade to this tile's sub-rectangle so relief lines
+  // up with the imagery. intensity is toggled by applyBaseSurface (0 = satellite).
+  if (self.hillshadeImage != nil) {
+    double du = self.aoiMaxLon - self.aoiMinLon, dv = self.aoiMaxLat - self.aoiMinLat;
+    if (du > 0 && dv > 0) {
+      float uLo = (float)((tMinLon - self.aoiMinLon) / du);
+      float uHi = (float)((tMaxLon - self.aoiMinLon) / du);
+      float vLo = (float)((self.aoiMaxLat - tMaxLat) / dv);   // v: row 0 = north
+      float vHi = (float)((self.aoiMaxLat - tMinLat) / dv);
+      SCNMatrix4 tx = SCNMatrix4MakeScale(uHi - uLo, vHi - vLo, 1.0f);
+      tx.m41 = uLo; tx.m42 = vLo;   // sampledUV = localUV * scale + offset
+      mat.multiply.contents = self.hillshadeImage;
+      mat.multiply.contentsTransform = tx;
+      mat.multiply.wrapS = SCNWrapModeClamp;
+      mat.multiply.wrapT = SCNWrapModeClamp;
+      mat.multiply.intensity = 0.0;   // off until Hybrid
+    }
+  }
   mat.doubleSided = YES;
   geo.firstMaterial = mat;
   free(verts); free(uvs); free(idx);
@@ -905,7 +1068,7 @@ static NSArray *erisAsArray(id v) {
   NSMutableArray<NSString *> *tags = [NSMutableArray arrayWithObject:src];
   // Truthful: never "Roads" when the package only holds a derived road-bearing line.
   if ([self layerAvailable:@"roads"]) [tags addObject:[self describeRoadContext]];
-  if ([self imageryUsable]) [tags addObject:@"Aerial imagery"];
+  if ([self imageryUsable]) [tags addObject:self.imageryTiled ? @"Aerial imagery (HD tiled)" : @"Aerial imagery"];
   else if (self.hillshadeImage) [tags addObject:@"Hillshade relief"];
   self.statusLabel.text = [NSString stringWithFormat:@"  Offline terrain · v%@\n  %@  ",
                            version, [tags componentsJoinedByString:@" · "]];
@@ -930,16 +1093,35 @@ static NSArray *erisAsArray(id v) {
 
 #pragma mark - Base surface (terrain / satellite / hybrid) + layer visibility
 
-// Set the terrain mesh material from the current base surface. All textures are
-// local; imagery is used ONLY when packaged + it loaded as a valid image. Hybrid
-// blends aerial imagery with hillshade relief via the material's multiply layer.
+// Set the base surface (terrain relief / satellite / hybrid). All textures are
+// local; imagery is used ONLY when packaged + valid. TILED imagery renders as
+// per-tile terrain patches (imageryTilesNode); legacy single-image imagery renders
+// as the terrain mesh diffuse. Hybrid blends aerial imagery with hillshade relief.
 - (void)applyBaseSurface {
+  BOOL wantImagery = (self.baseSurface != 0) && [self imageryUsable];
+  // Only drape tiled patches when EVERY tile's patch actually built (a degenerate
+  // patch would leave a hole) — otherwise fall back to terrain relief, never a
+  // partial/holey surface.
+  BOOL allPatchesBuilt = self.imageryTilesNode != nil
+      && self.imageryTilesNode.childNodes.count == self.imageryTileMetas.count
+      && self.imageryTileMetas.count > 0;
+  BOOL useTiles = wantImagery && self.imageryTiled && allPatchesBuilt;
+
+  // When tiled imagery is the active surface, show the patches and hide the base
+  // mesh (they coincide, so hiding avoids z-fighting); otherwise show the base mesh.
+  self.imageryTilesNode.hidden = !useTiles;
+  self.terrainNode.hidden = useTiles;
+  if (useTiles) {
+    [self applyTiledImageryHybrid:(self.baseSurface == 2)];
+    return;
+  }
+
   SCNMaterial *mat = self.terrainNode.geometry.firstMaterial;
   if (mat == nil) return;
   mat.multiply.contents = nil;
   mat.multiply.intensity = 1.0;
   UIImage *diffuse = nil;
-  if (self.baseSurface == 1 && self.imageryImage != nil) {           // satellite / aerial imagery
+  if (self.baseSurface == 1 && self.imageryImage != nil) {           // satellite (legacy single image)
     diffuse = self.imageryImage;
   } else if (self.baseSurface == 2 && self.imageryImage != nil) {    // hybrid: imagery x hillshade
     diffuse = self.imageryImage;
@@ -957,6 +1139,16 @@ static NSArray *erisAsArray(id v) {
   mat.diffuse.wrapT = SCNWrapModeClamp;
   mat.multiply.wrapS = SCNWrapModeClamp;
   mat.multiply.wrapT = SCNWrapModeClamp;
+}
+
+// Toggle the per-tile hillshade multiply for tiled imagery: Hybrid blends the
+// (per-tile sliced) hillshade at reliefIntensity; Satellite shows imagery alone.
+- (void)applyTiledImageryHybrid:(BOOL)hybrid {
+  float intensity = hybrid ? (float)MAX(0.0, MIN(1.0, self.reliefIntensity)) : 0.0f;
+  for (SCNNode *patch in self.imageryTilesNode.childNodes) {
+    SCNMaterial *mat = patch.geometry.firstMaterial;
+    if (mat.multiply.contents != nil) mat.multiply.intensity = intensity;
+  }
 }
 
 - (void)applyLayerVisibility {
@@ -1126,7 +1318,23 @@ static NSArray *erisAsArray(id v) {
   [s appendString:@"Display settings do not modify the packaged elevation data\n\n"];
   [s appendFormat:@"Elevation source: %@ · %@\n", elev[@"source"] ?: @"USGS_3DEP", elev[@"dataset"] ?: @"USGS 3DEP"];
   if ([self imageryUsable]) {
-    [s appendFormat:@"Aerial imagery: %@\n", [self layerSourceLabel:@"imagery"] ?: @"packaged"];
+    NSDictionary *img = [self.contextLayers[@"imagery"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"imagery"] : @{};
+    // Report the ACTUAL source (never claim ArcGIS-map equivalence), the packaging
+    // mode (tiled vs legacy single-image), tile count, effective resolution, and the
+    // local storage size — and state that imagery is packaged locally (no network).
+    [s appendFormat:@"Aerial imagery source: %@\n", [self layerSourceLabel:@"imagery"] ?: @"packaged imagery"];
+    if (self.imageryTiled) {
+      [s appendFormat:@"Imagery mode: tiled (%lu tiles)\n", (unsigned long)self.imageryTileMetas.count];
+      id eff = img[@"effective_meters_per_pixel"];
+      if ([eff respondsToSelector:@selector(doubleValue)] && [eff doubleValue] > 0) {
+        [s appendFormat:@"Effective imagery resolution: %.2f m/pixel\n", [eff doubleValue]];
+      }
+      double mb = [img[@"bytes"] respondsToSelector:@selector(doubleValue)] ? [img[@"bytes"] doubleValue] / (1024.0 * 1024.0) : 0;
+      if (mb > 0) [s appendFormat:@"Imagery storage: %.1f MB (packaged locally)\n", mb];
+    } else {
+      [s appendString:@"Imagery mode: single-image (legacy)\n"];
+    }
+    [s appendString:@"Aerial imagery is packaged in the offline area — no network is used in this viewer.\n"];
   } else {
     [s appendString:self.hillshadeImage ? @"Surface texture: USGS 3DEP hillshade relief (no aerial imagery)\n"
                                         : @"Surface texture: none (elevation mesh only)\n"];

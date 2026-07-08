@@ -213,6 +213,8 @@ jobs:
         run: node scripts/check-terrain-texcoord-contract.mjs
       - name: Terrain vertical-exaggeration source-contract (physical scale + data integrity)
         run: node scripts/check-terrain-exaggeration-contract.mjs
+      - name: Tiled-imagery SceneKit source-contract (per-tile patches, offline-only, no UV/bleed regression)
+        run: node scripts/check-terrain-imagery-tiles-contract.mjs
       - name: Lint
         run: npx expo lint
       - name: TypeScript check
