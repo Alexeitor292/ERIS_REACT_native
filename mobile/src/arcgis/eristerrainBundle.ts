@@ -175,6 +175,7 @@ export type ContextLayers = {
   roads?: ContextLayerMeta;
   imagery?: ContextLayerMeta;
   overview?: ContextLayerMeta;
+  road_cross_section?: ContextLayerMeta;
   [k: string]: ContextLayerMeta | undefined;
 };
 
@@ -189,7 +190,7 @@ export type EristerrainManifest = {
 };
 
 /** Named optional context layers that may be packaged inside a bundle. */
-export const CONTEXT_LAYER_NAMES = ["roads", "imagery", "overview"] as const;
+export const CONTEXT_LAYER_NAMES = ["roads", "imagery", "overview", "road_cross_section"] as const;
 export type ContextLayerName = (typeof CONTEXT_LAYER_NAMES)[number];
 
 /** True when an imagery layer is the tiled (multi-tile JPEG) format. */
@@ -214,6 +215,29 @@ export function imageryTiles(
 ): ImageryTile[] {
   const layer = manifest?.context_layers?.imagery;
   return imageryIsTiled(layer) ? (layer!.tiles as ImageryTile[]) : [];
+}
+
+/** Packaged road cross-section context (road_cross_section.json): the Road Inventory-
+ *  derived roadway layout + route/postmile metadata + upstation direction + provenance,
+ *  so the native Cross Section tool works fully offline. Elevation is NOT in here — it
+ *  is sampled from the packaged terrain grid at cross-section time. */
+export type RoadCrossSectionContext = {
+  attributes: Record<string, unknown>; // RoadCrossSection shape (widths in feet)
+  route_name?: string | null;
+  county_code?: string | null;
+  begin_pm?: number | null;
+  end_pm?: number | null;
+  upstation_bearing_deg?: number | null;
+  postmile_increases_upstation?: boolean;
+  source: "ROAD_INVENTORY" | "FORM_FIELDS" | "DEFAULT";
+  centerline?: { type: string; coordinates: unknown } | null;
+};
+
+/** Whether the packaged road cross-section context is available in a manifest. */
+export function roadCrossSectionAvailable(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+): boolean {
+  return contextLayerAvailable(manifest, "road_cross_section");
 }
 
 /** Whether a named context layer is present + declared available in a manifest.

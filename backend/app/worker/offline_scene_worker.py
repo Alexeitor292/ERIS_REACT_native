@@ -64,6 +64,12 @@ def _build_context(db: Session, job: dict) -> dict:
     # defensively parsed — absent/wrong-shape degrades to "no road inventory line".
     _snap = offline_scene_svc.coerce_json_obj(row["road_inventory_snapshot_json"])
     road_inv_geom = _snap.get("geometry") if isinstance(_snap, dict) else None
+    # Road Inventory-derived roadway cross-section layout (lane counts/widths, shoulders,
+    # median) for the offline Cross Section tool. Faithful parity with the mobile
+    # derivation; ROAD_INVENTORY when a snapshot exists, else DEFAULT (labeled).
+    from ..services.road_cross_section_build import build_road_cross_section
+    _rxs_snapshot = _snap if isinstance(_snap, dict) else None
+    road_cross_section = {"attributes": build_road_cross_section(_rxs_snapshot, None), "snapshot": _rxs_snapshot}
 
     # Enforce the ONE authoritative AOI maximum at worker execution too — never
     # trust the stored/client radius or bounds blindly. Recompute the AOI from the
@@ -88,6 +94,7 @@ def _build_context(db: Session, job: dict) -> dict:
         "bounds": bounds,
         "content_signature": content_sig,
         "road_inventory_geometry": road_inv_geom,
+        "road_cross_section": road_cross_section,
         "overlays": {
             "incident": {"lat": float(row["latitude"]), "lon": float(row["longitude"])},
             "geometry": geometry,

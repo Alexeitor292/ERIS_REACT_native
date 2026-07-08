@@ -1,0 +1,202 @@
+[
+  {
+    "name": "null_fallback40",
+    "snapshot": null,
+    "fallback": 40,
+    "expected": {
+      "lt_lane_count": 2,
+      "rt_lane_count": 2,
+      "lt_lane_width_ft": 10,
+      "rt_lane_width_ft": 10,
+      "lt_outside_shoulder_ft": 0,
+      "lt_inside_shoulder_ft": 0,
+      "rt_inside_shoulder_ft": 0,
+      "rt_outside_shoulder_ft": 0,
+      "median_width_ft": 0,
+      "median_category": "NONE",
+      "total_width_ft": 40,
+      "source": "FORM_FIELDS"
+    }
+  },
+  {
+    "name": "null_nofallback",
+    "snapshot": null,
+    "fallback": null,
+    "expected": {
+      "lt_lane_count": 1,
+      "rt_lane_count": 1,
+      "lt_lane_width_ft": 12,
+      "rt_lane_width_ft": 12,
+      "lt_outside_shoulder_ft": 4,
+      "lt_inside_shoulder_ft": 0,
+      "rt_inside_shoulder_ft": 0,
+      "rt_outside_shoulder_ft": 4,
+      "median_width_ft": 0,
+      "median_category": "NONE",
+      "total_width_ft": 32,
+      "source": "DEFAULT"
+    }
+  },
+  {
+    "name": "divided_raised",
+    "snapshot": {
+      "left_lanes": 2,
+      "right_lanes": 2,
+      "median_type": "R",
+      "median_width": 22,
+      "route_name": "SR-17",
+      "county_code": "SCL",
+      "begin_pm": 5,
+      "end_pm": 6
+    },
+    "fallback": null,
+    "expected": {
+      "lt_lane_count": 2,
+      "rt_lane_count": 2,
+      "lt_lane_width_ft": 12,
+      "rt_lane_width_ft": 12,
+      "lt_outside_shoulder_ft": 8,
+      "lt_inside_shoulder_ft": 4,
+      "rt_inside_shoulder_ft": 4,
+      "rt_outside_shoulder_ft": 8,
+      "median_width_ft": 22,
+      "median_category": "RAISED",
+      "total_width_ft": 94,
+      "begin_pm": 5,
+      "end_pm": 6,
+      "route_name": "SR-17",
+      "county_code": "SCL",
+      "terrain_code": null,
+      "design_speed": null,
+      "adt": null,
+      "landmark": null,
+      "source": "ROAD_INVENTORY"
+    }
+  },
+  {
+    "name": "undivided",
+    "snapshot": {
+      "left_lanes": 1,
+      "right_lanes": 1,
+      "median_type": "N",
+      "median_width": 0
+    },
+    "fallback": null,
+    "expected": {
+      "lt_lane_count": 1,
+      "rt_lane_count": 1,
+      "lt_lane_width_ft": 12,
+      "rt_lane_width_ft": 12,
+      "lt_outside_shoulder_ft": 4,
+      "lt_inside_shoulder_ft": 0,
+      "rt_inside_shoulder_ft": 0,
+      "rt_outside_shoulder_ft": 4,
+      "median_width_ft": 0,
+      "median_category": "NONE",
+      "total_width_ft": 32,
+      "terrain_code": null,
+      "design_speed": null,
+      "adt": null,
+      "landmark": null,
+      "source": "ROAD_INVENTORY"
+    }
+  },
+  {
+    "name": "barrier_freeway",
+    "snapshot": {
+      "left_lanes": 3,
+      "right_lanes": 3,
+      "median_type": "B",
+      "median_width": 4,
+      "route_name": "US-101",
+      "county_code": "SCL",
+      "begin_pm": 10,
+      "end_pm": 12,
+      "design_speed": 65,
+      "adt": 120000,
+      "terrain_code": "F",
+      "landmark_short_desc": "Near Summit Rd"
+    },
+    "fallback": null,
+    "expected": {
+      "lt_lane_count": 3,
+      "rt_lane_count": 3,
+      "lt_lane_width_ft": 12,
+      "rt_lane_width_ft": 12,
+      "lt_outside_shoulder_ft": 8,
+      "lt_inside_shoulder_ft": 4,
+      "rt_inside_shoulder_ft": 4,
+      "rt_outside_shoulder_ft": 8,
+      "median_width_ft": 4,
+      "median_category": "BARRIER",
+      "total_width_ft": 100,
+      "begin_pm": 10,
+      "end_pm": 12,
+      "route_name": "US-101",
+      "county_code": "SCL",
+      "terrain_code": "F",
+      "design_speed": 65,
+      "adt": 120000,
+      "landmark": "Near Summit Rd",
+      "source": "ROAD_INVENTORY"
+    }
+  },
+  {
+    "name": "real_columns_ignored",
+    "snapshot": {
+      "left_lanes": 2,
+      "right_lanes": 2,
+      "median_type": "P",
+      "median_width": 3,
+      "left_shoulder_width": 10,
+      "right_shoulder_width": 10
+    },
+    "fallback": null,
+    "expected": {
+      "lt_lane_count": 2,
+      "rt_lane_count": 2,
+      "lt_lane_width_ft": 12,
+      "rt_lane_width_ft": 12,
+      "lt_outside_shoulder_ft": 8,
+      "lt_inside_shoulder_ft": 4,
+      "rt_inside_shoulder_ft": 4,
+      "rt_outside_shoulder_ft": 8,
+      "median_width_ft": 3,
+      "median_category": "PAINTED",
+      "total_width_ft": 75,
+      "terrain_code": null,
+      "design_speed": null,
+      "adt": null,
+      "landmark": null,
+      "source": "ROAD_INVENTORY"
+    }
+  },
+  {
+    "name": "depressed_median",
+    "snapshot": {
+      "left_lanes": 2,
+      "right_lanes": 2,
+      "median_type": "D",
+      "median_width": 40
+    },
+    "fallback": null,
+    "expected": {
+      "lt_lane_count": 2,
+      "rt_lane_count": 2,
+      "lt_lane_width_ft": 12,
+      "rt_lane_width_ft": 12,
+      "lt_outside_shoulder_ft": 8,
+      "lt_inside_shoulder_ft": 4,
+      "rt_inside_shoulder_ft": 4,
+      "rt_outside_shoulder_ft": 8,
+      "median_width_ft": 40,
+      "median_category": "DEPRESSED",
+      "total_width_ft": 112,
+      "terrain_code": null,
+      "design_speed": null,
+      "adt": null,
+      "landmark": null,
+      "source": "ROAD_INVENTORY"
+    }
+  }
+]

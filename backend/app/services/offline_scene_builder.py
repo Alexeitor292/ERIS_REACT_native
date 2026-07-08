@@ -401,6 +401,39 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         else:
             layers["roads"] = context_fmt.unavailable_layer("disabled")
 
+        # --- Road cross-section context (Road Inventory layout; licence-clean, tiny) ---
+        if settings.OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED:
+            _emit("Packaging road cross-section context")
+            try:
+                block = context_fmt.road_cross_section_block(ctx)
+                if block is None:
+                    layers["road_cross_section"] = context_fmt.unavailable_layer("no_data")
+                    _log("road_cross_section", "no_data")
+                else:
+                    data = json.dumps(block, separators=(",", ":")).encode("utf-8")
+                    if running + len(data) <= max_bytes:
+                        src = {
+                            "provider": "eris_road_inventory",
+                            "dataset": "ERIS Road Inventory cross-section layout",
+                            "attribution": "ERIS Road Inventory",
+                            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        layers["road_cross_section"] = context_fmt.available_layer(
+                            context_fmt.ROAD_CROSS_SECTION_FILE, data, src,
+                            layout_source=block.get("source"),
+                        )
+                        assets[context_fmt.ROAD_CROSS_SECTION_FILE] = data
+                        running += len(data)
+                        _log("road_cross_section", "packaged", source=block.get("source"), bytes=len(data))
+                    else:
+                        layers["road_cross_section"] = context_fmt.unavailable_layer("too_large")
+                        _log("road_cross_section", "skipped_too_large", bytes=len(data))
+            except Exception as e:  # never corrupt the package on a layout failure
+                layers["road_cross_section"] = context_fmt.unavailable_layer("build_error")
+                _log("road_cross_section", "build_error", error=str(e)[:120])
+        else:
+            layers["road_cross_section"] = context_fmt.unavailable_layer("disabled")
+
         # --- Overview inset (server-rendered; licence-clean) ---
         if settings.OFFLINE_SCENE_OVERVIEW_ENABLED:
             _emit("Creating overview map")

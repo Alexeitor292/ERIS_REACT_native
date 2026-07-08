@@ -17,6 +17,7 @@ import {
   isUnsafeEntryName,
   lonLatToGridCell,
   parseZipEntries,
+  roadCrossSectionAvailable,
   summarizeContextLayers,
   validateBundleManifest,
   type TerrainMeta,
@@ -486,4 +487,51 @@ test("tiled imagery: a tile with the wrong byte count fails closed", () => {
 test("tiled imagery: tile count not matching columns*rows fails closed", () => {
   const m = manifestWithTiledImagery({ columns: 3, rows: 1 }); // says 3 tiles, only 2 declared
   assert.throws(() => extractAndValidateBundle(tiledBundle(m)), /tile count does not match/);
+});
+
+// ---- road cross-section context (road_cross_section.json) -------------------
+
+const RXS = enc(JSON.stringify({
+  attributes: { lt_lane_count: 1, rt_lane_count: 1, median_category: "NONE", total_width_ft: 32, source: "ROAD_INVENTORY" },
+  route_name: "SR-17", county_code: "SCL", begin_pm: 5, end_pm: 6,
+  upstation_bearing_deg: 42, postmile_increases_upstation: true, source: "ROAD_INVENTORY",
+}));
+
+function manifestWithRoadXsec(overrides: Record<string, unknown> = {}) {
+  const m = goodManifest() as Record<string, unknown>;
+  m.context_layers = {
+    roads: { available: false, reason: "no_data" },
+    imagery: { available: false, reason: "not_configured" },
+    overview: { available: false, reason: "disabled" },
+    road_cross_section: {
+      available: true, file: "road_cross_section.json", sha256: "f".repeat(64), bytes: RXS.length,
+      source: { provider: "eris_road_inventory", attribution: "ERIS Road Inventory" }, ...overrides,
+    },
+  };
+  m.files = { manifest: "manifest.json", terrain: "elevation-grid.bin", road_cross_section: "road_cross_section.json" };
+  return m;
+}
+
+test("road_cross_section context is validated + extracted + reported available", () => {
+  const { manifest, files } = extractAndValidateBundle(bundleWith(manifestWithRoadXsec(), [["road_cross_section.json", RXS]]));
+  assert.equal(roadCrossSectionAvailable(manifest), true);
+  assert.ok(files["road_cross_section.json"]);
+  const parsed = JSON.parse(new TextDecoder().decode(files["road_cross_section.json"]));
+  assert.equal(parsed.attributes.source, "ROAD_INVENTORY");
+  assert.equal(parsed.route_name, "SR-17");
+});
+
+test("legacy package without road_cross_section still opens (unavailable, not corrupt)", () => {
+  const { manifest } = extractAndValidateBundle(goodBundle());
+  assert.equal(roadCrossSectionAvailable(manifest), false);
+  assert.equal(contextLayerReason(manifest, "road_cross_section"), "unavailable");
+});
+
+test("declared-available road_cross_section that is MISSING fails closed", () => {
+  assert.throws(() => extractAndValidateBundle(bundleWith(manifestWithRoadXsec(), [])), /missing context asset road_cross_section\.json/);
+});
+
+test("declared-available road_cross_section with wrong byte count fails closed", () => {
+  const bundle = bundleWith(manifestWithRoadXsec({ bytes: RXS.length + 9 }), [["road_cross_section.json", RXS]]);
+  assert.throws(() => extractAndValidateBundle(bundle), /road_cross_section\.json size mismatch/);
 });

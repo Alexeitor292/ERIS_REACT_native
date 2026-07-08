@@ -40,6 +40,7 @@ IMAGERY_FILE = "imagery.png"          # legacy single-image aerial drape
 IMAGERY_TILE_DIR = "imagery"          # tiled aerial imagery -> imagery/{row}/{col}.jpg
 IMAGERY_TILE_EXT = "jpg"
 OVERVIEW_FILE = "overview.png"
+ROAD_CROSS_SECTION_FILE = "road_cross_section.json"
 
 
 def imagery_tile_file(row: int, column: int, ext: str = IMAGERY_TILE_EXT) -> str:
@@ -193,6 +194,45 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float) -> tuple[dict, int]:
     return {"type": "FeatureCollection", "features": features}, len(features)
 
 
+# ---- road cross-section context (Road Inventory layout, packaged for offline) ----
+
+def road_cross_section_block(ctx: dict) -> dict | None:
+    """Assemble the packaged road_cross_section.json content: the Road Inventory-
+    derived roadway layout (RoadCrossSection attributes) + route/postmile metadata +
+    the UPSTATION bearing (from the resolved road bearing) + provenance. Returns None
+    when no cross-section attributes are available.
+
+    Elevation is deliberately NOT in this block — the native Cross Section tool samples
+    ground elevation from the packaged terrain grid at tap time. There is no
+    authoritative centerline geometry in the tabular Road Inventory (road_segments has
+    no geometry), so snapping uses the packaged roads.geojson; centerline is null here.
+    """
+    rxs = ctx.get("road_cross_section") if isinstance(ctx.get("road_cross_section"), dict) else None
+    attrs = rxs.get("attributes") if isinstance(rxs, dict) else None
+    if not isinstance(attrs, dict) or not attrs:
+        return None
+    overlays = ctx.get("overlays") or {}
+    bearing = overlays.get("roadBearingDeg")
+    block: dict = {
+        "attributes": attrs,
+        "route_name": attrs.get("route_name"),
+        "county_code": attrs.get("county_code"),
+        "begin_pm": attrs.get("begin_pm"),
+        "end_pm": attrs.get("end_pm"),
+        # Upstation = increasing postmile; the resolved road bearing already points
+        # upstation. The native tool uses this to orient LT/RT canonically.
+        "upstation_bearing_deg": float(bearing) if _finite(bearing) else None,
+        "postmile_increases_upstation": True,
+        "source": attrs.get("source", "DEFAULT"),
+        "centerline": None,
+        "provenance": {
+            "roadLayoutSource": attrs.get("source", "DEFAULT"),
+            "note": "Roadway layout from ERIS Road Inventory; schematic surface (no crown/superelevation).",
+        },
+    }
+    return block
+
+
 # ---- context-layer manifest metadata ---------------------------------------
 
 def available_layer(file: str, data: bytes, source: dict | None = None, **extra) -> dict:
@@ -252,7 +292,7 @@ def validate_context_layers(context_layers) -> tuple[bool, str | None]:
         return True, None
     if not isinstance(context_layers, dict):
         return False, "context_layers must be an object"
-    for name in ("roads", "imagery", "overview"):
+    for name in ("roads", "imagery", "overview", "road_cross_section"):
         layer = context_layers.get(name)
         if layer is None:
             continue

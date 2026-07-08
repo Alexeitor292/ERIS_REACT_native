@@ -647,3 +647,76 @@ operator config change that applies to newly generated packages. A new native bu
 required (Objective-C SceneKit changes). Config: `OFFLINE_SCENE_IMAGERY_MODE`,
 `_TARGET_MPP`, `_SOURCE_NATIVE_MPP`, `_TILE_PX`, `_TILE_TIMEOUT_S`, `_TILE_RETRIES`,
 `_OVERALL_DEADLINE_S`, `_MAX_TILES`, `_MAX_MB`, `_JPEG_QUALITY`.
+
+## Addendum 6 — map-driven 3D road cross-section slice (2026-07-08)
+
+Adds a **"Cross Section" tool** to the native offline 3D terrain viewer: the user taps
+a road, ERIS snaps to the packaged road context, samples the offline USGS 3DEP grid
+along a perpendicular slice, and opens a **realistic SceneKit roadway/terrain cutaway**
+looking UPSTATION — deliberately NOT the flat schematic SVG Measurements diagram
+(`RoadCrossSectionRenderer`, retained for legacy Measurements use).
+
+**Canonical orientation (unchanged).** Always looking UPSTATION (toward increasing
+postmile); LT always left, RT always right; no mirrored/downstation mode. Offsets are
+feet from the roadway centerline (median center): LT negative, RT positive; the
+cross-section axis = upstation bearing + 90°.
+
+**Data contract — `RoadCrossSectionSlice`** (`mobile/src/measurements/roadCrossSectionSlice.ts`,
+the tested source of truth mirrored by native Obj-C + consumed by the RN renderer):
+selected/snapped lat-lon, upstation + cross-section bearings, the `RoadCrossSection`
+layout, `elevationSource: "USGS_3DEP_OFFLINE_GRID"`, an ordered `samples[]`
+(`{side, offsetFt, lat, lon, elevationM|null, elevationFt|null, status: OK|NO_DATA|
+OUT_OF_BOUNDS, label}`), `keyMarkers` (LT/RT outside-shoulder edges + 10/20/50 ft), and
+`provenance` (roadLayoutSource ROAD_INVENTORY|FORM_FIELDS|DEFAULT, elevation source,
+packageVersion, snappedToRoadContext, roadContextSource).
+
+**Tap → slice (native, offline).** `ErisTerrainSceneViewController.m`: a "Cross Section"
+nav button enters selection mode with the banner "Tap a road to create a cross section."
+An `SCNHitTest` on the terrain → world XZ → grid col/row (inverse of the true-scale mesh
+mapping, exaggeration-independent) → lat/lon via `local_transform`. No network.
+
+**Road snapping.** The tapped point is projected onto the nearest packaged `roads.geojson`
+LineString (richest-first: road_inventory / road_centerline before the derived
+road_bearing line) within a max snap distance (60 m). Upstation is resolved by orienting
+the segment tangent to the packaged/incident road-bearing hint. Too far / no feature →
+"No road context near tap. Try closer to the roadway." (never a misleading far slice).
+If no road geometry is packaged but a bearing exists, a clearly-labelled fallback
+orientation is used.
+
+**Elevation sampling.** Each offset lat/lon → grid col/row → **bilinear** sample of the
+read-only `elevation-grid.bin` (metres). No-data cells → `NO_DATA`; outside the grid →
+`OUT_OF_BOUNDS`; nothing is invented beyond coverage. `self.gridData` is never mutated
+and no packaged file is written (static guard + CI).
+
+**Realistic SceneKit cutaway** (`ErisRoadSliceSceneViewController`). Procedural, local-only
+materials: an asphalt roadway deck (lanes / shoulders / median by category NONE/PAINTED/
+RAISED/BARRIER/DEPRESSED with lane markings + edge lines), an **elevation-driven terrain
+surface** beyond each shoulder extruded from the sampled profile (SCNShape), 10/20/50 ft
+stakes coloured by sample status, an **orthographic camera looking upstation** (LT left,
+RT right), lighting, LT/RT + "Looking upstation" + route/postmile labels, an always-on
+honest stake legend, and a **Technical overlay** toggle (exact element widths, all
+breakpoints, stake elevations + deltas, provenance). Reset restores the upstation framing.
+
+**Packaged road context (offline).** The worker derives the `RoadCrossSection` layout
+server-side (`road_cross_section_build.py`, a faithful parity port of the mobile
+`buildRoadSectionFromInventory` — locked by the shared fixture
+`roadCrossSectionParity.json` asserted by both a Python and a TS test) and packages
+`road_cross_section.json` (attributes + route/county/postmile + upstation direction +
+provenance) as a `context_layers.road_cross_section` asset (per-entry SHA-256/CRC/byte
+validated on worker + device). Legacy packages without it still open; the tool then uses
+a clearly-labelled default 2-lane layout. Config: `OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED`
+(default true).
+
+**What is measured vs schematic.** Ground elevation beyond the shoulder is **measured**
+from the USGS 3DEP offline grid. The roadway deck is a **schematic** Road Inventory-derived
+surface (lane/shoulder/median widths) — no crown, cross-slope, curb shape, superelevation,
+or lane-level engineering precision is claimed unless that data exists. Labels state
+"Roadway layout: Road Inventory / default assumptions", "Ground elevation: USGS 3DEP
+offline grid", and "Roadway surface is schematic unless pavement crown/superelevation data
+is available."
+
+**Offline guarantees.** After download the feature works in Airplane Mode: no server call,
+no online basemap/imagery, no live USGS/ArcGIS elevation call, no AI imagery — all geometry
++ materials are package-derived/procedural. **No backend deploy or package regeneration is
+required** (the packaged block is additive/backward compatible); a new native iOS
+development build IS required (SceneKit + config-plugin source additions).
