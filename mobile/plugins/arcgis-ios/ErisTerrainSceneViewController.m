@@ -3,6 +3,7 @@
 #import <SceneKit/SceneKit.h>
 
 #import "ArcGisSketchStore.h"
+#import "ErisRoadSliceSceneViewController.h"
 
 // Packed two-float texture coordinate for the SceneKit texcoord source. MUST NOT
 // use CGPoint: CGPoint holds two CGFloat (double, 16 bytes) on 64-bit iOS, but the
@@ -199,6 +200,45 @@ static NSString *ErisExagLabel(CGFloat value) {
 // true scale) and Y-scaled together by exagNode for the 0.5x..3.0x control. This
 // NEVER mutates gridData (the read-only source-derived elevation grid) or any
 // packaged file — it only changes SceneKit geometry/transforms in memory.
+// --- Cross Section pure helpers (mirror roadCrossSectionSlice.ts) ------------
+static const double kXsMPerDegLat = 111320.0;
+static const double kXsFtPerM = 3.280839895;
+
+static double XsNum(NSDictionary *d, NSString *k, double def) {
+  id v = [d isKindOfClass:[NSDictionary class]] ? d[k] : nil;
+  return [v respondsToSelector:@selector(doubleValue)] ? [v doubleValue] : def;
+}
+static NSString *XsStr(NSDictionary *d, NSString *k, NSString *def) {
+  id v = [d isKindOfClass:[NSDictionary class]] ? d[k] : nil;
+  return [v isKindOfClass:[NSString class]] ? v : def;
+}
+static double XsNorm360(double deg) {
+  double r = fmod(deg, 360.0);
+  return r < 0 ? r + 360.0 : r;
+}
+// Cross-section axis bearing (LT->RT) = upstation + 90 (RT is to the right).
+static double XsCrossBearing(double upstationDeg) { return XsNorm360(upstationDeg + 90.0); }
+// Orient a segment tangent to the upstation hint hemisphere (within 90deg), else keep.
+static double XsResolveUpstation(double tangentDeg, double hintDeg) {
+  double t = XsNorm360(tangentDeg);
+  if (!isfinite(hintDeg)) return t;
+  double h = XsNorm360(hintDeg);
+  double diff = fabs(fmod(t - h + 540.0, 360.0) - 180.0);
+  return diff <= 90.0 ? t : XsNorm360(t + 180.0);
+}
+// Signed outside-shoulder edge offset (ft): LT negative, RT positive.
+static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
+  double mh = MAX(0, XsNum(road, @"median_width_ft", 0)) / 2.0;
+  if (lt) {
+    return -(mh + XsNum(road, @"lt_inside_shoulder_ft", 0)
+             + XsNum(road, @"lt_lane_count", 1) * XsNum(road, @"lt_lane_width_ft", 12)
+             + XsNum(road, @"lt_outside_shoulder_ft", 0));
+  }
+  return mh + XsNum(road, @"rt_inside_shoulder_ft", 0)
+         + XsNum(road, @"rt_lane_count", 1) * XsNum(road, @"rt_lane_width_ft", 12)
+         + XsNum(road, @"rt_outside_shoulder_ft", 0);
+}
+
 @interface ErisTerrainSceneViewController ()
 @property(nonatomic, strong) SCNView *scnView;
 @property(nonatomic, strong) SCNNode *cameraNode;
@@ -246,6 +286,14 @@ static NSString *ErisExagLabel(CGFloat value) {
 @property(nonatomic, assign) BOOL showBoundary;
 @property(nonatomic, assign) BOOL showOverview;
 @property(nonatomic, assign) CGFloat reliefIntensity;        // hillshade blend in hybrid (0..1)
+// --- Cross Section tool (tap a road -> perpendicular roadway/terrain slice) ---
+@property(nonatomic, assign) BOOL crossSectionMode;
+@property(nonatomic, strong) UILabel *crossSectionBanner;
+@property(nonatomic, strong) UIBarButtonItem *crossSectionItem;
+@property(nonatomic, strong) SCNNode *sliceLineNode;          // translucent slice plane on the terrain
+@property(nonatomic, strong) NSArray<NSDictionary *> *roadSnapFeatures; // {kind, coords:[[lon,lat]...]}
+@property(nonatomic, strong) NSDictionary *roadCrossSectionCtx; // packaged road_cross_section.json (or nil)
+@property(nonatomic, assign) double upstationHintDeg;         // roadBearingDeg param hint (NAN if none)
 @end
 
 @implementation ErisTerrainSceneViewController
@@ -264,6 +312,7 @@ static NSString *ErisExagLabel(CGFloat value) {
   self.reliefIntensity = 0.85f;         // hillshade blend (NOT vertical exaggeration)
   self.verticalExaggeration = 1.0f;     // display-only; 1.0x = physical true scale
   self.markerNodes = [NSMutableArray array];
+  self.upstationHintDeg = NAN;
 
   self.scnView = [[SCNView alloc] initWithFrame:self.view.bounds];
   self.scnView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -271,6 +320,10 @@ static NSString *ErisExagLabel(CGFloat value) {
   self.scnView.backgroundColor = [UIColor colorWithRed:0.05 green:0.07 blue:0.12 alpha:1.0];
   self.scnView.scene = [SCNScene scene];
   [self.view addSubview:self.scnView];
+  // Single-tap picks a road when the Cross Section tool is active (coexists with the
+  // camera-control pan/pinch gestures). Inactive at all other times.
+  UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onSceneTap:)];
+  [self.scnView addGestureRecognizer:tap];
 
   // Status pill (version / source / offline).
   self.statusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -299,10 +352,14 @@ static NSString *ErisExagLabel(CGFloat value) {
   UIBarButtonItem *layers = [[UIBarButtonItem alloc] initWithTitle:@"Layers" style:UIBarButtonItemStylePlain
                                                             target:self action:@selector(onLayers)];
   layers.accessibilityLabel = @"Layers";
+  self.crossSectionItem = [[UIBarButtonItem alloc] initWithTitle:@"Cross Section" style:UIBarButtonItemStylePlain
+                                                          target:self action:@selector(onCrossSection)];
+  self.crossSectionItem.accessibilityLabel = @"Cross Section";
   self.navigationItem.leftBarButtonItems = @[
     layers,
     [[UIBarButtonItem alloc] initWithTitle:@"Reset" style:UIBarButtonItemStylePlain target:self action:@selector(resetToIncident)],
     [[UIBarButtonItem alloc] initWithTitle:@"North" style:UIBarButtonItemStylePlain target:self action:@selector(resetNorth)],
+    self.crossSectionItem,
   ];
 
   [self loadBundle];
@@ -375,6 +432,7 @@ static NSString *ErisExagLabel(CGFloat value) {
   [self computeFocusTargetFromParams:p];
   [self addOverlaysFromParams:p];   // incident / geometry / sample-extent / bearing -> overlaysNode
   [self buildRoadsLayer];           // packaged roads.geojson -> roadsNode
+  [self loadCrossSectionContext:p]; // road_cross_section.json + snap features (offline)
   [self buildBoundaryLayer];        // package boundary ring -> boundaryNode
   [self buildOverviewInset];        // north-up 2D inset (lower-right)
   [self applyLayerVisibility];
@@ -1349,6 +1407,14 @@ static NSArray *erisAsArray(id v) {
   } else {
     [s appendString:@"Road context: No road context packaged\n"];
   }
+  // Road cross-section tool availability (offline).
+  if ([self crossSectionContextAvailable]) {
+    NSString *layoutSrc = [self crossSectionLayoutSource];
+    NSString *label = [layoutSrc isEqualToString:@"ROAD_INVENTORY"] ? @"Road Inventory" : ([layoutSrc isEqualToString:@"FORM_FIELDS"] ? @"form/default assumptions" : @"default assumptions");
+    [s appendFormat:@"Cross Section tool: available offline (roadway layout: %@)\n", label];
+  } else {
+    [s appendString:@"Cross Section tool: uses default roadway assumptions (no Road Inventory cross-section packaged)\n"];
+  }
   [s appendFormat:@"Package version: %@\n", [p[@"packageVersion"] isKindOfClass:[NSString class]] ? p[@"packageVersion"] : @"—"];
   if ([self.manifest[@"generated_at"] isKindOfClass:[NSString class]]) [s appendFormat:@"Created: %@\n", self.manifest[@"generated_at"]];
   if ([area[@"radius_m"] respondsToSelector:@selector(doubleValue)]) {
@@ -1373,6 +1439,301 @@ static NSArray *erisAsArray(id v) {
   }
   if (attr.count) [s appendFormat:@"\nAttribution: %@", [attr componentsJoinedByString:@"; "]];
   return s;
+}
+
+#pragma mark - Cross Section tool (tap a road -> perpendicular roadway/terrain slice)
+
+// Load the packaged offline road cross-section context + road snap features + the
+// upstation bearing hint. All local files — no network.
+- (void)loadCrossSectionContext:(NSDictionary *)p {
+  id bearing = p[@"roadBearingDeg"];
+  self.upstationHintDeg = [bearing respondsToSelector:@selector(doubleValue)] ? [bearing doubleValue] : NAN;
+  NSString *path = [self.extractedDir stringByAppendingPathComponent:@"road_cross_section.json"];
+  if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+    NSData *d = [NSData dataWithContentsOfFile:path];
+    id j = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+    if ([j isKindOfClass:[NSDictionary class]]) self.roadCrossSectionCtx = j;
+  }
+  double bdeg = XsNum(self.roadCrossSectionCtx, @"upstation_bearing_deg", NAN);
+  if (isfinite(bdeg)) self.upstationHintDeg = bdeg;   // packaged upstation direction preferred
+  self.roadSnapFeatures = [self parseRoadSnapFeatures];
+}
+
+// roads.geojson LineStrings -> snap features {kind, coords}, richest-first
+// (inventory/centerline before the derived bearing line).
+- (NSArray<NSDictionary *> *)parseRoadSnapFeatures {
+  NSMutableArray *rich = [NSMutableArray array];
+  NSMutableArray *bearing = [NSMutableArray array];
+  NSData *data = [NSData dataWithContentsOfFile:[self.extractedDir stringByAppendingPathComponent:@"roads.geojson"]];
+  id gj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+  NSArray *feats = ([gj isKindOfClass:[NSDictionary class]] && [gj[@"features"] isKindOfClass:[NSArray class]]) ? gj[@"features"] : @[];
+  for (id f in feats) {
+    if (![f isKindOfClass:[NSDictionary class]]) continue;
+    NSDictionary *geom = [f[@"geometry"] isKindOfClass:[NSDictionary class]] ? f[@"geometry"] : nil;
+    NSDictionary *props = [f[@"properties"] isKindOfClass:[NSDictionary class]] ? f[@"properties"] : @{};
+    if (![XsStr(geom, @"type", @"") isEqualToString:@"LineString"]) continue;
+    NSArray *coords = [geom[@"coordinates"] isKindOfClass:[NSArray class]] ? geom[@"coordinates"] : nil;
+    if (coords.count < 2) continue;
+    NSString *kind = XsStr(props, @"kind", @"road");
+    NSDictionary *feat = @{@"kind": kind, @"coords": coords};
+    if ([kind isEqualToString:@"road_bearing"]) [bearing addObject:feat]; else [rich addObject:feat];
+  }
+  [rich addObjectsFromArray:bearing];
+  return rich;
+}
+
+- (BOOL)crossSectionContextAvailable {
+  NSDictionary *attrs = [self.roadCrossSectionCtx[@"attributes"] isKindOfClass:[NSDictionary class]] ? self.roadCrossSectionCtx[@"attributes"] : nil;
+  return attrs != nil && attrs.count > 0;
+}
+- (NSString *)crossSectionLayoutSource {
+  NSDictionary *attrs = [self.roadCrossSectionCtx[@"attributes"] isKindOfClass:[NSDictionary class]] ? self.roadCrossSectionCtx[@"attributes"] : nil;
+  return XsStr(attrs, @"source", @"DEFAULT");
+}
+
+// The roadway layout for the section: packaged Road Inventory, else a labelled default.
+- (NSDictionary *)crossSectionRoad {
+  if ([self crossSectionContextAvailable]) return self.roadCrossSectionCtx[@"attributes"];
+  return @{@"lt_lane_count": @1, @"rt_lane_count": @1, @"lt_lane_width_ft": @12, @"rt_lane_width_ft": @12,
+           @"lt_outside_shoulder_ft": @4, @"rt_outside_shoulder_ft": @4, @"lt_inside_shoulder_ft": @0, @"rt_inside_shoulder_ft": @0,
+           @"median_width_ft": @0, @"median_category": @"NONE", @"total_width_ft": @32, @"source": @"DEFAULT"};
+}
+
+- (void)onCrossSection { [self setCrossSectionModeActive:!self.crossSectionMode]; }
+
+- (void)setCrossSectionModeActive:(BOOL)active {
+  self.crossSectionMode = active;
+  self.crossSectionItem.title = active ? @"Cancel" : @"Cross Section";
+  if (active && self.crossSectionBanner == nil) {
+    UILabel *b = [[UILabel alloc] init];
+    b.translatesAutoresizingMaskIntoConstraints = NO;
+    b.numberOfLines = 0; b.textAlignment = NSTextAlignmentCenter;
+    b.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    b.textColor = [UIColor whiteColor];
+    b.backgroundColor = [UIColor colorWithRed:0.13 green:0.33 blue:0.52 alpha:0.92];
+    b.text = @"  Tap a road to create a cross section  ";
+    b.layer.cornerRadius = 8; b.clipsToBounds = YES;
+    [self.view addSubview:b];
+    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+      [b.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
+      [b.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-16],
+      [b.widthAnchor constraintLessThanOrEqualToAnchor:g.widthAnchor multiplier:0.9],
+    ]];
+    self.crossSectionBanner = b;
+  }
+  self.crossSectionBanner.hidden = !active;
+}
+
+- (void)onSceneTap:(UITapGestureRecognizer *)gr {
+  if (!self.crossSectionMode) return;
+  CGPoint pt = [gr locationInView:self.scnView];
+  NSArray<SCNHitTestResult *> *hits = [self.scnView hitTest:pt options:@{SCNHitTestSortResultsKey: @YES}];
+  SCNHitTestResult *hit = hits.firstObject;
+  if (hit == nil) { [self showCrossSectionMessage:@"Tap on the terrain surface."]; return; }
+  SCNVector3 wp = hit.worldCoordinates;
+  double selLat = 0, selLon = 0;
+  if (![self worldX:wp.x z:wp.z toLat:&selLat lon:&selLon]) { [self showCrossSectionMessage:@"Could not resolve that location."]; return; }
+  [self createCrossSectionAtLat:selLat lon:selLon];
+}
+
+// world XZ -> lat/lon (inverse of surfaceWorldForCol; X/Z are exaggeration-independent).
+- (BOOL)worldX:(double)x z:(double)z toLat:(double *)outLat lon:(double *)outLon {
+  if (self.halfWidthUnits <= 0 || self.halfDepthUnits <= 0 || self.cols < 2 || self.rows < 2) return NO;
+  double col = (x / (2.0 * self.halfWidthUnits) + 0.5) * (self.cols - 1);
+  double row = (z / (2.0 * self.halfDepthUnits) + 0.5) * (self.rows - 1);
+  NSDictionary *lt = self.terrainMeta[@"local_transform"];
+  double originLon = XsNum(lt, @"origin_lon", 0), originLat = XsNum(lt, @"origin_lat", 0);
+  double lonPerCol = XsNum(lt, @"lon_per_col", 0), latPerRow = XsNum(lt, @"lat_per_row", 0);
+  if (lonPerCol == 0 || latPerRow == 0) return NO;
+  *outLon = originLon + col * lonPerCol;
+  *outLat = originLat + row * latPerRow;
+  return YES;
+}
+
+- (void)createCrossSectionAtLat:(double)selLat lon:(double)selLon {
+  double snapLat = selLat, snapLon = selLon, tangentDeg = 0, bestDist = INFINITY;
+  NSString *kind = nil; BOOL snapped = NO;
+  for (NSDictionary *f in self.roadSnapFeatures) {
+    double sLat, sLon, tDeg, dist;
+    if ([self projectLat:selLat lon:selLon ontoCoords:f[@"coords"] outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) {
+      if (dist < bestDist) { bestDist = dist; snapLat = sLat; snapLon = sLon; tangentDeg = tDeg; kind = f[@"kind"]; }
+    }
+  }
+  double maxSnapM = 60.0, upstationDeg;
+  if (bestDist <= maxSnapM) {
+    snapped = YES;
+    upstationDeg = XsResolveUpstation(tangentDeg, self.upstationHintDeg);
+  } else if (self.roadSnapFeatures.count == 0 && isfinite(self.upstationHintDeg)) {
+    snapped = NO; snapLat = selLat; snapLon = selLon; kind = nil;
+    upstationDeg = self.upstationHintDeg;   // fallback orientation (no road geometry packaged)
+  } else {
+    [self showCrossSectionMessage:@"No road context near tap. Try closer to the roadway."];
+    return;
+  }
+
+  NSDictionary *slice = [self buildSliceSelectedLat:selLat selLon:selLon snapLat:snapLat snapLon:snapLon
+                                       upstationDeg:upstationDeg snapped:snapped roadContextKind:kind];
+  [self drawSliceLineAtLat:snapLat lon:snapLon crossBearing:XsCrossBearing(upstationDeg) road:[self crossSectionRoad]];
+  [self setCrossSectionModeActive:NO];
+
+  ErisRoadSliceSceneViewController *vc = [[ErisRoadSliceSceneViewController alloc] initWithSlice:slice];
+  UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+  nav.modalPresentationStyle = UIModalPresentationFullScreen;
+  [self presentViewController:nav animated:YES completion:nil];
+}
+
+// Project onto a polyline (equirectangular metres): nearest point + tangent + distance.
+- (BOOL)projectLat:(double)lat lon:(double)lon ontoCoords:(NSArray *)coords
+            outLat:(double *)outLat outLon:(double *)outLon outTangent:(double *)outTan outDist:(double *)outDist {
+  if (![coords isKindOfClass:[NSArray class]] || coords.count < 2) return NO;
+  double mPerLon = kXsMPerDegLat * cos(lat * M_PI / 180.0);
+  double px = lon * mPerLon, py = lat * kXsMPerDegLat;
+  double best = INFINITY; BOOL found = NO;
+  for (NSUInteger i = 0; i + 1 < coords.count; i++) {
+    NSArray *A = coords[i], *B = coords[i + 1];
+    if (![A isKindOfClass:[NSArray class]] || A.count < 2 || ![B isKindOfClass:[NSArray class]] || B.count < 2) continue;
+    double aLon = [A[0] doubleValue], aLat = [A[1] doubleValue], bLon = [B[0] doubleValue], bLat = [B[1] doubleValue];
+    double ax = aLon * mPerLon, ay = aLat * kXsMPerDegLat, bx = bLon * mPerLon, by = bLat * kXsMPerDegLat;
+    double dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    double t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = MAX(0, MIN(1, t));
+    double sx = ax + t * dx, sy = ay + t * dy;
+    double dist = hypot(px - sx, py - sy);
+    if (dist < best) {
+      best = dist; found = YES;
+      *outLon = sx / mPerLon; *outLat = sy / kXsMPerDegLat;
+      double mLat = (aLat + bLat) / 2.0;
+      double dN = (bLat - aLat) * kXsMPerDegLat, dE = (bLon - aLon) * kXsMPerDegLat * cos(mLat * M_PI / 180.0);
+      *outTan = XsNorm360(atan2(dE, dN) * 180.0 / M_PI);
+      *outDist = dist;
+    }
+  }
+  return found;
+}
+
+- (NSDictionary *)buildSliceSelectedLat:(double)selLat selLon:(double)selLon snapLat:(double)snapLat snapLon:(double)snapLon
+                           upstationDeg:(double)upstationDeg snapped:(BOOL)snapped roadContextKind:(NSString *)kind {
+  NSDictionary *road = [self crossSectionRoad];
+  double crossBearing = XsCrossBearing(upstationDeg);
+  double ltShoulder = XsShoulderEdgeFt(road, YES), rtShoulder = XsShoulderEdgeFt(road, NO);
+
+  NSMutableArray *samples = [NSMutableArray array];
+  [samples addObject:[self xsSample:0 side:@"CENTER" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"Centerline"]];
+  [samples addObject:[self xsSample:ltShoulder side:@"LT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"LT outside shoulder edge"]];
+  [samples addObject:[self xsSample:rtShoulder side:@"RT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"RT outside shoulder edge"]];
+  for (int d = 5; d <= 50; d += 5) {
+    [samples addObject:[self xsSample:(ltShoulder - d) side:@"LT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:[NSString stringWithFormat:@"LT +%d ft", d]]];
+    [samples addObject:[self xsSample:(rtShoulder + d) side:@"RT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:[NSString stringWithFormat:@"RT +%d ft", d]]];
+  }
+
+  NSDictionary *km = @{
+    @"ltOutsideShoulderEdge": [self xsSample:ltShoulder side:@"LT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"LT outside shoulder edge"],
+    @"rtOutsideShoulderEdge": [self xsSample:rtShoulder side:@"RT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"RT outside shoulder edge"],
+    @"lt10ft": [self xsSample:(ltShoulder - 10) side:@"LT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"LT +10 ft"],
+    @"lt20ft": [self xsSample:(ltShoulder - 20) side:@"LT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"LT +20 ft"],
+    @"lt50ft": [self xsSample:(ltShoulder - 50) side:@"LT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"LT +50 ft"],
+    @"rt10ft": [self xsSample:(rtShoulder + 10) side:@"RT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"RT +10 ft"],
+    @"rt20ft": [self xsSample:(rtShoulder + 20) side:@"RT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"RT +20 ft"],
+    @"rt50ft": [self xsSample:(rtShoulder + 50) side:@"RT" snapLat:snapLat snapLon:snapLon cross:crossBearing label:@"RT +50 ft"],
+  };
+
+  NSString *version = XsStr([self params], @"packageVersion", @"—");
+  NSMutableDictionary *prov = [@{
+    @"roadLayoutSource": XsStr(road, @"source", @"DEFAULT"),
+    @"elevationSource": @"USGS 3DEP source-derived offline terrain grid",
+    @"packageVersion": version,
+    @"snappedToRoadContext": @(snapped),
+  } mutableCopy];
+  if (kind) prov[@"roadContextSource"] = kind;
+
+  return @{
+    @"selectedLat": @(selLat), @"selectedLon": @(selLon),
+    @"snappedLat": @(snapLat), @"snappedLon": @(snapLon),
+    @"upstationBearingDeg": @(XsNorm360(upstationDeg)),
+    @"crossSectionBearingDeg": @(crossBearing),
+    @"road": road,
+    @"elevationSource": @"USGS_3DEP_OFFLINE_GRID",
+    @"samples": samples,
+    @"keyMarkers": km,
+    @"provenance": prov,
+  };
+}
+
+- (NSDictionary *)xsSample:(double)offsetFt side:(NSString *)side snapLat:(double)snapLat snapLon:(double)snapLon
+                     cross:(double)crossBearing label:(NSString *)label {
+  double dM = offsetFt / kXsFtPerM, rad = crossBearing * M_PI / 180.0;
+  double dNorth = dM * cos(rad), dEast = dM * sin(rad);
+  double cosLat = cos(snapLat * M_PI / 180.0); if (fabs(cosLat) < 1e-9) cosLat = 1e-9;
+  double lat = snapLat + dNorth / kXsMPerDegLat;
+  double lon = snapLon + dEast / (kXsMPerDegLat * cosLat);
+  NSString *status = @"OUT_OF_BOUNDS";
+  double elevM = [self sampleElevationMetersAtLat:lat lon:lon outStatus:&status];
+  NSMutableDictionary *s = [@{
+    @"side": side, @"offsetFt": @(offsetFt), @"lat": @(lat), @"lon": @(lon),
+    @"source": @"USGS_3DEP_OFFLINE_GRID", @"status": status, @"label": label,
+  } mutableCopy];
+  if (isfinite(elevM) && [status isEqualToString:@"OK"]) {
+    s[@"elevationM"] = @(elevM);
+    s[@"elevationFt"] = @(elevM * kXsFtPerM);
+  } else {
+    s[@"elevationM"] = [NSNull null];
+    s[@"elevationFt"] = [NSNull null];
+  }
+  return s;
+}
+
+// Bilinear elevation (metres) from the READ-ONLY grid, or NAN with an honest status.
+// Never mutates gridData or any packaged file.
+- (double)sampleElevationMetersAtLat:(double)lat lon:(double)lon outStatus:(NSString **)outStatus {
+  if (self.gridData == nil) { if (outStatus) *outStatus = @"OUT_OF_BOUNDS"; return NAN; }
+  double col, row;
+  if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) { if (outStatus) *outStatus = @"OUT_OF_BOUNDS"; return NAN; }
+  double eps = 1e-6;
+  if (!(col >= -eps && col <= (self.cols - 1) + eps && row >= -eps && row <= (self.rows - 1) + eps)) {
+    if (outStatus) *outStatus = @"OUT_OF_BOUNDS"; return NAN;
+  }
+  double cc = MIN(MAX(col, 0.0), (double)(self.cols - 1));
+  double rr = MIN(MAX(row, 0.0), (double)(self.rows - 1));
+  NSInteger c0 = (NSInteger)floor(cc), r0 = (NSInteger)floor(rr);
+  NSInteger c1 = MIN(c0 + 1, self.cols - 1), r1 = MIN(r0 + 1, self.rows - 1);
+  double fc = cc - c0, fr = rr - r0;
+  const float *h = (const float *)self.gridData.bytes;   // READ-ONLY
+  double cells[4] = {h[r0 * self.cols + c0], h[r0 * self.cols + c1], h[r1 * self.cols + c0], h[r1 * self.cols + c1]};
+  for (int i = 0; i < 4; i++) {
+    if (!isfinite(cells[i]) || cells[i] == self.noData) { if (outStatus) *outStatus = @"NO_DATA"; return NAN; }
+  }
+  double top = cells[0] + (cells[1] - cells[0]) * fc, bot = cells[2] + (cells[3] - cells[2]) * fc;
+  if (outStatus) *outStatus = @"OK";
+  return top + (bot - top) * fr;
+}
+
+// Translucent slice line draped across the road on the terrain surface (under exagNode).
+- (void)drawSliceLineAtLat:(double)lat lon:(double)lon crossBearing:(double)crossBearing road:(NSDictionary *)road {
+  [self.sliceLineNode removeFromParentNode];
+  double ltShoulder = XsShoulderEdgeFt(road, YES), rtShoulder = XsShoulderEdgeFt(road, NO);
+  double minOff = ltShoulder - 50, maxOff = rtShoulder + 50;
+  NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+  int steps = 24;
+  for (int i = 0; i <= steps; i++) {
+    double off = minOff + (maxOff - minOff) * ((double)i / steps);
+    double dM = off / kXsFtPerM, rad = crossBearing * M_PI / 180.0;
+    double cosLat = cos(lat * M_PI / 180.0); if (fabs(cosLat) < 1e-9) cosLat = 1e-9;
+    double slat = lat + (dM * cos(rad)) / kXsMPerDegLat;
+    double slon = lon + (dM * sin(rad)) / (kXsMPerDegLat * cosLat);
+    SCNVector3 w;
+    if ([self surfaceWorldForLat:slat lon:slon lift:self.worldSize * 0.02f out:&w]) [pts addObject:[NSValue valueWithSCNVector3:w]];
+  }
+  if (pts.count < 2) return;
+  SCNNode *line = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.30 green:0.85 blue:0.95 alpha:0.9] closed:NO];
+  self.sliceLineNode = line;
+  [self.exagNode addChildNode:line];
+}
+
+- (void)showCrossSectionMessage:(NSString *)msg {
+  UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Cross Section" message:msg preferredStyle:UIAlertControllerStyleAlert];
+  [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+  [self presentViewController:a animated:YES completion:nil];
 }
 
 @end

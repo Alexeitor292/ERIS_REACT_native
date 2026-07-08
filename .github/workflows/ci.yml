@@ -215,17 +215,22 @@ jobs:
         run: node scripts/check-terrain-exaggeration-contract.mjs
       - name: Tiled-imagery SceneKit source-contract (per-tile patches, offline-only, no UV/bleed regression)
         run: node scripts/check-terrain-imagery-tiles-contract.mjs
+      - name: Road cross-section source-contract (offline tap→slice, grid read-only, upstation)
+        run: node scripts/check-road-cross-section-contract.mjs
       - name: Lint
         run: npx expo lint
       - name: TypeScript check
         run: npx tsc -p tsconfig.json --noEmit
-      - name: Offline-scene / terrain / bundle / overlay / scale unit tests
+      - name: Offline-scene / terrain / bundle / overlay / scale / cross-section unit tests
         run: >-
           node --experimental-strip-types --test
           src/arcgis/offlineScene.test.ts
           src/arcgis/eristerrainBundle.test.ts
           src/arcgis/terrainOverlays.test.ts
           src/arcgis/terrainScale.test.ts
+          src/measurements/roadCrossSectionSlice.test.ts
+          src/measurements/roadCrossSectionParity.test.ts
+          src/components/roadCrossSectionSliceModel.test.ts
       - name: Expo doctor
         run: npx expo-doctor || true   # advisory; does not fail the build
       - name: Expo iOS prebuild verification (config plugin wiring)

@@ -124,6 +124,12 @@ class Settings(BaseSettings):
     # ArcGIS FeatureServer adapter (documented, license-reviewed by the operator)
     # can broaden coverage.
     OFFLINE_SCENE_ROADS_ENABLED: bool = Field(default=True)
+    # Package the Road Inventory-derived roadway cross-section layout (lane counts/
+    # widths, shoulders, median width/category) + route/postmile metadata + upstation
+    # direction into road_cross_section.json, so the native offline Cross Section tool
+    # works in Airplane Mode. Small JSON metadata (not elevation — that is sampled from
+    # the packaged terrain grid at cross-section time). Degrades gracefully.
+    OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED: bool = Field(default=True)
     OFFLINE_SCENE_ROAD_SOURCE: str = Field(default="eris_internal")  # eris_internal | arcgis_feature_service
     OFFLINE_SCENE_ROAD_SOURCE_URL: str | None = Field(default=None)  # required for arcgis_feature_service
     OFFLINE_SCENE_ROAD_BUFFER_M: float = Field(default=250.0)        # bounds buffer for clipping

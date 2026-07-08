@@ -262,6 +262,11 @@ async function validateAndExtractEristerrain(partUri: string, submissionId: numb
   if (files["roads.geojson"]) {
     await FileSystem.writeAsStringAsync(`${dir}/roads.geojson`, utf8FromBytes(files["roads.geojson"]));
   }
+  // Road cross-section context (Road Inventory layout + provenance) for the offline
+  // Cross Section tool — small JSON text asset.
+  if (files["road_cross_section.json"]) {
+    await FileSystem.writeAsStringAsync(`${dir}/road_cross_section.json`, utf8FromBytes(files["road_cross_section.json"]));
+  }
   for (const png of ["imagery.png", "overview.png"]) {
     if (files[png]) {
       await FileSystem.writeAsStringAsync(`${dir}/${png}`, bytesToBase64(files[png]), {
