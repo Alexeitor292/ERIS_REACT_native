@@ -69,6 +69,17 @@ forbidMatch(/writeToFile:|writeToURL:|createFileAtPath:|removeItemAtPath:|remove
 // 7. Vertical exaggeration remains a display-only container Y-scale.
 requireMatch(/\bexagNode\b/, "vertical exaggeration must stay a display-only container Y-scale (exagNode).");
 
+// 8. DRAPE, not REPLACE (regression fix). The authoritative base terrain mesh must
+//    NEVER be hidden to show tiled imagery — imagery is an overlay draped above it.
+forbidMatch(/terrainNode\.hidden\s*=\s*useTiles/,
+  "REGRESSION: must NOT hide the base terrain for tiled imagery (terrainNode.hidden = useTiles). Drape imagery above the mesh instead.");
+requireMatch(/self\.terrainNode\.hidden\s*=\s*NO/, "the base terrain mesh must stay visible (drape overlay): self.terrainNode.hidden = NO.");
+requireMatch(/imageryDrapeLift/, "imagery patches must drape slightly ABOVE the mesh (imageryDrapeLift) to avoid z-fighting.");
+
+// 9. Runtime safety fallback: never show a broken/partial tiled surface.
+requireMatch(/disableTiledImagery\s*:/, "must have a runtime safety fallback that disables tiled imagery (disableTiledImagery:).");
+requireMatch(/validateTileBounds/, "must validate tile bounds (no overlap/invalid) before building patches (validateTileBounds).");
+
 if (errors.length > 0) {
   console.error("Tiled-imagery SceneKit source-contract FAILED (ErisTerrainSceneViewController.m):");
   for (const e of errors) console.error(`  - ${e}`);

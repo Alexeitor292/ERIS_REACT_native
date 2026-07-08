@@ -47,6 +47,15 @@ const WRITES = /writeToFile:|writeToURL:|createFileAtPath:|removeItemAtPath:|rem
   req(/No road context near tap/, "must reject far/absent snaps honestly (the operator message).");
   req(/sampleElevationMetersAtLat:/, "must sample elevation from the packaged grid (sampleElevationMetersAtLat:).");
   req(/createCrossSectionAtLat:/, "must build the cross-section from the tapped station (createCrossSectionAtLat:).");
+  // REGRESSION FIX: the snap parser must accept EVERY line-like geometry the renderer
+  // draws (reuse primitivesFromGeometry), not just bare LineString — so tapping near a
+  // visible road line snaps.
+  req(/parseRoadSnapFeatures\s*\{[\s\S]{0,900}primitivesFromGeometry/,
+      "the snap parser must reuse primitivesFromGeometry (all line-like geometries), not only LineString.");
+  // Clearly-labelled bearing fallback with honest provenance when only bearing exists.
+  req(/bearing_fallback/, "must support a labelled bearing fallback (roadContextSource=bearing_fallback).");
+  req(/No road context packaged for this area/, "must give the honest no-context message when no geometry and no bearing exist.");
+  req(/inPackageBoundsLat:/, "bearing fallback must be gated to taps within the package bounds (inPackageBoundsLat:).");
   // gridData READ-ONLY: assigned exactly once (at load).
   const assigns = (code.match(/self\.gridData\s*=(?!=)/g) || []).length;
   if (assigns !== 1) errors.push(`[terrain-vc] self.gridData must be assigned exactly once; found ${assigns}.`);

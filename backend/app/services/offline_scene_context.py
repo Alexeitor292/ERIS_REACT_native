@@ -72,6 +72,51 @@ def bounds_with_buffer(bounds: dict, buffer_m: float) -> dict:
     }
 
 
+def _clip_segment_to_bounds(p0, p1, bounds: dict):
+    """Liang-Barsky clip of segment p0->p1 ([lon,lat]) to the bounds rectangle. Returns
+    the clipped [[lon,lat],[lon,lat]] (endpoints ON the bounds edges) or None if the
+    segment does not intersect the rectangle."""
+    x0, y0 = float(p0[0]), float(p0[1])
+    x1, y1 = float(p1[0]), float(p1[1])
+    dx, dy = x1 - x0, y1 - y0
+    t0, t1 = 0.0, 1.0
+    checks = (
+        (-dx, x0 - bounds["min_lon"]), (dx, bounds["max_lon"] - x0),
+        (-dy, y0 - bounds["min_lat"]), (dy, bounds["max_lat"] - y0),
+    )
+    for p, q in checks:
+        if p == 0:
+            if q < 0:
+                return None  # parallel to an edge and outside it
+        else:
+            t = q / p
+            if p < 0:
+                if t > t1:
+                    return None
+                t0 = max(t0, t)
+            else:
+                if t < t0:
+                    return None
+                t1 = min(t1, t)
+    if t0 > t1:
+        return None
+    return [[x0 + t0 * dx, y0 + t0 * dy], [x0 + t1 * dx, y0 + t1 * dy]]
+
+
+def _aoi_span_m(bounds: dict) -> float:
+    """Diagonal length (metres, cos-lat adjusted) of the AOI bounds; 0 on bad bounds."""
+    try:
+        min_lat, max_lat = float(bounds["min_lat"]), float(bounds["max_lat"])
+        min_lon, max_lon = float(bounds["min_lon"]), float(bounds["max_lon"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    mid_lat = (min_lat + max_lat) / 2.0
+    cos_lat = math.cos(math.radians(mid_lat)) or 1e-6
+    w = (max_lon - min_lon) * _M_PER_DEG_LAT * abs(cos_lat)
+    h = (max_lat - min_lat) * _M_PER_DEG_LAT
+    return math.hypot(max(0.0, w), max(0.0, h))
+
+
 def lonlat_in_bounds(lon: float, lat: float, bounds: dict) -> bool:
     if not (_finite(lon) and _finite(lat)):
         return False
@@ -168,7 +213,14 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float) -> tuple[dict, int]:
     incident = overlays.get("incident")
     bearing = overlays.get("roadBearingDeg")
     if isinstance(incident, dict) and _finite(incident.get("lat")) and _finite(incident.get("lon")) and _finite(bearing):
-        line = _clean_line(road_bearing_line(incident, float(bearing)), bounds)
+        # Extend the synthetic bearing line to SPAN the package footprint (then clip to
+        # bounds), so when a bearing line is the only road context the user can tap near
+        # it anywhere in the AOI — not just within ~130 m of the incident. It stays a
+        # single straight line along the resolved road bearing (honestly "road_bearing").
+        span_m = _aoi_span_m(ctx.get("bounds") or {}) * 2.0 + 260.0
+        long_line = road_bearing_line(incident, float(bearing), length_m=span_m)
+        clipped = _clip_segment_to_bounds(long_line[0], long_line[1], bounds)
+        line = _clean_line(clipped, bounds) if clipped else []
         if line:
             features.append({
                 "type": "Feature",
@@ -483,11 +535,36 @@ def fetch_imagery_png(bounds: dict, *, export_url: str, px: int, timeout_s: int,
     return data, source
 
 
+def tile_export_dims(bounds: dict, px: int) -> tuple[int, int]:
+    """Pixel (width, height) for a tile export whose ASPECT MATCHES the tile's metric
+    footprint (cos-lat adjusted). Requesting a SQUARE image for a non-square bbox lets
+    ImageServer adjust/expand the bbox to the requested aspect, so adjacent tiles cover
+    overlapping ground -> the SAME building appears in two tiles (double buildings) and
+    the imagery is misaligned to the terrain. Matching the aspect eliminates that: the
+    longer axis gets `px`, the shorter is scaled proportionally (min 1)."""
+    tp = max(1, int(px))
+    try:
+        min_lat, max_lat = float(bounds["min_lat"]), float(bounds["max_lat"])
+        min_lon, max_lon = float(bounds["min_lon"]), float(bounds["max_lon"])
+        mid_lat = (min_lat + max_lat) / 2.0
+        cos_lat = math.cos(math.radians(mid_lat)) or 1e-6
+        w_m = (max_lon - min_lon) * _M_PER_DEG_LAT * abs(cos_lat)
+        h_m = (max_lat - min_lat) * _M_PER_DEG_LAT
+    except (KeyError, TypeError, ValueError):
+        return tp, tp
+    if not (w_m > 0 and h_m > 0):
+        return tp, tp
+    if w_m >= h_m:
+        return tp, max(1, round(tp * h_m / w_m))
+    return max(1, round(tp * w_m / h_m)), tp
+
+
 def _export_tile_params(bounds: dict, px: int, jpeg_quality: int) -> dict:
     bbox = f"{bounds['min_lon']},{bounds['min_lat']},{bounds['max_lon']},{bounds['max_lat']}"
+    w_px, h_px = tile_export_dims(bounds, px)
     return {
         "bbox": bbox, "bboxSR": "4326", "imageSR": "4326",
-        "size": f"{px},{px}", "format": "jpg", "compressionQuality": str(int(jpeg_quality)),
+        "size": f"{w_px},{h_px}", "format": "jpg", "compressionQuality": str(int(jpeg_quality)),
         "f": "image",
     }
 
