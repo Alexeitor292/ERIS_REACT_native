@@ -720,3 +720,41 @@ no online basemap/imagery, no live USGS/ArcGIS elevation call, no AI imagery —
 + materials are package-derived/procedural. **No backend deploy or package regeneration is
 required** (the packaged block is additive/backward compatible); a new native iOS
 development build IS required (SceneKit + config-plugin source additions).
+
+## Addendum 7 — truthful road context + real centerline source (2026-07-09)
+
+Fixes a confirmed field blocker (Proxmox `g20260709192633-15`): with `eris_internal`
+road source and a submission that has no road-inventory geometry and no resolved road
+bearing, the package correctly showed "No road context packaged", but the manifest
+implied the Cross Section tool was usable (`road_cross_section.available=true`) with an
+"ERIS Road Inventory" provenance for what was actually a **DEFAULT** layout.
+
+**Manifest truthfulness.** `context_layers.road_cross_section` now carries explicit
+flags: `layout_available`, `layout_source`, `layout_source_label`, `snap_available`,
+`orientation_available`, `fully_usable`, `reason`. `fully_usable` is true only when a
+roadway layout exists AND the app can snap (roads geometry) or orient (upstation
+bearing) — so the mobile UI never claims usability it does not have.
+
+**Provenance.** `DEFAULT` → "Default roadway assumptions" (never "Road Inventory");
+`ROAD_INVENTORY` → "ERIS Road Inventory"; `FORM_FIELDS` → "Submission/form fields".
+
+**Road-geometry priority (with precise reasons).** `roads_geojson_from_context` builds
+`roads.geojson` in order: external `road_centerline` (ArcGIS adapter) → `road_inventory`
+line (+ route/postmile) → submitted **line-like** geometry only (`submitted_road_geometry`,
+never polygons) → AOI-spanning `road_bearing`. When empty it returns a PRECISE reason
+(`no_road_inventory_geometry` / `no_road_bearing` / `no_centerline_source_configured` /
+`no_centerline_features_in_area`) — never a generic `no_data`.
+
+**Real centerline source.** `OFFLINE_SCENE_ROAD_SOURCE=arcgis_feature_service` +
+`OFFLINE_SCENE_ROAD_SOURCE_URL=<FeatureServer layer>` packages real `road_centerline`
+features (worker-only fetch, GeoJSON + Esri `paths`, clipped to bounds+buffer, service
+URL sanitized in the manifest — no credentials in manifest/logs/mobile; degrades on
+failure). This is how an operator packages actual Caltrans road context.
+
+**Mobile.** The Cross Section button gates on computed usability with honest copy —
+"Roadway layout is packaged, but no road snap geometry or upstation bearing is available
+for this area." / "Road context is enabled, but no road geometry was found for this
+package area." — and never tells the user to enable road context when it is already
+enabled. Package Details reports the road-context reason, cross-section layout + source
+label, snap geometry, upstation bearing, and "Cross Section usable: yes/no". Renderer-
+only + packaging changes; existing packages still open; a new native build IS required.

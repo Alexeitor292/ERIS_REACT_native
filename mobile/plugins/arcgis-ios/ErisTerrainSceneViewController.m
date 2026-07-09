@@ -1477,27 +1477,23 @@ static NSArray *erisAsArray(id v) {
     [s appendFormat:@"Road context: %@ (%ld feature%@)%@\n", [self describeRoadContext], (long)count,
                     count == 1 ? @"" : @"s", srcLabel ? [@" · " stringByAppendingString:srcLabel] : @""];
   } else {
-    [s appendString:@"Road context: No road context packaged\n"];
+    [s appendFormat:@"Road context: unavailable (%@)\n", [self roadsUnavailableReason] ?: @"no_road_context"];
   }
-  // Cross Section snap diagnostics (regression triage): the snap parser uses the SAME
-  // geometry parser as the visible road layer, so visible roads are snap-eligible.
+  // Cross Section usability (TRUTHFUL — never implies the tool works when it cannot).
   {
+    NSDictionary *rxsLayer = [self.contextLayers[@"road_cross_section"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"road_cross_section"] : @{};
     NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : @{};
     NSArray *kinds = [roads[@"road_kinds"] isKindOfClass:[NSArray class]] ? roads[@"road_kinds"] : @[];
-    [s appendFormat:@"Cross-section snap: %lu snap feature%@%@ · road context %@\n",
-        (unsigned long)self.roadSnapFeatures.count, self.roadSnapFeatures.count == 1 ? @"" : @"s",
-        [self hasRichRoadGeometry] ? @" (real road geometry)" : (self.roadSnapFeatures.count ? @" (bearing line only)" : @""),
-        [self layerAvailable:@"roads"] ? @"available" : @"unavailable"];
-    if (kinds.count) [s appendFormat:@"Road kinds: %@\n", [kinds componentsJoinedByString:@", "]];
-    [s appendFormat:@"Upstation bearing available: %@\n", isfinite(self.upstationHintDeg) ? @"yes" : @"no"];
-  }
-  // Road cross-section tool availability (offline).
-  if ([self crossSectionContextAvailable]) {
     NSString *layoutSrc = [self crossSectionLayoutSource];
-    NSString *label = [layoutSrc isEqualToString:@"ROAD_INVENTORY"] ? @"Road Inventory" : ([layoutSrc isEqualToString:@"FORM_FIELDS"] ? @"form/default assumptions" : @"default assumptions");
-    [s appendFormat:@"Cross Section tool: available offline (roadway layout: %@)\n", label];
-  } else {
-    [s appendString:@"Cross Section tool: uses default roadway assumptions (no Road Inventory cross-section packaged)\n"];
+    NSString *layoutLabel = [rxsLayer[@"layout_source_label"] isKindOfClass:[NSString class]] ? rxsLayer[@"layout_source_label"]
+        : ([layoutSrc isEqualToString:@"ROAD_INVENTORY"] ? @"ERIS Road Inventory"
+           : ([layoutSrc isEqualToString:@"FORM_FIELDS"] ? @"Submission/form fields" : @"Default roadway assumptions"));
+    [s appendFormat:@"Cross-section layout: %@ (%@)\n", [self crossSectionContextAvailable] ? @"packaged" : @"default assumptions", layoutLabel];
+    [s appendFormat:@"Snap geometry: %@%@\n", [self crossSectionSnapAvailable] ? @"available" : @"unavailable",
+        (self.roadSnapFeatures.count && kinds.count) ? [NSString stringWithFormat:@" (%lu feature%@ · %@)",
+            (unsigned long)self.roadSnapFeatures.count, self.roadSnapFeatures.count == 1 ? @"" : @"s", [kinds componentsJoinedByString:@", "]] : @""];
+    [s appendFormat:@"Upstation bearing: %@\n", [self crossSectionOrientationAvailable] ? @"available" : @"unavailable"];
+    [s appendFormat:@"Cross Section usable: %@\n", [self crossSectionFullyUsable] ? @"yes" : @"no"];
   }
   [s appendFormat:@"Package version: %@\n", [p[@"packageVersion"] isKindOfClass:[NSString class]] ? p[@"packageVersion"] : @"—"];
   if ([self.manifest[@"generated_at"] isKindOfClass:[NSString class]]) [s appendFormat:@"Created: %@\n", self.manifest[@"generated_at"]];
@@ -1605,7 +1601,40 @@ static NSArray *erisAsArray(id v) {
            @"median_width_ft": @0, @"median_category": @"NONE", @"total_width_ft": @32, @"source": @"DEFAULT"};
 }
 
-- (void)onCrossSection { [self setCrossSectionModeActive:!self.crossSectionMode]; }
+// Cross Section usability (computed from the actually-loaded package — robust for
+// legacy AND new packages). The tool is usable only when the app can snap to real road
+// geometry OR orient from an upstation bearing.
+- (BOOL)crossSectionSnapAvailable { return self.roadSnapFeatures.count > 0; }
+- (BOOL)crossSectionOrientationAvailable { return isfinite(self.upstationHintDeg); }
+- (BOOL)crossSectionFullyUsable { return [self crossSectionSnapAvailable] || [self crossSectionOrientationAvailable]; }
+
+// Reason the packaged roads layer is unavailable (precise token or "disabled").
+- (NSString *)roadsUnavailableReason {
+  NSDictionary *roads = [self.contextLayers[@"roads"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"roads"] : nil;
+  if (roads != nil && [roads[@"available"] boolValue]) return nil;
+  NSString *r = [roads[@"reason"] isKindOfClass:[NSString class]] ? roads[@"reason"] : @"no_road_context";
+  return r;
+}
+
+- (void)onCrossSection {
+  if (self.crossSectionMode) { [self setCrossSectionModeActive:NO]; return; }
+  // Distinguish: fully usable -> enter tap mode; otherwise explain HONESTLY without
+  // ever telling the user to "enable road context" when it is already enabled.
+  if ([self crossSectionFullyUsable]) {
+    [self setCrossSectionModeActive:YES];
+    return;
+  }
+  NSString *msg;
+  NSString *roadsReason = [self roadsUnavailableReason];
+  if ([self crossSectionContextAvailable]) {
+    msg = @"Roadway layout is packaged, but no road snap geometry or upstation bearing is available for this area.";
+  } else if ([roadsReason isEqualToString:@"disabled"]) {
+    msg = @"Road context is not packaged for this area.";
+  } else {
+    msg = @"Road context is enabled, but no road geometry was found for this package area.";
+  }
+  [self showCrossSectionMessage:msg];
+}
 
 - (void)setCrossSectionModeActive:(BOOL)active {
   self.crossSectionMode = active;

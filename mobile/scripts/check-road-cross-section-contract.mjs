@@ -56,6 +56,14 @@ const WRITES = /writeToFile:|writeToURL:|createFileAtPath:|removeItemAtPath:|rem
   req(/bearing_fallback/, "must support a labelled bearing fallback (roadContextSource=bearing_fallback).");
   req(/No road context packaged for this area/, "must give the honest no-context message when no geometry and no bearing exist.");
   req(/inPackageBoundsLat:/, "bearing fallback must be gated to taps within the package bounds (inPackageBoundsLat:).");
+  // TRUTHFUL USABILITY GATING: the Cross Section button must distinguish fully-usable
+  // from layout-only, and NEVER tell the user to enable road context when it is enabled.
+  req(/crossSectionFullyUsable/, "the Cross Section button must gate on computed usability (crossSectionFullyUsable).");
+  req(/no road snap geometry or upstation bearing is available/,
+      "must show the layout-packaged-but-not-usable message (no snap geometry or upstation bearing).");
+  req(/no road geometry was found for this package area/,
+      "must show the enabled-but-no-data message (never say 'enable' when road context is already enabled).");
+  req(/Cross Section usable:/, "Package Details must state whether the Cross Section tool is usable (Cross Section usable: yes/no).");
   // gridData READ-ONLY: assigned exactly once (at load).
   const assigns = (code.match(/self\.gridData\s*=(?!=)/g) || []).length;
   if (assigns !== 1) errors.push(`[terrain-vc] self.gridData must be assigned exactly once; found ${assigns}.`);

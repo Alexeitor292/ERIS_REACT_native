@@ -18,6 +18,8 @@ import {
   lonLatToGridCell,
   parseZipEntries,
   roadCrossSectionAvailable,
+  roadCrossSectionUsability,
+  roadsUnavailableReason,
   summarizeContextLayers,
   validateBundleManifest,
   type TerrainMeta,
@@ -534,4 +536,68 @@ test("declared-available road_cross_section that is MISSING fails closed", () =>
 test("declared-available road_cross_section with wrong byte count fails closed", () => {
   const bundle = bundleWith(manifestWithRoadXsec({ bytes: RXS.length + 9 }), [["road_cross_section.json", RXS]]);
   assert.throws(() => extractAndValidateBundle(bundle), /road_cross_section\.json size mismatch/);
+});
+
+// ---- road cross-section usability (truthful UI gating) ----------------------
+
+test("roadCrossSectionUsability: explicit flags — not fully usable when no snap/bearing", () => {
+  const m = {
+    context_layers: {
+      roads: { available: false, reason: "no_road_bearing" },
+      road_cross_section: {
+        available: true, file: "road_cross_section.json", sha256: "f".repeat(64), bytes: 1,
+        layout_available: true, layout_source: "DEFAULT", layout_source_label: "Default roadway assumptions",
+        snap_available: false, orientation_available: false, fully_usable: false, reason: "no_road_snap_geometry",
+      },
+    },
+  } as never;
+  const u = roadCrossSectionUsability(m);
+  assert.equal(u.layoutAvailable, true);
+  assert.equal(u.snapAvailable, false);
+  assert.equal(u.orientationAvailable, false);
+  assert.equal(u.fullyUsable, false); // UI must NOT claim usable
+  assert.equal(u.reason, "no_road_snap_geometry");
+  assert.equal(u.layoutSourceLabel, "Default roadway assumptions"); // never "Road Inventory" for DEFAULT
+});
+
+test("roadCrossSectionUsability: explicit flags — fully usable with snap + bearing", () => {
+  const m = {
+    context_layers: {
+      roads: { available: true, file: "roads.geojson", sha256: "b".repeat(64), road_kinds: ["road_bearing"] },
+      road_cross_section: {
+        available: true, file: "road_cross_section.json", sha256: "f".repeat(64), bytes: 1,
+        layout_available: true, layout_source: "ROAD_INVENTORY", snap_available: true, orientation_available: true,
+        fully_usable: true, reason: null,
+      },
+    },
+  } as never;
+  assert.equal(roadCrossSectionUsability(m).fullyUsable, true);
+});
+
+test("roadCrossSectionUsability: legacy package (no flags) falls back conservatively", () => {
+  // legacy: road_cross_section available but no flags; roads unavailable -> not fully usable.
+  const legacy = {
+    context_layers: {
+      roads: { available: false, reason: "no_data" },
+      road_cross_section: { available: true, file: "road_cross_section.json", sha256: "f".repeat(64) },
+    },
+  } as never;
+  const u = roadCrossSectionUsability(legacy);
+  assert.equal(u.fullyUsable, false);
+  assert.equal(u.reason, "no_road_snap_geometry");
+  // legacy with roads available -> usable via snap.
+  const legacyRoads = {
+    context_layers: {
+      roads: { available: true, file: "roads.geojson", sha256: "b".repeat(64) },
+      road_cross_section: { available: true, file: "road_cross_section.json", sha256: "f".repeat(64) },
+    },
+  } as never;
+  assert.equal(roadCrossSectionUsability(legacyRoads).fullyUsable, true);
+});
+
+test("roadsUnavailableReason surfaces the precise token (never generic when packaged)", () => {
+  assert.equal(roadsUnavailableReason({ context_layers: { roads: { available: false, reason: "no_road_bearing" } } } as never), "no_road_bearing");
+  assert.equal(roadsUnavailableReason({ context_layers: { roads: { available: false, reason: "disabled" } } } as never), "disabled");
+  assert.equal(roadsUnavailableReason({ context_layers: { roads: { available: true, file: "roads.geojson", sha256: "b".repeat(64) } } } as never), null);
+  assert.equal(roadsUnavailableReason({ context_layers: {} } as never), "no_road_context");
 });
