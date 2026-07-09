@@ -159,3 +159,53 @@ class TestArcgisCenterlineAdapter:
         meta = ctxmod.available_layer(ctxmod.ROADS_FILE, b"{}", src, feature_count=2, road_kinds=["road_centerline"])
         assert "SECRET" not in json.dumps(meta)
         assert meta["source"]["service"] == "https://gis.example.gov/FeatureServer/3"
+
+    def test_service_url_strips_embedded_basic_auth_credentials(self):
+        # Review finding: userinfo (user:password@host) must be dropped from the manifest.
+        src = {"provider": "arcgis_feature_service", "service": "https://svc_user:S3CRET@gis.example.gov:8443/arcgis/rest/services/Roads/FeatureServer/0?token=ABC"}
+        out = ctxmod.sanitize_source(src)
+        assert "S3CRET" not in json.dumps(out) and "svc_user" not in json.dumps(out) and "ABC" not in json.dumps(out)
+        assert out["service"] == "https://gis.example.gov:8443/arcgis/rest/services/Roads/FeatureServer/0"
+
+
+class TestRoadsProvenanceReflectsActualKind:
+    """Review finding: provenance must reflect the ACTUAL packaged kind, never claim
+    ArcGIS centerlines (or attach the service URL) for a synthetic bearing fallback."""
+
+    def _b(self):
+        return HillshadeReliefBuilder()
+
+    def test_external_configured_but_only_bearing_packaged_is_not_labeled_arcgis(self, monkeypatch):
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_OVERVIEW_ENABLED", False)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_ENABLED", False)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROADS_ENABLED", True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED", True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "arcgis_feature_service")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE_URL", "https://gis.example.gov/FeatureServer/0")
+        # Adapter returns NOTHING for this AOI; the incident still has a bearing.
+        monkeypatch.setattr(ctxmod, "fetch_arcgis_road_features", lambda *a, **k: [])
+        layers, assets = self._b()._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is True and roads["road_kinds"] == ["road_bearing"]
+        # provenance must NOT claim ArcGIS centerlines and must NOT include the service URL
+        assert roads["source"]["provider"] == "eris_internal"
+        assert roads["source"]["dataset"] != "ArcGIS road centerlines"
+        assert "service" not in roads["source"]
+
+    def test_external_centerline_present_is_labeled_arcgis_with_sanitized_service(self, monkeypatch):
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_OVERVIEW_ENABLED", False)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_ENABLED", False)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROADS_ENABLED", True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED", True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "arcgis_feature_service")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE_URL", "https://gis.example.gov/FeatureServer/0?token=SECRET")
+        monkeypatch.setattr(
+            ctxmod, "fetch_arcgis_road_features",
+            lambda *a, **k: ctxmod.normalize_road_features([{"geometry": {"type": "LineString", "coordinates": [[-121.5, 38.5], [-121.49, 38.505]]}}]),
+        )
+        layers, assets = self._b()._build_context_layers(_ctx(bearing=None), base_bytes=0)
+        roads = layers["roads"]
+        assert "road_centerline" in roads["road_kinds"]
+        assert roads["source"]["provider"] == "arcgis_feature_service"
+        assert roads["source"]["service"] == "https://gis.example.gov/FeatureServer/0"  # token stripped
+        assert "SECRET" not in json.dumps(roads)

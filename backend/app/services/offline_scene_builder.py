@@ -381,15 +381,20 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 if count > 0:
                     data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
                     if running + len(data) <= max_bytes:
+                        # Provenance must reflect the ACTUAL richest kind packaged — never
+                        # claim ArcGIS centerlines (or attach the service URL) when the
+                        # configured source returned nothing and only a synthetic bearing/
+                        # inventory/submitted line was packaged.
+                        kinds = context_fmt.road_kinds_from_geojson(geojson)
+                        has_centerline = "road_centerline" in kinds
                         src = {
-                            "provider": "arcgis_feature_service" if external_configured else "eris_internal",
-                            "dataset": "ArcGIS road centerlines" if external_configured else "ERIS road context (bearing + inventory + submitted)",
+                            "provider": "arcgis_feature_service" if has_centerline else "eris_internal",
+                            "dataset": "ArcGIS road centerlines" if has_centerline else "ERIS road context (bearing + inventory + submitted)",
                             "retrieved_at": datetime.now(timezone.utc).isoformat(),
                             "attribution": "Caltrans / ERIS road context",
                         }
-                        if external_configured:
+                        if has_centerline:
                             src["service"] = settings.OFFLINE_SCENE_ROAD_SOURCE_URL  # sanitized by sanitize_source
-                        kinds = context_fmt.road_kinds_from_geojson(geojson)
                         layers["roads"] = context_fmt.available_layer(
                             context_fmt.ROADS_FILE, data, src, feature_count=count, road_kinds=kinds
                         )
