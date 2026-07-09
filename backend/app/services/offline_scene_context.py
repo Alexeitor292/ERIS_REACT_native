@@ -127,8 +127,9 @@ def lonlat_in_bounds(lon: float, lat: float, bounds: dict) -> bool:
 
 
 def sanitize_source(source: dict | None) -> dict:
-    """Keep only provenance keys; strip any URL query string (could carry tokens/
-    keys) from a `service` value. Never emits credentials/internal endpoints."""
+    """Keep only provenance keys; from a `service` URL strip the query string (tokens/
+    keys) AND any embedded userinfo (user:password@host — basic-auth credentials).
+    Never emits credentials/internal endpoints into the shipped manifest."""
     if not isinstance(source, dict):
         return {}
     out: dict = {}
@@ -139,7 +140,10 @@ def sanitize_source(source: dict | None) -> dict:
         if k == "service" and isinstance(v, str):
             try:
                 p = urlparse(v)
-                v = urlunparse((p.scheme, p.netloc, p.path, "", "", ""))  # drop params/query/fragment
+                # Rebuild netloc from host[:port] only — drops any user:password@.
+                host = p.hostname or ""
+                netloc = f"{host}:{p.port}" if p.port else host
+                v = urlunparse((p.scheme, netloc, p.path, "", "", ""))  # no userinfo/params/query/fragment
             except Exception:
                 continue
         out[k] = v
