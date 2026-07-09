@@ -37,7 +37,7 @@ def _ctx(**overlays_extra):
 
 class TestRoadsGeoJson:
     def test_road_bearing_feature_from_real_bearing(self):
-        gj, count = ctxmod.roads_geojson_from_context(_ctx(), buffer_m=250.0)
+        gj, count, _reason = ctxmod.roads_geojson_from_context(_ctx(), buffer_m=250.0)
         assert gj["type"] == "FeatureCollection"
         assert count == 1
         f = gj["features"][0]
@@ -48,7 +48,7 @@ class TestRoadsGeoJson:
             assert -121.53 < lon < -121.47 and 38.47 < lat < 38.53
 
     def test_no_bearing_no_invented_roads(self):
-        gj, count = ctxmod.roads_geojson_from_context(_ctx(roadBearingDeg=None), buffer_m=250.0)
+        gj, count, _reason = ctxmod.roads_geojson_from_context(_ctx(roadBearingDeg=None), buffer_m=250.0)
         assert count == 0 and gj["features"] == []
 
     def test_road_inventory_linestrings_included_and_clipped(self):
@@ -57,14 +57,14 @@ class TestRoadsGeoJson:
             "type": "LineString",
             "coordinates": [[-121.5, 38.5], [-121.49, 38.49]],  # inside
         }
-        gj, count = ctxmod.roads_geojson_from_context(ctx, buffer_m=250.0)
+        gj, count, _reason = ctxmod.roads_geojson_from_context(ctx, buffer_m=250.0)
         kinds = {f["properties"]["kind"] for f in gj["features"]}
         assert "road_inventory" in kinds and count == 2
 
     def test_road_inventory_far_outside_is_dropped(self):
         ctx = _ctx()
         ctx["road_inventory_geometry"] = {"type": "LineString", "coordinates": [[-100.0, 20.0], [-99.0, 21.0]]}
-        gj, count = ctxmod.roads_geojson_from_context(ctx, buffer_m=250.0)
+        gj, count, _reason = ctxmod.roads_geojson_from_context(ctx, buffer_m=250.0)
         # Only the bearing feature survives; the far line is not in bounds.
         assert count == 1 and gj["features"][0]["properties"]["kind"] == "road_bearing"
 
@@ -72,7 +72,7 @@ class TestRoadsGeoJson:
         for bad in ("garbage", 5, {"type": "LineString"}, {"paths": "nope"}, {"coordinates": [[1]]}):
             ctx = _ctx(roadBearingDeg=None)
             ctx["road_inventory_geometry"] = bad
-            gj, count = ctxmod.roads_geojson_from_context(ctx, buffer_m=250.0)
+            gj, count, _reason = ctxmod.roads_geojson_from_context(ctx, buffer_m=250.0)
             assert count == 0
 
 
@@ -143,7 +143,7 @@ class TestOverviewPixelMapping:
 
     def test_render_overview_png(self):
         pytest.importorskip("PIL")
-        gj, _ = ctxmod.roads_geojson_from_context(_ctx(), 250.0)
+        gj, _c, _reason = ctxmod.roads_geojson_from_context(_ctx(), 250.0)
         png = ctxmod.render_overview_png(
             bounds=BOUNDS, incident=INCIDENT, roads_geojson=gj, geometry=None, sample_extent=None, px=128
         )
@@ -201,7 +201,7 @@ class TestBundleWithContextLayers:
         pytest.importorskip("PIL")
         grid, meta = self._terrain()
         ctx = _ctx()
-        gj, count = ctxmod.roads_geojson_from_context(ctx, 250.0)
+        gj, count, _reason = ctxmod.roads_geojson_from_context(ctx, 250.0)
         roads = json.dumps(gj, separators=(",", ":")).encode()
         png = ctxmod.render_overview_png(bounds=BOUNDS, incident=INCIDENT, roads_geojson=gj, geometry=None, sample_extent=None, px=96)
         cl = {
