@@ -127,8 +127,9 @@ def lonlat_in_bounds(lon: float, lat: float, bounds: dict) -> bool:
 
 
 def sanitize_source(source: dict | None) -> dict:
-    """Keep only provenance keys; strip any URL query string (could carry tokens/
-    keys) from a `service` value. Never emits credentials/internal endpoints."""
+    """Keep only provenance keys; from a `service` URL strip the query string (tokens/
+    keys) AND any embedded userinfo (user:password@host — basic-auth credentials).
+    Never emits credentials/internal endpoints into the shipped manifest."""
     if not isinstance(source, dict):
         return {}
     out: dict = {}
@@ -139,7 +140,10 @@ def sanitize_source(source: dict | None) -> dict:
         if k == "service" and isinstance(v, str):
             try:
                 p = urlparse(v)
-                v = urlunparse((p.scheme, p.netloc, p.path, "", "", ""))  # drop params/query/fragment
+                # Rebuild netloc from host[:port] only — drops any user:password@.
+                host = p.hostname or ""
+                netloc = f"{host}:{p.port}" if p.port else host
+                v = urlunparse((p.scheme, netloc, p.path, "", "", ""))  # no userinfo/params/query/fragment
             except Exception:
                 continue
         out[k] = v
@@ -188,6 +192,26 @@ def _iter_linestrings(geom):
                 yield path
 
 
+def _iter_line_only(geom):
+    """Yield ONLY genuinely line-like parts from a geometry: GeoJSON LineString /
+    MultiLineString and Esri paths. Polygons/rings are deliberately NOT treated as
+    roads (we never invent a road centerline from a polygon boundary)."""
+    if not isinstance(geom, dict):
+        return
+    gtype = geom.get("type")
+    coords = geom.get("coordinates")
+    if gtype == "LineString" and isinstance(coords, list):
+        yield coords
+    elif gtype == "MultiLineString" and isinstance(coords, list):
+        for part in coords:
+            if isinstance(part, list):
+                yield part
+    elif isinstance(geom.get("paths"), list):  # Esri polyline
+        for path in geom["paths"]:
+            if isinstance(path, list):
+                yield path
+
+
 def _clean_line(coords, bounds: dict) -> list:
     """Keep finite [lon,lat] vertices; return the line only if it intersects the
     (buffered) bounds. No invented/interpolated coordinates."""
@@ -202,21 +226,79 @@ def _clean_line(coords, bounds: dict) -> list:
     return pts if (len(pts) >= 2 and any_in) else []
 
 
-def roads_geojson_from_context(ctx: dict, buffer_m: float) -> tuple[dict, int]:
-    """Assemble roads.geojson (a FeatureCollection) from ERIS-authoritative data in
-    the build context: the resolved road-bearing segment + any line geometry in the
-    road-inventory snapshot. Clipped to bounds + buffer. Returns (geojson, count)."""
+# Precise reasons roads.geojson has no usable snap geometry (never a generic "no_data").
+ROADS_REASON_NO_INVENTORY = "no_road_inventory_geometry"
+ROADS_REASON_NO_BEARING = "no_road_bearing"
+ROADS_REASON_NO_SOURCE = "no_centerline_source_configured"
+ROADS_REASON_NO_FEATURES = "no_centerline_features_in_area"
+
+
+def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configured: bool = False) -> tuple[dict, int, str | None]:
+    """Assemble roads.geojson (a FeatureCollection) for the offline Cross Section snap,
+    in PRIORITY order. Returns (geojson, count, reason) — reason is a PRECISE token when
+    count == 0 (never a generic "no_data"):
+
+      A. external road_centerline features (arcgis_feature_service adapter, pre-fetched
+         into ctx['external_road_features']) — the richest, real road network.
+      B. road-inventory line geometry (ctx['road_inventory_geometry']).
+      C. submitted incident geometry, but ONLY the genuinely line-like parts
+         (LineString/MultiLineString/paths) -> kind 'submitted_road_geometry'.
+      D. a synthetic AOI-spanning road_bearing LineString (incident + roadBearingDeg),
+         clipped to bounds — the snap/orientation fallback.
+
+    All geometry is clipped to bounds + buffer. When nothing is available, the reason
+    tells the operator exactly what is missing / what to configure.
+    """
     bounds = bounds_with_buffer(ctx["bounds"], buffer_m)
     overlays = ctx.get("overlays") or {}
     features: list = []
 
+    # A. External centerlines (already road_centerline kind); clip defensively to bounds.
+    external_count = 0
+    for feat in ctx.get("external_road_features") or []:
+        if not isinstance(feat, dict):
+            continue
+        external_count += 1
+        for line in _iter_line_only((feat or {}).get("geometry")):
+            cleaned = _clean_line(line, bounds)
+            if cleaned:
+                props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "LineString", "coordinates": cleaned},
+                    "properties": {**props, "kind": props.get("kind") or "road_centerline"},
+                })
+
+    # B. Road-inventory line geometry (route/postmile metadata when available).
+    inv_meta = {}
+    rxs_attrs = ((ctx.get("road_cross_section") or {}).get("attributes")) if isinstance(ctx.get("road_cross_section"), dict) else None
+    if isinstance(rxs_attrs, dict):
+        for k in ("route_name", "county_code", "begin_pm", "end_pm"):
+            if rxs_attrs.get(k) is not None:
+                inv_meta[k] = rxs_attrs[k]
+    for line in _iter_line_only(ctx.get("road_inventory_geometry")):
+        cleaned = _clean_line(line, bounds)
+        if cleaned:
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": cleaned},
+                "properties": {"kind": "road_inventory", **inv_meta},
+            })
+
+    # C. Submitted incident geometry — ONLY line-like parts (never polygons).
+    for line in _iter_line_only(overlays.get("geometry")):
+        cleaned = _clean_line(line, bounds)
+        if cleaned:
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": cleaned},
+                "properties": {"kind": "submitted_road_geometry"},
+            })
+
+    # D. Synthetic AOI-spanning road-bearing fallback (snap + orientation).
     incident = overlays.get("incident")
     bearing = overlays.get("roadBearingDeg")
     if isinstance(incident, dict) and _finite(incident.get("lat")) and _finite(incident.get("lon")) and _finite(bearing):
-        # Extend the synthetic bearing line to SPAN the package footprint (then clip to
-        # bounds), so when a bearing line is the only road context the user can tap near
-        # it anywhere in the AOI — not just within ~130 m of the incident. It stays a
-        # single straight line along the resolved road bearing (honestly "road_bearing").
         span_m = _aoi_span_m(ctx.get("bounds") or {}) * 2.0 + 260.0
         long_line = road_bearing_line(incident, float(bearing), length_m=span_m)
         clipped = _clip_segment_to_bounds(long_line[0], long_line[1], bounds)
@@ -228,22 +310,20 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float) -> tuple[dict, int]:
                 "properties": {"kind": "road_bearing", "bearing_deg": round(float(bearing), 1)},
             })
 
-    # Line geometry from the road-inventory snapshot (defensive).
-    for line in _iter_linestrings(ctx.get("road_inventory_geometry")):
-        cleaned = _clean_line(line, bounds)
-        if cleaned:
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": cleaned},
-                "properties": {"kind": "road_inventory"},
-            })
-
-    # Optional external adapter features (already clipped by the caller).
-    for feat in ctx.get("external_road_features") or []:
-        if isinstance(feat, dict):
-            features.append(feat)
-
-    return {"type": "FeatureCollection", "features": features}, len(features)
+    count = len(features)
+    reason = None
+    if count == 0:
+        if external_configured:
+            reason = ROADS_REASON_NO_FEATURES  # a source is configured but returned nothing here
+        elif ctx.get("road_inventory_geometry") is None and not _finite(bearing):
+            # No inventory geometry and no bearing: the confirmed field blocker. The
+            # operator's lever is to configure a real centerline source.
+            reason = ROADS_REASON_NO_BEARING if isinstance(incident, dict) else ROADS_REASON_NO_INVENTORY
+        elif ctx.get("road_inventory_geometry") is None:
+            reason = ROADS_REASON_NO_INVENTORY
+        else:
+            reason = ROADS_REASON_NO_SOURCE
+    return {"type": "FeatureCollection", "features": features}, count, reason
 
 
 # ---- road cross-section context (Road Inventory layout, packaged for offline) ----
@@ -265,6 +345,7 @@ def road_cross_section_block(ctx: dict) -> dict | None:
         return None
     overlays = ctx.get("overlays") or {}
     bearing = overlays.get("roadBearingDeg")
+    source = attrs.get("source", "DEFAULT")
     block: dict = {
         "attributes": attrs,
         "route_name": attrs.get("route_name"),
@@ -274,15 +355,73 @@ def road_cross_section_block(ctx: dict) -> dict | None:
         # Upstation = increasing postmile; the resolved road bearing already points
         # upstation. The native tool uses this to orient LT/RT canonically.
         "upstation_bearing_deg": float(bearing) if _finite(bearing) else None,
+        "orientation_available": bool(_finite(bearing)),
         "postmile_increases_upstation": True,
-        "source": attrs.get("source", "DEFAULT"),
+        "layout_source": source,
+        "source": source,
         "centerline": None,
         "provenance": {
-            "roadLayoutSource": attrs.get("source", "DEFAULT"),
-            "note": "Roadway layout from ERIS Road Inventory; schematic surface (no crown/superelevation).",
+            "roadLayoutSource": source,
+            "layoutSourceLabel": layout_source_label(source),
+            # Truthful note — DEFAULT is NOT Road Inventory.
+            "note": _layout_note(source),
         },
     }
     return block
+
+
+# Truthful human label for the roadway-layout provenance. DEFAULT must NEVER read as
+# if it came from Road Inventory.
+LAYOUT_SOURCE_LABELS = {
+    "ROAD_INVENTORY": "ERIS Road Inventory",
+    "FORM_FIELDS": "Submission/form fields",
+    "DEFAULT": "Default roadway assumptions",
+}
+
+
+def layout_source_label(source) -> str:
+    return LAYOUT_SOURCE_LABELS.get(str(source).upper(), "Default roadway assumptions")
+
+
+def _layout_note(source) -> str:
+    label = layout_source_label(source)
+    if str(source).upper() == "ROAD_INVENTORY":
+        return "Roadway layout from ERIS Road Inventory; schematic surface (no crown/superelevation)."
+    return f"Roadway layout: {label}; schematic surface (no crown/superelevation) — not measured from Road Inventory."
+
+
+# Precise reasons a road-cross-section layer is degraded (surfaced in the manifest so
+# the mobile UI never implies the Cross Section tool is usable when it is not).
+RXS_REASON_NO_SNAP = "no_road_snap_geometry"
+RXS_REASON_NO_BEARING = "no_upstation_bearing"
+RXS_REASON_DEFAULT_ONLY = "default_layout_only"
+
+
+def road_cross_section_usability(
+    *, layout_available: bool, layout_source, snap_available: bool, orientation_available: bool
+) -> dict:
+    """Explicit usability flags for the packaged road-cross-section layer. The Cross
+    Section tool is FULLY usable only when a roadway layout exists AND the app can
+    either snap to real road geometry OR orient from an upstation bearing. Missing
+    snap geometry + missing bearing => not usable (the confirmed field blocker)."""
+    fully_usable = bool(layout_available and (snap_available or orientation_available))
+    if not fully_usable:
+        reason = RXS_REASON_NO_SNAP
+    elif not orientation_available:
+        reason = RXS_REASON_NO_BEARING  # usable via snap tangent, but no explicit upstation bearing
+    elif str(layout_source).upper() == "DEFAULT":
+        reason = RXS_REASON_DEFAULT_ONLY  # usable, but roadway dimensions are default assumptions
+    else:
+        reason = None
+    return {
+        "layout_available": bool(layout_available),
+        "layout_source": layout_source,
+        "layout_source_label": layout_source_label(layout_source),
+        "snap_available": bool(snap_available),
+        "orientation_available": bool(orientation_available),
+        "fully_usable": fully_usable,
+        "reason": reason,
+    }
 
 
 # ---- context-layer manifest metadata ---------------------------------------
@@ -306,6 +445,7 @@ ROAD_CONTEXT_NONE = "No road context packaged"
 ROAD_CONTEXT_BEARING = "Road bearing context"
 ROAD_CONTEXT_INVENTORY = "Road inventory geometry"
 ROAD_CONTEXT_FEATURE_SERVICE = "Feature service road network"
+ROAD_CONTEXT_SUBMITTED = "Submitted road-aligned geometry"
 
 
 def road_kinds_from_geojson(geojson: dict | None) -> list:
@@ -330,6 +470,8 @@ def describe_road_context(roads_layer: dict | None) -> str:
         return ROAD_CONTEXT_FEATURE_SERVICE
     if "road_inventory" in kinds:
         return ROAD_CONTEXT_INVENTORY
+    if "submitted_road_geometry" in kinds:
+        return ROAD_CONTEXT_SUBMITTED
     if "road_bearing" in kinds:
         return ROAD_CONTEXT_BEARING
     # available but unclassified kinds -> honest, non-overstating fallback.
@@ -620,10 +762,46 @@ def fetch_imagery_tile(
     return data, source
 
 
+def _esri_paths_to_geometry(geom: dict) -> dict | None:
+    """Convert an Esri polyline ({paths:[[[x,y],...],...]}) to a GeoJSON LineString /
+    MultiLineString. Returns None if not an Esri polyline."""
+    paths = geom.get("paths") if isinstance(geom, dict) else None
+    if not isinstance(paths, list):
+        return None
+    lines = [p for p in paths if isinstance(p, list) and len(p) >= 2]
+    if not lines:
+        return None
+    if len(lines) == 1:
+        return {"type": "LineString", "coordinates": lines[0]}
+    return {"type": "MultiLineString", "coordinates": lines}
+
+
+def normalize_road_features(features) -> list:
+    """Normalise an ArcGIS FeatureServer query response's features into GeoJSON line
+    Features tagged kind='road_centerline'. Accepts BOTH GeoJSON (geometry.type
+    LineString/MultiLineString) and Esri JSON (geometry.paths). Non-line features are
+    dropped. Never carries provider credentials into properties."""
+    out = []
+    for f in features or []:
+        geom = (f or {}).get("geometry") or {}
+        if not isinstance(geom, dict):
+            continue
+        gj = None
+        if geom.get("type") in ("LineString", "MultiLineString") and isinstance(geom.get("coordinates"), list):
+            gj = {"type": geom["type"], "coordinates": geom["coordinates"]}
+        else:
+            gj = _esri_paths_to_geometry(geom)
+        if gj is not None:
+            out.append({"type": "Feature", "geometry": gj, "properties": {"kind": "road_centerline"}})
+    return out
+
+
 def fetch_arcgis_road_features(bounds: dict, *, source_url: str, timeout_s: int, session=None) -> list:
-    """Opt-in adapter: query road/route line features from a configured ArcGIS
-    FeatureServer layer within the (buffered) bounds. Worker-only, license reviewed
-    by the operator. Returns a list of GeoJSON Features (may be empty)."""
+    """Opt-in adapter: query road/route LINE features from a configured ArcGIS
+    FeatureServer layer intersecting the (buffered) bounds. Worker-only, license
+    reviewed by the operator; NO credentials are placed in the manifest/logs/mobile.
+    Requests GeoJSON but tolerates Esri JSON (paths). Returns GeoJSON line Features
+    (kind='road_centerline'); may be empty."""
     import requests
 
     s = session or requests.Session()
@@ -631,15 +809,10 @@ def fetch_arcgis_road_features(bounds: dict, *, source_url: str, timeout_s: int,
     params = {
         "where": "1=1", "geometry": bbox, "geometryType": "esriGeometryEnvelope",
         "inSR": "4326", "outSR": "4326", "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "*", "returnGeometry": "true", "f": "geojson",
+        "outFields": "", "returnGeometry": "true", "f": "geojson",
     }
     resp = s.get(source_url.rstrip("/") + "/query", params=params, timeout=timeout_s)
     resp.raise_for_status()
     fc = resp.json()
     feats = fc.get("features") if isinstance(fc, dict) else None
-    out = []
-    for f in feats or []:
-        geom = (f or {}).get("geometry") or {}
-        if isinstance(geom, dict) and geom.get("type") in ("LineString", "MultiLineString"):
-            out.append({"type": "Feature", "geometry": geom, "properties": {"kind": "road_centerline"}})
-    return out
+    return normalize_road_features(feats)
