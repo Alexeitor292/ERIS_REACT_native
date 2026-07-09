@@ -217,6 +217,64 @@ export function imageryTiles(
   return imageryIsTiled(layer) ? (layer!.tiles as ImageryTile[]) : [];
 }
 
+/** Explicit usability of the offline Cross Section tool for a package. The tool is
+ *  FULLY usable only when a roadway layout is packaged AND the app can snap (roads
+ *  geometry) or orient (upstation bearing). Prefers the packaged manifest flags
+ *  (new packages), falling back to a conservative derivation for legacy packages so
+ *  the UI never claims full usability when snap geometry is absent. */
+export type RoadCrossSectionUsability = {
+  layoutAvailable: boolean;
+  layoutSource: string | null;
+  layoutSourceLabel: string | null;
+  snapAvailable: boolean;
+  orientationAvailable: boolean;
+  fullyUsable: boolean;
+  reason: string | null; // no_road_snap_geometry | no_upstation_bearing | default_layout_only | null
+};
+
+export function roadCrossSectionUsability(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+): RoadCrossSectionUsability {
+  const layer = manifest?.context_layers?.road_cross_section;
+  const roads = manifest?.context_layers?.roads;
+  const layoutAvailable = !!layer && layer.available === true;
+  // New packages carry explicit flags — trust them.
+  if (layer && typeof (layer as Record<string, unknown>).fully_usable === "boolean") {
+    const l = layer as Record<string, unknown>;
+    return {
+      layoutAvailable,
+      layoutSource: typeof l.layout_source === "string" ? (l.layout_source as string) : null,
+      layoutSourceLabel: typeof l.layout_source_label === "string" ? (l.layout_source_label as string) : null,
+      snapAvailable: l.snap_available === true,
+      orientationAvailable: l.orientation_available === true,
+      fullyUsable: l.fully_usable === true,
+      reason: typeof l.reason === "string" ? (l.reason as string) : null,
+    };
+  }
+  // Legacy fallback: usable only if road geometry (snap) is packaged.
+  const snapAvailable = !!roads && roads.available === true;
+  return {
+    layoutAvailable,
+    layoutSource: layoutAvailable ? "UNKNOWN" : null,
+    layoutSourceLabel: null,
+    snapAvailable,
+    orientationAvailable: false,
+    fullyUsable: layoutAvailable && snapAvailable,
+    reason: layoutAvailable && !snapAvailable ? "no_road_snap_geometry" : null,
+  };
+}
+
+/** Precise reason the packaged roads layer is unavailable (for honest UI copy), or
+ *  null when roads are available. "disabled" means road context was turned off at
+ *  build time (NOT an in-area data gap). */
+export function roadsUnavailableReason(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+): string | null {
+  const roads = manifest?.context_layers?.roads;
+  if (roads && roads.available === true) return null;
+  return roads && typeof roads.reason === "string" ? roads.reason : "no_road_context";
+}
+
 /** Packaged road cross-section context (road_cross_section.json): the Road Inventory-
  *  derived roadway layout + route/postmile metadata + upstation direction + provenance,
  *  so the native Cross Section tool works fully offline. Elevation is NOT in here — it

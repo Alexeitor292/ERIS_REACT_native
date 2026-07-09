@@ -357,44 +357,53 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                         sid, ctx.get("package_version"), layer, outcome,
                         " ".join(f"{k}={v}" for k, v in kv.items()))
 
-        # --- Roads (default: ERIS-internal; opt-in external ArcGIS adapter) ---
+        # --- Roads (default: ERIS-internal; opt-in external ArcGIS centerline adapter) ---
         roads_geojson = None
+        roads_available = False
         if settings.OFFLINE_SCENE_ROADS_ENABLED:
             _emit("Collecting road context")
             try:
                 external = []
-                if settings.OFFLINE_SCENE_ROAD_SOURCE == "arcgis_feature_service" and settings.OFFLINE_SCENE_ROAD_SOURCE_URL:
+                external_configured = bool(
+                    settings.OFFLINE_SCENE_ROAD_SOURCE == "arcgis_feature_service" and settings.OFFLINE_SCENE_ROAD_SOURCE_URL
+                )
+                if external_configured:
                     bbuf = context_fmt.bounds_with_buffer(ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M)
                     external = context_fmt.fetch_arcgis_road_features(
                         bbuf, source_url=settings.OFFLINE_SCENE_ROAD_SOURCE_URL,
                         timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
                     )
-                geojson, count = context_fmt.roads_geojson_from_context(
-                    {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M
+                geojson, count, roads_reason = context_fmt.roads_geojson_from_context(
+                    {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M,
+                    external_configured=external_configured,
                 )
                 roads_geojson = geojson if count > 0 else None
                 if count > 0:
                     data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
                     if running + len(data) <= max_bytes:
                         src = {
-                            "provider": settings.OFFLINE_SCENE_ROAD_SOURCE,
-                            "dataset": "ERIS road context (bearing + road inventory)",
+                            "provider": "arcgis_feature_service" if external_configured else "eris_internal",
+                            "dataset": "ArcGIS road centerlines" if external_configured else "ERIS road context (bearing + inventory + submitted)",
                             "retrieved_at": datetime.now(timezone.utc).isoformat(),
                             "attribution": "Caltrans / ERIS road context",
                         }
+                        if external_configured:
+                            src["service"] = settings.OFFLINE_SCENE_ROAD_SOURCE_URL  # sanitized by sanitize_source
                         kinds = context_fmt.road_kinds_from_geojson(geojson)
                         layers["roads"] = context_fmt.available_layer(
                             context_fmt.ROADS_FILE, data, src, feature_count=count, road_kinds=kinds
                         )
                         assets[context_fmt.ROADS_FILE] = data
                         running += len(data)
-                        _log("roads", "packaged", features=count, bytes=len(data))
+                        roads_available = True
+                        _log("roads", "packaged", features=count, kinds=",".join(kinds), bytes=len(data))
                     else:
                         layers["roads"] = context_fmt.unavailable_layer("too_large")
                         _log("roads", "skipped_too_large", bytes=len(data))
                 else:
-                    layers["roads"] = context_fmt.unavailable_layer("no_data")
-                    _log("roads", "no_data")
+                    # PRECISE reason (never generic "no_data").
+                    layers["roads"] = context_fmt.unavailable_layer(roads_reason or "no_road_data")
+                    _log("roads", "unavailable", reason=roads_reason)
             except Exception as e:  # never corrupt the package on a road-source failure
                 layers["roads"] = context_fmt.unavailable_layer("source_error")
                 _log("roads", "source_error", error=str(e)[:120])
@@ -412,19 +421,31 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 else:
                     data = json.dumps(block, separators=(",", ":")).encode("utf-8")
                     if running + len(data) <= max_bytes:
+                        layout_source = block.get("source", "DEFAULT")
+                        # Explicit usability: the layout is packaged, but the Cross Section
+                        # tool is only FULLY usable when the app can snap (roads.geojson has
+                        # geometry) OR orient (upstation bearing). Flags go in the manifest so
+                        # the mobile UI never implies usability it does not have.
+                        usability = context_fmt.road_cross_section_usability(
+                            layout_available=True,
+                            layout_source=layout_source,
+                            snap_available=roads_available,
+                            orientation_available=block.get("upstation_bearing_deg") is not None,
+                        )
+                        label = context_fmt.layout_source_label(layout_source)
                         src = {
-                            "provider": "eris_road_inventory",
-                            "dataset": "ERIS Road Inventory cross-section layout",
-                            "attribution": "ERIS Road Inventory",
+                            "provider": "eris_road_inventory" if str(layout_source).upper() == "ROAD_INVENTORY" else "eris_default_layout",
+                            "dataset": f"Roadway cross-section layout ({label})",
+                            "attribution": label,   # DEFAULT reads "Default roadway assumptions", NOT Road Inventory
                             "retrieved_at": datetime.now(timezone.utc).isoformat(),
                         }
                         layers["road_cross_section"] = context_fmt.available_layer(
-                            context_fmt.ROAD_CROSS_SECTION_FILE, data, src,
-                            layout_source=block.get("source"),
+                            context_fmt.ROAD_CROSS_SECTION_FILE, data, src, **usability,
                         )
                         assets[context_fmt.ROAD_CROSS_SECTION_FILE] = data
                         running += len(data)
-                        _log("road_cross_section", "packaged", source=block.get("source"), bytes=len(data))
+                        _log("road_cross_section", "packaged", source=layout_source,
+                             fully_usable=usability["fully_usable"], reason=usability["reason"], bytes=len(data))
                     else:
                         layers["road_cross_section"] = context_fmt.unavailable_layer("too_large")
                         _log("road_cross_section", "skipped_too_large", bytes=len(data))

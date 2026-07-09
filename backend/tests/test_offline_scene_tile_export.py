@@ -65,7 +65,7 @@ class TestBearingLineCoversAOI:
         }
 
     def test_bearing_line_spans_the_package_not_a_260m_stub(self):
-        gj, count = ctxmod.roads_geojson_from_context(self._ctx(), buffer_m=250.0)
+        gj, count, _reason = ctxmod.roads_geojson_from_context(self._ctx(), buffer_m=250.0)
         assert count == 1
         coords = gj["features"][0]["geometry"]["coordinates"]
         span = _dist_m(coords[0], coords[-1])
@@ -74,7 +74,7 @@ class TestBearingLineCoversAOI:
         assert gj["features"][0]["properties"]["kind"] == "road_bearing"
 
     def test_bearing_line_still_clipped_to_bounds(self):
-        gj, _ = ctxmod.roads_geojson_from_context(self._ctx(bearing=90.0), buffer_m=250.0)  # due east
+        gj, _c, _reason = ctxmod.roads_geojson_from_context(self._ctx(bearing=90.0), buffer_m=250.0)  # due east
         buf = ctxmod.bounds_with_buffer(BOUNDS, 250.0)
         for lon, lat in gj["features"][0]["geometry"]["coordinates"]:
             assert buf["min_lon"] - 1e-6 <= lon <= buf["max_lon"] + 1e-6
