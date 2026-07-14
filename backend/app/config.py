@@ -130,10 +130,22 @@ class Settings(BaseSettings):
     # works in Airplane Mode. Small JSON metadata (not elevation — that is sampled from
     # the packaged terrain grid at cross-section time). Degrades gracefully.
     OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED: bool = Field(default=True)
-    OFFLINE_SCENE_ROAD_SOURCE: str = Field(default="eris_internal")  # eris_internal | arcgis_feature_service
+    # eris_internal | arcgis_feature_service | census_tigerweb
+    # See docs/adr-offline-road-context-source.md. census_tigerweb is the credential-free
+    # DEVELOPMENT road-snap source (public U.S. Census TIGERweb); arcgis_feature_service is
+    # retained for a future authorized Caltrans/ArcGIS Enterprise centerline layer.
+    OFFLINE_SCENE_ROAD_SOURCE: str = Field(default="eris_internal")
     OFFLINE_SCENE_ROAD_SOURCE_URL: str | None = Field(default=None)  # required for arcgis_feature_service
     OFFLINE_SCENE_ROAD_BUFFER_M: float = Field(default=250.0)        # bounds buffer for clipping
     OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S: int = Field(default=30)
+    # Public U.S. Census TIGERweb Transportation MapServer (no credentials/tokens). Layers:
+    # 2 = Primary Roads, 6 = Secondary Roads, 8 = Local Roads. Worker-side fetch ONLY —
+    # the mobile app never contacts a road source. TIGERweb is road SNAP CONTEXT, not
+    # Caltrans engineering/survey-grade data (provenance must say U.S. Census Bureau).
+    OFFLINE_SCENE_TIGERWEB_BASE_URL: str = Field(
+        default="https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer"
+    )
+    OFFLINE_SCENE_TIGERWEB_LAYERS: str = Field(default="2,6,8")
 
     # Aerial/satellite imagery drape. OPT-IN: NAIP (USGS/USDA, public domain) is the
     # intended licence-clean provider, but must be validated on a live worker before

@@ -776,43 +776,197 @@ def _esri_paths_to_geometry(geom: dict) -> dict | None:
     return {"type": "MultiLineString", "coordinates": lines}
 
 
-def normalize_road_features(features) -> list:
-    """Normalise an ArcGIS FeatureServer query response's features into GeoJSON line
-    Features tagged kind='road_centerline'. Accepts BOTH GeoJSON (geometry.type
-    LineString/MultiLineString) and Esri JSON (geometry.paths). Non-line features are
-    dropped. Never carries provider credentials into properties."""
+# Safe, non-sensitive attribute allowlist for packaged road centerlines (TIGERweb).
+# Nothing else from the provider is carried into the offline package.
+TIGER_ROAD_PROPS = ("NAME", "BASENAME", "MTFCC", "RTTYP")
+
+
+def _safe_props(feature: dict, keep_props) -> dict:
+    """Extract ONLY allowlisted scalar attributes from a GeoJSON (`properties`) or Esri
+    (`attributes`) feature. Never carries provider internals/credentials."""
+    if not keep_props:
+        return {}
+    src = feature.get("properties") if isinstance(feature.get("properties"), dict) else None
+    if src is None:
+        src = feature.get("attributes") if isinstance(feature.get("attributes"), dict) else {}
+    out: dict = {}
+    for k in keep_props:
+        v = src.get(k)
+        if v is None:
+            continue
+        if isinstance(v, (str, int, float)):  # scalars only — no nested provider objects
+            out[k] = v
+    return out
+
+
+def normalize_road_features(features, *, keep_props=None) -> list:
+    """Normalise an ArcGIS REST query response's features (MapServer OR FeatureServer)
+    into GeoJSON line Features tagged kind='road_centerline'. Accepts BOTH GeoJSON
+    (geometry.type LineString/MultiLineString) and Esri JSON (geometry.paths). Non-line
+    features are dropped. Only allowlisted attributes are preserved (keep_props); the
+    `kind` tag is written LAST so a provider attribute can never override it."""
     out = []
     for f in features or []:
-        geom = (f or {}).get("geometry") or {}
+        if not isinstance(f, dict):
+            continue
+        geom = f.get("geometry") or {}
         if not isinstance(geom, dict):
             continue
-        gj = None
         if geom.get("type") in ("LineString", "MultiLineString") and isinstance(geom.get("coordinates"), list):
             gj = {"type": geom["type"], "coordinates": geom["coordinates"]}
         else:
             gj = _esri_paths_to_geometry(geom)
-        if gj is not None:
-            out.append({"type": "Feature", "geometry": gj, "properties": {"kind": "road_centerline"}})
+        if gj is None:
+            continue
+        out.append({
+            "type": "Feature",
+            "geometry": gj,
+            "properties": {**_safe_props(f, keep_props), "kind": "road_centerline"},
+        })
     return out
 
 
-def fetch_arcgis_road_features(bounds: dict, *, source_url: str, timeout_s: int, session=None) -> list:
-    """Opt-in adapter: query road/route LINE features from a configured ArcGIS
-    FeatureServer layer intersecting the (buffered) bounds. Worker-only, license
-    reviewed by the operator; NO credentials are placed in the manifest/logs/mobile.
-    Requests GeoJSON but tolerates Esri JSON (paths). Returns GeoJSON line Features
-    (kind='road_centerline'); may be empty."""
+def _line_key(coords, precision: int):
+    pts = tuple(
+        (round(float(c[0]), precision), round(float(c[1]), precision))
+        for c in coords or []
+        if isinstance(c, (list, tuple)) and len(c) >= 2
+    )
+    rev = tuple(reversed(pts))
+    return min(pts, rev)  # direction-agnostic
+
+
+def _feature_key(geom: dict, precision: int):
+    t = geom.get("type")
+    c = geom.get("coordinates")
+    if t == "LineString":
+        parts = [c]
+    elif t == "MultiLineString":
+        parts = c or []
+    else:
+        return None
+    keys = sorted(_line_key(p, precision) for p in parts if isinstance(p, list))
+    return tuple(keys) or None
+
+
+def dedupe_line_features(features, *, precision: int = 6) -> list:
+    """Drop identical / effectively-identical line features (same geometry regardless of
+    vertex order/direction, to `precision` decimal degrees ~0.1 m). Layers 2/6/8 can
+    return the same road, and paged queries can repeat features."""
+    seen = set()
+    out = []
+    for f in features or []:
+        geom = (f or {}).get("geometry") or {}
+        key = _feature_key(geom, precision) if isinstance(geom, dict) else None
+        if key is None:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
+
+
+def fetch_arcgis_line_layer(
+    layer_url: str, bounds: dict, *, timeout_s: int, session=None, out_fields: str = "", keep_props=None
+) -> list:
+    """Query ONE ArcGIS REST line layer (`<layer_url>/query`) intersecting `bounds`.
+    Works for BOTH `MapServer/<id>` and `FeatureServer/<id>`. Requests WGS84 (4326) and
+    prefers GeoJSON, defensively falling back to Esri JSON (paths) when a service does
+    not support `f=geojson`. ArcGIS returns errors as JSON with HTTP 200 — that is
+    detected and raised. Worker-only; no credentials/tokens are ever sent or stored."""
     import requests
 
     s = session or requests.Session()
     bbox = f"{bounds['min_lon']},{bounds['min_lat']},{bounds['max_lon']},{bounds['max_lat']}"
-    params = {
-        "where": "1=1", "geometry": bbox, "geometryType": "esriGeometryEnvelope",
-        "inSR": "4326", "outSR": "4326", "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "", "returnGeometry": "true", "f": "geojson",
+    url = layer_url.rstrip("/") + "/query"
+    last_err = None
+    for fmt in ("geojson", "json"):  # prefer GeoJSON; fall back to Esri JSON
+        params = {
+            "where": "1=1", "geometry": bbox, "geometryType": "esriGeometryEnvelope",
+            "inSR": "4326", "outSR": "4326", "spatialRel": "esriSpatialRelIntersects",
+            "outFields": out_fields, "returnGeometry": "true", "f": fmt,
+        }
+        try:
+            resp = s.get(url, params=params, timeout=timeout_s)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict) and data.get("error"):
+                last_err = str(data["error"])[:160]
+                continue  # unsupported format / query error -> try the next format
+            feats = data.get("features") if isinstance(data, dict) else None
+            return normalize_road_features(feats, keep_props=keep_props)
+        except Exception as e:  # noqa: BLE001 - try the next format, else fail this layer
+            last_err = str(e)[:160]
+            continue
+    raise RuntimeError(f"road layer query failed: {last_err}")
+
+
+def fetch_arcgis_road_features(bounds: dict, *, source_url: str, timeout_s: int, session=None) -> list:
+    """Opt-in adapter (`arcgis_feature_service`): query a single configured ArcGIS
+    FeatureServer/MapServer LINE layer intersecting the (buffered) bounds. Retained for a
+    future authorized Caltrans/ArcGIS Enterprise centerline layer. Worker-only; NO
+    credentials are placed in the manifest/logs/mobile. No attributes are packaged."""
+    return fetch_arcgis_line_layer(
+        source_url, bounds, timeout_s=timeout_s, session=session, out_fields="", keep_props=None
+    )
+
+
+def parse_tigerweb_layers(spec) -> list:
+    """Parse "2,6,8" -> [2, 6, 8]. Defensive: junk entries are ignored."""
+    out: list = []
+    for part in str(spec or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            n = int(part)
+        except ValueError:
+            continue
+        if n >= 0 and n not in out:
+            out.append(n)
+    return out
+
+
+def tigerweb_source_meta(base_url: str) -> dict:
+    """TRUTHFUL provenance for packaged TIGERweb road centerlines. TIGERweb is public
+    U.S. Census road geometry used as SNAP CONTEXT — it must NEVER be labelled Caltrans,
+    ERIS Road Inventory, ArcGIS Enterprise, engineering-grade or survey-grade."""
+    return {
+        "provider": "us_census_tigerweb",
+        "dataset": "U.S. Census Bureau TIGERweb Transportation Roads",
+        "attribution": "U.S. Census Bureau",
+        "service": base_url,  # sanitized (query/userinfo stripped) by sanitize_source
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
     }
-    resp = s.get(source_url.rstrip("/") + "/query", params=params, timeout=timeout_s)
-    resp.raise_for_status()
-    fc = resp.json()
-    feats = fc.get("features") if isinstance(fc, dict) else None
-    return normalize_road_features(feats)
+
+
+def fetch_tigerweb_road_features(
+    bounds: dict, *, base_url: str, layers, timeout_s: int, session=None
+) -> list:
+    """Query the configured public TIGERweb Transportation road layers (default 2=Primary,
+    6=Secondary, 8=Local) against the (buffered) bounds and COMBINE the results.
+
+    One layer failing must NOT discard the successful layers. If EVERY layer fails, this
+    raises (the builder degrades the roads layer to reason='source_error'). Results are
+    de-duplicated and carry only the safe attribute allowlist. Credential-free, worker-only.
+    """
+    ids = parse_tigerweb_layers(layers)
+    if not base_url or not ids:
+        raise RuntimeError("TIGERweb base URL / layers not configured")
+    combined: list = []
+    failures = 0
+    for lid in ids:
+        layer_url = f"{base_url.rstrip('/')}/{int(lid)}"
+        try:
+            combined.extend(
+                fetch_arcgis_line_layer(
+                    layer_url, bounds, timeout_s=timeout_s, session=session,
+                    out_fields="*", keep_props=TIGER_ROAD_PROPS,
+                )
+            )
+        except Exception:  # noqa: BLE001 - a single layer failing is tolerated
+            failures += 1
+    if failures == len(ids):
+        raise RuntimeError(f"all {len(ids)} TIGERweb road layers failed")
+    return dedupe_line_features(combined)

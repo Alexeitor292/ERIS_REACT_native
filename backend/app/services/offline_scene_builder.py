@@ -364,15 +364,26 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             _emit("Collecting road context")
             try:
                 external = []
-                external_configured = bool(
-                    settings.OFFLINE_SCENE_ROAD_SOURCE == "arcgis_feature_service" and settings.OFFLINE_SCENE_ROAD_SOURCE_URL
-                )
+                road_source = str(settings.OFFLINE_SCENE_ROAD_SOURCE or "eris_internal")
+                tiger_configured = bool(road_source == "census_tigerweb" and settings.OFFLINE_SCENE_TIGERWEB_BASE_URL)
+                arcgis_configured = bool(road_source == "arcgis_feature_service" and settings.OFFLINE_SCENE_ROAD_SOURCE_URL)
+                external_configured = tiger_configured or arcgis_configured
                 if external_configured:
                     bbuf = context_fmt.bounds_with_buffer(ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M)
-                    external = context_fmt.fetch_arcgis_road_features(
-                        bbuf, source_url=settings.OFFLINE_SCENE_ROAD_SOURCE_URL,
-                        timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
-                    )
+                    if tiger_configured:
+                        # Public U.S. Census TIGERweb (credential-free dev road-snap source).
+                        # One layer failing does not discard the others; ALL failing raises
+                        # -> roads degrade to source_error (the terrain package still builds).
+                        external = context_fmt.fetch_tigerweb_road_features(
+                            bbuf, base_url=settings.OFFLINE_SCENE_TIGERWEB_BASE_URL,
+                            layers=settings.OFFLINE_SCENE_TIGERWEB_LAYERS,
+                            timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
+                        )
+                    else:
+                        external = context_fmt.fetch_arcgis_road_features(
+                            bbuf, source_url=settings.OFFLINE_SCENE_ROAD_SOURCE_URL,
+                            timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
+                        )
                 geojson, count, roads_reason = context_fmt.roads_geojson_from_context(
                     {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M,
                     external_configured=external_configured,
@@ -381,20 +392,30 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 if count > 0:
                     data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
                     if running + len(data) <= max_bytes:
-                        # Provenance must reflect the ACTUAL richest kind packaged — never
-                        # claim ArcGIS centerlines (or attach the service URL) when the
-                        # configured source returned nothing and only a synthetic bearing/
+                        # Provenance must reflect the ACTUAL richest kind packaged AND the
+                        # actual provider — never claim ArcGIS/Caltrans for TIGERweb, and
+                        # never claim a centerline source when only a synthetic bearing/
                         # inventory/submitted line was packaged.
                         kinds = context_fmt.road_kinds_from_geojson(geojson)
                         has_centerline = "road_centerline" in kinds
-                        src = {
-                            "provider": "arcgis_feature_service" if has_centerline else "eris_internal",
-                            "dataset": "ArcGIS road centerlines" if has_centerline else "ERIS road context (bearing + inventory + submitted)",
-                            "retrieved_at": datetime.now(timezone.utc).isoformat(),
-                            "attribution": "Caltrans / ERIS road context",
-                        }
-                        if has_centerline:
-                            src["service"] = settings.OFFLINE_SCENE_ROAD_SOURCE_URL  # sanitized by sanitize_source
+                        if has_centerline and tiger_configured:
+                            # U.S. Census Bureau — NOT Caltrans / not engineering-grade.
+                            src = context_fmt.tigerweb_source_meta(settings.OFFLINE_SCENE_TIGERWEB_BASE_URL)
+                        elif has_centerline and arcgis_configured:
+                            src = {
+                                "provider": "arcgis_feature_service",
+                                "dataset": "ArcGIS road centerlines",
+                                "attribution": "Caltrans / ERIS road context",
+                                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                                "service": settings.OFFLINE_SCENE_ROAD_SOURCE_URL,  # sanitized by sanitize_source
+                            }
+                        else:
+                            src = {
+                                "provider": "eris_internal",
+                                "dataset": "ERIS road context (bearing + inventory + submitted)",
+                                "attribution": "Caltrans / ERIS road context",
+                                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                            }
                         layers["roads"] = context_fmt.available_layer(
                             context_fmt.ROADS_FILE, data, src, feature_count=count, road_kinds=kinds
                         )

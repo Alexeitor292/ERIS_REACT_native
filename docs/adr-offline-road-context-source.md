@@ -1,8 +1,17 @@
 # ADR: Offline road-context source for development and future production
 
-Status: **Accepted for development; implementation pending**  
+Status: **Accepted for development; backend adapter IMPLEMENTED (2026-07-14)**
+
 Date: **2026-07-14**  
 Scope: automatic `.eristerrain` package generation and the native offline Cross Section tool
+
+> **Implementation note (2026-07-14).** `census_tigerweb` is implemented as a
+> backend-only worker adapter (`OFFLINE_SCENE_ROAD_SOURCE=census_tigerweb`). The ArcGIS
+> REST query path is generalized to both `MapServer/<id>` and `FeatureServer/<id>`, so
+> `arcgis_feature_service` is preserved unchanged for a future authorized Caltrans
+> Enterprise layer. No mobile, Objective-C, or Expo change was required, and **no new EAS
+> build is needed** — the shipped app already consumes `roads.geojson` with
+> `kind: "road_centerline"`.
 
 ## Context
 
@@ -33,7 +42,7 @@ This source is for development and functional field testing of:
 
 It is **not** authoritative Caltrans engineering data and must never be represented as such.
 
-The adapter is not implemented merely by this ADR. As of this decision, the code supports `eris_internal` and `arcgis_feature_service`; `census_tigerweb` is the next backend-only implementation target.
+As of the decision the code supported `eris_internal` and `arcgis_feature_service`. `census_tigerweb` has since been implemented as the backend-only adapter described under "Required implementation behavior"; the code now supports all three sources.
 
 ## Selected public service
 
@@ -67,7 +76,7 @@ OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S=30
 OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED=true
 ```
 
-These `census_tigerweb` variables are **planned**, not a claim that the current deployment already recognizes them.
+These `census_tigerweb` variables are **recognized by the backend** as of the 2026-07-14 adapter implementation. A running deployment still only uses them once the worker is redeployed with the new image and the variables are set.
 
 ## Required implementation behavior
 

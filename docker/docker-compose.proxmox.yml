@@ -107,6 +107,18 @@ services:
       OFFLINE_SCENE_DEV_MODE: ${OFFLINE_SCENE_DEV_MODE:-false}
       OFFLINE_SCENE_MAX_RADIUS_M: ${OFFLINE_SCENE_MAX_RADIUS_M:-3000}
       OFFLINE_SCENE_MAX_PACKAGE_MB: ${OFFLINE_SCENE_MAX_PACKAGE_MB:-512}
+      # Road context (worker-only fetch; the mobile app NEVER contacts a road source).
+      # eris_internal | census_tigerweb (public U.S. Census, credential-free DEV source)
+      # | arcgis_feature_service (future authorized Caltrans/Enterprise centerlines).
+      # See docs/adr-offline-road-context-source.md.
+      OFFLINE_SCENE_ROADS_ENABLED: ${OFFLINE_SCENE_ROADS_ENABLED:-true}
+      OFFLINE_SCENE_ROAD_SOURCE: ${OFFLINE_SCENE_ROAD_SOURCE:-eris_internal}
+      OFFLINE_SCENE_ROAD_SOURCE_URL: ${OFFLINE_SCENE_ROAD_SOURCE_URL:-}
+      OFFLINE_SCENE_ROAD_BUFFER_M: ${OFFLINE_SCENE_ROAD_BUFFER_M:-250}
+      OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S: ${OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S:-30}
+      OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED: ${OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED:-true}
+      OFFLINE_SCENE_TIGERWEB_BASE_URL: ${OFFLINE_SCENE_TIGERWEB_BASE_URL:-https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer}
+      OFFLINE_SCENE_TIGERWEB_LAYERS: ${OFFLINE_SCENE_TIGERWEB_LAYERS:-2,6,8}
       # High-definition TILED aerial imagery (worker-only; OFF by default). Default
       # source is public-domain USGS/USDA NAIP — never a browser ArcGIS key.
       OFFLINE_SCENE_IMAGERY_ENABLED: ${OFFLINE_SCENE_IMAGERY_ENABLED:-false}
