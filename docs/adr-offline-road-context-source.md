@@ -125,6 +125,105 @@ The roadway-layout source remains independently identified as `ROAD_INVENTORY`, 
 
 When TIGERweb geometry is available but no authoritative `roadBearingDeg` is available, ERIS may use the centerline tangent to construct a development cross-section, but it must preserve `orientation_available=false` and must not imply that the chosen line direction is verified increasing postmile. A future UX review should ensure that “Looking upstation” is not presented as authoritative in that degraded state.
 
+## Road classification (added after the first field test)
+
+Field testing of package `vg20260714175006-18` showed local streets were visible and
+selectable while the actual freeway was hard or impossible to select, because
+`roads.geojson` carried no way to tell a highway from a driveway. The class is therefore
+made **explicit and trusted** at package-build time.
+
+The class is derived from **which TIGERweb layer the worker queried**, never from a
+provider attribute:
+
+| Layer | `source_layer_id` | `road_class` | `road_class_label`        |
+| ----- | ----------------- | ------------ | ------------------------- |
+| 2     | `2`               | `primary`    | `Primary road / highway`  |
+| 6     | `6`               | `secondary`  | `Secondary road`          |
+| 8     | `8`               | `local`      | `Local road`              |
+| other | as configured     | `unclassified` | `Unclassified road`     |
+
+Every TIGERweb feature in `roads.geojson` therefore carries:
+
+```json
+{
+  "NAME": "US-50", "BASENAME": "US-50", "MTFCC": "S1100", "RTTYP": "U",
+  "source_layer_id": 2,
+  "road_class": "primary",
+  "road_class_label": "Primary road / highway",
+  "kind": "road_centerline"
+}
+```
+
+Rules that must hold:
+
+- `kind`, `source_layer_id`, `road_class`, and `road_class_label` are **ERIS-trusted**.
+  They are written **after** the provider attribute allowlist, so a TIGERweb attribute
+  named `road_class` (or `kind`) can never spoof them. A misconfigured layer ID degrades
+  to `unclassified` — it must never silently become a highway.
+- Deduplication of the same geometry across layers retains the **highest** class:
+  `primary > secondary > local > unclassified`. The priority is explicit, not an accident
+  of request order. The winning feature keeps **its own** safe metadata; loser attributes
+  are never merged in.
+- Only `NAME`, `BASENAME`, `MTFCC`, `RTTYP` are preserved from the provider.
+
+The manifest advertises only the classes **actually packaged**:
+
+```json
+"roads": {
+  "available": true, "file": "context_layers/roads.geojson",
+  "feature_count": 128, "road_kinds": ["road_centerline"],
+  "road_classes": ["local", "primary", "secondary"],
+  "road_class_counts": { "primary": 4, "secondary": 11, "local": 113 },
+  "source": { "provider": "us_census_tigerweb", "dataset": "U.S. Census Bureau TIGERweb Transportation Roads", "attribution": "U.S. Census Bureau", "service": "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer" }
+}
+```
+
+`road_classes`/`road_class_counts` are **omitted** when no classified roads were packaged
+(e.g. `eris_internal` road-bearing geometry). Provider/dataset/attribution are unchanged.
+
+This ADR does **not** decide the native renderer behavior. A later mobile milestone will
+use `road_class` for highway-first selection and the immersive cross-section transition.
+
+## Road-versus-imagery alignment diagnostic
+
+The same field test showed some TIGERweb lines appearing displaced from the packaged
+aerial imagery. Before changing the native renderer, we must know **where** the
+displacement comes from. A deterministic, server-side diagnostic renders the roads and
+the imagery of a **specific `.eristerrain` package** into one image, using only packaged
+files and no network:
+
+```sh
+python -m app.tools.offline_scene_alignment \
+  --package /tmp/package.eristerrain \
+  --output-dir /tmp/eris-alignment
+```
+
+It writes `road-imagery-alignment.png` (imagery/tile mosaic + roads styled by class:
+primary = thick magenta, secondary = medium orange, local = thin cyan, incident marker,
+package boundary outline) and `road-imagery-alignment.json` (package version, terrain and
+imagery bounds, imagery format, feature counts by class, road bbox, malformed features
+dropped, coordinates outside declared bounds, provider/dataset, and the exact
+lon/lat→pixel transform). Tiles are placed by **each tile's own declared bounds**, never
+by filename order.
+
+### Interpreting the result — the next decision
+
+- **A. Roads line up with the imagery in the diagnostic, but not on the iPhone.** The
+  package is self-consistent; the fault is in the **native coordinate/texture transform**.
+  Fix the renderer. Do not change the road source.
+- **B. Roads are displaced in the diagnostic too.** The package itself disagrees. The
+  displacement is **TIGERweb geometry versus the packaged imagery** — i.e. source accuracy
+  and generalization, which this ADR already accepts as *context, not survey-grade*. Treat
+  it as a source-accuracy question (or revisit the provider), not a renderer bug.
+
+**Warning — do not apply a global lon/lat offset.** It is tempting to eyeball one
+screenshot and shift every road by a fixed delta. Do not. TIGERweb error is *not* a
+constant translation: it varies by area, road class, and vintage, and a global nudge would
+fabricate precision, corrupt correctly-placed roads, and silently misrepresent an
+unverified alignment as a corrected one. The diagnostic measures **package-coordinate
+consistency only** — it cannot declare the imagery's visible pavement centerlines
+authoritative, and it is not a survey or an engineering-grade check.
+
 ## Alternatives retained for future review
 
 ### 1. ERIS internal context

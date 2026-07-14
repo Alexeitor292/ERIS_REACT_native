@@ -138,8 +138,11 @@ class TestSafetyAndHygiene:
         s = FakeSession({2: {"features": [_gj(IN_LINE, props)]}, 6: {"features": []}, 8: {"features": []}})
         out = _fetch(s)
         got = out[0]["properties"]
-        assert set(got) == {"NAME", "BASENAME", "MTFCC", "RTTYP", "kind"}
+        # safe provider allowlist + the ERIS-trusted road class (derived from the layer queried)
+        assert set(got) == {"NAME", "BASENAME", "MTFCC", "RTTYP",
+                            "kind", "source_layer_id", "road_class", "road_class_label"}
         assert got["kind"] == "road_centerline"       # provider attr cannot spoof `kind`
+        assert got["road_class"] == "primary" and got["source_layer_id"] == 2
         assert "SECRET" not in json.dumps(out) and "OID" not in got
 
     def test_deduplicates_identical_and_reversed_lines(self):
