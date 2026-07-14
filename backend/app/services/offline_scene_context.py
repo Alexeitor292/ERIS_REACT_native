@@ -212,18 +212,77 @@ def _iter_line_only(geom):
                 yield path
 
 
-def _clean_line(coords, bounds: dict) -> list:
-    """Keep finite [lon,lat] vertices; return the line only if it intersects the
-    (buffered) bounds. No invented/interpolated coordinates."""
+_PT_EPS = 1e-9  # ~0.1 mm in degrees — joins/duplicates below this are the same point
+
+
+def _finite_points(coords) -> list:
+    """Finite [lon,lat] vertices only (defensive; nothing invented)."""
     pts = []
-    any_in = False
     for c in coords or []:
         if isinstance(c, (list, tuple)) and len(c) >= 2 and _finite(c[0]) and _finite(c[1]):
-            lon, lat = float(c[0]), float(c[1])
-            pts.append([lon, lat])
-            if lonlat_in_bounds(lon, lat, bounds):
-                any_in = True
-    return pts if (len(pts) >= 2 and any_in) else []
+            pts.append([float(c[0]), float(c[1])])
+    return pts
+
+
+def _pt_eq(a, b) -> bool:
+    return abs(a[0] - b[0]) <= _PT_EPS and abs(a[1] - b[1]) <= _PT_EPS
+
+
+def _dedupe_adjacent(pts: list) -> list:
+    out: list = []
+    for p in pts:
+        if not out or not _pt_eq(out[-1], p):
+            out.append(p)
+    return out
+
+
+def clip_line_to_bounds(coords, bounds: dict) -> list:
+    """TRUE polyline clipping to the (buffered) bounds rectangle.
+
+    Every consecutive segment is clipped with Liang-Barsky (_clip_segment_to_bounds), so:
+      * a segment that CROSSES the bounds with BOTH endpoints outside is retained, cut to
+        the two boundary intersections (the old filter dropped it);
+      * out-of-bounds coordinates are NEVER packaged (the old filter kept the whole
+        original line whenever a single vertex happened to be inside);
+      * a line that leaves and re-enters yields SEPARATE disconnected parts;
+      * duplicate vertices created at segment joins are collapsed;
+      * parts with fewer than two distinct finite points are rejected.
+
+    Returns a list of clipped parts (each a list of [lon,lat]); [] when the line does not
+    intersect the bounds at all. Only boundary intersections are introduced — no other
+    coordinate is invented.
+    """
+    pts = _finite_points(coords)
+    if len(pts) < 2:
+        return []
+    parts: list = []
+    cur: list = []
+    for i in range(len(pts) - 1):
+        seg = _clip_segment_to_bounds(pts[i], pts[i + 1], bounds)
+        if seg is None:  # segment entirely outside -> current part ends here
+            if len(cur) >= 2:
+                parts.append(cur)
+            cur = []
+            continue
+        a, b = seg
+        if cur and not _pt_eq(cur[-1], a):
+            # The clipped piece does not continue the current part (the line left the
+            # bounds and re-entered elsewhere) -> start a new disconnected part.
+            if len(cur) >= 2:
+                parts.append(cur)
+            cur = []
+        if not cur:
+            cur = [a]
+        if not _pt_eq(cur[-1], b):
+            cur.append(b)
+    if len(cur) >= 2:
+        parts.append(cur)
+    out = []
+    for p in parts:
+        d = _dedupe_adjacent(p)
+        if len(d) >= 2:
+            out.append(d)
+    return out
 
 
 # Precise reasons roads.geojson has no usable snap geometry (never a generic "no_data").
@@ -246,28 +305,35 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
       D. a synthetic AOI-spanning road_bearing LineString (incident + roadBearingDeg),
          clipped to bounds — the snap/orientation fallback.
 
-    All geometry is clipped to bounds + buffer. When nothing is available, the reason
-    tells the operator exactly what is missing / what to configure.
+    ALL geometry is TRULY CLIPPED to bounds + buffer (Liang-Barsky per segment, see
+    clip_line_to_bounds): a line crossing the AOI with both endpoints outside is retained
+    cut to the boundary, out-of-bounds coordinates are never packaged, and a line that
+    leaves and re-enters becomes separate LineString features. When nothing is available,
+    the reason tells the operator exactly what is missing / what to configure.
     """
     bounds = bounds_with_buffer(ctx["bounds"], buffer_m)
     overlays = ctx.get("overlays") or {}
     features: list = []
 
-    # A. External centerlines (already road_centerline kind); clip defensively to bounds.
+    def _emit(line, props: dict) -> None:
+        """Clip a raw line to the buffered bounds and emit ONE LineString Feature per
+        surviving (disconnected) part. No out-of-bounds coordinate is ever packaged."""
+        for part in clip_line_to_bounds(line, bounds):
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": part},
+                "properties": dict(props),
+            })
+
+    # A. External centerlines (already road_centerline kind); clipped to bounds.
     external_count = 0
     for feat in ctx.get("external_road_features") or []:
         if not isinstance(feat, dict):
             continue
         external_count += 1
+        props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
         for line in _iter_line_only((feat or {}).get("geometry")):
-            cleaned = _clean_line(line, bounds)
-            if cleaned:
-                props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
-                features.append({
-                    "type": "Feature",
-                    "geometry": {"type": "LineString", "coordinates": cleaned},
-                    "properties": {**props, "kind": props.get("kind") or "road_centerline"},
-                })
+            _emit(line, {**props, "kind": props.get("kind") or "road_centerline"})
 
     # B. Road-inventory line geometry (route/postmile metadata when available).
     inv_meta = {}
@@ -277,23 +343,11 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
             if rxs_attrs.get(k) is not None:
                 inv_meta[k] = rxs_attrs[k]
     for line in _iter_line_only(ctx.get("road_inventory_geometry")):
-        cleaned = _clean_line(line, bounds)
-        if cleaned:
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": cleaned},
-                "properties": {"kind": "road_inventory", **inv_meta},
-            })
+        _emit(line, {"kind": "road_inventory", **inv_meta})
 
     # C. Submitted incident geometry — ONLY line-like parts (never polygons).
     for line in _iter_line_only(overlays.get("geometry")):
-        cleaned = _clean_line(line, bounds)
-        if cleaned:
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": cleaned},
-                "properties": {"kind": "submitted_road_geometry"},
-            })
+        _emit(line, {"kind": "submitted_road_geometry"})
 
     # D. Synthetic AOI-spanning road-bearing fallback (snap + orientation).
     incident = overlays.get("incident")
@@ -301,14 +355,7 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
     if isinstance(incident, dict) and _finite(incident.get("lat")) and _finite(incident.get("lon")) and _finite(bearing):
         span_m = _aoi_span_m(ctx.get("bounds") or {}) * 2.0 + 260.0
         long_line = road_bearing_line(incident, float(bearing), length_m=span_m)
-        clipped = _clip_segment_to_bounds(long_line[0], long_line[1], bounds)
-        line = _clean_line(clipped, bounds) if clipped else []
-        if line:
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": line},
-                "properties": {"kind": "road_bearing", "bearing_deg": round(float(bearing), 1)},
-            })
+        _emit(long_line, {"kind": "road_bearing", "bearing_deg": round(float(bearing), 1)})
 
     count = len(features)
     reason = None
@@ -776,43 +823,197 @@ def _esri_paths_to_geometry(geom: dict) -> dict | None:
     return {"type": "MultiLineString", "coordinates": lines}
 
 
-def normalize_road_features(features) -> list:
-    """Normalise an ArcGIS FeatureServer query response's features into GeoJSON line
-    Features tagged kind='road_centerline'. Accepts BOTH GeoJSON (geometry.type
-    LineString/MultiLineString) and Esri JSON (geometry.paths). Non-line features are
-    dropped. Never carries provider credentials into properties."""
+# Safe, non-sensitive attribute allowlist for packaged road centerlines (TIGERweb).
+# Nothing else from the provider is carried into the offline package.
+TIGER_ROAD_PROPS = ("NAME", "BASENAME", "MTFCC", "RTTYP")
+
+
+def _safe_props(feature: dict, keep_props) -> dict:
+    """Extract ONLY allowlisted scalar attributes from a GeoJSON (`properties`) or Esri
+    (`attributes`) feature. Never carries provider internals/credentials."""
+    if not keep_props:
+        return {}
+    src = feature.get("properties") if isinstance(feature.get("properties"), dict) else None
+    if src is None:
+        src = feature.get("attributes") if isinstance(feature.get("attributes"), dict) else {}
+    out: dict = {}
+    for k in keep_props:
+        v = src.get(k)
+        if v is None:
+            continue
+        if isinstance(v, (str, int, float)):  # scalars only — no nested provider objects
+            out[k] = v
+    return out
+
+
+def normalize_road_features(features, *, keep_props=None) -> list:
+    """Normalise an ArcGIS REST query response's features (MapServer OR FeatureServer)
+    into GeoJSON line Features tagged kind='road_centerline'. Accepts BOTH GeoJSON
+    (geometry.type LineString/MultiLineString) and Esri JSON (geometry.paths). Non-line
+    features are dropped. Only allowlisted attributes are preserved (keep_props); the
+    `kind` tag is written LAST so a provider attribute can never override it."""
     out = []
     for f in features or []:
-        geom = (f or {}).get("geometry") or {}
+        if not isinstance(f, dict):
+            continue
+        geom = f.get("geometry") or {}
         if not isinstance(geom, dict):
             continue
-        gj = None
         if geom.get("type") in ("LineString", "MultiLineString") and isinstance(geom.get("coordinates"), list):
             gj = {"type": geom["type"], "coordinates": geom["coordinates"]}
         else:
             gj = _esri_paths_to_geometry(geom)
-        if gj is not None:
-            out.append({"type": "Feature", "geometry": gj, "properties": {"kind": "road_centerline"}})
+        if gj is None:
+            continue
+        out.append({
+            "type": "Feature",
+            "geometry": gj,
+            "properties": {**_safe_props(f, keep_props), "kind": "road_centerline"},
+        })
     return out
 
 
-def fetch_arcgis_road_features(bounds: dict, *, source_url: str, timeout_s: int, session=None) -> list:
-    """Opt-in adapter: query road/route LINE features from a configured ArcGIS
-    FeatureServer layer intersecting the (buffered) bounds. Worker-only, license
-    reviewed by the operator; NO credentials are placed in the manifest/logs/mobile.
-    Requests GeoJSON but tolerates Esri JSON (paths). Returns GeoJSON line Features
-    (kind='road_centerline'); may be empty."""
+def _line_key(coords, precision: int):
+    pts = tuple(
+        (round(float(c[0]), precision), round(float(c[1]), precision))
+        for c in coords or []
+        if isinstance(c, (list, tuple)) and len(c) >= 2
+    )
+    rev = tuple(reversed(pts))
+    return min(pts, rev)  # direction-agnostic
+
+
+def _feature_key(geom: dict, precision: int):
+    t = geom.get("type")
+    c = geom.get("coordinates")
+    if t == "LineString":
+        parts = [c]
+    elif t == "MultiLineString":
+        parts = c or []
+    else:
+        return None
+    keys = sorted(_line_key(p, precision) for p in parts if isinstance(p, list))
+    return tuple(keys) or None
+
+
+def dedupe_line_features(features, *, precision: int = 6) -> list:
+    """Drop identical / effectively-identical line features (same geometry regardless of
+    vertex order/direction, to `precision` decimal degrees ~0.1 m). Layers 2/6/8 can
+    return the same road, and paged queries can repeat features."""
+    seen = set()
+    out = []
+    for f in features or []:
+        geom = (f or {}).get("geometry") or {}
+        key = _feature_key(geom, precision) if isinstance(geom, dict) else None
+        if key is None:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
+
+
+def fetch_arcgis_line_layer(
+    layer_url: str, bounds: dict, *, timeout_s: int, session=None, out_fields: str = "", keep_props=None
+) -> list:
+    """Query ONE ArcGIS REST line layer (`<layer_url>/query`) intersecting `bounds`.
+    Works for BOTH `MapServer/<id>` and `FeatureServer/<id>`. Requests WGS84 (4326) and
+    prefers GeoJSON, defensively falling back to Esri JSON (paths) when a service does
+    not support `f=geojson`. ArcGIS returns errors as JSON with HTTP 200 — that is
+    detected and raised. Worker-only; no credentials/tokens are ever sent or stored."""
     import requests
 
     s = session or requests.Session()
     bbox = f"{bounds['min_lon']},{bounds['min_lat']},{bounds['max_lon']},{bounds['max_lat']}"
-    params = {
-        "where": "1=1", "geometry": bbox, "geometryType": "esriGeometryEnvelope",
-        "inSR": "4326", "outSR": "4326", "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "", "returnGeometry": "true", "f": "geojson",
+    url = layer_url.rstrip("/") + "/query"
+    last_err = None
+    for fmt in ("geojson", "json"):  # prefer GeoJSON; fall back to Esri JSON
+        params = {
+            "where": "1=1", "geometry": bbox, "geometryType": "esriGeometryEnvelope",
+            "inSR": "4326", "outSR": "4326", "spatialRel": "esriSpatialRelIntersects",
+            "outFields": out_fields, "returnGeometry": "true", "f": fmt,
+        }
+        try:
+            resp = s.get(url, params=params, timeout=timeout_s)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict) and data.get("error"):
+                last_err = str(data["error"])[:160]
+                continue  # unsupported format / query error -> try the next format
+            feats = data.get("features") if isinstance(data, dict) else None
+            return normalize_road_features(feats, keep_props=keep_props)
+        except Exception as e:  # noqa: BLE001 - try the next format, else fail this layer
+            last_err = str(e)[:160]
+            continue
+    raise RuntimeError(f"road layer query failed: {last_err}")
+
+
+def fetch_arcgis_road_features(bounds: dict, *, source_url: str, timeout_s: int, session=None) -> list:
+    """Opt-in adapter (`arcgis_feature_service`): query a single configured ArcGIS
+    FeatureServer/MapServer LINE layer intersecting the (buffered) bounds. Retained for a
+    future authorized Caltrans/ArcGIS Enterprise centerline layer. Worker-only; NO
+    credentials are placed in the manifest/logs/mobile. No attributes are packaged."""
+    return fetch_arcgis_line_layer(
+        source_url, bounds, timeout_s=timeout_s, session=session, out_fields="", keep_props=None
+    )
+
+
+def parse_tigerweb_layers(spec) -> list:
+    """Parse "2,6,8" -> [2, 6, 8]. Defensive: junk entries are ignored."""
+    out: list = []
+    for part in str(spec or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            n = int(part)
+        except ValueError:
+            continue
+        if n >= 0 and n not in out:
+            out.append(n)
+    return out
+
+
+def tigerweb_source_meta(base_url: str) -> dict:
+    """TRUTHFUL provenance for packaged TIGERweb road centerlines. TIGERweb is public
+    U.S. Census road geometry used as SNAP CONTEXT — it must NEVER be labelled Caltrans,
+    ERIS Road Inventory, ArcGIS Enterprise, engineering-grade or survey-grade."""
+    return {
+        "provider": "us_census_tigerweb",
+        "dataset": "U.S. Census Bureau TIGERweb Transportation Roads",
+        "attribution": "U.S. Census Bureau",
+        "service": base_url,  # sanitized (query/userinfo stripped) by sanitize_source
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
     }
-    resp = s.get(source_url.rstrip("/") + "/query", params=params, timeout=timeout_s)
-    resp.raise_for_status()
-    fc = resp.json()
-    feats = fc.get("features") if isinstance(fc, dict) else None
-    return normalize_road_features(feats)
+
+
+def fetch_tigerweb_road_features(
+    bounds: dict, *, base_url: str, layers, timeout_s: int, session=None
+) -> list:
+    """Query the configured public TIGERweb Transportation road layers (default 2=Primary,
+    6=Secondary, 8=Local) against the (buffered) bounds and COMBINE the results.
+
+    One layer failing must NOT discard the successful layers. If EVERY layer fails, this
+    raises (the builder degrades the roads layer to reason='source_error'). Results are
+    de-duplicated and carry only the safe attribute allowlist. Credential-free, worker-only.
+    """
+    ids = parse_tigerweb_layers(layers)
+    if not base_url or not ids:
+        raise RuntimeError("TIGERweb base URL / layers not configured")
+    combined: list = []
+    failures = 0
+    for lid in ids:
+        layer_url = f"{base_url.rstrip('/')}/{int(lid)}"
+        try:
+            combined.extend(
+                fetch_arcgis_line_layer(
+                    layer_url, bounds, timeout_s=timeout_s, session=session,
+                    out_fields="*", keep_props=TIGER_ROAD_PROPS,
+                )
+            )
+        except Exception:  # noqa: BLE001 - a single layer failing is tolerated
+            failures += 1
+    if failures == len(ids):
+        raise RuntimeError(f"all {len(ids)} TIGERweb road layers failed")
+    return dedupe_line_features(combined)

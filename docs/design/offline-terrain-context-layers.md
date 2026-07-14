@@ -19,8 +19,9 @@ road-provider configuration or implementing a new adapter.
 
 - **Selected development source:** public U.S. Census Bureau TIGERweb
   Transportation road geometry, queried by the worker during package generation.
-- **Implementation status:** decision accepted, backend implementation pending.
-  Current code still supports `eris_internal` and `arcgis_feature_service`.
+- **Implementation status:** **implemented (backend-only, 2026-07-14).** The code now
+  supports `eris_internal`, `census_tigerweb`, and `arcgis_feature_service`. No mobile /
+  Objective-C / Expo change and **no new EAS build** were required.
 - **Why:** this allows independent development without connecting the current ERIS
   environment to Caltrans ArcGIS Enterprise yet.
 - **Production posture:** Caltrans ArcGIS Enterprise remains a future authoritative
@@ -85,23 +86,44 @@ overview still work.
 
 ## Config knobs (safe defaults, fail-graceful)
 
-Current implemented road sources:
+Implemented road sources:
 
 ```env
 OFFLINE_SCENE_ROADS_ENABLED=true
-OFFLINE_SCENE_ROAD_SOURCE=eris_internal          # eris_internal | arcgis_feature_service
+# eris_internal | census_tigerweb | arcgis_feature_service
+OFFLINE_SCENE_ROAD_SOURCE=eris_internal
 OFFLINE_SCENE_ROAD_SOURCE_URL=                   # required only for arcgis_feature_service
 OFFLINE_SCENE_ROAD_BUFFER_M=250
 OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S=30
 ```
 
-Planned TIGERweb development source (not implemented merely by documenting it):
+TIGERweb development source (implemented; credential-free, worker-only):
 
 ```env
 OFFLINE_SCENE_ROAD_SOURCE=census_tigerweb
 OFFLINE_SCENE_TIGERWEB_BASE_URL=https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer
-OFFLINE_SCENE_TIGERWEB_LAYERS=2,6,8
+OFFLINE_SCENE_TIGERWEB_LAYERS=2,6,8   # 2 Primary, 6 Secondary, 8 Local
 ```
+
+TIGERweb behavior: layers are queried against bounds + buffer in WGS84 (GeoJSON preferred,
+Esri `paths` accepted defensively); successful layers are combined even if one fails; all
+layers failing degrades roads to `source_error`; geometry is de-duplicated; only `NAME`,
+`BASENAME`, `MTFCC`, `RTTYP` are packaged; features are tagged `kind: "road_centerline"`;
+provenance is `us_census_tigerweb` / U.S. Census Bureau.
+
+### Road geometry clipping (all sources)
+
+Every packaged road line — TIGERweb/external centerlines, road-inventory geometry,
+submitted line geometry, and the synthetic road-bearing line — is **truly clipped** to the
+buffered bounds with per-segment Liang-Barsky (`clip_line_to_bounds`), not merely filtered:
+
+- a segment that **crosses** the AOI with both endpoints outside is **retained**, cut to the
+  boundary intersections;
+- **no out-of-bounds coordinate is ever packaged**;
+- a line that leaves and re-enters the AOI becomes **separate `LineString` features** (the
+  mobile snap parser already handles multiple line features);
+- duplicate vertices at segment joins are collapsed, and parts with fewer than two distinct
+  points are rejected.
 
 Other context settings:
 
@@ -151,10 +173,11 @@ provider key belongs in the mobile app or committed `.env` files.
 
 ## Open work and review points
 
-- Implement `census_tigerweb` as a backend-only provider, supporting the public
-  `MapServer/<layer>/query` contract and truthful Census provenance.
+- ~~Implement `census_tigerweb` as a backend-only provider~~ — **done (2026-07-14)**:
+  supports the public `MapServer/<layer>/query` contract (and `FeatureServer/<layer>`)
+  with truthful Census provenance.
 - Revalidate TIGERweb layer IDs `2`, `6`, and `8`, schemas, access behavior, and
-  service limits during implementation and periodically afterward.
+  service limits periodically (public service schemas can change).
 - Ensure a TIGER-only tangent is not presented as authoritative increasing-postmile
   upstation when no resolved road bearing exists.
 - Perform physical iPhone Airplane-Mode acceptance with a newly generated package
