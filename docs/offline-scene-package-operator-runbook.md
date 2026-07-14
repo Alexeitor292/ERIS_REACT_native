@@ -301,7 +301,17 @@ package works with **no cellular service** — the iOS viewer reads only local f
   road-bearing segment + road-inventory line geometry), clipped to the package
   bounds + `OFFLINE_SCENE_ROAD_BUFFER_M`. No third-party provider unless an
   operator opts into `OFFLINE_SCENE_ROAD_SOURCE=arcgis_feature_service` with a
-  license-reviewed `OFFLINE_SCENE_ROAD_SOURCE_URL`.
+  license-reviewed `OFFLINE_SCENE_ROAD_SOURCE_URL`, or
+  `OFFLINE_SCENE_ROAD_SOURCE=census_tigerweb` (public, credential-free).
+  **Road class:** TIGERweb features carry an ERIS-trusted class derived from the
+  layer queried — layer `2` → `road_class: "primary"` ("Primary road / highway"),
+  `6` → `"secondary"`, `8` → `"local"` — alongside `source_layer_id` and
+  `road_class_label`. These are written *after* the provider attributes, so a
+  provider attribute can never spoof them. When the same geometry appears in two
+  layers, the **highest** class wins (`primary > secondary > local`), independent of
+  request order. The manifest advertises only the classes actually packaged, via
+  `road_classes` + `road_class_counts` (both omitted when no classified roads are
+  present, e.g. `eris_internal`).
 - **Overview** (`overview.png`) — ERIS server-rendered north-up inset.
 - **Aerial imagery** (`imagery.png`) — **opt-in**, USGS/USDA NAIP (public domain).
   `OFFLINE_SCENE_IMAGERY_ENABLED=false` by default; enable + validate on a worker
@@ -343,3 +353,92 @@ its `source` must carry provenance only (no credentials/tokens).
 surface, the north-up overview inset, Layers toggles, Terrain/Satellite/Hybrid
 switching (only when imagery packaged), and the Package Details sheet, all with the
 device in Airplane Mode.
+
+## 12. Road-versus-imagery alignment diagnostic
+
+When a field tester reports that roads look **displaced from the aerial imagery**, do not
+guess and do not patch the renderer yet. Run this diagnostic against the **exact package
+the tester downloaded**. It reads only the files inside the `.eristerrain` bundle and
+makes **no network requests**, so it answers one question deterministically: *is the
+package itself self-consistent?*
+
+**Retrieve the latest package from MinIO and run the diagnostic** (on the ERIS server;
+same `C` compose invocation as the verification block above):
+
+```sh
+C="docker compose --env-file docker/.env.proxmox -f docker/docker-compose.yml -f docker/docker-compose.proxmox.yml"
+set -a; . docker/.env.proxmox; set +a
+
+# 1) Newest READY package (the catalog is the source of truth).
+OBJECT_KEY="$($C exec -T mariadb mariadb -u root -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE" -N -B -e \
+  "SELECT object_key FROM offline_scene_packages WHERE status='READY' ORDER BY id DESC LIMIT 1;")"
+echo "object_key=$OBJECT_KEY"
+
+# 2) Fetch it with a FRESH presigned grant (no credentials are exposed or printed).
+URL="$($C exec -T backend python -c "
+from app.storage import presign_get
+from app.config import settings
+print(presign_get('$OBJECT_KEY', bucket=settings.MINIO_OFFLINE_SCENES_BUCKET, expires_seconds=300))
+")"
+curl -sS -o /tmp/package.eristerrain "$URL"
+
+# 3) Run the diagnostic inside the packaging worker. The Compose service is
+#    `offline-scene-worker` (there is NO service named `worker`).
+#    Its image ships Pillow + app.tools.
+$C cp /tmp/package.eristerrain offline-scene-worker:/tmp/package.eristerrain
+$C exec -T offline-scene-worker python -m app.tools.offline_scene_alignment \
+  --package /tmp/package.eristerrain --output-dir /tmp/eris-alignment
+$C exec -T offline-scene-worker cat /tmp/eris-alignment/road-imagery-alignment.json
+
+# 4) Pull the image back to the host to look at it.
+$C cp offline-scene-worker:/tmp/eris-alignment/road-imagery-alignment.png ./road-imagery-alignment.png
+```
+
+**Outputs** (in `--output-dir`):
+
+- `road-imagery-alignment.png` — north-up, east-right. Packaged imagery as the background
+  (a single `imagery.png`, or a mosaic rebuilt from **each tile's own declared bounds** —
+  never filename order). Roads drawn on top, styled by class so a highway is unmistakable:
+  **primary = thick magenta**, **secondary = medium orange**, **local = thin cyan**.
+  Plus the incident marker and the package-boundary outline.
+- `road-imagery-alignment.json` — package version, terrain bounds, imagery format +
+  bounds, road feature count and counts by `road_class`, road geometry bbox, malformed
+  features dropped, the road clipping contract, the two out-of-bounds counters (below),
+  source provider/dataset, output image dimensions, and the exact lon/lat→pixel transform.
+  It contains **no** credentials, query strings, tokens, local source paths, or MinIO
+  secrets.
+
+**Roads are buffered — read the two counters correctly.** Road context is deliberately
+clipped to *terrain bounds + `OFFLINE_SCENE_ROAD_BUFFER_M`*, so roads legitimately extend
+past the terrain/imagery footprint. The package records the exact contract it applied
+(`context_layers.roads.clip_bounds` + `buffer_m`) and the diagnostic judges against
+**that**, never against live config:
+
+| Field | Meaning |
+| --- | --- |
+| `coordinates_outside_terrain_bounds` | Outside the terrain/imagery frame. **Expected to be non-zero** — that is the road buffer doing its job. Not an error. Such geometry is still drawn; Pillow clips it at the canvas edge. |
+| `coordinates_outside_road_clip_bounds` | Outside the package's **own declared** `clip_bounds`. This is a **packaging contract violation** and should normally be `0`. |
+| `road_clip_bounds_status` | `declared`, or `not_declared_legacy` for a package built before this field existed — then `road_clip_bounds` and `coordinates_outside_road_clip_bounds` are `null` (**unknown**, not zero). Terrain bounds are *not* a substitute. |
+
+**How to read it — this is the decision:**
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| **A.** Roads sit on the pavement in the PNG, but are displaced on the iPhone | The package is self-consistent. The bug is in the **native coordinate/texture transform**. | Fix the renderer. Do not touch the road source. |
+| **B.** Roads are displaced in the PNG too | The package itself disagrees: **TIGERweb geometry vs. the packaged imagery**. | Treat as source accuracy/generalization (TIGERweb is context, not survey-grade). Do not "fix" the renderer. |
+
+Also check the JSON before drawing conclusions: a non-zero
+`coordinates_outside_road_clip_bounds` (a clipping/packaging contract violation), a
+non-zero `malformed_features_dropped`, or an `imagery_bounds` that differs from
+`terrain_bounds`, each explain apparent displacement on their own.
+
+**`coordinates_outside_terrain_bounds` does not.** It is expected to be non-zero because
+of the configured road buffer, and buffered geometry is *not* an explanation for roads
+sitting off the pavement. Do not cite it as one.
+
+> **Warning — never apply a global lon/lat offset based on one screenshot.** TIGERweb error
+> is not a constant translation; it varies by area, road class, and vintage. A blanket nudge
+> would corrupt correctly-placed roads and dress up an unverified alignment as a corrected
+> one. The diagnostic proves **package-coordinate consistency only** — it cannot declare the
+> imagery's visible pavement centerlines authoritative, and it is not a survey or an
+> engineering-grade check.

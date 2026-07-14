@@ -416,8 +416,26 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                                 "attribution": "Caltrans / ERIS road context",
                                 "retrieved_at": datetime.now(timezone.utc).isoformat(),
                             }
+                        # Bounded, truthful road-class metadata — ONLY classes actually
+                        # packaged (so a highway-first UI can tell primary from local).
+                        class_counts = context_fmt.road_class_counts(geojson)
+                        extra = {
+                            "feature_count": count,
+                            "road_kinds": kinds,
+                            # The road CLIPPING CONTRACT, persisted exactly as applied.
+                            # Roads are clipped to bounds + buffer, so they legitimately
+                            # extend past the terrain/imagery footprint. A reader must use
+                            # THIS, not live config, to judge a coordinate in/out of bounds.
+                            "clip_bounds": context_fmt.road_clip_bounds(
+                                ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M
+                            ),
+                            "buffer_m": float(settings.OFFLINE_SCENE_ROAD_BUFFER_M),
+                        }
+                        if class_counts:
+                            extra["road_classes"] = sorted(class_counts)
+                            extra["road_class_counts"] = class_counts
                         layers["roads"] = context_fmt.available_layer(
-                            context_fmt.ROADS_FILE, data, src, feature_count=count, road_kinds=kinds
+                            context_fmt.ROADS_FILE, data, src, **extra
                         )
                         assets[context_fmt.ROADS_FILE] = data
                         running += len(data)

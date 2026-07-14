@@ -58,6 +58,14 @@ def _finite(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
+def road_clip_bounds(bounds: dict, buffer_m: float) -> dict:
+    """THE road clipping contract: the exact bounds `roads_geojson_from_context` clips
+    road geometry to. The builder persists the result in the roads manifest layer
+    (`clip_bounds`) so a package stays self-describing — a reader must NEVER recompute
+    it from live config. Both call sites go through this one function so they cannot drift."""
+    return bounds_with_buffer(bounds, buffer_m)
+
+
 def bounds_with_buffer(bounds: dict, buffer_m: float) -> dict:
     """Expand geographic bounds by buffer_m (approx, local equirectangular)."""
     d_lat = max(0.0, float(buffer_m)) / _M_PER_DEG_LAT
@@ -311,7 +319,7 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
     leaves and re-enters becomes separate LineString features. When nothing is available,
     the reason tells the operator exactly what is missing / what to configure.
     """
-    bounds = bounds_with_buffer(ctx["bounds"], buffer_m)
+    bounds = road_clip_bounds(ctx["bounds"], buffer_m)
     overlays = ctx.get("overlays") or {}
     features: list = []
 
@@ -827,6 +835,52 @@ def _esri_paths_to_geometry(geom: dict) -> dict | None:
 # Nothing else from the provider is carried into the offline package.
 TIGER_ROAD_PROPS = ("NAME", "BASENAME", "MTFCC", "RTTYP")
 
+# --- Road class (ERIS-TRUSTED, derived from the TIGERweb layer we queried) -------------
+# The configured TIGERweb Transportation layers:
+#   2 = Primary Roads, 6 = Secondary Roads, 8 = Local Roads
+# The class is decided by ERIS from the LAYER ID we asked for — never from a provider
+# attribute — so a provider field can never spoof it.
+TIGERWEB_LAYER_CLASS = {2: "primary", 6: "secondary", 8: "local"}
+ROAD_CLASS_LABELS = {
+    "primary": "Primary road / highway",
+    "secondary": "Secondary road",
+    "local": "Local road",
+    "unclassified": "Unclassified road",
+}
+# Explicit, order-INDEPENDENT dedupe priority: a duplicate geometry keeps its highest
+# classification (a freeway that also appears in the local layer stays primary).
+ROAD_CLASS_PRIORITY = {"primary": 3, "secondary": 2, "local": 1, "unclassified": 0}
+# ERIS-trusted property names that provider attributes may NEVER override.
+TRUSTED_ROAD_PROPS = ("kind", "source_layer_id", "road_class", "road_class_label")
+
+
+def road_class_for_layer(layer_id) -> str:
+    """TIGERweb layer id -> ERIS road class. Unknown/misconfigured layer ids are honestly
+    'unclassified' (lowest dedupe priority) rather than silently claimed as a highway."""
+    try:
+        return TIGERWEB_LAYER_CLASS.get(int(layer_id), "unclassified")
+    except (TypeError, ValueError):
+        return "unclassified"
+
+
+def road_class_label(road_class) -> str:
+    return ROAD_CLASS_LABELS.get(str(road_class), ROAD_CLASS_LABELS["unclassified"])
+
+
+def road_class_priority(road_class) -> int:
+    return ROAD_CLASS_PRIORITY.get(str(road_class), 0)
+
+
+def road_class_counts(geojson: dict | None) -> dict:
+    """Counts of packaged features by road_class (only classes actually present)."""
+    counts: dict = {}
+    for f in (geojson or {}).get("features") or []:
+        props = (f or {}).get("properties") if isinstance(f, dict) else None
+        rc = props.get("road_class") if isinstance(props, dict) else None
+        if isinstance(rc, str) and rc:
+            counts[rc] = counts.get(rc, 0) + 1
+    return counts
+
 
 def _safe_props(feature: dict, keep_props) -> dict:
     """Extract ONLY allowlisted scalar attributes from a GeoJSON (`properties`) or Esri
@@ -846,13 +900,17 @@ def _safe_props(feature: dict, keep_props) -> dict:
     return out
 
 
-def normalize_road_features(features, *, keep_props=None) -> list:
+def normalize_road_features(features, *, keep_props=None, trusted: dict | None = None) -> list:
     """Normalise an ArcGIS REST query response's features (MapServer OR FeatureServer)
     into GeoJSON line Features tagged kind='road_centerline'. Accepts BOTH GeoJSON
     (geometry.type LineString/MultiLineString) and Esri JSON (geometry.paths). Non-line
-    features are dropped. Only allowlisted attributes are preserved (keep_props); the
-    `kind` tag is written LAST so a provider attribute can never override it."""
+    features are dropped.
+
+    Only allowlisted provider attributes are preserved (keep_props). The ERIS-TRUSTED
+    properties (`trusted`: source_layer_id / road_class / road_class_label) and `kind` are
+    written LAST, so a provider attribute can NEVER spoof them."""
     out = []
+    safe_trusted = {k: v for k, v in (trusted or {}).items() if k in TRUSTED_ROAD_PROPS}
     for f in features or []:
         if not isinstance(f, dict):
             continue
@@ -868,7 +926,8 @@ def normalize_road_features(features, *, keep_props=None) -> list:
         out.append({
             "type": "Feature",
             "geometry": gj,
-            "properties": {**_safe_props(f, keep_props), "kind": "road_centerline"},
+            # provider attrs first; ERIS-trusted values last (unspoofable)
+            "properties": {**_safe_props(f, keep_props), **safe_trusted, "kind": "road_centerline"},
         })
     return out
 
@@ -899,29 +958,43 @@ def _feature_key(geom: dict, precision: int):
 def dedupe_line_features(features, *, precision: int = 6) -> list:
     """Drop identical / effectively-identical line features (same geometry regardless of
     vertex order/direction, to `precision` decimal degrees ~0.1 m). Layers 2/6/8 can
-    return the same road, and paged queries can repeat features."""
-    seen = set()
-    out = []
+    return the same road, and paged queries can repeat features.
+
+    DETERMINISTIC CLASS PRIORITY: when the same geometry appears in several layers, the
+    HIGHEST classification wins (primary > secondary > local > unclassified) — a freeway
+    that is also present in the local-roads layer stays `primary`, regardless of the order
+    the layers were queried in. The winning feature keeps its OWN safe metadata; provider
+    attributes from the duplicates are never merged. Ties keep the first-seen feature, so
+    the output is stable.
+    """
+    best: dict = {}
+    order: list = []
     for f in features or []:
         geom = (f or {}).get("geometry") or {}
         key = _feature_key(geom, precision) if isinstance(geom, dict) else None
         if key is None:
             continue
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(f)
-    return out
+        props = f.get("properties") if isinstance(f.get("properties"), dict) else {}
+        prio = road_class_priority(props.get("road_class"))
+        if key not in best:
+            best[key] = (prio, f)
+            order.append(key)
+        elif prio > best[key][0]:
+            best[key] = (prio, f)  # strictly higher class wins; ties keep the first seen
+    return [best[k][1] for k in order]
 
 
 def fetch_arcgis_line_layer(
-    layer_url: str, bounds: dict, *, timeout_s: int, session=None, out_fields: str = "", keep_props=None
+    layer_url: str, bounds: dict, *, timeout_s: int, session=None, out_fields: str = "",
+    keep_props=None, trusted: dict | None = None,
 ) -> list:
     """Query ONE ArcGIS REST line layer (`<layer_url>/query`) intersecting `bounds`.
     Works for BOTH `MapServer/<id>` and `FeatureServer/<id>`. Requests WGS84 (4326) and
     prefers GeoJSON, defensively falling back to Esri JSON (paths) when a service does
     not support `f=geojson`. ArcGIS returns errors as JSON with HTTP 200 — that is
-    detected and raised. Worker-only; no credentials/tokens are ever sent or stored."""
+    detected and raised. Worker-only; no credentials/tokens are ever sent or stored.
+    `trusted` holds ERIS-derived properties (e.g. the road class implied by WHICH layer
+    was queried); they are written AFTER provider attributes and can never be spoofed."""
     import requests
 
     s = session or requests.Session()
@@ -942,7 +1015,7 @@ def fetch_arcgis_line_layer(
                 last_err = str(data["error"])[:160]
                 continue  # unsupported format / query error -> try the next format
             feats = data.get("features") if isinstance(data, dict) else None
-            return normalize_road_features(feats, keep_props=keep_props)
+            return normalize_road_features(feats, keep_props=keep_props, trusted=trusted)
         except Exception as e:  # noqa: BLE001 - try the next format, else fail this layer
             last_err = str(e)[:160]
             continue
@@ -995,8 +1068,11 @@ def fetch_tigerweb_road_features(
     6=Secondary, 8=Local) against the (buffered) bounds and COMBINE the results.
 
     One layer failing must NOT discard the successful layers. If EVERY layer fails, this
-    raises (the builder degrades the roads layer to reason='source_error'). Results are
-    de-duplicated and carry only the safe attribute allowlist. Credential-free, worker-only.
+    raises (the builder degrades the roads layer to reason='source_error'). Results carry
+    only the safe attribute allowlist plus the ERIS-TRUSTED road class derived from the
+    LAYER ID we queried (source_layer_id / road_class / road_class_label), and are
+    de-duplicated keeping the HIGHEST class (primary > secondary > local) regardless of
+    query order. Credential-free, worker-only.
     """
     ids = parse_tigerweb_layers(layers)
     if not base_url or not ids:
@@ -1005,11 +1081,17 @@ def fetch_tigerweb_road_features(
     failures = 0
     for lid in ids:
         layer_url = f"{base_url.rstrip('/')}/{int(lid)}"
+        rc = road_class_for_layer(lid)
+        trusted = {
+            "source_layer_id": int(lid),
+            "road_class": rc,
+            "road_class_label": road_class_label(rc),
+        }
         try:
             combined.extend(
                 fetch_arcgis_line_layer(
                     layer_url, bounds, timeout_s=timeout_s, session=session,
-                    out_fields="*", keep_props=TIGER_ROAD_PROPS,
+                    out_fields="*", keep_props=TIGER_ROAD_PROPS, trusted=trusted,
                 )
             )
         except Exception:  # noqa: BLE001 - a single layer failing is tolerated
