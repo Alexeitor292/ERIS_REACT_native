@@ -107,9 +107,23 @@ OFFLINE_SCENE_TIGERWEB_LAYERS=2,6,8   # 2 Primary, 6 Secondary, 8 Local
 
 TIGERweb behavior: layers are queried against bounds + buffer in WGS84 (GeoJSON preferred,
 Esri `paths` accepted defensively); successful layers are combined even if one fails; all
-layers failing degrades roads to `source_error`; geometry is clipped to bounds + buffer and
-de-duplicated; only `NAME`, `BASENAME`, `MTFCC`, `RTTYP` are packaged; features are tagged
-`kind: "road_centerline"`; provenance is `us_census_tigerweb` / U.S. Census Bureau.
+layers failing degrades roads to `source_error`; geometry is de-duplicated; only `NAME`,
+`BASENAME`, `MTFCC`, `RTTYP` are packaged; features are tagged `kind: "road_centerline"`;
+provenance is `us_census_tigerweb` / U.S. Census Bureau.
+
+### Road geometry clipping (all sources)
+
+Every packaged road line — TIGERweb/external centerlines, road-inventory geometry,
+submitted line geometry, and the synthetic road-bearing line — is **truly clipped** to the
+buffered bounds with per-segment Liang-Barsky (`clip_line_to_bounds`), not merely filtered:
+
+- a segment that **crosses** the AOI with both endpoints outside is **retained**, cut to the
+  boundary intersections;
+- **no out-of-bounds coordinate is ever packaged**;
+- a line that leaves and re-enters the AOI becomes **separate `LineString` features** (the
+  mobile snap parser already handles multiple line features);
+- duplicate vertices at segment joins are collapsed, and parts with fewer than two distinct
+  points are rejected.
 
 Other context settings:
 
