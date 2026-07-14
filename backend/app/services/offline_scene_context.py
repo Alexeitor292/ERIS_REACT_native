@@ -58,6 +58,14 @@ def _finite(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
+def road_clip_bounds(bounds: dict, buffer_m: float) -> dict:
+    """THE road clipping contract: the exact bounds `roads_geojson_from_context` clips
+    road geometry to. The builder persists the result in the roads manifest layer
+    (`clip_bounds`) so a package stays self-describing — a reader must NEVER recompute
+    it from live config. Both call sites go through this one function so they cannot drift."""
+    return bounds_with_buffer(bounds, buffer_m)
+
+
 def bounds_with_buffer(bounds: dict, buffer_m: float) -> dict:
     """Expand geographic bounds by buffer_m (approx, local equirectangular)."""
     d_lat = max(0.0, float(buffer_m)) / _M_PER_DEG_LAT
@@ -311,7 +319,7 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
     leaves and re-enters becomes separate LineString features. When nothing is available,
     the reason tells the operator exactly what is missing / what to configure.
     """
-    bounds = bounds_with_buffer(ctx["bounds"], buffer_m)
+    bounds = road_clip_bounds(ctx["bounds"], buffer_m)
     overlays = ctx.get("overlays") or {}
     features: list = []
 

@@ -382,14 +382,16 @@ print(presign_get('$OBJECT_KEY', bucket=settings.MINIO_OFFLINE_SCENES_BUCKET, ex
 ")"
 curl -sS -o /tmp/package.eristerrain "$URL"
 
-# 3) Run the diagnostic inside the worker (its image ships Pillow + app.tools).
-$C cp /tmp/package.eristerrain worker:/tmp/package.eristerrain
-$C exec -T worker python -m app.tools.offline_scene_alignment \
+# 3) Run the diagnostic inside the packaging worker. The Compose service is
+#    `offline-scene-worker` (there is NO service named `worker`).
+#    Its image ships Pillow + app.tools.
+$C cp /tmp/package.eristerrain offline-scene-worker:/tmp/package.eristerrain
+$C exec -T offline-scene-worker python -m app.tools.offline_scene_alignment \
   --package /tmp/package.eristerrain --output-dir /tmp/eris-alignment
-$C exec -T worker cat /tmp/eris-alignment/road-imagery-alignment.json
+$C exec -T offline-scene-worker cat /tmp/eris-alignment/road-imagery-alignment.json
 
 # 4) Pull the image back to the host to look at it.
-$C cp worker:/tmp/eris-alignment/road-imagery-alignment.png ./road-imagery-alignment.png
+$C cp offline-scene-worker:/tmp/eris-alignment/road-imagery-alignment.png ./road-imagery-alignment.png
 ```
 
 **Outputs** (in `--output-dir`):
@@ -401,9 +403,22 @@ $C cp worker:/tmp/eris-alignment/road-imagery-alignment.png ./road-imagery-align
   Plus the incident marker and the package-boundary outline.
 - `road-imagery-alignment.json` — package version, terrain bounds, imagery format +
   bounds, road feature count and counts by `road_class`, road geometry bbox, malformed
-  features dropped, coordinates outside the declared bounds, source provider/dataset,
-  output image dimensions, and the exact lon/lat→pixel transform. It contains **no**
-  credentials, query strings, tokens, local source paths, or MinIO secrets.
+  features dropped, the road clipping contract, the two out-of-bounds counters (below),
+  source provider/dataset, output image dimensions, and the exact lon/lat→pixel transform.
+  It contains **no** credentials, query strings, tokens, local source paths, or MinIO
+  secrets.
+
+**Roads are buffered — read the two counters correctly.** Road context is deliberately
+clipped to *terrain bounds + `OFFLINE_SCENE_ROAD_BUFFER_M`*, so roads legitimately extend
+past the terrain/imagery footprint. The package records the exact contract it applied
+(`context_layers.roads.clip_bounds` + `buffer_m`) and the diagnostic judges against
+**that**, never against live config:
+
+| Field | Meaning |
+| --- | --- |
+| `coordinates_outside_terrain_bounds` | Outside the terrain/imagery frame. **Expected to be non-zero** — that is the road buffer doing its job. Not an error. Such geometry is still drawn; Pillow clips it at the canvas edge. |
+| `coordinates_outside_road_clip_bounds` | Outside the package's **own declared** `clip_bounds`. This is a **packaging contract violation** and should normally be `0`. |
+| `road_clip_bounds_status` | `declared`, or `not_declared_legacy` for a package built before this field existed — then `road_clip_bounds` and `coordinates_outside_road_clip_bounds` are `null` (**unknown**, not zero). Terrain bounds are *not* a substitute. |
 
 **How to read it — this is the decision:**
 
@@ -412,9 +427,14 @@ $C cp worker:/tmp/eris-alignment/road-imagery-alignment.png ./road-imagery-align
 | **A.** Roads sit on the pavement in the PNG, but are displaced on the iPhone | The package is self-consistent. The bug is in the **native coordinate/texture transform**. | Fix the renderer. Do not touch the road source. |
 | **B.** Roads are displaced in the PNG too | The package itself disagrees: **TIGERweb geometry vs. the packaged imagery**. | Treat as source accuracy/generalization (TIGERweb is context, not survey-grade). Do not "fix" the renderer. |
 
-Also check the JSON before drawing conclusions: a non-zero `coords_outside_package_bounds`
-or `malformed_features_dropped`, or an `imagery_bounds` that differs from `terrain_bounds`,
-each explain apparent displacement on their own.
+Also check the JSON before drawing conclusions: a non-zero
+`coordinates_outside_road_clip_bounds` (a clipping/packaging contract violation), a
+non-zero `malformed_features_dropped`, or an `imagery_bounds` that differs from
+`terrain_bounds`, each explain apparent displacement on their own.
+
+**`coordinates_outside_terrain_bounds` does not.** It is expected to be non-zero because
+of the configured road buffer, and buffered geometry is *not* an explanation for roads
+sitting off the pavement. Do not cite it as one.
 
 > **Warning — never apply a global lon/lat offset based on one screenshot.** TIGERweb error
 > is not a constant translation; it varies by area, road class, and vintage. A blanket nudge

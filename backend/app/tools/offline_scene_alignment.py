@@ -193,6 +193,29 @@ class Package:
             return {"type": "FeatureCollection", "features": []}
         return gj if isinstance(gj, dict) else {"type": "FeatureCollection", "features": []}
 
+    def road_clip(self) -> dict:
+        """The DECLARED road clipping contract from the manifest.
+
+        Roads are packaged clipped to terrain bounds + OFFLINE_SCENE_ROAD_BUFFER_M, so
+        road coordinates outside the terrain footprint are EXPECTED, not errors. Only the
+        package's own declared `clip_bounds` can decide a real contract violation.
+
+        A legacy package predating this field declares nothing: we say so explicitly
+        (`not_declared_legacy`) and refuse to substitute terrain bounds, which would
+        falsely condemn every buffered coordinate."""
+        layer = self.context_layers.get("roads")
+        if not isinstance(layer, dict) or layer.get("available") is not True:
+            return {"bounds": None, "buffer_m": None, "status": "not_declared_legacy"}
+        b = layer.get("clip_bounds")
+        if not _valid_bounds(b):
+            return {"bounds": None, "buffer_m": None, "status": "not_declared_legacy"}
+        buf = layer.get("buffer_m")
+        return {
+            "bounds": b,
+            "buffer_m": float(buf) if _finite(buf) else None,
+            "status": "declared",
+        }
+
     def road_source(self) -> dict:
         """Provider/dataset ONLY — never the service URL/query (no secrets in the report)."""
         layer = self.context_layers.get("roads")
@@ -274,11 +297,16 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
         draw.rectangle([bx0, by0, bx1, by1], outline=BOUNDARY_COLOR, width=3)
 
     gj = pkg.roads()
+    clip = pkg.road_clip()
+    clip_bounds = clip["bounds"]
     feats = gj.get("features") if isinstance(gj.get("features"), list) else []
     counts: dict = {}
     kinds: dict = {}
     malformed = 0
-    outside_pkg = 0
+    # Two DIFFERENT questions. Outside terrain = expected (roads are buffered).
+    # Outside the declared clip_bounds = a packaging contract violation.
+    outside_terrain = 0
+    outside_clip = 0 if clip_bounds else None
     minx = miny = math.inf
     maxx = maxy = -math.inf
     drawn = 0
@@ -304,9 +332,13 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
                     continue
                 lon, lat = float(c[0]), float(c[1])
                 if _valid_bounds(pkg_bounds) and not _in_bounds(lon, lat, pkg_bounds):
-                    outside_pkg += 1  # counted, never silently treated as valid
+                    outside_terrain += 1   # EXPECTED for buffered road context — not an error
+                if clip_bounds is not None and not _in_bounds(lon, lat, clip_bounds):
+                    outside_clip += 1      # a real contract violation; never silently valid
                 minx, maxx = min(minx, lon), max(maxx, lon)
                 miny, maxy = min(miny, lat), max(maxy, lat)
+                # Drawn regardless: geometry legitimately inside the road buffer but outside
+                # the terrain frame is NOT erroneous. Pillow clips it at the canvas edge.
                 pts.append(lonlat_to_px(lon, lat, t))
             if len(pts) >= 2:
                 draw.line(pts, fill=style["color"], width=style["width"], joint="curve")
@@ -343,7 +375,15 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
         "road_kind_counts": kinds,
         "road_geometry_bbox": road_bbox,
         "malformed_features_dropped": malformed,
-        "coordinates_outside_package_bounds": outside_pkg,
+        # The road clipping contract, as DECLARED BY THE PACKAGE (never recomputed here).
+        "road_clip_bounds": clip_bounds,               # null on a legacy package
+        "road_buffer_m": clip["buffer_m"],
+        "road_clip_bounds_status": clip["status"],     # "declared" | "not_declared_legacy"
+        # EXPECTED to be > 0: road context is buffered past the terrain/imagery footprint.
+        "coordinates_outside_terrain_bounds": outside_terrain,
+        # A packaging CONTRACT VIOLATION. Normally 0. null when the package declares no
+        # clip_bounds — unknown, and we will not pretend terrain bounds are equivalent.
+        "coordinates_outside_road_clip_bounds": outside_clip,
         "road_source": pkg.road_source(),               # provider/dataset/attribution only
         "output_image": {"width_px": w, "height_px": h, "file": IMAGE_NAME},
         "transform": t,                                 # deterministic lon/lat -> pixel
@@ -384,7 +424,16 @@ def main(argv=None) -> int:
     print(f"road_feature_count     : {report['road_feature_count']}")
     print(f"road_class_counts      : {report['road_class_counts']}")
     print(f"malformed_dropped      : {report['malformed_features_dropped']}")
-    print(f"coords_outside_bounds  : {report['coordinates_outside_package_bounds']}")
+    print(f"road_clip_bounds       : {report['road_clip_bounds_status']} "
+          f"(buffer_m={report['road_buffer_m']})")
+    print(f"outside_terrain_bounds : {report['coordinates_outside_terrain_bounds']} "
+          f"(expected > 0: road context is buffered)")
+    violations = report["coordinates_outside_road_clip_bounds"]
+    if violations is None:
+        print("outside_road_clip      : unknown (package declares no clip_bounds; legacy)")
+    else:
+        print(f"outside_road_clip      : {violations} "
+              f"{'OK' if violations == 0 else '<-- CONTRACT VIOLATION'}")
     print(f"image                  : {report['output_image']['width_px']}x{report['output_image']['height_px']} -> {IMAGE_NAME}")
     print(f"NOTE: {DISCLAIMER}")
     return 0

@@ -169,6 +169,44 @@ class TestManifestRoadClassMetadata:
         gj = json.loads(assets[ctxmod.ROADS_FILE])
         assert {f["properties"]["road_class"] for f in gj["features"]} == {"primary", "local"}
 
+    def test_clip_bounds_and_buffer_are_persisted_exactly(self, monkeypatch):
+        """The package must be SELF-DESCRIBING: a reader may never recompute the clip
+        contract from live config. Roads are clipped to bounds + buffer, so they extend
+        past the terrain frame — only the declared clip_bounds can judge them."""
+        _roads_settings(monkeypatch, "census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_BUFFER_M", 250.0)
+        s = FakeSession({2: {"features": [_gj(LINE_A, {"NAME": "US-50"})]},
+                         6: {"features": []}, 8: {"features": []}})
+        b = HillshadeReliefBuilder()
+        b._session = s
+        layers, assets = b._build_context_layers(_ctx(), base_bytes=0)
+        roads = layers["roads"]
+
+        expected = ctxmod.road_clip_bounds(BOUNDS, 250.0)
+        assert roads["clip_bounds"] == expected      # EXACTLY what the clipper used
+        assert roads["buffer_m"] == 250.0
+        # the contract is strictly larger than the terrain bounds (that IS the buffer)
+        assert roads["clip_bounds"]["max_lon"] > BOUNDS["max_lon"]
+        assert roads["clip_bounds"]["min_lat"] < BOUNDS["min_lat"]
+        # every packaged coordinate really is inside the declared contract
+        for f in json.loads(assets[ctxmod.ROADS_FILE])["features"]:
+            for lon, lat in f["geometry"]["coordinates"]:
+                assert expected["min_lon"] - 1e-9 <= lon <= expected["max_lon"] + 1e-9
+                assert expected["min_lat"] - 1e-9 <= lat <= expected["max_lat"] + 1e-9
+
+    def test_clip_bounds_follows_a_changed_buffer(self, monkeypatch):
+        """Persisted, not hard-coded: a different buffer yields different clip_bounds."""
+        _roads_settings(monkeypatch, "census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_BUFFER_M", 1000.0)
+        s = FakeSession({2: {"features": [_gj(LINE_A, {"NAME": "US-50"})]},
+                         6: {"features": []}, 8: {"features": []}})
+        b = HillshadeReliefBuilder()
+        b._session = s
+        layers, _ = b._build_context_layers(_ctx(), base_bytes=0)
+        assert layers["roads"]["buffer_m"] == 1000.0
+        assert layers["roads"]["clip_bounds"] == ctxmod.road_clip_bounds(BOUNDS, 1000.0)
+        assert layers["roads"]["clip_bounds"] != ctxmod.road_clip_bounds(BOUNDS, 250.0)
+
     def test_class_metadata_omitted_when_no_classed_roads(self, monkeypatch):
         _roads_settings(monkeypatch, "eris_internal")
         b = HillshadeReliefBuilder()

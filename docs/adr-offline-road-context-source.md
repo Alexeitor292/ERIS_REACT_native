@@ -202,9 +202,40 @@ It writes `road-imagery-alignment.png` (imagery/tile mosaic + roads styled by cl
 primary = thick magenta, secondary = medium orange, local = thin cyan, incident marker,
 package boundary outline) and `road-imagery-alignment.json` (package version, terrain and
 imagery bounds, imagery format, feature counts by class, road bbox, malformed features
-dropped, coordinates outside declared bounds, provider/dataset, and the exact
-lon/lat→pixel transform). Tiles are placed by **each tile's own declared bounds**, never
-by filename order.
+dropped, the road clipping contract, both out-of-bounds counters, provider/dataset, and
+the exact lon/lat→pixel transform). Tiles are placed by **each tile's own declared
+bounds**, never by filename order. In Docker the Compose service to exec into is
+`offline-scene-worker`.
+
+### The road clipping contract must be packaged, not inferred
+
+Road context is clipped to *terrain bounds + `OFFLINE_SCENE_ROAD_BUFFER_M`*, so roads
+**legitimately** extend beyond the terrain/imagery footprint. A diagnostic that checked
+road coordinates against terrain bounds alone would condemn perfectly valid buffered
+geometry. Therefore the roads manifest layer persists the exact bounds that were applied:
+
+```json
+"roads": {
+  "clip_bounds": { "min_lat": 38.3978, "min_lon": -121.6029, "max_lat": 38.5022, "max_lon": -121.3971 },
+  "buffer_m": 250
+}
+```
+
+`clip_bounds` is exactly what `roads_geojson_from_context` clipped to (both go through
+`road_clip_bounds()`, so they cannot drift). A reader must **never** recompute it from
+live configuration — the package stays self-describing and reproducible even after the
+config changes. The diagnostic then reports two distinct things:
+
+- `coordinates_outside_terrain_bounds` — outside the terrain/imagery frame. **Expected**
+  to be non-zero; that is the buffer. Such geometry is still drawn (Pillow clips it at the
+  canvas edge) and is never called malformed or invalid.
+- `coordinates_outside_road_clip_bounds` — outside the package's own declared
+  `clip_bounds`. A **packaging contract violation**; normally `0`.
+
+For a legacy package with no `clip_bounds`, `road_clip_bounds` is `null`,
+`road_clip_bounds_status` is `not_declared_legacy`, and
+`coordinates_outside_road_clip_bounds` is `null` — **unknown, not zero**. Terrain bounds
+are not a stand-in for the clipping contract.
 
 ### Interpreting the result — the next decision
 

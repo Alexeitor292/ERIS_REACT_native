@@ -12,6 +12,7 @@ import zipfile
 
 import pytest
 
+from app.services.offline_scene_context import road_clip_bounds
 from app.tools import offline_scene_alignment as tool
 
 PIL = pytest.importorskip("PIL")
@@ -21,6 +22,12 @@ from PIL import Image  # noqa: E402
 BOUNDS = {"min_lat": 38.40, "min_lon": -121.60, "max_lat": 38.50, "max_lon": -121.40}
 INCIDENT = {"lat": 38.45, "lon": -121.50}
 MIDLAT = (BOUNDS["min_lat"] + BOUNDS["max_lat"]) / 2.0
+
+# Roads are packaged clipped to terrain bounds + buffer, so they legitimately extend
+# PAST the terrain/imagery frame. Use the REAL contract function, not a hand-rolled copy.
+BUFFER_M = 250.0
+CLIP = road_clip_bounds(BOUNDS, BUFFER_M)
+_AUTO = object()
 
 
 def _solid(color, size=(64, 64), fmt="PNG") -> bytes:
@@ -38,7 +45,8 @@ def _road(coords, road_class=None, kind="road_centerline", extra=None):
     return {"type": "Feature", "geometry": {"type": "LineString", "coordinates": coords}, "properties": props}
 
 
-def make_package(*, imagery="single", roads=None, tiles=None, incident=INCIDENT, road_source=None) -> bytes:
+def make_package(*, imagery="single", roads=None, tiles=None, incident=INCIDENT, road_source=None,
+                 clip_bounds=_AUTO, buffer_m=BUFFER_M) -> bytes:
     """Build a STORED .eristerrain zip with a manifest + roads + imagery."""
     ctx: dict = {}
     files: dict = {}
@@ -62,6 +70,11 @@ def make_package(*, imagery="single", roads=None, tiles=None, incident=INCIDENT,
                         "source": road_source or {"provider": "us_census_tigerweb",
                                                   "dataset": "U.S. Census Bureau TIGERweb Transportation Roads",
                                                   "attribution": "U.S. Census Bureau"}}
+        # clip_bounds=None models a LEGACY package built before the contract was recorded.
+        cb = CLIP if clip_bounds is _AUTO else clip_bounds
+        if cb is not None:
+            ctx["roads"]["clip_bounds"] = dict(cb)
+            ctx["roads"]["buffer_m"] = buffer_m
     else:
         ctx["roads"] = {"available": False, "reason": "no_data"}
 
@@ -197,10 +210,10 @@ class TestRoadsAndReport:
         assert report["road_feature_count"] == 1
         assert report["malformed_features_dropped"] == 3
 
-    def test_coordinates_outside_package_bounds_are_counted_not_silently_valid(self, tmp_path):
+    def test_coordinates_outside_road_clip_bounds_are_counted_not_silently_valid(self, tmp_path):
         far = _road([[-121.50, 38.45], [-120.00, 38.45]], "primary")  # runs far east of the AOI
         report, _ = _run(make_package(roads=[far]), tmp_path)
-        assert report["coordinates_outside_package_bounds"] >= 1
+        assert report["coordinates_outside_road_clip_bounds"] >= 1    # a contract violation
         # the bbox honestly reports the out-of-bounds extent (nothing hidden)
         assert report["road_geometry_bbox"]["max_lon"] > BOUNDS["max_lon"]
 
@@ -237,3 +250,83 @@ class TestRoadsAndReport:
         assert rc == 0
         assert (tmp_path / "cli" / tool.IMAGE_NAME).exists()
         assert (tmp_path / "cli" / tool.REPORT_NAME).exists()
+
+
+# ---- the road CLIPPING CONTRACT (buffered roads are valid, not "out of bounds") ----
+
+class TestRoadClipBounds:
+    """Roads are clipped to terrain bounds + buffer, so they legitimately extend past the
+    terrain/imagery frame. Judging them against terrain bounds alone (PR #50 review) calls
+    perfectly valid buffered geometry 'out of bounds'."""
+
+    # A road just OUTSIDE the terrain frame but INSIDE the 250 m road buffer.
+    BUFFERED_LON = BOUNDS["max_lon"] + (CLIP["max_lon"] - BOUNDS["max_lon"]) / 2.0
+
+    def test_buffered_coordinate_is_not_a_clip_violation(self, tmp_path):
+        assert BOUNDS["max_lon"] < self.BUFFERED_LON < CLIP["max_lon"]   # genuinely in the buffer
+        road = _road([[-121.50, 38.45], [self.BUFFERED_LON, 38.45]], "primary")
+        report, _ = _run(make_package(roads=[road]), tmp_path)
+
+        # Outside the terrain frame: EXPECTED, that is the buffer doing its job.
+        assert report["coordinates_outside_terrain_bounds"] >= 1
+        # But NOT a contract violation, and NOT malformed/dropped.
+        assert report["coordinates_outside_road_clip_bounds"] == 0
+        assert report["malformed_features_dropped"] == 0
+        assert report["road_feature_count"] == 1          # still drawn, not discarded
+
+    def test_coordinate_outside_clip_bounds_is_counted(self, tmp_path):
+        road = _road([[-121.50, 38.45], [-120.00, 38.45]], "primary")    # way past the buffer
+        report, _ = _run(make_package(roads=[road]), tmp_path)
+        assert report["coordinates_outside_road_clip_bounds"] >= 1
+        assert report["road_clip_bounds_status"] == "declared"
+
+    def test_clip_bounds_and_buffer_are_reported_exactly_as_declared(self, tmp_path):
+        road = _road([[-121.55, 38.45], [-121.45, 38.45]], "local")
+        report, _ = _run(make_package(roads=[road]), tmp_path)
+        assert report["road_clip_bounds"] == CLIP        # exactly the packaged contract
+        assert report["road_buffer_m"] == BUFFER_M
+        assert report["road_clip_bounds_status"] == "declared"
+        # and the contract is genuinely LARGER than the terrain frame
+        assert report["road_clip_bounds"]["max_lon"] > report["terrain_bounds"]["max_lon"]
+
+    def test_legacy_package_reports_unknown_not_zero(self, tmp_path):
+        """No clip_bounds declared -> we must NOT pretend terrain bounds are equivalent."""
+        road = _road([[-121.50, 38.45], [self.BUFFERED_LON, 38.45]], "primary")
+        report, _ = _run(make_package(roads=[road], clip_bounds=None), tmp_path)
+
+        assert report["road_clip_bounds"] is None
+        assert report["road_buffer_m"] is None
+        assert report["road_clip_bounds_status"] == "not_declared_legacy"
+        # UNKNOWN, not a clean bill of health...
+        assert report["coordinates_outside_road_clip_bounds"] is None
+        # ...while the terrain-bounds fact is still reported honestly.
+        assert report["coordinates_outside_terrain_bounds"] >= 1
+        assert report["malformed_features_dropped"] == 0
+
+    def test_buffered_geometry_is_drawn_out_to_the_canvas_edge(self, tmp_path):
+        """A road running from inside the frame into the buffer is drawn all the way to the
+        canvas edge — Pillow clips it there. It is never truncated at the terrain boundary
+        nor treated as erroneous."""
+        road = _road([[-121.45, 38.45], [self.BUFFERED_LON, 38.45]], "primary")
+        report, out = _run(make_package(roads=[road]), tmp_path)
+        assert report["road_feature_count"] == 1
+        assert report["coordinates_outside_terrain_bounds"] >= 1   # it does leave the frame
+        assert report["coordinates_outside_road_clip_bounds"] == 0  # but is perfectly valid
+
+        im = Image.open(out / tool.IMAGE_NAME).convert("RGB")
+        w, h = im.size
+        primary = tool.CLASS_STYLE["primary"]["color"]
+        # the LAST column still carries the road: it was drawn out to the edge, not cut
+        # short at max_lon (which would leave the right edge as bare imagery).
+        edge = {im.getpixel((w - 1, y)) for y in range(h)}
+        assert primary in edge, "buffered road was truncated at the terrain boundary"
+
+    def test_legacy_report_still_has_no_credentials_or_paths(self, tmp_path):
+        src = {"provider": "us_census_tigerweb", "dataset": "TIGERweb",
+               "attribution": "U.S. Census Bureau",
+               "service": "https://u:P@ss@tigerweb.example.gov/x?token=SECRET"}
+        road = _road([[-121.55, 38.45], [-121.45, 38.45]], "local")
+        _, out = _run(make_package(roads=[road], clip_bounds=None, road_source=src), tmp_path)
+        blob = (out / tool.REPORT_NAME).read_text()
+        for bad in ("SECRET", "token", "P@ss", "eristerrain", "/tmp", "C:\\"):
+            assert bad not in blob, f"report leaked {bad!r}"
