@@ -1,6 +1,6 @@
 # Design note — Offline terrain context layers (iOS)
 
-Status: implementation in progress on `feature/offline-terrain-context-layers`.
+Status: baseline implemented; road-source strategy updated 2026-07-14.
 
 ## Goal
 
@@ -10,6 +10,31 @@ Add, packaged inside the existing `.eristerrain` bundle: road/route context, an
 optional aerial-imagery drape, a north-up 2D overview inset, and clear
 per-layer provenance. Reuse the existing SceneKit height-field renderer and the
 existing package/download/integrity machinery. No Google/Apple/Bing/Mapbox tiles.
+
+## Current road-source decision (2026-07-14)
+
+The source decision is recorded in
+`docs/adr-offline-road-context-source.md` and should be reviewed before changing
+road-provider configuration or implementing a new adapter.
+
+- **Selected development source:** public U.S. Census Bureau TIGERweb
+  Transportation road geometry, queried by the worker during package generation.
+- **Implementation status:** decision accepted, backend implementation pending.
+  Current code still supports `eris_internal` and `arcgis_feature_service`.
+- **Why:** this allows independent development without connecting the current ERIS
+  environment to Caltrans ArcGIS Enterprise yet.
+- **Production posture:** Caltrans ArcGIS Enterprise remains a future authoritative
+  option when its environment, credentials, data contract, licensing, and security
+  review are ready.
+- **Other retained options:** a personal Esri-hosted development layer, ArcGIS
+  Online, self-hosted PostGIS/versioned road extracts, and deterministic static test
+  fixtures.
+
+TIGERweb geometry is road **snap context**, not Caltrans engineering truth. It does
+not establish postmile direction, authoritative upstation, lane/shoulder dimensions,
+crown, superelevation, or survey accuracy. USGS 3DEP remains the ground-elevation
+source, and the roadway layout remains independently identified as Road Inventory,
+form fields, or default assumptions.
 
 ## Smallest safe implementation path
 
@@ -37,38 +62,52 @@ unavailable", never as corrupt.
 - A declared-`available:false` (or absent) layer is simply not shown; the base
   terrain + hillshade + incident + geometry keep working.
 
-## Assets & data sources (this iteration)
+## Assets & data sources
 
-| Layer | Asset | Source | Default | Offline after download? | Notes |
+| Layer | Asset | Source | Default / status | Offline after download? | Notes |
 |---|---|---|---|---|---|
-| Terrain relief | `elevation-grid.bin` | USGS 3DEP (public domain) | on | yes | unchanged |
-| Hillshade | `hillshade.png` | USGS 3DEP rendered relief (public domain) | on when available | yes | unchanged |
-| Roads/routes | `roads.geojson` | **ERIS-authoritative** data already in the build context (submitted incident geometry + resolved road-bearing segment + any line geometry in the road-inventory snapshot), clipped to bounds + buffer | **on** | yes | no third-party provider; opt-in external ArcGIS FeatureServer adapter is documented + config-gated |
-| Overview inset | `overview.png` | **server-rendered** (Pillow) from package bounds + roads + incident + geometry on a dark background | **on** | yes | licence-clean; no external data |
-| Aerial imagery | `imagery.png` | **USGS/USDA NAIP** ImageServer `exportImage` (public domain) via a config-driven adapter | **off (opt-in)** | yes | adapter implemented; disabled by default until validated on a live worker |
+| Terrain relief | `elevation-grid.bin` | USGS 3DEP | on | yes | unchanged |
+| Hillshade | `hillshade.png` | USGS 3DEP rendered relief | on when available | yes | unchanged |
+| Roads/routes | `roads.geojson` | Current: ERIS build context; selected development target: U.S. Census TIGERweb; future production option: approved Caltrans/enterprise centerlines | `eris_internal` today; `census_tigerweb` planned | yes | provider must be truthful in the manifest; TIGERweb is context, not engineering-grade data |
+| Overview inset | `overview.png` | server-rendered (Pillow) from package bounds + roads + incident + geometry | on | yes | no external data |
+| Aerial imagery | single/tiled imagery assets | USGS/USDA NAIP ImageServer via config-driven adapter | opt-in by code default | yes | source and effective resolution recorded |
 
 Roads/imagery are fetched **only during package build** on the worker — never
 during the mobile download or while viewing offline.
 
-### Why imagery defaults OFF
-NAIP (USGS/USDA National Agriculture Imagery Program) is public-domain federal
-imagery and is the intended licence-clean provider. But the live service behavior
-must be confirmed on a worker with network before we claim "satellite imagery";
-until then `OFFLINE_SCENE_IMAGERY_ENABLED=false` and the manifest records
-`imagery.available=false, reason="not_configured"`, so the iOS Layers sheet shows
-Satellite/Hybrid as **Unavailable**. Hillshade + roads + overview still work.
+### Why imagery defaults OFF in code
+
+NAIP (USGS/USDA National Agriculture Imagery Program) is the intended
+licence-clean provider. Live behavior must be validated on the deployed worker;
+when `OFFLINE_SCENE_IMAGERY_ENABLED=false`, the manifest records imagery as
+unavailable and the iOS Layers sheet disables Satellite/Hybrid. Hillshade + roads +
+overview still work.
 
 ## Config knobs (safe defaults, fail-graceful)
 
-```
+Current implemented road sources:
+
+```env
 OFFLINE_SCENE_ROADS_ENABLED=true
 OFFLINE_SCENE_ROAD_SOURCE=eris_internal          # eris_internal | arcgis_feature_service
 OFFLINE_SCENE_ROAD_SOURCE_URL=                   # required only for arcgis_feature_service
 OFFLINE_SCENE_ROAD_BUFFER_M=250
 OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S=30
+```
 
-OFFLINE_SCENE_IMAGERY_ENABLED=false              # opt-in; NAIP adapter below
-OFFLINE_SCENE_IMAGERY_MANDATORY=false            # if true, imagery failure fails the job
+Planned TIGERweb development source (not implemented merely by documenting it):
+
+```env
+OFFLINE_SCENE_ROAD_SOURCE=census_tigerweb
+OFFLINE_SCENE_TIGERWEB_BASE_URL=https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer
+OFFLINE_SCENE_TIGERWEB_LAYERS=2,6,8
+```
+
+Other context settings:
+
+```env
+OFFLINE_SCENE_IMAGERY_ENABLED=false
+OFFLINE_SCENE_IMAGERY_MANDATORY=false
 OFFLINE_SCENE_IMAGERY_EXPORT_URL=https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer
 OFFLINE_SCENE_IMAGERY_MAX_PX=1024
 OFFLINE_SCENE_IMAGERY_FETCH_TIMEOUT_S=45
@@ -78,13 +117,11 @@ OFFLINE_SCENE_OVERVIEW_PX=512
 ```
 
 - A **road-source failure never corrupts/deletes** a valid terrain package: roads
-  are marked `available:false, reason:"source_error"` and the package still builds.
+  are marked unavailable with a precise reason and the package still builds.
 - **Optional imagery** that is disabled/uncovered/too-large/failed is **skipped**
   with a manifest reason; the job only fails if `OFFLINE_SCENE_IMAGERY_MANDATORY`.
-- All packaged assets count toward `OFFLINE_SCENE_MAX_PACKAGE_MB` (enforced on the
-  total bundle bytes before registration + before the download grant). Imagery is
-  the last, skippable asset, so it is dropped (reason `too_large`) before it could
-  push the package over the limit.
+- All packaged assets count toward `OFFLINE_SCENE_MAX_PACKAGE_MB`. Imagery is the
+  last skippable asset and is dropped before it can push the package over the cap.
 
 ## Native iOS (reuse SceneKit renderer)
 
@@ -92,27 +129,36 @@ OFFLINE_SCENE_OVERVIEW_PX=512
   Relief / Satellite / Hybrid — last two disabled when imagery absent), Overlays
   (Roads, Incident/Geometry, Package Boundary, Overview), Appearance (relief +
   imagery opacity). Default: Terrain Relief + Roads + Overview. Accessible labels.
-- Material switching: terrain node material `diffuse.contents` swaps between
-  hillshade image, imagery image, or a blended layer; no network.
-- Roads drape on the mesh surface (reuse the existing surface-sampling + polyline
-  helpers). Labels deferred to the overview inset to avoid 3D clutter.
-- **Overview inset** (lower-right `UIImageView` of `overview.png`) with a center
-  indicator; "Overview" accessibility label; toggleable.
-- **Package Details** sheet from the status pill: elevation/imagery/road sources,
-  created-at, area/radius, version, offline-ready, attribution, unavailable layers
-  + reasons.
-- All new controllers read only the extracted local files; **no `URLSession`/
-  network** is introduced. Corrupt GeoJSON/image/metadata degrade that one layer.
+- Material switching: terrain node material swaps between hillshade, imagery, or a
+  blended layer; no network.
+- Roads drape on the mesh surface. Labels are kept out of the 3D scene where they
+  would create clutter.
+- **Overview inset** is north-up and toggleable.
+- **Package Details** reports elevation/imagery/road sources, version, area,
+  attribution, unavailable reasons, road snap availability, orientation
+  availability, and Cross Section usability.
+- All controllers read only extracted local files; **no network** is introduced by
+  the native viewer. Corrupt GeoJSON/image/metadata degrades or rejects according to
+  the package integrity contract.
 
-## Security / integrity (unchanged, extended)
-Private bucket, signed-against-public-host grants, anonymous-denied, SHA-256 +
-size + CRC integrity all preserved. Context-layer sources carry provider/dataset/
-attribution/retrieved_at only — **never** credentials or internal URLs. No provider
-keys in the mobile app or committed `.env`.
+## Security / integrity
 
-## What is NOT in this iteration (honest)
-- Live NAIP imagery is adapter-complete but **default-off** and unverified against
-  the live service from this environment.
-- iOS is compiled by CI (macOS runner); not compiled on the Windows dev box.
-- Real-device Airplane-Mode acceptance is a documented manual gate, not claimed.
-- Android is unchanged and remains **not** a native offline-terrain target.
+Private bucket, signed-against-public-host grants, anonymous-denied, SHA-256 + size
++ CRC integrity are preserved. Context-layer source blocks contain sanitized
+provider/dataset/attribution/retrieved-at/service provenance only — **never**
+credentials, token query strings, internal endpoints, or browser API keys. No
+provider key belongs in the mobile app or committed `.env` files.
+
+## Open work and review points
+
+- Implement `census_tigerweb` as a backend-only provider, supporting the public
+  `MapServer/<layer>/query` contract and truthful Census provenance.
+- Revalidate TIGERweb layer IDs `2`, `6`, and `8`, schemas, access behavior, and
+  service limits during implementation and periodically afterward.
+- Ensure a TIGER-only tangent is not presented as authoritative increasing-postmile
+  upstation when no resolved road bearing exists.
+- Perform physical iPhone Airplane-Mode acceptance with a newly generated package
+  containing TIGERweb road centerlines.
+- Revisit the provider decision when Caltrans offers an approved dev/production
+  service or when a self-hosted road snapshot becomes operationally preferable.
+- Android remains **not** a native offline-terrain target.
