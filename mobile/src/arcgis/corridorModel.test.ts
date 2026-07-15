@@ -8,8 +8,10 @@ import assert from "node:assert/strict";
 import {
   buildCorridorParts,
   clipPolylineToRect,
+  clipSliceToRect,
   insertStationIntoParts,
   metersBetween,
+  projectTapOntoClippedRoad,
   toLocalMeters,
   type LonLat,
   type Rect,
@@ -113,4 +115,50 @@ test("insertStationIntoParts is a no-op when the station is off every road part"
   const before = JSON.stringify(parts);
   insertStationIntoParts(parts, [-121.5, 38.6]); // far from the road
   assert.equal(JSON.stringify(parts), before);
+});
+
+// ---- Defect 2: never snap to a road outside the elevation grid --------------
+
+const GRID: Rect = { minLon: -121.51, minLat: 38.49, maxLon: -121.49, maxLat: 38.51 };
+
+test("a road entirely OUTSIDE the grid is not selectable even for a near tap", () => {
+  // Highway 30 m north of the grid's north edge; the tap sits between it and the grid.
+  const road: LonLat[] = [[-121.52, 38.5103], [-121.48, 38.5103]];
+  const proj = projectTapOntoClippedRoad(road, GRID, -121.5, 38.5095); // < 90 m from the road
+  assert.equal(proj, null, "no in-grid part -> not selectable");
+});
+
+test("a road CROSSING the grid snaps to its in-bounds portion", () => {
+  const road: LonLat[] = [[-121.56, 38.5], [-121.44, 38.5]]; // both endpoints outside, crosses
+  const proj = projectTapOntoClippedRoad(road, GRID, -121.5, 38.5005)!;
+  assert.ok(proj, "crossing road is selectable");
+  assert.ok(proj.snapLon >= GRID.minLon - 1e-9 && proj.snapLon <= GRID.maxLon + 1e-9, "snap lon in grid");
+  assert.ok(proj.snapLat >= GRID.minLat - 1e-9 && proj.snapLat <= GRID.maxLat + 1e-9, "snap lat in grid");
+});
+
+test("a partially-inside road snaps within the grid", () => {
+  const road: LonLat[] = [[-121.5, 38.5], [-121.4, 38.5]]; // starts inside, exits east
+  const proj = projectTapOntoClippedRoad(road, GRID, -121.495, 38.5)!;
+  assert.ok(proj.snapLon <= GRID.maxLon + 1e-9);
+});
+
+// ---- Defect 3: immersive slice plane is bounded to the corridor -------------
+
+test("a slice fully inside the corridor is not truncated", () => {
+  const s = clipSliceToRect([-121.505, 38.5], [-121.495, 38.5], GRID);
+  assert.equal(s.truncated, false);
+  assert.equal(s.points.length, 2);
+});
+
+test("a slice extending past the corridor edge is clipped + reports truncation", () => {
+  const s = clipSliceToRect([-121.5, 38.5], [-121.44, 38.5], GRID); // runs out the east edge
+  assert.equal(s.truncated, true);
+  for (const c of s.points) assert.ok(c[0] <= GRID.maxLon + 1e-9 && c[0] >= GRID.minLon - 1e-9, "clipped to the rect");
+  assert.ok(Math.abs(s.points[1][0] - GRID.maxLon) < 1e-9, "far endpoint sits exactly on the boundary");
+});
+
+test("a slice missing the corridor entirely yields no points (truncated)", () => {
+  const s = clipSliceToRect([-121.6, 38.6], [-121.55, 38.6], GRID);
+  assert.deepEqual(s.points, []);
+  assert.equal(s.truncated, true);
 });

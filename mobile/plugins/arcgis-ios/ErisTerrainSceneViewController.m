@@ -218,8 +218,9 @@ static NSString *ErisExagLabel(CGFloat value) {
 //   * incident marker;
 //   * uploaded incident geometry (GeoJSON geometry/Feature/FeatureCollection/
 //     GeometryCollection and Esri x-y/points/paths/rings; Point, MultiPoint,
-//     LineString, Polygon and their multi-equivalents), clipped to the package
-//     bounds (out-of-bounds vertices are skipped — no invented coordinates);
+//     LineString, Polygon and their multi-equivalents): LINES are truly clipped to the
+//     package bounds (Liang-Barsky, separate parts); point/polygon vertices outside the
+//     bounds are dropped — never invented coordinates;
 //   * the terrain sample extent as a bounding rectangle (only when provided);
 //   * the road-bearing line (only when a real bearing exists).
 //
@@ -1182,20 +1183,38 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
   if (rect) [self.overlaysNode addChildNode:rect];
 }
 
-// Render normalized overlay primitives draped on the surface. Out-of-bounds
-// vertices are skipped (no invented coordinates).
+// Render normalized overlay primitives draped on the surface. LINES are TRULY CLIPPED to
+// the terrain-grid bounds (Liang-Barsky, separate parts — a segment crossing the terrain
+// with both endpoints outside is retained). POINTS outside the bounds are dropped, and
+// POLYGON outlines drop out-of-bounds vertices. Never invents coordinates.
 - (void)addUploadedGeometry:(id)geom {
   NSArray<NSDictionary *> *prims = [self primitivesFromGeometry:geom];
   UIColor *lineColor = [UIColor colorWithRed:0.30 green:0.93 blue:0.55 alpha:1.0];
   for (NSDictionary *prim in prims) {
     NSString *kind = prim[@"kind"];
     NSArray *coords = prim[@"coords"];
+    if ([kind isEqualToString:@"line"]) {
+      for (NSArray *part in [self clipLineCoordsToTerrainBounds:coords]) {   // real clip -> parts
+        NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+        for (NSArray *c in part) {
+          SCNVector3 w;
+          if ([self surfaceWorldForLat:[c[1] doubleValue] lon:[c[0] doubleValue]
+                                  lift:[self drapeLiftForLayer:ErisDrapeSubmitted] out:&w]) {
+            [pts addObject:[NSValue valueWithSCNVector3:w]];
+          }
+        }
+        SCNNode *ln = [self polylineFromPoints:pts color:lineColor closed:NO];
+        if (ln) [self.overlaysNode addChildNode:ln];
+      }
+      continue;
+    }
+    // Points + polygon outlines: keep in-bounds vertices, drop out-of-bounds (no invention).
     NSMutableArray<NSValue *> *pts = [NSMutableArray array];
     for (NSArray *c in coords) {
       double lon = [c[0] doubleValue], lat = [c[1] doubleValue];
       double col, row;
       if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) continue;
-      if (![self inBoundsCol:col row:row]) continue;   // skip out-of-bounds vertex
+      if (![self inBoundsCol:col row:row]) continue;
       [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:[self drapeLiftForLayer:ErisDrapeSubmitted]]]];
     }
     if ([kind isEqualToString:@"point"]) {
@@ -1208,9 +1227,6 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
         [self.overlaysNode addChildNode:dot];
         [self.markerNodes addObject:dot];   // counter-scaled to stay round under exaggeration
       }
-    } else if ([kind isEqualToString:@"line"]) {
-      SCNNode *ln = [self polylineFromPoints:pts color:lineColor closed:NO];
-      if (ln) [self.overlaysNode addChildNode:ln];
     } else if ([kind isEqualToString:@"polygon"]) {
       SCNNode *poly = [self polylineFromPoints:pts color:lineColor closed:YES];
       if (poly) [self.overlaysNode addChildNode:poly];
@@ -1579,8 +1595,11 @@ static NSArray *erisAsArray(id v) {
 // Drape packaged roads.geojson onto the mesh as CLASS-AWARE ribbons (Part 4). Each
 // feature is styled by its ERIS road_class (width/opacity/colour, highways drawn on
 // top); a legacy feature with no road_class renders as the neutral "unclassified"
-// legacy style. Defensive: a corrupt/absent file yields no roads (never a crash);
-// out-of-bounds vertices are skipped (no invented geometry).
+// legacy style. Each line is TRULY CLIPPED to the terrain-grid bounds (Liang-Barsky) into
+// separate parts — a segment crossing the grid with both endpoints outside is retained;
+// disconnected parts are never joined. A class is recorded as packaged ONLY when a clipped
+// part actually renders (never from the manifest alone). Defensive: a corrupt/absent file
+// yields no roads.
 - (void)buildRoadsLayer {
   if (![self layerAvailable:@"roads"]) return;
   NSData *data = [NSData dataWithContentsOfFile:[self.extractedDir stringByAppendingPathComponent:@"roads.geojson"]];
@@ -1598,20 +1617,14 @@ static NSArray *erisAsArray(id v) {
     float lift = [self sceneUnitsForMeters:st.liftM];
     for (NSDictionary *prim in [self primitivesFromGeometry:((NSDictionary *)feat)[@"geometry"]]) {
       if (![prim[@"kind"] isEqualToString:@"line"]) continue;
-      NSMutableArray *inb = [NSMutableArray array];        // in-bounds centreline (no invented coords)
-      for (NSArray *c in prim[@"coords"]) {
-        double lon = [c[0] doubleValue], lat = [c[1] doubleValue];
-        double col, row;
-        if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) continue;
-        if (![self inBoundsCol:col row:row]) continue;
-        [inb addObject:@[@(lon), @(lat)]];
+      // REAL clip to the terrain bounds -> separate parts, each rendered as its own ribbon.
+      for (NSArray *part in [self clipLineCoordsToTerrainBounds:prim[@"coords"]]) {
+        SCNNode *ribbon = [self roadRibbonNodeFromCoords:part widthMeters:st.widthM lift:lift color:color opacity:st.opacity];
+        if (ribbon == nil) continue;
+        ribbon.renderingOrder = st.order;                  // higher class drawn on top
+        [[self roadContainerForClass:rc] addChildNode:ribbon];
+        [packaged addObject:rc];                           // class rendered from an actual clipped part
       }
-      if (inb.count < 2) continue;
-      SCNNode *ribbon = [self roadRibbonNodeFromCoords:inb widthMeters:st.widthM lift:lift color:color opacity:st.opacity];
-      if (ribbon == nil) continue;
-      ribbon.renderingOrder = st.order;                    // higher class drawn on top
-      [[self roadContainerForClass:rc] addChildNode:ribbon];
-      [packaged addObject:rc];
     }
   }
   self.packagedRoadClasses = packaged;
@@ -2134,7 +2147,11 @@ static NSArray *erisAsArray(id v) {
     NSString *rc = f[@"roadClass"] ?: @"unclassified";
     if (![self roadClassSelectable:rc]) continue;           // never snap to a non-selected class
     double sLat, sLon, tDeg, dist;
-    if (![self projectLat:lat lon:lon ontoCoords:f[@"coords"] outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;
+    // Project onto the TERRAIN-CLIPPED road, so the snap point is inherently inside the
+    // elevation grid: a road entirely outside the grid yields no parts (not selectable,
+    // even within tolerance); a crossing road snaps to its in-bounds portion.
+    if (![self projectLat:lat lon:lon ontoParts:[self clipLineCoordsToTerrainBounds:f[@"coords"]]
+                    outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;
     if (dist > ErisSnapMaxMetersForClass(rc)) continue;     // per-class tolerance
     NSMutableDictionary *cand = [@{
       @"snapLat": @(sLat), @"snapLon": @(sLon), @"tangentDeg": @(tDeg), @"distM": @(dist),
@@ -2179,11 +2196,26 @@ static NSArray *erisAsArray(id v) {
     NSString *rc = f[@"roadClass"] ?: @"unclassified";
     if ([self roadClassSelectable:rc]) continue;   // only classes excluded by the filter
     double sLat, sLon, tDeg, dist;
-    if (![self projectLat:lat lon:lon ontoCoords:f[@"coords"] outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;
+    if (![self projectLat:lat lon:lon ontoParts:[self clipLineCoordsToTerrainBounds:f[@"coords"]]
+                    outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;   // must be in-grid
     if (dist > ErisSnapMaxMetersForClass(rc)) continue;
     if (dist < best) { best = dist; bestClass = rc; }
   }
   return bestClass;
+}
+
+// Project a tap onto the nearest of several clipped road parts (each is [lon,lat]). The
+// snap is guaranteed inside whatever bounds the parts were clipped to. NO if no parts.
+- (BOOL)projectLat:(double)lat lon:(double)lon ontoParts:(NSArray *)parts
+            outLat:(double *)outLat outLon:(double *)outLon outTangent:(double *)outTan outDist:(double *)outDist {
+  BOOL found = NO; double best = INFINITY;
+  for (NSArray *part in parts) {
+    double sLat, sLon, tDeg, dist;
+    if ([self projectLat:lat lon:lon ontoCoords:part outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) {
+      if (dist < best) { best = dist; *outLat = sLat; *outLon = sLon; *outTan = tDeg; *outDist = dist; found = YES; }
+    }
+  }
+  return found;
 }
 
 - (NSDictionary *)bearingFallbackCandidateAtLat:(double)lat lon:(double)lon {
@@ -2199,6 +2231,14 @@ static NSArray *erisAsArray(id v) {
 // inspection controller (Part 9). Both modes share this one slice model.
 - (void)inspectCandidate:(NSDictionary *)cand selLat:(double)selLat selLon:(double)selLon {
   double snapLat = [cand[@"snapLat"] doubleValue], snapLon = [cand[@"snapLon"] doubleValue];
+  // A cross section requires an elevation-grid station. Refuse (before building any
+  // samples, camera target, slice or corridor) if the snapped point is outside the grid —
+  // road geometry is packaged with a context buffer that can extend beyond the terrain.
+  if (![self inPackageBoundsLat:snapLat lon:snapLon]) {
+    [self clearSelectedRoadHighlight];
+    [self showCrossSectionMessage:@"The selected road is outside the downloaded terrain area. Choose a road inside the offline terrain boundary."];
+    return;
+  }
   BOOL bearingFallback = [cand[@"bearingFallback"] boolValue];
   BOOL snapped = !bearingFallback;
   double upstationDeg = bearingFallback ? self.upstationHintDeg
@@ -2432,17 +2472,10 @@ static NSArray *erisAsArray(id v) {
   SCNNode *group = [SCNNode node];
   float lift = [self drapeLiftForLayer:ErisDrapeSelectedRoad];
   UIColor *hi = [UIColor colorWithRed:0.24 green:0.96 blue:1.0 alpha:1.0];
-  NSArray *coords = c[@"coords"];
-  if ([coords isKindOfClass:[NSArray class]] && coords.count >= 2) {
-    NSMutableArray *inb = [NSMutableArray array];
-    for (NSArray *cc in coords) {
-      double lon = [cc[0] doubleValue], lat = [cc[1] doubleValue];
-      double col, row;
-      if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) continue;
-      if (![self inBoundsCol:col row:row]) continue;
-      [inb addObject:@[@(lon), @(lat)]];
-    }
-    SCNNode *ribbon = [self roadRibbonNodeFromCoords:inb widthMeters:11.0 lift:lift color:hi opacity:0.92];
+  // Same REAL clipping as buildRoadsLayer, so a highlighted candidate whose TIGER segment
+  // crosses the terrain (with NO original vertex inside) still renders its in-bounds part.
+  for (NSArray *part in [self clipLineCoordsToTerrainBounds:c[@"coords"]]) {
+    SCNNode *ribbon = [self roadRibbonNodeFromCoords:part widthMeters:11.0 lift:lift color:hi opacity:0.92];
     if (ribbon) { ribbon.renderingOrder = 60; [group addChildNode:ribbon]; }
   }
   SCNVector3 sp;
@@ -2773,17 +2806,25 @@ static NSArray *erisAsArray(id v) {
   }
 
   // Slice line built around the STATION (so the cross-section plane passes through the
-  // exact snapped point), in patch-local metres relative to the patch centre.
+  // exact snapped point) and CLIPPED to the corridor rect (so an edge station never draws
+  // a plane floating beyond the terrain mesh, and never uses clamped edge elevation).
   NSDictionary *road = [self crossSectionRoad];
   double ltSh = XsShoulderEdgeFt(road, YES), rtSh = XsShoulderEdgeFt(road, NO);
   double minOff = ltSh - 50, maxOff = rtSh + 50;
+  double r2 = crossBearing * M_PI / 180.0;
+  double e0 = minOff / kXsFtPerM, e1 = maxOff / kXsFtPerM;
+  double lon0 = lon + (e0 * sin(r2)) / (kXsMPerDegLat * cosLat), lat0 = lat + (e0 * cos(r2)) / kXsMPerDegLat;
+  double lon1 = lon + (e1 * sin(r2)) / (kXsMPerDegLat * cosLat), lat1 = lat + (e1 * cos(r2)) / kXsMPerDegLat;
+  double st0, st1;
+  BOOL sliceInRect = [self clipSegAx:lon0 ay:lat0 bx:lon1 by:lat1 minX:minLon minY:minLat maxX:maxLon maxY:maxLat lo:&st0 hi:&st1];
+  BOOL sliceTruncated = !sliceInRect || st0 > 1e-9 || st1 < 1 - 1e-9;   // cut by the package boundary
   NSMutableArray *sliceXsZs = [NSMutableArray array];
-  for (int i = 0; i <= 20; i++) {
-    double off = minOff + (maxOff - minOff) * ((double)i / 20.0);
-    double dM = off / kXsFtPerM, r2 = crossBearing * M_PI / 180.0;
-    double slat = lat + (dM * cos(r2)) / kXsMPerDegLat;      // around the STATION, not the centre
-    double slon = lon + (dM * sin(r2)) / (kXsMPerDegLat * cosLat);
-    [sliceXsZs addObject:@[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)]];
+  if (sliceInRect) {
+    for (int i = 0; i <= 20; i++) {
+      double tt = st0 + (st1 - st0) * ((double)i / 20.0);
+      double slon = lon0 + (lon1 - lon0) * tt, slat = lat0 + (lat1 - lat0) * tt;
+      [sliceXsZs addObject:@[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)]];
+    }
   }
 
   UIImage *img = [self corridorImageForMinLon:minLon minLat:minLat maxLon:maxLon maxLat:maxLat];
@@ -2791,7 +2832,7 @@ static NSArray *erisAsArray(id v) {
     @"cols": @(cols), @"rows": @(rows), @"widthM": @(widthM), @"depthM": @(depthM),
     @"heights": heights, @"minElevM": @(minElev), @"maxElevM": @(maxElev),
     @"image": img ?: (id)[NSNull null], @"hasImagery": @(img != nil),
-    @"roadPartsXsZs": roadPartsXsZs, @"sliceXsZs": sliceXsZs,
+    @"roadPartsXsZs": roadPartsXsZs, @"sliceXsZs": sliceXsZs, @"sliceTruncated": @(sliceTruncated),
     @"stationEastM": @(stationEastM), @"stationSouthM": @(stationSouthM),
     @"upstationDeg": @(upstationDeg), @"crossBearingDeg": @(crossBearing),
   };
@@ -2817,12 +2858,14 @@ static NSArray *erisAsArray(id v) {
   *lo = t0; *hi = t1; return YES;
 }
 
-// Clip a road ([lon,lat] array) to the corridor rect -> array of SEPARATE parts, with the
-// station inserted into the nearest part. Mirrors clipPolylineToRect/insertStationIntoParts
-// in corridorModel.ts (unit-tested there).
-- (NSArray<NSArray *> *)clipRoadCoords:(id)coordsIn minLon:(double)minLon minLat:(double)minLat
-                                maxLon:(double)maxLon maxLat:(double)maxLat
-                            stationLon:(double)stationLon stationLat:(double)stationLat {
+// SHARED clip helper: clip a line ([lon,lat] array) to a geographic rect via Liang-Barsky
+// per segment -> array of SEPARATE parts. A crossing segment (both endpoints outside) is
+// retained and cut to the two boundaries; a partial segment is cut at the boundary; a
+// fully-outside segment is dropped; leave/re-enter yields separate parts; disconnected
+// parts are never joined; every output coordinate lies inside the rect. Mirrors
+// clipPolylineToRect in corridorModel.ts (unit-tested there).
+- (NSArray<NSMutableArray *> *)clipLineCoords:(id)coordsIn toMinLon:(double)minLon minLat:(double)minLat
+                                       maxLon:(double)maxLon maxLat:(double)maxLat {
   NSArray *coords = [coordsIn isKindOfClass:[NSArray class]] ? coordsIn : @[];
   NSMutableArray<NSMutableArray *> *parts = [NSMutableArray array];
   NSMutableArray *cur = [NSMutableArray array];
@@ -2855,6 +2898,23 @@ static NSArray *erisAsArray(id v) {
   if (cur.count) [parts addObject:cur];
   NSMutableArray<NSMutableArray *> *out = [NSMutableArray array];
   for (NSMutableArray *p in parts) if (p.count >= 2) [out addObject:p];
+  return out;
+}
+
+// Clip a line to the EXACT terrain-grid geographic bounds (used by buildRoadsLayer +
+// highlightCandidate + uploaded-line geometry, so all main-map lines are truly clipped,
+// not vertex-filtered).
+- (NSArray<NSMutableArray *> *)clipLineCoordsToTerrainBounds:(id)coordsIn {
+  return [self clipLineCoords:coordsIn toMinLon:self.aoiMinLon minLat:self.aoiMinLat
+                       maxLon:self.aoiMaxLon maxLat:self.aoiMaxLat];
+}
+
+// Clip a road to the corridor rect + insert the station into the nearest part.
+- (NSArray<NSArray *> *)clipRoadCoords:(id)coordsIn minLon:(double)minLon minLat:(double)minLat
+                                maxLon:(double)maxLon maxLat:(double)maxLat
+                            stationLon:(double)stationLon stationLat:(double)stationLat {
+  NSMutableArray<NSMutableArray *> *out = [[self clipLineCoords:coordsIn toMinLon:minLon minLat:minLat
+                                                        maxLon:maxLon maxLat:maxLat] mutableCopy];
   [self insertStationLon:stationLon lat:stationLat intoParts:out];
   return out;
 }

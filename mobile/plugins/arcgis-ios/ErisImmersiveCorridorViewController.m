@@ -297,6 +297,9 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   if ([layoutSrc isEqualToString:@"DEFAULT"]) {
     [lines addObject:@"Default roadway assumptions — verify lane, shoulder, and median dimensions."];
   }
+  if ([self.corridor[@"sliceTruncated"] boolValue]) {
+    [lines addObject:@"Section truncated by the package boundary — only the in-bounds portion is shown."];
+  }
   if (!built) [lines addObject:@"Corridor terrain unavailable for this location."];
 
   UILabel *banner = [[UILabel alloc] init];

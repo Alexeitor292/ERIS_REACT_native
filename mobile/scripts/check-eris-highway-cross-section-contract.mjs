@@ -71,6 +71,12 @@ const checker = (tag, code) => ({
   req(/@"All roads"/, "Road Display control must offer All roads.");
   req(/applyRoadDisplayFilter/, "Road Display filter must gate class visibility.");
 
+  // PR #51 FINAL review — Defect 1: main-map roads are REALLY clipped, not vertex-filtered.
+  req(/clipLineCoordsToTerrainBounds:/, "main-map lines must be clipped to the terrain bounds (shared helper).");
+  req(/-\s*\(void\)buildRoadsLayer\s*\{[\s\S]{0,1400}clipLineCoordsToTerrainBounds/, "buildRoadsLayer must clip each line to the terrain bounds.");
+  req(/-\s*\(void\)highlightCandidate:[\s\S]{0,700}clipLineCoordsToTerrainBounds/, "the candidate highlight must use the same clipping.");
+  forbid(/\[\s*inb\s+addObject/, "the old in-bounds-vertex-only road accumulation must be gone.");
+
   // Part 5: highway-first candidate search.
   req(/gatherCandidatesAtLat:/, "selection must gather a bounded candidate set (gatherCandidatesAtLat:).");
   req(/kErisSnapMaxPrimaryM\s*=\s*90/, "primary snap tolerance must be 90 m.");
@@ -107,6 +113,15 @@ const checker = (tag, code) => ({
   req(/clipRoadCoords:/, "corridor road must be clipped per-segment to the corridor rect.");
   req(/stationEastM/, "corridor must record the snapped station offset (station-fixed).");
   forbid(/@"roadXsZs"/, "the old single-list corridor road (roadXsZs) must be gone.");
+
+  // PR #51 FINAL review — Defect 2: never inspect a station outside the elevation grid.
+  req(/ontoParts:/, "candidate selection must project onto TERRAIN-CLIPPED road parts (in-grid snaps).");
+  req(/gatherCandidatesAtLat:\(double\)lat[\s\S]{0,600}ontoParts:/, "gatherCandidates must project onto clipped parts.");
+  req(/inspectCandidate:\(NSDictionary \*\)cand[\s\S]{0,400}inPackageBoundsLat/, "inspectCandidate must verify the station is in-grid first.");
+  req(/outside the downloaded terrain area/, "an out-of-grid station must be refused with truthful wording.");
+
+  // PR #51 FINAL review — Defect 3: the immersive slice plane is bounded to the corridor.
+  req(/sliceTruncated/, "the corridor must flag a slice truncated by the package boundary.");
 
   // Part 7: saved/animated/restored camera transition; no immediate modal in the tap path.
   req(/saveMapCameraState/, "must save the map camera before the flight.");
@@ -146,6 +161,7 @@ const checker = (tag, code) => ({
   req(/resetCameraFraming/, "immersive VC must support Reset framing.");
   req(/roadPartsXsZs/, "immersive VC must render the clipped road PARTS independently.");
   req(/worldForEast:self\.stationEastM/, "immersive camera/focus must sit on the snapped station, not the patch centre.");
+  req(/Section truncated by the package boundary/, "immersive VC must state when the section is truncated by the boundary.");
   req(/Not street-level photography/, "must state it is an offline aerial-terrain inspection, not street view.");
   req(/upstation is not verified|packaged upstation bearing/, "must state the orientation provenance.");
   req(/Default roadway assumptions/, "must warn on DEFAULT roadway layout.");

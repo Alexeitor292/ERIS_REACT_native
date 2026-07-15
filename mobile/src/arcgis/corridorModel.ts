@@ -101,6 +101,67 @@ export function clipPolylineToRect(coords: LonLat[], r: Rect): LonLat[][] {
   return parts.filter((pt) => pt.length >= 2);
 }
 
+export type Projection = { snapLon: number; snapLat: number; distM: number; tangentDeg: number };
+
+// Project point p onto segment [a,b] in metres; return the snap point + tangent bearing.
+function projectPointSeg(p: LonLat, a: LonLat, b: LonLat): Projection {
+  const cosLat = Math.cos((p[1] * Math.PI) / 180) || 1e-9;
+  const mx = (lon: number) => lon * M_PER_DEG_LAT * cosLat;
+  const my = (lat: number) => lat * M_PER_DEG_LAT;
+  const ax = mx(a[0]);
+  const ay = my(a[1]);
+  const bx = mx(b[0]);
+  const by = my(b[1]);
+  const px = mx(p[0]);
+  const py = my(p[1]);
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const sx = ax + t * dx;
+  const sy = ay + t * dy;
+  const mLat = (a[1] + b[1]) / 2;
+  const dN = (b[1] - a[1]) * M_PER_DEG_LAT;
+  const dE = (b[0] - a[0]) * M_PER_DEG_LAT * Math.cos((mLat * Math.PI) / 180);
+  return {
+    snapLon: sx / (M_PER_DEG_LAT * cosLat),
+    snapLat: sy / M_PER_DEG_LAT,
+    distM: Math.hypot(px - sx, py - sy),
+    tangentDeg: ((Math.atan2(dE, dN) * 180) / Math.PI + 360) % 360,
+  };
+}
+
+/**
+ * Project a tap onto a road AFTER clipping it to the grid `rect`. The snap point is
+ * therefore inherently inside the grid: a road that is entirely outside the grid yields
+ * null (not selectable, even within tolerance); a road crossing the grid snaps to its
+ * in-bounds portion. Mirrors gatherCandidatesAtLat's project-onto-clipped-parts.
+ */
+export function projectTapOntoClippedRoad(coords: LonLat[], rect: Rect, tapLon: number, tapLat: number): Projection | null {
+  let best: Projection | null = null;
+  for (const part of clipPolylineToRect(coords, rect)) {
+    for (let i = 0; i + 1 < part.length; i++) {
+      const r = projectPointSeg([tapLon, tapLat], part[i], part[i + 1]);
+      if (!best || r.distM < best.distM) best = r;
+    }
+  }
+  return best;
+}
+
+/**
+ * Clip a straight cross-section slice segment [a,b] to the corridor rect. Returns the
+ * in-rect endpoints and whether it was truncated by the boundary (so the immersive view
+ * renders only the available portion and can state the truncation). Empty when the slice
+ * misses the rect entirely.
+ */
+export function clipSliceToRect(a: LonLat, b: LonLat, rect: Rect): { points: LonLat[]; truncated: boolean } {
+  const res = clipSegmentParam(a, b, rect);
+  if (!res) return { points: [], truncated: true };
+  const [t0, t1] = res;
+  return { points: [lerp(a, b, t0), lerp(a, b, t1)], truncated: t0 > 1e-9 || t1 < 1 - 1e-9 };
+}
+
 // Project station onto segment [a,b]; return {distM, t}.
 function projectStation(station: LonLat, a: LonLat, b: LonLat): { distM: number; t: number } {
   const cosLat = Math.cos((station[1] * Math.PI) / 180) || 1e-9;
