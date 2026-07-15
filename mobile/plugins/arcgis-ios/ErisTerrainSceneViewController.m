@@ -3,7 +3,9 @@
 #import <SceneKit/SceneKit.h>
 
 #import "ArcGisSketchStore.h"
-#import "ErisRoadSliceSceneViewController.h"
+// The tap path now presents the Immersive/Technical inspection container (Part 9), never
+// the road-slice cutaway directly — no immediate uncoordinated modal in onSceneTap.
+#import "ErisInspectionViewController.h"
 
 // Packed two-float texture coordinate for the SceneKit texcoord source. MUST NOT
 // use CGPoint: CGPoint holds two CGFloat (double, 16 bytes) on 64-bit iOS, but the
@@ -54,6 +56,10 @@ static NSString *ErisExagLabel(CGFloat value) {
 @property(nonatomic, assign) CGFloat reliefIntensity;         // hillshade blend (NOT vertical exaggeration)
 @property(nonatomic, assign) CGFloat verticalExaggeration;    // display-only 0.5..3.0
 @property(nonatomic, weak) UILabel *exagValueLabel;           // live value text (no row reload while dragging)
+// Road Display control (0 Highways, 1 Highways+secondary, 2 All roads). Highway
+// options are disabled when no primary roads are packaged (legacy/unclassified).
+@property(nonatomic, assign) NSInteger roadDisplayMode;
+@property(nonatomic, assign) BOOL primaryRoadsAvailable, secondaryRoadsAvailable;
 @property(nonatomic, copy) void (^onChange)(ErisLayersSheetVC *sheet);
 @end
 
@@ -71,14 +77,24 @@ static NSString *ErisExagLabel(CGFloat value) {
 - (void)done { [self dismissViewControllerAnimated:YES completion:nil]; }
 - (void)notify { if (self.onChange) self.onChange(self); }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 3; }
+// 4 sections when roads are packaged (adds "Road display"); 3 otherwise.
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return self.roadsAvailable ? 4 : 3; }
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
-  return s == 0 ? 3 : (s == 1 ? 4 : 2);  // Appearance: vertical exaggeration + hillshade intensity
+  // 0 base(3), 1 overlays(4), 2 appearance(2), 3 road display(3: Highways / +secondary / All)
+  return s == 0 ? 3 : (s == 1 ? 4 : (s == 2 ? 2 : 3));
 }
 
 - (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
-  return s == 0 ? @"Base surface" : (s == 1 ? @"Operational overlays" : @"Appearance");
+  return s == 0 ? @"Base surface" : (s == 1 ? @"Operational overlays" : (s == 2 ? @"Appearance" : @"Road display"));
+}
+
+- (NSString *)tableView:(UITableView *)t titleForFooterInSection:(NSInteger)s {
+  if (s == 3 && !self.primaryRoadsAvailable) {
+    return @"This package has no highway/primary roads. Showing all packaged roads (unclassified).";
+  }
+  if (s == 3) return @"Cross Section selects roads from the classes shown here.";
+  return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -109,7 +125,7 @@ static NSString *ErisExagLabel(CGFloat value) {
     [sw addTarget:self action:@selector(onSwitch:) forControlEvents:UIControlEventValueChanged];
     sw.accessibilityLabel = titles[ip.row];
     cell.accessoryView = sw;
-  } else if (ip.row == 0) {
+  } else if (ip.section == 2 && ip.row == 0) {
     // Vertical exaggeration — a DISPLAY setting; it does not change the packaged data.
     cell.textLabel.text = @"Vertical exaggeration";
     cell.detailTextLabel.text = ErisExagLabel(self.verticalExaggeration);
@@ -122,18 +138,44 @@ static NSString *ErisExagLabel(CGFloat value) {
     sl.accessibilityValue = ErisExagLabel(self.verticalExaggeration);
     [sl addTarget:self action:@selector(onExagSlider:) forControlEvents:UIControlEventValueChanged];
     cell.accessoryView = sl;
-  } else {
+  } else if (ip.section == 2) {
     cell.textLabel.text = @"Hillshade intensity";
     UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(0, 0, 150, 30)];
     sl.minimumValue = 0.2f; sl.maximumValue = 1.0f; sl.value = (float)self.reliefIntensity;
     sl.accessibilityLabel = @"Hillshade intensity";
     [sl addTarget:self action:@selector(onHillshadeSlider:) forControlEvents:UIControlEventValueChanged];
     cell.accessoryView = sl;
+  } else {
+    // Road display: Highways / Highways + secondary / All roads. Highway options are
+    // disabled when no primary roads are packaged so legacy packages can only pick All.
+    NSArray *titles = @[@"Highways", @"Highways + secondary", @"All roads"];
+    NSArray *hints = @[@"Primary roads only", @"Primary and secondary roads", @"Every packaged road"];
+    cell.textLabel.text = titles[ip.row];
+    cell.detailTextLabel.text = hints[ip.row];
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    BOOL enabled = (ip.row == 2)
+        || (ip.row == 0 && self.primaryRoadsAvailable)
+        || (ip.row == 1 && (self.primaryRoadsAvailable || self.secondaryRoadsAvailable));
+    cell.textLabel.enabled = enabled;
+    cell.userInteractionEnabled = enabled;
+    cell.accessoryType = (self.roadDisplayMode == ip.row) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    cell.accessibilityLabel = [NSString stringWithFormat:@"%@%@", titles[ip.row],
+                               self.roadDisplayMode == ip.row ? @", selected" : (enabled ? @"" : @", unavailable")];
   }
   return cell;
 }
 
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
+  if (ip.section == 3) {
+    BOOL enabled = (ip.row == 2)
+        || (ip.row == 0 && self.primaryRoadsAvailable)
+        || (ip.row == 1 && (self.primaryRoadsAvailable || self.secondaryRoadsAvailable));
+    if (!enabled) return;
+    self.roadDisplayMode = ip.row;
+    [t reloadSections:[NSIndexSet indexSetWithIndex:3] withRowAnimation:UITableViewRowAnimationNone];
+    [self notify];
+    return;
+  }
   if (ip.section != 0) return;
   if (ip.row != 0 && !self.imageryAvailable) return;   // never select an unavailable surface
   self.baseSurface = ip.row;
@@ -239,6 +281,97 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
          + XsNum(road, @"rt_outside_shoulder_ft", 0);
 }
 
+// --- Physical drape lifts (METRES above the mesh surface) --------------------
+// Every draped overlay sits a few CENTIMETRES-to-DECIMETRES above the terrain mesh
+// — enough to defeat z-fighting, and NOTHING like the tens of metres that the old
+// worldSize-percentage lifts produced. On a ~3 km AOI, `worldSize * 0.018` put the
+// road overlay ~27 m ABOVE the imagery; perspective parallax then made correctly
+// located centrelines look horizontally displaced on the iPhone. These are true
+// physical heights, converted to scene units via sceneUnitsPerMeter, and are each
+// independently adjustable. Ordered so higher-priority overlays sit slightly above
+// lower ones (selected road above roads above imagery) and never z-fight.
+static const double kErisImageryDrapeLiftM    = 0.05;  // aerial imagery drape
+static const double kErisRoadDrapeLiftM       = 0.30;  // packaged road centrelines
+static const double kErisSubmittedGeomLiftM   = 0.35;  // uploaded incident line/polygon + sample extent
+static const double kErisBoundaryLiftM        = 0.40;  // package boundary ring
+static const double kErisSelectedRoadLiftM    = 0.55;  // highlighted selected road (Cross Section)
+static const double kErisSliceIndicatorLiftM  = 0.65;  // cross-section slice indicator line
+// Submitted point-of-interest marker radius (metre-derived + physically bounded —
+// never a worldSize-percentage sphere implying tens of metres of ground footprint).
+static const double kErisSubmittedPointRadiusM = 3.0;
+// Incident marker: a small ground RING at the exact coordinate (8-12 m diameter — NOT
+// the old 75 m sphere) plus a billboarded pin. Metre-derived + physically bounded.
+static const double kErisIncidentRingDiameterM = 10.0;
+static const double kErisIncidentPinLiftM       = 9.0;   // billboard pin height above the ring
+
+// Draped-overlay layers, each with its own metre-derived lift (drapeLiftForLayer:).
+typedef NS_ENUM(NSInteger, ErisDrapeLayer) {
+  ErisDrapeImagery = 0,
+  ErisDrapeRoad,
+  ErisDrapeSubmitted,
+  ErisDrapeBoundary,
+  ErisDrapeSelectedRoad,
+  ErisDrapeSliceIndicator,
+};
+
+// --- Road classification (mirrors the ERIS-trusted road_class from PR #50) ----
+// The class is the ERIS-GENERATED road_class field ("primary"/"secondary"/"local");
+// a legacy package with no road_class is honestly "unclassified" (never a silent
+// highway). Provider attributes (NAME/MTFCC/RTTYP) are DISPLAY metadata only and
+// never drive classification. Kept in lockstep with roadClass.ts (parity-tested).
+static NSString *ErisRoadClassLabel(NSString *rc) {
+  if ([rc isEqualToString:@"primary"]) return @"Primary road / highway";
+  if ([rc isEqualToString:@"secondary"]) return @"Secondary road";
+  if ([rc isEqualToString:@"local"]) return @"Local road";
+  return @"Unclassified road";
+}
+// Selection/dedupe priority: primary > secondary > local > unclassified.
+static NSInteger ErisRoadClassPriority(NSString *rc) {
+  if ([rc isEqualToString:@"primary"]) return 3;
+  if ([rc isEqualToString:@"secondary"]) return 2;
+  if ([rc isEqualToString:@"local"]) return 1;
+  return 0;
+}
+
+// Class-aware render style: hierarchy uses WIDTH + OPACITY (metres) in addition to
+// colour, so a highway reads as a highway even in greyscale / to colour-blind users.
+// Higher classes are wider, more opaque, lifted slightly higher, drawn last (on top).
+typedef struct {
+  double widthM;                 // ribbon width in METRES (physical, not worldSize %)
+  CGFloat r, g, b;               // tasteful production palette (NOT the diagnostic's garish colours)
+  CGFloat opacity;
+  double liftM;                  // metre lift above the mesh (all < 1 m; highways slightly above locals)
+  NSInteger order;              // SceneKit renderingOrder (higher = drawn on top)
+} ErisRoadStyle;
+
+static ErisRoadStyle ErisRoadStyleForClass(NSString *rc) {
+  if ([rc isEqualToString:@"primary"])   return (ErisRoadStyle){9.0, 1.00, 0.80, 0.28, 1.00, 0.36, 40};
+  if ([rc isEqualToString:@"secondary"]) return (ErisRoadStyle){5.0, 1.00, 0.62, 0.28, 0.92, 0.33, 30};
+  if ([rc isEqualToString:@"local"])     return (ErisRoadStyle){2.5, 0.74, 0.80, 0.88, 0.68, 0.30, 20};
+  return (ErisRoadStyle){3.5, 0.98, 0.82, 0.36, 0.85, 0.31, 25};  // unclassified / legacy (legacy yellow)
+}
+
+// Road Display filter (which classes are visible + selectable).
+typedef NS_ENUM(NSInteger, ErisRoadDisplayMode) {
+  ErisRoadDisplayHighways = 0,        // primary only
+  ErisRoadDisplayHighwaysSecondary,   // primary + secondary
+  ErisRoadDisplayAll,                 // all classes (incl. local + unclassified)
+};
+
+// Per-class snap tolerance (metres). Highways get a generous tolerance appropriate for
+// divided carriageways + generalized TIGER geometry; locals a tight one. A closer local
+// must NEVER out-rank an eligible highway (highway-first). Named + parity-tested.
+static const double kErisSnapMaxPrimaryM   = 90.0;
+static const double kErisSnapMaxSecondaryM = 65.0;
+static const double kErisSnapMaxLocalM     = 45.0;   // local + unclassified + bearing fallback
+static const NSInteger kErisMaxCandidates  = 3;      // bounded set gathered at complex interchanges
+
+static double ErisSnapMaxMetersForClass(NSString *rc) {
+  if ([rc isEqualToString:@"primary"]) return kErisSnapMaxPrimaryM;
+  if ([rc isEqualToString:@"secondary"]) return kErisSnapMaxSecondaryM;
+  return kErisSnapMaxLocalM;  // local / unclassified
+}
+
 @interface ErisTerrainSceneViewController ()
 @property(nonatomic, strong) SCNView *scnView;
 @property(nonatomic, strong) SCNNode *cameraNode;
@@ -293,9 +426,27 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
 @property(nonatomic, strong) UILabel *crossSectionBanner;
 @property(nonatomic, strong) UIBarButtonItem *crossSectionItem;
 @property(nonatomic, strong) SCNNode *sliceLineNode;          // translucent slice plane on the terrain
-@property(nonatomic, strong) NSArray<NSDictionary *> *roadSnapFeatures; // {kind, coords:[[lon,lat]...]}
+@property(nonatomic, strong) SCNNode *selectedRoadNode;      // highlighted candidate before Inspect (Part 6)
+@property(nonatomic, strong) NSArray<NSDictionary *> *roadSnapFeatures; // {kind, coords, roadClass, name, ...}
 @property(nonatomic, strong) NSDictionary *roadCrossSectionCtx; // packaged road_cross_section.json (or nil)
 @property(nonatomic, assign) double upstationHintDeg;         // roadBearingDeg param hint (NAN if none)
+// --- class-aware road rendering + Road Display filter (Part 4) ---
+@property(nonatomic, strong) NSMutableDictionary<NSString *, SCNNode *> *roadClassNodes; // road_class -> container
+@property(nonatomic, strong) NSSet<NSString *> *packagedRoadClasses;    // classes actually drawn
+@property(nonatomic, assign) BOOL primaryRoadsPackaged;
+@property(nonatomic, assign) BOOL secondaryRoadsPackaged;
+@property(nonatomic, assign) ErisRoadDisplayMode roadDisplayMode;
+// --- highway-first candidate selection + confirmation (Part 5/6) ---
+@property(nonatomic, assign) ErisRoadDisplayMode selectionMode;  // Highway vs All Roads (mirrors display intent)
+@property(nonatomic, strong) NSArray<NSDictionary *> *pendingCandidates;  // bounded candidate set awaiting confirm
+@property(nonatomic, assign) NSInteger pendingCandidateIndex;
+@property(nonatomic, assign) double pendingSelLat, pendingSelLon;
+@property(nonatomic, strong) UIView *candidateCardView;          // bottom confirmation card
+// --- map->inspection camera transition (Part 7) ---
+@property(nonatomic, assign) SCNMatrix4 savedCameraTransform;    // restored when inspection closes
+@property(nonatomic, assign) SCNVector3 savedCameraTarget;
+@property(nonatomic, assign) BOOL hasSavedCamera;
+@property(nonatomic, strong) SCNNode *inspectionFocusNode;       // transient look-at target during the flight
 @end
 
 @implementation ErisTerrainSceneViewController
@@ -486,6 +637,35 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
   self.sceneUnitsPerMeter = (2.0 * self.worldSize) / maxDim;
   self.halfWidthUnits = widthM * self.sceneUnitsPerMeter / 2.0;
   self.halfDepthUnits = heightM * self.sceneUnitsPerMeter / 2.0;
+}
+
+#pragma mark - Physical scale conversions (metres -> scene units)
+
+// Canonical metre -> scene-unit conversion for any PHYSICAL height or size. Use this
+// (never a worldSize percentage) whenever a quantity represents real metres, so a
+// value looks the same physical size on a 1 km AOI and a 5 km AOI. sceneUnitsPerMeter
+// is the true-scale baseline from the package footprint (computePhysicalScale).
+- (float)sceneUnitsForMeters:(double)meters {
+  return (float)(meters * self.sceneUnitsPerMeter);
+}
+
+// Metre lift for a draped overlay layer (source of truth for drapeLiftForLayer:).
+- (double)drapeLiftMetersForLayer:(ErisDrapeLayer)layer {
+  switch (layer) {
+    case ErisDrapeImagery:        return kErisImageryDrapeLiftM;
+    case ErisDrapeRoad:           return kErisRoadDrapeLiftM;
+    case ErisDrapeSubmitted:      return kErisSubmittedGeomLiftM;
+    case ErisDrapeBoundary:       return kErisBoundaryLiftM;
+    case ErisDrapeSelectedRoad:   return kErisSelectedRoadLiftM;
+    case ErisDrapeSliceIndicator: return kErisSliceIndicatorLiftM;
+  }
+  return kErisRoadDrapeLiftM;
+}
+
+// Scene-unit drape lift for a layer — the ONLY way draped overlays get their height.
+// Metre-derived, so the overlay hugs the imagery (~decimetres up) at any AOI size.
+- (float)drapeLiftForLayer:(ErisDrapeLayer)layer {
+  return [self sceneUnitsForMeters:[self drapeLiftMetersForLayer:layer]];
 }
 
 // Apply the display-only vertical exaggeration: Y-scale the container, and
@@ -709,8 +889,8 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
 }
 
 // Tiny lift so imagery patches drape ABOVE the base terrain surface (avoids z-fighting)
-// without visibly floating. In true-scale units; exagNode scales it with the terrain.
-- (float)imageryDrapeLift { return (float)(self.worldSize * 0.002); }
+// without visibly floating. Metre-derived (~5 cm); exagNode scales it with the terrain.
+- (float)imageryDrapeLift { return [self drapeLiftForLayer:ErisDrapeImagery]; }
 
 // A height-field patch covering ONE tile's geographic bounds. Vertices are sampled
 // from the SAME grid mapping used by the base mesh + overlays (surfaceWorldForCol),
@@ -901,13 +1081,7 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
     double col, row;
     if ([self colRowForLat:incLat lon:incLon outCol:&col outRow:&row] && [self inBoundsCol:col row:row]) {
       incidentInBounds = YES;
-      SCNVector3 pos = [self surfaceWorldForCol:col row:row lift:self.worldSize * 0.03f];
-      SCNNode *pin = [SCNNode nodeWithGeometry:[SCNSphere sphereWithRadius:self.worldSize * 0.025f]];
-      pin.geometry.firstMaterial.diffuse.contents = [UIColor colorWithRed:0.14 green:0.39 blue:0.92 alpha:1.0];
-      pin.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
-      pin.position = pos;
-      [self.overlaysNode addChildNode:pin];
-      [self.markerNodes addObject:pin];   // counter-scaled so it stays round under exaggeration
+      [self addIncidentMarkerAtCol:col row:row];
     }
   }
 
@@ -924,7 +1098,9 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
   if (incidentInBounds && [bearing isKindOfClass:[NSNumber class]]) {
     double rad = [bearing doubleValue] * M_PI / 180.0;
     SCNVector3 c;
-    if ([self surfaceWorldForLat:incLat lon:incLon lift:self.worldSize * 0.02f out:&c]) {
+    if ([self surfaceWorldForLat:incLat lon:incLon lift:[self drapeLiftForLayer:ErisDrapeRoad] out:&c]) {
+      // Length is a VISUAL framing proportion (a synthetic direction indicator has no
+      // "true" physical length) — legitimately worldSize-relative, not a metre measure.
       float len = self.worldSize * 0.4f;
       SCNVector3 a = SCNVector3Make(c.x - sinf(rad) * len, c.y, c.z + cosf(rad) * len);
       SCNVector3 b = SCNVector3Make(c.x + sinf(rad) * len, c.y, c.z - cosf(rad) * len);
@@ -934,6 +1110,52 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
       if (line) [self.overlaysNode addChildNode:line];
     }
   }
+}
+
+// Restrained incident-location marker (Part 2): a metre-scaled ground RING at the
+// EXACT incident coordinate (kErisIncidentRingDiameterM ~ 10 m — never a 75 m sphere),
+// a small centre dot for close range, and a billboarded pin above it that always faces
+// the camera. All metre-derived + counter-scaled so they stay round under vertical
+// exaggeration; the thin ring does not obscure the road beneath it.
+- (void)addIncidentMarkerAtCol:(double)col row:(double)row {
+  UIColor *incidentColor = [UIColor colorWithRed:0.16 green:0.45 blue:0.95 alpha:1.0];
+  SCNVector3 ground = [self surfaceWorldForCol:col row:row lift:[self drapeLiftForLayer:ErisDrapeSubmitted]];
+  double dia = kErisIncidentRingDiameterM;
+
+  // Ground ring (torus lies flat in the XZ plane): outer diameter ~= dia.
+  SCNTorus *torus = [SCNTorus torusWithRingRadius:[self sceneUnitsForMeters:dia * 0.42]
+                                       pipeRadius:[self sceneUnitsForMeters:dia * 0.08]];
+  torus.firstMaterial.diffuse.contents = incidentColor;
+  torus.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  SCNNode *ring = [SCNNode nodeWithGeometry:torus];
+  ring.position = ground;
+  ring.name = @"Incident location";
+  [self.overlaysNode addChildNode:ring];
+  [self.markerNodes addObject:ring];   // counter-scaled -> stays a flat round ring under exaggeration
+
+  // Small centre dot (metre-derived, bounded) for close-range readability.
+  SCNNode *dot = [SCNNode nodeWithGeometry:[SCNSphere sphereWithRadius:[self sceneUnitsForMeters:dia * 0.12]]];
+  dot.geometry.firstMaterial.diffuse.contents = incidentColor;
+  dot.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  dot.position = ground;
+  [self.overlaysNode addChildNode:dot];
+  [self.markerNodes addObject:dot];
+
+  // Billboarded pin head above the ring: always faces the camera (bounded, readable at
+  // overview + close range) WITHOUT implying a large ground footprint.
+  SCNNode *pin = [SCNNode nodeWithGeometry:[SCNSphere sphereWithRadius:[self sceneUnitsForMeters:dia * 0.22]]];
+  pin.geometry.firstMaterial.diffuse.contents = incidentColor;
+  pin.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  SCNBillboardConstraint *bb = [SCNBillboardConstraint billboardConstraint];
+  bb.freeAxes = SCNBillboardAxisAll;
+  pin.constraints = @[bb];
+  pin.position = SCNVector3Make(ground.x, ground.y + [self sceneUnitsForMeters:kErisIncidentPinLiftM], ground.z);
+  pin.name = @"Incident location";
+  [self.overlaysNode addChildNode:pin];
+  [self.markerNodes addObject:pin];
+
+  // Accessible identification of the marker (VoiceOver reads the scene status pill).
+  self.scnView.accessibilityLabel = @"Offline 3D terrain with incident location marker";
 }
 
 - (void)addSampleExtent:(NSDictionary *)ext {
@@ -947,7 +1169,7 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
     double col, row;
     if (![self colRowForLat:ring[i][1] lon:ring[i][0] outCol:&col outRow:&row]) continue;
     if (![self inBoundsCol:col row:row]) continue;  // clip to packaged bounds
-    [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:self.worldSize * 0.015f]]];
+    [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:[self drapeLiftForLayer:ErisDrapeSubmitted]]]];
   }
   SCNNode *rect = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.42 green:0.84 blue:0.96 alpha:1.0] closed:NO];
   if (rect) [self.overlaysNode addChildNode:rect];
@@ -967,11 +1189,12 @@ static double XsShoulderEdgeFt(NSDictionary *road, BOOL lt) {
       double col, row;
       if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) continue;
       if (![self inBoundsCol:col row:row]) continue;   // skip out-of-bounds vertex
-      [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:self.worldSize * 0.02f]]];
+      [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:[self drapeLiftForLayer:ErisDrapeSubmitted]]]];
     }
     if ([kind isEqualToString:@"point"]) {
       for (NSValue *v in pts) {
-        SCNNode *dot = [SCNNode nodeWithGeometry:[SCNSphere sphereWithRadius:self.worldSize * 0.018f]];
+        // Metre-derived, physically bounded dot — never a worldSize-percentage sphere.
+        SCNNode *dot = [SCNNode nodeWithGeometry:[SCNSphere sphereWithRadius:[self sceneUnitsForMeters:kErisSubmittedPointRadiusM]]];
         dot.geometry.firstMaterial.diffuse.contents = lineColor;
         dot.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
         dot.position = [v SCNVector3Value];
@@ -1281,31 +1504,152 @@ static NSArray *erisAsArray(id v) {
 
 #pragma mark - Packaged roads / boundary / overview inset
 
-// Drape packaged roads.geojson onto the mesh surface. Defensive: a corrupt/absent
-// file yields no roads (never a crash). Only LineString-like features are rendered
-// (roads are lines); out-of-bounds vertices are skipped (no invented geometry).
+// A draped road RIBBON: the in-bounds centreline widened to `widthMeters`
+// (perpendicular, in the ground plane, metre-derived) and sampled onto the terrain
+// surface, so road CLASS reads by WIDTH + OPACITY, not colour alone (Part 4). The
+// width offset is computed per vertex from the local tangent. Returns nil if fewer
+// than two usable vertices survive.
+- (SCNNode *)roadRibbonNodeFromCoords:(NSArray *)coords widthMeters:(double)widthM lift:(float)lift
+                                color:(UIColor *)color opacity:(CGFloat)opacity {
+  NSUInteger n = coords.count;
+  if (n < 2) return nil;
+  double halfW = MAX(0.1, widthM / 2.0);
+  NSMutableArray<NSValue *> *left = [NSMutableArray array], *right = [NSMutableArray array];
+  for (NSUInteger i = 0; i < n; i++) {
+    NSArray *c = coords[i];
+    double lon = [c[0] doubleValue], lat = [c[1] doubleValue];
+    NSArray *cp = coords[i == 0 ? 0 : i - 1], *cn = coords[i + 1 < n ? i + 1 : n - 1];
+    double cosLat = cos(lat * M_PI / 180.0); if (fabs(cosLat) < 1e-9) cosLat = 1e-9;
+    double dE = ([cn[0] doubleValue] - [cp[0] doubleValue]) * kXsMPerDegLat * cosLat;
+    double dN = ([cn[1] doubleValue] - [cp[1] doubleValue]) * kXsMPerDegLat;
+    double len = hypot(dE, dN); if (len < 1e-9) { dE = 1; dN = 0; len = 1; }
+    // Right normal = tangent rotated -90deg: (dN, -dE)/len (in E/N metres).
+    double pE = dN / len, pN = -dE / len;
+    double dLat = (pN * halfW) / kXsMPerDegLat, dLon = (pE * halfW) / (kXsMPerDegLat * cosLat);
+    SCNVector3 wR, wL;
+    if (![self surfaceWorldForLat:lat + dLat lon:lon + dLon lift:lift out:&wR]) continue;
+    if (![self surfaceWorldForLat:lat - dLat lon:lon - dLon lift:lift out:&wL]) continue;
+    [right addObject:[NSValue valueWithSCNVector3:wR]];
+    [left addObject:[NSValue valueWithSCNVector3:wL]];
+  }
+  NSUInteger m = left.count;
+  if (m < 2) return nil;
+  NSUInteger vcount = m * 2;
+  SCNVector3 *verts = malloc(sizeof(SCNVector3) * vcount);
+  for (NSUInteger i = 0; i < m; i++) { verts[i * 2] = [left[i] SCNVector3Value]; verts[i * 2 + 1] = [right[i] SCNVector3Value]; }
+  NSUInteger icount = (m - 1) * 6;
+  int *idx = malloc(sizeof(int) * icount);
+  NSUInteger k = 0;
+  for (NSUInteger i = 0; i + 1 < m; i++) {
+    int l0 = (int)(i * 2), r0 = l0 + 1, l1 = (int)((i + 1) * 2), r1 = l1 + 1;
+    idx[k++] = l0; idx[k++] = r0; idx[k++] = l1;
+    idx[k++] = l1; idx[k++] = r0; idx[k++] = r1;
+  }
+  SCNGeometrySource *src = [SCNGeometrySource geometrySourceWithVertices:verts count:vcount];
+  SCNGeometryElement *el = [SCNGeometryElement geometryElementWithData:[NSData dataWithBytes:idx length:sizeof(int) * icount]
+                                                        primitiveType:SCNGeometryPrimitiveTypeTriangles
+                                                       primitiveCount:icount / 3 bytesPerIndex:sizeof(int)];
+  SCNGeometry *geo = [SCNGeometry geometryWithSources:@[src] elements:@[el]];
+  SCNMaterial *mat = [SCNMaterial material];
+  mat.diffuse.contents = color;
+  mat.lightingModelName = SCNLightingModelConstant;   // reads at any light / grazing angle
+  mat.doubleSided = YES;
+  mat.transparency = opacity;
+  geo.firstMaterial = mat;
+  free(verts); free(idx);
+  return [SCNNode nodeWithGeometry:geo];
+}
+
+// Container node for one road class (created lazily under roadsNode so the Road
+// Display filter can show/hide/dim whole classes independently).
+- (SCNNode *)roadContainerForClass:(NSString *)rc {
+  if (self.roadClassNodes == nil) self.roadClassNodes = [NSMutableDictionary dictionary];
+  SCNNode *node = self.roadClassNodes[rc];
+  if (node == nil) { node = [SCNNode node]; self.roadClassNodes[rc] = node; [self.roadsNode addChildNode:node]; }
+  return node;
+}
+
+// Drape packaged roads.geojson onto the mesh as CLASS-AWARE ribbons (Part 4). Each
+// feature is styled by its ERIS road_class (width/opacity/colour, highways drawn on
+// top); a legacy feature with no road_class renders as the neutral "unclassified"
+// legacy style. Defensive: a corrupt/absent file yields no roads (never a crash);
+// out-of-bounds vertices are skipped (no invented geometry).
 - (void)buildRoadsLayer {
   if (![self layerAvailable:@"roads"]) return;
   NSData *data = [NSData dataWithContentsOfFile:[self.extractedDir stringByAppendingPathComponent:@"roads.geojson"]];
   id gj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
   if (![gj isKindOfClass:[NSDictionary class]]) return;
-  UIColor *roadColor = [UIColor colorWithRed:0.98 green:0.82 blue:0.36 alpha:1.0];
+  self.roadClassNodes = [NSMutableDictionary dictionary];
+  NSMutableSet<NSString *> *packaged = [NSMutableSet set];
   for (id feat in erisAsArray(((NSDictionary *)gj)[@"features"])) {
     if (![feat isKindOfClass:[NSDictionary class]]) continue;
-    NSArray<NSDictionary *> *prims = [self primitivesFromGeometry:((NSDictionary *)feat)[@"geometry"]];
-    for (NSDictionary *prim in prims) {
+    NSDictionary *props = [((NSDictionary *)feat)[@"properties"] isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)feat)[@"properties"] : @{};
+    NSString *rc = XsStr(props, @"road_class", @"");
+    if (rc.length == 0) rc = @"unclassified";        // legacy: no ERIS road_class -> unclassified
+    ErisRoadStyle st = ErisRoadStyleForClass(rc);
+    UIColor *color = [UIColor colorWithRed:st.r green:st.g blue:st.b alpha:1.0];
+    float lift = [self sceneUnitsForMeters:st.liftM];
+    for (NSDictionary *prim in [self primitivesFromGeometry:((NSDictionary *)feat)[@"geometry"]]) {
       if (![prim[@"kind"] isEqualToString:@"line"]) continue;
-      NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+      NSMutableArray *inb = [NSMutableArray array];        // in-bounds centreline (no invented coords)
       for (NSArray *c in prim[@"coords"]) {
         double lon = [c[0] doubleValue], lat = [c[1] doubleValue];
         double col, row;
         if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) continue;
         if (![self inBoundsCol:col row:row]) continue;
-        [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:col row:row lift:self.worldSize * 0.018f]]];
+        [inb addObject:@[@(lon), @(lat)]];
       }
-      SCNNode *ln = [self polylineFromPoints:pts color:roadColor closed:NO];
-      if (ln) [self.roadsNode addChildNode:ln];
+      if (inb.count < 2) continue;
+      SCNNode *ribbon = [self roadRibbonNodeFromCoords:inb widthMeters:st.widthM lift:lift color:color opacity:st.opacity];
+      if (ribbon == nil) continue;
+      ribbon.renderingOrder = st.order;                    // higher class drawn on top
+      [[self roadContainerForClass:rc] addChildNode:ribbon];
+      [packaged addObject:rc];
     }
+  }
+  self.packagedRoadClasses = packaged;
+  self.primaryRoadsPackaged = [packaged containsObject:@"primary"];
+  self.secondaryRoadsPackaged = [packaged containsObject:@"secondary"];
+  // Default Road Display: Highways when primary roads are packaged, else All roads
+  // (so legacy/unclassified packages still show their roads with a clear label).
+  self.roadDisplayMode = self.primaryRoadsPackaged ? ErisRoadDisplayHighways : ErisRoadDisplayAll;
+  self.selectionMode = self.roadDisplayMode;
+  [self applyRoadDisplayFilter];
+}
+
+// Whether a road class is visible under the current Road Display mode.
+- (BOOL)roadClassVisibleForDisplay:(NSString *)rc {
+  NSInteger prio = ErisRoadClassPriority(rc);
+  switch (self.roadDisplayMode) {
+    case ErisRoadDisplayHighways:          return prio >= 3;                    // primary only
+    case ErisRoadDisplayHighwaysSecondary: return prio >= 2;                    // primary + secondary
+    case ErisRoadDisplayAll:               return YES;                          // all incl. local/unclassified
+  }
+  return YES;
+}
+
+// Whether a class is SELECTABLE for the Cross Section (Highway vs All Roads).
+- (BOOL)roadClassSelectable:(NSString *)rc {
+  NSInteger prio = ErisRoadClassPriority(rc);
+  switch (self.selectionMode) {
+    case ErisRoadDisplayHighways:          return prio >= 3;
+    case ErisRoadDisplayHighwaysSecondary: return prio >= 2;
+    case ErisRoadDisplayAll:               return YES;
+  }
+  return YES;
+}
+
+// Show/hide road-class containers per the Road Display mode. In Cross Section mode,
+// non-selectable classes are DIMMED (not hidden) so the user still sees context but
+// selectable roads are emphasised (Part 4).
+- (void)applyRoadDisplayFilter {
+  for (NSString *rc in self.roadClassNodes) {
+    SCNNode *node = self.roadClassNodes[rc];
+    BOOL visible = [self roadClassVisibleForDisplay:rc];
+    node.hidden = !visible;
+    CGFloat op = 1.0;
+    if (visible && self.crossSectionMode && ![self roadClassSelectable:rc]) op = 0.35;  // dim non-selectable
+    node.opacity = op;
   }
 }
 
@@ -1315,7 +1659,7 @@ static NSArray *erisAsArray(id v) {
     {0, 0}, {(double)(self.cols - 1), 0}, {(double)(self.cols - 1), (double)(self.rows - 1)}, {0, (double)(self.rows - 1)}};
   NSMutableArray<NSValue *> *pts = [NSMutableArray array];
   for (int i = 0; i < 4; i++) {
-    [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:corners[i][0] row:corners[i][1] lift:self.worldSize * 0.01f]]];
+    [pts addObject:[NSValue valueWithSCNVector3:[self surfaceWorldForCol:corners[i][0] row:corners[i][1] lift:[self drapeLiftForLayer:ErisDrapeBoundary]]]];
   }
   SCNNode *ring = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.55 green:0.75 blue:0.95 alpha:0.9] closed:YES];
   if (ring) [self.boundaryNode addChildNode:ring];
@@ -1361,6 +1705,9 @@ static NSArray *erisAsArray(id v) {
   sheet.showOverview = self.showOverview;
   sheet.reliefIntensity = self.reliefIntensity;
   sheet.verticalExaggeration = self.verticalExaggeration;
+  sheet.roadDisplayMode = self.roadDisplayMode;
+  sheet.primaryRoadsAvailable = self.primaryRoadsPackaged;
+  sheet.secondaryRoadsAvailable = self.secondaryRoadsPackaged;
   __weak typeof(self) weakSelf = self;
   sheet.onChange = ^(ErisLayersSheetVC *s) {
     typeof(self) me = weakSelf;
@@ -1372,8 +1719,11 @@ static NSArray *erisAsArray(id v) {
     me.showOverview = s.showOverview;
     me.reliefIntensity = s.reliefIntensity;
     me.verticalExaggeration = s.verticalExaggeration;
+    me.roadDisplayMode = s.roadDisplayMode;
+    me.selectionMode = s.roadDisplayMode;   // keep Cross Section selection aligned with display
     [me applyBaseSurface];         // hillshade intensity (hybrid multiply) may have changed
     [me applyLayerVisibility];
+    [me applyRoadDisplayFilter];   // class visibility/dimming per Road Display mode
     [me applyVerticalExaggeration]; // display-only Y-scale; never touches gridData/files
   };
   UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:sheet];
@@ -1539,12 +1889,38 @@ static NSArray *erisAsArray(id v) {
   self.roadSnapFeatures = [self parseRoadSnapFeatures];
 }
 
-// roads.geojson -> snap features {kind, coords}, richest-first (inventory/centerline
-// before the derived bearing line). Uses the SAME geometry parser as buildRoadsLayer
-// (primitivesFromGeometry), so every line-like geometry the renderer DRAWS is also
-// eligible for snapping — LineString, MultiLineString, Polygon rings, and Esri
-// paths/rings — not just bare LineString. If a yellow road line is visible, tapping
-// near it can snap.
+// Build a snap primitive that retains the road-context kind AND the full road
+// metadata (Part 3). roadClass is the ERIS-GENERATED road_class; a legacy package
+// with no road_class degrades honestly to "unclassified" (never a silent highway).
+// Provider NAME/BASENAME/MTFCC/RTTYP/source_layer_id are DISPLAY metadata only and
+// never drive classification or selection.
+- (NSDictionary *)snapFeatureForProps:(NSDictionary *)props kind:(NSString *)kind coords:(NSArray *)coords {
+  NSString *rc = XsStr(props, @"road_class", @"");
+  if (rc.length == 0) rc = @"unclassified";
+  NSString *rcLabel = XsStr(props, @"road_class_label", @"");
+  if (rcLabel.length == 0) rcLabel = ErisRoadClassLabel(rc);
+  NSMutableDictionary *f = [@{
+    @"kind": kind.length ? kind : @"road",
+    @"coords": coords,
+    @"roadClass": rc,
+    @"roadClassLabel": rcLabel,
+  } mutableCopy];
+  NSString *name = XsStr(props, @"NAME", @"");         if (name.length) f[@"name"] = name;
+  NSString *basename = XsStr(props, @"BASENAME", @""); if (basename.length) f[@"basename"] = basename;
+  NSString *mtfcc = XsStr(props, @"MTFCC", @"");       if (mtfcc.length) f[@"mtfcc"] = mtfcc;
+  NSString *rttyp = XsStr(props, @"RTTYP", @"");       if (rttyp.length) f[@"rttyp"] = rttyp;
+  id sli = props[@"source_layer_id"];
+  if ([sli isKindOfClass:[NSNumber class]]) f[@"sourceLayerId"] = sli;
+  return f;
+}
+
+// roads.geojson -> snap features {kind, coords, roadClass, roadClassLabel, name, ...},
+// richest-first (inventory/centerline before the derived bearing line). Uses the SAME
+// geometry parser as buildRoadsLayer (primitivesFromGeometry), so every line-like
+// geometry the renderer DRAWS is also eligible for snapping — LineString,
+// MultiLineString, Polygon rings, and Esri paths/rings — not just bare LineString.
+// Every primitive retains the full road metadata so highway-first selection (Part 5)
+// and the confirmation card (Part 6) can classify + label it.
 - (NSArray<NSDictionary *> *)parseRoadSnapFeatures {
   NSMutableArray *rich = [NSMutableArray array];
   NSMutableArray *bearing = [NSMutableArray array];
@@ -1561,7 +1937,7 @@ static NSArray *erisAsArray(id v) {
       if (![pk isEqualToString:@"line"] && ![pk isEqualToString:@"polygon"]) continue;  // line-like only
       NSArray *coords = prim[@"coords"];
       if (coords.count < 2) continue;
-      NSDictionary *feat = @{@"kind": kind, @"coords": coords};
+      NSDictionary *feat = [self snapFeatureForProps:props kind:kind coords:coords];
       if ([kind isEqualToString:@"road_bearing"]) [bearing addObject:feat]; else [rich addObject:feat];
     }
   }
@@ -1658,6 +2034,8 @@ static NSArray *erisAsArray(id v) {
     self.crossSectionBanner = b;
   }
   self.crossSectionBanner.hidden = !active;
+  if (active) { [self clearSelectedRoadHighlight]; [self dismissCandidateCard]; }  // fresh start
+  [self applyRoadDisplayFilter];   // emphasise selectable classes / dim the rest while active
 }
 
 - (void)onSceneTap:(UITapGestureRecognizer *)gr {
@@ -1686,46 +2064,397 @@ static NSArray *erisAsArray(id v) {
   return YES;
 }
 
+// Tap handler: gather the HIGHWAY-FIRST bounded candidate set (Part 5) and present the
+// confirmation card (Part 6) instead of silently committing to the nearest line. Honest
+// fallbacks preserved: bearing fallback, "No road context near tap", "No road context
+// packaged for this area", and never snapping to a class the filter excludes.
 - (void)createCrossSectionAtLat:(double)selLat lon:(double)selLon {
-  double snapLat = selLat, snapLon = selLon, tangentDeg = 0, bestDist = INFINITY;
-  NSString *kind = nil; BOOL snapped = NO;
-  for (NSDictionary *f in self.roadSnapFeatures) {
-    double sLat, sLon, tDeg, dist;
-    if ([self projectLat:selLat lon:selLon ontoCoords:f[@"coords"] outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) {
-      if (dist < bestDist) { bestDist = dist; snapLat = sLat; snapLon = sLon; tangentDeg = tDeg; kind = f[@"kind"]; }
-    }
+  NSArray<NSDictionary *> *candidates = [self gatherCandidatesAtLat:selLat lon:selLon];
+  if (candidates.count > 0) {
+    [self presentCandidateConfirmation:candidates selLat:selLat selLon:selLon];
+    return;
   }
-  double maxSnapM = 60.0, upstationDeg;
   BOOL bearingAvailable = isfinite(self.upstationHintDeg);
-  if (bestDist <= maxSnapM) {
-    // Snapped to real road geometry (road_inventory / road_centerline / bearing line).
-    snapped = YES;
-    upstationDeg = XsResolveUpstation(tangentDeg, self.upstationHintDeg);
-  } else if (bearingAvailable && ![self hasRichRoadGeometry] && [self inPackageBoundsLat:selLat lon:selLon]) {
-    // Only a short bearing line (or no line geometry) is packaged and the tap is
-    // beyond 60 m of it, but the tap is inside the package and the user is
-    // intentionally in Cross Section mode -> clearly-labelled BEARING FALLBACK.
-    snapped = NO; snapLat = selLat; snapLon = selLon; kind = @"bearing_fallback";
-    upstationDeg = self.upstationHintDeg;
-  } else if ([self hasRichRoadGeometry]) {
-    // Real road geometry exists but the tap is too far from it — tell the user to aim.
+  if (bearingAvailable && ![self hasRichRoadGeometry] && [self inPackageBoundsLat:selLat lon:selLon]) {
+    // Only a bearing (or no line geometry) is packaged and the tap is inside the
+    // package -> clearly-labelled BEARING FALLBACK (still confirmed so its provenance
+    // is explicit; orientation is geometry/bearing-derived, never verified upstation).
+    [self presentCandidateConfirmation:@[[self bearingFallbackCandidateAtLat:selLat lon:selLon]] selLat:selLat selLon:selLon];
+    return;
+  }
+  // A road IS near the tap but its class is excluded by the current filter -> guide the
+  // user; NEVER silently snap to a different class than the selected filter.
+  NSString *excluded = [self nearbyExcludedClassAtLat:selLat lon:selLon];
+  if (excluded != nil) {
+    [self showCrossSectionMessage:[NSString stringWithFormat:
+        @"The nearest road here is a %@. Change Road Display in Layers to include it, or tap a highlighted road.",
+        [ErisRoadClassLabel(excluded) lowercaseString]]];
+    return;
+  }
+  if ([self hasRichRoadGeometry]) {
     [self showCrossSectionMessage:@"No road context near tap. Try closer to the highlighted road line."];
     return;
-  } else {
-    // No geometry and no bearing at all — the package lacks road context.
-    [self showCrossSectionMessage:@"No road context packaged for this area. Regenerate the offline package with road context enabled."];
-    return;
   }
+  [self showCrossSectionMessage:@"No road context packaged for this area. Regenerate the offline package with road context enabled."];
+}
 
-  NSDictionary *slice = [self buildSliceSelectedLat:selLat selLon:selLon snapLat:snapLat snapLon:snapLon
-                                       upstationDeg:upstationDeg snapped:snapped roadContextKind:kind];
-  [self drawSliceLineAtLat:snapLat lon:snapLon crossBearing:XsCrossBearing(upstationDeg) road:[self crossSectionRoad]];
+// Equirectangular metres between two lon/lat points (shared by candidate dedup).
+- (double)metersBetweenLatA:(double)aLat lonA:(double)aLon latB:(double)bLat lonB:(double)bLon {
+  double mLat = (aLat + bLat) / 2.0;
+  double dN = (bLat - aLat) * kXsMPerDegLat;
+  double dE = (bLon - aLon) * kXsMPerDegLat * cos(mLat * M_PI / 180.0);
+  return hypot(dN, dE);
+}
+
+// HIGHWAY-FIRST candidate gathering (Part 5). For every eligible road snap feature,
+// project the tap and keep it only if within ITS class tolerance. Rank deterministically
+// by (1) class priority DESC — so a closer local can never out-rank an eligible highway,
+// (2) distance ASC, (3) stable source order — then dedup near-identical lines and cap at
+// the best few (kErisMaxCandidates) so complex interchanges surface a bounded choice.
+- (NSArray<NSDictionary *> *)gatherCandidatesAtLat:(double)lat lon:(double)lon {
+  NSMutableArray *cands = [NSMutableArray array];
+  NSInteger order = 0;
+  for (NSDictionary *f in self.roadSnapFeatures) {
+    NSString *kind = f[@"kind"] ?: @"road";
+    NSInteger idx = order++;
+    if ([kind isEqualToString:@"road_bearing"]) continue;   // bearing is a fallback, not a class candidate
+    NSString *rc = f[@"roadClass"] ?: @"unclassified";
+    if (![self roadClassSelectable:rc]) continue;           // never snap to a non-selected class
+    double sLat, sLon, tDeg, dist;
+    if (![self projectLat:lat lon:lon ontoCoords:f[@"coords"] outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;
+    if (dist > ErisSnapMaxMetersForClass(rc)) continue;     // per-class tolerance
+    [cands addObject:@{
+      @"snapLat": @(sLat), @"snapLon": @(sLon), @"tangentDeg": @(tDeg), @"distM": @(dist),
+      @"roadClass": rc, @"roadClassLabel": f[@"roadClassLabel"] ?: ErisRoadClassLabel(rc),
+      @"name": f[@"name"] ?: @"", @"kind": kind, @"coords": f[@"coords"] ?: @[],
+      @"priority": @(ErisRoadClassPriority(rc)), @"order": @(idx),
+    }];
+  }
+  [cands sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+    NSInteger pa = [a[@"priority"] integerValue], pb = [b[@"priority"] integerValue];
+    if (pa != pb) return pa > pb ? NSOrderedAscending : NSOrderedDescending;   // higher class first
+    double da = [a[@"distM"] doubleValue], db = [b[@"distM"] doubleValue];
+    if (fabs(da - db) > 1e-6) return da < db ? NSOrderedAscending : NSOrderedDescending;
+    NSInteger oa = [a[@"order"] integerValue], ob = [b[@"order"] integerValue];
+    return oa < ob ? NSOrderedAscending : (oa > ob ? NSOrderedDescending : NSOrderedSame);  // stable source order
+  }];
+  NSMutableArray *out = [NSMutableArray array];
+  for (NSDictionary *c in cands) {
+    BOOL dup = NO;
+    for (NSDictionary *k in out) {
+      if (![k[@"roadClass"] isEqual:c[@"roadClass"]]) continue;
+      if ([self metersBetweenLatA:[k[@"snapLat"] doubleValue] lonA:[k[@"snapLon"] doubleValue]
+                             latB:[c[@"snapLat"] doubleValue] lonB:[c[@"snapLon"] doubleValue]] < 8.0) { dup = YES; break; }
+    }
+    if (!dup) [out addObject:c];
+    if ((NSInteger)out.count >= kErisMaxCandidates) break;
+  }
+  return out;
+}
+
+// The class of the nearest road within tolerance that is EXCLUDED by the current filter
+// (so we can guide the user rather than silently snap to a different class), or nil.
+- (NSString *)nearbyExcludedClassAtLat:(double)lat lon:(double)lon {
+  NSString *bestClass = nil; double best = INFINITY;
+  for (NSDictionary *f in self.roadSnapFeatures) {
+    if ([f[@"kind"] isEqualToString:@"road_bearing"]) continue;
+    NSString *rc = f[@"roadClass"] ?: @"unclassified";
+    if ([self roadClassSelectable:rc]) continue;   // only classes excluded by the filter
+    double sLat, sLon, tDeg, dist;
+    if (![self projectLat:lat lon:lon ontoCoords:f[@"coords"] outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;
+    if (dist > ErisSnapMaxMetersForClass(rc)) continue;
+    if (dist < best) { best = dist; bestClass = rc; }
+  }
+  return bestClass;
+}
+
+- (NSDictionary *)bearingFallbackCandidateAtLat:(double)lat lon:(double)lon {
+  return @{
+    @"snapLat": @(lat), @"snapLon": @(lon), @"tangentDeg": @(self.upstationHintDeg), @"distM": @(0.0),
+    @"roadClass": @"unclassified", @"roadClassLabel": @"Bearing direction (no road geometry)",
+    @"name": @"", @"kind": @"bearing_fallback", @"coords": @[], @"bearingFallback": @YES,
+  };
+}
+
+// Build the immutable slice model for a CONFIRMED candidate, highlight it, run the
+// map->inspection camera flight (Part 7), then present the Immersive/Technical
+// inspection controller (Part 9). Both modes share this one slice model.
+- (void)inspectCandidate:(NSDictionary *)cand selLat:(double)selLat selLon:(double)selLon {
+  double snapLat = [cand[@"snapLat"] doubleValue], snapLon = [cand[@"snapLon"] doubleValue];
+  BOOL bearingFallback = [cand[@"bearingFallback"] boolValue];
+  BOOL snapped = !bearingFallback;
+  double upstationDeg = bearingFallback ? self.upstationHintDeg
+                                        : XsResolveUpstation([cand[@"tangentDeg"] doubleValue], self.upstationHintDeg);
+  double crossBearing = XsCrossBearing(upstationDeg);
+
+  NSMutableDictionary *slice = [[self buildSliceSelectedLat:selLat selLon:selLon snapLat:snapLat snapLon:snapLon
+                                              upstationDeg:upstationDeg snapped:snapped roadContextKind:cand[@"kind"]] mutableCopy];
+  // Carry the selected-candidate metadata + honest orientation/layout flags (Part 10).
+  slice[@"selectedRoadName"] = cand[@"name"] ?: @"";
+  slice[@"selectedRoadClass"] = cand[@"roadClass"] ?: @"unclassified";
+  slice[@"selectedRoadClassLabel"] = cand[@"roadClassLabel"] ?: @"Unclassified road";
+  slice[@"snapDistanceM"] = cand[@"distM"] ?: @(0);
+  slice[@"orientationAuthoritative"] = @(isfinite(self.upstationHintDeg));
+  slice[@"selectedRoadCoords"] = cand[@"coords"] ?: @[];   // for the corridor road overlay
+
+  NSDictionary *corridor = [self buildCorridorModelAtLat:snapLat lon:snapLon upstationDeg:upstationDeg
+                                            crossBearing:crossBearing slice:slice];
+
+  [self drawSliceLineAtLat:snapLat lon:snapLon crossBearing:crossBearing road:[self crossSectionRoad]];
   [self setCrossSectionModeActive:NO];
+  __weak typeof(self) weakSelf = self;
+  [self animateMapToInspectionAtLat:snapLat lon:snapLon upstationDeg:upstationDeg completion:^{
+    typeof(self) me = weakSelf; if (me == nil) return;
+    ErisInspectionViewController *vc = [[ErisInspectionViewController alloc] initWithSlice:slice corridor:corridor];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;   // coordinated with the camera flight
+    [me presentViewController:nav animated:YES completion:nil];
+  }];
+}
 
-  ErisRoadSliceSceneViewController *vc = [[ErisRoadSliceSceneViewController alloc] initWithSlice:slice];
-  UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-  nav.modalPresentationStyle = UIModalPresentationFullScreen;
-  [self presentViewController:nav animated:YES completion:nil];
+#pragma mark - Candidate confirmation card (Part 6)
+
+- (NSDictionary *)currentPendingCandidate {
+  if (self.pendingCandidateIndex < 0 || self.pendingCandidateIndex >= (NSInteger)self.pendingCandidates.count) return nil;
+  return self.pendingCandidates[self.pendingCandidateIndex];
+}
+
+// Present the compact bottom confirmation card and highlight the current candidate on
+// the 3D terrain BEFORE Inspect is pressed. For an unnamed divided highway with several
+// nearby carriageway/ramp candidates, "Choose another road" cycles the bounded set so
+// the selection is visible rather than pretended unambiguous.
+- (void)presentCandidateConfirmation:(NSArray<NSDictionary *> *)candidates selLat:(double)selLat selLon:(double)selLon {
+  self.pendingCandidates = candidates;
+  self.pendingCandidateIndex = 0;
+  self.pendingSelLat = selLat; self.pendingSelLon = selLon;
+  [self showCandidateCard];
+  [self highlightCandidate:[self currentPendingCandidate]];
+}
+
+- (UILabel *)cardLabel:(NSString *)text size:(CGFloat)size weight:(UIFontWeight)weight color:(UIColor *)color {
+  UILabel *l = [[UILabel alloc] init];
+  l.text = text; l.font = [UIFont systemFontOfSize:size weight:weight]; l.textColor = color;
+  l.numberOfLines = 0;
+  return l;
+}
+
+- (UIButton *)cardButton:(NSString *)title filled:(BOOL)filled action:(SEL)action {
+  UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+  [b setTitle:title forState:UIControlStateNormal];
+  b.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+  b.titleLabel.adjustsFontSizeToFitWidth = YES;
+  b.contentEdgeInsets = UIEdgeInsetsMake(10, 12, 10, 12);
+  b.layer.cornerRadius = 10;
+  if (filled) { b.backgroundColor = [UIColor colorWithRed:0.16 green:0.5 blue:0.95 alpha:1]; [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal]; }
+  else { b.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12]; [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal]; }
+  [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+  return b;
+}
+
+- (UIColor *)cardClassColor:(NSString *)rc {
+  ErisRoadStyle st = ErisRoadStyleForClass(rc);
+  return [UIColor colorWithRed:st.r green:st.g blue:st.b alpha:1.0];
+}
+
+- (NSString *)candidateTitle:(NSDictionary *)c {
+  NSString *name = c[@"name"];
+  if ([name isKindOfClass:[NSString class]] && name.length) return name;
+  return c[@"roadClassLabel"] ?: @"Unclassified road";   // fall back to the class label
+}
+
+// Rounded snap distance: whole metres up close, nearest 5 m further out.
+- (NSString *)roundedDistanceText:(double)d {
+  if (d < 1.0) return @"< 1";
+  if (d < 20.0) return [NSString stringWithFormat:@"%.0f", round(d)];
+  return [NSString stringWithFormat:@"%.0f", round(d / 5.0) * 5.0];
+}
+
+// Honest detail lines: snap distance, whether direction is authoritative or
+// geometry-derived, and whether roadway dimensions are ERIS data / form data / defaults.
+- (NSString *)candidateDetailText:(NSDictionary *)c {
+  NSMutableArray *lines = [NSMutableArray array];
+  if ([c[@"bearingFallback"] boolValue]) {
+    [lines addObject:@"No road geometry here — oriented from the packaged bearing only."];
+  } else {
+    [lines addObject:[NSString stringWithFormat:@"Snap distance: %@ m from your tap", [self roundedDistanceText:[c[@"distM"] doubleValue]]]];
+  }
+  [lines addObject:isfinite(self.upstationHintDeg)
+      ? @"Direction: from the packaged upstation bearing."
+      : @"Direction: from centerline geometry — upstation is NOT verified."];
+  NSString *src = [self crossSectionLayoutSource];
+  [lines addObject:[src isEqualToString:@"ROAD_INVENTORY"] ? @"Roadway dimensions: ERIS Road Inventory data."
+      : ([src isEqualToString:@"FORM_FIELDS"] ? @"Roadway dimensions: submission / form fields."
+         : @"Roadway dimensions: DEFAULT assumptions — verify lane, shoulder, and median.")];
+  // Part 10: never silently present the DEFAULT one-lane-each-way 32 ft template as real
+  // highway geometry.
+  if ([c[@"roadClass"] isEqualToString:@"primary"] && [src isEqualToString:@"DEFAULT"]) {
+    [lines addObject:@"⚠ Highway shown with DEFAULT one-lane-each-way (32 ft) geometry — not real highway dimensions."];
+  }
+  return [lines componentsJoinedByString:@"\n"];
+}
+
+- (void)showCandidateCard {
+  [self.candidateCardView removeFromSuperview];
+  NSDictionary *c = [self currentPendingCandidate];
+  if (c == nil) return;
+
+  UIView *card = [[UIView alloc] init];
+  card.translatesAutoresizingMaskIntoConstraints = NO;
+  card.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.97];
+  card.layer.cornerRadius = 16; card.clipsToBounds = YES;
+
+  UILabel *title = [self cardLabel:[self candidateTitle:c] size:18 weight:UIFontWeightBold color:[UIColor whiteColor]];
+  UILabel *cls = [self cardLabel:c[@"roadClassLabel"] size:13 weight:UIFontWeightSemibold color:[self cardClassColor:c[@"roadClass"]]];
+  UILabel *detail = [self cardLabel:[self candidateDetailText:c] size:12.5 weight:UIFontWeightRegular color:[UIColor colorWithWhite:0.85 alpha:1]];
+
+  UIButton *inspect = [self cardButton:@"Inspect" filled:YES action:@selector(onCardInspect)];
+  UIButton *cancel = [self cardButton:@"Cancel" filled:NO action:@selector(onCardCancel)];
+  UIStackView *actions = [[UIStackView alloc] initWithArrangedSubviews:@[inspect, cancel]];
+  actions.axis = UILayoutConstraintAxisHorizontal; actions.distribution = UIStackViewDistributionFillEqually; actions.spacing = 10;
+
+  UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, cls, detail]];
+  if (self.pendingCandidates.count > 1) {
+    UIButton *another = [self cardButton:[NSString stringWithFormat:@"Choose another road  (%ld of %lu)",
+                                          (long)(self.pendingCandidateIndex + 1), (unsigned long)self.pendingCandidates.count]
+                                  filled:NO action:@selector(onCardChooseAnother)];
+    [stack addArrangedSubview:another];
+  }
+  [stack addArrangedSubview:actions];
+  stack.axis = UILayoutConstraintAxisVertical; stack.spacing = 9;
+  stack.translatesAutoresizingMaskIntoConstraints = NO;
+  [card addSubview:stack];
+  [self.view addSubview:card];
+  self.candidateCardView = card;
+
+  UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+  [NSLayoutConstraint activateConstraints:@[
+    [card.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
+    [card.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+    [card.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-12],
+    [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+    [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+    [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:14],
+    [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-14],
+  ]];
+}
+
+- (void)dismissCandidateCard {
+  [self.candidateCardView removeFromSuperview];
+  self.candidateCardView = nil;
+}
+
+- (void)onCardInspect {
+  NSDictionary *c = [self currentPendingCandidate];
+  [self dismissCandidateCard];
+  if (c) [self inspectCandidate:c selLat:self.pendingSelLat selLon:self.pendingSelLon];
+}
+
+- (void)onCardCancel {
+  [self dismissCandidateCard];
+  [self clearSelectedRoadHighlight];   // stay in Cross Section mode so the user can retap
+}
+
+- (void)onCardChooseAnother {
+  if (self.pendingCandidates.count == 0) return;
+  self.pendingCandidateIndex = (self.pendingCandidateIndex + 1) % (NSInteger)self.pendingCandidates.count;
+  [self showCandidateCard];
+  [self highlightCandidate:[self currentPendingCandidate]];
+}
+
+// Highlight the selected candidate's road on the 3D terrain (bright ribbon lifted above
+// the class ribbons) + a marker at the snapped point, so the choice is visible before
+// Inspect. Persists briefly after inspection closes (cleared on the next fresh tap).
+- (void)highlightCandidate:(NSDictionary *)c {
+  [self clearSelectedRoadHighlight];
+  if (c == nil) return;
+  SCNNode *group = [SCNNode node];
+  float lift = [self drapeLiftForLayer:ErisDrapeSelectedRoad];
+  UIColor *hi = [UIColor colorWithRed:0.24 green:0.96 blue:1.0 alpha:1.0];
+  NSArray *coords = c[@"coords"];
+  if ([coords isKindOfClass:[NSArray class]] && coords.count >= 2) {
+    NSMutableArray *inb = [NSMutableArray array];
+    for (NSArray *cc in coords) {
+      double lon = [cc[0] doubleValue], lat = [cc[1] doubleValue];
+      double col, row;
+      if (![self colRowForLat:lat lon:lon outCol:&col outRow:&row]) continue;
+      if (![self inBoundsCol:col row:row]) continue;
+      [inb addObject:@[@(lon), @(lat)]];
+    }
+    SCNNode *ribbon = [self roadRibbonNodeFromCoords:inb widthMeters:11.0 lift:lift color:hi opacity:0.92];
+    if (ribbon) { ribbon.renderingOrder = 60; [group addChildNode:ribbon]; }
+  }
+  SCNVector3 sp;
+  if ([self surfaceWorldForLat:[c[@"snapLat"] doubleValue] lon:[c[@"snapLon"] doubleValue] lift:lift out:&sp]) {
+    SCNNode *dot = [SCNNode nodeWithGeometry:[SCNSphere sphereWithRadius:[self sceneUnitsForMeters:4.5]]];
+    dot.geometry.firstMaterial.diffuse.contents = hi;
+    dot.geometry.firstMaterial.lightingModelName = SCNLightingModelConstant;
+    dot.position = sp; dot.renderingOrder = 61;
+    [group addChildNode:dot];
+  }
+  self.selectedRoadNode = group;
+  [self.exagNode addChildNode:group];
+}
+
+- (void)clearSelectedRoadHighlight {
+  [self.selectedRoadNode removeFromParentNode];
+  self.selectedRoadNode = nil;
+}
+
+#pragma mark - Map -> inspection camera transition (Part 7)
+
+- (void)saveMapCameraState {
+  self.savedCameraTransform = self.cameraNode.transform;
+  self.savedCameraTarget = self.scnView.defaultCameraController.target;
+  self.hasSavedCamera = YES;
+}
+
+// Bounded, cancellable flight from the current map camera toward the snapped station,
+// rotated to look ALONG the selected road tangent, lowered to an oblique viewpoint —
+// then run `completion` (which raises the inspection controller via a cross-dissolve).
+- (void)animateMapToInspectionAtLat:(double)lat lon:(double)lon upstationDeg:(double)upstationDeg completion:(void (^)(void))completion {
+  [self saveMapCameraState];
+  SCNVector3 focus;
+  if (![self surfaceWorldForLat:lat lon:lon lift:0 out:&focus]) { if (completion) completion(); return; }
+  focus.y *= (float)self.verticalExaggeration;
+  double rad = upstationDeg * M_PI / 180.0;
+  double ux = sin(rad), uz = -cos(rad);                 // upstation direction in world XZ
+  float back = [self sceneUnitsForMeters:55.0], side = [self sceneUnitsForMeters:20.0], up = [self sceneUnitsForMeters:28.0];
+  // Camera pulled DOWNstation (-upstation) + offset to the side, low + looking at the focus.
+  SCNVector3 camPos = SCNVector3Make(focus.x - (float)ux * back - (float)uz * side,
+                                     focus.y + up,
+                                     focus.z - (float)uz * back + (float)ux * side);
+  SCNNode *target = [SCNNode node]; target.position = focus; target.name = @"inspectionFocus";
+  [self.scnView.scene.rootNode addChildNode:target];
+  self.inspectionFocusNode = target;
+  SCNLookAtConstraint *look = [SCNLookAtConstraint lookAtConstraintWithTarget:target];
+  look.gimbalLockEnabled = YES;
+  self.cameraNode.constraints = @[look];   // orient toward the focus throughout the flight
+  [SCNTransaction begin];
+  [SCNTransaction setAnimationDuration:0.9];
+  [SCNTransaction setCompletionBlock:^{ if (completion) completion(); }];
+  self.cameraNode.position = camPos;
+  [SCNTransaction commit];
+}
+
+// Restore the PRIOR map camera when inspection closes (never reset to the incident
+// view); the selected highlight + slice line stay visible briefly. Called from
+// viewDidAppear once a flight has been saved.
+- (void)restoreMapCameraAfterInspection {
+  if (!self.hasSavedCamera) return;
+  self.hasSavedCamera = NO;
+  self.cameraNode.constraints = @[];
+  [self.inspectionFocusNode removeFromParentNode]; self.inspectionFocusNode = nil;
+  [SCNTransaction begin];
+  [SCNTransaction setAnimationDuration:0.5];
+  self.cameraNode.transform = self.savedCameraTransform;
+  [SCNTransaction commit];
+  self.scnView.defaultCameraController.target = self.savedCameraTarget;
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+  [super viewDidAppear:animated];
+  [self restoreMapCameraAfterInspection];   // returns from the inspection modal, not initial load
 }
 
 // Project onto a polyline (equirectangular metres): nearest point + tangent + distance.
@@ -1853,6 +2582,116 @@ static NSArray *erisAsArray(id v) {
   return top + (bot - top) * fr;
 }
 
+#pragma mark - Immersive corridor model (Part 8)
+
+// Composite the packaged imagery (single OR tiled) into ONE north-up UIImage covering the
+// corridor bounds — fully offline (Core Graphics only, no network). Returns nil when no
+// imagery is packaged (the immersive view then falls back to shaded relief).
+- (UIImage *)corridorImageForMinLon:(double)minLon minLat:(double)minLat maxLon:(double)maxLon maxLat:(double)maxLat {
+  if (![self imageryUsable]) return nil;
+  double du = maxLon - minLon, dv = maxLat - minLat;
+  if (!(du > 0) || !(dv > 0)) return nil;
+  CGSize size = CGSizeMake(512, 512);
+  UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+  fmt.opaque = YES; fmt.scale = 1.0;
+  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt];
+  return [renderer imageWithActions:^(UIGraphicsImageRendererContext *rc) {
+    [[UIColor colorWithWhite:0.10 alpha:1.0] setFill];
+    [rc fillRect:CGRectMake(0, 0, size.width, size.height)];
+    if (self.imageryTiled) {
+      // Draw each tile into the corridor by its OWN declared bounds (north at top).
+      for (NSDictionary *meta in self.imageryTileMetas) {
+        UIImage *img = meta[@"image"]; NSDictionary *b = meta[@"bounds"];
+        if (![img isKindOfClass:[UIImage class]] || ![b isKindOfClass:[NSDictionary class]]) continue;
+        double tMinLon = [b[@"min_lon"] doubleValue], tMaxLon = [b[@"max_lon"] doubleValue];
+        double tMinLat = [b[@"min_lat"] doubleValue], tMaxLat = [b[@"max_lat"] doubleValue];
+        CGFloat x0 = (CGFloat)((tMinLon - minLon) / du) * size.width;
+        CGFloat x1 = (CGFloat)((tMaxLon - minLon) / du) * size.width;
+        CGFloat y0 = (CGFloat)((maxLat - tMaxLat) / dv) * size.height;
+        CGFloat y1 = (CGFloat)((maxLat - tMinLat) / dv) * size.height;
+        [img drawInRect:CGRectMake(x0, y0, x1 - x0, y1 - y0)];
+      }
+    } else if (self.imageryImage != nil) {
+      // Single image spans the whole AOI: crop the sub-rect that maps to the corridor.
+      double au = self.aoiMaxLon - self.aoiMinLon, av = self.aoiMaxLat - self.aoiMinLat;
+      if (au > 0 && av > 0 && self.imageryImage.CGImage != NULL) {
+        CGFloat iw = self.imageryImage.size.width, ih = self.imageryImage.size.height;
+        CGFloat sx = (CGFloat)((minLon - self.aoiMinLon) / au) * iw;
+        CGFloat sw = (CGFloat)(du / au) * iw;
+        CGFloat sy = (CGFloat)((self.aoiMaxLat - maxLat) / av) * ih;
+        CGFloat sh = (CGFloat)(dv / av) * ih;
+        CGRect crop = CGRectIntersection(CGRectMake(sx, sy, sw, sh), CGRectMake(0, 0, iw, ih));
+        CGImageRef sub = CGRectIsNull(crop) ? NULL : CGImageCreateWithImageInRect(self.imageryImage.CGImage, crop);
+        if (sub) {
+          [[UIImage imageWithCGImage:sub] drawInRect:CGRectMake(0, 0, size.width, size.height)];
+          CGImageRelease(sub);
+        }
+      }
+    }
+  }];
+}
+
+// Build the immersive corridor model (Part 8): a north-up terrain patch (~260 m) around
+// the snapped station, sampled from the SAME read-only elevation grid, with a composited
+// aerial drape, the selected road, and the cross-section slice — all in patch-local
+// metres. The camera is oriented along the road by the immersive controller.
+- (NSDictionary *)buildCorridorModelAtLat:(double)lat lon:(double)lon upstationDeg:(double)upstationDeg
+                             crossBearing:(double)crossBearing slice:(NSDictionary *)slice {
+  double halfM = 130.0;
+  double cosLat = cos(lat * M_PI / 180.0); if (fabs(cosLat) < 1e-9) cosLat = 1e-9;
+  double dLat = halfM / kXsMPerDegLat, dLon = halfM / (kXsMPerDegLat * cosLat);
+  double minLon = MAX(self.aoiMinLon, lon - dLon), maxLon = MIN(self.aoiMaxLon, lon + dLon);
+  double minLat = MAX(self.aoiMinLat, lat - dLat), maxLat = MIN(self.aoiMaxLat, lat + dLat);
+  if (!(maxLon > minLon) || !(maxLat > minLat)) { minLon = lon - dLon; maxLon = lon + dLon; minLat = lat - dLat; maxLat = lat + dLat; }
+  double centerLon = (minLon + maxLon) / 2.0, centerLat = (minLat + maxLat) / 2.0;
+  double widthM = (maxLon - minLon) * kXsMPerDegLat * cosLat, depthM = (maxLat - minLat) * kXsMPerDegLat;
+
+  NSInteger cols = 48, rows = 48;
+  NSMutableArray<NSNumber *> *heights = [NSMutableArray arrayWithCapacity:(NSUInteger)(rows * cols)];
+  double minElev = INFINITY, maxElev = -INFINITY;
+  for (NSInteger r = 0; r < rows; r++) {
+    double fLat = maxLat - (maxLat - minLat) * ((double)r / (rows - 1));   // row 0 = north
+    for (NSInteger cc = 0; cc < cols; cc++) {
+      double fLon = minLon + (maxLon - minLon) * ((double)cc / (cols - 1));
+      NSString *status = @"";
+      double e = [self sampleElevationMetersAtLat:fLat lon:fLon outStatus:&status];
+      if (!isfinite(e) || ![status isEqualToString:@"OK"]) e = self.minE;   // honest fallback, never invented relief
+      [heights addObject:@(e)];
+      minElev = MIN(minElev, e); maxElev = MAX(maxElev, e);
+    }
+  }
+  if (!isfinite(minElev)) { minElev = self.minE; maxElev = self.maxE; }
+
+  // Selected road + slice line in patch-local metres (x = east, z = south from centre).
+  NSMutableArray *roadXsZs = [NSMutableArray array];
+  for (NSArray *c in ([slice[@"selectedRoadCoords"] isKindOfClass:[NSArray class]] ? slice[@"selectedRoadCoords"] : @[])) {
+    if (![c isKindOfClass:[NSArray class]] || c.count < 2) continue;
+    double clon = [c[0] doubleValue], clat = [c[1] doubleValue];
+    if (clon < minLon - 1e-9 || clon > maxLon + 1e-9 || clat < minLat - 1e-9 || clat > maxLat + 1e-9) continue;
+    [roadXsZs addObject:@[@((clon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - clat) * kXsMPerDegLat)]];
+  }
+  NSDictionary *road = [self crossSectionRoad];
+  double ltSh = XsShoulderEdgeFt(road, YES), rtSh = XsShoulderEdgeFt(road, NO);
+  double minOff = ltSh - 50, maxOff = rtSh + 50;
+  NSMutableArray *sliceXsZs = [NSMutableArray array];
+  for (int i = 0; i <= 20; i++) {
+    double off = minOff + (maxOff - minOff) * ((double)i / 20.0);
+    double dM = off / kXsFtPerM, r2 = crossBearing * M_PI / 180.0;
+    double slat = centerLat + (dM * cos(r2)) / kXsMPerDegLat;
+    double slon = centerLon + (dM * sin(r2)) / (kXsMPerDegLat * cosLat);
+    [sliceXsZs addObject:@[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)]];
+  }
+
+  UIImage *img = [self corridorImageForMinLon:minLon minLat:minLat maxLon:maxLon maxLat:maxLat];
+  return @{
+    @"cols": @(cols), @"rows": @(rows), @"widthM": @(widthM), @"depthM": @(depthM),
+    @"heights": heights, @"minElevM": @(minElev), @"maxElevM": @(maxElev),
+    @"image": img ?: (id)[NSNull null], @"hasImagery": @(img != nil),
+    @"roadXsZs": roadXsZs, @"sliceXsZs": sliceXsZs,
+    @"upstationDeg": @(upstationDeg), @"crossBearingDeg": @(crossBearing),
+  };
+}
+
 // Translucent slice line draped across the road on the terrain surface (under exagNode).
 - (void)drawSliceLineAtLat:(double)lat lon:(double)lon crossBearing:(double)crossBearing road:(NSDictionary *)road {
   [self.sliceLineNode removeFromParentNode];
@@ -1867,7 +2706,7 @@ static NSArray *erisAsArray(id v) {
     double slat = lat + (dM * cos(rad)) / kXsMPerDegLat;
     double slon = lon + (dM * sin(rad)) / (kXsMPerDegLat * cosLat);
     SCNVector3 w;
-    if ([self surfaceWorldForLat:slat lon:slon lift:self.worldSize * 0.02f out:&w]) [pts addObject:[NSValue valueWithSCNVector3:w]];
+    if ([self surfaceWorldForLat:slat lon:slon lift:[self drapeLiftForLayer:ErisDrapeSliceIndicator] out:&w]) [pts addObject:[NSValue valueWithSCNVector3:w]];
   }
   if (pts.count < 2) return;
   SCNNode *line = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.30 green:0.85 blue:0.95 alpha:0.9] closed:NO];

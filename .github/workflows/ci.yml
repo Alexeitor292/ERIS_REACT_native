@@ -217,6 +217,8 @@ jobs:
         run: node scripts/check-terrain-imagery-tiles-contract.mjs
       - name: Road cross-section source-contract (offline tap→slice, grid read-only, upstation)
         run: node scripts/check-road-cross-section-contract.mjs
+      - name: Highway immersive cross-section source-contract (metre draping, class-aware roads, highway-first select, immersive/technical)
+        run: node scripts/check-eris-highway-cross-section-contract.mjs
       - name: Lint
         run: npx expo lint
       - name: TypeScript check
@@ -228,6 +230,7 @@ jobs:
           src/arcgis/eristerrainBundle.test.ts
           src/arcgis/terrainOverlays.test.ts
           src/arcgis/terrainScale.test.ts
+          src/arcgis/roadClass.test.ts
           src/measurements/roadCrossSectionSlice.test.ts
           src/measurements/roadCrossSectionParity.test.ts
           src/components/roadCrossSectionSliceModel.test.ts

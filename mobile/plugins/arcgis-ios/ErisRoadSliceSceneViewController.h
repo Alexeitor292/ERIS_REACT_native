@@ -17,6 +17,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithSlice:(NSDictionary *)slice;
 
+// Restore the default upstation ortho framing (called by the inspection container's
+// Reset when this is the active Technical child).
+- (void)resetCameraFraming;
+
 @end
 
 NS_ASSUME_NONNULL_END

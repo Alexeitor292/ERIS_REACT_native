@@ -108,6 +108,38 @@ export function sceneScale(
   };
 }
 
+// --- Draped-overlay physical lifts (metres above the mesh) -------------------
+// Mirrors the ErisDrapeLayer table + sceneUnitsForMeters:/drapeLiftForLayer: in
+// ErisTerrainSceneViewController.m. Each overlay hugs the imagery a few decimetres up —
+// NOT the tens of metres the old worldSize-percentage lifts produced. The old road lift
+// `worldSize * 0.018` on a ~3 km AOI put roads ~27 m above the imagery, and perspective
+// parallax then made correctly located centrelines look horizontally displaced. Keep in
+// sync with the kEris*DrapeLiftM constants.
+export const DRAPE_LIFTS_M = {
+  imagery: 0.05,
+  road: 0.3,
+  submitted: 0.35,
+  boundary: 0.4,
+  selectedRoad: 0.55,
+  sliceIndicator: 0.65,
+} as const;
+export type DrapeLayer = keyof typeof DRAPE_LIFTS_M;
+
+// The old (buggy) worldSize-percentage lift factors, kept ONLY so tests can prove the
+// new metre-derived lifts are far smaller (a regression guard, not production code).
+export const LEGACY_ROAD_LIFT_WORLDSIZE_FACTOR = 0.018;
+export const INCIDENT_RING_DIAMETER_M = 10.0; // ground ring (8–12 m), not the old 75 m sphere
+
+/** Scene-unit drape lift for a layer: metres × sceneUnitsPerMeter (metre-derived). */
+export function drapeLiftSceneUnits(scale: Pick<SceneScale, "sceneUnitsPerMeter">, layer: DrapeLayer): number {
+  return DRAPE_LIFTS_M[layer] * scale.sceneUnitsPerMeter;
+}
+
+/** Physical metres a scene-unit height represents (inverse of sceneUnitsForMeters:). */
+export function sceneUnitsToMeters(scale: Pick<SceneScale, "sceneUnitsPerMeter">, sceneUnits: number): number {
+  return scale.sceneUnitsPerMeter > 0 ? sceneUnits / scale.sceneUnitsPerMeter : NaN;
+}
+
 /**
  * Mesh Y (scene units) for an elevation, at a given exaggeration:
  *   sceneY = (elevationMeters − minElevationMeters) × sceneUnitsPerMeter × exaggeration
