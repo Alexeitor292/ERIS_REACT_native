@@ -81,9 +81,15 @@ const WRITES = /writeToFile:|writeToURL:|createFileAtPath:|removeItemAtPath:|rem
   const req = (re, msg) => { if (!re.test(code)) errors.push(`[slice-vc] ${msg}`); };
   const forbid = (re, msg) => { if (re.test(code)) errors.push(`[slice-vc] ${msg}`); };
 
-  req(/Looking upstation/, 'must label the canonical orientation ("Looking upstation").');
-  req(/@"LT"/, "must label LT.");
-  req(/@"RT"/, "must label RT.");
+  // Orientation labels must DEPEND on orientationAuthoritative (PR #51 review): no
+  // unconditional "Looking upstation" / LT / RT contradicted only by a footer.
+  req(/orientationAuthoritative/, "orientation labels must branch on orientationAuthoritative.");
+  req(/orientAuth\s*\?/, "LT/RT/upstation label text must be SELECTED from orientationAuthoritative (ternary).");
+  req(/Looking upstation/, "the authoritative branch keeps 'Looking upstation'.");
+  req(/Looking along packaged centerline/, "the geometry-derived branch labels 'Looking along packaged centerline'.");
+  req(/Display left/, "the geometry-derived branch labels LT as 'Display left'.");
+  req(/Display right/, "the geometry-derived branch labels RT as 'Display right'.");
+  req(/Upstation and LT\/RT are not verified/, "geometry-derived must prominently show 'Upstation and LT/RT are not verified.'");
   req(/USGS 3DEP/, "must cite the USGS 3DEP offline elevation source.");
   req(/BARRIER|RAISED|DEPRESSED/, "must render median categories.");
   req(/schematic/, "must state the roadway surface is schematic (honest labelling).");
