@@ -6,10 +6,15 @@ import assert from "node:assert/strict";
 
 import type { TerrainMeta } from "./eristerrainBundle.ts";
 import {
+  DRAPE_LIFTS_M,
+  drapeLiftSceneUnits,
   elevationToSceneY,
   exaggerationLabel,
+  INCIDENT_RING_DIAMETER_M,
+  LEGACY_ROAD_LIFT_WORLDSIZE_FACTOR,
   physicalFootprintMeters,
   sceneScale,
+  sceneUnitsToMeters,
   snapExaggeration,
   VERT_EXAG_DEFAULT,
   VERT_EXAG_MAX,
@@ -104,4 +109,45 @@ test("snap + labels: 0.5..3.0 step 0.1, true-scale default", () => {
   assert.match(exaggerationLabel(0.5), /Flattened/);
   assert.match(exaggerationLabel(2.0), /Enhanced relief/);
   assert.match(exaggerationLabel(3.0), /High relief/);
+});
+
+// A ~3 km AOI (matches the field package scale that exposed the 27 m road-float bug).
+const META_3KM: Pick<TerrainMeta, "rows" | "columns" | "bounds" | "local_transform"> = {
+  rows: 3,
+  columns: 3,
+  bounds: { min_lat: 38.485, min_lon: -121.517, max_lat: 38.512, max_lon: -121.483 },
+  local_transform: { origin_lon: -121.517, origin_lat: 38.512, lon_per_col: 0.017, lat_per_row: -0.0135 },
+};
+
+test("physical scale: road drape lift is metre-derived and ~0.30 m, NOT the old ~27 m", () => {
+  const s = sceneScale(META_3KM, WS)!;
+  assert.ok(s && Math.max(s.widthM, s.heightM) > 2500 && Math.max(s.widthM, s.heightM) < 3500, "AOI is ~3 km");
+
+  // New metre-derived road lift converts back to ~0.30 m — well below 1 m.
+  const roadLiftUnits = drapeLiftSceneUnits(s, "road");
+  const roadLiftMeters = sceneUnitsToMeters(s, roadLiftUnits);
+  assert.ok(near(roadLiftMeters, DRAPE_LIFTS_M.road), "road lift round-trips to its metre value");
+  assert.ok(roadLiftMeters < 1.0, `road lift ${roadLiftMeters} m must be < 1 m`);
+
+  // The OLD worldSize-percentage lift (worldSize * 0.018) is ~27 m on this AOI — the bug.
+  const legacyUnits = WS * LEGACY_ROAD_LIFT_WORLDSIZE_FACTOR;
+  const legacyMeters = sceneUnitsToMeters(s, legacyUnits);
+  assert.ok(legacyMeters > 20 && legacyMeters < 35, `legacy lift ${legacyMeters} m ≈ 27 m (documents the bug)`);
+  assert.ok(roadLiftMeters < legacyMeters / 20, "new lift is dramatically smaller than the old one");
+});
+
+test("physical scale: incident marker is a ~10 m ring, never a 75 m footprint", () => {
+  assert.ok(INCIDENT_RING_DIAMETER_M >= 8 && INCIDENT_RING_DIAMETER_M <= 12, "8–12 m ground ring");
+  assert.ok(INCIDENT_RING_DIAMETER_M < 75, "not the old 75 m sphere");
+});
+
+test("physical scale: draped layers are ordered, closely stacked, all < 1 m (no parallax gap)", () => {
+  const order: (keyof typeof DRAPE_LIFTS_M)[] = ["imagery", "road", "submitted", "boundary", "selectedRoad", "sliceIndicator"];
+  for (let i = 1; i < order.length; i++) {
+    assert.ok(DRAPE_LIFTS_M[order[i]] > DRAPE_LIFTS_M[order[i - 1]], `${order[i]} lifts above ${order[i - 1]}`);
+  }
+  for (const k of order) assert.ok(DRAPE_LIFTS_M[k] < 1.0, `${k} lift < 1 m`);
+  // imagery, road and the selected slice indicator are within ~0.6 m of each other — no
+  // large parallax-producing separation between the aerial drape and the overlays.
+  assert.ok(DRAPE_LIFTS_M.sliceIndicator - DRAPE_LIFTS_M.imagery < 0.7);
 });

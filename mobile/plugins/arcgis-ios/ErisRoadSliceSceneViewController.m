@@ -347,12 +347,15 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   [self.scnView.scene.rootNode addChildNode:sun];
 }
 
-- (void)onReset {
-  // Restore the default upstation ortho framing without disturbing the scene.
+// Restore the default upstation ortho framing without disturbing the scene. Public so
+// the inspection container's Reset can drive it when Technical is the active child.
+- (void)resetCameraFraming {
   self.scnView.pointOfView = self.cameraNode;
   self.cameraNode.transform = self.defaultCamTransform;
   self.cameraNode.camera.orthographicScale = self.defaultOrthoScale;
 }
+
+- (void)onReset { [self resetCameraFraming]; }
 
 #pragma mark - Overlays (labels, provenance, technical panel)
 
@@ -370,9 +373,29 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   UILayoutGuide *g = self.view.safeAreaLayoutGuide;
   NSDictionary *prov = [self.slice[@"provenance"] isKindOfClass:[NSDictionary class]] ? self.slice[@"provenance"] : @{};
 
-  UILabel *lt = [self pinnedLabel:@"LT" size:16];
-  UILabel *rt = [self pinnedLabel:@"RT" size:16];
-  UILabel *up = [self pinnedLabel:@"Looking upstation" size:13];
+  // Orientation labels DEPEND on whether the upstation bearing is authoritative (PR #51
+  // review). Geometry-derived orientation must never present a prominent, unconditional
+  // "Looking upstation" / LT / RT that only a footer contradicts.
+  BOOL orientAuth = [self.slice[@"orientationAuthoritative"] boolValue];
+  UILabel *lt = [self pinnedLabel:(orientAuth ? @"LT" : @"Display left") size:16];
+  UILabel *rt = [self pinnedLabel:(orientAuth ? @"RT" : @"Display right") size:16];
+  UILabel *up = [self pinnedLabel:(orientAuth ? @"Looking upstation" : @"Looking along packaged centerline") size:13];
+
+  // Self-contained "Values" toggle (works when embedded in the inspection container,
+  // where this controller's own nav-bar items are not shown).
+  UIButton *valuesBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+  valuesBtn.translatesAutoresizingMaskIntoConstraints = NO;
+  [valuesBtn setTitle:@"Values" forState:UIControlStateNormal];
+  valuesBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+  [valuesBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+  valuesBtn.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
+  valuesBtn.layer.cornerRadius = 8; valuesBtn.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
+  [valuesBtn addTarget:self action:@selector(onToggleTechnical) forControlEvents:UIControlEventTouchUpInside];
+  [self.view addSubview:valuesBtn];
+  [NSLayoutConstraint activateConstraints:@[
+    [valuesBtn.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+    [valuesBtn.topAnchor constraintEqualToAnchor:g.topAnchor constant:40],
+  ]];
   NSString *route = dstr(self.road, @"route_name", nil);
   NSString *pm = [self postmileText];
   NSString *hdr = route ? [NSString stringWithFormat:@"Route %@%@", route, pm.length ? [@"  ·  " stringByAppendingString:pm] : @""] : pm;
@@ -389,6 +412,19 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
     [header.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
     [header.topAnchor constraintEqualToAnchor:up.bottomAnchor constant:2],
   ]];
+
+  // Prominent (not footer-only) warning when orientation is geometry-derived.
+  if (!orientAuth) {
+    UILabel *warn = [self pinnedLabel:@"Upstation and LT/RT are not verified." size:12];
+    warn.textAlignment = NSTextAlignmentCenter;
+    warn.textColor = [UIColor colorWithRed:1.0 green:0.80 blue:0.30 alpha:1.0];
+    [NSLayoutConstraint activateConstraints:@[
+      [warn.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
+      [warn.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:3],
+      [warn.leadingAnchor constraintGreaterThanOrEqualToAnchor:g.leadingAnchor constant:8],
+      [warn.trailingAnchor constraintLessThanOrEqualToAnchor:g.trailingAnchor constant:-8],
+    ]];
+  }
 
   // Always-visible stake legend (honest values; kept compact so the scene stays clean).
   self.legendLabel = [[UILabel alloc] init];
@@ -412,9 +448,16 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   NSString *snapNote = [prov[@"snappedToRoadContext"] boolValue]
       ? [NSString stringWithFormat:@"Snapped to %@", dstr(prov, @"roadContextSource", @"road context")]
       : @"Fallback orientation (not snapped to a road feature)";
+  // Part 10: never imply LT/RT are authoritative Caltrans directions when the upstation
+  // is only geometry-derived.
+  NSString *orientNote = [self.slice[@"orientationAuthoritative"] boolValue]
+      ? @"Upstation from the packaged bearing."
+      : @"Orientation follows packaged centerline geometry; upstation is not verified.";
+  NSString *defaultNote = [layoutSrc isEqualToString:@"DEFAULT"]
+      ? @"\nDefault roadway assumptions — verify lane, shoulder, and median dimensions." : @"";
   footer.text = [NSString stringWithFormat:
-                 @"Roadway layout: %@  ·  Ground elevation: USGS 3DEP offline grid\n%@\nRoadway surface is schematic unless pavement crown/superelevation data is available.",
-                 layoutLabel, snapNote];
+                 @"Roadway layout: %@  ·  Ground elevation: USGS 3DEP offline grid\n%@\n%@\nRoadway surface is schematic unless pavement crown/superelevation data is available.%@",
+                 layoutLabel, snapNote, orientNote, defaultNote];
   [self.view addSubview:footer];
 
   [NSLayoutConstraint activateConstraints:@[

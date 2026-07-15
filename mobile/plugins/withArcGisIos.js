@@ -22,6 +22,10 @@ const IOS_FILES = [
   "ErisTerrainSceneViewController.m",
   "ErisRoadSliceSceneViewController.h",
   "ErisRoadSliceSceneViewController.m",
+  "ErisImmersiveCorridorViewController.h",
+  "ErisImmersiveCorridorViewController.m",
+  "ErisInspectionViewController.h",
+  "ErisInspectionViewController.m",
 ];
 
 function patchPodfile(podfileContent) {

@@ -14,7 +14,8 @@
     "check:terrain-exaggeration": "node scripts/check-terrain-exaggeration-contract.mjs",
     "check:terrain-imagery-tiles": "node scripts/check-terrain-imagery-tiles-contract.mjs",
     "check:road-cross-section": "node scripts/check-road-cross-section-contract.mjs",
-    "test": "node scripts/check-arcgis-native-selectors.mjs && node scripts/check-terrain-texcoord-contract.mjs && node scripts/check-terrain-exaggeration-contract.mjs && node scripts/check-terrain-imagery-tiles-contract.mjs && node scripts/check-road-cross-section-contract.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts src/arcgis/terrainScale.test.ts src/measurements/roadCrossSectionSlice.test.ts src/measurements/roadCrossSectionParity.test.ts src/components/roadCrossSectionSliceModel.test.ts"
+    "check:highway-cross-section": "node scripts/check-eris-highway-cross-section-contract.mjs",
+    "test": "node scripts/check-arcgis-native-selectors.mjs && node scripts/check-terrain-texcoord-contract.mjs && node scripts/check-terrain-exaggeration-contract.mjs && node scripts/check-terrain-imagery-tiles-contract.mjs && node scripts/check-road-cross-section-contract.mjs && node scripts/check-eris-highway-cross-section-contract.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts src/arcgis/terrainScale.test.ts src/arcgis/roadClass.test.ts src/arcgis/corridorModel.test.ts src/measurements/roadCrossSectionSlice.test.ts src/measurements/roadCrossSectionParity.test.ts src/components/roadCrossSectionSliceModel.test.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
