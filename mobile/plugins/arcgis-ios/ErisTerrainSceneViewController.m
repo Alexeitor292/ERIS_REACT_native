@@ -442,11 +442,15 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
 @property(nonatomic, assign) NSInteger pendingCandidateIndex;
 @property(nonatomic, assign) double pendingSelLat, pendingSelLon;
 @property(nonatomic, strong) UIView *candidateCardView;          // bottom confirmation card
-// --- map->inspection camera transition (Part 7) ---
+// --- map->inspection camera transition (Part 7) + cancellation (PR #51 review) ---
 @property(nonatomic, assign) SCNMatrix4 savedCameraTransform;    // restored when inspection closes
 @property(nonatomic, assign) SCNVector3 savedCameraTarget;
 @property(nonatomic, assign) BOOL hasSavedCamera;
 @property(nonatomic, strong) SCNNode *inspectionFocusNode;       // transient look-at target during the flight
+@property(nonatomic, assign) BOOL transitionInProgress;
+@property(nonatomic, assign) NSInteger transitionToken;          // monotonic; stale completions are ignored
+@property(nonatomic, assign) BOOL didPresentInspection;          // gate the return-camera restore
+@property(nonatomic, assign) BOOL inspectionConfirmed;           // keep highlight through inspection
 @end
 
 @implementation ErisTerrainSceneViewController
@@ -518,7 +522,10 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
   [self loadBundle];
 }
 
-- (void)onClose { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)onClose {
+  [self cancelInspectionTransition];   // Close during a camera flight must not present later
+  [self dismissViewControllerAnimated:YES completion:nil];
+}
 
 - (NSDictionary *)params {
   NSString *raw = [ArcGisSketchStore offlineSceneParamsJson];
@@ -2034,7 +2041,13 @@ static NSArray *erisAsArray(id v) {
     self.crossSectionBanner = b;
   }
   self.crossSectionBanner.hidden = !active;
-  if (active) { [self clearSelectedRoadHighlight]; [self dismissCandidateCard]; }  // fresh start
+  // Cancellable selection: clear the pending set + card either way; keep the highlight
+  // only when an inspection has already been confirmed (PR #51 review).
+  [self dismissCandidateCard];
+  self.pendingCandidates = nil;
+  self.pendingCandidateIndex = 0;
+  if (active) { self.inspectionConfirmed = NO; [self clearSelectedRoadHighlight]; }   // fresh start
+  else if (!self.inspectionConfirmed) { [self clearSelectedRoadHighlight]; }
   [self applyRoadDisplayFilter];   // emphasise selectable classes / dim the rest while active
 }
 
@@ -2123,12 +2136,17 @@ static NSArray *erisAsArray(id v) {
     double sLat, sLon, tDeg, dist;
     if (![self projectLat:lat lon:lon ontoCoords:f[@"coords"] outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;
     if (dist > ErisSnapMaxMetersForClass(rc)) continue;     // per-class tolerance
-    [cands addObject:@{
+    NSMutableDictionary *cand = [@{
       @"snapLat": @(sLat), @"snapLon": @(sLon), @"tangentDeg": @(tDeg), @"distM": @(dist),
       @"roadClass": rc, @"roadClassLabel": f[@"roadClassLabel"] ?: ErisRoadClassLabel(rc),
       @"name": f[@"name"] ?: @"", @"kind": kind, @"coords": f[@"coords"] ?: @[],
       @"priority": @(ErisRoadClassPriority(rc)), @"order": @(idx),
-    }];
+    } mutableCopy];
+    // Carry display-only provider metadata to the confirmation UI (never classification).
+    for (NSString *mk in @[@"basename", @"mtfcc", @"rttyp", @"sourceLayerId"]) {
+      id v = f[mk]; if (v != nil) cand[mk] = v;
+    }
+    [cands addObject:cand];
   }
   [cands sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
     NSInteger pa = [a[@"priority"] integerValue], pb = [b[@"priority"] integerValue];
@@ -2200,17 +2218,51 @@ static NSArray *erisAsArray(id v) {
   NSDictionary *corridor = [self buildCorridorModelAtLat:snapLat lon:snapLon upstationDeg:upstationDeg
                                             crossBearing:crossBearing slice:slice];
 
+  self.inspectionConfirmed = YES;   // keep the highlight through the transition + inspection
   [self drawSliceLineAtLat:snapLat lon:snapLon crossBearing:crossBearing road:[self crossSectionRoad]];
   [self setCrossSectionModeActive:NO];
   __weak typeof(self) weakSelf = self;
   [self animateMapToInspectionAtLat:snapLat lon:snapLon upstationDeg:upstationDeg completion:^{
     typeof(self) me = weakSelf; if (me == nil) return;
+    me.didPresentInspection = YES;   // only now will the return restore the prior camera
     ErisInspectionViewController *vc = [[ErisInspectionViewController alloc] initWithSlice:slice corridor:corridor];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;   // coordinated with the camera flight
     [me presentViewController:nav animated:YES completion:nil];
   }];
+}
+
+- (BOOL)layoutRequiresAcknowledgment {
+  return [[self crossSectionLayoutSource] isEqualToString:@"DEFAULT"];   // mirror requiresLayoutAcknowledgment (roadClass.ts)
+}
+
+// BLOCKING DEFAULT-layout gate (Part 10, PR #51 review). The inspection controller is NOT
+// constructed or presented until "Acknowledge and inspect". Shows the exact default
+// lane/shoulder/median values; a primary highway states the 1-lane-each-way, 32 ft layout
+// is not observed highway geometry.
+- (void)presentDefaultLayoutGateForCandidate:(NSDictionary *)c selLat:(double)selLat selLon:(double)selLon {
+  NSDictionary *road = [self crossSectionRoad];
+  NSMutableString *m = [NSMutableString stringWithString:@"This section uses DEFAULT roadway assumptions, not measured geometry:\n\n"];
+  [m appendFormat:@"• Lanes: %g each direction @ %g ft\n", XsNum(road, @"lt_lane_count", 1), XsNum(road, @"lt_lane_width_ft", 12)];
+  [m appendFormat:@"• Outside shoulders: %g ft\n", XsNum(road, @"lt_outside_shoulder_ft", 4)];
+  [m appendFormat:@"• Median: %g ft (%@)\n", XsNum(road, @"median_width_ft", 0), XsStr(road, @"median_category", @"NONE")];
+  [m appendFormat:@"• Total width: %g ft\n", XsNum(road, @"total_width_ft", 32)];
+  if ([c[@"roadClass"] isEqualToString:@"primary"]) {
+    [m appendString:@"\nThis is a highway, but the 1-lane-each-direction, 32-foot layout is NOT observed highway geometry. Verify lane, shoulder, and median dimensions."];
+  } else {
+    [m appendString:@"\nVerify lane, shoulder, and median dimensions before relying on this section."];
+  }
+  UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Default roadway assumptions" message:m preferredStyle:UIAlertControllerStyleAlert];
+  __weak typeof(self) weakSelf = self;
+  [a addAction:[UIAlertAction actionWithTitle:@"Back" style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) {
+    [weakSelf clearSelectedRoadHighlight];   // returned WITHOUT constructing the inspection
+  }]];
+  [a addAction:[UIAlertAction actionWithTitle:@"Acknowledge and inspect" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+    typeof(self) me = weakSelf; if (me == nil) return;
+    [me inspectCandidate:c selLat:selLat selLon:selLon];   // only now is the inspection built
+  }]];
+  [self presentViewController:a animated:YES completion:nil];
 }
 
 #pragma mark - Candidate confirmation card (Part 6)
@@ -2345,18 +2397,27 @@ static NSArray *erisAsArray(id v) {
 }
 
 - (void)onCardInspect {
+  if (self.candidateCardView == nil) return;   // cancelled/superseded: card actions are inert
   NSDictionary *c = [self currentPendingCandidate];
+  if (c == nil) return;
+  double selLat = self.pendingSelLat, selLon = self.pendingSelLon;
   [self dismissCandidateCard];
-  if (c) [self inspectCandidate:c selLat:self.pendingSelLat selLon:self.pendingSelLon];
+  if ([self layoutRequiresAcknowledgment]) {
+    [self presentDefaultLayoutGateForCandidate:c selLat:selLat selLon:selLon];   // gate BEFORE any inspection is built
+  } else {
+    [self inspectCandidate:c selLat:selLat selLon:selLon];
+  }
 }
 
 - (void)onCardCancel {
   [self dismissCandidateCard];
+  self.pendingCandidates = nil;
+  self.pendingCandidateIndex = 0;
   [self clearSelectedRoadHighlight];   // stay in Cross Section mode so the user can retap
 }
 
 - (void)onCardChooseAnother {
-  if (self.pendingCandidates.count == 0) return;
+  if (self.candidateCardView == nil || self.pendingCandidates.count == 0) return;
   self.pendingCandidateIndex = (self.pendingCandidateIndex + 1) % (NSInteger)self.pendingCandidates.count;
   [self showCandidateCard];
   [self highlightCandidate:[self currentPendingCandidate]];
@@ -2410,8 +2471,10 @@ static NSArray *erisAsArray(id v) {
 }
 
 // Bounded, cancellable flight from the current map camera toward the snapped station,
-// rotated to look ALONG the selected road tangent, lowered to an oblique viewpoint —
-// then run `completion` (which raises the inspection controller via a cross-dissolve).
+// rotated to look ALONG the selected road tangent, lowered to an oblique viewpoint. The
+// completion presents the inspection ONLY if the transition is still current, this
+// controller is still visible, is not being dismissed, and has nothing already presented
+// (a monotonic token invalidates a superseded flight).
 - (void)animateMapToInspectionAtLat:(double)lat lon:(double)lon upstationDeg:(double)upstationDeg completion:(void (^)(void))completion {
   [self saveMapCameraState];
   SCNVector3 focus;
@@ -2420,7 +2483,6 @@ static NSArray *erisAsArray(id v) {
   double rad = upstationDeg * M_PI / 180.0;
   double ux = sin(rad), uz = -cos(rad);                 // upstation direction in world XZ
   float back = [self sceneUnitsForMeters:55.0], side = [self sceneUnitsForMeters:20.0], up = [self sceneUnitsForMeters:28.0];
-  // Camera pulled DOWNstation (-upstation) + offset to the side, low + looking at the focus.
   SCNVector3 camPos = SCNVector3Make(focus.x - (float)ux * back - (float)uz * side,
                                      focus.y + up,
                                      focus.z - (float)uz * back + (float)ux * side);
@@ -2430,19 +2492,43 @@ static NSArray *erisAsArray(id v) {
   SCNLookAtConstraint *look = [SCNLookAtConstraint lookAtConstraintWithTarget:target];
   look.gimbalLockEnabled = YES;
   self.cameraNode.constraints = @[look];   // orient toward the focus throughout the flight
+
+  self.transitionInProgress = YES;
+  NSInteger tok = ++self.transitionToken;
+  __weak typeof(self) weakSelf = self;
   [SCNTransaction begin];
   [SCNTransaction setAnimationDuration:0.9];
-  [SCNTransaction setCompletionBlock:^{ if (completion) completion(); }];
+  [SCNTransaction setCompletionBlock:^{
+    typeof(self) me = weakSelf; if (me == nil) return;
+    if (tok != me.transitionToken || !me.transitionInProgress) return;   // superseded / already cancelled
+    if (me.view.window == nil || me.isBeingDismissed || me.presentedViewController != nil) {
+      [me cancelInspectionTransition];   // Close/disappearance during the flight -> never present
+      return;
+    }
+    me.transitionInProgress = NO;
+    if (completion) completion();
+  }];
   self.cameraNode.position = camPos;
   [SCNTransaction commit];
 }
 
-// Restore the PRIOR map camera when inspection closes (never reset to the incident
-// view); the selected highlight + slice line stay visible briefly. Called from
-// viewDidAppear once a flight has been saved.
-- (void)restoreMapCameraAfterInspection {
-  if (!self.hasSavedCamera) return;
+// Cancel a flight that never presented: invalidate the token, drop the look-at constraint
+// + transient focus node, dismiss the card, and prevent any delayed presentation. Does NOT
+// restore the saved camera (per review: only the real return path restores).
+- (void)cancelInspectionTransition {
+  self.transitionInProgress = NO;
+  self.transitionToken++;
+  self.cameraNode.constraints = @[];
+  [self.inspectionFocusNode removeFromParentNode]; self.inspectionFocusNode = nil;
+  [self dismissCandidateCard];
   self.hasSavedCamera = NO;
+}
+
+// Restore the PRIOR map camera when inspection actually closes (never reset to the
+// incident view); the highlight + slice line stay visible briefly.
+- (void)restoreMapCameraAfterInspection {
+  self.hasSavedCamera = NO;
+  self.inspectionConfirmed = NO;   // a future fresh tap may now clear the highlight
   self.cameraNode.constraints = @[];
   [self.inspectionFocusNode removeFromParentNode]; self.inspectionFocusNode = nil;
   [SCNTransaction begin];
@@ -2454,7 +2540,10 @@ static NSArray *erisAsArray(id v) {
 
 - (void)viewDidAppear:(BOOL)animated {
   [super viewDidAppear:animated];
-  [self restoreMapCameraAfterInspection];   // returns from the inspection modal, not initial load
+  // Restore only when we actually presented an inspection (not on initial load, and not
+  // for a flight that never presented).
+  if (self.didPresentInspection && self.hasSavedCamera) [self restoreMapCameraAfterInspection];
+  self.didPresentInspection = NO;
 }
 
 // Project onto a polyline (equirectangular metres): nearest point + tangent + distance.
@@ -2662,14 +2751,29 @@ static NSArray *erisAsArray(id v) {
   }
   if (!isfinite(minElev)) { minElev = self.minE; maxElev = self.maxE; }
 
-  // Selected road + slice line in patch-local metres (x = east, z = south from centre).
-  NSMutableArray *roadXsZs = [NSMutableArray array];
-  for (NSArray *c in ([slice[@"selectedRoadCoords"] isKindOfClass:[NSArray class]] ? slice[@"selectedRoadCoords"] : @[])) {
-    if (![c isKindOfClass:[NSArray class]] || c.count < 2) continue;
-    double clon = [c[0] doubleValue], clat = [c[1] doubleValue];
-    if (clon < minLon - 1e-9 || clon > maxLon + 1e-9 || clat < minLat - 1e-9 || clat > maxLat + 1e-9) continue;
-    [roadXsZs addObject:@[@((clon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - clat) * kXsMPerDegLat)]];
+  // Station-FIXED geometry: the cross-section plane + camera target follow the snapped
+  // station (lat/lon), NOT the edge-clipped patch midpoint (centerLon/centerLat).
+  double stationEastM = (lon - centerLon) * kXsMPerDegLat * cosLat;
+  double stationSouthM = (centerLat - lat) * kXsMPerDegLat;
+
+  // Selected road: REAL per-segment clip to the corridor rect -> separate parts (a
+  // crossing segment survives even when both endpoints are outside; leave/re-enter makes
+  // separate parts; disconnected parts are never chorded). Mirrors corridorModel.ts.
+  NSArray<NSArray *> *clippedParts = [self clipRoadCoords:slice[@"selectedRoadCoords"]
+                                                   minLon:minLon minLat:minLat maxLon:maxLon maxLat:maxLat
+                                               stationLon:lon stationLat:lat];
+  NSMutableArray *roadPartsXsZs = [NSMutableArray array];
+  for (NSArray *part in clippedParts) {
+    NSMutableArray *lp = [NSMutableArray array];
+    for (NSArray *c in part) {
+      double clon = [c[0] doubleValue], clat = [c[1] doubleValue];
+      [lp addObject:@[@((clon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - clat) * kXsMPerDegLat)]];
+    }
+    if (lp.count >= 2) [roadPartsXsZs addObject:lp];   // render each part independently
   }
+
+  // Slice line built around the STATION (so the cross-section plane passes through the
+  // exact snapped point), in patch-local metres relative to the patch centre.
   NSDictionary *road = [self crossSectionRoad];
   double ltSh = XsShoulderEdgeFt(road, YES), rtSh = XsShoulderEdgeFt(road, NO);
   double minOff = ltSh - 50, maxOff = rtSh + 50;
@@ -2677,8 +2781,8 @@ static NSArray *erisAsArray(id v) {
   for (int i = 0; i <= 20; i++) {
     double off = minOff + (maxOff - minOff) * ((double)i / 20.0);
     double dM = off / kXsFtPerM, r2 = crossBearing * M_PI / 180.0;
-    double slat = centerLat + (dM * cos(r2)) / kXsMPerDegLat;
-    double slon = centerLon + (dM * sin(r2)) / (kXsMPerDegLat * cosLat);
+    double slat = lat + (dM * cos(r2)) / kXsMPerDegLat;      // around the STATION, not the centre
+    double slon = lon + (dM * sin(r2)) / (kXsMPerDegLat * cosLat);
     [sliceXsZs addObject:@[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)]];
   }
 
@@ -2687,9 +2791,97 @@ static NSArray *erisAsArray(id v) {
     @"cols": @(cols), @"rows": @(rows), @"widthM": @(widthM), @"depthM": @(depthM),
     @"heights": heights, @"minElevM": @(minElev), @"maxElevM": @(maxElev),
     @"image": img ?: (id)[NSNull null], @"hasImagery": @(img != nil),
-    @"roadXsZs": roadXsZs, @"sliceXsZs": sliceXsZs,
+    @"roadPartsXsZs": roadPartsXsZs, @"sliceXsZs": sliceXsZs,
+    @"stationEastM": @(stationEastM), @"stationSouthM": @(stationSouthM),
     @"upstationDeg": @(upstationDeg), @"crossBearingDeg": @(crossBearing),
   };
+}
+
+// Liang-Barsky clip of ONE segment to the rect; sets lo/hi params, returns NO on a miss.
+- (BOOL)clipSegAx:(double)ax ay:(double)ay bx:(double)bx by:(double)by
+             minX:(double)minX minY:(double)minY maxX:(double)maxX maxY:(double)maxY
+               lo:(double *)lo hi:(double *)hi {
+  double dx = bx - ax, dy = by - ay;
+  double p[4] = {-dx, dx, -dy, dy};
+  double q[4] = {ax - minX, maxX - ax, ay - minY, maxY - ay};
+  double t0 = 0, t1 = 1;
+  for (int i = 0; i < 4; i++) {
+    if (p[i] == 0) { if (q[i] < 0) return NO; }
+    else {
+      double t = q[i] / p[i];
+      if (p[i] < 0) { if (t > t1) return NO; if (t > t0) t0 = t; }
+      else { if (t < t0) return NO; if (t < t1) t1 = t; }
+    }
+  }
+  if (t0 > t1) return NO;
+  *lo = t0; *hi = t1; return YES;
+}
+
+// Clip a road ([lon,lat] array) to the corridor rect -> array of SEPARATE parts, with the
+// station inserted into the nearest part. Mirrors clipPolylineToRect/insertStationIntoParts
+// in corridorModel.ts (unit-tested there).
+- (NSArray<NSArray *> *)clipRoadCoords:(id)coordsIn minLon:(double)minLon minLat:(double)minLat
+                                maxLon:(double)maxLon maxLat:(double)maxLat
+                            stationLon:(double)stationLon stationLat:(double)stationLat {
+  NSArray *coords = [coordsIn isKindOfClass:[NSArray class]] ? coordsIn : @[];
+  NSMutableArray<NSMutableArray *> *parts = [NSMutableArray array];
+  NSMutableArray *cur = [NSMutableArray array];
+  double eps = 1e-12;
+  for (NSUInteger i = 0; i + 1 < coords.count; i++) {
+    NSArray *A = coords[i], *B = coords[i + 1];
+    if (![A isKindOfClass:[NSArray class]] || A.count < 2 || ![B isKindOfClass:[NSArray class]] || B.count < 2) {
+      if (cur.count) { [parts addObject:cur]; cur = [NSMutableArray array]; }
+      continue;
+    }
+    double ax = [A[0] doubleValue], ay = [A[1] doubleValue], bx = [B[0] doubleValue], by = [B[1] doubleValue];
+    double t0, t1;
+    if (![self clipSegAx:ax ay:ay bx:bx by:by minX:minLon minY:minLat maxX:maxLon maxY:maxLat lo:&t0 hi:&t1]) {
+      if (cur.count) { [parts addObject:cur]; cur = [NSMutableArray array]; }
+      continue;
+    }
+    double p0x = ax + (bx - ax) * t0, p0y = ay + (by - ay) * t0;
+    double p1x = ax + (bx - ax) * t1, p1y = ay + (by - ay) * t1;
+    BOOL entering = t0 > eps, exiting = t1 < 1 - eps;
+    if (cur.count == 0 || entering) {
+      if (cur.count) [parts addObject:cur];
+      cur = [NSMutableArray arrayWithObject:@[@(p0x), @(p0y)]];
+    }
+    NSArray *last = cur.lastObject;
+    if (!(fabs([last[0] doubleValue] - p1x) < 1e-12 && fabs([last[1] doubleValue] - p1y) < 1e-12)) {
+      [cur addObject:@[@(p1x), @(p1y)]];
+    }
+    if (exiting) { [parts addObject:cur]; cur = [NSMutableArray array]; }
+  }
+  if (cur.count) [parts addObject:cur];
+  NSMutableArray<NSMutableArray *> *out = [NSMutableArray array];
+  for (NSMutableArray *p in parts) if (p.count >= 2) [out addObject:p];
+  [self insertStationLon:stationLon lat:stationLat intoParts:out];
+  return out;
+}
+
+// Insert the station as an explicit vertex of the nearest road part (within ~2 m). Never
+// creates a new part or a false chord.
+- (void)insertStationLon:(double)sLon lat:(double)sLat intoParts:(NSMutableArray<NSMutableArray *> *)parts {
+  double bestD = INFINITY; NSInteger bpi = -1, bsi = -1;
+  double cosLat = cos(sLat * M_PI / 180.0); if (fabs(cosLat) < 1e-9) cosLat = 1e-9;
+  double px = sLon * kXsMPerDegLat * cosLat, py = sLat * kXsMPerDegLat;
+  for (NSUInteger pi = 0; pi < parts.count; pi++) {
+    NSArray *part = parts[pi];
+    for (NSUInteger si = 0; si + 1 < part.count; si++) {
+      double ax = [part[si][0] doubleValue] * kXsMPerDegLat * cosLat, ay = [part[si][1] doubleValue] * kXsMPerDegLat;
+      double bx = [part[si + 1][0] doubleValue] * kXsMPerDegLat * cosLat, by = [part[si + 1][1] doubleValue] * kXsMPerDegLat;
+      double dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+      double t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0; t = MAX(0, MIN(1, t));
+      double d = hypot(px - (ax + t * dx), py - (ay + t * dy));
+      if (d < bestD) { bestD = d; bpi = (NSInteger)pi; bsi = (NSInteger)si; }
+    }
+  }
+  if (bpi < 0 || bestD > 2.0) return;
+  NSMutableArray *part = parts[bpi];
+  NSArray *a = part[bsi], *b = part[bsi + 1];
+  BOOL nearA = fabs([a[0] doubleValue] - sLon) < 1e-9 && fabs([a[1] doubleValue] - sLat) < 1e-9;
+  BOOL nearB = fabs([b[0] doubleValue] - sLon) < 1e-9 && fabs([b[1] doubleValue] - sLat) < 1e-9;
+  if (!nearA && !nearB) [part insertObject:@[@(sLon), @(sLat)] atIndex:bsi + 1];
 }
 
 // Translucent slice line draped across the road on the terrain surface (under exagNode).

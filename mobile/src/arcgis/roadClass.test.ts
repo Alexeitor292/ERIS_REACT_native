@@ -6,11 +6,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  canInspect,
   classEligible,
   defaultDisplayMode,
   gatherCandidates,
   MAX_CANDIDATES,
   normalizeRoadClass,
+  requiresLayoutAcknowledgment,
   roadClassLabel,
   roadClassPriority,
   roadStyle,
@@ -112,6 +114,42 @@ test("metadata + snap distance reach the confirmation candidate", () => {
 
 test("no silent wrong-class snap: Highway mode near only a local returns nothing", () => {
   assert.deepEqual(gatherCandidates([localNear], "highways"), []);
+});
+
+test("DEFAULT layout gates inspection until acknowledged; other layouts do not", () => {
+  assert.equal(requiresLayoutAcknowledgment("DEFAULT"), true);
+  assert.equal(requiresLayoutAcknowledgment("ROAD_INVENTORY"), false);
+  assert.equal(requiresLayoutAcknowledgment("FORM_FIELDS"), false);
+  // The gate: DEFAULT cannot inspect until acknowledged; ERIS/form data inspect freely.
+  assert.equal(canInspect("DEFAULT", false), false);
+  assert.equal(canInspect("DEFAULT", true), true);
+  assert.equal(canInspect("ROAD_INVENTORY", false), true);
+});
+
+test("candidate carries display metadata (basename/mtfcc/rttyp/sourceLayerId) without affecting class", () => {
+  const f: SnapFeature = {
+    roadClass: "primary",
+    name: "US-50",
+    basename: "US Hwy 50",
+    mtfcc: "S1100",
+    rttyp: "U",
+    sourceLayerId: 2,
+    kind: "road_centerline",
+    distM: 40,
+    snapLat: 38.5,
+    snapLon: -121.5,
+  };
+  // A different provider road_class value must NOT override the ERIS class.
+  const spoof: SnapFeature = { ...f, roadClass: "local", mtfcc: "S1100" }; // still classified by its own roadClass field
+  const [c] = gatherCandidates([f], "highways");
+  assert.equal(c.basename, "US Hwy 50");
+  assert.equal(c.mtfcc, "S1100");
+  assert.equal(c.rttyp, "U");
+  assert.equal(c.sourceLayerId, 2);
+  assert.equal(c.kind, "road_centerline");
+  assert.equal(c.roadClass, "primary"); // classification comes from roadClass, not mtfcc/rttyp
+  // The "spoof" feature is classified local strictly by its roadClass field, never mtfcc.
+  assert.equal(gatherCandidates([spoof], "highways").length, 0, "an S1100 mtfcc does not make a local a highway");
 });
 
 test("bearing features are never class candidates; candidate set is bounded + deduped", () => {

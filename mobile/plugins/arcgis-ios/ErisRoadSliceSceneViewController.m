@@ -373,9 +373,13 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   UILayoutGuide *g = self.view.safeAreaLayoutGuide;
   NSDictionary *prov = [self.slice[@"provenance"] isKindOfClass:[NSDictionary class]] ? self.slice[@"provenance"] : @{};
 
-  UILabel *lt = [self pinnedLabel:@"LT" size:16];
-  UILabel *rt = [self pinnedLabel:@"RT" size:16];
-  UILabel *up = [self pinnedLabel:@"Looking upstation" size:13];
+  // Orientation labels DEPEND on whether the upstation bearing is authoritative (PR #51
+  // review). Geometry-derived orientation must never present a prominent, unconditional
+  // "Looking upstation" / LT / RT that only a footer contradicts.
+  BOOL orientAuth = [self.slice[@"orientationAuthoritative"] boolValue];
+  UILabel *lt = [self pinnedLabel:(orientAuth ? @"LT" : @"Display left") size:16];
+  UILabel *rt = [self pinnedLabel:(orientAuth ? @"RT" : @"Display right") size:16];
+  UILabel *up = [self pinnedLabel:(orientAuth ? @"Looking upstation" : @"Looking along packaged centerline") size:13];
 
   // Self-contained "Values" toggle (works when embedded in the inspection container,
   // where this controller's own nav-bar items are not shown).
@@ -408,6 +412,19 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
     [header.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
     [header.topAnchor constraintEqualToAnchor:up.bottomAnchor constant:2],
   ]];
+
+  // Prominent (not footer-only) warning when orientation is geometry-derived.
+  if (!orientAuth) {
+    UILabel *warn = [self pinnedLabel:@"Upstation and LT/RT are not verified." size:12];
+    warn.textAlignment = NSTextAlignmentCenter;
+    warn.textColor = [UIColor colorWithRed:1.0 green:0.80 blue:0.30 alpha:1.0];
+    [NSLayoutConstraint activateConstraints:@[
+      [warn.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
+      [warn.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:3],
+      [warn.leadingAnchor constraintGreaterThanOrEqualToAnchor:g.leadingAnchor constant:8],
+      [warn.trailingAnchor constraintLessThanOrEqualToAnchor:g.trailingAnchor constant:-8],
+    ]];
+  }
 
   // Always-visible stake legend (honest values; kept compact so the scene stays clean).
   self.legendLabel = [[UILabel alloc] init];

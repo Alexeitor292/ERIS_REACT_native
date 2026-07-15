@@ -89,6 +89,25 @@ const checker = (tag, code) => ({
   req(/@"Cancel"/, "the card must offer Cancel.");
   req(/highlightCandidate:/, "the selected candidate must be highlighted before Inspect.");
 
+  // PR #51 review — Defect 6: candidate carries display metadata (never classification).
+  req(/@"basename"/, "candidate must carry basename.");
+  req(/@"mtfcc"/, "candidate must carry mtfcc.");
+  req(/@"rttyp"/, "candidate must carry rttyp.");
+  req(/@"sourceLayerId"/, "candidate must carry sourceLayerId.");
+
+  // PR #51 review — Defect 3: DEFAULT layout is a real GATE before any inspection is built.
+  req(/layoutRequiresAcknowledgment/, "DEFAULT layout must gate inspection (layoutRequiresAcknowledgment).");
+  req(/onCardInspect[\s\S]{0,300}layoutRequiresAcknowledgment/, "Inspect must consult the gate before building inspection.");
+  req(/presentDefaultLayoutGateForCandidate/, "the gate must present a blocking assumptions confirmation.");
+  req(/Acknowledge and inspect/, "the gate action must be 'Acknowledge and inspect'.");
+  req(/NOT observed highway geometry/, "a primary highway on DEFAULT must state it is not observed geometry.");
+
+  // PR #51 review — Defect 1/2: station-fixed corridor + real multi-part road clipping.
+  req(/roadPartsXsZs/, "corridor road must be emitted as separate clipped parts.");
+  req(/clipRoadCoords:/, "corridor road must be clipped per-segment to the corridor rect.");
+  req(/stationEastM/, "corridor must record the snapped station offset (station-fixed).");
+  forbid(/@"roadXsZs"/, "the old single-list corridor road (roadXsZs) must be gone.");
+
   // Part 7: saved/animated/restored camera transition; no immediate modal in the tap path.
   req(/saveMapCameraState/, "must save the map camera before the flight.");
   req(/animateMapToInspectionAtLat:/, "must animate the camera toward the snapped station.");
@@ -97,6 +116,15 @@ const checker = (tag, code) => ({
   req(/ErisInspectionViewController/, "inspection must open the Immersive/Technical container.");
   forbid(/\[\s*ErisRoadSliceSceneViewController\s+alloc\s*\]/,
       "the tap path must NOT present the orthographic slice directly (no uncoordinated modal).");
+
+  // PR #51 review — Defect 5: selection + camera transitions are cancellable.
+  req(/transitionInProgress/, "the camera flight must track transitionInProgress.");
+  req(/transitionToken/, "a monotonic transitionToken must invalidate superseded flights.");
+  req(/cancelInspectionTransition/, "there must be an explicit transition cancellation path.");
+  req(/isBeingDismissed/, "the flight completion must not present while being dismissed.");
+  req(/presentedViewController/, "the flight completion must not double-present.");
+  req(/onClose[\s\S]{0,120}cancelInspectionTransition/, "Close must invalidate an in-flight transition.");
+  req(/candidateCardView == nil/, "card actions must be inert after cancellation.");
 
   // Part 10: truthful orientation + default-layout warnings in the card.
   req(/upstation is NOT verified/, "must warn when orientation is only geometry-derived.");
@@ -116,6 +144,8 @@ const checker = (tag, code) => ({
   req(/fieldOfView/, "immersive camera must be PERSPECTIVE (fieldOfView set).");
   forbid(/usesOrthographicProjection/, "the immersive camera must NOT be orthographic.");
   req(/resetCameraFraming/, "immersive VC must support Reset framing.");
+  req(/roadPartsXsZs/, "immersive VC must render the clipped road PARTS independently.");
+  req(/worldForEast:self\.stationEastM/, "immersive camera/focus must sit on the snapped station, not the patch centre.");
   req(/Not street-level photography/, "must state it is an offline aerial-terrain inspection, not street view.");
   req(/upstation is not verified|packaged upstation bearing/, "must state the orientation provenance.");
   req(/Default roadway assumptions/, "must warn on DEFAULT roadway layout.");

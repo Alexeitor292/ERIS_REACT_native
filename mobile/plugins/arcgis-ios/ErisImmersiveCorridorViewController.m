@@ -25,7 +25,8 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 @property(nonatomic, assign) NSInteger cols, rows;
 @property(nonatomic, assign) double widthM, depthM, minElevM, supm;
 @property(nonatomic, strong) NSArray<NSNumber *> *heights;
-@property(nonatomic, assign) SCNVector3 focusCenter;      // patch centre on the surface (scene units)
+@property(nonatomic, assign) SCNVector3 focusCenter;      // the SNAPPED STATION on the surface (scene units)
+@property(nonatomic, assign) double stationEastM, stationSouthM;   // station offset from the patch centre
 @property(nonatomic, assign) double upstationDeg;
 @property(nonatomic, assign) SCNMatrix4 defaultCamTransform;
 @property(nonatomic, assign) SCNVector3 defaultCamTarget;
@@ -51,6 +52,8 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   self.depthM = CorNum(self.corridor, @"depthM", 0);
   self.minElevM = CorNum(self.corridor, @"minElevM", 0);
   self.upstationDeg = CorNum(self.corridor, @"upstationDeg", 0);
+  self.stationEastM = CorNum(self.corridor, @"stationEastM", 0);
+  self.stationSouthM = CorNum(self.corridor, @"stationSouthM", 0);
   self.heights = [self.corridor[@"heights"] isKindOfClass:[NSArray class]] ? self.corridor[@"heights"] : @[];
   double maxDim = MAX(self.widthM, self.depthM); if (!(maxDim > 0)) maxDim = 1.0;
   self.supm = (2.0 * kCorridorWorldHalf) / maxDim;
@@ -151,7 +154,9 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   free(verts); free(uvs); free(idx);
   SCNNode *node = [SCNNode nodeWithGeometry:geo];
   [self.scnView.scene.rootNode addChildNode:node];
-  self.focusCenter = [self worldForEast:0 south:0 lift:0];
+  // Focus = the SNAPPED STATION (not the patch centre), so the camera + orbit target sit
+  // on the actual selected point even when the patch is clipped at an AOI edge.
+  self.focusCenter = [self worldForEast:self.stationEastM south:self.stationSouthM lift:0];
 }
 
 #pragma mark - Overlays
@@ -175,17 +180,21 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   return [SCNNode nodeWithGeometry:geo];
 }
 
-// The selected road drawn on the corridor surface (bright), so the relationship between
-// the road, the terrain and the incident context is visible.
+// The selected road drawn on the corridor surface (bright). Each CLIPPED PART is drawn
+// independently — disconnected sections are never joined by a false chord.
 - (void)buildRoadOverlay {
-  NSArray *road = [self.corridor[@"roadXsZs"] isKindOfClass:[NSArray class]] ? self.corridor[@"roadXsZs"] : @[];
-  NSMutableArray<NSValue *> *pts = [NSMutableArray array];
-  for (NSArray *p in road) {
-    if (![p isKindOfClass:[NSArray class]] || p.count < 2) continue;
-    [pts addObject:[NSValue valueWithSCNVector3:[self worldForEast:[p[0] doubleValue] south:[p[1] doubleValue] lift:0.35]]];
+  NSArray *parts = [self.corridor[@"roadPartsXsZs"] isKindOfClass:[NSArray class]] ? self.corridor[@"roadPartsXsZs"] : @[];
+  UIColor *color = [UIColor colorWithRed:1.0 green:0.82 blue:0.28 alpha:1.0];
+  for (NSArray *part in parts) {
+    if (![part isKindOfClass:[NSArray class]]) continue;
+    NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+    for (NSArray *p in part) {
+      if (![p isKindOfClass:[NSArray class]] || p.count < 2) continue;
+      [pts addObject:[NSValue valueWithSCNVector3:[self worldForEast:[p[0] doubleValue] south:[p[1] doubleValue] lift:0.35]]];
+    }
+    SCNNode *line = [self lineNodeFromPoints:pts color:color];
+    if (line) { line.renderingOrder = 20; [self.scnView.scene.rootNode addChildNode:line]; }
   }
-  SCNNode *line = [self lineNodeFromPoints:pts color:[UIColor colorWithRed:1.0 green:0.82 blue:0.28 alpha:1.0]];
-  if (line) { line.renderingOrder = 20; [self.scnView.scene.rootNode addChildNode:line]; }
 }
 
 // The selected cross-section plane, standing in the environment: the slice line on the

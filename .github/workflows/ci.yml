@@ -231,6 +231,7 @@ jobs:
           src/arcgis/terrainOverlays.test.ts
           src/arcgis/terrainScale.test.ts
           src/arcgis/roadClass.test.ts
+          src/arcgis/corridorModel.test.ts
           src/measurements/roadCrossSectionSlice.test.ts
           src/measurements/roadCrossSectionParity.test.ts
           src/components/roadCrossSectionSliceModel.test.ts

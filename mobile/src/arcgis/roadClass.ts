@@ -78,10 +78,27 @@ export function defaultDisplayMode(packagedClasses: Iterable<string>): RoadDispl
   return [...packagedClasses].some((c) => normalizeRoadClass(c) === "primary") ? "highways" : "all";
 }
 
+// DEFAULT roadway layout must be acknowledged before inspection (PR #51 review). The
+// acknowledgment is a GATE, not just a banner. Mirrors layoutRequiresAcknowledgment /
+// the onCardInspect gate in ErisTerrainSceneViewController.m.
+export function requiresLayoutAcknowledgment(layoutSource: unknown): boolean {
+  return layoutSource === "DEFAULT";
+}
+/** Inspection may proceed only when the layout is not DEFAULT, or DEFAULT is acknowledged. */
+export function canInspect(layoutSource: unknown, acknowledged: boolean): boolean {
+  return !requiresLayoutAcknowledgment(layoutSource) || acknowledged === true;
+}
+
 export type SnapFeature = {
   roadClass?: string;
   name?: string;
   kind?: string;
+  // Display-only provider metadata carried through to the confirmation UI (PR #51 review).
+  // These MUST NOT drive classification — only roadClass does.
+  basename?: string;
+  mtfcc?: string;
+  rttyp?: string;
+  sourceLayerId?: number;
   /** projected snap for this feature: distance (m), and snap point/tangent (opaque here). */
   distM: number;
   snapLat: number;
