@@ -60,6 +60,7 @@ static NSString *ErisExagLabel(CGFloat value) {
 // options are disabled when no primary roads are packaged (legacy/unclassified).
 @property(nonatomic, assign) NSInteger roadDisplayMode;
 @property(nonatomic, assign) BOOL primaryRoadsAvailable, secondaryRoadsAvailable;
+@property(nonatomic, assign) BOOL showRoadDiagnostics, roadDiagnosticsAvailable;
 @property(nonatomic, copy) void (^onChange)(ErisLayersSheetVC *sheet);
 @end
 
@@ -82,7 +83,7 @@ static NSString *ErisExagLabel(CGFloat value) {
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
   // 0 base(3), 1 overlays(4), 2 appearance(2), 3 road display(3: Highways / +secondary / All)
-  return s == 0 ? 3 : (s == 1 ? 4 : (s == 2 ? 2 : 3));
+  return s == 0 ? 3 : (s == 1 ? 5 : (s == 2 ? 2 : 3));
 }
 
 - (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
@@ -111,7 +112,8 @@ static NSString *ErisExagLabel(CGFloat value) {
     cell.accessibilityLabel = [NSString stringWithFormat:@"%@%@", titles[ip.row],
                                enabled ? (self.baseSurface == ip.row ? @", selected" : @"") : @", unavailable"];
   } else if (ip.section == 1) {
-    NSArray *titles = @[@"Road Context", @"Incident / Submitted Geometry", @"Package Boundary", @"Overview Map"];
+    NSArray *titles = @[@"Road Context", @"Incident / Submitted Geometry", @"Package Boundary", @"Overview Map",
+                        @"Road diagnostics (raw carriageways)"];
     cell.textLabel.text = titles[ip.row];
     UISwitch *sw = [[UISwitch alloc] init];
     sw.tag = ip.row;
@@ -119,7 +121,15 @@ static NSString *ErisExagLabel(CGFloat value) {
     if (ip.row == 0) { on = self.showRoads; enabled = self.roadsAvailable; }
     else if (ip.row == 1) { on = self.showOverlays; }
     else if (ip.row == 2) { on = self.showBoundary; }
-    else { on = self.showOverview; enabled = self.overviewAvailable; }
+    else if (ip.row == 3) { on = self.showOverview; enabled = self.overviewAvailable; }
+    else {
+      // Optional diagnostics: the two RAW carriageway members behind a derived corridor.
+      // Always non-selectable; only meaningful for a selection-schema package.
+      on = self.showRoadDiagnostics; enabled = self.roadDiagnosticsAvailable;
+      cell.detailTextLabel.text = enabled ? @"Shows both raw member centerlines (not selectable)"
+                                          : @"No divided-highway corridors packaged";
+      cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    }
     sw.on = on; sw.enabled = enabled;
     if (!enabled) cell.textLabel.enabled = NO;
     [sw addTarget:self action:@selector(onSwitch:) forControlEvents:UIControlEventValueChanged];
@@ -188,7 +198,8 @@ static NSString *ErisExagLabel(CGFloat value) {
     case 0: self.showRoads = sw.on; break;
     case 1: self.showOverlays = sw.on; break;
     case 2: self.showBoundary = sw.on; break;
-    default: self.showOverview = sw.on; break;
+    case 3: self.showOverview = sw.on; break;
+    default: self.showRoadDiagnostics = sw.on; break;
   }
   [self notify];
 }
@@ -305,6 +316,17 @@ static const double kErisSubmittedPointRadiusM = 3.0;
 static const double kErisIncidentRingDiameterM = 10.0;
 static const double kErisIncidentPinLiftM       = 9.0;   // billboard pin height above the ring
 
+// --- Tile-native imagery quality --------------------------------------------
+// Anisotropic filtering for the oblique/grazing views this map is used at. 16 is the
+// common device ceiling; SceneKit clamps to what the GPU supports.
+static const CGFloat kErisImageryMaxAnisotropy = 16.0;
+// Immersive corridor texture: a SAFETY CEILING, never a target. Genuine detail is bounded
+// by the source GSD — a 260 m corridor at 0.6 m/px holds only ~433 real pixels across, so
+// upscaling to the cap would fabricate apparent detail. Mirrors imagerySizing.ts.
+static const NSInteger kErisCorridorMaxTexturePx = 3072;
+static const NSInteger kErisCorridorMinTexturePx = 64;
+static const double kErisCorridorTextureMemoryBudgetBytes = 64.0 * 1024.0 * 1024.0;
+
 // Draped-overlay layers, each with its own metre-derived lift (drapeLiftForLayer:).
 typedef NS_ENUM(NSInteger, ErisDrapeLayer) {
   ErisDrapeImagery = 0,
@@ -350,6 +372,111 @@ static ErisRoadStyle ErisRoadStyleForClass(NSString *rc) {
   if ([rc isEqualToString:@"secondary"]) return (ErisRoadStyle){5.0, 1.00, 0.62, 0.28, 0.92, 0.33, 30};
   if ([rc isEqualToString:@"local"])     return (ErisRoadStyle){2.5, 0.74, 0.80, 0.88, 0.68, 0.30, 20};
   return (ErisRoadStyle){3.5, 0.98, 0.82, 0.36, 0.85, 0.31, 25};  // unclassified / legacy (legacy yellow)
+}
+
+// A ramp is visually distinct (narrower, cooler amber) so the user understands it is a
+// ramp — but it stays selectable.
+static ErisRoadStyle ErisRampStyle(void) { return (ErisRoadStyle){4.0, 0.95, 0.52, 0.16, 0.85, 0.32, 28}; }
+
+// --- Divided-highway selection schema (ADDITIVE; mirrors roadSelection.ts) ----
+// `selection_kind` holds EXACTLY four SELECTABLE candidate kinds. A diagnostics-only raw
+// carriageway segment uses `diagnostic_kind` and is never a candidate. ERIS context lines
+// (road_bearing / road_inventory / submitted_road_geometry) carry selection_kind null and
+// stay available for orientation/context but are NEVER roads. Malformed metadata FAILS
+// CLOSED (non-selectable) rather than guessing. Legacy packages (no schema at all) keep the
+// previous class-aware behaviour — no package migration.
+static NSString *const kErisSelDividedCorridor = @"divided_highway_corridor";
+static NSString *const kErisSelIndividualCarriageway = @"individual_carriageway";
+static NSString *const kErisSelOrdinaryRoad = @"ordinary_road";
+static NSString *const kErisSelRamp = @"ramp";
+static NSString *const kErisDiagCarriagewayMember = @"carriageway_member";
+
+// Raw diagnostics carriageway member: thin, translucent, never a normal yellow road.
+static ErisRoadStyle ErisDiagnosticMemberStyle(void) { return (ErisRoadStyle){2.0, 0.55, 0.85, 1.00, 0.55, 0.34, 12}; }
+
+// Style for a SELECTION-SCHEMA feature. A divided corridor and an individual carriageway
+// are both mainline primaries and render with the primary style — the corridor's derived
+// midpoint is the ONE yellow line through a shared run.
+static ErisRoadStyle ErisRoadStyleForSelection(NSString *selectionKind, NSString *rc) {
+  if ([selectionKind isEqualToString:kErisSelRamp]) return ErisRampStyle();
+  if ([selectionKind isEqualToString:kErisSelDividedCorridor]
+      || [selectionKind isEqualToString:kErisSelIndividualCarriageway]) {
+    return ErisRoadStyleForClass(@"primary");
+  }
+  return ErisRoadStyleForClass(rc);
+}
+
+static BOOL ErisIsSelectableKind(NSString *k) {
+  return [k isEqualToString:kErisSelDividedCorridor] || [k isEqualToString:kErisSelIndividualCarriageway]
+      || [k isEqualToString:kErisSelOrdinaryRoad] || [k isEqualToString:kErisSelRamp];
+}
+
+// Ranking WITHIN eligible primary features: corridor > individual roadway > ramp. A ramp
+// must never displace an eligible mainline merely because both are road_class "primary".
+static NSInteger ErisSelectionRank(NSString *k) {
+  if ([k isEqualToString:kErisSelDividedCorridor]) return 3;
+  if ([k isEqualToString:kErisSelIndividualCarriageway]) return 2;
+  if ([k isEqualToString:kErisSelRamp]) return 1;
+  return 0;
+}
+
+// Never claims a compass direction or one-way status from the classification alone.
+static NSString *ErisSelectionLabel(NSString *k, NSString *name) {
+  if ([k isEqualToString:kErisSelDividedCorridor]) return @"Divided highway corridor";
+  if ([k isEqualToString:kErisSelIndividualCarriageway]) return @"Individual highway roadway";
+  if ([k isEqualToString:kErisSelRamp]) return @"Ramp";
+  return name.length ? name : @"Road";
+}
+
+// --- Divided-corridor inspection geometry -----------------------------------
+// EXACT mirror of mobile/src/arcgis/dividedCorridorInspection.ts (unit-tested there).
+// From TIGER geometry we observe ONLY: two source centrelines, a geometry-derived
+// midpoint, the measured centreline separation, and the packaged terrain/imagery. Pavement
+// edges, lane/shoulder dimensions, median category/width and traffic direction are NOT
+// observable — so this model FAILS CLOSED rather than fabricating a roadway, and forbids
+// the single-road DEFAULT template downstream.
+static const double kErisOutsideMarginM      = 20.0;   // outside terrain beyond each member (~65 ft)
+static const double kErisStraddleToleranceM  = 0.5;
+static const double kErisSepTolAbsM          = 5.0;    // tolerance = max(5 m, 25% of packaged median)
+static const double kErisSepTolFrac          = 0.25;
+// Section sampling (mirrors dividedSectionSampling.ts).
+static const double kErisSectionSampleSpacingM = 1.0;     // target spacing for a continuous profile
+static const NSInteger kErisMaxSectionSamples  = 512;     // ceiling for one section
+static const double kErisOffsetEpsM            = 1e-6;    // offsets closer than this are one station
+
+static const double kErisMinPlausibleSepM    = 2.0;
+static const double kErisMaxPlausibleSepM    = 200.0;
+
+static NSString *const kErisRenderingObservedDividedCorridor = @"observed_divided_corridor";
+static NSString *const kErisMedianSeparationLabel  = @"Median / separation area";
+static NSString *const kErisMedianSeparationDetail =
+    @"Interval between observed carriageway centerlines. Pavement edges and physical median width are unavailable.";
+static NSString *const kErisMedianSeparationScene  = @"Between observed carriageway centerlines; pavement edges unknown.";
+static NSString *const kErisMemberALabel = @"Observed carriageway centerline A";
+static NSString *const kErisMemberBLabel = @"Observed carriageway centerline B";
+static NSString *const kErisMidpointLabel = @"Geometry-derived corridor midpoint";
+
+// Local metric vector (x = east metres, y = north metres) about a station.
+typedef struct { double x, y; } ErisVec;
+
+static ErisVec ErisVecFromBearing(double deg) {
+  return (ErisVec){sin(deg * M_PI / 180.0), cos(deg * M_PI / 180.0)};
+}
+static double ErisDot(ErisVec a, ErisVec b) { return a.x * b.x + a.y * b.y; }
+static BOOL ErisUnit(ErisVec v, ErisVec *out) {
+  double n = hypot(v.x, v.y);
+  if (!(n > 1e-9)) return NO;
+  *out = (ErisVec){v.x / n, v.y / n};
+  return YES;
+}
+static ErisVec ErisToM(double lon, double lat, double lon0, double lat0) {
+  double cl = cos(lat0 * M_PI / 180.0); if (fabs(cl) < 1e-9) cl = 1e-9;
+  return (ErisVec){(lon - lon0) * kXsMPerDegLat * cl, (lat - lat0) * kXsMPerDegLat};
+}
+static void ErisToLL(ErisVec v, double lon0, double lat0, double *outLon, double *outLat) {
+  double cl = cos(lat0 * M_PI / 180.0); if (fabs(cl) < 1e-9) cl = 1e-9;
+  *outLon = lon0 + v.x / (kXsMPerDegLat * cl);
+  *outLat = lat0 + v.y / kXsMPerDegLat;
 }
 
 // Road Display filter (which classes are visible + selectable).
@@ -436,6 +563,16 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
 @property(nonatomic, strong) NSSet<NSString *> *packagedRoadClasses;    // classes actually drawn
 @property(nonatomic, assign) BOOL primaryRoadsPackaged;
 @property(nonatomic, assign) BOOL secondaryRoadsPackaged;
+// --- divided-highway selection schema (additive) ---
+@property(nonatomic, assign) BOOL roadsUseSelectionSchema;   // package declares selection_kind
+@property(nonatomic, strong) SCNNode *roadsDiagnosticsNode;  // raw carriageway members (nonselectable)
+@property(nonatomic, assign) BOOL showRoadDiagnostics;       // optional diagnostics display
+// --- immersive corridor texture provenance (GSD-derived; no fixed 512x512) ---
+@property(nonatomic, assign) CGSize corridorTextureSize;
+@property(nonatomic, assign) BOOL corridorTextureSourceLimited;
+@property(nonatomic, assign) BOOL corridorTextureMemoryCapped;
+@property(nonatomic, assign) double corridorTextureGsd;
+@property(nonatomic, assign) NSInteger corridorTileCount;    // tiles that intersected THIS corridor
 @property(nonatomic, assign) ErisRoadDisplayMode roadDisplayMode;
 // --- highway-first candidate selection + confirmation (Part 5/6) ---
 @property(nonatomic, assign) ErisRoadDisplayMode selectionMode;  // Highway vs All Roads (mirrors display intent)
@@ -971,9 +1108,17 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
   SCNGeometry *geo = [SCNGeometry geometryWithSources:@[vSrc, uvSrc] elements:@[el]];
 
   SCNMaterial *mat = [SCNMaterial material];
-  mat.diffuse.contents = img;
+  mat.diffuse.contents = img;             // the tile's own FULL-RESOLUTION decoded image
   mat.diffuse.wrapS = SCNWrapModeClamp;   // one tile image, one patch — never tile/repeat
   mat.diffuse.wrapT = SCNWrapModeClamp;
+  // TILE-NATIVE QUALITY: linear magnification/minification + mip filtering keep the tile
+  // readable when zoomed in and alias-free when zoomed out; anisotropy is what keeps a
+  // freeway legible at the oblique/grazing angles this view is used at. Without these
+  // SceneKit defaults to nearest-ish minification and the tiles shimmer.
+  mat.diffuse.magnificationFilter = SCNFilterModeLinear;
+  mat.diffuse.minificationFilter = SCNFilterModeLinear;
+  mat.diffuse.mipFilter = SCNFilterModeLinear;
+  mat.diffuse.maxAnisotropy = kErisImageryMaxAnisotropy;
   // Hybrid: slice the whole-AOI hillshade to this tile's sub-rectangle so relief lines
   // up with the imagery. intensity is toggled by applyBaseSurface (0 = satellite).
   if (self.hillshadeImage != nil) {
@@ -1523,6 +1668,8 @@ static NSArray *erisAsArray(id v) {
   self.overlaysNode.hidden = !self.showOverlays;
   self.boundaryNode.hidden = !self.showBoundary;
   self.overviewView.hidden = !self.showOverview;
+  // Raw carriageway members: an OPTIONAL diagnostics display, always non-selectable.
+  self.roadsDiagnosticsNode.hidden = !(self.showRoads && self.showRoadDiagnostics);
 }
 
 #pragma mark - Packaged roads / boundary / overview inset
@@ -1606,13 +1753,36 @@ static NSArray *erisAsArray(id v) {
   id gj = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
   if (![gj isKindOfClass:[NSDictionary class]]) return;
   self.roadClassNodes = [NSMutableDictionary dictionary];
+  if (self.roadsDiagnosticsNode == nil) {
+    self.roadsDiagnosticsNode = [SCNNode node];
+    [self.exagNode addChildNode:self.roadsDiagnosticsNode];
+  }
   NSMutableSet<NSString *> *packaged = [NSMutableSet set];
   for (id feat in erisAsArray(((NSDictionary *)gj)[@"features"])) {
     if (![feat isKindOfClass:[NSDictionary class]]) continue;
     NSDictionary *props = [((NSDictionary *)feat)[@"properties"] isKindOfClass:[NSDictionary class]] ? ((NSDictionary *)feat)[@"properties"] : @{};
     NSString *rc = XsStr(props, @"road_class", @"");
     if (rc.length == 0) rc = @"unclassified";        // legacy: no ERIS road_class -> unclassified
-    ErisRoadStyle st = ErisRoadStyleForClass(rc);
+
+    // --- selection-schema routing (additive; legacy packages skip all of this) ---
+    BOOL hasSchema = (props[@"selection_kind"] != nil) || (props[@"diagnostic_kind"] != nil)
+                  || (props[@"selectable"] != nil);
+    NSString *sk = XsStr(props, @"selection_kind", @"");
+    NSString *dk = XsStr(props, @"diagnostic_kind", @"");
+    id selv = props[@"selectable"];
+    BOOL selectable = hasSchema && [selv isKindOfClass:[NSNumber class]] && [selv boolValue]
+                   && ErisIsSelectableKind(sk);
+    BOOL isDiagnosticMember = [dk isEqualToString:kErisDiagCarriagewayMember];
+    if (hasSchema && !selectable && !isDiagnosticMember) {
+      // A retained CONTEXT line (road_bearing / road_inventory / submitted). It stays in the
+      // package and in roadSnapFeatures for its existing orientation/context purpose, but it
+      // is NOT a road — never draw it as one.
+      continue;
+    }
+
+    ErisRoadStyle st = hasSchema ? (isDiagnosticMember ? ErisDiagnosticMemberStyle()
+                                                       : ErisRoadStyleForSelection(sk, rc))
+                                 : ErisRoadStyleForClass(rc);
     UIColor *color = [UIColor colorWithRed:st.r green:st.g blue:st.b alpha:1.0];
     float lift = [self sceneUnitsForMeters:st.liftM];
     for (NSDictionary *prim in [self primitivesFromGeometry:((NSDictionary *)feat)[@"geometry"]]) {
@@ -1622,11 +1792,19 @@ static NSArray *erisAsArray(id v) {
         SCNNode *ribbon = [self roadRibbonNodeFromCoords:part widthMeters:st.widthM lift:lift color:color opacity:st.opacity];
         if (ribbon == nil) continue;
         ribbon.renderingOrder = st.order;                  // higher class drawn on top
+        if (isDiagnosticMember) {
+          // The two RAW carriageway members of a paired corridor: diagnostics only, hidden
+          // by default, never a normal yellow road and never selectable. The corridor's
+          // derived midpoint is the ONE selectable line through the paired run.
+          [self.roadsDiagnosticsNode addChildNode:ribbon];
+          continue;
+        }
         [[self roadContainerForClass:rc] addChildNode:ribbon];
         [packaged addObject:rc];                           // class rendered from an actual clipped part
       }
     }
   }
+  self.roadsDiagnosticsNode.hidden = !self.showRoadDiagnostics;
   self.packagedRoadClasses = packaged;
   self.primaryRoadsPackaged = [packaged containsObject:@"primary"];
   self.secondaryRoadsPackaged = [packaged containsObject:@"secondary"];
@@ -1726,6 +1904,8 @@ static NSArray *erisAsArray(id v) {
   sheet.reliefIntensity = self.reliefIntensity;
   sheet.verticalExaggeration = self.verticalExaggeration;
   sheet.roadDisplayMode = self.roadDisplayMode;
+  sheet.showRoadDiagnostics = self.showRoadDiagnostics;
+  sheet.roadDiagnosticsAvailable = (self.roadsDiagnosticsNode.childNodes.count > 0);
   sheet.primaryRoadsAvailable = self.primaryRoadsPackaged;
   sheet.secondaryRoadsAvailable = self.secondaryRoadsPackaged;
   __weak typeof(self) weakSelf = self;
@@ -1740,6 +1920,7 @@ static NSArray *erisAsArray(id v) {
     me.reliefIntensity = s.reliefIntensity;
     me.verticalExaggeration = s.verticalExaggeration;
     me.roadDisplayMode = s.roadDisplayMode;
+    me.showRoadDiagnostics = s.showRoadDiagnostics;
     me.selectionMode = s.roadDisplayMode;   // keep Cross Section selection aligned with display
     [me applyBaseSurface];         // hillshade intensity (hybrid multiply) may have changed
     [me applyLayerVisibility];
@@ -1931,6 +2112,45 @@ static NSArray *erisAsArray(id v) {
   NSString *rttyp = XsStr(props, @"RTTYP", @"");       if (rttyp.length) f[@"rttyp"] = rttyp;
   id sli = props[@"source_layer_id"];
   if ([sli isKindOfClass:[NSNumber class]]) f[@"sourceLayerId"] = sli;
+
+  // --- additive divided-highway selection schema (fails closed) ---
+  // NB: a context feature packages selection_kind: null -> NSNull, which is NOT nil, so the
+  // key's presence still marks the schema. XsStr yields "" for NSNull => not selectable.
+  BOOL hasSchema = (props[@"selection_kind"] != nil) || (props[@"diagnostic_kind"] != nil)
+                || (props[@"selectable"] != nil);
+  NSString *sk = XsStr(props, @"selection_kind", @"");
+  id selv = props[@"selectable"];
+  BOOL selectable = hasSchema && [selv isKindOfClass:[NSNumber class]] && [selv boolValue]
+                 && ErisIsSelectableKind(sk);
+  f[@"hasSelectionSchema"] = @(hasSchema);
+  f[@"selectionKind"] = sk;
+  f[@"selectable"] = @(selectable);
+  NSString *dk = XsStr(props, @"diagnostic_kind", @"");    if (dk.length) f[@"diagnosticKind"] = dk;
+  NSString *fid = XsStr(props, @"feature_id", @"");        if (fid.length) f[@"featureId"] = fid;
+  NSString *sfid = XsStr(props, @"source_feature_id", @""); if (sfid.length) f[@"sourceFeatureId"] = sfid;
+  if ([sk isEqualToString:kErisSelDividedCorridor]) {
+    // Corridor relationships + provenance. Malformed member refs -> the corridor keeps its
+    // derived centreline but exposes no member data (never a half-built corridor).
+    id msf = props[@"member_source_feature_ids"], mpf = props[@"member_part_feature_ids"];
+    if ([msf isKindOfClass:[NSArray class]] && [msf count] == 2 &&
+        [mpf isKindOfClass:[NSArray class]] && [mpf count] == 2) {
+      f[@"memberSourceFeatureIds"] = msf;
+      f[@"memberPartFeatureIds"] = mpf;
+    }
+    id mg = props[@"member_geometry"];
+    if ([mg isKindOfClass:[NSDictionary class]]) f[@"memberGeometry"] = mg;
+    NSString *mgk = XsStr(props, @"member_geometry_kind", @""); if (mgk.length) f[@"memberGeometryKind"] = mgk;
+    id sep = props[@"separation_m"];  if ([sep isKindOfClass:[NSDictionary class]]) f[@"separationM"] = sep;
+    id mpm = props[@"member_provider_metadata"]; if ([mpm isKindOfClass:[NSArray class]]) f[@"memberProviderMetadata"] = mpm;
+    id clen = props[@"corridor_length_m"]; if ([clen isKindOfClass:[NSNumber class]]) f[@"corridorLengthM"] = clen;
+    id odeg = props[@"orientation_deg"];   if ([odeg isKindOfClass:[NSNumber class]]) f[@"orientationDeg"] = odeg;
+    NSString *osrc = XsStr(props, @"orientation_source", @""); if (osrc.length) f[@"orientationSource"] = osrc;
+    id pairing = props[@"pairing"];
+    if ([pairing isKindOfClass:[NSDictionary class]]) {
+      NSString *pm = XsStr(pairing, @"method", @""); if (pm.length) f[@"pairingMethod"] = pm;
+      id pv = pairing[@"version"]; if ([pv isKindOfClass:[NSNumber class]]) f[@"pairingVersion"] = pv;
+    }
+  }
   return f;
 }
 
@@ -1958,9 +2178,13 @@ static NSArray *erisAsArray(id v) {
       NSArray *coords = prim[@"coords"];
       if (coords.count < 2) continue;
       NSDictionary *feat = [self snapFeatureForProps:props kind:kind coords:coords];
+      if ([feat[@"hasSelectionSchema"] boolValue]) self.roadsUseSelectionSchema = YES;
       if ([kind isEqualToString:@"road_bearing"]) [bearing addObject:feat]; else [rich addObject:feat];
     }
   }
+  // Context lines (road_bearing / road_inventory / submitted) stay in the snap-feature list
+  // so their EXISTING contextual purposes (bearing-orientation fallback, hasRichRoadGeometry)
+  // keep working — candidate gathering excludes them via `selectable`.
   [rich addObjectsFromArray:bearing];   // prefer real geometry; bearing line last
   return rich;
 }
@@ -2144,6 +2368,10 @@ static NSArray *erisAsArray(id v) {
     NSString *kind = f[@"kind"] ?: @"road";
     NSInteger idx = order++;
     if ([kind isEqualToString:@"road_bearing"]) continue;   // bearing is a fallback, not a class candidate
+    // SELECTION-SCHEMA GATE: only `selectable` candidates. Diagnostics carriageway members
+    // and context lines (road_inventory / submitted / bearing) are never candidates. A
+    // legacy package (no schema) keeps the previous class-aware behaviour.
+    if (self.roadsUseSelectionSchema && ![f[@"selectable"] boolValue]) continue;
     NSString *rc = f[@"roadClass"] ?: @"unclassified";
     if (![self roadClassSelectable:rc]) continue;           // never snap to a non-selected class
     double sLat, sLon, tDeg, dist;
@@ -2153,14 +2381,23 @@ static NSArray *erisAsArray(id v) {
     if (![self projectLat:lat lon:lon ontoParts:[self clipLineCoordsToTerrainBounds:f[@"coords"]]
                     outLat:&sLat outLon:&sLon outTangent:&tDeg outDist:&dist]) continue;
     if (dist > ErisSnapMaxMetersForClass(rc)) continue;     // per-class tolerance
+    NSString *sk = f[@"selectionKind"] ?: @"";
     NSMutableDictionary *cand = [@{
       @"snapLat": @(sLat), @"snapLon": @(sLon), @"tangentDeg": @(tDeg), @"distM": @(dist),
       @"roadClass": rc, @"roadClassLabel": f[@"roadClassLabel"] ?: ErisRoadClassLabel(rc),
       @"name": f[@"name"] ?: @"", @"kind": kind, @"coords": f[@"coords"] ?: @[],
       @"priority": @(ErisRoadClassPriority(rc)), @"order": @(idx),
+      @"selectionKind": sk,
+      // WITHIN a class: corridor > individual roadway > ramp, so a ramp can never displace
+      // an eligible mainline merely because both are road_class "primary".
+      @"selectionRank": @(ErisSelectionRank(sk)),
     } mutableCopy];
-    // Carry display-only provider metadata to the confirmation UI (never classification).
-    for (NSString *mk in @[@"basename", @"mtfcc", @"rttyp", @"sourceLayerId"]) {
+    // Carry display-only provider metadata + corridor provenance to the confirmation UI.
+    for (NSString *mk in @[@"basename", @"mtfcc", @"rttyp", @"sourceLayerId", @"featureId",
+                           @"sourceFeatureId", @"memberSourceFeatureIds", @"memberPartFeatureIds",
+                           @"memberGeometry", @"memberGeometryKind", @"memberProviderMetadata",
+                           @"separationM", @"corridorLengthM", @"orientationDeg",
+                           @"orientationSource", @"pairingMethod", @"pairingVersion"]) {
       id v = f[mk]; if (v != nil) cand[mk] = v;
     }
     [cands addObject:cand];
@@ -2168,6 +2405,9 @@ static NSArray *erisAsArray(id v) {
   [cands sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
     NSInteger pa = [a[@"priority"] integerValue], pb = [b[@"priority"] integerValue];
     if (pa != pb) return pa > pb ? NSOrderedAscending : NSOrderedDescending;   // higher class first
+    // WITHIN a class: divided corridor > individual roadway > ramp.
+    NSInteger ra = [a[@"selectionRank"] integerValue], rb = [b[@"selectionRank"] integerValue];
+    if (ra != rb) return ra > rb ? NSOrderedAscending : NSOrderedDescending;
     double da = [a[@"distM"] doubleValue], db = [b[@"distM"] doubleValue];
     if (fabs(da - db) > 1e-6) return da < db ? NSOrderedAscending : NSOrderedDescending;
     NSInteger oa = [a[@"order"] integerValue], ob = [b[@"order"] integerValue];
@@ -2218,6 +2458,312 @@ static NSArray *erisAsArray(id v) {
   return found;
 }
 
+#pragma mark - Divided-corridor inspection model (mirrors dividedCorridorInspection.ts)
+
+// Coerce a packaged [[lon,lat],...] array (defensively).
+- (NSArray *)cleanLonLatLine:(id)raw {
+  if (![raw isKindOfClass:[NSArray class]]) return @[];
+  NSMutableArray *out = [NSMutableArray array];
+  for (id c in (NSArray *)raw) {
+    if (![c isKindOfClass:[NSArray class]] || [c count] < 2) continue;
+    id a = c[0], b = c[1];
+    if (![a respondsToSelector:@selector(doubleValue)] || ![b respondsToSelector:@selector(doubleValue)]) continue;
+    double lon = [a doubleValue], lat = [b doubleValue];
+    if (!isfinite(lon) || !isfinite(lat)) continue;
+    [out addObject:@[@(lon), @(lat)]];
+  }
+  return out;
+}
+
+// ONE immutable provenance record for the inspection, assembled from the REAL sources:
+// imagery/texture facts from the corridor model, pairing/orientation from the inspection
+// model, truncation from the section. The container renders this dictionary and nothing
+// else, so a value cannot be named one thing here and read as another there.
+//
+// Keys are the single vocabulary shared with ErisInspectionViewController.
+- (NSDictionary *)buildInspectionProvenanceForSlice:(NSDictionary *)slice corridor:(NSDictionary *)corridor
+                                         inspection:(NSDictionary *)dc section:(NSDictionary *)section {
+  NSDictionary *base = [slice[@"provenance"] isKindOfClass:[NSDictionary class]] ? slice[@"provenance"] : @{};
+  NSMutableDictionary *p = [base mutableCopy];
+
+  // --- Terrain source: published explicitly, never merely inherited ---
+  p[@"elevationSource"] = XsStr(base, @"elevationSource", @"USGS 3DEP source-derived offline terrain grid");
+
+  // --- Imagery + texture quality, straight from the corridor model's own keys ---
+  NSString *provider = XsStr(corridor, @"imageryProvider", @"");
+  BOOL hasImagery = [corridor[@"hasImagery"] boolValue];
+  p[@"imageryPresent"] = @(hasImagery);
+  if (provider.length && hasImagery) p[@"imageryProvider"] = provider;
+  double mpp = XsNum(corridor, @"imageryEffectiveMpp", NAN);
+  if (isfinite(mpp) && mpp > 0 && hasImagery) p[@"imageryMetersPerPixel"] = @(mpp);
+  NSInteger tiles = (NSInteger)XsNum(corridor, @"imageryTileCount", 0);
+  p[@"imageryTileCount"] = @(tiles);
+  p[@"textureWidthPx"] = corridor[@"textureWidthPx"] ?: @(0);
+  p[@"textureHeightPx"] = corridor[@"textureHeightPx"] ?: @(0);
+  p[@"textureSourceLimited"] = @([corridor[@"textureSourceLimited"] boolValue]);
+  p[@"textureMemoryCapped"] = @([corridor[@"textureMemoryCapped"] boolValue]);
+  // A single packaged overview stretched over the corridor is NOT tile-native detail.
+  p[@"imageryLegacySingle"] = @(hasImagery && tiles <= 1);
+  p[@"sectionTruncated"] = @(section ? [section[@"truncated"] boolValue] : [corridor[@"sliceTruncated"] boolValue]);
+
+  // --- Orientation + pairing ---
+  p[@"orientationAuthoritative"] = @([slice[@"orientationAuthoritative"] boolValue]);
+  p[@"orientationSource"] = dc ? (XsStr(dc, @"orientationSource", @"geometry_derived"))
+                              : ([slice[@"orientationAuthoritative"] boolValue] ? @"packaged_upstation_bearing" : @"geometry_derived");
+  if (dc) {
+    p[@"pairingMethod"] = XsStr(dc, @"pairingMethod", @"");
+    id pv = dc[@"pairingVersion"];
+    p[@"pairingVersion"] = [pv isKindOfClass:[NSString class]] ? pv : [NSString stringWithFormat:@"%@", pv ?: @"—"];
+    p[@"separationM"] = dc[@"separationM"] ?: @(0);
+    p[@"renderingMode"] = kErisRenderingObservedDividedCorridor;
+    if (section) {
+      p[@"sectionRequestedSpanM"] = section[@"requestedSpanM"] ?: @(0);
+      p[@"sectionClippedSpanM"] = section[@"clippedSpanM"] ?: @(0);
+      p[@"sectionSampleCount"] = @([(NSArray *)section[@"samples"] count]);
+      p[@"sectionSampleSpacingM"] = section[@"sampleSpacingM"] ?: @(0);
+    }
+  }
+  return p;
+}
+
+// Build the ONE immutable divided SECTION from the inspection model, or nil + a reason.
+// Mirrors dividedSectionSampling.ts (planDividedSection) — keep in lockstep.
+//
+// This is the SOLE section contract for a divided corridor: the model's crossAxis and
+// [sectionMinOffsetM, sectionMaxOffsetM], clipped ONCE to the packaged elevation grid and
+// sampled along that exact line. The map slice line, the immersive section plane and the
+// technical profile all consume this one result, so they cannot describe different ground.
+//
+// It must never consult crossSectionRoad, XsShoulderEdgeFt, XsCrossBearing or the DEFAULT
+// template: those describe a roadway this package does not contain.
+#define ERIS_DS_FAIL(r) do { if (outReason) *outReason = (r); return nil; } while (0)
+- (NSDictionary *)buildDividedSectionForInspection:(NSDictionary *)dc reason:(NSString **)outReason {
+  NSDictionary *station = [dc[@"station"] isKindOfClass:[NSDictionary class]] ? dc[@"station"] : nil;
+  double lon0 = XsNum(station, @"lon", NAN), lat0 = XsNum(station, @"lat", NAN);
+  if (!isfinite(lon0) || !isfinite(lat0)) ERIS_DS_FAIL(@"invalid_station");
+
+  NSDictionary *ca = [dc[@"crossAxis"] isKindOfClass:[NSDictionary class]] ? dc[@"crossAxis"] : nil;
+  ErisVec crossAxis = (ErisVec){XsNum(ca, @"x", NAN), XsNum(ca, @"y", NAN)};
+  if (!isfinite(crossAxis.x) || !isfinite(crossAxis.y)) ERIS_DS_FAIL(@"invalid_cross_axis");
+  double axisLen = hypot(crossAxis.x, crossAxis.y);
+  if (!(axisLen > 0.99 && axisLen < 1.01)) ERIS_DS_FAIL(@"invalid_cross_axis");
+
+  double minOff = XsNum(dc, @"sectionMinOffsetM", NAN), maxOff = XsNum(dc, @"sectionMaxOffsetM", NAN);
+  if (!isfinite(minOff) || !isfinite(maxOff) || !(maxOff > minOff)) ERIS_DS_FAIL(@"invalid_section_extent");
+  double offA = XsNum(dc[@"memberA"], @"offsetM", NAN), offB = XsNum(dc[@"memberB"], @"offsetM", NAN);
+  if (!isfinite(offA) || !isfinite(offB)) ERIS_DS_FAIL(@"invalid_section_extent");
+  if (offA < minOff - kErisOffsetEpsM || offA > maxOff + kErisOffsetEpsM ||
+      offB < minOff - kErisOffsetEpsM || offB > maxOff + kErisOffsetEpsM) ERIS_DS_FAIL(@"member_offset_outside_section");
+
+  double requestedSpan = maxOff - minOff;
+  double aLon, aLat, bLon, bLat;
+  ErisToLL((ErisVec){crossAxis.x * minOff, crossAxis.y * minOff}, lon0, lat0, &aLon, &aLat);
+  ErisToLL((ErisVec){crossAxis.x * maxOff, crossAxis.y * maxOff}, lon0, lat0, &bLon, &bLat);
+
+  // ONE clip, against the packaged elevation grid. Everything downstream uses its result.
+  double t0, t1;
+  BOOL inRect = [self clipSegAx:aLon ay:aLat bx:bLon by:bLat
+                           minX:self.aoiMinLon minY:self.aoiMinLat maxX:self.aoiMaxLon maxY:self.aoiMaxLat
+                             lo:&t0 hi:&t1];
+  if (!inRect) ERIS_DS_FAIL(@"section_outside_package");
+  double startOff = minOff + requestedSpan * t0, endOff = minOff + requestedSpan * t1;
+  double clippedSpan = endOff - startOff;
+  if (!(clippedSpan > 0)) ERIS_DS_FAIL(@"section_outside_package");
+  BOOL truncated = (t0 > 1e-9) || (t1 < 1 - 1e-9);
+
+  // Anchors that must be sampled explicitly: the clipped ends, both OBSERVED carriageway
+  // centerlines and the midpoint station — so no marker is interpolated into existence.
+  NSMutableArray<NSNumber *> *offsets = [NSMutableArray array];
+  for (NSNumber *n in @[@(startOff), @(endOff), @(offA), @(offB), @(0.0)]) {
+    double o = n.doubleValue;
+    if (o >= startOff - kErisOffsetEpsM && o <= endOff + kErisOffsetEpsM) [offsets addObject:@(o)];
+  }
+  NSInteger steps = (NSInteger)llround(clippedSpan / kErisSectionSampleSpacingM);
+  steps = MAX(1, MIN(kErisMaxSectionSamples - 1, steps));
+  double step = clippedSpan / (double)steps;
+  for (NSInteger i = 0; i <= steps; i++) [offsets addObject:@(startOff + step * i)];
+  [offsets sortUsingComparator:^NSComparisonResult(NSNumber *x, NSNumber *y) { return [x compare:y]; }];
+
+  NSMutableArray *samples = [NSMutableArray array];
+  NSMutableArray *sliceLonLat = [NSMutableArray array];
+  double last = -INFINITY;
+  BOOL memberAHasGround = NO, memberBHasGround = NO;
+  for (NSNumber *n in offsets) {
+    double o = n.doubleValue;
+    if (o < startOff - kErisOffsetEpsM || o > endOff + kErisOffsetEpsM) continue;
+    if (isfinite(last) && fabs(o - last) <= kErisOffsetEpsM) continue;   // dedupe anchors vs fill
+    last = o;
+    double sLon, sLat;
+    ErisToLL((ErisVec){crossAxis.x * o, crossAxis.y * o}, lon0, lat0, &sLon, &sLat);
+    NSString *side = fabs(o) <= kErisOffsetEpsM ? @"CENTER" : (o < 0 ? @"LT" : @"RT");
+    NSString *label;
+    if (fabs(o - offA) <= kErisOffsetEpsM)      label = kErisMemberALabel;
+    else if (fabs(o - offB) <= kErisOffsetEpsM) label = kErisMemberBLabel;
+    else if (fabs(o) <= kErisOffsetEpsM)        label = kErisMidpointLabel;
+    else label = [NSString stringWithFormat:@"%@ %.1f m", side, fabs(o)];
+
+    NSString *status = @"OUT_OF_BOUNDS";
+    double elevM = [self sampleElevationMetersAtLat:sLat lon:sLon outStatus:&status];
+    BOOL okSample = isfinite(elevM) && [status isEqualToString:@"OK"];
+    if (okSample && fabs(o - offA) <= kErisOffsetEpsM) memberAHasGround = YES;
+    if (okSample && fabs(o - offB) <= kErisOffsetEpsM) memberBHasGround = YES;
+    [samples addObject:@{
+      @"side": side, @"offsetFt": @(o * kXsFtPerM), @"offsetM": @(o), @"lat": @(sLat), @"lon": @(sLon),
+      @"source": @"USGS_3DEP_OFFLINE_GRID", @"status": status, @"label": label,
+      @"elevationM": okSample ? (id)@(elevM) : (id)[NSNull null],
+      @"elevationFt": okSample ? (id)@(elevM * kXsFtPerM) : (id)[NSNull null],
+    }];
+    [sliceLonLat addObject:@[@(sLon), @(sLat)]];
+  }
+  if (samples.count < 2) ERIS_DS_FAIL(@"section_outside_package");
+
+  // Both observed centerlines must stand on REAL packaged terrain. Without it their markers
+  // could only be placed at a guessed elevation — fail closed rather than invent ground.
+  BOOL aInSpan = (offA >= startOff - kErisOffsetEpsM && offA <= endOff + kErisOffsetEpsM);
+  BOOL bInSpan = (offB >= startOff - kErisOffsetEpsM && offB <= endOff + kErisOffsetEpsM);
+  if (!aInSpan || !bInSpan) ERIS_DS_FAIL(@"member_terrain_outside_package");
+  if (!memberAHasGround || !memberBHasGround) ERIS_DS_FAIL(@"member_terrain_unavailable");
+
+  double startLon, startLat, endLon, endLat;
+  ErisToLL((ErisVec){crossAxis.x * startOff, crossAxis.y * startOff}, lon0, lat0, &startLon, &startLat);
+  ErisToLL((ErisVec){crossAxis.x * endOff, crossAxis.y * endOff}, lon0, lat0, &endLon, &endLat);
+
+  if (outReason) *outReason = nil;
+  return @{
+    @"startOffsetM": @(startOff), @"endOffsetM": @(endOff),
+    @"startLon": @(startLon), @"startLat": @(startLat),
+    @"endLon": @(endLon), @"endLat": @(endLat),
+    @"truncated": @(truncated),
+    @"samples": samples,
+    @"sliceLonLat": sliceLonLat,
+    @"crossBearingDeg": @(XsNorm360(atan2(crossAxis.x, crossAxis.y) * 180.0 / M_PI)),
+    @"requestedSpanM": @(requestedSpan),
+    @"clippedSpanM": @(clippedSpan),
+    @"sampleSpacingM": @(kErisSectionSampleSpacingM),
+  };
+}
+#undef ERIS_DS_FAIL
+
+// Build the ONE immutable divided-corridor inspection model, or nil + a fail-closed reason.
+// Reason tokens match dividedCorridorInspection.ts exactly.
+// Fail CLOSED: set the reason and return nil (never a fabricated roadway).
+#define ERIS_DC_FAIL(r) do { if (outReason) *outReason = (r); return nil; } while (0)
+- (NSDictionary *)buildDividedCorridorInspectionForCandidate:(NSDictionary *)cand reason:(NSString **)outReason {
+  // Validate EACH station component against ITS OWN value. Guarding lon on lat's type sent
+  // -doubleValue to whatever snapLon held: an NSNull/NSString there raised unrecognized
+  // selector instead of failing closed.
+  // NSNumber specifically, not -respondsToSelector:@selector(doubleValue): NSString also
+  // answers doubleValue, so a garbage string would silently become 0.0 — a "valid" station
+  // at (0, 0) in the Gulf of Guinea.
+  id rawLon = cand[@"snapLon"], rawLat = cand[@"snapLat"];
+  double lon0 = [rawLon isKindOfClass:[NSNumber class]] ? [rawLon doubleValue] : NAN;
+  double lat0 = [rawLat isKindOfClass:[NSNumber class]] ? [rawLat doubleValue] : NAN;
+  if (!isfinite(lon0) || !isfinite(lat0)) ERIS_DC_FAIL(@"invalid_station");
+
+  NSArray *corridor = [self cleanLonLatLine:cand[@"coords"]];
+  if (corridor.count < 2) ERIS_DC_FAIL(@"missing_corridor_geometry");
+  NSDictionary *mg = [cand[@"memberGeometry"] isKindOfClass:[NSDictionary class]] ? cand[@"memberGeometry"] : nil;
+  NSArray *memberA = [self cleanLonLatLine:mg[@"a"]];
+  NSArray *memberB = [self cleanLonLatLine:mg[@"b"]];
+  if (memberA.count < 2) ERIS_DC_FAIL(@"missing_member_a_geometry");
+  if (memberB.count < 2) ERIS_DC_FAIL(@"missing_member_b_geometry");
+  NSArray *srcIds = [cand[@"memberSourceFeatureIds"] isKindOfClass:[NSArray class]] ? cand[@"memberSourceFeatureIds"] : nil;
+  NSArray *partIds = [cand[@"memberPartFeatureIds"] isKindOfClass:[NSArray class]] ? cand[@"memberPartFeatureIds"] : nil;
+  if (srcIds.count != 2 || partIds.count != 2) ERIS_DC_FAIL(@"unresolved_member_references");
+
+  // 1. local tangent of the SELECTED corridor at the station.
+  double cLat, cLon, cTan, cDist;
+  if (![self projectLat:lat0 lon:lon0 ontoCoords:corridor outLat:&cLat outLon:&cLon outTangent:&cTan outDist:&cDist]) ERIS_DC_FAIL(@"invalid_corridor_projection");
+  ErisVec corridorTangent = ErisVecFromBearing(cTan);
+
+  // 2-3. project the station onto each member + capture LOCAL member tangents.
+  double aLat, aLon, aTan, aDist, bLat, bLon, bTan, bDist;
+  if (![self projectLat:lat0 lon:lon0 ontoCoords:memberA outLat:&aLat outLon:&aLon outTangent:&aTan outDist:&aDist]) ERIS_DC_FAIL(@"invalid_member_a_projection");
+  if (![self projectLat:lat0 lon:lon0 ontoCoords:memberB outLat:&bLat outLon:&bLon outTangent:&bTan outDist:&bDist]) ERIS_DC_FAIL(@"invalid_member_b_projection");
+
+  // 4. AXIAL average — coordinate order must not matter. Align B into A's hemisphere,
+  // average, normalise. This is an AXIS, never a travel direction.
+  ErisVec tA = ErisVecFromBearing(aTan), tB = ErisVecFromBearing(bTan);
+  if (ErisDot(tA, tB) < 0) tB = (ErisVec){-tB.x, -tB.y};
+  ErisVec axialTangent;
+  if (!ErisUnit((ErisVec){tA.x + tB.x, tA.y + tB.y}, &axialTangent)) ERIS_DC_FAIL(@"unstable_axial_tangent");
+
+  // 5-6. perpendicular cross axis, oriented deterministically member A -> member B.
+  ErisVec va = ErisToM(aLon, aLat, lon0, lat0), vb = ErisToM(bLon, bLat, lon0, lat0);
+  ErisVec crossAxis = (ErisVec){axialTangent.y, -axialTangent.x};
+  ErisVec aToB = (ErisVec){vb.x - va.x, vb.y - va.y};
+  if (ErisDot(crossAxis, aToB) < 0) crossAxis = (ErisVec){-crossAxis.x, -crossAxis.y};
+
+  // 7. signed offsets + separations.
+  double offsetA = ErisDot(va, crossAxis), offsetB = ErisDot(vb, crossAxis);
+  double separationM = hypot(aToB.x, aToB.y);
+  double separationAlongAxisM = fabs(offsetB - offsetA);
+
+  // 8-11. fail-closed validation.
+  if (!isfinite(separationM)) ERIS_DC_FAIL(@"non_finite_separation");
+  if (separationM < kErisMinPlausibleSepM || separationM > kErisMaxPlausibleSepM) ERIS_DC_FAIL(@"implausible_separation");
+  // The members must STRADDLE the derived station, else the midpoint is not between them.
+  if (!(offsetA < -kErisStraddleToleranceM && offsetB > kErisStraddleToleranceM)) ERIS_DC_FAIL(@"members_do_not_straddle_station");
+  NSDictionary *packaged = [cand[@"separationM"] isKindOfClass:[NSDictionary class]] ? cand[@"separationM"] : nil;
+  double ref = XsNum(packaged, @"median", NAN);
+  if (!isfinite(ref)) ref = XsNum(packaged, @"mean", NAN);
+  if (isfinite(ref) && ref > 0) {
+    double tol = MAX(kErisSepTolAbsM, kErisSepTolFrac * ref);
+    if (fabs(separationM - ref) > tol) ERIS_DC_FAIL(@"separation_inconsistent_with_package");
+  }
+
+  // 12. section extent: both members + bounded outside margins.
+  double sectionMin = MIN(offsetA, offsetB) - kErisOutsideMarginM;
+  double sectionMax = MAX(offsetA, offsetB) + kErisOutsideMarginM;
+  double sLon0, sLat0, sLon1, sLat1;
+  ErisToLL((ErisVec){crossAxis.x * sectionMin, crossAxis.y * sectionMin}, lon0, lat0, &sLon0, &sLat0);
+  ErisToLL((ErisVec){crossAxis.x * sectionMax, crossAxis.y * sectionMax}, lon0, lat0, &sLon1, &sLat1);
+
+  if (outReason) *outReason = nil;
+  return @{
+    @"renderingMode": kErisRenderingObservedDividedCorridor,
+    @"selectionKind": kErisSelDividedCorridor,
+    @"featureId": cand[@"featureId"] ?: @"",
+    @"station": @{@"lon": @(lon0), @"lat": @(lat0)},
+    @"corridorTangent": @{@"x": @(corridorTangent.x), @"y": @(corridorTangent.y)},
+    @"axialTangent": @{@"x": @(axialTangent.x), @"y": @(axialTangent.y)},
+    @"crossAxis": @{@"x": @(crossAxis.x), @"y": @(crossAxis.y)},
+    @"memberA": @{@"lon": @(aLon), @"lat": @(aLat), @"offsetM": @(offsetA), @"distanceFromStationM": @(aDist),
+                  @"tangent": @{@"x": @(tA.x), @"y": @(tA.y)},
+                  @"sourceFeatureId": srcIds[0], @"partFeatureId": partIds[0], @"label": kErisMemberALabel},
+    @"memberB": @{@"lon": @(bLon), @"lat": @(bLat), @"offsetM": @(offsetB), @"distanceFromStationM": @(bDist),
+                  @"tangent": @{@"x": @(tB.x), @"y": @(tB.y)},
+                  @"sourceFeatureId": srcIds[1], @"partFeatureId": partIds[1], @"label": kErisMemberBLabel},
+    @"memberAGeometry": memberA,
+    @"memberBGeometry": memberB,
+    @"corridorGeometry": corridor,
+    @"separationM": @(separationM),
+    @"separationAlongAxisM": @(separationAlongAxisM),
+    @"packagedSeparation": packaged ?: @{},
+    @"sectionMinOffsetM": @(sectionMin),
+    @"sectionMaxOffsetM": @(sectionMax),
+    @"sectionStart": @[@(sLon0), @(sLat0)],
+    @"sectionEnd": @[@(sLon1), @(sLat1)],
+    @"pairingMethod": cand[@"pairingMethod"] ?: @"",
+    @"pairingVersion": cand[@"pairingVersion"] ?: @(0),
+    @"orientationSource": cand[@"orientationSource"] ?: @"geometry_derived",
+    @"observed": @[@"Two packaged source carriageway centerlines",
+                   @"Geometry-derived midpoint corridor centerline",
+                   @"Measured centerline-to-centerline separation",
+                   @"Packaged terrain elevation profile",
+                   @"Packaged aerial imagery",
+                   @"Geometry-derived orientation"],
+    @"unavailable": @[@"Pavement edges", @"Carriageway width", @"Lane count", @"Lane width",
+                      @"Inside/outside shoulder dimensions", @"Median category",
+                      @"Physical median width", @"Concrete barrier presence",
+                      @"Traffic direction", @"Authoritative upstation"],
+    // The DEFAULT one-lane-each-way 32 ft deck must NEVER be drawn for a corridor.
+    @"schematicRoadwayAllowed": @NO,
+    @"defaultTwoWayTemplateAllowed": @NO,
+  };
+}
+#undef ERIS_DC_FAIL
+
 - (NSDictionary *)bearingFallbackCandidateAtLat:(double)lat lon:(double)lon {
   return @{
     @"snapLat": @(lat), @"snapLon": @(lon), @"tangentDeg": @(self.upstationHintDeg), @"distM": @(0.0),
@@ -2245,8 +2791,38 @@ static NSArray *erisAsArray(id v) {
                                         : XsResolveUpstation([cand[@"tangentDeg"] doubleValue], self.upstationHintDeg);
   double crossBearing = XsCrossBearing(upstationDeg);
 
-  NSMutableDictionary *slice = [[self buildSliceSelectedLat:selLat selLon:selLon snapLat:snapLat snapLon:snapLon
-                                              upstationDeg:upstationDeg snapped:snapped roadContextKind:cand[@"kind"]] mutableCopy];
+  // ONE immutable divided-corridor inspection model + its ONE section, built here BEFORE
+  // the slice, because for a divided corridor the section IS the slice contract: the model
+  // depends only on the candidate, and the terrain must be sampled along the model's
+  // crossAxis over the model's extent — never along the DEFAULT template's axis.
+  // FAILS CLOSED — a corridor that cannot be validated never opens a fabricated inspection.
+  NSDictionary *inspectionGeometry = nil, *dividedSection = nil;
+  BOOL isDivided = [cand[@"selectionKind"] isEqualToString:kErisSelDividedCorridor];
+  if (isDivided) {
+    NSString *why = nil;
+    inspectionGeometry = [self buildDividedCorridorInspectionForCandidate:cand reason:&why];
+    if (inspectionGeometry == nil) {
+      [self clearSelectedRoadHighlight];
+      [self showCrossSectionMessage:[NSString stringWithFormat:
+          @"Divided-corridor geometry could not be validated for this road (%@). "
+          @"No cross section was generated. Choose another road.", why ?: @"unknown"]];
+      return;   // never a fabricated divided-roadway schematic
+    }
+    dividedSection = [self buildDividedSectionForInspection:inspectionGeometry reason:&why];
+    if (dividedSection == nil) {
+      [self clearSelectedRoadHighlight];
+      [self showCrossSectionMessage:[NSString stringWithFormat:
+          @"The terrain section across this divided corridor could not be measured from the "
+          @"packaged grid (%@). No cross section was generated. Choose another road.", why ?: @"unknown"]];
+      return;   // no packaged ground under the carriageways -> no section at all
+    }
+  }
+
+  NSMutableDictionary *slice = isDivided
+      ? [[self buildDividedSliceSelectedLat:selLat selLon:selLon inspection:inspectionGeometry
+                                    section:dividedSection snapped:snapped roadContextKind:cand[@"kind"]] mutableCopy]
+      : [[self buildSliceSelectedLat:selLat selLon:selLon snapLat:snapLat snapLon:snapLon
+                        upstationDeg:upstationDeg snapped:snapped roadContextKind:cand[@"kind"]] mutableCopy];
   // Carry the selected-candidate metadata + honest orientation/layout flags (Part 10).
   slice[@"selectedRoadName"] = cand[@"name"] ?: @"";
   slice[@"selectedRoadClass"] = cand[@"roadClass"] ?: @"unclassified";
@@ -2255,17 +2831,45 @@ static NSArray *erisAsArray(id v) {
   slice[@"orientationAuthoritative"] = @(isfinite(self.upstationHintDeg));
   slice[@"selectedRoadCoords"] = cand[@"coords"] ?: @[];   // for the corridor road overlay
 
+  if (isDivided) {
+    // The model + its section travel WITH the slice: the corridor build and both children
+    // read them, so all three views describe one section.
+    slice[@"inspectionGeometry"] = inspectionGeometry;
+    slice[@"dividedSection"] = dividedSection;
+    slice[@"selectionKind"] = kErisSelDividedCorridor;
+    slice[@"renderingMode"] = kErisRenderingObservedDividedCorridor;
+    slice[@"defaultTwoWayTemplateAllowed"] = @NO;
+    slice[@"schematicRoadwayAllowed"] = @NO;
+  }
+
   NSDictionary *corridor = [self buildCorridorModelAtLat:snapLat lon:snapLon upstationDeg:upstationDeg
                                             crossBearing:crossBearing slice:slice];
 
+  // ONE immutable provenance record, built once from the REAL corridor/model keys and
+  // handed to the inspection. Previously the container read imageryProvider/
+  // imageryMetersPerPixel/imageryVintage off slice.provenance, which never held them — so
+  // the bar silently showed nothing while the true values sat in `corridor` under other
+  // names.
+  NSDictionary *provenance = [self buildInspectionProvenanceForSlice:slice corridor:corridor
+                                                          inspection:inspectionGeometry section:dividedSection];
+
   self.inspectionConfirmed = YES;   // keep the highlight through the transition + inspection
-  [self drawSliceLineAtLat:snapLat lon:snapLon crossBearing:crossBearing road:[self crossSectionRoad]];
+  if (isDivided) {
+    [self drawSliceLineFromSection:dividedSection];   // the exact clipped section, not a template line
+  } else {
+    [self drawSliceLineAtLat:snapLat lon:snapLon crossBearing:crossBearing road:[self crossSectionRoad]];
+  }
   [self setCrossSectionModeActive:NO];
   __weak typeof(self) weakSelf = self;
   [self animateMapToInspectionAtLat:snapLat lon:snapLon upstationDeg:upstationDeg completion:^{
     typeof(self) me = weakSelf; if (me == nil) return;
     me.didPresentInspection = YES;   // only now will the return restore the prior camera
-    ErisInspectionViewController *vc = [[ErisInspectionViewController alloc] initWithSlice:slice corridor:corridor];
+    // `inspectionGeometry` was built ONCE above (fail-closed) and is passed through
+    // unchanged; the container hands the same instance to both children.
+    ErisInspectionViewController *vc = [[ErisInspectionViewController alloc] initWithSlice:slice
+                                                                                  corridor:corridor
+                                                                        inspectionGeometry:inspectionGeometry
+                                                                                provenance:provenance];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;   // coordinated with the camera flight
@@ -2281,6 +2885,41 @@ static NSArray *erisAsArray(id v) {
 // constructed or presented until "Acknowledge and inspect". Shows the exact default
 // lane/shoulder/median values; a primary highway states the 1-lane-each-way, 32 ft layout
 // is not observed highway geometry.
+// Pre-inspection gate for an OBSERVED divided corridor. The DEFAULT gate cannot be shown
+// here: it promises a one-lane-each-way 32-ft template that this path deliberately never
+// applies, so it would misdescribe the very inspection it is gating. States what the
+// package observes and what it does not contain — no default lane/shoulder/median/total
+// values appear, because none are used.
+- (void)presentDividedCorridorGateForCandidate:(NSDictionary *)c selLat:(double)selLat selLon:(double)selLon {
+  NSMutableString *m = [NSMutableString stringWithString:
+      @"This inspection is built only from observed packaged geometry.\n\nObserved:\n"];
+  [m appendString:@"• Two packaged carriageway centerlines\n"];
+  [m appendString:@"• A geometry-derived midpoint corridor\n"];
+  [m appendString:@"• Measured centerline-to-centerline separation\n"];
+  [m appendString:@"• Packaged terrain and imagery\n"];
+  [m appendString:@"\nUnavailable:\n"];
+  [m appendString:@"• Lane count and lane widths\n"];
+  [m appendString:@"• Shoulders\n"];
+  [m appendString:@"• Pavement edges\n"];
+  [m appendString:@"• Carriageway widths\n"];
+  [m appendString:@"• Physical median width and category\n"];
+  [m appendString:@"• Traffic direction\n"];
+  [m appendString:@"\nThe inspection will not apply the DEFAULT 32-foot two-way roadway template. "
+                  @"The area between the centerlines is an interval, not measured pavement."];
+
+  UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Observed divided corridor"
+                                                            message:m preferredStyle:UIAlertControllerStyleAlert];
+  __weak typeof(self) weakSelf = self;
+  [a addAction:[UIAlertAction actionWithTitle:@"Back" style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) {
+    [weakSelf clearSelectedRoadHighlight];   // returned WITHOUT constructing the inspection
+  }]];
+  [a addAction:[UIAlertAction actionWithTitle:@"Inspect" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+    typeof(self) me = weakSelf; if (me == nil) return;
+    [me inspectCandidate:c selLat:selLat selLon:selLon];
+  }]];
+  [self presentViewController:a animated:YES completion:nil];
+}
+
 - (void)presentDefaultLayoutGateForCandidate:(NSDictionary *)c selLat:(double)selLat selLon:(double)selLon {
   NSDictionary *road = [self crossSectionRoad];
   NSMutableString *m = [NSMutableString stringWithString:@"This section uses DEFAULT roadway assumptions, not measured geometry:\n\n"];
@@ -2352,7 +2991,22 @@ static NSArray *erisAsArray(id v) {
 - (NSString *)candidateTitle:(NSDictionary *)c {
   NSString *name = c[@"name"];
   if ([name isKindOfClass:[NSString class]] && name.length) return name;
+  NSString *sk = c[@"selectionKind"] ?: @"";
+  if (ErisIsSelectableKind(sk)) return ErisSelectionLabel(sk, nil);   // never invents a direction
   return c[@"roadClassLabel"] ?: @"Unclassified road";   // fall back to the class label
+}
+
+// The candidate's ROLE line (below the title). Selection-schema packages name the role;
+// legacy packages keep the class label.
+- (NSString *)candidateRoleLabel:(NSDictionary *)c {
+  NSString *sk = c[@"selectionKind"] ?: @"";
+  if (ErisIsSelectableKind(sk)) {
+    NSString *role = ErisSelectionLabel(sk, nil);
+    NSString *cls = c[@"roadClassLabel"] ?: @"";
+    // "Divided highway corridor · Primary road / highway"
+    return cls.length && ![role isEqualToString:cls] ? [NSString stringWithFormat:@"%@  ·  %@", role, cls] : role;
+  }
+  return c[@"roadClassLabel"] ?: @"Unclassified road";
 }
 
 // Rounded snap distance: whole metres up close, nearest 5 m further out.
@@ -2366,6 +3020,21 @@ static NSArray *erisAsArray(id v) {
 // geometry-derived, and whether roadway dimensions are ERIS data / form data / defaults.
 - (NSString *)candidateDetailText:(NSDictionary *)c {
   NSMutableArray *lines = [NSMutableArray array];
+  // Divided corridor: OBSERVED facts only — measured separation, derived-centreline
+  // provenance, and the pairing method/version that produced it.
+  if ([c[@"selectionKind"] isEqualToString:kErisSelDividedCorridor]) {
+    NSDictionary *sep = [c[@"separationM"] isKindOfClass:[NSDictionary class]] ? c[@"separationM"] : nil;
+    if (sep) {
+      [lines addObject:[NSString stringWithFormat:@"Measured carriageway separation: %.0f m (min %.0f, max %.0f)",
+                        XsNum(sep, @"mean", 0), XsNum(sep, @"min", 0), XsNum(sep, @"max", 0)]];
+    }
+    [lines addObject:@"Geometry-derived corridor centerline (midpoint of the two observed carriageways)."];
+    if (![c[@"orientationSource"] isEqualToString:@"road_inventory"]) {
+      [lines addObject:@"Direction is not authoritative."];
+    }
+    NSString *pm = c[@"pairingMethod"];
+    if (pm.length) [lines addObject:[NSString stringWithFormat:@"Pairing: %@ v%@", pm, c[@"pairingVersion"] ?: @"?"]];
+  }
   if ([c[@"bearingFallback"] boolValue]) {
     [lines addObject:@"No road geometry here — oriented from the packaged bearing only."];
   } else {
@@ -2397,7 +3066,7 @@ static NSArray *erisAsArray(id v) {
   card.layer.cornerRadius = 16; card.clipsToBounds = YES;
 
   UILabel *title = [self cardLabel:[self candidateTitle:c] size:18 weight:UIFontWeightBold color:[UIColor whiteColor]];
-  UILabel *cls = [self cardLabel:c[@"roadClassLabel"] size:13 weight:UIFontWeightSemibold color:[self cardClassColor:c[@"roadClass"]]];
+  UILabel *cls = [self cardLabel:[self candidateRoleLabel:c] size:13 weight:UIFontWeightSemibold color:[self cardClassColor:c[@"roadClass"]]];
   UILabel *detail = [self cardLabel:[self candidateDetailText:c] size:12.5 weight:UIFontWeightRegular color:[UIColor colorWithWhite:0.85 alpha:1]];
 
   UIButton *inspect = [self cardButton:@"Inspect" filled:YES action:@selector(onCardInspect)];
@@ -2442,7 +3111,12 @@ static NSArray *erisAsArray(id v) {
   if (c == nil) return;
   double selLat = self.pendingSelLat, selLon = self.pendingSelLon;
   [self dismissCandidateCard];
-  if ([self layoutRequiresAcknowledgment]) {
+  // A divided corridor gets its OWN gate: the DEFAULT one would describe a template this
+  // inspection never applies. Non-divided roads that genuinely use the template are
+  // unaffected.
+  if ([c[@"selectionKind"] isEqualToString:kErisSelDividedCorridor]) {
+    [self presentDividedCorridorGateForCandidate:c selLat:selLat selLon:selLon];
+  } else if ([self layoutRequiresAcknowledgment]) {
     [self presentDefaultLayoutGateForCandidate:c selLat:selLat selLon:selLon];   // gate BEFORE any inspection is built
   } else {
     [self inspectCandidate:c selLat:selLat selLon:selLon];
@@ -2656,6 +3330,44 @@ static NSArray *erisAsArray(id v) {
   };
 }
 
+// The slice for an OBSERVED divided corridor. Its samples come from the immutable section
+// (model crossAxis + clipped extent), NOT from buildSliceSelectedLat's template geometry.
+//
+// Deliberately absent: crossSectionRoad geometry, XsShoulderEdgeFt, XsCrossBearing, and
+// keyMarkers — the stakes are defined as offsets "beyond the shoulder", and this package
+// has no shoulders. An empty keyMarkers is the truthful answer, not a defaulted one.
+- (NSDictionary *)buildDividedSliceSelectedLat:(double)selLat selLon:(double)selLon
+                                    inspection:(NSDictionary *)dc section:(NSDictionary *)section
+                                       snapped:(BOOL)snapped roadContextKind:(NSString *)kind {
+  NSDictionary *station = dc[@"station"];
+  double snapLat = XsNum(station, @"lat", NAN), snapLon = XsNum(station, @"lon", NAN);
+  NSDictionary *at = [dc[@"axialTangent"] isKindOfClass:[NSDictionary class]] ? dc[@"axialTangent"] : nil;
+  double axialDeg = XsNorm360(atan2(XsNum(at, @"x", 0), XsNum(at, @"y", 0)) * 180.0 / M_PI);
+
+  NSMutableDictionary *prov = [@{
+    // No roadLayoutSource: this path applies no roadway layout at all.
+    @"elevationSource": @"USGS 3DEP source-derived offline terrain grid",
+    @"packageVersion": XsStr([self params], @"packageVersion", @"—"),
+    @"snappedToRoadContext": @(snapped),
+  } mutableCopy];
+  if (kind) prov[@"roadContextSource"] = kind;
+
+  return @{
+    @"selectedLat": @(selLat), @"selectedLon": @(selLon),
+    @"snappedLat": @(snapLat), @"snappedLon": @(snapLon),
+    // Orientation from the OBSERVED corridor axis, not a template bearing.
+    @"upstationBearingDeg": @(axialDeg),
+    @"crossSectionBearingDeg": section[@"crossBearingDeg"],
+    // `road` carries route/postmile METADATA only (never geometry); the divided renderer
+    // reads route_name/begin_pm/end_pm and nothing dimensional. Its source is disclosed.
+    @"road": [self crossSectionRoad] ?: @{},
+    @"elevationSource": @"USGS_3DEP_OFFLINE_GRID",
+    @"samples": section[@"samples"],
+    @"keyMarkers": @{},
+    @"provenance": prov,
+  };
+}
+
 - (NSDictionary *)xsSample:(double)offsetFt side:(NSString *)side snapLat:(double)snapLat snapLon:(double)snapLon
                      cross:(double)crossBearing label:(NSString *)label {
   double dM = offsetFt / kXsFtPerM, rad = crossBearing * M_PI / 180.0;
@@ -2709,24 +3421,82 @@ static NSArray *erisAsArray(id v) {
 // Composite the packaged imagery (single OR tiled) into ONE north-up UIImage covering the
 // corridor bounds — fully offline (Core Graphics only, no network). Returns nil when no
 // imagery is packaged (the immersive view then falls back to shaded relief).
+// Effective ground-sample distance (m/px) the PACKAGE truthfully declares. Never guessed:
+// without it we cannot claim any particular detail, so fall back to a coarse default.
+- (double)imageryEffectiveMetersPerPixel {
+  NSDictionary *img = [self.contextLayers[@"imagery"] isKindOfClass:[NSDictionary class]] ? self.contextLayers[@"imagery"] : nil;
+  double eff = XsNum(img, @"effective_meters_per_pixel", 0);
+  if (!(eff > 0)) eff = XsNum(img, @"source_native_meters_per_pixel", 0);
+  return eff > 0 ? eff : 1.0;
+}
+
+// Decide the LOCAL corridor texture size from GROUND SIZE / effective GSD — never a fixed
+// square. Mirrors corridorTextureSizing() in imagerySizing.ts (unit-tested there):
+//  * useful pixels = corridor metres / effective_meters_per_pixel (the REAL source count);
+//  * geographic aspect preserved;
+//  * never upscaled past the source density (beyond layout rounding);
+//  * capped at kErisCorridorMaxTexturePx and by a decoded-RGBA memory budget.
+// Reports back whether the result is source-resolution limited or memory capped.
+- (CGSize)corridorTextureSizeForWidthM:(double)widthM heightM:(double)heightM
+                                   gsd:(double)gsd sourceLimited:(BOOL *)sourceLimited
+                          memoryCapped:(BOOL *)memoryCapped {
+  double g = gsd > 0 ? gsd : 1.0;
+  double reqW = MAX(1.0, round(widthM / g)), reqH = MAX(1.0, round(heightM / g));
+  double scale = 1.0, longest = MAX(reqW, reqH);
+  if (longest > (double)kErisCorridorMaxTexturePx) scale = (double)kErisCorridorMaxTexturePx / longest;
+  double w = MAX((double)kErisCorridorMinTexturePx, MIN((double)kErisCorridorMaxTexturePx, round(reqW * scale)));
+  double h = MAX((double)kErisCorridorMinTexturePx, MIN((double)kErisCorridorMaxTexturePx, round(reqH * scale)));
+  BOOL capped = NO;
+  if (w * h * 4.0 > kErisCorridorTextureMemoryBudgetBytes) {
+    capped = YES;
+    double k = sqrt(kErisCorridorTextureMemoryBudgetBytes / (w * h * 4.0));
+    w = MAX((double)kErisCorridorMinTexturePx, round(w * k));
+    h = MAX((double)kErisCorridorMinTexturePx, round(h * k));
+  }
+  if (sourceLimited) *sourceLimited = (!capped && longest <= (double)kErisCorridorMaxTexturePx);
+  if (memoryCapped) *memoryCapped = capped;
+  return CGSizeMake(w, h);
+}
+
+// Composite ONCE, from ONLY the tiles intersecting the corridor, at source-native density.
+// The old implementation flattened the COMPLETE AOI into a fixed CGSizeMake(512, 512),
+// which discarded most packaged detail and ignored geographic aspect.
 - (UIImage *)corridorImageForMinLon:(double)minLon minLat:(double)minLat maxLon:(double)maxLon maxLat:(double)maxLat {
   if (![self imageryUsable]) return nil;
   double du = maxLon - minLon, dv = maxLat - minLat;
   if (!(du > 0) || !(dv > 0)) return nil;
-  CGSize size = CGSizeMake(512, 512);
+  double midLat = (minLat + maxLat) / 2.0;
+  double cosLat = cos(midLat * M_PI / 180.0); if (fabs(cosLat) < 1e-9) cosLat = 1e-9;
+  double widthM = du * kXsMPerDegLat * fabs(cosLat), heightM = dv * kXsMPerDegLat;
+  double gsd = [self imageryEffectiveMetersPerPixel];
+  BOOL sourceLimited = NO, memoryCapped = NO;
+  CGSize size = [self corridorTextureSizeForWidthM:widthM heightM:heightM gsd:gsd
+                                    sourceLimited:&sourceLimited memoryCapped:&memoryCapped];
+  self.corridorTextureSize = size;
+  self.corridorTextureSourceLimited = sourceLimited;
+  self.corridorTextureMemoryCapped = memoryCapped;
+  self.corridorTextureGsd = gsd;
+  self.corridorTileCount = 0;
+
   UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-  fmt.opaque = YES; fmt.scale = 1.0;
+  fmt.opaque = YES; fmt.scale = 1.0;                    // scale 1: exact pixel dims, no re-encode
   UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt];
-  return [renderer imageWithActions:^(UIGraphicsImageRendererContext *rc) {
+  __block NSInteger used = 0;
+  UIImage *out = [renderer imageWithActions:^(UIGraphicsImageRendererContext *rc) {
     [[UIColor colorWithWhite:0.10 alpha:1.0] setFill];
     [rc fillRect:CGRectMake(0, 0, size.width, size.height)];
     if (self.imageryTiled) {
-      // Draw each tile into the corridor by its OWN declared bounds (north at top).
+      // ONLY the tiles that intersect this corridor — never the complete AOI. Each is drawn
+      // by its OWN declared bounds (north at top).
       for (NSDictionary *meta in self.imageryTileMetas) {
         UIImage *img = meta[@"image"]; NSDictionary *b = meta[@"bounds"];
         if (![img isKindOfClass:[UIImage class]] || ![b isKindOfClass:[NSDictionary class]]) continue;
         double tMinLon = [b[@"min_lon"] doubleValue], tMaxLon = [b[@"max_lon"] doubleValue];
         double tMinLat = [b[@"min_lat"] doubleValue], tMaxLat = [b[@"max_lat"] doubleValue];
+        // Interior overlap only; a merely touching edge contributes nothing.
+        if (MIN(tMaxLon, maxLon) - MAX(tMinLon, minLon) <= 0) continue;
+        if (MIN(tMaxLat, maxLat) - MAX(tMinLat, minLat) <= 0) continue;
+        used++;
         CGFloat x0 = (CGFloat)((tMinLon - minLon) / du) * size.width;
         CGFloat x1 = (CGFloat)((tMaxLon - minLon) / du) * size.width;
         CGFloat y0 = (CGFloat)((maxLat - tMaxLat) / dv) * size.height;
@@ -2745,12 +3515,15 @@ static NSArray *erisAsArray(id v) {
         CGRect crop = CGRectIntersection(CGRectMake(sx, sy, sw, sh), CGRectMake(0, 0, iw, ih));
         CGImageRef sub = CGRectIsNull(crop) ? NULL : CGImageCreateWithImageInRect(self.imageryImage.CGImage, crop);
         if (sub) {
+          used = 1;   // legacy single image: exactly one source contributed
           [[UIImage imageWithCGImage:sub] drawInRect:CGRectMake(0, 0, size.width, size.height)];
           CGImageRelease(sub);
         }
       }
     }
   }];
+  self.corridorTileCount = used;
+  return out;
 }
 
 // Build the immersive corridor model (Part 8): a north-up terrain patch (~260 m) around
@@ -2808,33 +3581,83 @@ static NSArray *erisAsArray(id v) {
   // Slice line built around the STATION (so the cross-section plane passes through the
   // exact snapped point) and CLIPPED to the corridor rect (so an edge station never draws
   // a plane floating beyond the terrain mesh, and never uses clamped edge elevation).
-  NSDictionary *road = [self crossSectionRoad];
-  double ltSh = XsShoulderEdgeFt(road, YES), rtSh = XsShoulderEdgeFt(road, NO);
-  double minOff = ltSh - 50, maxOff = rtSh + 50;
-  double r2 = crossBearing * M_PI / 180.0;
-  double e0 = minOff / kXsFtPerM, e1 = maxOff / kXsFtPerM;
-  double lon0 = lon + (e0 * sin(r2)) / (kXsMPerDegLat * cosLat), lat0 = lat + (e0 * cos(r2)) / kXsMPerDegLat;
-  double lon1 = lon + (e1 * sin(r2)) / (kXsMPerDegLat * cosLat), lat1 = lat + (e1 * cos(r2)) / kXsMPerDegLat;
-  double st0, st1;
-  BOOL sliceInRect = [self clipSegAx:lon0 ay:lat0 bx:lon1 by:lat1 minX:minLon minY:minLat maxX:maxLon maxY:maxLat lo:&st0 hi:&st1];
-  BOOL sliceTruncated = !sliceInRect || st0 > 1e-9 || st1 < 1 - 1e-9;   // cut by the package boundary
   NSMutableArray *sliceXsZs = [NSMutableArray array];
-  if (sliceInRect) {
-    for (int i = 0; i <= 20; i++) {
-      double tt = st0 + (st1 - st0) * ((double)i / 20.0);
-      double slon = lon0 + (lon1 - lon0) * tt, slat = lat0 + (lat1 - lat0) * tt;
+  BOOL sliceTruncated = NO;
+  NSDictionary *dividedSection = [slice[@"dividedSection"] isKindOfClass:[NSDictionary class]] ? slice[@"dividedSection"] : nil;
+  if (dividedSection) {
+    // OBSERVED divided corridor: the section plane is the model's already-clipped section —
+    // the SAME points the map line and the technical profile use. No template geometry.
+    for (NSArray *p in (NSArray *)dividedSection[@"sliceLonLat"]) {
+      if (![p isKindOfClass:[NSArray class]] || p.count < 2) continue;
+      double slon = [p[0] doubleValue], slat = [p[1] doubleValue];
       [sliceXsZs addObject:@[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)]];
     }
+    sliceTruncated = [dividedSection[@"truncated"] boolValue];
+  } else {
+    NSDictionary *road = [self crossSectionRoad];
+    double ltSh = XsShoulderEdgeFt(road, YES), rtSh = XsShoulderEdgeFt(road, NO);
+    double minOff = ltSh - 50, maxOff = rtSh + 50;
+    double r2 = crossBearing * M_PI / 180.0;
+    double e0 = minOff / kXsFtPerM, e1 = maxOff / kXsFtPerM;
+    double lon0 = lon + (e0 * sin(r2)) / (kXsMPerDegLat * cosLat), lat0 = lat + (e0 * cos(r2)) / kXsMPerDegLat;
+    double lon1 = lon + (e1 * sin(r2)) / (kXsMPerDegLat * cosLat), lat1 = lat + (e1 * cos(r2)) / kXsMPerDegLat;
+    double st0, st1;
+    BOOL sliceInRect = [self clipSegAx:lon0 ay:lat0 bx:lon1 by:lat1 minX:minLon minY:minLat maxX:maxLon maxY:maxLat lo:&st0 hi:&st1];
+    sliceTruncated = !sliceInRect || st0 > 1e-9 || st1 < 1 - 1e-9;   // cut by the package boundary
+    if (sliceInRect) {
+      for (int i = 0; i <= 20; i++) {
+        double tt = st0 + (st1 - st0) * ((double)i / 20.0);
+        double slon = lon0 + (lon1 - lon0) * tt, slat = lat0 + (lat1 - lat0) * tt;
+        [sliceXsZs addObject:@[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)]];
+      }
+    }
+  }
+
+  // Divided corridor: the two OBSERVED member centrelines as local reference lines, clipped
+  // with the same part-preserving Liang-Barsky logic (disconnected parts are never chorded),
+  // plus each member's station projection marker. References only — never selectable here.
+  NSDictionary *dc = [slice[@"inspectionGeometry"] isKindOfClass:[NSDictionary class]] ? slice[@"inspectionGeometry"] : nil;
+  NSMutableArray *memberAParts = [NSMutableArray array], *memberBParts = [NSMutableArray array];
+  NSArray *memberAStation = @[], *memberBStation = @[];
+  if (dc) {
+    for (NSInteger side = 0; side < 2; side++) {
+      NSArray *geom = side == 0 ? dc[@"memberAGeometry"] : dc[@"memberBGeometry"];
+      NSMutableArray *dst = side == 0 ? memberAParts : memberBParts;
+      for (NSArray *part in [self clipLineCoords:geom toMinLon:minLon minLat:minLat maxLon:maxLon maxLat:maxLat]) {
+        NSMutableArray *lp = [NSMutableArray array];
+        for (NSArray *c in part) {
+          double clon = [c[0] doubleValue], clat = [c[1] doubleValue];
+          [lp addObject:@[@((clon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - clat) * kXsMPerDegLat)]];
+        }
+        if (lp.count >= 2) [dst addObject:lp];
+      }
+    }
+    NSDictionary *ma = dc[@"memberA"], *mb = dc[@"memberB"];
+    memberAStation = @[@(([ma[@"lon"] doubleValue] - centerLon) * kXsMPerDegLat * cosLat),
+                       @((centerLat - [ma[@"lat"] doubleValue]) * kXsMPerDegLat)];
+    memberBStation = @[@(([mb[@"lon"] doubleValue] - centerLon) * kXsMPerDegLat * cosLat),
+                       @((centerLat - [mb[@"lat"] doubleValue]) * kXsMPerDegLat)];
   }
 
   UIImage *img = [self corridorImageForMinLon:minLon minLat:minLat maxLon:maxLon maxLat:maxLat];
   return @{
     @"cols": @(cols), @"rows": @(rows), @"widthM": @(widthM), @"depthM": @(depthM),
+    @"memberAPartsXsZs": memberAParts, @"memberBPartsXsZs": memberBParts,
+    @"memberAStationXZ": memberAStation, @"memberBStationXZ": memberBStation,
+    @"isDividedCorridor": @(dc != nil),
     @"heights": heights, @"minElevM": @(minElev), @"maxElevM": @(maxElev),
     @"image": img ?: (id)[NSNull null], @"hasImagery": @(img != nil),
     @"roadPartsXsZs": roadPartsXsZs, @"sliceXsZs": sliceXsZs, @"sliceTruncated": @(sliceTruncated),
     @"stationEastM": @(stationEastM), @"stationSouthM": @(stationSouthM),
     @"upstationDeg": @(upstationDeg), @"crossBearingDeg": @(crossBearing),
+    // TRUTHFUL local imagery provenance — never overstates detail.
+    @"imageryProvider": [self layerSourceLabel:@"imagery"] ?: @"",
+    @"imageryEffectiveMpp": @([self imageryEffectiveMetersPerPixel]),
+    @"imageryTileCount": @(self.corridorTileCount),
+    @"textureWidthPx": @((NSInteger)self.corridorTextureSize.width),
+    @"textureHeightPx": @((NSInteger)self.corridorTextureSize.height),
+    @"textureSourceLimited": @(self.corridorTextureSourceLimited),
+    @"textureMemoryCapped": @(self.corridorTextureMemoryCapped),
   };
 }
 
@@ -2959,6 +3782,27 @@ static NSArray *erisAsArray(id v) {
     double slon = lon + (dM * sin(rad)) / (kXsMPerDegLat * cosLat);
     SCNVector3 w;
     if ([self surfaceWorldForLat:slat lon:slon lift:[self drapeLiftForLayer:ErisDrapeSliceIndicator] out:&w]) [pts addObject:[NSValue valueWithSCNVector3:w]];
+  }
+  if (pts.count < 2) return;
+  SCNNode *line = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.30 green:0.85 blue:0.95 alpha:0.9] closed:NO];
+  self.sliceLineNode = line;
+  [self.exagNode addChildNode:line];
+}
+
+// The map slice line for an OBSERVED divided corridor: the EXACT clipped section endpoints
+// from the immutable section, so the line on the map is the same ground the inspection
+// profiles. No shoulder edges, no ±50 ft, no template bearing.
+- (void)drawSliceLineFromSection:(NSDictionary *)section {
+  [self.sliceLineNode removeFromParentNode];
+  NSArray *pts2 = [section[@"sliceLonLat"] isKindOfClass:[NSArray class]] ? section[@"sliceLonLat"] : @[];
+  NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+  for (NSArray *p in pts2) {
+    if (![p isKindOfClass:[NSArray class]] || p.count < 2) continue;
+    SCNVector3 w;
+    if ([self surfaceWorldForLat:[p[1] doubleValue] lon:[p[0] doubleValue]
+                            lift:[self drapeLiftForLayer:ErisDrapeSliceIndicator] out:&w]) {
+      [pts addObject:[NSValue valueWithSCNVector3:w]];
+    }
   }
   if (pts.count < 2) return;
   SCNNode *line = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.30 green:0.85 blue:0.95 alpha:0.9] closed:NO];

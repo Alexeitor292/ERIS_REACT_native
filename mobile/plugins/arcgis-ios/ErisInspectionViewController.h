@@ -6,5 +6,12 @@
 // orthographic cutaway. Switching modes preserves the selected location, road candidate,
 // samples, and roadway-layout source. Fully offline.
 @interface ErisInspectionViewController : UIViewController
-- (instancetype)initWithSlice:(NSDictionary *)slice corridor:(NSDictionary *)corridor;
+// `inspectionGeometry` is the ONE immutable divided-corridor model built by the terrain
+// controller (nil for non-divided roads). It is handed unchanged to BOTH children so
+// neither can reproject the station or derive a different section.
+// `provenance` is the ONE immutable provenance record assembled by the terrain controller
+// from the real corridor/model values. This view renders it verbatim and derives nothing.
+- (instancetype)initWithSlice:(NSDictionary *)slice corridor:(NSDictionary *)corridor
+           inspectionGeometry:(NSDictionary *)inspectionGeometry
+                   provenance:(NSDictionary *)provenance;
 @end

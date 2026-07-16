@@ -8,6 +8,9 @@ static const double kCorridorWorldHalf = 100.0;   // scene half-extent for the l
 static const double kCorridorVExag     = 1.5;     // modest display exaggeration (inspection readability)
 static const double kCorridorPlaneHtM  = 9.0;     // cross-section plane height above the road
 
+static NSString *const kCorRenderingObservedDividedCorridor = @"observed_divided_corridor";
+static NSString *const kCorMedianSeparationLabel = @"Median / separation area";
+
 static double CorNum(NSDictionary *d, NSString *k, double def) {
   id v = [d isKindOfClass:[NSDictionary class]] ? d[k] : nil;
   return [v respondsToSelector:@selector(doubleValue)] ? [v doubleValue] : def;
@@ -20,6 +23,10 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 @interface ErisImmersiveCorridorViewController ()
 @property(nonatomic, strong) NSDictionary *slice;
 @property(nonatomic, strong) NSDictionary *corridor;
+// The shared immutable divided-corridor model from the terrain controller. READ ONLY —
+// this view renders it and never reprojects the station or re-derives the section.
+@property(nonatomic, strong) NSDictionary *inspectionGeometry;
+@property(nonatomic, assign) BOOL sceneReleased;
 @property(nonatomic, strong) SCNView *scnView;
 @property(nonatomic, strong) SCNNode *cameraNode;
 @property(nonatomic, assign) NSInteger cols, rows;
@@ -34,12 +41,19 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 
 @implementation ErisImmersiveCorridorViewController
 
-- (instancetype)initWithSlice:(NSDictionary *)slice corridor:(NSDictionary *)corridor {
+- (instancetype)initWithSlice:(NSDictionary *)slice corridor:(NSDictionary *)corridor
+           inspectionGeometry:(NSDictionary *)inspectionGeometry {
   if ((self = [super init])) {
     _slice = [slice isKindOfClass:[NSDictionary class]] ? slice : @{};
     _corridor = [corridor isKindOfClass:[NSDictionary class]] ? corridor : @{};
+    _inspectionGeometry = [inspectionGeometry isKindOfClass:[NSDictionary class]] ? inspectionGeometry : nil;
   }
   return self;
+}
+
+- (BOOL)isObservedDividedCorridor {
+  return self.inspectionGeometry != nil &&
+         [CorStr(self.slice, @"renderingMode", @"") isEqualToString:kCorRenderingObservedDividedCorridor];
 }
 
 - (void)viewDidLoad {
@@ -69,8 +83,11 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 
   BOOL built = (self.cols >= 2 && self.rows >= 2 && (NSInteger)self.heights.count == self.cols * self.rows);
   if (built) {
-    [self buildTerrainPatch];
+    @autoreleasepool {                       // free the decoded/composited drape promptly
+      [self buildTerrainPatch];
+    }
     [self buildRoadOverlay];
+    if ([self isObservedDividedCorridor]) [self buildDividedCorridorOverlay];
     [self buildCrossSectionPlane];
   }
   [self addLighting];
@@ -197,6 +214,77 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   }
 }
 
+// Small upright marker (post + knob) pinning an observed point on the surface.
+- (SCNNode *)markerAtEast:(double)eM south:(double)sM color:(UIColor *)color heightM:(double)hM {
+  SCNVector3 base = [self worldForEast:eM south:sM lift:0.1];
+  float h = (float)(hM * self.supm * kCorridorVExag);
+  float r = (float)MAX(0.35 * self.supm, 0.25);
+  SCNNode *group = [SCNNode node];
+  SCNCylinder *post = [SCNCylinder cylinderWithRadius:r * 0.35 height:h];
+  post.firstMaterial.diffuse.contents = color;
+  post.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  SCNNode *postNode = [SCNNode nodeWithGeometry:post];
+  postNode.position = SCNVector3Make(base.x, base.y + h / 2.0f, base.z);
+  [group addChildNode:postNode];
+  SCNSphere *knob = [SCNSphere sphereWithRadius:r];
+  knob.firstMaterial.diffuse.contents = color;
+  knob.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  SCNNode *knobNode = [SCNNode nodeWithGeometry:knob];
+  knobNode.position = SCNVector3Make(base.x, base.y + h, base.z);
+  [group addChildNode:knobNode];
+  group.renderingOrder = 22;
+  return group;
+}
+
+// Part 12D — the OBSERVED divided corridor in the environment. The selected corridor
+// midpoint is already drawn bright yellow by buildRoadOverlay; here we add the two real
+// carriageway centerlines that produced it (blue, clearly secondary references), a station
+// marker on each, and the measured separation between them.
+//
+// Everything drawn is measured. The span between the two centerlines is annotated as the
+// "Median / separation area" — never as pavement, lanes, or a physical median width, none
+// of which the package contains.
+- (void)buildDividedCorridorOverlay {
+  NSDictionary *dc = self.inspectionGeometry;
+  UIColor *memberColor = [UIColor colorWithRed:0.55 green:0.80 blue:1.0 alpha:0.95];   // observed reference
+  UIColor *stationColor = [UIColor colorWithRed:1.0 green:0.45 blue:0.30 alpha:1.0];
+
+  for (NSInteger side = 0; side < 2; side++) {
+    NSString *partsKey = side == 0 ? @"memberAPartsXsZs" : @"memberBPartsXsZs";
+    NSArray *parts = [self.corridor[partsKey] isKindOfClass:[NSArray class]] ? self.corridor[partsKey] : @[];
+    for (NSArray *part in parts) {
+      if (![part isKindOfClass:[NSArray class]]) continue;
+      NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+      for (NSArray *p in part) {
+        if (![p isKindOfClass:[NSArray class]] || p.count < 2) continue;
+        [pts addObject:[NSValue valueWithSCNVector3:[self worldForEast:[p[0] doubleValue]
+                                                                 south:[p[1] doubleValue]
+                                                                  lift:0.28]]];
+      }
+      SCNNode *line = [self lineNodeFromPoints:pts color:memberColor];
+      if (line) { line.renderingOrder = 19; [self.scnView.scene.rootNode addChildNode:line]; }
+    }
+    NSArray *st = side == 0 ? self.corridor[@"memberAStationXZ"] : self.corridor[@"memberBStationXZ"];
+    if ([st isKindOfClass:[NSArray class]] && st.count >= 2) {
+      SCNNode *m = [self markerAtEast:[st[0] doubleValue] south:[st[1] doubleValue] color:stationColor heightM:4.0];
+      NSDictionary *mem = side == 0 ? dc[@"memberA"] : dc[@"memberB"];
+      m.name = CorStr(mem, @"label", side == 0 ? @"Carriageway A" : @"Carriageway B");
+      [self.scnView.scene.rootNode addChildNode:m];
+    }
+  }
+
+  // The measured separation, drawn between the two observed station points.
+  NSArray *a = self.corridor[@"memberAStationXZ"], *b = self.corridor[@"memberBStationXZ"];
+  if ([a isKindOfClass:[NSArray class]] && a.count >= 2 && [b isKindOfClass:[NSArray class]] && b.count >= 2) {
+    NSArray<NSValue *> *span = @[
+      [NSValue valueWithSCNVector3:[self worldForEast:[a[0] doubleValue] south:[a[1] doubleValue] lift:4.2]],
+      [NSValue valueWithSCNVector3:[self worldForEast:[b[0] doubleValue] south:[b[1] doubleValue] lift:4.2]],
+    ];
+    SCNNode *dim = [self lineNodeFromPoints:span color:stationColor];
+    if (dim) { dim.renderingOrder = 23; [self.scnView.scene.rootNode addChildNode:dim]; }
+  }
+}
+
 // The selected cross-section plane, standing in the environment: the slice line on the
 // surface + a translucent vertical quad rising from it.
 - (void)buildCrossSectionPlane {
@@ -282,20 +370,17 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 #pragma mark - Warnings (Part 10) + honest limitations
 
 - (void)addWarningOverlays:(BOOL)built {
-  NSDictionary *prov = [self.slice[@"provenance"] isKindOfClass:[NSDictionary class]] ? self.slice[@"provenance"] : @{};
-  NSString *layoutSrc = CorStr(prov, @"roadLayoutSource", @"DEFAULT");
   BOOL orientationAuthoritative = [self.slice[@"orientationAuthoritative"] boolValue];
   BOOL hasImagery = [self.corridor[@"hasImagery"] boolValue];
 
+  // SCENE-SPECIFIC facts only. Roadway-layout provenance and its limitations live in the
+  // container's single compact provenance bar — this block must not restate them.
   NSMutableArray<NSString *> *lines = [NSMutableArray array];
   [lines addObject:hasImagery
       ? @"Offline aerial-terrain inspection — packaged imagery draped on the local terrain. Not street-level photography."
       : @"Offline terrain inspection (no packaged imagery here) — shaded relief. Not street-level photography."];
-  [lines addObject:orientationAuthoritative
-      ? @"Orientation from the packaged upstation bearing."
-      : @"Orientation follows packaged centerline geometry; upstation is not verified."];
-  if ([layoutSrc isEqualToString:@"DEFAULT"]) {
-    [lines addObject:@"Default roadway assumptions — verify lane, shoulder, and median dimensions."];
+  if (!orientationAuthoritative) {
+    [lines addObject:@"Orientation follows packaged centerline geometry; upstation is not verified."];
   }
   if ([self.corridor[@"sliceTruncated"] boolValue]) {
     [lines addObject:@"Section truncated by the package boundary — only the in-bounds portion is shown."];
@@ -311,11 +396,82 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   banner.text = [NSString stringWithFormat:@"  %@  ", [lines componentsJoinedByString:@"\n  "]];
   [self.view addSubview:banner];
   UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+  // Top — the container's compact provenance bar owns the bottom edge.
   [NSLayoutConstraint activateConstraints:@[
     [banner.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
     [banner.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
-    [banner.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-8],
+    [banner.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
   ]];
+
+  if ([self isObservedDividedCorridor]) [self addSeparationAnnotation];
+}
+
+// The measured separation, stated in words beside the drawn dimension line. This is the
+// ONLY quantity the package supports between the carriageways — so it is labelled as the
+// separation area with the pavement-edge limitation attached, never as a median width or
+// a lane arrangement.
+- (void)addSeparationAnnotation {
+  NSDictionary *dc = self.inspectionGeometry;
+  double sep = CorNum(dc, @"separationM", 0);
+  NSString *text = [NSString stringWithFormat:
+      @"%@: %.1f m between observed carriageway centerlines\nPavement edges and physical median width are unavailable.",
+      kCorMedianSeparationLabel, sep];
+
+  UILabel *l = [[UILabel alloc] init];
+  l.translatesAutoresizingMaskIntoConstraints = NO;
+  l.numberOfLines = 0;
+  l.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+  l.textColor = [UIColor colorWithRed:1.0 green:0.80 blue:0.62 alpha:1.0];
+  l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.62];
+  l.text = [NSString stringWithFormat:@"  %@  ", text];
+  l.isAccessibilityElement = YES;
+  l.accessibilityLabel = [NSString stringWithFormat:
+      @"%@. %.1f metres between the two observed carriageway centerlines. Pavement edges and physical median width are unavailable.",
+      kCorMedianSeparationLabel, sep];
+  [self.view addSubview:l];
+  UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+  [NSLayoutConstraint activateConstraints:@[
+    [l.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
+    [l.trailingAnchor constraintLessThanOrEqualToAnchor:g.trailingAnchor constant:-8],
+    [l.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-64],
+  ]];
+
+  NSDictionary *ma = dc[@"memberA"], *mb = dc[@"memberB"];
+  self.scnView.accessibilityLabel = [NSString stringWithFormat:
+      @"Immersive offline terrain corridor. Observed divided highway corridor: the selected yellow line is the geometry-derived corridor midpoint between %@ and %@, drawn as blue reference centerlines. Measured separation %.1f metres.",
+      CorStr(ma, @"label", @"carriageway A"), CorStr(mb, @"label", @"carriageway B"), sep];
+}
+
+#pragma mark - Deterministic teardown (Part 12F)
+
+// Drop the decoded drape, geometry and camera as soon as the inspection closes rather than
+// waiting on dealloc timing. Idempotent — safe from onClose, viewDidDisappear and dealloc.
+- (void)releaseSceneResources {
+  if (self.sceneReleased) return;
+  self.sceneReleased = YES;
+  self.scnView.playing = NO;
+  self.scnView.delegate = nil;
+  SCNScene *scene = self.scnView.scene;
+  if (scene) {
+    [scene.rootNode enumerateChildNodesUsingBlock:^(SCNNode *node, BOOL *stop) {
+      for (SCNMaterial *m in node.geometry.materials) {
+        m.diffuse.contents = nil; m.normal.contents = nil; m.emission.contents = nil;
+      }
+      node.geometry = nil;
+      node.light = nil;
+      node.camera = nil;
+    }];
+    for (SCNNode *child in [scene.rootNode.childNodes copy]) [child removeFromParentNode];
+  }
+  self.scnView.pointOfView = nil;
+  self.scnView.scene = nil;
+  self.cameraNode = nil;
+  self.heights = nil;                     // packaged elevation array (can be megabytes)
+  self.corridor = @{};                    // drops the composited corridor UIImage
+}
+
+- (void)dealloc {
+  [self releaseSceneResources];
 }
 
 @end

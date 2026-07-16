@@ -3,6 +3,14 @@
   "compilerOptions": {
     "strict": true,
     "jsx": "react-jsx",
+    // The pure offline-scene modules (roadClass / roadSelection / corridorModel /
+    // imagerySizing / terrainScale) are executed directly by `node --test
+    // --experimental-strip-types`, which resolves ESM specifiers literally and therefore
+    // requires the explicit ".ts" extension on runtime imports. This flag lets tsc accept
+    // that same specifier. It is typecheck-only (CI runs `tsc --noEmit`) and permissive —
+    // extensionless imports elsewhere are unaffected, and Metro resolves ".ts" natively.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "paths": {
       "@/*": [
         "./*"

@@ -103,6 +103,20 @@ export function clipPolylineToRect(coords: LonLat[], r: Rect): LonLat[][] {
 
 export type Projection = { snapLon: number; snapLat: number; distM: number; tangentDeg: number };
 
+/**
+ * Nearest point on a polyline (unclipped) + its LOCAL tangent bearing. Exported so the
+ * divided-corridor inspection model projects onto member geometry with the same maths the
+ * corridor pass uses. Returns null for a degenerate polyline.
+ */
+export function projectToPolyline(coords: LonLat[], lon: number, lat: number): Projection | null {
+  let best: Projection | null = null;
+  for (let i = 0; i + 1 < (coords?.length ?? 0); i++) {
+    const r = projectPointSeg([lon, lat], coords[i], coords[i + 1]);
+    if (!best || r.distM < best.distM) best = r;
+  }
+  return best;
+}
+
 // Project point p onto segment [a,b] in metres; return the snap point + tangent bearing.
 function projectPointSeg(p: LonLat, a: LonLat, b: LonLat): Projection {
   const cosLat = Math.cos((p[1] * Math.PI) / 180) || 1e-9;

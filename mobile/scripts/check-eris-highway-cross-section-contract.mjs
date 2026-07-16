@@ -73,7 +73,7 @@ const checker = (tag, code) => ({
 
   // PR #51 FINAL review — Defect 1: main-map roads are REALLY clipped, not vertex-filtered.
   req(/clipLineCoordsToTerrainBounds:/, "main-map lines must be clipped to the terrain bounds (shared helper).");
-  req(/-\s*\(void\)buildRoadsLayer\s*\{[\s\S]{0,1400}clipLineCoordsToTerrainBounds/, "buildRoadsLayer must clip each line to the terrain bounds.");
+  req(/-\s*\(void\)buildRoadsLayer\s*\{[\s\S]{0,2600}clipLineCoordsToTerrainBounds/, "buildRoadsLayer must clip each line to the terrain bounds.");
   req(/-\s*\(void\)highlightCandidate:[\s\S]{0,700}clipLineCoordsToTerrainBounds/, "the candidate highlight must use the same clipping.");
   forbid(/\[\s*inb\s+addObject/, "the old in-bounds-vertex-only road accumulation must be gone.");
 
@@ -103,7 +103,14 @@ const checker = (tag, code) => ({
 
   // PR #51 review — Defect 3: DEFAULT layout is a real GATE before any inspection is built.
   req(/layoutRequiresAcknowledgment/, "DEFAULT layout must gate inspection (layoutRequiresAcknowledgment).");
-  req(/onCardInspect[\s\S]{0,300}layoutRequiresAcknowledgment/, "Inspect must consult the gate before building inspection.");
+  // Part 13 added a SECOND gate (divided corridors get their own truthful one), so Inspect
+  // now branches: divided -> presentDividedCorridorGateForCandidate, else DEFAULT gate.
+  // Both must still be consulted BEFORE inspectCandidate: builds anything.
+  req(/onCardInspect[\s\S]{0,700}layoutRequiresAcknowledgment/, "Inspect must consult the gate before building inspection.");
+  req(/onCardInspect[\s\S]{0,400}presentDividedCorridorGateForCandidate/,
+      "a divided corridor must be gated by its own truthful gate before inspection.");
+  req(/presentDividedCorridorGateForCandidate[\s\S]{0,1800}inspectCandidate:/,
+      "the divided gate must lead to the inspection only on acknowledgment.");
   req(/presentDefaultLayoutGateForCandidate/, "the gate must present a blocking assumptions confirmation.");
   req(/Acknowledge and inspect/, "the gate action must be 'Acknowledge and inspect'.");
   req(/NOT observed highway geometry/, "a primary highway on DEFAULT must state it is not observed geometry.");
@@ -122,6 +129,49 @@ const checker = (tag, code) => ({
 
   // PR #51 FINAL review — Defect 3: the immersive slice plane is bounded to the corridor.
   req(/sliceTruncated/, "the corridor must flag a slice truncated by the package boundary.");
+
+  // ---- divided-highway selection schema (additive) --------------------------
+  req(/divided_highway_corridor/, "must parse the divided_highway_corridor selection kind.");
+  req(/individual_carriageway/, "must parse the individual_carriageway selection kind.");
+  req(/ordinary_road/, "must parse the ordinary_road selection kind.");
+  req(/kErisSelRamp/, "must parse the ramp selection kind.");
+  req(/carriageway_member/, "must recognise the diagnostics carriageway_member role.");
+  req(/ErisIsSelectableKind/, "selectable eligibility must gate on the four-value enum.");
+  req(/hasSelectionSchema/, "must detect whether the package declares the selection schema.");
+  req(/roadsUseSelectionSchema/, "a legacy package must keep the previous class-aware behaviour.");
+  // selectable:true eligibility + diagnostics/context exclusion in candidate gathering.
+  req(/gatherCandidatesAtLat:\(double\)lat[\s\S]{0,900}roadsUseSelectionSchema[\s\S]{0,120}selectable/,
+      "candidate gathering must admit ONLY selectable:true schema features.");
+  // ONE corridor line: raw members go to the diagnostics node, never a normal yellow road.
+  req(/roadsDiagnosticsNode/, "raw carriageway members must render into a separate diagnostics layer.");
+  req(/ErisDiagnosticMemberStyle/, "diagnostics members must not use the normal road style.");
+  req(/-\s*\(void\)buildRoadsLayer\s*\{[\s\S]{0,2600}roadsDiagnosticsNode addChildNode/,
+      "buildRoadsLayer must route diagnostics members to the diagnostics layer.");
+  // Ramp ranking strictly below corridor/mainline even though both are road_class primary.
+  req(/ErisSelectionRank/, "candidate ranking must rank corridor > individual roadway > ramp.");
+  req(/selectionRank/, "the candidate must carry its selection rank.");
+  // Truthful labels: never a fabricated compass direction.
+  req(/Divided highway corridor/, "the card must label a divided corridor.");
+  req(/Individual highway roadway/, "the card must label an individual roadway without a direction claim.");
+  forbid(/@"(East|West|North|South)bound/, "must NEVER claim a compass direction from the classification.");
+  req(/Measured carriageway separation/, "a corridor candidate must report its MEASURED separation.");
+  req(/Geometry-derived corridor centerline/, "a corridor must state its centreline is geometry-derived.");
+  req(/Direction is not authoritative/, "a geometry-derived corridor must say the direction is not authoritative.");
+
+  // ---- tile-native + GSD-derived imagery ------------------------------------
+  forbid(/CGSizeMake\(\s*512\s*,\s*512\s*\)/, "the fixed 512x512 immersive compositor must be gone.");
+  req(/imageryEffectiveMetersPerPixel/, "corridor texture sizing must use the packaged effective m/px.");
+  req(/corridorTextureSizeForWidthM:/, "corridor texture size must be derived from ground size / GSD.");
+  req(/kErisCorridorMaxTexturePx\s*=\s*3072/, "the corridor texture cap must be 3072.");
+  req(/kErisCorridorTextureMemoryBudgetBytes/, "an explicit decoded/GPU memory budget must be enforced.");
+  req(/corridorTextureSourceLimited/, "must report when the result is source-resolution limited.");
+  req(/corridorTextureMemoryCapped/, "must report when the result is device-memory capped.");
+  req(/imageryTileCount/, "must report how many tiles this LOCAL inspection used.");
+  // Tile-native quality on the main terrain.
+  req(/mat\.diffuse\.mipFilter\s*=\s*SCNFilterModeLinear/, "imagery tiles must use mip filtering.");
+  req(/mat\.diffuse\.magnificationFilter\s*=\s*SCNFilterModeLinear/, "imagery tiles must magnify linearly.");
+  req(/mat\.diffuse\.minificationFilter\s*=\s*SCNFilterModeLinear/, "imagery tiles must minify linearly.");
+  req(/mat\.diffuse\.maxAnisotropy\s*=\s*kErisImageryMaxAnisotropy/, "imagery tiles must use anisotropic filtering.");
 
   // Part 7: saved/animated/restored camera transition; no immediate modal in the tap path.
   req(/saveMapCameraState/, "must save the map camera before the flight.");
@@ -164,7 +214,10 @@ const checker = (tag, code) => ({
   req(/Section truncated by the package boundary/, "immersive VC must state when the section is truncated by the boundary.");
   req(/Not street-level photography/, "must state it is an offline aerial-terrain inspection, not street view.");
   req(/upstation is not verified|packaged upstation bearing/, "must state the orientation provenance.");
-  req(/Default roadway assumptions/, "must warn on DEFAULT roadway layout.");
+  // Part 12E moved the DEFAULT-layout limitation into the container's single provenance
+  // control (asserted in the inspection-vc block above), so the immersive scene must NOT
+  // restate it — one statement, not two competing ones.
+  forbid(/Default roadway assumptions/, "the immersive scene must not duplicate the container's DEFAULT-layout provenance (Part 12E).");
   forbid(NET, "immersive VC must not perform networking (packaged data only).");
   forbid(WRITES, "immersive VC must not write files.");
 }
@@ -179,8 +232,14 @@ const checker = (tag, code) => ({
   req(/ErisImmersiveCorridorViewController/, "must host the immersive corridor child.");
   req(/ErisRoadSliceSceneViewController/, "must host the technical orthographic child.");
   req(/initWithSlice:self\.slice/, "both children must share the same slice model.");
-  req(/Default roadway assumptions/, "must require acknowledgment of DEFAULT roadway assumptions.");
-  req(/Acknowledge/, "the default-layout warning must be acknowledgeable.");
+  // Part 12E superseded the acknowledgment PANEL with ONE compact expandable provenance
+  // control: the DEFAULT-layout limitation is still stated (never dropped), but it is no
+  // longer a second acknowledgment on top of the map's. See
+  // check-eris-divided-corridor-native-contract.mjs for the provenance-UX contract.
+  req(/Default roadway template — not observed geometry/, "must still state the DEFAULT-layout limitation.");
+  req(/DEFAULT one-lane-each-way \(32 ft\) template — NOT real highway geometry/,
+      "a DEFAULT primary highway must still carry the not-real-geometry wording.");
+  forbid(/@"Acknowledge"/, "the inspection container must not add a second Acknowledge control (Part 12E).");
   forbid(NET, "inspection container must not perform networking.");
   forbid(WRITES, "inspection container must not write files.");
 }
