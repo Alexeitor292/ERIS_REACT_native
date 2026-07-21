@@ -35,6 +35,32 @@ from urllib.parse import urlparse, urlunparse
 
 _M_PER_DEG_LAT = 111_320.0
 
+# --- road-source provider vocabulary (typed selection, not arbitrary strings) -------
+# The offline road provider selected by OFFLINE_SCENE_ROAD_SOURCE. `none` packages NO
+# road context (intentionally unavailable); the others are documented in
+# docs/adr-offline-road-context-source.md. Selection is always EXPLICIT — an endpoint
+# being reachable never activates a provider on its own.
+ROAD_SOURCE_NONE = "none"
+ROAD_SOURCE_ERIS_INTERNAL = "eris_internal"
+ROAD_SOURCE_TIGERWEB = "census_tigerweb"
+ROAD_SOURCE_ARCGIS = "arcgis_feature_service"
+ROAD_SOURCE_CALTRANS = "caltrans_crs"
+VALID_ROAD_SOURCES = frozenset(
+    {ROAD_SOURCE_NONE, ROAD_SOURCE_ERIS_INTERNAL, ROAD_SOURCE_TIGERWEB, ROAD_SOURCE_ARCGIS, ROAD_SOURCE_CALTRANS}
+)
+
+
+def normalize_road_source(value) -> str:
+    """Validate + canonicalize a road-source value. Raises ValueError for an unknown
+    provider (an invalid provider is rejected, never silently coerced to a default)."""
+    v = str(value if value is not None else ROAD_SOURCE_ERIS_INTERNAL).strip().lower()
+    if v not in VALID_ROAD_SOURCES:
+        raise ValueError(
+            f"OFFLINE_SCENE_ROAD_SOURCE must be one of {sorted(VALID_ROAD_SOURCES)}, got {value!r}"
+        )
+    return v
+
+
 ROADS_FILE = "roads.geojson"
 IMAGERY_FILE = "imagery.png"          # legacy single-image aerial drape
 IMAGERY_TILE_DIR = "imagery"          # tiled aerial imagery -> imagery/{row}/{col}.jpg
@@ -560,6 +586,53 @@ def validate_context_layers(context_layers) -> tuple[bool, str | None]:
         sha = layer.get("sha256")
         if not (isinstance(sha, str) and len(sha) == 64):
             return False, f"context_layers.{name} available but missing/invalid sha256"
+    return True, None
+
+
+def validate_roads_geojson(data: bytes, declared_feature_count=None) -> tuple[bool, str | None]:
+    """Fail-closed validation of packaged roads.geojson BYTES (called by the bundle
+    validator, which already checked sha256 + byte length). Ensures the asset is a valid
+    GeoJSON FeatureCollection of ONLY LineString/MultiLineString features with finite,
+    in-range coordinates, and — when the manifest declares one — that the actual feature
+    count matches ``feature_count``. So malformed GeoJSON, a non-line geometry, invalid
+    coordinates, or a declared-count mismatch can never reach a READY package."""
+    try:
+        obj = json.loads(data)
+    except Exception:
+        return False, "roads.geojson is not valid JSON"
+    if not isinstance(obj, dict) or not isinstance(obj.get("features"), list):
+        return False, "roads.geojson is not a GeoJSON FeatureCollection"
+    feats = obj["features"]
+    for f in feats:
+        if not isinstance(f, dict):
+            return False, "roads.geojson feature is not an object"
+        geom = f.get("geometry")
+        if not isinstance(geom, dict):
+            return False, "roads.geojson feature missing geometry"
+        gtype = geom.get("type")
+        coords = geom.get("coordinates")
+        if gtype == "LineString":
+            parts = [coords]
+        elif gtype == "MultiLineString":
+            if not isinstance(coords, list):
+                return False, "roads.geojson invalid MultiLineString"
+            parts = coords
+        else:
+            return False, f"roads.geojson unsupported geometry {gtype!r}"
+        for part in parts:
+            if not isinstance(part, list) or len(part) < 2:
+                return False, "roads.geojson line has fewer than 2 vertices"
+            for c in part:
+                if not (
+                    isinstance(c, (list, tuple)) and len(c) >= 2
+                    and _finite(c[0]) and _finite(c[1])
+                    and -180.0 <= c[0] <= 180.0 and -90.0 <= c[1] <= 90.0
+                ):
+                    return False, "roads.geojson has invalid coordinates"
+    if declared_feature_count is not None and len(feats) != int(declared_feature_count):
+        return False, (
+            f"roads.geojson feature_count mismatch: declared {declared_feature_count}, actual {len(feats)}"
+        )
     return True, None
 
 

@@ -233,6 +233,7 @@ jobs:
           src/arcgis/roadClass.test.ts
           src/arcgis/corridorModel.test.ts
           src/arcgis/roadSelection.test.ts
+          src/arcgis/caltransRoads.test.ts
           src/arcgis/imagerySizing.test.ts
           src/arcgis/dividedCorridorInspection.test.ts
           src/arcgis/dividedSectionSampling.test.ts

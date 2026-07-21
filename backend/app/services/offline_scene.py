@@ -125,16 +125,27 @@ def content_signature(
     geometry_json: object | None,
     road_bearing_deg: float | None,
     radius_m: float,
+    road_provider: str | None = None,
+    road_filter_version: str | None = None,
 ) -> str:
     """Stable short signature of the inputs that affect the packaged scene. Stored
     with a registered package; the mobile app re-downloads when the newest READY
-    catalog package's signature differs from the one it downloaded."""
+    catalog package's signature differs from the one it downloaded.
+
+    ``road_provider`` + ``road_filter_version`` are folded in (when supplied) so the
+    signature — and therefore the mobile re-download trigger — changes when the road
+    provider or its filter/inclusion policy changes for the same AOI. They are added
+    only when provided, so callers that omit them produce the legacy signature."""
     payload = {
         "u": gisa_updated_at or "",
         "g": geometry_json if isinstance(geometry_json, (dict, list)) else None,
         "b": round(float(road_bearing_deg), 2) if road_bearing_deg is not None else None,
         "r": round(float(radius_m), 1),
     }
+    if road_provider is not None:
+        payload["rp"] = str(road_provider)
+    if road_filter_version is not None:
+        payload["rf"] = str(road_filter_version)
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 

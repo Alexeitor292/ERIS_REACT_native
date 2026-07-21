@@ -1,8 +1,9 @@
 # ADR: Offline road-context source for development and future production
 
-Status: **Accepted for development; backend adapter IMPLEMENTED (2026-07-14)**
+Status: **Accepted for development; backend adapters IMPLEMENTED — `census_tigerweb` (2026-07-14), `caltrans_crs` (2026-07-21)**
 
-Date: **2026-07-14**  
+Date: **2026-07-14** (addendum **2026-07-21**)
+
 Scope: automatic `.eristerrain` package generation and the native offline Cross Section tool
 
 > **Implementation note (2026-07-14).** `census_tigerweb` is implemented as a
@@ -12,6 +13,41 @@ Scope: automatic `.eristerrain` package generation and the native offline Cross 
 > Enterprise layer. No mobile, Objective-C, or Expo change was required, and **no new EAS
 > build is needed** — the shipped app already consumes `roads.geojson` with
 > `kind: "road_centerline"`.
+
+> **Addendum (2026-07-21) — `caltrans_crs` California highway/freeway source.** An
+> OPTIONAL, operator-selected provider (`OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs`) packages
+> California **highways and freeways** (not local streets) from the PUBLIC, credential-free
+> Caltrans **CRS Functional Classification** ArcGIS FeatureServer
+> (`.../CHhighway/CRS_Functional_Classification/FeatureServer/0`). It lives in a dedicated
+> pure/worker module (`backend/app/services/offline_scene_caltrans.py`) so filter +
+> normalization stay separate from networking. Highlights:
+> - **Filter:** inclusion is driven by the layer's `F_System` functional-classification
+>   field (the only classification lever it exposes). Default include = `1,2,3` (Interstate
+>   + Other Freeways/Expressways + Other Principal Arterials = the state highway system,
+>   excluding minor arterials/collectors/local), tunable via
+>   `OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES`. The `where` clause is built by a pure,
+>   unit-tested function from validated integer codes only — never string-concatenated
+>   input. `RouteID` values (e.g. `SHS_050._P`) confirm the included set is the State
+>   Highway System.
+> - **Pagination + safety:** bounded `resultOffset`/`resultRecordCount` pagination with
+>   `exceededTransferLimit` detection, hard-capped by `_MAX_PAGES`/`_MAX_FEATURES`; https-only
+>   endpoint, connect/read timeouts, bounded retry with jitter, max response size, JSON +
+>   geometry + coordinate validation, dedupe by `OBJECTID`, and cancellation re-checked
+>   between pages. It queries only the package AOI — never the statewide dataset.
+> - **Schema:** minimal per-feature allowlist (`source_feature_id`, `route_id`, `NAME`,
+>   `functional_class` + `functional_class_label`, `county`, `district`, `provider`), with
+>   the ERIS-trusted `road_class` (`1,2,3` → `primary`) written last (unspoofable). The
+>   existing divided-highway pairing merges `_P`/`_S` carriageways into a corridor.
+> - **Failure policy:** `OFFLINE_SCENE_ROADS_REQUIRED` makes roads mandatory (job fails
+>   rather than publishing a package without verified road data); `OFFLINE_SCENE_ROAD_SOURCE`
+>   now also accepts `none`; there is **no silent fallback** — an explicit, audited
+>   `OFFLINE_SCENE_ROAD_FALLBACK_SOURCE` records `roads.fallback` in the manifest+logs.
+> - **Provenance/attribution:** "California Department of Transportation (Caltrans), CRS
+>   Functional Classification / Linear Reference System-derived data" — road **context**,
+>   not survey/engineering-grade. No mobile/Objective-C change was required (the shipped app
+>   already renders `road_centerline` + `road_class`). The same public layer is also offered
+>   as an OPTIONAL online web map toggle ("Caltrans Highways & Freeways"), independent of
+>   whether a downloaded package contains packaged roads.
 
 ## Context
 
@@ -279,6 +315,12 @@ Advantages: managed hosting and ArcGIS tooling.
 Limitations: trial/subscription lifecycle, credits, account governance, and avoidable vendor coupling.
 
 ### 4. Caltrans ArcGIS Enterprise
+
+> **Update (2026-07-21).** The PUBLIC Caltrans **CRS Functional Classification**
+> FeatureServer is now implemented as `caltrans_crs` (see the addendum above) — a
+> credential-free California highway/freeway **context** source. That is distinct from
+> the authenticated Caltrans **Enterprise** integration described here, which remains the
+> future path for authoritative route/postmile alignment and Road Inventory coupling.
 
 This remains the likely production or authoritative integration when the organizational environment, service owner, credentials, licensing, network path, data contract, and security review are ready.
 
