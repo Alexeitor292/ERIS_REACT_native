@@ -287,8 +287,24 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 
 // The selected cross-section plane, standing in the environment: the slice line on the
 // surface + a translucent vertical quad rising from it.
+// The section plane is drawn once per CONTIGUOUS VALID RUN of the slice line. A run ends at
+// every sample the packaged terrain does not cover, so neither the translucent quad nor the
+// ground-contact line ever spans a gap — a continuous surface there would imply measured
+// ground across terrain this package does not contain.
 - (void)buildCrossSectionPlane {
+  NSArray *runs = [self.corridor[@"sliceXsZsRuns"] isKindOfClass:[NSArray class]] ? self.corridor[@"sliceXsZsRuns"] : nil;
+  if (runs) {
+    for (id r in runs) {
+      if ([r isKindOfClass:[NSArray class]] && [(NSArray *)r count] >= 2) [self buildCrossSectionPlaneRun:(NSArray *)r];
+    }
+    return;
+  }
+  // Legacy / non-divided packages carry no validity mask: one continuous run.
   NSArray *sl = [self.corridor[@"sliceXsZs"] isKindOfClass:[NSArray class]] ? self.corridor[@"sliceXsZs"] : @[];
+  if (sl.count >= 2) [self buildCrossSectionPlaneRun:sl];
+}
+
+- (void)buildCrossSectionPlaneRun:(NSArray *)sl {
   if (sl.count < 2) return;
   UIColor *cyan = [UIColor colorWithRed:0.30 green:0.85 blue:0.98 alpha:1.0];
   NSMutableArray<NSValue *> *base = [NSMutableArray array];

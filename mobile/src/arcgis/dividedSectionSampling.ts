@@ -169,12 +169,16 @@ export function planDividedSection(input: SectionInput): SectionPlan {
 }
 
 /**
- * Is `offsetM` an anchor that must resolve to a real sample? Mirrors the native
- * fail-closed check: a member centerline with no packaged terrain under it must not be
- * drawn at a guessed elevation.
+ * Anchors that must each resolve to their OWN exact real sample. Mirrors the native
+ * fail-closed checks: a member centerline — or the selected midpoint station — with no
+ * packaged terrain under it must not be drawn at a guessed or interpolated elevation.
+ *
+ * The midpoint (offset 0) is included because it is the SELECTED feature: without real
+ * ground beneath it the native builder fails the section with `station_terrain_unavailable`
+ * rather than standing the corridor on invented terrain.
  */
 export function requiredAnchorOffsets(plan: Extract<SectionPlan, { ok: true }>, memberAOffsetM: number, memberBOffsetM: number): number[] {
-  return [memberAOffsetM, memberBOffsetM].filter(
+  return [memberAOffsetM, memberBOffsetM, 0].filter(
     (o) => o >= plan.startOffsetM - OFFSET_EPSILON_M && o <= plan.endOffsetM + OFFSET_EPSILON_M,
   );
 }

@@ -114,9 +114,23 @@ const unit = (v: Vec): Vec | null => {
 /** bearing (deg, north-referenced) -> local unit vector */
 const bearingToVec = (deg: number): Vec => ({ x: Math.sin((deg * Math.PI) / 180), y: Math.cos((deg * Math.PI) / 180) });
 
+/**
+ * STRICT, FAIL-CLOSED line validation. Mirrors -cleanLonLatLine: in
+ * ErisTerrainSceneViewController.m — keep the two in lockstep.
+ *
+ * `every` (not `filter`) is the point: ONE invalid vertex rejects the WHOLE line. Dropping a
+ * malformed middle coordinate and keeping the ones around it would INVENT a straight chord
+ * across it. `Number.isFinite` also rejects numeric strings ("1") and booleans, since those
+ * are not numbers — a coerced "garbage" would otherwise become a "valid" point at 0.
+ */
+const validCoord = (p: unknown): boolean =>
+  Array.isArray(p) && p.length >= 2 &&
+  typeof p[0] === "number" && typeof p[1] === "number" &&
+  Number.isFinite(p[0]) && Number.isFinite(p[1]) &&
+  p[0] >= -180 && p[0] <= 180 && p[1] >= -90 && p[1] <= 90;
+
 const validLine = (c: unknown): c is LonLat[] =>
-  Array.isArray(c) && c.length >= 2 &&
-  c.every((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  Array.isArray(c) && c.length >= 2 && c.every(validCoord);
 
 export const OBSERVED = [
   "Two packaged source carriageway centerlines",

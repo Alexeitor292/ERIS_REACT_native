@@ -455,6 +455,11 @@ static NSString *const kErisMedianSeparationScene  = @"Between observed carriage
 static NSString *const kErisMemberALabel = @"Observed carriageway centerline A";
 static NSString *const kErisMemberBLabel = @"Observed carriageway centerline B";
 static NSString *const kErisMidpointLabel = @"Geometry-derived corridor midpoint";
+// Stated on the DIVIDED candidate card in place of any roadway-template dimensions. The
+// divided inspection does not consult the DEFAULT lane/shoulder/median template at all, so
+// the card must say those values are unavailable rather than print assumed ones.
+static NSString *const kErisDividedNoRoadwayDimensionsDetail =
+    @"Lane, shoulder, pavement-edge and physical-median dimensions are unavailable for this corridor.";
 
 // Local metric vector (x = east metres, y = north metres) about a station.
 typedef struct { double x, y; } ErisVec;
@@ -2460,16 +2465,37 @@ static NSArray *erisAsArray(id v) {
 
 #pragma mark - Divided-corridor inspection model (mirrors dividedCorridorInspection.ts)
 
-// Coerce a packaged [[lon,lat],...] array (defensively).
+// A CFBoolean is an NSNumber subclass, so @YES would otherwise pass as longitude 1.
+// NSJSONSerialization returns the kCFBoolean singletons, so pointer identity is exact.
+static BOOL ErisIsBoolNumber(id v) {
+  return v == (id)kCFBooleanTrue || v == (id)kCFBooleanFalse;
+}
+
+// STRICT, FAIL-CLOSED validation of a packaged [[lon,lat],...] line.
+// Mirrors validLine() in dividedCorridorInspection.ts — keep the two in lockstep.
+//
+// Returns nil if ANY declared vertex is invalid. It must NEVER skip a bad vertex and keep
+// the ones after it: dropping a malformed middle coordinate and joining its neighbours
+// would INVENT a straight chord across it that does not exist in the packaged geometry.
+// A rejected line becomes a fail-closed reason at the call site, not a repaired line.
+//
+// Rejected: a non-array; fewer than two coordinates; a coordinate that is not an array of
+// at least two components; a component that is not a real NSNumber (NSString also answers
+// -doubleValue, so "garbage" would silently become 0.0 — a "valid" point in the Gulf of
+// Guinea); a CFBoolean; a non-finite value; and anything outside WGS84 bounds.
 - (NSArray *)cleanLonLatLine:(id)raw {
-  if (![raw isKindOfClass:[NSArray class]]) return @[];
-  NSMutableArray *out = [NSMutableArray array];
-  for (id c in (NSArray *)raw) {
-    if (![c isKindOfClass:[NSArray class]] || [c count] < 2) continue;
-    id a = c[0], b = c[1];
-    if (![a respondsToSelector:@selector(doubleValue)] || ![b respondsToSelector:@selector(doubleValue)]) continue;
+  if (![raw isKindOfClass:[NSArray class]]) return nil;
+  NSArray *rawLine = (NSArray *)raw;
+  if (rawLine.count < 2) return nil;
+  NSMutableArray *out = [NSMutableArray arrayWithCapacity:rawLine.count];
+  for (id c in rawLine) {
+    if (![c isKindOfClass:[NSArray class]] || [(NSArray *)c count] < 2) return nil;
+    id a = ((NSArray *)c)[0], b = ((NSArray *)c)[1];
+    if (![a isKindOfClass:[NSNumber class]] || ![b isKindOfClass:[NSNumber class]]) return nil;
+    if (ErisIsBoolNumber(a) || ErisIsBoolNumber(b)) return nil;
     double lon = [a doubleValue], lat = [b doubleValue];
-    if (!isfinite(lon) || !isfinite(lat)) continue;
+    if (!isfinite(lon) || !isfinite(lat)) return nil;
+    if (lon < -180.0 || lon > 180.0 || lat < -90.0 || lat > 90.0) return nil;
     [out addObject:@[@(lon), @(lat)]];
   }
   return out;
@@ -2586,8 +2612,11 @@ static NSArray *erisAsArray(id v) {
 
   NSMutableArray *samples = [NSMutableArray array];
   NSMutableArray *sliceLonLat = [NSMutableArray array];
+  // Per-vertex validity, parallel to sliceLonLat/samples. Downstream renderers split their
+  // geometry on it so nothing is ever drawn across a terrain gap.
+  NSMutableArray *sliceValid = [NSMutableArray array];
   double last = -INFINITY;
-  BOOL memberAHasGround = NO, memberBHasGround = NO;
+  BOOL memberAHasGround = NO, memberBHasGround = NO, midpointHasGround = NO;
   for (NSNumber *n in offsets) {
     double o = n.doubleValue;
     if (o < startOff - kErisOffsetEpsM || o > endOff + kErisOffsetEpsM) continue;
@@ -2607,6 +2636,8 @@ static NSArray *erisAsArray(id v) {
     BOOL okSample = isfinite(elevM) && [status isEqualToString:@"OK"];
     if (okSample && fabs(o - offA) <= kErisOffsetEpsM) memberAHasGround = YES;
     if (okSample && fabs(o - offB) <= kErisOffsetEpsM) memberBHasGround = YES;
+    // The EXACT midpoint anchor — never "present because it can be interpolated".
+    if (okSample && fabs(o) <= kErisOffsetEpsM) midpointHasGround = YES;
     [samples addObject:@{
       @"side": side, @"offsetFt": @(o * kXsFtPerM), @"offsetM": @(o), @"lat": @(sLat), @"lon": @(sLon),
       @"source": @"USGS_3DEP_OFFLINE_GRID", @"status": status, @"label": label,
@@ -2614,6 +2645,7 @@ static NSArray *erisAsArray(id v) {
       @"elevationFt": okSample ? (id)@(elevM * kXsFtPerM) : (id)[NSNull null],
     }];
     [sliceLonLat addObject:@[@(sLon), @(sLat)]];
+    [sliceValid addObject:@(okSample)];
   }
   if (samples.count < 2) ERIS_DS_FAIL(@"section_outside_package");
 
@@ -2623,6 +2655,11 @@ static NSArray *erisAsArray(id v) {
   BOOL bInSpan = (offB >= startOff - kErisOffsetEpsM && offB <= endOff + kErisOffsetEpsM);
   if (!aInSpan || !bInSpan) ERIS_DS_FAIL(@"member_terrain_outside_package");
   if (!memberAHasGround || !memberBHasGround) ERIS_DS_FAIL(@"member_terrain_unavailable");
+  // The SELECTED feature is the geometry-derived midpoint station. Its marker may only be
+  // drawn on real packaged ground, and it must never be placed at an elevation interpolated
+  // across a gap — so if its EXACT anchor sample is missing, fail the section closed rather
+  // than present the corridor standing on invented terrain.
+  if (!midpointHasGround) ERIS_DS_FAIL(@"station_terrain_unavailable");
 
   double startLon, startLat, endLon, endLat;
   ErisToLL((ErisVec){crossAxis.x * startOff, crossAxis.y * startOff}, lon0, lat0, &startLon, &startLat);
@@ -2636,6 +2673,7 @@ static NSArray *erisAsArray(id v) {
     @"truncated": @(truncated),
     @"samples": samples,
     @"sliceLonLat": sliceLonLat,
+    @"sliceValid": sliceValid,
     @"crossBearingDeg": @(XsNorm360(atan2(crossAxis.x, crossAxis.y) * 180.0 / M_PI)),
     @"requestedSpanM": @(requestedSpan),
     @"clippedSpanM": @(clippedSpan),
@@ -3018,23 +3056,46 @@ static NSArray *erisAsArray(id v) {
 
 // Honest detail lines: snap distance, whether direction is authoritative or
 // geometry-derived, and whether roadway dimensions are ERIS data / form data / defaults.
-- (NSString *)candidateDetailText:(NSDictionary *)c {
+// Detail text for a DIVIDED corridor candidate: OBSERVED facts only.
+//
+// This is a SEPARATE path that RETURNS before the single-road layout messaging, because the
+// divided inspection does not use the roadway template at all. It must never consult
+// crossSectionLayoutSource / crossSectionRoad / layoutRequiresAcknowledgment / DEFAULT lane,
+// shoulder or median values / total width, and it must never present the GLOBAL packaged
+// upstation hint as though it governed this inspection — orientation provenance comes from
+// the candidate's own orientationSource. The DEFAULT one-lane-each-way 32 ft warning is
+// correct for non-divided roads and would be a falsehood here.
+- (NSString *)dividedCandidateDetailText:(NSDictionary *)c {
   NSMutableArray *lines = [NSMutableArray array];
-  // Divided corridor: OBSERVED facts only — measured separation, derived-centreline
-  // provenance, and the pairing method/version that produced it.
-  if ([c[@"selectionKind"] isEqualToString:kErisSelDividedCorridor]) {
-    NSDictionary *sep = [c[@"separationM"] isKindOfClass:[NSDictionary class]] ? c[@"separationM"] : nil;
-    if (sep) {
-      [lines addObject:[NSString stringWithFormat:@"Measured carriageway separation: %.0f m (min %.0f, max %.0f)",
-                        XsNum(sep, @"mean", 0), XsNum(sep, @"min", 0), XsNum(sep, @"max", 0)]];
-    }
-    [lines addObject:@"Geometry-derived corridor centerline (midpoint of the two observed carriageways)."];
-    if (![c[@"orientationSource"] isEqualToString:@"road_inventory"]) {
-      [lines addObject:@"Direction is not authoritative."];
-    }
-    NSString *pm = c[@"pairingMethod"];
-    if (pm.length) [lines addObject:[NSString stringWithFormat:@"Pairing: %@ v%@", pm, c[@"pairingVersion"] ?: @"?"]];
+  NSDictionary *sep = [c[@"separationM"] isKindOfClass:[NSDictionary class]] ? c[@"separationM"] : nil;
+  if (sep) {
+    [lines addObject:[NSString stringWithFormat:@"Measured carriageway separation: %.0f m (min %.0f, max %.0f)",
+                      XsNum(sep, @"mean", 0), XsNum(sep, @"min", 0), XsNum(sep, @"max", 0)]];
   }
+  [lines addObject:@"Geometry-derived corridor centerline (midpoint of the two observed carriageways)."];
+  if ([c[@"bearingFallback"] boolValue]) {
+    [lines addObject:@"No road geometry here — oriented from the packaged bearing only."];
+  } else {
+    [lines addObject:[NSString stringWithFormat:@"Snap distance: %@ m from your tap", [self roundedDistanceText:[c[@"distM"] doubleValue]]]];
+  }
+  // Orientation provenance from THIS candidate, never the global upstation hint.
+  NSString *osrc = [c[@"orientationSource"] isKindOfClass:[NSString class]] ? c[@"orientationSource"] : @"";
+  [lines addObject:[osrc isEqualToString:@"road_inventory"]
+      ? @"Direction: from ERIS Road Inventory for this corridor."
+      : @"Direction is not authoritative — geometry-derived for this corridor; upstation is NOT verified."];
+  NSString *pm = c[@"pairingMethod"];
+  if (pm.length) [lines addObject:[NSString stringWithFormat:@"Pairing: %@ v%@", pm, c[@"pairingVersion"] ?: @"?"]];
+  [lines addObject:kErisDividedNoRoadwayDimensionsDetail];
+  return [lines componentsJoinedByString:@"\n"];
+}
+
+- (NSString *)candidateDetailText:(NSDictionary *)c {
+  // Divided corridor gets a completely separate detail path and RETURNS here, so no
+  // single-road / DEFAULT-template messaging can follow it.
+  if ([c[@"selectionKind"] isEqualToString:kErisSelDividedCorridor]) {
+    return [self dividedCandidateDetailText:c];
+  }
+  NSMutableArray *lines = [NSMutableArray array];
   if ([c[@"bearingFallback"] boolValue]) {
     [lines addObject:@"No road geometry here — oriented from the packaged bearing only."];
   } else {
@@ -3582,16 +3643,33 @@ static NSArray *erisAsArray(id v) {
   // exact snapped point) and CLIPPED to the corridor rect (so an edge station never draws
   // a plane floating beyond the terrain mesh, and never uses clamped edge elevation).
   NSMutableArray *sliceXsZs = [NSMutableArray array];
+  // Contiguous VALID runs of the slice line. The immersive plane/base line is built from
+  // these, so no quad or ground-contact line is ever drawn across a terrain gap.
+  NSMutableArray *sliceXsZsRuns = [NSMutableArray array];
   BOOL sliceTruncated = NO;
   NSDictionary *dividedSection = [slice[@"dividedSection"] isKindOfClass:[NSDictionary class]] ? slice[@"dividedSection"] : nil;
   if (dividedSection) {
     // OBSERVED divided corridor: the section plane is the model's already-clipped section —
     // the SAME points the map line and the technical profile use. No template geometry.
-    for (NSArray *p in (NSArray *)dividedSection[@"sliceLonLat"]) {
+    NSArray *sliceValid = [dividedSection[@"sliceValid"] isKindOfClass:[NSArray class]] ? dividedSection[@"sliceValid"] : nil;
+    NSArray *slicePts = (NSArray *)dividedSection[@"sliceLonLat"];
+    NSMutableArray *run = [NSMutableArray array];
+    for (NSUInteger i = 0; i < slicePts.count; i++) {
+      NSArray *p = slicePts[i];
       if (![p isKindOfClass:[NSArray class]] || p.count < 2) continue;
       double slon = [p[0] doubleValue], slat = [p[1] doubleValue];
-      [sliceXsZs addObject:@[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)]];
+      NSArray *xz = @[@((slon - centerLon) * kXsMPerDegLat * cosLat), @((centerLat - slat) * kXsMPerDegLat)];
+      [sliceXsZs addObject:xz];
+      // Split the run at every sample the packaged terrain does not cover.
+      BOOL valid = sliceValid ? (i < sliceValid.count && [sliceValid[i] boolValue]) : YES;
+      if (valid) {
+        [run addObject:xz];
+      } else {
+        if (run.count >= 2) [sliceXsZsRuns addObject:[run copy]];
+        run = [NSMutableArray array];
+      }
     }
+    if (run.count >= 2) [sliceXsZsRuns addObject:[run copy]];
     sliceTruncated = [dividedSection[@"truncated"] boolValue];
   } else {
     NSDictionary *road = [self crossSectionRoad];
@@ -3647,7 +3725,8 @@ static NSArray *erisAsArray(id v) {
     @"isDividedCorridor": @(dc != nil),
     @"heights": heights, @"minElevM": @(minElev), @"maxElevM": @(maxElev),
     @"image": img ?: (id)[NSNull null], @"hasImagery": @(img != nil),
-    @"roadPartsXsZs": roadPartsXsZs, @"sliceXsZs": sliceXsZs, @"sliceTruncated": @(sliceTruncated),
+    @"roadPartsXsZs": roadPartsXsZs, @"sliceXsZs": sliceXsZs, @"sliceXsZsRuns": sliceXsZsRuns,
+    @"sliceTruncated": @(sliceTruncated),
     @"stationEastM": @(stationEastM), @"stationSouthM": @(stationSouthM),
     @"upstationDeg": @(upstationDeg), @"crossBearingDeg": @(crossBearing),
     // TRUTHFUL local imagery provenance — never overstates detail.

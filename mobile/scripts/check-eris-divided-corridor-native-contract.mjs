@@ -219,8 +219,10 @@ const tsModel = readFileSync(TS("dividedCorridorInspection.ts"), "utf8");
   const DIVIDED_METHODS = [
     "- (void)buildObservedDividedCorridorScene",
     "- (void)buildDividedGroundInto:",
-    "- (NSArray<NSValue *> *)dividedGroundPointsFt",
+    "- (NSArray<NSArray<NSValue *> *> *)dividedGroundRunsFt",
+    "- (void)buildDividedGroundRun:",
     "- (double)dividedGroundElevAtFt:",
+    "- (double)dividedExactGroundElevAtFt:",
     "- (void)addDividedMarkerInto:",
     "- (void)addSeparationDimensionInto:",
     "- (NSString *)dividedTechnicalText",
@@ -660,6 +662,148 @@ const tsModel = readFileSync(TS("dividedCorridorInspection.ts"), "utf8");
   const tsReasons = [...tsSection.matchAll(/reason:\s*"([a-z_]+)"/g)].map((m) => m[1]);
   for (const r of new Set(tsReasons)) {
     if (!terrain.includes(`@"${r}"`)) fail(tag, `the native section must be able to report the fail reason "${r}".`);
+  }
+}
+
+// ---- M: member geometry validation is STRICTLY fail-closed ----------------------------
+// Mutation battery: replacing rejection with `continue`, or reintroducing -doubleValue
+// coercion, must fail CI. Skipping a malformed vertex and keeping its neighbours would
+// invent a chord across it; -doubleValue turns the NSString "garbage" into 0.
+{
+  const tag = "strict-line-validation";
+  const clean = methodBody(terrain, "- (NSArray *)cleanLonLatLine:");
+  if (!clean) {
+    fail(tag, "the native mirror must implement cleanLonLatLine:.");
+  } else {
+    if (/\bcontinue\s*;/.test(clean)) {
+      fail(tag, "cleanLonLatLine: must never `continue` past a malformed vertex — it must reject the whole line.");
+    }
+    if (/respondsToSelector:\s*@selector\(doubleValue\)/.test(clean)) {
+      fail(tag, "cleanLonLatLine: must not accept anything answering -doubleValue (NSString would coerce to 0).");
+    }
+    const numberChecks = countOf(clean, /isKindOfClass:\s*\[NSNumber class\]/g);
+    if (numberChecks < 1) fail(tag, "cleanLonLatLine: must require real NSNumber components.");
+    if (!/ErisIsBoolNumber/.test(clean)) {
+      fail(tag, "cleanLonLatLine: must reject CFBoolean values (a bool is an NSNumber subclass).");
+    }
+    if (!/-180(\.0)?/.test(clean) || !/180(\.0)?/.test(clean) || !/-90(\.0)?/.test(clean) || !/90(\.0)?/.test(clean)) {
+      fail(tag, "cleanLonLatLine: must enforce WGS84 bounds on longitude and latitude.");
+    }
+    if (!/isfinite\(lon\)\s*\|\|\s*!isfinite\(lat\)|!isfinite\(lon\)|!isfinite\(lat\)/.test(clean)) {
+      fail(tag, "cleanLonLatLine: must reject non-finite coordinates.");
+    }
+    if (countOf(clean, /return nil;/g) < 4) {
+      fail(tag, "cleanLonLatLine: must fail closed (return nil) on every invalid-input branch.");
+    }
+    if (/return\s+@\[\];/.test(clean)) {
+      fail(tag, "cleanLonLatLine: must return nil (not an empty array) so the caller reports a fail-closed reason.");
+    }
+  }
+  if (!/ErisIsBoolNumber/.test(terrain)) fail(tag, "the native mirror must define ErisIsBoolNumber.");
+  // The TS mirror must be equally strict.
+  if (!/typeof p\[0\] === "number"/.test(tsModel) || !/typeof p\[1\] === "number"/.test(tsModel)) {
+    fail(tag, "dividedCorridorInspection.ts validCoord must require real numbers (not coercible values).");
+  }
+  if (!/p\[0\] >= -180 && p\[0\] <= 180 && p\[1\] >= -90 && p\[1\] <= 90/.test(tsModel)) {
+    fail(tag, "dividedCorridorInspection.ts validCoord must enforce WGS84 bounds.");
+  }
+  if (!/c\.every\(validCoord\)/.test(tsModel)) {
+    fail(tag, "dividedCorridorInspection.ts validLine must reject the whole line via `every` (never filter).");
+  }
+}
+
+// ---- N: the DIVIDED candidate card never claims roadway-template dimensions -----------
+// Mutation battery: removing the early return, or consulting the DEFAULT template / the
+// global upstation hint from the divided branch, must fail CI.
+{
+  const tag = "divided-card-no-default";
+  const divided = methodBody(terrain, "- (NSString *)dividedCandidateDetailText:");
+  const detail = methodBody(terrain, "- (NSString *)candidateDetailText:");
+  if (!divided) fail(tag, "the divided candidate card must have its OWN detail method.");
+  if (!detail) {
+    fail(tag, "candidateDetailText: must exist.");
+  } else if (!/kErisSelDividedCorridor[\s\S]{0,160}return \[self dividedCandidateDetailText:/.test(detail)) {
+    fail(tag, "candidateDetailText: must RETURN the divided text early, so single-road/DEFAULT messaging cannot follow.");
+  }
+  for (const [re, what] of [
+    [/crossSectionLayoutSource/, "crossSectionLayoutSource"],
+    [/crossSectionRoad/, "crossSectionRoad"],
+    [/layoutRequiresAcknowledgment/, "layoutRequiresAcknowledgment"],
+    [/upstationHintDeg/, "the global upstation hint"],
+    [/total_width_ft/, "total width"],
+    [/32 ft/, "the DEFAULT 32 ft template"],
+    [/DEFAULT assumptions/, "DEFAULT roadway dimensions"],
+    [/one-lane-each-way/, "the one-lane-each-way template"],
+    [/not real highway dimensions/, "the DEFAULT-template warning"],
+  ]) {
+    if (divided && re.test(divided)) fail(tag, `the divided candidate card must not consult/print ${what}.`);
+  }
+  if (divided && !/orientationSource/.test(divided)) {
+    fail(tag, "the divided card must state orientation provenance from the candidate's own orientationSource.");
+  }
+  if (divided && !/kErisDividedNoRoadwayDimensionsDetail/.test(divided)) {
+    fail(tag, "the divided card must state explicitly that roadway dimensions are unavailable.");
+  }
+}
+
+// ---- O: terrain NoData is never bridged (contiguous valid runs) ------------------------
+// Mutation battery: reinstating a single flat filtered point list, drawing one shape across
+// the whole section, interpolating across a gap, or accepting an interpolated critical
+// anchor, must fail CI.
+{
+  const tag = "nodata-runs";
+  if (/dividedGroundPointsFt/.test(slice)) {
+    fail(tag, "the flat dividedGroundPointsFt list must not return — it silently reconnects across NoData.");
+  }
+  const runs = methodBody(slice, "- (NSArray<NSArray<NSValue *> *> *)dividedGroundRunsFt");
+  if (!runs) {
+    fail(tag, "the technical renderer must build contiguous valid runs (dividedGroundRunsFt).");
+  } else {
+    if (!/cur\.count/.test(runs) || !/runs addObject/.test(runs)) {
+      fail(tag, "dividedGroundRunsFt must END the current run at every unusable sample.");
+    }
+    if (!/isEqualToString:@"OK"/.test(runs)) fail(tag, "only status OK samples may carry ground.");
+    if (!/disnull\(ev\)/.test(runs) || !/isfinite\(\[ev doubleValue\]\)/.test(runs)) {
+      fail(tag, "a null / non-finite elevation must end the run.");
+    }
+  }
+  const exact = methodBody(slice, "- (double)dividedExactGroundElevAtFt:");
+  if (!exact) {
+    fail(tag, "critical anchors must resolve through dividedExactGroundElevAtFt: (exact sample only).");
+  } else if (/prev\.y \+ \(p\.y - prev\.y\)/.test(exact)) {
+    fail(tag, "the exact-anchor lookup must never interpolate.");
+  }
+  const ground = methodBody(slice, "- (void)buildDividedGroundInto:") || "";
+  if (!/dividedRenderableGroundRunsFt/.test(ground) || !/buildDividedGroundRun:/.test(ground)) {
+    fail(tag, "the ground profile must be drawn once PER RUN, never as one shape across the section.");
+  }
+  const elev = methodBody(slice, "- (double)dividedGroundElevAtFt:") || "";
+  if (!/for \(NSArray<NSValue \*> \*run in \[self dividedGroundRunsFt\]\)/.test(elev)) {
+    fail(tag, "dividedGroundElevAtFt: must interpolate only WITHIN a contiguous run.");
+  }
+  const marker = methodBody(slice, "- (void)addDividedMarkerInto:") || "";
+  if (!/dividedExactGroundElevAtFt:/.test(marker)) {
+    fail(tag, "a member/midpoint marker must stand on its EXACT anchor sample, never an interpolated one.");
+  }
+  const dim = methodBody(slice, "- (void)addSeparationDimensionInto:") || "";
+  if (!/dividedExactGroundElevAtFt:/.test(dim)) {
+    fail(tag, "the separation dimension needs both EXACT member anchors.");
+  }
+  // The section fails closed when the SELECTED midpoint station has no exact ground.
+  const section = methodBody(terrain, "- (NSDictionary *)buildDividedSectionForInspection:") || "";
+  if (!/midpointHasGround/.test(section) || !/@"station_terrain_unavailable"/.test(section)) {
+    fail(tag, "the section must fail with station_terrain_unavailable when the midpoint anchor has no real ground.");
+  }
+  if (!/@"sliceValid"/.test(section)) {
+    fail(tag, "the section must publish per-vertex sliceValid so renderers can split on terrain gaps.");
+  }
+  // The immersive plane must be split per valid run.
+  const plane = methodBody(immersive, "- (void)buildCrossSectionPlane") || "";
+  if (!/sliceXsZsRuns/.test(plane) || !/buildCrossSectionPlaneRun:/.test(plane)) {
+    fail(tag, "the immersive section plane must be built per contiguous valid run, not across gaps.");
+  }
+  if (!/sliceXsZsRuns/.test(terrain)) {
+    fail(tag, "the corridor model must publish sliceXsZsRuns (validity-split slice line).");
   }
 }
 

@@ -235,6 +235,8 @@ jobs:
           src/arcgis/roadSelection.test.ts
           src/arcgis/imagerySizing.test.ts
           src/arcgis/dividedCorridorInspection.test.ts
+          src/arcgis/dividedSectionSampling.test.ts
+          src/arcgis/dividedTerrainRuns.test.ts
           src/measurements/roadCrossSectionSlice.test.ts
           src/measurements/roadCrossSectionParity.test.ts
           src/components/roadCrossSectionSliceModel.test.ts

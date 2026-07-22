@@ -231,24 +231,75 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 #pragma mark - Observed divided corridor (Part 12C) — template-free
 
 // OK ground samples inside the section, sorted by offset. CGPoint(x=offsetFt, y=elevFt).
-- (NSArray<NSValue *> *)dividedGroundPointsFt {
+// CONTIGUOUS VALID RUNS of the divided ground profile, in section order.
+// Mirrors contiguousValidRuns() in dividedTerrainRuns.ts — keep the two in lockstep.
+//
+// The ordered sample stream is SPLIT wherever a sample is not usable packaged ground:
+// a status other than OK, a null elevation, a non-finite elevation, or an offset outside
+// the section. Unusable samples are NEVER merely filtered out, because dropping them and
+// joining the survivors would draw one continuous ground surface across terrain the package
+// does not contain — inventing ground exactly where it is unknown.
+//
+// Runs with a single point are retained (they can anchor an exact marker) but are never
+// joined to another run and never produce a line or fill.
+- (NSArray<NSArray<NSValue *> *> *)dividedGroundRunsFt {
   NSArray *samples = [self.slice[@"samples"] isKindOfClass:[NSArray class]] ? self.slice[@"samples"] : @[];
   double minOff = dnum(self.inspectionGeometry, @"sectionMinOffsetM", -60) * kFtPerM;
   double maxOff = dnum(self.inspectionGeometry, @"sectionMaxOffsetM", 60) * kFtPerM;
-  NSMutableArray<NSValue *> *pts = [NSMutableArray array];
+  NSMutableArray<NSArray<NSValue *> *> *runs = [NSMutableArray array];
+  NSMutableArray<NSValue *> *cur = [NSMutableArray array];
   for (id s in samples) {
-    if (![s isKindOfClass:[NSDictionary class]]) continue;
-    if (![dstr(s, @"status", @"") isEqualToString:@"OK"]) continue;
-    id ev = s[@"elevationFt"]; if (disnull(ev)) continue;
-    double off = dnum(s, @"offsetFt", 0);
-    if (off < minOff - 1e-6 || off > maxOff + 1e-6) continue;
-    [pts addObject:[NSValue valueWithCGPoint:CGPointMake(off, [ev doubleValue])]];
+    BOOL usable = NO;
+    double off = 0, elev = 0;
+    if ([s isKindOfClass:[NSDictionary class]]) {
+      off = dnum(s, @"offsetFt", NAN);
+      id ev = s[@"elevationFt"];
+      if (isfinite(off) && off >= minOff - 1e-6 && off <= maxOff + 1e-6 &&
+          [dstr(s, @"status", @"") isEqualToString:@"OK"] &&
+          !disnull(ev) && [ev isKindOfClass:[NSNumber class]] && isfinite([ev doubleValue])) {
+        usable = YES;
+        elev = [ev doubleValue];
+      }
+    }
+    if (usable) {
+      [cur addObject:[NSValue valueWithCGPoint:CGPointMake(off, elev)]];
+    } else if (cur.count) {                      // the gap ENDS the run
+      [runs addObject:[cur copy]];
+      cur = [NSMutableArray array];
+    }
   }
-  [pts sortUsingComparator:^NSComparisonResult(NSValue *a, NSValue *b) {
-    double ax = a.CGPointValue.x, bx = b.CGPointValue.x;
-    return ax < bx ? NSOrderedAscending : (ax > bx ? NSOrderedDescending : NSOrderedSame);
-  }];
-  return pts;
+  if (cur.count) [runs addObject:[cur copy]];
+  return runs;
+}
+
+// Runs that can be drawn as a line/fill (>= 2 points). A single-point run is diagnostic only.
+- (NSArray<NSArray<NSValue *> *> *)dividedRenderableGroundRunsFt {
+  NSMutableArray<NSArray<NSValue *> *> *out = [NSMutableArray array];
+  for (NSArray<NSValue *> *r in [self dividedGroundRunsFt]) if (r.count >= 2) [out addObject:r];
+  return out;
+}
+
+// Total usable ground samples across all runs (for the technical panel).
+- (NSUInteger)dividedGroundSampleCount {
+  NSUInteger n = 0;
+  for (NSArray<NSValue *> *r in [self dividedGroundRunsFt]) n += r.count;
+  return n;
+}
+
+// The EXACT packaged ground elevation at an offset: there must be a real sample AT that
+// offset. Used for every critical anchor (both observed centerlines and the midpoint), so a
+// marker can never be placed at an elevation interpolated across a gap, and an anchor is
+// never considered present merely because neighbouring samples could be interpolated.
+- (double)dividedExactGroundElevAtFt:(double)offsetFt found:(BOOL *)found {
+  if (found) *found = NO;
+  const double eps = 1e-3;                        // sub-millimetre in feet: same station
+  for (NSArray<NSValue *> *run in [self dividedGroundRunsFt]) {
+    for (NSValue *v in run) {
+      CGPoint p = v.CGPointValue;
+      if (fabs(p.x - offsetFt) <= eps) { if (found) *found = YES; return p.y; }
+    }
+  }
+  return self.datumFt;
 }
 
 // The truthful divided section. Everything here comes from the shared inspection model or
@@ -278,9 +329,17 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   [self addSeparationDimensionInto:root fromFt:aOffFt toFt:bOffFt];
 }
 
-// One continuous ground profile across the whole section (not per-shoulder), extruded.
+// The ground profile, drawn ONCE PER CONTIGUOUS VALID RUN — never one continuous shape
+// across the whole section. No line, polygon or filled ground shape may cross a run
+// boundary, because a gap is terrain the package does not contain. Each run gets its own
+// closed fill, so a fill can never span from one valid run to another.
 - (void)buildDividedGroundInto:(SCNNode *)root {
-  NSArray<NSValue *> *pts = [self dividedGroundPointsFt];
+  for (NSArray<NSValue *> *run in [self dividedRenderableGroundRunsFt]) {
+    [self buildDividedGroundRun:run into:root];
+  }
+}
+
+- (void)buildDividedGroundRun:(NSArray<NSValue *> *)pts into:(SCNNode *)root {
   if (pts.count < 2) return;             // no profile -> draw nothing (stated in the panel)
   UIBezierPath *path = [UIBezierPath bezierPath];
   double minY = 0;
@@ -309,26 +368,32 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 // or last sample there would present the nearest known ground as though it were measured at
 // that offset — a flat extrapolation that reads as fact. Such an offset is simply not found,
 // and the caller must show nothing rather than a guess.
+// Interpolation is permitted ONLY between two ADJACENT valid samples of the SAME contiguous
+// run. An offset that falls in a gap between runs — or outside the sampled range — has no
+// packaged terrain under it and is simply not found, so the caller shows nothing rather than
+// a value interpolated across unavailable ground.
 - (double)dividedGroundElevAtFt:(double)offsetFt found:(BOOL *)found {
-  NSArray<NSValue *> *pts = [self dividedGroundPointsFt];
   if (found) *found = NO;
-  if (pts.count < 2) return self.datumFt;
-  CGPoint first = pts.firstObject.CGPointValue, last = pts.lastObject.CGPointValue;
   const double eps = 1e-6;
-  if (offsetFt < first.x - eps || offsetFt > last.x + eps) return self.datumFt;   // outside real coverage
-  CGPoint prev = first;
-  for (NSValue *v in pts) {
-    CGPoint p = v.CGPointValue;
-    if (p.x >= offsetFt) {
-      double span = p.x - prev.x;
-      double t = span > 1e-9 ? (offsetFt - prev.x) / span : 0;
-      if (found) *found = YES;
-      return prev.y + (p.y - prev.y) * t;
+  for (NSArray<NSValue *> *run in [self dividedGroundRunsFt]) {
+    if (run.count == 0) continue;
+    CGPoint first = run.firstObject.CGPointValue, last = run.lastObject.CGPointValue;
+    if (offsetFt < first.x - eps || offsetFt > last.x + eps) continue;   // not inside THIS run
+    CGPoint prev = first;
+    for (NSValue *v in run) {
+      CGPoint p = v.CGPointValue;
+      if (p.x >= offsetFt) {
+        double span = p.x - prev.x;
+        double t = span > 1e-9 ? (offsetFt - prev.x) / span : 0;
+        if (found) *found = YES;
+        return prev.y + (p.y - prev.y) * t;      // strictly between adjacent samples of one run
+      }
+      prev = p;
     }
-    prev = p;
+    if (found) *found = YES;   // exactly at the last sample of this run
+    return last.y;
   }
-  if (found) *found = YES;   // exactly at the last sample
-  return last.y;
+  return self.datumFt;         // in a gap, or outside every run
 }
 
 // A vertical post pinning an observed centerline to the ground profile. Drawn ONLY where
@@ -336,7 +401,9 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 // pin it to, so the marker is omitted and the panel states the gap.
 - (void)addDividedMarkerInto:(SCNNode *)root offsetFt:(double)offsetFt color:(UIColor *)color heightUnits:(double)h {
   BOOL found = NO;
-  double elevFt = [self dividedGroundElevAtFt:offsetFt found:&found];
+  // EXACT anchor only: the marker stands on a real sample at this offset, never on a value
+  // interpolated between neighbours (and never across a gap).
+  double elevFt = [self dividedExactGroundElevAtFt:offsetFt found:&found];
   if (!found) return;                        // no packaged ground here -> no marker
   double groundY = [self yUnits:elevFt];
   SCNBox *post = [SCNBox boxWithWidth:0.18 height:h length:0.18 chamferRadius:0];
@@ -363,8 +430,8 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   // Both ends need real ground; otherwise the bar would span between a measured point and
   // an extrapolated one. The measured separation is still stated in the panel and legend.
   BOOL fLo = NO, fHi = NO;
-  double eLo = [self dividedGroundElevAtFt:lo found:&fLo], eHi = [self dividedGroundElevAtFt:hi found:&fHi];
-  if (!fLo || !fHi) return;
+  double eLo = [self dividedExactGroundElevAtFt:lo found:&fLo], eHi = [self dividedExactGroundElevAtFt:hi found:&fHi];
+  if (!fLo || !fHi) return;                    // both EXACT member anchors required
   double y = MAX([self yUnits:eLo], [self yUnits:eHi]) + 4.2;
   SCNBox *bar = [SCNBox boxWithWidth:wUnits height:0.10 length:0.10 chamferRadius:0];
   bar.firstMaterial = [self matWithColor:[UIColor colorWithRed:1.0 green:0.45 blue:0.30 alpha:1.0]];
@@ -821,22 +888,33 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   [s appendFormat:@"  %@\n\n", kSliceMedianSeparationDetail];
 
   [s appendString:@"Ground profile (USGS 3DEP offline grid):\n"];
-  NSArray<NSValue *> *pts = [self dividedGroundPointsFt];
-  [s appendFormat:@"  %lu OK samples across the section%@\n", (unsigned long)pts.count,
-   pts.count < 2 ? @" — profile unavailable, nothing drawn" : @""];
-  if (pts.count >= 2) {
-    [s appendFormat:@"  Measured from %.1f to %.1f ft about the midpoint\n",
-     pts.firstObject.CGPointValue.x, pts.lastObject.CGPointValue.x];
+  NSArray<NSArray<NSValue *> *> *runs = [self dividedGroundRunsFt];
+  NSArray<NSArray<NSValue *> *> *drawn = [self dividedRenderableGroundRunsFt];
+  NSUInteger nSamples = [self dividedGroundSampleCount];
+  [s appendFormat:@"  %lu OK samples across the section%@\n", (unsigned long)nSamples,
+   drawn.count == 0 ? @" — profile unavailable, nothing drawn" : @""];
+  // Gaps are stated, never bridged: each contiguous run is drawn on its own.
+  if (runs.count > 1) {
+    [s appendFormat:@"  %lu contiguous ground runs (terrain is missing between them) — each drawn separately; no surface is drawn across a gap.\n",
+     (unsigned long)runs.count];
   }
-  // Terrain is never extrapolated past the sampled range: say so where a marker is absent.
+  for (NSArray<NSValue *> *r in runs) {
+    if (r.count >= 2) {
+      [s appendFormat:@"    run: %.1f … %.1f ft (%lu samples)\n",
+       r.firstObject.CGPointValue.x, r.lastObject.CGPointValue.x, (unsigned long)r.count];
+    } else if (r.count == 1) {
+      [s appendFormat:@"    isolated sample at %.1f ft — not joined to any run\n", r.firstObject.CGPointValue.x];
+    }
+  }
+  // Terrain is never extrapolated or interpolated across a gap: say so where a marker is absent.
   BOOL fa = NO, fb = NO;
-  [self dividedGroundElevAtFt:dnum(ma, @"offsetM", 0) * kFtPerM found:&fa];
-  [self dividedGroundElevAtFt:dnum(mb, @"offsetM", 0) * kFtPerM found:&fb];
+  [self dividedExactGroundElevAtFt:dnum(ma, @"offsetM", 0) * kFtPerM found:&fa];
+  [self dividedExactGroundElevAtFt:dnum(mb, @"offsetM", 0) * kFtPerM found:&fb];
   if (!fa || !fb) {
     [s appendFormat:@"  %@ has no packaged ground at its offset — its marker is omitted rather than placed at an assumed elevation.\n",
      !fa ? dstr(ma, @"label", @"Centerline A") : dstr(mb, @"label", @"Centerline B")];
   }
-  [s appendString:@"\nElevations sampled from the packaged terrain grid; missing samples are omitted (never interpolated beyond coverage).\n"];
+  [s appendString:@"\nElevations sampled from the packaged terrain grid; missing samples split the profile into separate runs (never interpolated across a gap or beyond coverage).\n"];
   return s;
 }
 

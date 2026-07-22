@@ -182,8 +182,17 @@ test("truncation that cuts past a member drops it from the required anchors (no 
   const grid = { ...HUGE_GRID, maxLon: STATION.lon + 5 / (111_320.0 * cosLat) };
   const p = ok(planDividedSection(input({ grid })));
   const required = requiredAnchorOffsets(p, -10, 10);
-  assert.deepEqual(required, [-10], "member B has no packaged ground: it must not be a required sample");
+  // Member B (+10 m) is outside the package, so it is not a required sample. The SELECTED
+  // midpoint station (0) always is: its marker may never sit on interpolated ground.
+  assert.deepEqual(required, [-10, 0], "member B has no packaged ground: it must not be a required sample");
   assert.ok(!p.offsetsM.some((o) => o > 5 + 1e-6), "nothing may be sampled beyond the package");
+});
+
+test("the selected midpoint station is always a required anchor", () => {
+  const p = ok(planDividedSection(input({})));
+  const required = requiredAnchorOffsets(p, -10, 10);
+  assert.ok(required.includes(0), "the midpoint station must have its own exact ground sample");
+  assert.deepEqual([...required].sort((a, b) => a - b), [-10, 0, 10]);
 });
 
 test("a section entirely outside the package fails closed", () => {
