@@ -501,7 +501,16 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 count = len(paired_features)
                 log("roads", "paired", corridors=pairing_stats.get("divided_corridor_count", 0),
                     kinds=",".join(pairing_stats.get("selection_kinds") or []))
-            except Exception as e:  # noqa: BLE001 — pairing must never break packaging
+            except corridor_pairing.DuplicateSourceIdentityError as e:
+                # FAIL CLOSED, never swallow: two distinct packaged lines shared a pairing
+                # source identity. Publishing misleading unpaired output would hide the
+                # collision, so the package fails instead. (The packaging boundary guarantees
+                # unique per-part provider_feature_id; this should be unreachable.)
+                log("roads", "pairing_identity_collision", error=str(e)[:160])
+                raise OfflineSceneBuildError(
+                    f"Divided-corridor pairing found colliding road identities: {e}"
+                ) from e
+            except Exception as e:  # noqa: BLE001 — other pairing failures must never break packaging
                 pairing_stats = None
                 log("roads", "pairing_skipped", error=str(e)[:120])
 

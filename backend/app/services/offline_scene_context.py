@@ -325,6 +325,36 @@ ROADS_REASON_NO_BEARING = "no_road_bearing"
 ROADS_REASON_NO_SOURCE = "no_centerline_source_configured"
 ROADS_REASON_NO_FEATURES = "no_centerline_features_in_area"
 
+# --- two-level external-provider road identity -------------------------------------------
+# `provider_source_feature_id` is the durable identity of the COMPLETE original upstream
+# feature (set by the provider adapter, e.g. offline_scene_caltrans). One source feature can
+# be packaged as SEVERAL disconnected LineStrings — a MultiLineString, or a line that leaves
+# and re-enters the buffered bounds. Each packaged part must therefore get its OWN
+# `provider_feature_id` (the hook road_corridor_pairing prefers), or the pairing pass would
+# treat two independent lines as one and apply one component's paired range to the other.
+PROVIDER_SOURCE_ID_KEY = "provider_source_feature_id"
+PACKAGED_PART_ID_VERSION = 1
+
+
+def packaged_part_provider_feature_id(source_id: str, part_coords, precision: int = 6) -> str:
+    """Deterministic pairing identity for ONE packaged (already-clipped) LineString.
+
+    Derived from the original-provider identity + the canonical, orientation-invariant
+    geometry of THIS clipped part (via ``_line_key``, which returns min(pts, reversed)) +
+    a versioned formula. So it is:
+      * unique per distinct clipped part (different geometry -> different id);
+      * identical for the same clipped part regardless of digitisation direction, multipart
+        input order, provider response order, or OBJECTID;
+      * never a sequential part ordinal.
+    Two parts from one original MultiLineString/leave-re-enter feature therefore get
+    DIFFERENT ids, while the same part stays stable."""
+    key = _line_key(part_coords, precision)  # tuple of (lon,lat) tuples, orientation-invariant
+    raw = json.dumps(
+        {"v": PACKAGED_PART_ID_VERSION, "src": str(source_id), "geom": [list(p) for p in key]},
+        sort_keys=True, separators=(",", ":"),
+    )
+    return "part:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
 
 def roads_geojson_from_context(
     ctx: dict, buffer_m: float, *, external_configured: bool = False, include_internal_context: bool = True
@@ -363,12 +393,25 @@ def roads_geojson_from_context(
 
     def _emit(line, props: dict) -> None:
         """Clip a raw line to the buffered bounds and emit ONE LineString Feature per
-        surviving (disconnected) part. No out-of-bounds coordinate is ever packaged."""
+        surviving (disconnected) part. No out-of-bounds coordinate is ever packaged.
+
+        PART-LEVEL PROVIDER IDENTITY: when the source feature carries a recognized external
+        provider identity (``provider_source_feature_id``), each emitted part gets its OWN
+        ``provider_feature_id`` derived from that source identity + this part's canonical
+        geometry — so a MultiLineString / leave-re-enter feature never hands the pairing pass
+        two independent lines under one id. Features without a provider identity
+        (eris_internal bearing/inventory/submitted, or a provider that publishes none) are
+        emitted unchanged — no provider identity is invented."""
+        src_id = props.get(PROVIDER_SOURCE_ID_KEY)
+        has_provider_identity = isinstance(src_id, str) and bool(src_id)
         for part in clip_line_to_bounds(line, bounds):
+            part_props = dict(props)
+            if has_provider_identity:
+                part_props["provider_feature_id"] = packaged_part_provider_feature_id(src_id, part)
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": part},
-                "properties": dict(props),
+                "properties": part_props,
             })
 
     # A. External centerlines (already road_centerline kind); clipped to bounds.

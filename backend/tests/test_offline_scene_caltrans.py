@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import zipfile
 
 import pytest
+
+from app.services import road_corridor_pairing as pairing
 
 from app.config import settings
 from app.services import offline_scene as osvc
@@ -536,10 +539,13 @@ class TestNormalization:
         f["properties"]["road_class"] = "local"  # a provider attr must never spoof the trusted class
         out = cal.normalize_caltrans_features([f], included_classes=(1,))[0]["properties"]
         assert set(out) == {
-            "provider_object_id", "source_feature_id", "provider_feature_id", "route_id", "NAME",
+            "provider_object_id", "provider_source_feature_id", "source_feature_id",
+            "provider_feature_id", "route_id", "NAME",
             "functional_class", "functional_class_label",
             "county", "district", "provider", "road_class", "road_class_label", "kind",
         }
+        # The complete-source durable identity is exposed for provenance/tracing.
+        assert out["provider_source_feature_id"] == out["source_feature_id"]
         assert out["kind"] == "road_centerline" and out["provider"] == "caltrans_crs"
         assert out["road_class"] == "primary"  # trusted, derived from F_System, not spoofed
         assert out["provider_object_id"] == 10                    # OBJECTID kept as provenance
@@ -1538,3 +1544,179 @@ class TestBackwardCompatibility:
         pkg = builder.assemble_bundle(grid, b"HS", {}, manifest, None)
         ok, reason = builder.validate_bundle_bytes(pkg)
         assert ok, reason
+
+
+# --------------------------------------------------------------------------- #
+# Clipped-part identity: one source feature -> many packaged LineStrings, each
+# with a UNIQUE pairing identity (so road_corridor_pairing never merges parts).
+# --------------------------------------------------------------------------- #
+_ID_M_PER_DEG_LAT = 111320.0
+_ID_LAT0, _ID_LON0 = 38.50, -121.50
+_ID_COS = math.cos(math.radians(_ID_LAT0))
+_ID_BOUNDS = {"min_lat": 38.45, "min_lon": -121.60, "max_lat": 38.55, "max_lon": -121.40}
+
+
+def _id_ll(east_m, north_m):
+    return [round(_ID_LON0 + east_m / (_ID_M_PER_DEG_LAT * _ID_COS), 7),
+            round(_ID_LAT0 + north_m / _ID_M_PER_DEG_LAT, 7)]
+
+
+def _id_component(origin_e, off_n, length_m=400, step=25):
+    return [_id_ll(origin_e + d, off_n) for d in range(0, length_m + 1, step)]
+
+
+def _caltrans_mls(oid, route, fsys, parts):
+    return {"type": "Feature", "geometry": {"type": "MultiLineString", "coordinates": parts},
+            "properties": {"OBJECTID": oid, "RouteID": route, "F_System": fsys}}
+
+
+def _emit_caltrans(features, bounds=None):
+    """normalize Caltrans -> roads_geojson_from_context clipping (external, exclusive)."""
+    norm = cal.normalize_caltrans_features(features, included_classes=(1, 2))
+    gj, _count, _reason = ctxmod.roads_geojson_from_context(
+        {"bounds": bounds or _ID_BOUNDS, "external_road_features": norm, "overlays": {}},
+        250.0, external_configured=True, include_internal_context=False,
+    )
+    return gj["features"]
+
+
+def _centerlines(feats):
+    return [f for f in feats if f["properties"].get("kind") == "road_centerline"]
+
+
+def _pfid_set(feats):
+    return {f["properties"].get("provider_feature_id") for f in _centerlines(feats)}
+
+
+class TestClippedPartIdentity:
+    def test_multipart_emits_two_lines_shared_source_distinct_part_ids(self):
+        """Case 1: a two-part Caltrans MultiLineString -> two LineStrings; one
+        provider_source_feature_id; two different provider_feature_id; unique final ids."""
+        f = _caltrans_mls(10, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])
+        parts = _centerlines(_emit_caltrans([f]))
+        assert len(parts) == 2
+        assert all(p["geometry"]["type"] == "LineString" for p in parts)
+        srcs = {p["properties"]["provider_source_feature_id"] for p in parts}
+        assert len(srcs) == 1, "both parts trace to ONE source feature"
+        pfids = [p["properties"]["provider_feature_id"] for p in parts]
+        assert len(set(pfids)) == 2, "each clipped part has its OWN pairing identity"
+        assert all(pid.startswith("part:") for pid in pfids)
+        paired, _stats = pairing.build_selection_features(_emit_caltrans([f]), pairing.PairingParams())
+        fids = [g["properties"].get("feature_id") for g in paired]
+        assert len(set(fids)) == len(fids)
+
+    def test_multipart_reorder_produces_the_same_id_set_and_bytes(self):
+        """Case 2: reordering the MultiLineString's parts yields the same part-id set and
+        deterministically equivalent sorted output."""
+        parts_fwd = _emit_caltrans([_caltrans_mls(10, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])])
+        parts_rev = _emit_caltrans([_caltrans_mls(10, "SHS_050._P", 1, [_id_component(4000, 22), _id_component(0, 22)])])
+        assert _pfid_set(parts_fwd) == _pfid_set(parts_rev)
+        a, _ = pairing.build_selection_features(parts_fwd, pairing.PairingParams())
+        b, _ = pairing.build_selection_features(parts_rev, pairing.PairingParams())
+        assert json.dumps(a, sort_keys=True, separators=(",", ":")) == json.dumps(b, sort_keys=True, separators=(",", ":"))
+
+    def test_each_part_reversed_keeps_the_same_identity_set(self):
+        """Case 3: reversing each part's digitisation direction keeps the same id set."""
+        base = _emit_caltrans([_caltrans_mls(10, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])])
+        rev = _emit_caltrans([_caltrans_mls(10, "SHS_050._P", 1,
+                                            [list(reversed(_id_component(0, 22))), list(reversed(_id_component(4000, 22)))])])
+        assert _pfid_set(base) == _pfid_set(rev)
+
+    def test_objectid_only_reassignment_is_invariant(self):
+        """Case 4: OBJECTID-only change leaves source-level AND part-level identities."""
+        base = _emit_caltrans([_caltrans_mls(10, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])])
+        other = _emit_caltrans([_caltrans_mls(987654, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])])
+        assert ({p["properties"]["provider_source_feature_id"] for p in _centerlines(base)}
+                == {p["properties"]["provider_source_feature_id"] for p in _centerlines(other)})
+        assert _pfid_set(base) == _pfid_set(other)
+
+    def test_leave_and_reenter_emits_distinct_parts_with_distinct_ids(self):
+        """Case 5: one LineString that enters, exits, and re-enters the clip bounds emits
+        >= 2 disconnected parts, each with a distinct pairing identity."""
+        # inside -> far east (outside +buffer) -> back inside: two disconnected clipped parts.
+        line = [_id_ll(0, 0), _id_ll(0, 30), [-121.20, 38.50], _id_ll(200, -30), _id_ll(200, 0)]
+        f = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": line},
+             "properties": {"OBJECTID": 5, "RouteID": "SHS_050._P", "F_System": 1}}
+        parts = _centerlines(_emit_caltrans([f]))
+        assert len(parts) >= 2, "a leave/re-enter line must yield disconnected parts"
+        assert len({p["properties"]["provider_feature_id"] for p in parts}) == len(parts)
+        assert len({p["properties"]["provider_source_feature_id"] for p in parts}) == 1
+
+    def test_two_carriageways_split_into_two_locations_pair_independently(self):
+        """Case 6: two carriageway source features, each a MultiLineString split into two
+        geographically separate components -> two INDEPENDENT corridors, no cross-contamination."""
+        a = _caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])
+        b = _caltrans_mls(2, "SHS_050._S", 1, [_id_component(0, -22), _id_component(4000, -22)])
+        feats = _emit_caltrans([a, b])
+        cl = _centerlines(feats)
+        assert len(cl) == 4 and len(_pfid_set(feats)) == 4
+        paired, stats = pairing.build_selection_features(feats, pairing.PairingParams())
+        assert stats["divided_corridor_count"] == 2
+        fids = [g["properties"].get("feature_id") for g in paired]
+        assert len(set(fids)) == len(fids), "every emitted feature_id is unique"
+        diag = {g["properties"]["feature_id"] for g in paired
+                if g["properties"].get("diagnostic_kind") == "carriageway_member"}
+        corridors = [g for g in paired if g["properties"].get("selection_kind") == "divided_highway_corridor"]
+        assert len(corridors) == 2
+        member_ids_seen = []
+        for c in corridors:
+            members = c["properties"]["member_part_feature_ids"]
+            assert len(members) == 2 and len(set(members)) == 2
+            assert set(members) <= diag, "each member id resolves to exactly one emitted diagnostic member"
+            member_ids_seen.extend(members)
+            # both members of a corridor sit at the SAME locality (no X<->Y mixing).
+            mg = c["properties"].get("member_geometry") or {}
+            ax = [p[0] for p in mg.get("a", [])]
+            bx = [p[0] for p in mg.get("b", [])]
+            assert ax and bx and abs(min(ax) - min(bx)) < 0.01 and (max(ax) - min(ax)) < 0.02
+        assert len(set(member_ids_seen)) == len(member_ids_seen), "no diagnostic member is shared across corridors"
+
+    def test_single_unsplit_line_is_deterministic(self):
+        """Case 7: a single unsplit Caltrans LineString stays deterministic + selectable."""
+        f = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": _id_component(0, 0)},
+             "properties": {"OBJECTID": 7, "RouteID": "SHS_050._P", "F_System": 1}}
+        parts = _centerlines(_emit_caltrans([f]))
+        assert len(parts) == 1
+        a, _ = pairing.build_selection_features(_emit_caltrans([f]), pairing.PairingParams())
+        b, _ = pairing.build_selection_features(_emit_caltrans([f]), pairing.PairingParams())
+        assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+    def test_reused_event_id_across_distinct_features_stays_unique(self):
+        """Case 8: reused EventID on two distinct source features -> distinct part ids."""
+        fa = _caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22)])
+        fb = _caltrans_mls(2, "SHS_099._P", 1, [_id_component(4000, 22)])
+        fa["properties"]["EventID"] = fb["properties"]["EventID"] = "shared-event"
+        parts = _centerlines(_emit_caltrans([fa, fb]))
+        assert len(parts) == 2
+        assert len({p["properties"]["provider_source_feature_id"] for p in parts}) == 2
+        assert len(_pfid_set(parts)) == 2
+
+    def test_pairing_guard_fires_on_colliding_provider_ids(self):
+        """Fail closed: if two distinct lines reach pairing with the same provider_feature_id,
+        build_selection_features raises rather than misapply a component's range."""
+        parts = _centerlines(_emit_caltrans([_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])]))
+        # Reintroduce the old bug: force both parts to share one provider_feature_id.
+        collide = json.loads(json.dumps(parts))
+        collide[1]["properties"]["provider_feature_id"] = collide[0]["properties"]["provider_feature_id"]
+        with pytest.raises(pairing.DuplicateSourceIdentityError):
+            pairing.build_selection_features(collide, pairing.PairingParams())
+
+    def test_identical_geometry_same_id_is_not_a_collision(self):
+        """Two IDENTICAL geometries sharing an id is a genuine duplicate, not the bug."""
+        one = _centerlines(_emit_caltrans([_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22)])]))[0]
+        dup = json.loads(json.dumps([one, one]))
+        pairing.assert_unique_candidate_identities(dup)  # must NOT raise
+
+    def test_builder_fails_closed_on_identity_collision(self, monkeypatch):
+        """If a duplicate identity ever reaches pairing, the builder fails the package rather
+        than swallow it into misleading unpaired output."""
+        _caltrans_settings(monkeypatch)
+        # Force the packaging boundary to hand out a CONSTANT part id (reintroduce the bug),
+        # so two distinct clipped parts collide and pairing raises.
+        monkeypatch.setattr(ctxmod, "packaged_part_provider_feature_id", lambda *a, **k: "part:COLLIDE")
+        s = PagingSession([_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])])
+        ctx = _ctx()
+        ctx["bounds"] = _ID_BOUNDS
+        ctx["center"] = {"lat": _ID_LAT0, "lon": _ID_LON0}
+        with pytest.raises(OfflineSceneBuildError, match="colliding road identities"):
+            _builder(s)._build_context_layers(ctx, base_bytes=0)

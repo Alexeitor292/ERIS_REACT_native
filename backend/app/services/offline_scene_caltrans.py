@@ -520,20 +520,25 @@ def _clip_str(v, limit: int) -> str | None:
 def build_caltrans_properties(attrs: dict, fsys: int, *, layer_key: str, geometry: dict) -> dict:
     """Minimal, explicit property schema for a normalized Caltrans road feature.
 
-    Identity roles are deliberately separated:
+    TWO-LEVEL provider identity (see docs in ``roads_geojson_from_context``):
       * ``provider_object_id`` — the provider's OBJECTID. Provenance + stable pagination
         ordering + within-response dedupe ONLY. NOT a durable identity (a republication may
         reassign it).
       * ``provider_event_id`` — the provider's persistent ``EventID`` verbatim, when
         published and validated. Provenance/audit.
-      * ``source_feature_id`` — the DURABLE ERIS identity (see caltrans_source_feature_id).
-      * ``provider_feature_id`` — the provider-scoped durable identity handed to the
-        divided-corridor pairing pass, which PREFERS it over its own geometry-only hash
-        (``road_corridor_pairing.PROVIDER_ID_KEYS``). It carries the same value as
-        ``source_feature_id``; supplying it keeps the pairing pass's derived ids unique per
-        source feature, because that pass's fallback context (source_layer_id/kind/
-        road_class) is identical for every Caltrans feature and would otherwise collide for
-        two distinct route events sharing one alignment.
+      * ``provider_source_feature_id`` — the durable identity of the COMPLETE original
+        upstream feature (see ``caltrans_source_feature_id``: provider/layer context +
+        validated EventID + normalized RouteID + F_System + canonical FULL-SOURCE geometry).
+        Kept on every packaged part so a clipped LineString can always be traced to its
+        source feature.
+      * ``source_feature_id`` — currently the same full-source durable ERIS identity; used
+        for within-response dedupe before packaging (the pairing pass overwrites it later).
+      * ``provider_feature_id`` — a full-source value HERE, but the packaging boundary
+        (``roads_geojson_from_context``) RE-DERIVES it PER CLIPPED PART from
+        ``provider_source_feature_id`` + that part's canonical geometry, so two disconnected
+        LineStrings emitted from one MultiLineString/leave-re-enter source never share the
+        pairing-hook id. It must never reach ``road_corridor_pairing`` still equal to the
+        full-source value for a multi-part feature.
 
     The ERIS-TRUSTED fields (road_class/road_class_label/kind) are written LAST and derived
     from ``fsys`` only (never from an upstream attribute) so no provider value can spoof
@@ -555,7 +560,9 @@ def build_caltrans_properties(attrs: dict, fsys: int, *, layer_key: str, geometr
         layer_key=layer_key, event_id=event_id, route_id=route_id,
         functional_class=fsys, geometry=geometry,
     )
+    props["provider_source_feature_id"] = durable_id   # original complete-feature identity
     props["source_feature_id"] = durable_id
+    # Full-source value now; the packaging boundary re-derives it per clipped part.
     props["provider_feature_id"] = durable_id
     props["functional_class"] = fsys
     props["functional_class_label"] = functional_class_label(fsys)

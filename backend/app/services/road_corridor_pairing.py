@@ -100,6 +100,17 @@ class PairingConfigError(ValueError):
     """A pairing threshold is missing, non-finite, or internally inconsistent."""
 
 
+class DuplicateSourceIdentityError(ValueError):
+    """Two DIFFERENT packaged road centerlines resolved to the SAME pairing source identity.
+
+    Pairing keys candidate identity, self/partner exclusion, mutual-nearest exclusion, the
+    corridor ordered-pair key, the ``runs`` dict and member-source references on that id — so
+    proceeding could apply one component's paired range to another, or resolve the wrong
+    partner. The packaging boundary is responsible for handing every independent LineString a
+    unique per-part ``provider_feature_id``; this is the FAIL-CLOSED backstop if a duplicate
+    still reaches pairing. Callers must not swallow it and publish misleading unpaired output."""
+
+
 @dataclass(frozen=True)
 class PairingParams:
     """Thresholds for the pairing pass. Conservative by default; all are named, validated,
@@ -828,6 +839,41 @@ def corridor_feature(c: Corridor, params: PairingParams, member_part_ids: list,
     return _feature(c.midpoint, props)
 
 
+def assert_unique_candidate_identities(features: list) -> None:
+    """FAIL-CLOSED guard, run before pairing: no two DIFFERENT packaged road centerlines may
+    share a pairing source identity.
+
+    Identical geometries sharing an id are harmless (a genuine duplicate). Two DIFFERENT
+    canonical geometries sharing an id is the disconnected-part collision this guards against
+    — it raises ``DuplicateSourceIdentityError`` rather than let pairing misapply a
+    component's range. The identity + canonical orientation exactly mirror ``_candidate_lines``
+    and ``build_selection_features``, so this sees precisely what pairing would."""
+    seen: dict = {}   # source id -> canonical geometry key
+    for f in features or []:
+        if not isinstance(f, dict):
+            continue
+        props = f.get("properties") if isinstance(f.get("properties"), dict) else {}
+        if props.get("kind") != ROAD_CENTERLINE_KIND:
+            continue
+        geom = f.get("geometry") if isinstance(f.get("geometry"), dict) else {}
+        if geom.get("type") != "LineString":
+            continue
+        coords = [[float(c[0]), float(c[1])] for c in (geom.get("coordinates") or [])
+                  if isinstance(c, (list, tuple)) and len(c) >= 2]
+        if len(coords) < 2:
+            continue
+        clean = canonical_orientation(coords)
+        sid = source_feature_id(clean, props)
+        key = tuple((round(x, 7), round(y, 7)) for x, y in clean)
+        prev = seen.get(sid)
+        if prev is not None and prev != key:
+            raise DuplicateSourceIdentityError(
+                f"two distinct packaged road centerlines share pairing source identity {sid!r}; "
+                "the packaging boundary must give each clipped LineString a unique provider_feature_id"
+            )
+        seen[sid] = key
+
+
 def build_selection_features(features: list, params: PairingParams | None = None) -> tuple:
     """Rewrite the packaged road features with ADDITIVE selection metadata.
 
@@ -847,8 +893,13 @@ def build_selection_features(features: list, params: PairingParams | None = None
     geographically continuous. Corridors are appended as derived features.
 
     Output is sorted deterministically; provider input order never affects the result.
+
+    Raises ``DuplicateSourceIdentityError`` (fail closed) if two DIFFERENT packaged road
+    centerlines share a pairing source identity — that would let one component's paired range
+    be applied to another. The caller must not swallow it into unpaired output.
     """
     p = params or PairingParams()
+    assert_unique_candidate_identities(features)
     corridors = pair_corridors(features, p)
 
     # source_feature_id -> [(corridor_index, side, along_range)]
