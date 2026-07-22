@@ -7,8 +7,27 @@ static const double kUnitsPerFt = 0.40;
 static const double kVExag = 2.0;
 static const double kDepth = 8.0;          // along-road extrusion (upstation slab depth)
 static const double kDeckThickness = 1.2;
+static const double kFtPerM = 3.280839895;
+
+static NSString *const kSliceRenderingObservedDividedCorridor = @"observed_divided_corridor";
+static NSString *const kSliceMedianSeparationLabel  = @"Median / separation area";
+static NSString *const kSliceMedianSeparationDetail =
+    @"Interval between observed carriageway centerlines. Pavement edges and physical median width are unavailable.";
 
 // Small, safe dictionary readers (never throw on wrong types).
+// A REAL, finite, non-boolean NSNumber. Used for every sample-level field in the divided run
+// builder: -doubleValue/dnum would coerce the NSString "12" to 12 and the CFBoolean @YES to
+// 1, so a malformed packaged sample could masquerade as valid ground. CFBooleans are NSNumber
+// subclasses, so they are rejected by pointer identity against the shared singletons.
+static BOOL ErisSliceRealNumber(id v, double *out) {
+  if (![v isKindOfClass:[NSNumber class]]) return NO;             // rejects NSString outright
+  if (v == (id)kCFBooleanTrue || v == (id)kCFBooleanFalse) return NO;
+  double d = [v doubleValue];
+  if (!isfinite(d)) return NO;
+  if (out) *out = d;
+  return YES;
+}
+
 static double dnum(NSDictionary *d, NSString *k, double def) {
   id v = [d isKindOfClass:[NSDictionary class]] ? d[k] : nil;
   return [v respondsToSelector:@selector(doubleValue)] ? [v doubleValue] : def;
@@ -22,6 +41,10 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 @interface ErisRoadSliceSceneViewController ()
 @property(nonatomic, strong) NSDictionary *slice;
 @property(nonatomic, strong) NSDictionary *road;
+// The shared immutable divided-corridor model from the terrain controller. READ ONLY —
+// this view renders it and never reprojects the station or re-derives the section.
+@property(nonatomic, strong) NSDictionary *inspectionGeometry;
+@property(nonatomic, assign) BOOL sceneReleased;
 @property(nonatomic, strong) SCNView *scnView;
 @property(nonatomic, strong) SCNNode *cameraNode;
 @property(nonatomic, assign) SCNMatrix4 defaultCamTransform;
@@ -39,11 +62,25 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 @implementation ErisRoadSliceSceneViewController
 
 - (instancetype)initWithSlice:(NSDictionary *)slice {
+  return [self initWithSlice:slice inspectionGeometry:nil];
+}
+
+- (instancetype)initWithSlice:(NSDictionary *)slice inspectionGeometry:(NSDictionary *)inspectionGeometry {
   if ((self = [super init])) {
     _slice = [slice isKindOfClass:[NSDictionary class]] ? slice : @{};
     _road = [_slice[@"road"] isKindOfClass:[NSDictionary class]] ? _slice[@"road"] : @{};
+    _inspectionGeometry = [inspectionGeometry isKindOfClass:[NSDictionary class]] ? inspectionGeometry : nil;
   }
   return self;
+}
+
+// The ONLY switch onto the observed-divided path. When it is YES this controller must not
+// touch the roadway template at all: no shoulderEdgeFt, no deckSpans, no buildDeckInto, no
+// buildLaneMarkingsInto, and no DEFAULT lane counts / lane widths / median. The package
+// contains two observed centerlines and terrain — nothing else may be drawn as fact.
+- (BOOL)isObservedDividedCorridor {
+  return self.inspectionGeometry != nil &&
+         [dstr(self.slice, @"renderingMode", @"") isEqualToString:kSliceRenderingObservedDividedCorridor];
 }
 
 - (void)viewDidLoad {
@@ -58,7 +95,10 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   self.scnView.scene = [SCNScene scene];
   [self.view addSubview:self.scnView];
 
-  self.datumFt = [self deckElevationFt:&_hasElevation];
+  // The divided path derives its datum from the station itself — deckElevationFt would
+  // bound the average by the DEFAULT template's shoulder edges, which do not exist here.
+  self.datumFt = [self isObservedDividedCorridor] ? [self stationElevationFt:&_hasElevation]
+                                                  : [self deckElevationFt:&_hasElevation];
   [self buildScene];
   [self setupCamera];
   [self addLighting];
@@ -78,7 +118,44 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   [self applyOrthoScale];
 }
 
-- (void)onClose { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)onClose {
+  [self releaseSceneResources];
+  [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+#pragma mark - Deterministic teardown (Part 12F)
+
+// Release geometry, materials and the camera as soon as the section closes rather than
+// waiting on dealloc timing. Idempotent — safe from onClose, viewDidDisappear and dealloc.
+- (void)releaseSceneResources {
+  if (self.sceneReleased) return;
+  self.sceneReleased = YES;
+  self.scnView.playing = NO;
+  self.scnView.delegate = nil;
+  SCNScene *scene = self.scnView.scene;
+  if (scene) {
+    [scene.rootNode enumerateChildNodesUsingBlock:^(SCNNode *node, BOOL *stop) {
+      for (SCNMaterial *m in node.geometry.materials) {
+        m.diffuse.contents = nil; m.normal.contents = nil; m.emission.contents = nil;
+      }
+      node.geometry = nil;
+      node.light = nil;
+      node.camera = nil;
+      node.constraints = nil;
+    }];
+    for (SCNNode *child in [scene.rootNode.childNodes copy]) [child removeFromParentNode];
+  }
+  self.scnView.pointOfView = nil;
+  self.scnView.scene = nil;
+  self.cameraNode = nil;
+}
+
+// NOTE: no viewDidDisappear teardown here. The inspection container detaches the inactive
+// child when the mode switches, so releasing on disappear would destroy a scene the user
+// is about to return to. The container owns the lifetime and calls this on close.
+- (void)dealloc {
+  [self releaseSceneResources];
+}
 
 #pragma mark - Elevation datum + parsing
 
@@ -107,6 +184,28 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   return 0.0;
 }
 
+// Datum for the observed-divided path: the ground elevation at the station (offset 0),
+// else the mean of the OK samples inside the section. No template geometry is consulted.
+- (double)stationElevationFt:(BOOL *)outHasElevation {
+  NSArray *samples = [self.slice[@"samples"] isKindOfClass:[NSArray class]] ? self.slice[@"samples"] : @[];
+  double sum = 0; int n = 0; BOOL any = NO; double center = NAN;
+  double minOff = dnum(self.inspectionGeometry, @"sectionMinOffsetM", -60) * kFtPerM;
+  double maxOff = dnum(self.inspectionGeometry, @"sectionMaxOffsetM", 60) * kFtPerM;
+  for (id s in samples) {
+    if (![s isKindOfClass:[NSDictionary class]]) continue;
+    if (![dstr(s, @"status", @"") isEqualToString:@"OK"]) continue;
+    id ev = s[@"elevationFt"]; if (disnull(ev)) continue;
+    double e = [ev doubleValue], off = dnum(s, @"offsetFt", 0);
+    any = YES;
+    if (off == 0) center = e;
+    if (off >= minOff - 1e-6 && off <= maxOff + 1e-6) { sum += e; n++; }
+  }
+  if (outHasElevation) *outHasElevation = any;
+  if (!isnan(center)) return center;
+  if (n > 0) return sum / n;
+  return 0.0;
+}
+
 // Signed outside-shoulder edge offset (ft) from the centerline. LT negative, RT positive.
 - (double)shoulderEdgeFt:(NSString *)side {
   double mh = MAX(0, dnum(self.road, @"median_width_ft", 0)) / 2.0;
@@ -126,6 +225,9 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 #pragma mark - Scene construction
 
 - (void)buildScene {
+  // Observed divided corridor: an entirely separate, template-free path.
+  if ([self isObservedDividedCorridor]) { [self buildObservedDividedCorridorScene]; return; }
+
   SCNNode *root = self.scnView.scene.rootNode;
   double ltShoulder = [self shoulderEdgeFt:@"LT"];
   double rtShoulder = [self shoulderEdgeFt:@"RT"];
@@ -137,6 +239,222 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   [self buildGroundInto:root side:@"LT" edgeFt:ltShoulder];
   [self buildGroundInto:root side:@"RT" edgeFt:rtShoulder];
   [self buildStakesInto:root];
+}
+
+#pragma mark - Observed divided corridor (Part 12C) — template-free
+
+// OK ground samples inside the section, sorted by offset. CGPoint(x=offsetFt, y=elevFt).
+// CONTIGUOUS VALID RUNS of the divided ground profile, in section order.
+// Mirrors contiguousValidRuns() in dividedTerrainRuns.ts — keep the two in lockstep.
+//
+// The ordered sample stream is SPLIT wherever a sample is not usable packaged ground:
+// a status other than OK, a null elevation, a non-finite elevation, or an offset outside
+// the section. Unusable samples are NEVER merely filtered out, because dropping them and
+// joining the survivors would draw one continuous ground surface across terrain the package
+// does not contain — inventing ground exactly where it is unknown.
+//
+// Runs with a single point are retained (they can anchor an exact marker) but are never
+// joined to another run and never produce a line or fill.
+- (NSArray<NSArray<NSValue *> *> *)dividedGroundRunsFt {
+  NSArray *samples = [self.slice[@"samples"] isKindOfClass:[NSArray class]] ? self.slice[@"samples"] : @[];
+  double minOff = dnum(self.inspectionGeometry, @"sectionMinOffsetM", -60) * kFtPerM;
+  double maxOff = dnum(self.inspectionGeometry, @"sectionMaxOffsetM", 60) * kFtPerM;
+  NSMutableArray<NSArray<NSValue *> *> *runs = [NSMutableArray array];
+  NSMutableArray<NSValue *> *cur = [NSMutableArray array];
+  for (id s in samples) {
+    BOOL usable = NO;
+    double off = 0, elev = 0;
+    if ([s isKindOfClass:[NSDictionary class]]) {
+      // Both fields must be REAL, finite, non-boolean NSNumbers. A numeric string is
+      // rejected outright rather than coerced through -doubleValue/dnum, and a CFBoolean is
+      // rejected even though it is an NSNumber subclass — otherwise @YES would become
+      // offset/elevation 1. A malformed sample terminates the run exactly like NO_DATA.
+      if (ErisSliceRealNumber(s[@"offsetFt"], &off) &&
+          off >= minOff - 1e-6 && off <= maxOff + 1e-6 &&
+          [dstr(s, @"status", @"") isEqualToString:@"OK"] &&
+          !disnull(s[@"elevationFt"]) && ErisSliceRealNumber(s[@"elevationFt"], &elev)) {
+        usable = YES;
+      }
+    }
+    if (usable) {
+      [cur addObject:[NSValue valueWithCGPoint:CGPointMake(off, elev)]];
+    } else if (cur.count) {                      // the gap ENDS the run
+      [runs addObject:[cur copy]];
+      cur = [NSMutableArray array];
+    }
+  }
+  if (cur.count) [runs addObject:[cur copy]];
+  return runs;
+}
+
+// Runs that can be drawn as a line/fill (>= 2 points). A single-point run is diagnostic only.
+- (NSArray<NSArray<NSValue *> *> *)dividedRenderableGroundRunsFt {
+  NSMutableArray<NSArray<NSValue *> *> *out = [NSMutableArray array];
+  for (NSArray<NSValue *> *r in [self dividedGroundRunsFt]) if (r.count >= 2) [out addObject:r];
+  return out;
+}
+
+// Total usable ground samples across all runs (for the technical panel).
+- (NSUInteger)dividedGroundSampleCount {
+  NSUInteger n = 0;
+  for (NSArray<NSValue *> *r in [self dividedGroundRunsFt]) n += r.count;
+  return n;
+}
+
+// The EXACT packaged ground elevation at an offset: there must be a real sample AT that
+// offset. Used for every critical anchor (both observed centerlines and the midpoint), so a
+// marker can never be placed at an elevation interpolated across a gap, and an anchor is
+// never considered present merely because neighbouring samples could be interpolated.
+- (double)dividedExactGroundElevAtFt:(double)offsetFt found:(BOOL *)found {
+  if (found) *found = NO;
+  const double eps = 1e-3;                        // sub-millimetre in feet: same station
+  for (NSArray<NSValue *> *run in [self dividedGroundRunsFt]) {
+    for (NSValue *v in run) {
+      CGPoint p = v.CGPointValue;
+      if (fabs(p.x - offsetFt) <= eps) { if (found) *found = YES; return p.y; }
+    }
+  }
+  return self.datumFt;
+}
+
+// The truthful divided section. Everything here comes from the shared inspection model or
+// the packaged terrain grid: one continuous ground profile across the section, a marker on
+// each OBSERVED carriageway centerline, the geometry-derived midpoint, and the measured
+// separation between the two. No deck, no lanes, no shoulders, no median block — the
+// package does not contain pavement edges, so none are drawn.
+- (void)buildObservedDividedCorridorScene {
+  SCNNode *root = self.scnView.scene.rootNode;
+  NSDictionary *dc = self.inspectionGeometry;
+  double minOffFt = dnum(dc, @"sectionMinOffsetM", -60) * kFtPerM;
+  double maxOffFt = dnum(dc, @"sectionMaxOffsetM", 60) * kFtPerM;
+  self.centerXUnits = [self xUnits:(minOffFt + maxOffFt) / 2.0];
+  self.contentHalfWidthUnits = [self xUnits:(maxOffFt - minOffFt) / 2.0];
+
+  [self buildDividedGroundInto:root];
+
+  double aOffFt = dnum(dc[@"memberA"], @"offsetM", 0) * kFtPerM;
+  double bOffFt = dnum(dc[@"memberB"], @"offsetM", 0) * kFtPerM;
+  UIColor *memberColor = [UIColor colorWithRed:0.55 green:0.80 blue:1.0 alpha:1.0];
+  UIColor *midColor = [UIColor colorWithRed:1.0 green:0.82 blue:0.28 alpha:1.0];
+  [self addDividedMarkerInto:root offsetFt:aOffFt color:memberColor heightUnits:3.4];
+  [self addDividedMarkerInto:root offsetFt:bOffFt color:memberColor heightUnits:3.4];
+  // The selected feature: the geometry-derived midpoint (offset 0 = the station).
+  [self addDividedMarkerInto:root offsetFt:0 color:midColor heightUnits:4.6];
+
+  [self addSeparationDimensionInto:root fromFt:aOffFt toFt:bOffFt];
+}
+
+// The ground profile, drawn ONCE PER CONTIGUOUS VALID RUN — never one continuous shape
+// across the whole section. No line, polygon or filled ground shape may cross a run
+// boundary, because a gap is terrain the package does not contain. Each run gets its own
+// closed fill, so a fill can never span from one valid run to another.
+- (void)buildDividedGroundInto:(SCNNode *)root {
+  for (NSArray<NSValue *> *run in [self dividedRenderableGroundRunsFt]) {
+    [self buildDividedGroundRun:run into:root];
+  }
+}
+
+- (void)buildDividedGroundRun:(NSArray<NSValue *> *)pts into:(SCNNode *)root {
+  if (pts.count < 2) return;             // no profile -> draw nothing (stated in the panel)
+  UIBezierPath *path = [UIBezierPath bezierPath];
+  double minY = 0;
+  CGPoint first = pts.firstObject.CGPointValue, last = pts.lastObject.CGPointValue;
+  [path moveToPoint:CGPointMake([self xUnits:first.x], [self yUnits:first.y])];
+  for (NSValue *v in pts) {
+    CGPoint p = v.CGPointValue;
+    double y = [self yUnits:p.y];
+    [path addLineToPoint:CGPointMake([self xUnits:p.x], y)];
+    if (y < minY) minY = y;
+  }
+  double baseY = minY - 4.0;
+  [path addLineToPoint:CGPointMake([self xUnits:last.x], baseY)];
+  [path addLineToPoint:CGPointMake([self xUnits:first.x], baseY)];
+  [path closePath];
+  SCNShape *shape = [SCNShape shapeWithPath:path extrusionDepth:kDepth];
+  shape.firstMaterial = [self matWithColor:[UIColor colorWithRed:0.36 green:0.42 blue:0.24 alpha:1]];
+  SCNNode *n = [SCNNode nodeWithGeometry:shape];
+  n.position = SCNVector3Make(0, 0, (float)(-kDepth / 2.0));
+  [root addChildNode:n];
+}
+
+// Ground elevation (ft) at an offset, INTERPOLATED STRICTLY BETWEEN real OK samples.
+//
+// An offset outside the sampled range has no packaged terrain under it. Returning the first
+// or last sample there would present the nearest known ground as though it were measured at
+// that offset — a flat extrapolation that reads as fact. Such an offset is simply not found,
+// and the caller must show nothing rather than a guess.
+// Interpolation is permitted ONLY between two ADJACENT valid samples of the SAME contiguous
+// run. An offset that falls in a gap between runs — or outside the sampled range — has no
+// packaged terrain under it and is simply not found, so the caller shows nothing rather than
+// a value interpolated across unavailable ground.
+- (double)dividedGroundElevAtFt:(double)offsetFt found:(BOOL *)found {
+  if (found) *found = NO;
+  const double eps = 1e-6;
+  for (NSArray<NSValue *> *run in [self dividedGroundRunsFt]) {
+    if (run.count == 0) continue;
+    CGPoint first = run.firstObject.CGPointValue, last = run.lastObject.CGPointValue;
+    if (offsetFt < first.x - eps || offsetFt > last.x + eps) continue;   // not inside THIS run
+    CGPoint prev = first;
+    for (NSValue *v in run) {
+      CGPoint p = v.CGPointValue;
+      if (p.x >= offsetFt) {
+        double span = p.x - prev.x;
+        double t = span > 1e-9 ? (offsetFt - prev.x) / span : 0;
+        if (found) *found = YES;
+        return prev.y + (p.y - prev.y) * t;      // strictly between adjacent samples of one run
+      }
+      prev = p;
+    }
+    if (found) *found = YES;   // exactly at the last sample of this run
+    return last.y;
+  }
+  return self.datumFt;         // in a gap, or outside every run
+}
+
+// A vertical post pinning an observed centerline to the ground profile. Drawn ONLY where
+// the package actually has terrain: without a real sample there is no honest elevation to
+// pin it to, so the marker is omitted and the panel states the gap.
+- (void)addDividedMarkerInto:(SCNNode *)root offsetFt:(double)offsetFt color:(UIColor *)color heightUnits:(double)h {
+  BOOL found = NO;
+  // EXACT anchor only: the marker stands on a real sample at this offset, never on a value
+  // interpolated between neighbours (and never across a gap).
+  double elevFt = [self dividedExactGroundElevAtFt:offsetFt found:&found];
+  if (!found) return;                        // no packaged ground here -> no marker
+  double groundY = [self yUnits:elevFt];
+  SCNBox *post = [SCNBox boxWithWidth:0.18 height:h length:0.18 chamferRadius:0];
+  post.firstMaterial = [self matWithColor:color];
+  post.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  SCNNode *n = [SCNNode nodeWithGeometry:post];
+  n.position = SCNVector3Make((float)[self xUnits:offsetFt], (float)(groundY + h / 2.0), 0);
+  [root addChildNode:n];
+  SCNSphere *knob = [SCNSphere sphereWithRadius:0.22];
+  knob.firstMaterial = [self matWithColor:color];
+  knob.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  SCNNode *k = [SCNNode nodeWithGeometry:knob];
+  k.position = SCNVector3Make((float)[self xUnits:offsetFt], (float)(groundY + h), 0);
+  [root addChildNode:k];
+}
+
+// The measured separation drawn as a dimension bar between the two observed centerlines.
+// It spans the "Median / separation area" — an INTERVAL, not a pavement surface, so it is
+// drawn as a thin annotation line and never as a deck.
+- (void)addSeparationDimensionInto:(SCNNode *)root fromFt:(double)aFt toFt:(double)bFt {
+  double lo = MIN(aFt, bFt), hi = MAX(aFt, bFt);
+  double wUnits = (hi - lo) * kUnitsPerFt;
+  if (wUnits <= 1e-6) return;
+  // Both ends need real ground; otherwise the bar would span between a measured point and
+  // an extrapolated one. The measured separation is still stated in the panel and legend.
+  BOOL fLo = NO, fHi = NO;
+  double eLo = [self dividedExactGroundElevAtFt:lo found:&fLo], eHi = [self dividedExactGroundElevAtFt:hi found:&fHi];
+  if (!fLo || !fHi) return;                    // both EXACT member anchors required
+  double y = MAX([self yUnits:eLo], [self yUnits:eHi]) + 4.2;
+  SCNBox *bar = [SCNBox boxWithWidth:wUnits height:0.10 length:0.10 chamferRadius:0];
+  bar.firstMaterial = [self matWithColor:[UIColor colorWithRed:1.0 green:0.45 blue:0.30 alpha:1.0]];
+  bar.firstMaterial.lightingModelName = SCNLightingModelConstant;
+  SCNNode *n = [SCNNode nodeWithGeometry:bar];
+  n.position = SCNVector3Make((float)[self xUnits:(lo + hi) / 2.0], (float)y, 0);
+  n.name = kSliceMedianSeparationLabel;
+  [root addChildNode:n];
 }
 
 // Deck spans (LT outer shoulder -> RT outer shoulder), mirroring deckSpansFt() in
@@ -433,7 +751,7 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   self.legendLabel.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightRegular];
   self.legendLabel.textColor = [UIColor colorWithWhite:0.92 alpha:1];
   self.legendLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
-  self.legendLabel.text = [self stakeLegendText];
+  self.legendLabel.text = [self isObservedDividedCorridor] ? [self dividedLegendText] : [self stakeLegendText];
   [self.view addSubview:self.legendLabel];
 
   // Provenance footer (honest labelling).
@@ -443,8 +761,6 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   footer.font = [UIFont systemFontOfSize:10];
   footer.textColor = [UIColor colorWithWhite:0.78 alpha:1];
   footer.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
-  NSString *layoutSrc = dstr(prov, @"roadLayoutSource", @"DEFAULT");
-  NSString *layoutLabel = [layoutSrc isEqualToString:@"ROAD_INVENTORY"] ? @"Road Inventory" : ([layoutSrc isEqualToString:@"FORM_FIELDS"] ? @"form/default assumptions" : @"default assumptions");
   NSString *snapNote = [prov[@"snappedToRoadContext"] boolValue]
       ? [NSString stringWithFormat:@"Snapped to %@", dstr(prov, @"roadContextSource", @"road context")]
       : @"Fallback orientation (not snapped to a road feature)";
@@ -453,11 +769,22 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   NSString *orientNote = [self.slice[@"orientationAuthoritative"] boolValue]
       ? @"Upstation from the packaged bearing."
       : @"Orientation follows packaged centerline geometry; upstation is not verified.";
-  NSString *defaultNote = [layoutSrc isEqualToString:@"DEFAULT"]
-      ? @"\nDefault roadway assumptions — verify lane, shoulder, and median dimensions." : @"";
-  footer.text = [NSString stringWithFormat:
-                 @"Roadway layout: %@  ·  Ground elevation: USGS 3DEP offline grid\n%@\n%@\nRoadway surface is schematic unless pavement crown/superelevation data is available.%@",
-                 layoutLabel, snapNote, orientNote, defaultNote];
+  if ([self isObservedDividedCorridor]) {
+    // No roadway-layout line: there is no layout. Only what was observed, plus the limit.
+    NSDictionary *dc = self.inspectionGeometry;
+    footer.text = [NSString stringWithFormat:
+                   @"Observed divided corridor: two carriageway centerlines (%@)  ·  Ground elevation: USGS 3DEP offline grid\n%@\n%@\n%@ — %@",
+                   dstr(dc, @"pairingMethod", @"station-local pairing"), snapNote, orientNote,
+                   kSliceMedianSeparationLabel, kSliceMedianSeparationDetail];
+  } else {
+    NSString *layoutSrc = dstr(prov, @"roadLayoutSource", @"DEFAULT");
+    NSString *layoutLabel = [layoutSrc isEqualToString:@"ROAD_INVENTORY"] ? @"Road Inventory" : ([layoutSrc isEqualToString:@"FORM_FIELDS"] ? @"form/default assumptions" : @"default assumptions");
+    NSString *defaultNote = [layoutSrc isEqualToString:@"DEFAULT"]
+        ? @"\nDefault roadway assumptions — verify lane, shoulder, and median dimensions." : @"";
+    footer.text = [NSString stringWithFormat:
+                   @"Roadway layout: %@  ·  Ground elevation: USGS 3DEP offline grid\n%@\n%@\nRoadway surface is schematic unless pavement crown/superelevation data is available.%@",
+                   layoutLabel, snapNote, orientNote, defaultNote];
+  }
   [self.view addSubview:footer];
 
   [NSLayoutConstraint activateConstraints:@[
@@ -531,7 +858,83 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   return [NSString stringWithFormat:@"  %@\n  %@  ", lt, rt];
 }
 
+// Compact legend for the divided path: the two OBSERVED centerlines and their measured
+// separation. The stake legend is template-relative ("beyond shoulder") and cannot be
+// stated here, so it is not shown.
+- (NSString *)dividedLegendText {
+  NSDictionary *dc = self.inspectionGeometry;
+  NSDictionary *ma = dc[@"memberA"], *mb = dc[@"memberB"];
+  return [NSString stringWithFormat:@"  %@: %+.1f m   ·   %@: %+.1f m   ·   %@: %.1f m\n  %@  ",
+          dstr(ma, @"label", @"Centerline A"), dnum(ma, @"offsetM", 0),
+          dstr(mb, @"label", @"Centerline B"), dnum(mb, @"offsetM", 0),
+          kSliceMedianSeparationLabel, dnum(dc, @"separationM", 0),
+          kSliceMedianSeparationDetail];
+}
+
+// Technical values for the divided path. Split explicitly into what was OBSERVED and what
+// is UNAVAILABLE, so no reader can mistake the separation interval for a measured median
+// or infer a lane arrangement that the package does not contain.
+- (NSString *)dividedTechnicalText {
+  NSDictionary *dc = self.inspectionGeometry;
+  NSDictionary *ma = dc[@"memberA"], *mb = dc[@"memberB"];
+  double sep = dnum(dc, @"separationM", 0);
+  NSMutableString *s = [NSMutableString string];
+  [s appendString:@"OBSERVED DIVIDED CORRIDOR — technical\n\n"];
+  [s appendFormat:@"Rendering mode: %@\n", dstr(dc, @"renderingMode", kSliceRenderingObservedDividedCorridor)];
+  [s appendFormat:@"Corridor feature: %@\n", dstr(dc, @"featureId", @"—")];
+  [s appendFormat:@"Cross-section bearing: %.0f°  (corridor axis %.0f°)\n\n",
+   dnum(self.slice, @"crossSectionBearingDeg", 0), dnum(dc, @"axialTangent", 0)];
+
+  [s appendString:@"OBSERVED (measured from packaged geometry):\n"];
+  [s appendFormat:@"  %@: offset %+.2f m (%+.1f ft), %.2f m from station\n",
+   dstr(ma, @"label", @"Centerline A"), dnum(ma, @"offsetM", 0), dnum(ma, @"offsetM", 0) * kFtPerM,
+   dnum(ma, @"distanceFromStationM", 0)];
+  [s appendFormat:@"  %@: offset %+.2f m (%+.1f ft), %.2f m from station\n",
+   dstr(mb, @"label", @"Centerline B"), dnum(mb, @"offsetM", 0), dnum(mb, @"offsetM", 0) * kFtPerM,
+   dnum(mb, @"distanceFromStationM", 0)];
+  [s appendFormat:@"  %@: %.2f m (%.1f ft) centerline-to-centerline\n", kSliceMedianSeparationLabel, sep, sep * kFtPerM];
+  [s appendFormat:@"  Corridor midpoint: offset 0.00 m (%@)\n", dstr(dc, @"orientationSource", @"geometry-derived")];
+  [s appendFormat:@"  Pairing: %@ (%@)\n", dstr(dc, @"pairingMethod", @"station-local"), dstr(dc, @"pairingVersion", @"—")];
+  [s appendFormat:@"  Section extent: %.1f … %.1f m about the midpoint\n\n",
+   dnum(dc, @"sectionMinOffsetM", 0), dnum(dc, @"sectionMaxOffsetM", 0)];
+
+  [s appendString:@"UNAVAILABLE (not present in this package — not drawn, not assumed):\n"];
+  [s appendString:@"  Lane count · lane width · shoulder width · pavement edges · physical median width · surface type\n"];
+  [s appendFormat:@"  %@\n\n", kSliceMedianSeparationDetail];
+
+  [s appendString:@"Ground profile (USGS 3DEP offline grid):\n"];
+  NSArray<NSArray<NSValue *> *> *runs = [self dividedGroundRunsFt];
+  NSArray<NSArray<NSValue *> *> *drawn = [self dividedRenderableGroundRunsFt];
+  NSUInteger nSamples = [self dividedGroundSampleCount];
+  [s appendFormat:@"  %lu OK samples across the section%@\n", (unsigned long)nSamples,
+   drawn.count == 0 ? @" — profile unavailable, nothing drawn" : @""];
+  // Gaps are stated, never bridged: each contiguous run is drawn on its own.
+  if (runs.count > 1) {
+    [s appendFormat:@"  %lu contiguous ground runs (terrain is missing between them) — each drawn separately; no surface is drawn across a gap.\n",
+     (unsigned long)runs.count];
+  }
+  for (NSArray<NSValue *> *r in runs) {
+    if (r.count >= 2) {
+      [s appendFormat:@"    run: %.1f … %.1f ft (%lu samples)\n",
+       r.firstObject.CGPointValue.x, r.lastObject.CGPointValue.x, (unsigned long)r.count];
+    } else if (r.count == 1) {
+      [s appendFormat:@"    isolated sample at %.1f ft — not joined to any run\n", r.firstObject.CGPointValue.x];
+    }
+  }
+  // Terrain is never extrapolated or interpolated across a gap: say so where a marker is absent.
+  BOOL fa = NO, fb = NO;
+  [self dividedExactGroundElevAtFt:dnum(ma, @"offsetM", 0) * kFtPerM found:&fa];
+  [self dividedExactGroundElevAtFt:dnum(mb, @"offsetM", 0) * kFtPerM found:&fb];
+  if (!fa || !fb) {
+    [s appendFormat:@"  %@ has no packaged ground at its offset — its marker is omitted rather than placed at an assumed elevation.\n",
+     !fa ? dstr(ma, @"label", @"Centerline A") : dstr(mb, @"label", @"Centerline B")];
+  }
+  [s appendString:@"\nElevations sampled from the packaged terrain grid; missing samples split the profile into separate runs (never interpolated across a gap or beyond coverage).\n"];
+  return s;
+}
+
 - (NSString *)technicalText {
+  if ([self isObservedDividedCorridor]) return [self dividedTechnicalText];
   NSMutableString *s = [NSMutableString string];
   [s appendString:@"ROAD CROSS SECTION — technical\n\n"];
   [s appendFormat:@"Cross-section bearing: %.0f°  (upstation %.0f°)\n",

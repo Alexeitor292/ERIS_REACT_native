@@ -7,6 +7,9 @@
 // samples). No network, no fabricated buildings/panoramas/signs/vegetation. It is an
 // offline aerial-terrain inspection — never a claim of street-level photography.
 @interface ErisImmersiveCorridorViewController : UIViewController
-- (instancetype)initWithSlice:(NSDictionary *)slice corridor:(NSDictionary *)corridor;
+- (instancetype)initWithSlice:(NSDictionary *)slice corridor:(NSDictionary *)corridor
+           inspectionGeometry:(NSDictionary *)inspectionGeometry;
 - (void)resetCameraFraming;
+// Deterministic teardown — idempotent; never rely on dealloc alone.
+- (void)releaseSceneResources;
 @end

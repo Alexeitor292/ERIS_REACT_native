@@ -610,25 +610,47 @@ def tiled_imagery_tiles(imagery_layer) -> list:
     return tiles if isinstance(tiles, list) else []
 
 
-def tiled_imagery_layer(plan: dict, tile_metas: list, source: dict | None) -> dict:
+def tiled_imagery_layer(plan: dict, tile_metas: list, source: dict | None, *,
+                        jpeg_quality: int | None = None, vintage: str | None = None,
+                        diagnostics: dict | None = None) -> dict:
     """Assemble the manifest `context_layers.imagery` block for a TILED package from a
-    tile plan and the per-tile packaged metadata (file/bounds/sha256/bytes). Reports
-    the actual source + effective resolution + total imagery storage — never claims
-    ArcGIS equivalence."""
+    tile plan and the per-tile packaged metadata (file/bounds/sha256/bytes/width_px/
+    height_px). Reports the actual source + target/effective/source-native resolution,
+    measured pixel count, total storage, compression quality, vintage availability and a
+    gap/overlap diagnostic — never claims ArcGIS equivalence or detail finer than the
+    source truthfully provides."""
     total_bytes = sum(int(t.get("bytes") or 0) for t in tile_metas)
+    # Measured from the DECODED tile headers, never from the requested size (the export is
+    # aspect-matched, so tiles are generally not tile_size_px square).
+    pixel_count = sum(int(t.get("width_px") or 0) * int(t.get("height_px") or 0) for t in tile_metas)
     layer = {
         "available": True,
         "format": "tiled",
+        # tile_size_px is the REQUEST partition size, not a resolution claim. Genuine
+        # detail is governed by *_meters_per_pixel; per-tile measured dims are on each tile.
         "tile_size_px": int(plan["tile_size_px"]),
         "columns": int(plan["columns"]),
         "rows": int(plan["rows"]),
         "target_meters_per_pixel": plan.get("target_meters_per_pixel"),
         "effective_meters_per_pixel": plan.get("effective_meters_per_pixel"),
+        "source_native_meters_per_pixel": plan.get("source_native_meters_per_pixel"),
         "bounds": dict(plan["bounds"]),
         "tile_count": len(tile_metas),
         "bytes": total_bytes,
         "tiles": tile_metas,
     }
+    if pixel_count > 0:
+        layer["pixel_count"] = pixel_count
+    if jpeg_quality is not None:
+        layer["jpeg_quality"] = int(jpeg_quality)
+    # Acquisition vintage ONLY when the operator has truthfully declared the source's
+    # vintage; `retrieved_at` is the worker fetch time and is NOT a vintage.
+    v = str(vintage).strip() if isinstance(vintage, str) else ""
+    layer["vintage_available"] = bool(v)
+    if v:
+        layer["vintage"] = v
+    if diagnostics:
+        layer["diagnostics"] = dict(diagnostics)
     if source:
         layer["source"] = sanitize_source(source)
     return layer

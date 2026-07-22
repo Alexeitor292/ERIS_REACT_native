@@ -147,6 +147,31 @@ class Settings(BaseSettings):
     )
     OFFLINE_SCENE_TIGERWEB_LAYERS: str = Field(default="2,6,8")
 
+    # --- Divided-highway corridor pairing (worker-side, deterministic) ----------
+    # TIGERweb packages a divided highway as TWO primary centerlines. This pass decides —
+    # LOCALLY ALONG THE ROUTE, never globally by route name or mere proximity — where two
+    # primary carriageways share one corridor, and derives a midpoint centerline so the map
+    # can show ONE selectable yellow line. Additive: legacy packages are unaffected.
+    # See docs/adr-divided-highway-corridor-pairing.md for the design + thresholds.
+    OFFLINE_SCENE_DIVIDED_PAIRING_ENABLED: bool = Field(default=True)
+    OFFLINE_SCENE_PAIR_SAMPLE_INTERVAL_M: float = Field(default=10.0)   # deterministic resampling step
+    OFFLINE_SCENE_PAIR_WINDOW_M: float = Field(default=120.0)           # moving longitudinal window
+    OFFLINE_SCENE_PAIR_MIN_SEPARATION_M: float = Field(default=4.0)     # below this: effectively duplicate lines
+    # Generous by design: a WIDE but STABLE grass/open median is still one corridor. The
+    # decision rests on stability (stdev/slope), never on one small maximum-distance rule.
+    OFFLINE_SCENE_PAIR_MAX_SEPARATION_M: float = Field(default=120.0)
+    OFFLINE_SCENE_PAIR_MAX_BEARING_DIFF_DEG: float = Field(default=20.0)      # axial, mod 180
+    OFFLINE_SCENE_PAIR_MAX_OFFSET_ANGLE_DEV_DEG: float = Field(default=35.0)  # offset must be ~perpendicular
+    OFFLINE_SCENE_PAIR_SEP_STDEV_MAX_M: float = Field(default=12.0)           # separation stability
+    OFFLINE_SCENE_PAIR_SEP_SLOPE_MAX: float = Field(default=0.25)             # |d(sep)/ds|: rejects divergence
+    OFFLINE_SCENE_PAIR_MIN_WINDOW_COVERAGE: float = Field(default=0.8)
+    # Rejects brief interchange-only proximity and parallel ramps hugging the mainline.
+    OFFLINE_SCENE_PAIR_MIN_CORRIDOR_LENGTH_M: float = Field(default=150.0)
+    # Behaviour-changing: how far the derived midpoint may sit off-centre between the two
+    # carriageways before the run is SPLIT. Not a numeric epsilon — at metre scale it
+    # decides pairing, so it is a first-class configured threshold.
+    OFFLINE_SCENE_PAIR_MIDPOINT_TOLERANCE_M: float = Field(default=3.0)
+
     # Aerial/satellite imagery drape. OPT-IN: NAIP (USGS/USDA, public domain) is the
     # intended licence-clean provider, but must be validated on a live worker before
     # we claim "satellite imagery", so it defaults OFF. When off/uncovered/too-large/
@@ -184,6 +209,11 @@ class Settings(BaseSettings):
     OFFLINE_SCENE_IMAGERY_MAX_TILES: int = Field(default=64)
     OFFLINE_SCENE_IMAGERY_MAX_MB: int = Field(default=256)             # imagery-only budget
     OFFLINE_SCENE_IMAGERY_JPEG_QUALITY: int = Field(default=85)
+    # Imagery ACQUISITION vintage (e.g. "NAIP 2022"). `retrieved_at` is the worker fetch
+    # time and is NOT a vintage. There is no service-metadata probe today, so this is
+    # operator-declared: leave EMPTY unless the real upstream vintage is known. When empty
+    # the manifest reports vintage_available=false rather than inventing a date.
+    OFFLINE_SCENE_IMAGERY_SOURCE_VINTAGE: str = Field(default="")
     # Conservative per-request upstream export ceiling (ImageServer max width/height).
     # tile_px must stay <= this; a request never approaches the service maximum.
     OFFLINE_SCENE_IMAGERY_MAX_EXPORT_PX: int = Field(default=4096)

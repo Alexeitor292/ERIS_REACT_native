@@ -16,6 +16,10 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ErisRoadSliceSceneViewController : UIViewController
 
 - (instancetype)initWithSlice:(NSDictionary *)slice;
+// `inspectionGeometry` = the shared immutable divided-corridor model (nil for other roads).
+- (instancetype)initWithSlice:(NSDictionary *)slice inspectionGeometry:(nullable NSDictionary *)inspectionGeometry;
+// Deterministic teardown — idempotent; never rely on dealloc alone.
+- (void)releaseSceneResources;
 
 // Restore the default upstation ortho framing (called by the inspection container's
 // Reset when this is the active Technical child).

@@ -177,6 +177,11 @@ def plan_imagery_tiles(
         "rows": rows,
         "target_meters_per_pixel": round(planned_mpp, 3),
         "effective_meters_per_pixel": round(eff, 3),
+        # The source's own useful GSD. Recorded so a reader can tell whether
+        # effective_meters_per_pixel was geometry-limited or clamped to the source — we
+        # must never claim detail finer than the source actually provides.
+        "source_native_meters_per_pixel": (round(float(source_native_mpp), 3)
+                                           if _finite_pos(source_native_mpp) else None),
         "bounds": {
             "min_lat": float(bounds["min_lat"]),
             "min_lon": float(bounds["min_lon"]),
@@ -211,6 +216,98 @@ def assert_no_gaps_or_overlaps(plan: dict, *, eps: float = 1e-9) -> None:
 
 
 # ---- image-response validation ---------------------------------------------
+
+def image_dimensions(data: bytes | None) -> tuple[int, int] | None:
+    """(width, height) read from the ACTUAL encoded image header — never from the requested
+    size. The export is aspect-matched, so a tile is generally NOT tile_px x tile_px, and a
+    service may legitimately return something other than what was asked for. Reading the
+    JPEG SOF / PNG IHDR is what the decoder itself will produce.
+
+    Pure + dependency-free (this module must stay importable in the non-DB test job).
+    Returns None when the header cannot be parsed.
+    """
+    if not data or len(data) < 4:
+        return None
+    # PNG: 8-byte signature, then IHDR length+type, then width/height (big-endian uint32).
+    if is_png(data):
+        if len(data) < 24:
+            return None
+        try:
+            w = int.from_bytes(data[16:20], "big")
+            h = int.from_bytes(data[20:24], "big")
+            return (w, h) if w > 0 and h > 0 else None
+        except Exception:  # noqa: BLE001 - malformed header
+            return None
+    if not is_jpeg(data):
+        return None
+    # JPEG: walk the marker segments to the first Start-Of-Frame.
+    # SOF0..SOF15 carry the true frame size; DHT(C4)/JPG(C8)/DAC(CC) are NOT frame markers.
+    sof = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+    i = 2
+    n = len(data)
+    try:
+        while i + 3 < n:
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:   # standalone markers
+                i += 2
+                continue
+            if i + 3 >= n:
+                return None
+            seg_len = int.from_bytes(data[i + 2:i + 4], "big")
+            if seg_len < 2:
+                return None
+            if marker in sof:
+                # FF Cx | len(2) | precision(1) | height(2) | width(2)
+                if i + 9 > n:
+                    return None
+                h = int.from_bytes(data[i + 5:i + 7], "big")
+                w = int.from_bytes(data[i + 7:i + 9], "big")
+                return (w, h) if w > 0 and h > 0 else None
+            i += 2 + seg_len
+    except Exception:  # noqa: BLE001 - malformed/truncated stream
+        return None
+    return None
+
+
+def tile_diagnostics(plan: dict, tile_metas: list, present_files: set | None = None) -> dict:
+    """Package-time evidence that the tiled imagery is actually sound.
+
+    assert_no_gaps_or_overlaps() RAISES at build time but writes nothing, so a shipped
+    bundle carried no proof the check ran. This records a bounded, truthful result:
+    declared vs present tile files, gap/overlap status, and dimension consistency.
+    Never raises — a diagnostic must not be able to fail a build.
+    """
+    declared = [str(t.get("file")) for t in tile_metas if t.get("file")]
+    # NB: an EMPTY set is a meaningful answer ("nothing present"), so test for None.
+    present = set(present_files) if present_files is not None else set(declared)
+    missing = sorted(f for f in declared if f not in present)
+    dims = [(int(t["width_px"]), int(t["height_px"]))
+            for t in tile_metas if t.get("width_px") and t.get("height_px")]
+    gaps_ok, gaps_reason = True, None
+    try:
+        assert_no_gaps_or_overlaps(plan)
+    except ImageryPlanError as e:
+        gaps_ok, gaps_reason = False, str(e)[:120]
+    except Exception:  # noqa: BLE001 - never let a diagnostic break packaging
+        gaps_ok, gaps_reason = False, "diagnostic error"
+    out = {
+        "tiles_declared": len(declared),
+        "tiles_present": len(declared) - len(missing),
+        "missing_files": missing[:8],
+        "bounds_gap_free": bool(gaps_ok),
+        "bounds_overlap_free": bool(gaps_ok),
+        "dimensions_measured": len(dims),
+        # Aspect-matched export => tiles are NOT required to be identical; we record
+        # whether every tile reported a measurable size, not that they all match.
+        "dimensions_complete": len(dims) == len(declared),
+    }
+    if gaps_reason:
+        out["bounds_reason"] = gaps_reason
+    return out
+
 
 def is_jpeg(data: bytes | None) -> bool:
     return bool(data) and data[:3] == _JPEG_MAGIC

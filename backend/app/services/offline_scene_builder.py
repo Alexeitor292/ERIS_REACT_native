@@ -35,6 +35,7 @@ from ..storage import put_object_bytes
 from . import offline_scene as offline_scene_svc
 from . import offline_scene_context as context_fmt
 from . import offline_scene_terrain as terrain_fmt
+from . import road_corridor_pairing as corridor_pairing
 from .offline_scene_catalog import JobCancelledError, register_ready_package
 
 logger = logging.getLogger("eris.offline_scene_builder")
@@ -336,6 +337,23 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"], terrain_meta, context_layers)
         return assemble_bundle(grid_bytes, hillshade_bytes, ctx.get("overlays") or {}, manifest, assets)
 
+    # Divided-highway pairing thresholds from config (see the ADR). Kept in one place so
+    # the packaged `pairing` block always reports the values that were actually applied.
+    def _pairing_params(self) -> corridor_pairing.PairingParams:
+        return corridor_pairing.PairingParams(
+            sample_interval_m=float(settings.OFFLINE_SCENE_PAIR_SAMPLE_INTERVAL_M),
+            window_m=float(settings.OFFLINE_SCENE_PAIR_WINDOW_M),
+            min_separation_m=float(settings.OFFLINE_SCENE_PAIR_MIN_SEPARATION_M),
+            max_separation_m=float(settings.OFFLINE_SCENE_PAIR_MAX_SEPARATION_M),
+            max_bearing_diff_deg=float(settings.OFFLINE_SCENE_PAIR_MAX_BEARING_DIFF_DEG),
+            max_offset_angle_dev_deg=float(settings.OFFLINE_SCENE_PAIR_MAX_OFFSET_ANGLE_DEV_DEG),
+            sep_stdev_max_m=float(settings.OFFLINE_SCENE_PAIR_SEP_STDEV_MAX_M),
+            sep_slope_max=float(settings.OFFLINE_SCENE_PAIR_SEP_SLOPE_MAX),
+            min_window_coverage=float(settings.OFFLINE_SCENE_PAIR_MIN_WINDOW_COVERAGE),
+            min_corridor_length_m=float(settings.OFFLINE_SCENE_PAIR_MIN_CORRIDOR_LENGTH_M),
+            midpoint_tolerance_m=float(settings.OFFLINE_SCENE_PAIR_MIDPOINT_TOLERANCE_M),
+        )
+
     def _build_context_layers(self, ctx: dict, base_bytes: int, progress=None) -> tuple[dict, dict]:
         """Collect roads / optional imagery / overview into (context_layers, assets).
         Every layer degrades gracefully — a source failure marks the layer
@@ -388,6 +406,30 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                     {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M,
                     external_configured=external_configured,
                 )
+                # Deterministic station-local divided-highway pairing (ADDITIVE): adds a
+                # stable feature_id + ERIS-derived selection_kind to every road, splits a
+                # paired carriageway into its diagnostic member portion + selectable
+                # unpaired portions, and appends derived divided_highway_corridor features
+                # so the map can show ONE yellow line through a shared corridor.
+                # road_class_counts must describe the ORIGINAL source roads, captured BEFORE
+                # the pairing rewrite splits carriageways and derives corridors — otherwise
+                # one source carriageway would be counted several times.
+                source_features = list(geojson.get("features") or [])
+                source_class_counts = context_fmt.road_class_counts({"features": source_features})
+                source_count = len(source_features)
+                pairing_stats = None
+                if count > 0 and settings.OFFLINE_SCENE_DIVIDED_PAIRING_ENABLED:
+                    try:
+                        paired_features, pairing_stats = corridor_pairing.build_selection_features(
+                            geojson.get("features") or [], self._pairing_params()
+                        )
+                        geojson = {"type": "FeatureCollection", "features": paired_features}
+                        count = len(paired_features)
+                        _log("roads", "paired", corridors=pairing_stats.get("divided_corridor_count", 0),
+                             kinds=",".join(pairing_stats.get("selection_kinds") or []))
+                    except Exception as e:  # noqa: BLE001 — pairing must never break packaging
+                        pairing_stats = None
+                        _log("roads", "pairing_skipped", error=str(e)[:120])
                 roads_geojson = geojson if count > 0 else None
                 if count > 0:
                     data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
@@ -418,9 +460,13 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                             }
                         # Bounded, truthful road-class metadata — ONLY classes actually
                         # packaged (so a highway-first UI can tell primary from local).
-                        class_counts = context_fmt.road_class_counts(geojson)
+                        # Derived from the ORIGINAL sources, never the rewritten collection.
+                        class_counts = source_class_counts
                         extra = {
+                            # Total features actually serialized in roads.geojson.
                             "feature_count": count,
+                            # Original source/context features BEFORE the pairing rewrite.
+                            "source_feature_count": source_count,
                             "road_kinds": kinds,
                             # The road CLIPPING CONTRACT, persisted exactly as applied.
                             # Roads are clipped to bounds + buffer, so they legitimately
@@ -434,6 +480,24 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                         if class_counts:
                             extra["road_classes"] = sorted(class_counts)
                             extra["road_class_counts"] = class_counts
+                        # Divided-highway selection metadata — ONLY the kinds actually
+                        # packaged, plus the pairing method/version so a corridor can always
+                        # be traced back to the algorithm that produced it.
+                        if pairing_stats:
+                            # SELECTABLE candidate kinds only — diagnostics roles are kept
+                            # in a separate namespace so the selectable enum stays at four.
+                            extra["selection_kinds"] = pairing_stats["selection_kinds"]
+                            extra["selection_kind_counts"] = pairing_stats["selection_kind_counts"]
+                            extra["selectable_road_class_counts"] = pairing_stats["selectable_road_class_counts"]
+                            if pairing_stats["diagnostic_kinds"]:
+                                extra["diagnostic_kinds"] = pairing_stats["diagnostic_kinds"]
+                                extra["diagnostic_kind_counts"] = pairing_stats["diagnostic_kind_counts"]
+                            # Exact partition: feature_count == selectable + diagnostic + context.
+                            extra["selectable_feature_count"] = pairing_stats["selectable_feature_count"]
+                            extra["diagnostic_feature_count"] = pairing_stats["diagnostic_feature_count"]
+                            extra["context_feature_count"] = pairing_stats["context_feature_count"]
+                            extra["divided_corridor_count"] = pairing_stats["divided_corridor_count"]
+                            extra["pairing"] = pairing_stats["pairing"]
                         layers["roads"] = context_fmt.available_layer(
                             context_fmt.ROADS_FILE, data, src, **extra
                         )
@@ -622,11 +686,18 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                         f"imagery exceeds the {settings.OFFLINE_SCENE_IMAGERY_MAX_MB} MB budget"
                     )
                 assets[tile["file"]] = data
-                tile_metas.append({
+                meta = {
                     "row": tile["row"], "column": tile["column"], "file": tile["file"],
                     "bounds": dict(tile["bounds"]),
                     "sha256": context_fmt.sha256_hex(data), "bytes": len(data),
-                })
+                }
+                # MEASURED from the decoded header — never the requested size. The export is
+                # aspect-matched, so a tile is generally NOT tile_px square, and native needs
+                # the real dims for tile-native texture management.
+                dims = imagery.image_dimensions(data)
+                if dims:
+                    meta["width_px"], meta["height_px"] = int(dims[0]), int(dims[1])
+                tile_metas.append(meta)
                 _emit(f"Packaging aerial imagery: {i + 1} of {n} tiles")
         except Exception as e:  # roll back ANY partial tiles — never a holey imagery layer
             for t in plan["tiles"]:
@@ -641,7 +712,15 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             _log("imagery", "tile_failed", tile=coord, error=reason)
             return
 
-        layers["imagery"] = context_fmt.tiled_imagery_layer(plan, tile_metas, source_meta)
+        # Record package-time EVIDENCE that the tiling is sound (assert_no_gaps_or_overlaps
+        # raises but writes nothing, so a shipped bundle carried no proof the check ran).
+        diagnostics = imagery.tile_diagnostics(plan, tile_metas, present_files=set(assets.keys()))
+        layers["imagery"] = context_fmt.tiled_imagery_layer(
+            plan, tile_metas, source_meta,
+            jpeg_quality=int(settings.OFFLINE_SCENE_IMAGERY_JPEG_QUALITY),
+            vintage=settings.OFFLINE_SCENE_IMAGERY_SOURCE_VINTAGE,
+            diagnostics=diagnostics,
+        )
         _log("imagery", "packaged_tiled", tiles=n, bytes=imagery_bytes,
              effective_mpp=plan.get("effective_meters_per_pixel"))
 

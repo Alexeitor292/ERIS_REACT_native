@@ -98,3 +98,8 @@ module.exports = function withArcGisIos(config) {
   next = withArcGisIosSources(next);
   return next;
 };
+
+// The compilable (.m) sources this plugin injects, without extensions. CI asserts each one
+// produced a CompileC line, so a green iOS build can never again mean "compiled something
+// else". Derived from IOS_FILES so the two cannot drift.
+module.exports.__IOS_SOURCES__ = IOS_FILES.filter((f) => f.endsWith(".m")).map((f) => f.slice(0, -2));

@@ -232,6 +232,11 @@ jobs:
           src/arcgis/terrainScale.test.ts
           src/arcgis/roadClass.test.ts
           src/arcgis/corridorModel.test.ts
+          src/arcgis/roadSelection.test.ts
+          src/arcgis/imagerySizing.test.ts
+          src/arcgis/dividedCorridorInspection.test.ts
+          src/arcgis/dividedSectionSampling.test.ts
+          src/arcgis/dividedTerrainRuns.test.ts
           src/measurements/roadCrossSectionSlice.test.ts
           src/measurements/roadCrossSectionParity.test.ts
           src/components/roadCrossSectionSliceModel.test.ts
@@ -265,18 +270,48 @@ jobs:
         id: xc
         working-directory: mobile/ios
         run: |
+          set -euo pipefail
           WS=$(ls -d *.xcworkspace | head -1)
-          SCHEME=$(xcodebuild -list -workspace "$WS" -json | python3 -c "import sys,json;print(json.load(sys.stdin)['workspace']['schemes'][0])")
+          # The APP scheme comes from the app PROJECT. The workspace's scheme list is
+          # dominated by Pods (its first entry is ArcGIS-Runtime-SDK-iOS), so taking
+          # workspace schemes[0] built the ArcGIS pod and compiled none of our sources —
+          # a permanently, vacuously green "iOS native compile".
+          PROJ=$(ls -d *.xcodeproj | head -1)
+          SCHEME=$(xcodebuild -list -project "$PROJ" -json | python3 -c "import sys,json;print(json.load(sys.stdin)['project']['schemes'][0])")
+          echo "workspace=$WS  project=$PROJ  scheme=$SCHEME"
           echo "workspace=$WS" >> "$GITHUB_OUTPUT"
           echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
       - name: Xcode simulator build (signing disabled)
         working-directory: mobile/ios
-        run: >-
-          xcodebuild
-          -workspace "${{ steps.xc.outputs.workspace }}"
-          -scheme "${{ steps.xc.outputs.scheme }}"
-          -sdk iphonesimulator -configuration Debug
-          CODE_SIGNING_ALLOWED=NO build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace "${{ steps.xc.outputs.workspace }}" \
+            -scheme "${{ steps.xc.outputs.scheme }}" \
+            -sdk iphonesimulator -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/xcodebuild.log
+      - name: Verify the ERIS native sources were actually compiled
+        working-directory: mobile/ios
+        # A green build only means something if it compiled OUR Objective-C. Assert each
+        # injected source produced a CompileC line, so a scheme/plugin regression fails
+        # loudly instead of passing by building someone else's target.
+        run: |
+          set -uo pipefail
+          missing=0
+          # Match the SOURCE path on the CompileC line, not the object: Xcode 16 hashes
+          # object filenames (ErisTerrainSceneViewController-<hash>.o), so matching ".o"
+          # never fires and would report a real compile as "not compiled".
+          for f in $(node -e "process.stdout.write(require('../plugins/withArcGisIos.js').__IOS_SOURCES__.join(' '))"); do
+            if ! grep -qE "CompileC .*/${f}\.m " /tmp/xcodebuild.log; then
+              echo "NOT COMPILED: ${f}.m"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::The iOS build did not compile the ERIS native sources — the compile is not authoritative."
+            exit 1
+          fi
+          echo "All ERIS native sources compiled."
 
   compose:
     name: Compose validate + key isolation
