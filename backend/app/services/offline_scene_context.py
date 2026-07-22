@@ -326,18 +326,30 @@ ROADS_REASON_NO_SOURCE = "no_centerline_source_configured"
 ROADS_REASON_NO_FEATURES = "no_centerline_features_in_area"
 
 
-def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configured: bool = False) -> tuple[dict, int, str | None]:
+def roads_geojson_from_context(
+    ctx: dict, buffer_m: float, *, external_configured: bool = False, include_internal_context: bool = True
+) -> tuple[dict, int, str | None]:
     """Assemble roads.geojson (a FeatureCollection) for the offline Cross Section snap,
     in PRIORITY order. Returns (geojson, count, reason) — reason is a PRECISE token when
     count == 0 (never a generic "no_data"):
 
-      A. external road_centerline features (arcgis_feature_service adapter, pre-fetched
-         into ctx['external_road_features']) — the richest, real road network.
+      A. external road_centerline features (the selected external provider's normalized
+         results, pre-fetched into ctx['external_road_features']).
       B. road-inventory line geometry (ctx['road_inventory_geometry']).
       C. submitted incident geometry, but ONLY the genuinely line-like parts
          (LineString/MultiLineString/paths) -> kind 'submitted_road_geometry'.
       D. a synthetic AOI-spanning road_bearing LineString (incident + roadBearingDeg),
          clipped to bounds — the snap/orientation fallback.
+
+    PROVIDER EXCLUSIVITY (``include_internal_context``): B/C/D are ERIS-INTERNAL context and
+    belong ONLY to ``eris_internal``. When an EXTERNAL provider is selected
+    (caltrans_crs / census_tigerweb / arcgis_feature_service) the caller passes
+    ``include_internal_context=False`` and this returns ONLY that provider's features.
+    Blending internal geometry into an externally-sourced layer would let a provider that
+    returned nothing still publish ``available: true`` under someone else's provenance,
+    silently bypassing ``no_centerline_features_in_area``, OFFLINE_SCENE_ROADS_REQUIRED and
+    the audited-fallback record. An operator who WANTS internal geometry after an external
+    miss configures the explicit ``eris_internal`` fallback, which is audited.
 
     ALL geometry is TRULY CLIPPED to bounds + buffer (Liang-Barsky per segment, see
     clip_line_to_bounds): a line crossing the AOI with both endpoints outside is retained
@@ -369,32 +381,41 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
         for line in _iter_line_only((feat or {}).get("geometry")):
             _emit(line, {**props, "kind": props.get("kind") or "road_centerline"})
 
-    # B. Road-inventory line geometry (route/postmile metadata when available).
-    inv_meta = {}
-    rxs_attrs = ((ctx.get("road_cross_section") or {}).get("attributes")) if isinstance(ctx.get("road_cross_section"), dict) else None
-    if isinstance(rxs_attrs, dict):
-        for k in ("route_name", "county_code", "begin_pm", "end_pm"):
-            if rxs_attrs.get(k) is not None:
-                inv_meta[k] = rxs_attrs[k]
-    for line in _iter_line_only(ctx.get("road_inventory_geometry")):
-        _emit(line, {"kind": "road_inventory", **inv_meta})
-
-    # C. Submitted incident geometry — ONLY line-like parts (never polygons).
-    for line in _iter_line_only(overlays.get("geometry")):
-        _emit(line, {"kind": "submitted_road_geometry"})
-
-    # D. Synthetic AOI-spanning road-bearing fallback (snap + orientation).
+    # B/C/D are ERIS-INTERNAL context. They belong to `eris_internal` ONLY — an external
+    # provider's layer must contain that provider's features and nothing else.
     incident = overlays.get("incident")
     bearing = overlays.get("roadBearingDeg")
-    if isinstance(incident, dict) and _finite(incident.get("lat")) and _finite(incident.get("lon")) and _finite(bearing):
-        span_m = _aoi_span_m(ctx.get("bounds") or {}) * 2.0 + 260.0
-        long_line = road_bearing_line(incident, float(bearing), length_m=span_m)
-        _emit(long_line, {"kind": "road_bearing", "bearing_deg": round(float(bearing), 1)})
+    if include_internal_context:
+        # B. Road-inventory line geometry (route/postmile metadata when available).
+        inv_meta = {}
+        rxs_attrs = ((ctx.get("road_cross_section") or {}).get("attributes")) if isinstance(ctx.get("road_cross_section"), dict) else None
+        if isinstance(rxs_attrs, dict):
+            for k in ("route_name", "county_code", "begin_pm", "end_pm"):
+                if rxs_attrs.get(k) is not None:
+                    inv_meta[k] = rxs_attrs[k]
+        for line in _iter_line_only(ctx.get("road_inventory_geometry")):
+            _emit(line, {"kind": "road_inventory", **inv_meta})
+
+        # C. Submitted incident geometry — ONLY line-like parts (never polygons).
+        for line in _iter_line_only(overlays.get("geometry")):
+            _emit(line, {"kind": "submitted_road_geometry"})
+
+        # D. Synthetic AOI-spanning road-bearing fallback (snap + orientation).
+        if isinstance(incident, dict) and _finite(incident.get("lat")) and _finite(incident.get("lon")) and _finite(bearing):
+            span_m = _aoi_span_m(ctx.get("bounds") or {}) * 2.0 + 260.0
+            long_line = road_bearing_line(incident, float(bearing), length_m=span_m)
+            _emit(long_line, {"kind": "road_bearing", "bearing_deg": round(float(bearing), 1)})
 
     count = len(features)
     reason = None
     if count == 0:
-        if external_configured:
+        if not include_internal_context:
+            # An EXTERNAL provider was selected and returned nothing usable here. Internal
+            # geometry may exist, but it is not this provider's data and must not make the
+            # layer "available" — say so precisely so required-mode fails and an explicit
+            # fallback is the only way internal geometry gets packaged.
+            reason = ROADS_REASON_NO_FEATURES
+        elif external_configured:
             reason = ROADS_REASON_NO_FEATURES  # a source is configured but returned nothing here
         elif ctx.get("road_inventory_geometry") is None and not _finite(bearing):
             # No inventory geometry and no bearing: the confirmed field blocker. The

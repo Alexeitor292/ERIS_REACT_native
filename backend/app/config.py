@@ -177,8 +177,9 @@ class Settings(BaseSettings):
     # F_System functional-classification codes to INCLUDE. DEFAULT 1,2 = Interstate + Other
     # Freeways and Expressways (the conservative freeway/expressway scope). Class 3
     # ("Principal Arterial - Other") is a SURFACE arterial, NOT a freeway — operators may
-    # opt in with "1,2,3" for broader principal-arterial context. Codes 1-7; invalid
-    # entries are ignored.
+    # opt in with "1,2,3" for broader principal-arterial context. Codes 1-7 only; a supplied
+    # value that is malformed, out of range, floating-point or empty is REJECTED at startup
+    # (never ignored and never silently collapsed to the default).
     OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES: str = Field(default="1,2")
     # Bounded pagination + safety limits (never download the statewide dataset). Bounds are
     # enforced, not just documented: the page size is capped at the service's advertised

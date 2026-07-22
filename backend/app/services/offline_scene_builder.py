@@ -469,9 +469,18 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                     timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
                 )
 
+        # PROVIDER EXCLUSIVITY: ERIS-internal context (Road Inventory geometry, submitted
+        # line geometry, the synthetic road-bearing line) belongs to `eris_internal` ONLY.
+        # An externally-sourced roads layer contains that provider's features and nothing
+        # else, so a provider that returned nothing cannot publish available:true under
+        # borrowed geometry — it degrades to no_centerline_features_in_area, which required
+        # mode fails on and an explicit (audited) fallback is the only way to package
+        # internal geometry instead.
+        include_internal_context = (road_source == context_fmt.ROAD_SOURCE_ERIS_INTERNAL)
         geojson, count, roads_reason = context_fmt.roads_geojson_from_context(
             {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M,
             external_configured=external_configured,
+            include_internal_context=include_internal_context,
         )
         # Deterministic station-local divided-highway pairing (ADDITIVE): adds a stable
         # feature_id + ERIS-derived selection_kind to every road, splits a paired

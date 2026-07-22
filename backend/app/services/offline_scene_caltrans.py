@@ -188,25 +188,41 @@ def parse_functional_classes(spec) -> tuple[int, ...]:
     return tuple(sorted(out))
 
 
+def normalize_functional_class_collection(classes) -> tuple[int, ...]:
+    """THE strict normalizer for a functional-class COLLECTION (the adapter/query API).
+
+    Accepts genuine, non-boolean Python ``int`` codes 1-7 only, then de-duplicates and sorts
+    deterministically. Everything else is REJECTED rather than coerced, because ``int(c)``
+    silently turns ``1.9`` into 1, ``True`` into 1, ``1.0`` into 1 and ``"1"`` into 1 — any of
+    which would issue a query for a class the caller never asked for.
+
+    Operator STRING input has its own parser (``parse_functional_classes``); this collection
+    API deliberately does not accept strings at all."""
+    codes: list[int] = []
+    for c in classes or []:
+        if isinstance(c, bool):
+            raise ValueError(f"functional class {c!r} is a bool, not an F_System code")
+        if not isinstance(c, int):
+            raise ValueError(
+                f"functional class {c!r} must be an int (floats and strings are rejected, never coerced)"
+            )
+        if c not in FUNCTIONAL_CLASS_LABELS:
+            raise ValueError(f"functional class {c} is not a known F_System code (1-7)")
+        codes.append(c)
+    if not codes:
+        raise ValueError("no functional classes selected for the Caltrans road filter")
+    return tuple(sorted(set(codes)))
+
+
 def build_where_clause(classes) -> str:
     """Build the ArcGIS ``where`` clause ``F_System IN (1, 2)`` from a validated set of
     integer functional-class codes.
 
-    SECURITY: only ints that exist in FUNCTIONAL_CLASS_LABELS are ever interpolated — no
-    untrusted string is ever concatenated into a where clause. Raises ValueError on an
-    empty or invalid set."""
-    codes: list[int] = []
-    for c in classes or []:
-        try:
-            n = int(c)
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"functional class {c!r} is not an integer") from e
-        if n not in FUNCTIONAL_CLASS_LABELS:
-            raise ValueError(f"functional class {n} is not a known F_System code (1-7)")
-        codes.append(n)
-    if not codes:
-        raise ValueError("no functional classes selected for the Caltrans road filter")
-    codes = sorted(set(codes))
+    SECURITY: the collection is normalized by ``normalize_functional_class_collection`` first,
+    so only genuine ints that exist in FUNCTIONAL_CLASS_LABELS are ever interpolated — no
+    untrusted or coerced value is ever concatenated into a where clause. Raises ValueError on
+    an empty or invalid set."""
+    codes = normalize_functional_class_collection(classes)
     return f"{FUNCTIONAL_CLASS_FIELD} IN ({', '.join(str(n) for n in codes)})"
 
 
@@ -766,8 +782,11 @@ def fetch_caltrans_road_features(
     from . import offline_scene_imagery as imagery  # run_with_retries (bounded, injectable clock)
 
     _require_https(layer_url)
-    where = build_where_clause(functional_classes)
-    included = parse_functional_classes(",".join(str(int(c)) for c in functional_classes))
+    # Normalize ONCE, strictly, BEFORE the where clause, the included-class set and any
+    # network request — so an invalid collection (float, bool, string) raises before a single
+    # request is issued, and can never be silently coerced into a different query.
+    included = normalize_functional_class_collection(functional_classes)
+    where = build_where_clause(included)
     layer_key = caltrans_layer_key(layer_url)
     if session is None:
         import requests

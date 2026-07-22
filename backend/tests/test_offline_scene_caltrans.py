@@ -774,6 +774,26 @@ class TestFunctionalClassConfig:
         s = Settings(DB_PASS="x", JWT_SECRET="y")
         assert s.OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES == "1,2"
 
+    # ---- strict COLLECTION normalization (adapter/query API) ----
+    @pytest.mark.parametrize("bad", [[1.9], [1.0], [True], [False], ["1"], ["1.9"], [None], [8], [0], [], [2, "3"]])
+    def test_build_where_clause_rejects_non_int_collections(self, bad):
+        # int(c) would silently turn 1.9/True/1.0/"1" into 1 — a query nobody asked for.
+        with pytest.raises(ValueError):
+            cal.build_where_clause(bad)
+
+    def test_build_where_clause_normalizes_valid_collections(self):
+        assert cal.build_where_clause([2, 1, 2]) == "F_System IN (1, 2)"
+        assert cal.normalize_functional_class_collection([3, 1, 3]) == (1, 3)
+
+    @pytest.mark.parametrize("bad", [[1.9], [1.0], [True], ["1"], [], [8]])
+    def test_fetch_rejects_invalid_collections_before_any_request(self, bad):
+        s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A)])
+        with pytest.raises(ValueError):
+            cal.fetch_caltrans_road_features(
+                BOUNDS, layer_url=URL, functional_classes=bad, timeout_s=30, session=s, sleep=lambda *_: None
+            )
+        assert s.calls == [], "no network request may be issued for an invalid class collection"
+
     def test_upstream_non_integral_f_system_is_not_truncated(self):
         # 1.9 must NOT become class 1 — it is rejected, so the feature is dropped.
         for bad in (1.9, "1.9", "1e0", True):
@@ -1219,6 +1239,124 @@ class TestBuilderIntegration:
         assert layers["roads"]["available"] is True
         assert layers["roads"]["source"]["provider"] == "eris_internal"
         assert ctxmod.ROADS_FILE in assets
+
+    # ---- PROVIDER EXCLUSIVITY: an external layer holds ONLY that provider's features ----
+
+    def test_zero_features_with_bearing_present_is_unavailable(self, monkeypatch):
+        """Caltrans configured + reachable + zero usable features, with an internal bearing
+        available: the bearing must NOT be borrowed to publish available:true."""
+        _caltrans_settings(monkeypatch)
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert roads["reason"] == ctxmod.ROADS_REASON_NO_FEATURES
+        assert ctxmod.ROADS_FILE not in assets
+        assert "source" not in roads
+
+    def test_zero_features_with_road_inventory_geometry_present_is_unavailable(self, monkeypatch):
+        _caltrans_settings(monkeypatch)
+        ctx = _ctx(bearing=None)
+        ctx["road_inventory_geometry"] = {"type": "LineString", "coordinates": IN_A}
+        layers, assets = _builder(PagingSession([]))._build_context_layers(ctx, base_bytes=0)
+        assert layers["roads"]["available"] is False
+        assert layers["roads"]["reason"] == ctxmod.ROADS_REASON_NO_FEATURES
+        assert ctxmod.ROADS_FILE not in assets
+
+    @pytest.mark.parametrize("bearing,inv", [(42.0, None), (None, {"type": "LineString", "coordinates": IN_A})])
+    def test_zero_features_with_internal_geometry_fails_when_roads_required(self, monkeypatch, bearing, inv):
+        _caltrans_settings(monkeypatch, required=True)
+        ctx = _ctx(bearing=bearing)
+        ctx["road_inventory_geometry"] = inv
+        with pytest.raises(OfflineSceneBuildError, match="required"):
+            _builder(PagingSession([]))._build_context_layers(ctx, base_bytes=0)
+
+    def test_explicit_eris_internal_fallback_packages_internal_geometry_audited(self, monkeypatch):
+        """The ONLY sanctioned route to internal geometry after an external miss."""
+        _caltrans_settings(monkeypatch, required=False, fallback="eris_internal")
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is True
+        assert roads["road_kinds"] == ["road_bearing"]
+        assert roads["source"]["provider"] == "eris_internal"
+        assert roads["fallback"] == {
+            "from": "caltrans_crs", "to": "eris_internal", "reason": "no_centerline_features_in_area",
+        }
+        assert ctxmod.ROADS_FILE in assets
+
+    def test_successful_caltrans_result_contains_no_internal_bearing_feature(self, monkeypatch):
+        """A successful external result must not be silently mixed with internal geometry."""
+        _caltrans_settings(monkeypatch)
+        s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A)])
+        layers, assets = _builder(s)._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is True
+        assert roads["road_kinds"] == ["road_centerline"]      # no road_bearing mixed in
+        gj = json.loads(assets[ctxmod.ROADS_FILE])
+        kinds = {f["properties"].get("kind") for f in gj["features"]}
+        assert kinds == {"road_centerline"}
+        assert all(f["properties"].get("provider") == "caltrans_crs" for f in gj["features"])
+
+    def test_tigerweb_zero_features_does_not_borrow_internal_geometry(self, monkeypatch):
+        _caltrans_settings(monkeypatch)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_BASE_URL", "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_LAYERS", "2,6,8")
+        monkeypatch.setattr(ctxmod, "fetch_tigerweb_road_features", lambda *a, **k: [])
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        assert layers["roads"]["available"] is False
+        assert layers["roads"]["reason"] == ctxmod.ROADS_REASON_NO_FEATURES
+        assert ctxmod.ROADS_FILE not in assets
+
+    def test_arcgis_zero_features_does_not_borrow_internal_geometry(self, monkeypatch):
+        _caltrans_settings(monkeypatch)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "arcgis_feature_service")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE_URL", "https://gis.example.gov/FeatureServer/0")
+        monkeypatch.setattr(ctxmod, "fetch_arcgis_road_features", lambda *a, **k: [])
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        assert layers["roads"]["available"] is False
+        assert layers["roads"]["reason"] == ctxmod.ROADS_REASON_NO_FEATURES
+        assert ctxmod.ROADS_FILE not in assets
+
+    def test_external_fallback_uses_only_the_fallback_providers_results(self, monkeypatch):
+        """An external fallback packages ITS OWN external features — never internal context."""
+        _caltrans_settings(monkeypatch, required=False, fallback="census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_BASE_URL", "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_LAYERS", "2,6,8")
+        monkeypatch.setattr(ctxmod, "fetch_tigerweb_road_features", lambda *a, **k: [])
+        # Caltrans finds nothing AND the tiger fallback finds nothing: internal bearing must
+        # still not be packaged by either provider.
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        assert layers["roads"]["available"] is False
+        assert ctxmod.ROADS_FILE not in assets
+
+    def test_eris_internal_still_packages_bearing_and_inventory(self, monkeypatch):
+        _caltrans_settings(monkeypatch)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "eris_internal")
+        ctx = _ctx(bearing=42.0)
+        ctx["road_inventory_geometry"] = {"type": "LineString", "coordinates": IN_B}
+        layers, assets = _builder(PagingSession([]))._build_context_layers(ctx, base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is True
+        assert set(roads["road_kinds"]) == {"road_bearing", "road_inventory"}
+        assert roads["source"]["provider"] == "eris_internal"
+        assert ctxmod.ROADS_FILE in assets
+
+    def test_cancellation_still_never_contacts_or_packages_a_fallback(self, monkeypatch):
+        """Exclusivity must not weaken the cancellation path."""
+        _caltrans_settings(monkeypatch, required=True, fallback="eris_internal")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_PAGE_SIZE", 1)
+        state = {"n": 0}
+
+        def cancel():
+            state["n"] += 1
+            return state["n"] > 1
+
+        s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A), gj_feat(2, "SHS_099._P", 2, IN_B)])
+        ctx = dict(_ctx(bearing=42.0))
+        ctx["cancel_check"] = cancel
+        with pytest.raises(cal.CaltransFetchCancelled):
+            _builder(s)._build_context_layers(ctx, base_bytes=0)
+        assert len(s.calls) == 1
 
     def test_provider_none_packages_no_roads(self, monkeypatch):
         _caltrans_settings(monkeypatch)
