@@ -292,14 +292,20 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 // ground-contact line ever spans a gap — a continuous surface there would imply measured
 // ground across terrain this package does not contain.
 - (void)buildCrossSectionPlane {
-  NSArray *runs = [self.corridor[@"sliceXsZsRuns"] isKindOfClass:[NSArray class]] ? self.corridor[@"sliceXsZsRuns"] : nil;
-  if (runs) {
+  // EXPLICIT contract discriminator — never `runs != nil` or mere array presence. The model
+  // always publishes sliceXsZsRuns, and for a non-divided road it is an EMPTY array; keying
+  // off presence would then draw neither the runs nor the legacy plane.
+  BOOL runsAuthoritative = [self.corridor[@"sliceRunsAuthoritative"] boolValue];
+  if (runsAuthoritative) {
+    // Divided corridor: draw ONLY the declared valid runs. Zero runs means nothing is drawn —
+    // falling back to the flat sliceXsZs array here would bridge a divided NoData gap.
+    NSArray *runs = [self.corridor[@"sliceXsZsRuns"] isKindOfClass:[NSArray class]] ? self.corridor[@"sliceXsZsRuns"] : @[];
     for (id r in runs) {
       if ([r isKindOfClass:[NSArray class]] && [(NSArray *)r count] >= 2) [self buildCrossSectionPlaneRun:(NSArray *)r];
     }
     return;
   }
-  // Legacy / non-divided packages carry no validity mask: one continuous run.
+  // Legacy / non-divided packages carry no validity mask: one continuous plane, unchanged.
   NSArray *sl = [self.corridor[@"sliceXsZs"] isKindOfClass:[NSArray class]] ? self.corridor[@"sliceXsZs"] : @[];
   if (sl.count >= 2) [self buildCrossSectionPlaneRun:sl];
 }

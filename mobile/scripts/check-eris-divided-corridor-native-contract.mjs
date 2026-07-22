@@ -763,7 +763,7 @@ const tsModel = readFileSync(TS("dividedCorridorInspection.ts"), "utf8");
       fail(tag, "dividedGroundRunsFt must END the current run at every unusable sample.");
     }
     if (!/isEqualToString:@"OK"/.test(runs)) fail(tag, "only status OK samples may carry ground.");
-    if (!/disnull\(ev\)/.test(runs) || !/isfinite\(\[ev doubleValue\]\)/.test(runs)) {
+    if (!/disnull\(s\[@"elevationFt"\]\)/.test(runs) || !/ErisSliceRealNumber\(s\[@"elevationFt"\]/.test(runs)) {
       fail(tag, "a null / non-finite elevation must end the run.");
     }
   }
@@ -804,6 +804,100 @@ const tsModel = readFileSync(TS("dividedCorridorInspection.ts"), "utf8");
   }
   if (!/sliceXsZsRuns/.test(terrain)) {
     fail(tag, "the corridor model must publish sliceXsZsRuns (validity-split slice line).");
+  }
+}
+
+// ---- P: the MAIN-MAP slice indicator is split on the same mask, and fails closed ---------
+// Mutation battery: dropping the mask check, or rebuilding one flat polyline, must fail CI.
+{
+  const tag = "map-slice-runs";
+  const draw = methodBody(terrain, "- (void)drawSliceLineFromSection:");
+  if (!draw) {
+    fail(tag, "the map must implement drawSliceLineFromSection:.");
+  } else {
+    if (!/sliceValid/.test(draw)) {
+      fail(tag, "the map slice indicator must consume the section's sliceValid mask.");
+    }
+    if (!/validMask\.count\s*!=\s*pts2\.count/.test(draw)) {
+      fail(tag, "the map slice indicator must require the mask and point arrays to be the same length.");
+    }
+    if (!/flushRun/.test(draw) || countOf(draw, /flushRun\(\)/g) < 2) {
+      fail(tag, "the map slice indicator must flush one polyline PER contiguous valid run.");
+    }
+    if (!/run\.count\s*>=\s*2/.test(draw)) {
+      fail(tag, "a one-point run must not become a map polyline.");
+    }
+    // Fail closed: every malformed-mask branch returns without drawing.
+    if (countOf(draw, /return;/g) < 5) {
+      fail(tag, "a missing/malformed/mismatched mask must fail closed (draw no divided indicator).");
+    }
+    if (/isKindOfClass:\[NSArray class\]\]\s*\?\s*section\[@"sliceLonLat"\]\s*:\s*@\[\]/.test(draw)) {
+      fail(tag, "the map slice indicator must not silently substitute an empty point list.");
+    }
+    // The parent node keeps the existing cleanup/visibility contract.
+    if (!/self\.sliceLineNode\s*=\s*parent/.test(draw)) {
+      fail(tag, "the run polylines must hang under ONE parent sliceLineNode (cleanup contract).");
+    }
+  }
+}
+
+// ---- Q: the immersive run contract uses an EXPLICIT discriminator ------------------------
+// Mutation battery: reverting to `runs != nil` / array-presence must fail CI, because the
+// model always publishes sliceXsZsRuns (empty for a non-divided road) and presence-keying
+// would suppress the legacy continuous plane.
+{
+  const tag = "slice-runs-authoritative";
+  if (!/@"sliceRunsAuthoritative"/.test(terrain)) {
+    fail(tag, "the corridor model must publish an explicit sliceRunsAuthoritative flag.");
+  }
+  const model = methodBody(terrain, "- (NSDictionary *)buildCorridorModelAtLat:") || terrain;
+  if (!/sliceRunsAuthoritative\s*=\s*\(sliceValid != nil && sliceValid\.count == slicePts\.count\)/.test(model)) {
+    fail(tag, "sliceRunsAuthoritative must be true ONLY for a divided section with a matching-length mask.");
+  }
+  const plane = methodBody(immersive, "- (void)buildCrossSectionPlane") || "";
+  if (!/\[self\.corridor\[@"sliceRunsAuthoritative"\] boolValue\]/.test(plane)) {
+    fail(tag, "the immersive plane must branch on sliceRunsAuthoritative, not on array presence.");
+  }
+  if (/if\s*\(runs\)\s*\{/.test(plane)) {
+    fail(tag, "the immersive plane must not use `runs != nil` as the discriminator (empty array bug).");
+  }
+  // The legacy fallback must still exist, and must be unreachable when runs are authoritative.
+  if (!/sliceXsZs"\]/.test(plane) || !/sl\.count >= 2/.test(plane)) {
+    fail(tag, "the non-divided/legacy continuous plane must still be built from sliceXsZs.");
+  }
+  // Bodies are comment-stripped, so bound the authoritative branch by its own `return;`.
+  const authStart = plane.indexOf("runsAuthoritative)");
+  const authEnd = authStart >= 0 ? plane.indexOf("return;", authStart) : -1;
+  const authBlock = authStart >= 0 && authEnd > authStart ? plane.slice(authStart, authEnd) : "";
+  if (!authBlock) {
+    fail(tag, "the authoritative-runs branch must return (zero valid runs draws nothing).");
+  } else if (/sliceXsZs"\]/.test(authBlock)) {
+    fail(tag, "a divided corridor must NEVER fall back to the flat sliceXsZs array.");
+  }
+}
+
+// ---- R: native run samples reject booleans and strings ----------------------------------
+// Mutation battery: accepting a CFBoolean or a numeric string for offsetFt/elevationFt must
+// fail CI — TS treats both as invalid terrain, and the native mirror must agree.
+{
+  const tag = "run-sample-types";
+  if (!/static BOOL ErisSliceRealNumber/.test(slice)) {
+    fail(tag, "the slice renderer must define ErisSliceRealNumber (real, finite, non-boolean).");
+  } else {
+    const helper = slice.slice(slice.indexOf("static BOOL ErisSliceRealNumber"), slice.indexOf("static BOOL ErisSliceRealNumber") + 520);
+    if (!/isKindOfClass:\[NSNumber class\]/.test(helper)) fail(tag, "ErisSliceRealNumber must require an NSNumber (rejecting NSString).");
+    if (!/kCFBooleanTrue|kCFBooleanFalse/.test(helper)) fail(tag, "ErisSliceRealNumber must reject CFBoolean values.");
+    if (!/isfinite/.test(helper)) fail(tag, "ErisSliceRealNumber must require a finite value.");
+  }
+  const runs = methodBody(slice, "- (NSArray<NSArray<NSValue *> *> *)dividedGroundRunsFt") || "";
+  if (!/ErisSliceRealNumber\(s\[@"offsetFt"\]/.test(runs)) {
+    fail(tag, "the run builder must validate offsetFt as a real non-boolean NSNumber (never dnum/doubleValue).");
+  }
+  if (!/ErisSliceRealNumber\(s\[@"elevationFt"\]/.test(runs)) {
+    fail(tag, "the run builder must validate elevationFt as a real non-boolean NSNumber.");
+  }
+  if (/dnum\(s,\s*@"offsetFt"/.test(runs)) {
+    fail(tag, "the run builder must not coerce offsetFt through dnum (accepts strings and booleans).");
   }
 }
 

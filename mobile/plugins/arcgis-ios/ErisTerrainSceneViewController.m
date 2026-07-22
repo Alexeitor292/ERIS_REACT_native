@@ -3646,13 +3646,22 @@ static BOOL ErisIsBoolNumber(id v) {
   // Contiguous VALID runs of the slice line. The immersive plane/base line is built from
   // these, so no quad or ground-contact line is ever drawn across a terrain gap.
   NSMutableArray *sliceXsZsRuns = [NSMutableArray array];
+  // EXPLICIT contract discriminator. The runs array is authoritative ONLY for an observed
+  // divided corridor whose sliceValid mask was actually processed. It must never be inferred
+  // from the array merely being present/non-nil: an EMPTY runs array on a non-divided road
+  // would then suppress the legacy continuous plane entirely.
+  BOOL sliceRunsAuthoritative = NO;
   BOOL sliceTruncated = NO;
   NSDictionary *dividedSection = [slice[@"dividedSection"] isKindOfClass:[NSDictionary class]] ? slice[@"dividedSection"] : nil;
   if (dividedSection) {
     // OBSERVED divided corridor: the section plane is the model's already-clipped section —
     // the SAME points the map line and the technical profile use. No template geometry.
     NSArray *sliceValid = [dividedSection[@"sliceValid"] isKindOfClass:[NSArray class]] ? dividedSection[@"sliceValid"] : nil;
-    NSArray *slicePts = (NSArray *)dividedSection[@"sliceLonLat"];
+    NSArray *slicePts = [dividedSection[@"sliceLonLat"] isKindOfClass:[NSArray class]] ? dividedSection[@"sliceLonLat"] : @[];
+    // Authoritative only when the divided section really carries a mask of matching length.
+    // Otherwise the runs stay empty AND non-authoritative, so the immersive view falls back
+    // to its legacy behaviour instead of silently drawing nothing.
+    sliceRunsAuthoritative = (sliceValid != nil && sliceValid.count == slicePts.count);
     NSMutableArray *run = [NSMutableArray array];
     for (NSUInteger i = 0; i < slicePts.count; i++) {
       NSArray *p = slicePts[i];
@@ -3726,6 +3735,7 @@ static BOOL ErisIsBoolNumber(id v) {
     @"heights": heights, @"minElevM": @(minElev), @"maxElevM": @(maxElev),
     @"image": img ?: (id)[NSNull null], @"hasImagery": @(img != nil),
     @"roadPartsXsZs": roadPartsXsZs, @"sliceXsZs": sliceXsZs, @"sliceXsZsRuns": sliceXsZsRuns,
+    @"sliceRunsAuthoritative": @(sliceRunsAuthoritative),
     @"sliceTruncated": @(sliceTruncated),
     @"stationEastM": @(stationEastM), @"stationSouthM": @(stationSouthM),
     @"upstationDeg": @(upstationDeg), @"crossBearingDeg": @(crossBearing),
@@ -3873,20 +3883,52 @@ static BOOL ErisIsBoolNumber(id v) {
 // profiles. No shoulder edges, no ±50 ft, no template bearing.
 - (void)drawSliceLineFromSection:(NSDictionary *)section {
   [self.sliceLineNode removeFromParentNode];
-  NSArray *pts2 = [section[@"sliceLonLat"] isKindOfClass:[NSArray class]] ? section[@"sliceLonLat"] : @[];
-  NSMutableArray<NSValue *> *pts = [NSMutableArray array];
-  for (NSArray *p in pts2) {
-    if (![p isKindOfClass:[NSArray class]] || p.count < 2) continue;
-    SCNVector3 w;
-    if ([self surfaceWorldForLat:[p[1] doubleValue] lon:[p[0] doubleValue]
-                            lift:[self drapeLiftForLayer:ErisDrapeSliceIndicator] out:&w]) {
-      [pts addObject:[NSValue valueWithSCNVector3:w]];
+  self.sliceLineNode = nil;
+  NSArray *pts2 = [section[@"sliceLonLat"] isKindOfClass:[NSArray class]] ? (NSArray *)section[@"sliceLonLat"] : nil;
+  if (pts2.count < 2) return;
+
+  // The map indicator is split on the SAME sliceValid mask the technical profile and the
+  // immersive plane use, so all three derive identical run boundaries from the ONE immutable
+  // section. FAIL CLOSED: this method is only ever called for an OBSERVED divided corridor,
+  // so a missing, malformed or length-mismatched mask draws NO indicator — reverting to one
+  // continuous line would draw straight through terrain the package does not contain.
+  id rawValid = section[@"sliceValid"];
+  if (![rawValid isKindOfClass:[NSArray class]]) return;
+  NSArray *validMask = (NSArray *)rawValid;
+  if (validMask.count != pts2.count) return;
+  for (id m in validMask) if (![m isKindOfClass:[NSNumber class]]) return;
+
+  SCNNode *parent = [SCNNode node];
+  UIColor *color = [UIColor colorWithRed:0.30 green:0.85 blue:0.95 alpha:0.9];
+  NSMutableArray<NSValue *> *run = [NSMutableArray array];
+  // Each run is flushed as its OWN polyline: the end of one run is never joined to the start
+  // of the next, and a one-point run produces no line at all.
+  void (^flushRun)(void) = ^{
+    if (run.count >= 2) {
+      SCNNode *seg = [self polylineFromPoints:[run copy] color:color closed:NO];
+      if (seg) [parent addChildNode:seg];
     }
+    [run removeAllObjects];
+  };
+
+  for (NSUInteger i = 0; i < pts2.count; i++) {
+    id p = pts2[i];
+    BOOL valid = [validMask[i] boolValue];
+    SCNVector3 w;
+    BOOL placed = NO;
+    if (valid && [p isKindOfClass:[NSArray class]] && [(NSArray *)p count] >= 2) {
+      placed = [self surfaceWorldForLat:[((NSArray *)p)[1] doubleValue] lon:[((NSArray *)p)[0] doubleValue]
+                                   lift:[self drapeLiftForLayer:ErisDrapeSliceIndicator] out:&w];
+    }
+    if (placed) [run addObject:[NSValue valueWithSCNVector3:w]];
+    else flushRun();                    // the gap ENDS the run
   }
-  if (pts.count < 2) return;
-  SCNNode *line = [self polylineFromPoints:pts color:[UIColor colorWithRed:0.30 green:0.85 blue:0.95 alpha:0.9] closed:NO];
-  self.sliceLineNode = line;
-  [self.exagNode addChildNode:line];
+  flushRun();
+
+  if (parent.childNodes.count == 0) return;   // no drawable run -> no indicator at all
+  // ONE parent node keeps the existing cleanup/visibility contract unchanged.
+  self.sliceLineNode = parent;
+  [self.exagNode addChildNode:parent];
 }
 
 - (void)showCrossSectionMessage:(NSString *)msg {

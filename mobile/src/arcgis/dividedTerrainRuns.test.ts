@@ -12,6 +12,7 @@ import {
   exactAnchorElevation,
   interpolateWithinRuns,
   isolatedPoints,
+  maskedPolylineRuns,
   renderableRuns,
   renderableSegments,
   type TerrainSample,
@@ -147,6 +148,57 @@ test("a fill can never span from one valid run to another", () => {
     assert.ok(run.length >= 2);
     assert.ok(run.every((p) => Number.isFinite(p.elevationFt)));
   }
+});
+
+// --- main-map slice indicator: mask-driven polyline runs -------------------------------
+
+test("map: one invalid middle sample creates TWO polylines", () => {
+  const pts = ["a", "b", "c", "d"];
+  const runs = maskedPolylineRuns(pts, [true, true, false, true]);
+  assert.ok(runs);
+  // The single trailing point cannot form a line, so only the leading run survives.
+  assert.deepEqual(runs, [["a", "b"]]);
+  const runs2 = maskedPolylineRuns(["a", "b", "c", "d", "e"], [true, true, false, true, true]);
+  assert.deepEqual(runs2, [["a", "b"], ["d", "e"]]);   // two independent polylines
+});
+
+test("map: adjacent invalid samples create ONE gap, not several", () => {
+  const runs = maskedPolylineRuns(["a", "b", "c", "d", "e", "f"], [true, true, false, false, true, true]);
+  assert.deepEqual(runs, [["a", "b"], ["e", "f"]]);
+});
+
+test("map: no polyline segment ever crosses a false mask entry", () => {
+  const pts = [0, 1, 2, 3, 4, 5];
+  const mask = [true, true, false, true, true, true];
+  const runs = maskedPolylineRuns(pts, mask)!;
+  for (const run of runs) {
+    for (let i = 0; i + 1 < run.length; i++) {
+      for (let k = run[i] + 1; k < run[i + 1]; k++) {
+        assert.ok(mask[k], `segment ${run[i]}->${run[i + 1]} crosses invalid index ${k}`);
+      }
+    }
+  }
+  assert.deepEqual(runs, [[0, 1], [3, 4, 5]]);
+});
+
+test("map: a one-point run produces NO polyline", () => {
+  assert.deepEqual(maskedPolylineRuns(["a", "b", "c"], [false, true, false]), []);
+});
+
+test("map: a malformed or length-mismatched mask FAILS CLOSED (draw nothing)", () => {
+  const pts = ["a", "b", "c"];
+  assert.equal(maskedPolylineRuns(pts, null), null);
+  assert.equal(maskedPolylineRuns(pts, undefined), null);
+  assert.equal(maskedPolylineRuns(pts, [true, true]), null);              // too short
+  assert.equal(maskedPolylineRuns(pts, [true, true, true, true]), null);  // too long
+  assert.equal(maskedPolylineRuns(pts, [true, "yes", true] as unknown[]), null); // wrong types
+  assert.equal(maskedPolylineRuns(null, [true]), null);
+  // Fail-closed means NULL (nothing drawn) — never one continuous line.
+  assert.notDeepEqual(maskedPolylineRuns(pts, [true, true]), [pts]);
+});
+
+test("map: an all-valid mask yields exactly one continuous polyline", () => {
+  assert.deepEqual(maskedPolylineRuns(["a", "b", "c"], [true, true, true]), [["a", "b", "c"]]);
 });
 
 test("empty / malformed input degrades safely", () => {

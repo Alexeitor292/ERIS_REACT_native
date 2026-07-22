@@ -140,6 +140,38 @@ export function criticalAnchorsSatisfied(
 }
 
 /**
+ * Split an ordered point list on a parallel validity MASK — the contract the main-map slice
+ * indicator uses (`sliceLonLat` + `sliceValid`), mirrored by -drawSliceLineFromSection: in
+ * ErisTerrainSceneViewController.m.
+ *
+ * FAIL CLOSED: returns `null` (draw nothing at all) when the mask is missing, is not an
+ * array, is not all booleans/numbers, or does not have exactly the same length as the points.
+ * Reverting to one continuous polyline in that case would draw straight through terrain the
+ * package does not contain. Only runs of >= 2 points are returned, so a one-point run never
+ * becomes a line.
+ */
+export function maskedPolylineRuns<T>(
+  points: readonly T[] | null | undefined,
+  mask: readonly unknown[] | null | undefined,
+): T[][] | null {
+  if (!Array.isArray(points) || !Array.isArray(mask)) return null;
+  if (mask.length !== points.length) return null;
+  if (!mask.every((m) => typeof m === "boolean" || typeof m === "number")) return null;
+  const runs: T[][] = [];
+  let cur: T[] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (mask[i]) {
+      cur.push(points[i]);
+    } else if (cur.length) {
+      runs.push(cur);
+      cur = [];
+    }
+  }
+  if (cur.length) runs.push(cur);
+  return runs.filter((r) => r.length >= 2);
+}
+
+/**
  * The drawable segments implied by the runs: [from, to] pairs of ADJACENT samples within one
  * run. Used by tests to prove no rendered segment straddles an invalid sample.
  */

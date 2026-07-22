@@ -15,6 +15,19 @@ static NSString *const kSliceMedianSeparationDetail =
     @"Interval between observed carriageway centerlines. Pavement edges and physical median width are unavailable.";
 
 // Small, safe dictionary readers (never throw on wrong types).
+// A REAL, finite, non-boolean NSNumber. Used for every sample-level field in the divided run
+// builder: -doubleValue/dnum would coerce the NSString "12" to 12 and the CFBoolean @YES to
+// 1, so a malformed packaged sample could masquerade as valid ground. CFBooleans are NSNumber
+// subclasses, so they are rejected by pointer identity against the shared singletons.
+static BOOL ErisSliceRealNumber(id v, double *out) {
+  if (![v isKindOfClass:[NSNumber class]]) return NO;             // rejects NSString outright
+  if (v == (id)kCFBooleanTrue || v == (id)kCFBooleanFalse) return NO;
+  double d = [v doubleValue];
+  if (!isfinite(d)) return NO;
+  if (out) *out = d;
+  return YES;
+}
+
 static double dnum(NSDictionary *d, NSString *k, double def) {
   id v = [d isKindOfClass:[NSDictionary class]] ? d[k] : nil;
   return [v respondsToSelector:@selector(doubleValue)] ? [v doubleValue] : def;
@@ -252,13 +265,15 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
     BOOL usable = NO;
     double off = 0, elev = 0;
     if ([s isKindOfClass:[NSDictionary class]]) {
-      off = dnum(s, @"offsetFt", NAN);
-      id ev = s[@"elevationFt"];
-      if (isfinite(off) && off >= minOff - 1e-6 && off <= maxOff + 1e-6 &&
+      // Both fields must be REAL, finite, non-boolean NSNumbers. A numeric string is
+      // rejected outright rather than coerced through -doubleValue/dnum, and a CFBoolean is
+      // rejected even though it is an NSNumber subclass — otherwise @YES would become
+      // offset/elevation 1. A malformed sample terminates the run exactly like NO_DATA.
+      if (ErisSliceRealNumber(s[@"offsetFt"], &off) &&
+          off >= minOff - 1e-6 && off <= maxOff + 1e-6 &&
           [dstr(s, @"status", @"") isEqualToString:@"OK"] &&
-          !disnull(ev) && [ev isKindOfClass:[NSNumber class]] && isfinite([ev doubleValue])) {
+          !disnull(s[@"elevationFt"]) && ErisSliceRealNumber(s[@"elevationFt"], &elev)) {
         usable = YES;
-        elev = [ev doubleValue];
       }
     }
     if (usable) {
