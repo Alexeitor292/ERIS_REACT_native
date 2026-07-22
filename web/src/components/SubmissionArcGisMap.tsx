@@ -23,38 +23,17 @@ import CoordinateConversion from "@arcgis/core/widgets/CoordinateConversion";
 import Sketch from "@arcgis/core/widgets/Sketch";
 import Expand from "@arcgis/core/widgets/Expand";
 import { appConfig } from "../config";
+import { caltransHighwaysLayerConfig } from "./caltransHighwaysLayer";
 
-// Optional ONLINE "Caltrans Highways & Freeways" context layer: the PUBLIC Caltrans CRS
-// Functional Classification FeatureServer, filtered to highway/freeway functional classes
-// (F_System 1,2,3) and streamed live. It is OFF by default (toggle it on in the Layers
-// widget). This live overlay is intentionally independent of the offline package's
-// packaged roads — it does not claim to contain every California road, and it is never
-// used to decide whether a downloaded package contains roads.
+// Optional ONLINE Caltrans freeway/expressway context layer. OPT-IN: when
+// VITE_CALTRANS_HIGHWAYS_URL is unset the config helper returns null and NO layer is
+// constructed, so the deployment makes no request to the public service at all. The
+// construction policy (title, F_System 1,2 filter, trusted attribution, truthful
+// functional-classification wording) lives in the pure, unit-tested
+// ./caltransHighwaysLayer module.
 function createCaltransHighwaysLayer(): FeatureLayer | null {
-  const url = (appConfig.caltransHighwaysUrl ?? "").trim();
-  if (!url) return null;
-  return new FeatureLayer({
-    url,
-    title: "Caltrans Highways & Freeways",
-    visible: false, // opt-in: streamed only after the operator toggles it on
-    // Highways/freeways only — keeps the online overlay consistent with its name and the
-    // offline provider's scope, and avoids streaming local streets.
-    definitionExpression: "F_System IN (1, 2, 3)",
-    outFields: ["OBJECTID", "RouteID", "F_System", "County_label", "Caltrans_District"],
-    // The service exposes no copyrightText; declare attribution explicitly so the built-in
-    // attribution widget credits Caltrans. ERIS does not own or author this data.
-    copyright: "Highway geometry © California Department of Transportation (Caltrans), CRS Functional Classification",
-    renderer: {
-      type: "simple",
-      symbol: { type: "simple-line", width: 2.4, color: [234, 88, 12, 0.92] },
-    } as any,
-    popupTemplate: {
-      title: "Caltrans route {RouteID}",
-      content:
-        "Functional class {F_System} · County {County_label} · Caltrans District {Caltrans_District}" +
-        "<br/><small>Source: Caltrans CRS Functional Classification (live). Not survey/engineering-grade.</small>",
-    } as any,
-  });
+  const cfg = caltransHighwaysLayerConfig(appConfig.caltransHighwaysUrl);
+  return cfg ? new FeatureLayer(cfg as any) : null;
 }
 
 type Props = {

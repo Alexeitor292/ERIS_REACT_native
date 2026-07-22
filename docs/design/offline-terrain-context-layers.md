@@ -21,9 +21,10 @@ road-provider configuration or implementing a new adapter.
   Transportation road geometry, queried by the worker during package generation.
 - **Implementation status:** **implemented (backend-only).** The code supports
   `none`, `eris_internal`, `census_tigerweb`, `arcgis_feature_service`, and (added
-  2026-07-21) `caltrans_crs` — the OPTIONAL California highway/freeway source from the
-  public Caltrans CRS Functional Classification FeatureServer. No mobile / Objective-C /
-  Expo change and **no new EAS build** were required.
+  2026-07-21) `caltrans_crs` — OPTIONAL Caltrans freeway/expressway road context from the
+  public Caltrans CRS Functional Classification FeatureServer (a functional classification,
+  NOT an ownership dataset). No mobile / Objective-C / Expo change and **no new EAS build**
+  were required.
 - **Why:** this allows independent development without connecting the current ERIS
   environment to Caltrans ArcGIS Enterprise yet.
 - **Production posture:** Caltrans ArcGIS Enterprise remains a future authoritative
@@ -109,12 +110,13 @@ OFFLINE_SCENE_TIGERWEB_BASE_URL=https://tigerweb.geo.census.gov/arcgis/rest/serv
 OFFLINE_SCENE_TIGERWEB_LAYERS=2,6,8   # 2 Primary, 6 Secondary, 8 Local
 ```
 
-Caltrans California highway/freeway source (implemented; PUBLIC, credential-free, worker-only):
+Caltrans CRS Functional Classification source (implemented; PUBLIC, credential-free, worker-only):
 
 ```env
 OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs
 OFFLINE_SCENE_CALTRANS_ROADS_URL=https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0
-OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES=1,2,3  # F_System: 1 Interstate, 2 Other Freeways/Expressways, 3 Other Principal Arterials
+OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES=1,2    # DEFAULT: 1 Interstate + 2 Other Freeways and Expressways
+                                                 # (3 = "Principal Arterial - Other" is a SURFACE arterial, opt-in)
 OFFLINE_SCENE_CALTRANS_PAGE_SIZE=1000            # bounded pagination + safety caps
 OFFLINE_SCENE_CALTRANS_MAX_FEATURES=20000
 OFFLINE_SCENE_CALTRANS_MAX_PAGES=100
@@ -123,10 +125,17 @@ OFFLINE_SCENE_CALTRANS_RETRIES=2
 ```
 
 Caltrans behavior: bounded, paginated query of the package AOI filtered to the configured
-`F_System` highway/freeway classes; response JSON/geometry/coordinates validated; features
-normalized to a minimal allowlist with an ERIS-trusted `road_class`; deduped by `OBJECTID`;
-clipped to bounds + buffer; provenance credits Caltrans (road **context**, not
-survey/engineering-grade). It queries only the AOI — never the statewide dataset.
+`F_System` classes; response JSON/geometry/coordinates validated; features normalized to a
+minimal allowlist with an ERIS-trusted `road_class` and a durable `source_feature_id`
+(OBJECTID is kept only as `provider_object_id` for provenance/pagination/dedupe); clipped to
+bounds + buffer; provenance credits Caltrans. Pagination caps **fail closed** — a truncated
+result is never packaged as available.
+
+Scope caveat: this layer is a **functional classification**, not an ownership dataset. It
+does not establish that a feature is Caltrans-owned or a State Route, and it is road
+**context**, not survey/engineering-grade centerline. A true State Highway System provider
+must use a source that explicitly represents the SHS (e.g. the Caltrans Postmile/LRS
+network) — see `docs/adr-offline-road-context-source.md`.
 
 TIGERweb behavior: layers are queried against bounds + buffer in WGS84 (GeoJSON preferred,
 Esri `paths` accepted defensively); successful layers are combined even if one fails; all

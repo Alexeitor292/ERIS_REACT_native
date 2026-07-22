@@ -25,6 +25,7 @@ from ..db import SessionLocal
 from ..services import offline_scene as offline_scene_svc
 from ..services import offline_scene_jobs as jobs
 from ..services.offline_scene_builder import OfflineSceneBuildError, get_builder
+from ..services.offline_scene_caltrans import CaltransFetchCancelled
 from ..services.offline_scene_catalog import JobCancelledError, PackageRegistrationError
 
 logger = logging.getLogger("eris.offline_scene_worker")
@@ -200,6 +201,12 @@ def process_job(db: Session, job: dict, builder=None) -> dict:
         return jobs.get_job(db, job_id)  # type: ignore[return-value]
     except _JobAborted:
         logger.info("offline-scene job %s aborted: cancelled by user", job_id)
+        return jobs.get_job(db, job_id)  # type: ignore[return-value]
+    except CaltransFetchCancelled:
+        # A long paginated road fetch observed the cancellation between pages and aborted.
+        # Treat it exactly like _JobAborted: the job stays CANCELLED (never FAILED), and
+        # nothing was packaged, uploaded or registered.
+        logger.info("offline-scene job %s aborted: cancelled during road fetch", job_id)
         return jobs.get_job(db, job_id)  # type: ignore[return-value]
     except JobCancelledError:
         logger.info("offline-scene job %s cancelled during registration; object orphaned + audited", job_id)

@@ -113,7 +113,7 @@ class RouterSession:
         return FakeResp(self.tiger.get(lid, {"features": []}))
 
 
-def _fetch(session, classes=(1, 2, 3), *, bounds=None, **kw):
+def _fetch(session, classes=cal.DEFAULT_FUNCTIONAL_CLASSES, *, bounds=None, **kw):
     return cal.fetch_caltrans_road_features(
         bounds or BOUNDS, layer_url=URL, functional_classes=classes, timeout_s=30,
         session=session, sleep=lambda *_: None, **kw,
@@ -167,9 +167,9 @@ class TestQueryConstruction:
         assert p["inSR"] == "4326" and p["outSR"] == "4326"
         assert p["spatialRel"] == "esriSpatialRelIntersects" and p["returnGeometry"] == "true"
         assert p["f"] == "geojson"
-        assert p["outFields"] == "OBJECTID,RouteID,F_System,County_label,Caltrans_District"
+        assert p["outFields"] == "OBJECTID,EventID,RouteID,F_System,County_label,Caltrans_District"
         assert p["outFields"] != "*"
-        assert p["orderByFields"] == "OBJECTID"
+        assert p["orderByFields"] == "OBJECTID"  # OBJECTID drives stable PAGINATION only
 
     def test_where_clause_is_the_highway_filter(self):
         s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A)])
@@ -208,30 +208,58 @@ class TestPagination:
         assert [c["resultOffset"] for c in s.calls] == ["0", "2", "4"]  # not just the first page
         assert len(out) == 5
 
+    def test_default_query_uses_the_freeway_expressway_filter(self):
+        s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A)])
+        _fetch(s)  # no explicit classes -> the product default
+        assert s.calls[0]["where"] == "F_System IN (1, 2)"
+
     def test_exceeded_transfer_limit_drives_next_page(self):
         # Two features, page size 1: page 0 sets exceededTransferLimit -> a 2nd page runs.
-        feats = [gj_feat(1, "SHS_050._P", 1, IN_A), gj_feat(2, "SHS_099._P", 3, IN_B)]
+        feats = [gj_feat(1, "SHS_050._P", 1, IN_A), gj_feat(2, "SHS_099._P", 2, IN_B)]
         s = PagingSession(feats)
         out = _fetch(s, page_size=1)
         assert len(s.calls) >= 2 and len(out) == 2
 
-    def test_duplicate_feature_ids_deduped(self):
+    def test_offset_advances_by_records_returned_not_by_requested_page_size(self):
+        """REGRESSION: ArcGIS clamps resultRecordCount to the layer's maxRecordCount, so a
+        page can return FEWER rows than requested while signalling more remain. Advancing by
+        the requested page size would skip the unfetched rows and then exit as if complete —
+        silently losing roads."""
+
+        class ClampingSession:
+            """Serves at most `clamp` records per page regardless of resultRecordCount."""
+
+            def __init__(self, features, clamp):
+                self.features, self.clamp, self.calls = features, clamp, []
+
+            def get(self, url, params=None, timeout=None):
+                self.calls.append(dict(params or {}))
+                off = int(params["resultOffset"])
+                n = min(int(params["resultRecordCount"]), self.clamp)
+                page = self.features[off:off + n]
+                return FakeResp({"features": page, "exceededTransferLimit": (off + n) < len(self.features)})
+
+        feats = [gj_feat(i, f"SHS_0{i}._P", 1, [[-121.50 + i * 1e-4, 38.50], [-121.49 + i * 1e-4, 38.505]])
+                 for i in range(10)]
+        s = ClampingSession(feats, clamp=2)
+        out = _fetch(s, page_size=5)  # server clamps 5 -> 2
+        assert len(out) == 10, "every matching record must be retrieved despite the clamp"
+        assert [c["resultOffset"] for c in s.calls][:4] == ["0", "2", "4", "6"]  # advanced by returned count
+
+    def test_empty_page_while_service_reports_more_is_incomplete(self):
+        class StallSession:
+            def get(self, url, params=None, timeout=None):
+                # Claims more records remain but returns none -> no forward progress.
+                return FakeResp({"features": [], "exceededTransferLimit": True})
+
+        with pytest.raises(cal.CaltransIncompleteSourceError, match="empty page"):
+            _fetch(StallSession(), page_size=5)
+
+    def test_duplicate_provider_object_ids_deduped(self):
         dup = gj_feat(1, "SHS_050._P", 1, IN_A)
-        s = PagingSession([dup, gj_feat(2, "SHS_099._P", 3, IN_B), dup])
+        s = PagingSession([dup, gj_feat(2, "SHS_099._P", 2, IN_B), dup])
         out = _fetch(s, page_size=1000)
-        assert sorted(f["properties"]["source_feature_id"] for f in out) == [1, 2]
-
-    def test_page_limit_protection_bounds_the_loop(self):
-        feats = [gj_feat(i, f"SHS_{i}._P", 1, [[-121.5, 38.5], [-121.49, 38.505]]) for i in range(50)]
-        s = PagingSession(feats)
-        out = _fetch(s, page_size=1, max_pages=3)  # hard cap -> stops after 3 pages
-        assert len(s.calls) == 3 and len(out) == 3
-
-    def test_max_features_cap(self):
-        feats = [gj_feat(i, f"SHS_{i}._P", 1, [[-121.5, 38.5], [-121.49, 38.505]]) for i in range(20)]
-        s = PagingSession(feats)
-        out = _fetch(s, page_size=5, max_features=7)
-        assert len(out) == 7
+        assert sorted(f["properties"]["provider_object_id"] for f in out) == [1, 2]
 
     def test_empty_final_page_stops(self):
         # exceededTransferLimit True on the only page, then an empty page ends it.
@@ -262,6 +290,43 @@ class TestPagination:
         with pytest.raises(cal.CaltransFetchCancelled):
             _fetch(s, page_size=1, cancel_check=cancel)
         assert len(s.calls) == 1  # aborted before fetching the 2nd page
+
+
+# --------------------------------------------------------------------------- #
+# 3a. Pagination caps FAIL CLOSED (a truncated result is never a complete source)
+# --------------------------------------------------------------------------- #
+class TestPaginationCapFailsClosed:
+    def _many(self, n=50):
+        return [gj_feat(i, f"SHS_0{i}._P", 1, [[-121.50 + i * 1e-4, 38.50], [-121.49 + i * 1e-4, 38.505]])
+                for i in range(n)]
+
+    def test_max_pages_hit_with_exceeded_transfer_limit_raises(self):
+        s = PagingSession(self._many())
+        with pytest.raises(cal.CaltransIncompleteSourceError, match="page cap"):
+            _fetch(s, page_size=1, max_pages=3)
+        assert len(s.calls) == 3  # bounded: it did not keep paging
+
+    def test_max_features_hit_before_a_short_final_page_raises(self):
+        s = PagingSession(self._many(20))
+        with pytest.raises(cal.CaltransIncompleteSourceError, match="feature cap"):
+            _fetch(s, page_size=5, max_features=7)
+
+    def test_exact_cap_on_a_complete_result_is_not_truncated(self):
+        # 3 features, cap 3, and the page is short with no more-records flag -> COMPLETE.
+        s = PagingSession(self._many(3))
+        out = _fetch(s, page_size=10, max_features=3)
+        assert len(out) == 3  # no exception: nothing was dropped
+
+    def test_duplicates_beyond_the_cap_do_not_falsely_truncate(self):
+        """A row that is discarded as a duplicate is not 'dropped work' — it must not trip the
+        feature cap and fail a job whose de-duplicated result is actually complete."""
+        dup = gj_feat(1, "SHS_050._P", 1, IN_A)
+        s = PagingSession([dup, gj_feat(2, "SHS_099._P", 2, IN_B), dup])
+        out = _fetch(s, page_size=10, max_features=2)  # 3 rows, 2 unique, cap 2
+        assert sorted(f["properties"]["provider_object_id"] for f in out) == [1, 2]
+
+    def test_incomplete_source_is_a_fetch_error_subclass(self):
+        assert issubclass(cal.CaltransIncompleteSourceError, cal.CaltransFetchError)
 
 
 # --------------------------------------------------------------------------- #
@@ -309,7 +374,7 @@ class TestNetworkSafety:
 class TestGeometry:
     def test_linestring_and_multilinestring(self):
         two_part = {"type": "Feature", "geometry": {"type": "MultiLineString", "coordinates": [IN_B, IN_C]},
-                    "properties": {"OBJECTID": 2, "RouteID": "SHS_099._P", "F_System": 3}}
+                    "properties": {"OBJECTID": 2, "RouteID": "SHS_099._P", "F_System": 2}}
         s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A), two_part])
         out = _fetch(s)
         assert sorted(f["geometry"]["type"] for f in out) == ["LineString", "MultiLineString"]
@@ -344,10 +409,53 @@ class TestGeometry:
         bad = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[nan, 38.5], [200.0, 99.0]]}, "properties": {"OBJECTID": 1, "F_System": 1}}
         assert cal.normalize_caltrans_features([bad], included_classes=(1, 2, 3)) == []
 
-    def test_out_of_range_vertices_are_removed(self):
-        mixed = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[-121.5, 38.5], [999.0, 999.0], [-121.49, 38.505]]}, "properties": {"OBJECTID": 1, "F_System": 1}}
-        out = cal.normalize_caltrans_features([mixed], included_classes=(1, 2, 3))
-        assert len(out) == 1 and out[0]["geometry"]["coordinates"] == [[-121.5, 38.5], [-121.49, 38.505]]
+    # ---- FAIL-CLOSED: an invalid vertex must never be skipped so its neighbours join ----
+    # Dropping a corrupt vertex and keeping the rest of the part would INVENT a straight
+    # chord (A -> B) that does not exist in the source. ERIS rejects the whole feature.
+
+    def _ls(self, coords, oid=1, fsys=1):
+        return {"type": "Feature", "geometry": {"type": "LineString", "coordinates": coords},
+                "properties": {"OBJECTID": oid, "RouteID": "SHS_050._P", "F_System": fsys}}
+
+    def test_invalid_middle_vertex_never_bridges_the_valid_endpoints(self):
+        A, BAD, B = [-121.50, 38.500], [999.0, 999.0], [-121.49, 38.505]
+        out = cal.normalize_caltrans_features([self._ls([A, BAD, B])], included_classes=(1, 2))
+        assert out == [], "a corrupt middle vertex must reject the feature, not fabricate A->B"
+
+    def test_invalid_first_vertex_rejects_the_feature(self):
+        out = cal.normalize_caltrans_features(
+            [self._ls([[float("nan"), 38.5], [-121.50, 38.500], [-121.49, 38.505]])], included_classes=(1, 2))
+        assert out == []
+
+    def test_invalid_final_vertex_rejects_the_feature(self):
+        out = cal.normalize_caltrans_features(
+            [self._ls([[-121.50, 38.500], [-121.49, 38.505], [float("inf"), 38.5]])], included_classes=(1, 2))
+        assert out == []
+
+    def test_boolean_coordinates_reject_the_feature(self):
+        out = cal.normalize_caltrans_features(
+            [self._ls([[-121.50, 38.500], [True, False], [-121.49, 38.505]])], included_classes=(1, 2))
+        assert out == []
+
+    def test_one_malformed_multipart_member_cannot_create_a_false_bridge(self):
+        bad_multi = {"type": "Feature",
+                     "geometry": {"type": "MultiLineString", "coordinates": [IN_B, [[-121.5, 38.5], [999.0, 999.0]]]},
+                     "properties": {"OBJECTID": 1, "RouteID": "SHS_099._P", "F_System": 2}}
+        assert cal.normalize_caltrans_features([bad_multi], included_classes=(1, 2)) == []
+        # A non-list member is equally fatal (no silent "use the good parts").
+        junk_multi = {"type": "Feature",
+                      "geometry": {"type": "MultiLineString", "coordinates": [IN_B, "not-a-part"]},
+                      "properties": {"OBJECTID": 2, "RouteID": "SHS_099._P", "F_System": 2}}
+        assert cal.normalize_caltrans_features([junk_multi], included_classes=(1, 2)) == []
+
+    def test_valid_geometry_remains_deterministic(self):
+        good_ls = self._ls([[-121.50, 38.500], [-121.49, 38.505]])
+        good_mls = {"type": "Feature", "geometry": {"type": "MultiLineString", "coordinates": [IN_B, IN_C]},
+                    "properties": {"OBJECTID": 2, "RouteID": "SHS_099._P", "F_System": 2}}
+        a = cal.normalize_caltrans_features([good_ls, good_mls], included_classes=(1, 2))
+        b = cal.normalize_caltrans_features([good_ls, good_mls], included_classes=(1, 2))
+        assert json.dumps(a, separators=(",", ":")) == json.dumps(b, separators=(",", ":"))
+        assert sorted(f["geometry"]["type"] for f in a) == ["LineString", "MultiLineString"]
 
     def test_excessive_coordinate_count_rejected(self):
         big = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[-121.5 + i * 1e-6, 38.5] for i in range(50)]}, "properties": {"OBJECTID": 1, "F_System": 1}}
@@ -358,11 +466,27 @@ class TestGeometry:
 # 5. Filtering by functional class
 # --------------------------------------------------------------------------- #
 class TestFiltering:
-    def test_included_classes_kept(self):
-        feats = [gj_feat(1, "SHS_005._P", 1, IN_A), gj_feat(2, "SHS_099._P", 2, IN_B), gj_feat(3, "SHS_049._P", 3, IN_C)]
-        out = cal.normalize_caltrans_features(feats, included_classes=(1, 2, 3))
-        assert {f["properties"]["functional_class"] for f in out} == {1, 2, 3}
-        assert {f["properties"]["road_class"] for f in out} == {"primary"}  # all highways
+    def test_default_policy_is_freeway_expressway_only(self):
+        # Product policy: default = F_System 1 (Interstate) + 2 (Other Freeways and
+        # Expressways). Class 3 is a SURFACE arterial and is opt-in, never a default.
+        assert cal.DEFAULT_FUNCTIONAL_CLASSES == (1, 2)
+        assert cal.build_where_clause(cal.DEFAULT_FUNCTIONAL_CLASSES) == "F_System IN (1, 2)"
+
+    def test_included_freeway_classes_kept(self):
+        feats = [gj_feat(1, "SHS_005._P", 1, IN_A), gj_feat(2, "SHS_099._P", 2, IN_B)]
+        out = cal.normalize_caltrans_features(feats, included_classes=(1, 2))
+        assert {f["properties"]["functional_class"] for f in out} == {1, 2}
+        assert {f["properties"]["road_class"] for f in out} == {"primary"}  # freeways/expressways
+
+    def test_class_3_is_opt_in_and_is_not_presented_as_a_freeway(self):
+        arterial = gj_feat(3, "SHS_049._P", 3, IN_C)
+        # Excluded under the default policy...
+        assert cal.normalize_caltrans_features([arterial], included_classes=(1, 2)) == []
+        # ...and when opted in, it is a SECONDARY surface arterial, never "primary"/freeway.
+        out = cal.normalize_caltrans_features([arterial], included_classes=(1, 2, 3))
+        assert out[0]["properties"]["road_class"] == "secondary"
+        assert out[0]["properties"]["functional_class_label"] == "Principal Arterial - Other"
+        assert "freeway" not in out[0]["properties"]["functional_class_label"].lower()
 
     def test_excluded_local_and_collector(self):
         feats = [gj_feat(1, "LOCAL", 7, IN_A), gj_feat(2, "COLL", 5, IN_B), gj_feat(3, "SHS_050._P", 1, IN_C)]
@@ -383,10 +507,17 @@ class TestFiltering:
             {"type": "Feature", "geometry": {"type": "LineString", "coordinates": IN_C}, "properties": {"OBJECTID": 3, "RouteID": 12345, "F_System": 3}},  # non-string route
         ]
         out = cal.normalize_caltrans_features(feats, included_classes=(1, 2, 3))
-        by_id = {f["properties"]["source_feature_id"]: f["properties"] for f in out}
+        by_id = {f["properties"]["provider_object_id"]: f["properties"] for f in out}
         assert "route_id" not in by_id[1] and "NAME" not in by_id[1]
         assert by_id[2]["route_id"] == "SHS_020._P" and by_id[2]["NAME"] == "Route 20"
         assert "route_id" not in by_id[3]  # non-string dropped
+
+    def test_non_provider_route_convention_is_not_reshaped_into_a_route_claim(self):
+        # Only the provider's own SHS_* route-id convention yields a "Route N" label; any
+        # other id is passed through verbatim rather than asserting a route designation.
+        assert cal.caltrans_route_label("SHS_050._P") == "Route 50"
+        assert cal.caltrans_route_label("CITY-MAIN-ST-12") == "CITY-MAIN-ST-12"
+        assert cal.caltrans_route_label("") is None
 
     def test_widened_class_set_maps_hierarchy(self):
         feats = [gj_feat(1, "SHS_050._P", 1, IN_A), gj_feat(2, "ART", 4, IN_B)]
@@ -405,12 +536,40 @@ class TestNormalization:
         f["properties"]["road_class"] = "local"  # a provider attr must never spoof the trusted class
         out = cal.normalize_caltrans_features([f], included_classes=(1,))[0]["properties"]
         assert set(out) == {
-            "source_feature_id", "route_id", "NAME", "functional_class", "functional_class_label",
+            "provider_object_id", "source_feature_id", "provider_feature_id", "route_id", "NAME",
+            "functional_class", "functional_class_label",
             "county", "district", "provider", "road_class", "road_class_label", "kind",
         }
         assert out["kind"] == "road_centerline" and out["provider"] == "caltrans_crs"
         assert out["road_class"] == "primary"  # trusted, derived from F_System, not spoofed
+        assert out["provider_object_id"] == 10                    # OBJECTID kept as provenance
+        assert isinstance(out["source_feature_id"], str)          # durable ERIS identity
+        assert out["source_feature_id"].startswith("caltrans:")
         assert "SECRET" not in json.dumps(out)
+
+    def test_durable_id_is_supplied_to_the_pairing_provider_id_hook(self):
+        """The pairing pass PREFERS `provider_feature_id` over its own geometry-only hash;
+        supplying the durable id there keeps its derived ids unique per source feature."""
+        from app.services import road_corridor_pairing as pairing
+
+        f = gj_feat(10, "SHS_050._P", 1, IN_A)
+        f["properties"]["EventID"] = "evt-abc-123"
+        out = cal.normalize_caltrans_features([f], included_classes=(1,))[0]["properties"]
+        assert out["provider_event_id"] == "evt-abc-123"          # raw provider field (audit)
+        assert out["provider_feature_id"] == out["source_feature_id"]
+        assert "provider_feature_id" in pairing.PROVIDER_ID_KEYS  # the contract we rely on
+
+    def test_distinct_route_events_on_one_alignment_keep_distinct_packaged_ids(self):
+        """Two concurrent LRS route events can share an alignment. They must not collapse to
+        one identity in the packaged output (which would merge two roads for selection)."""
+        from app.services import road_corridor_pairing as pairing
+
+        a = gj_feat(1, "SHS_005._P", 1, IN_A)
+        b = gj_feat(2, "SHS_099._P", 1, IN_A)  # identical geometry, different route
+        feats = cal.normalize_caltrans_features([a, b], included_classes=(1,))
+        assert len({f["properties"]["source_feature_id"] for f in feats}) == 2
+        paired, _stats = pairing.build_selection_features(feats, pairing.PairingParams())
+        assert len({f["properties"]["feature_id"] for f in paired}) == len(paired)  # all unique
 
     def test_deterministic_precision_and_stable_bytes(self):
         noisy = [[-121.5000004, 38.5000006], [-121.4900001, 38.5050009]]
@@ -426,12 +585,205 @@ class TestNormalization:
 
     def test_deterministic_ordering_independent_of_input_order(self):
         f1 = gj_feat(1, "SHS_050._P", 1, IN_A)
-        f3 = gj_feat(3, "SHS_099._P", 3, IN_B)
+        f3 = gj_feat(3, "SHS_099._P", 2, IN_B)
         f2 = gj_feat(2, "SHS_020._P", 2, IN_C)
-        forward = cal.dedupe_caltrans_features(cal.normalize_caltrans_features([f1, f2, f3], included_classes=(1, 2, 3)))
-        shuffled = cal.dedupe_caltrans_features(cal.normalize_caltrans_features([f3, f1, f2], included_classes=(1, 2, 3)))
-        assert [f["properties"]["source_feature_id"] for f in forward] == [1, 2, 3]
-        assert [f["properties"]["source_feature_id"] for f in shuffled] == [1, 2, 3]
+        forward = cal.dedupe_caltrans_features(cal.normalize_caltrans_features([f1, f2, f3], included_classes=(1, 2)))
+        shuffled = cal.dedupe_caltrans_features(cal.normalize_caltrans_features([f3, f1, f2], included_classes=(1, 2)))
+        ids_fwd = [f["properties"]["source_feature_id"] for f in forward]
+        ids_shuf = [f["properties"]["source_feature_id"] for f in shuffled]
+        assert len(ids_fwd) == 3
+        # Ordering is by the DURABLE identity, so response order cannot change the output.
+        assert ids_fwd == ids_shuf
+        assert json.dumps(forward, separators=(",", ":")) == json.dumps(shuffled, separators=(",", ":"))
+
+
+# --------------------------------------------------------------------------- #
+# 6b. Durable feature identity (OBJECTID is NOT identity)
+# --------------------------------------------------------------------------- #
+class TestDurableIdentity:
+    def _sfid(self, feature):
+        return cal.normalize_caltrans_features([feature], included_classes=(1, 2))[0]["properties"]["source_feature_id"]
+
+    def test_objectid_reassignment_does_not_change_identity(self):
+        """A service refresh/republication may reassign OBJECTID. With geometry and stable
+        attributes unchanged, the durable ERIS identity must be identical."""
+        a = self._sfid(gj_feat(477930, "SHS_050._P", 1, IN_A))
+        b = self._sfid(gj_feat(999999, "SHS_050._P", 1, IN_A))  # ONLY OBJECTID changed
+        assert a == b
+
+    def test_objectid_reassignment_does_not_change_identity_with_event_id(self):
+        f1 = gj_feat(1, "SHS_050._P", 1, IN_A)
+        f1["properties"]["EventID"] = "evt-1"
+        f2 = gj_feat(42, "SHS_050._P", 1, IN_A)
+        f2["properties"]["EventID"] = "evt-1"
+        assert self._sfid(f1) == self._sfid(f2)
+
+    def test_identity_is_coordinate_order_invariant(self):
+        fwd = gj_feat(1, "SHS_050._P", 1, IN_A)
+        rev = gj_feat(1, "SHS_050._P", 1, list(reversed(IN_A)))  # reversed digitization
+        assert self._sfid(fwd) == self._sfid(rev)
+
+    def test_identity_is_multipart_order_invariant(self):
+        a = {"type": "Feature", "geometry": {"type": "MultiLineString", "coordinates": [IN_B, IN_C]},
+             "properties": {"OBJECTID": 1, "RouteID": "SHS_099._P", "F_System": 2}}
+        b = {"type": "Feature", "geometry": {"type": "MultiLineString", "coordinates": [IN_C, IN_B]},
+             "properties": {"OBJECTID": 7, "RouteID": "SHS_099._P", "F_System": 2}}
+        assert self._sfid(a) == self._sfid(b)
+
+    def test_different_geometry_yields_different_identity(self):
+        assert self._sfid(gj_feat(1, "SHS_050._P", 1, IN_A)) != self._sfid(gj_feat(1, "SHS_050._P", 1, IN_B))
+
+    def test_same_event_id_with_different_geometry_yields_different_ids(self):
+        """source_feature_id identifies ONE exact original road feature, so a shared EventID
+        must not merge two different geometries. (Stability of the provider's event across
+        releases is represented by provider_event_id, not by source_feature_id.)"""
+        f1 = gj_feat(1, "SHS_050._P", 1, IN_A)
+        f1["properties"]["EventID"] = "evt-9"
+        f2 = gj_feat(1, "SHS_050._P", 1, IN_B)
+        f2["properties"]["EventID"] = "evt-9"
+        assert self._sfid(f1) != self._sfid(f2)
+
+    def test_distinct_routes_with_identical_geometry_yield_different_ids(self):
+        a = gj_feat(1, "SHS_005._P", 1, IN_A)
+        b = gj_feat(1, "SHS_099._P", 1, IN_A)  # same geometry + class, different route event
+        assert self._sfid(a) != self._sfid(b)
+
+    def test_provider_event_id_still_carries_the_provider_event(self):
+        f = gj_feat(1, "SHS_050._P", 1, IN_A)
+        f["properties"]["EventID"] = "evt-9"
+        props = cal.normalize_caltrans_features([f], included_classes=(1,))[0]["properties"]
+        assert props["provider_event_id"] == "evt-9"  # provenance / cross-version correlation
+
+    def test_malformed_event_id_is_rejected_and_falls_back(self):
+        assert cal.validated_event_id("  ") is None
+        assert cal.validated_event_id("x" * 200) is None
+        assert cal.validated_event_id("bad\x00id") is None
+        assert cal.validated_event_id(12345) is None
+        assert cal.validated_event_id(" evt-ok ") == "evt-ok"
+        # Degenerate placeholders (all-zero GUID / single repeated char) are not identity.
+        assert cal.validated_event_id("{00000000-0000-0000-0000-000000000000}") is None
+        assert cal.validated_event_id("0000") is None
+        # A rejected EventID must not leak into the packaged properties.
+        f = gj_feat(1, "SHS_050._P", 1, IN_A)
+        f["properties"]["EventID"] = "bad\x00id"
+        props = cal.normalize_caltrans_features([f], included_classes=(1,))[0]["properties"]
+        assert "provider_event_id" not in props
+        assert props["source_feature_id"] == self._sfid(gj_feat(1, "SHS_050._P", 1, IN_A))
+
+    def test_a_shared_event_id_never_collapses_distinct_geometries(self):
+        """EventID is validated for SHAPE, not uniqueness. A placeholder/republished event id
+        shared by several distinct geometry rows must NEVER silently drop roads."""
+        feats = []
+        for i in range(5):
+            f = gj_feat(i, "SHS_050._P", 1, [[-121.50 + i * 1e-3, 38.50], [-121.49 + i * 1e-3, 38.505]])
+            f["properties"]["EventID"] = "same-event-for-all"  # shape-valid but not unique
+            feats.append(f)
+        out = cal.dedupe_caltrans_features(cal.normalize_caltrans_features(feats, included_classes=(1,)))
+        assert len(out) == 5, "distinct geometries must survive a non-unique upstream event id"
+
+    def test_shared_event_id_stays_distinct_through_pairing_end_to_end(self):
+        """END-TO-END: several distinct roads republished under ONE shape-valid EventID must
+        stay distinct all the way through the divided-corridor pairing pass, and every
+        corridor's member references must resolve unambiguously."""
+        from app.services import road_corridor_pairing as pairing
+
+        # Two parallel carriageways (pair into a corridor) + a separate road, all sharing
+        # one EventID — the exact case the event-only identity formula used to collapse.
+        car_a = [[-121.500, 38.5000], [-121.480, 38.5000]]
+        car_b = [[-121.500, 38.5004], [-121.480, 38.5004]]   # ~44 m apart, same bearing
+        other = [[-121.470, 38.4900], [-121.460, 38.4950]]
+        feats_in = []
+        for i, coords in enumerate((car_a, car_b, other)):
+            f = gj_feat(i + 1, "SHS_050._P", 1, coords)
+            f["properties"]["EventID"] = "one-event-for-all"
+            feats_in.append(f)
+
+        norm = cal.dedupe_caltrans_features(cal.normalize_caltrans_features(feats_in, included_classes=(1,)))
+        assert len(norm) == 3, "a shared EventID must not drop distinct roads"
+        assert len({f["properties"]["source_feature_id"] for f in norm}) == 3
+
+        paired, _stats = pairing.build_selection_features(norm, pairing.PairingParams())
+        # Pairing-derived SOURCE ids stay distinct (they key off provider_feature_id). A
+        # DERIVED corridor is not source-derived, so it legitimately carries no source id.
+        src_ids = {
+            f["properties"]["source_feature_id"]
+            for f in paired
+            if isinstance(f["properties"].get("source_feature_id"), str)
+        }
+        assert len(src_ids) == 3, f"expected 3 distinct source ids, got {sorted(src_ids)}"
+        # Every emitted feature id is unique.
+        fids = [f["properties"].get("feature_id") for f in paired]
+        assert len(set(fids)) == len(fids)
+        # Corridor member references resolve unambiguously and never repeat a member.
+        corridors = [f for f in paired if f["properties"].get("member_source_feature_ids")]
+        assert corridors, "the two parallel carriageways should have paired into a corridor"
+        for f in corridors:
+            members = f["properties"]["member_source_feature_ids"]
+            assert len(set(members)) == len(members), "a corridor must not repeat a member source id"
+            assert set(members) <= src_ids, "member source ids must resolve to emitted sources"
+
+    def test_canonical_geometry_key_accepts_the_esri_paths_form(self):
+        # Public API: a caller passing raw upstream Esri geometry must not silently get an
+        # empty key (which would degrade identity to route+class and collapse segments).
+        key = cal.canonical_geometry_key({"paths": [IN_A]})
+        assert key and key == cal.canonical_geometry_key({"type": "LineString", "coordinates": IN_A})
+
+    def test_identity_is_scoped_to_the_provider_layer(self):
+        f = gj_feat(1, "SHS_050._P", 1, IN_A)
+        a = cal.normalize_caltrans_features([f], included_classes=(1,), layer_key=cal.DEFAULT_LAYER_KEY)
+        b = cal.normalize_caltrans_features([f], included_classes=(1,), layer_key="caltrans_crs:/other/featureserver/9")
+        assert a[0]["properties"]["source_feature_id"] != b[0]["properties"]["source_feature_id"]
+
+    def test_layer_key_ignores_host_query_and_credentials(self):
+        base = cal.caltrans_layer_key(URL)
+        assert base == cal.caltrans_layer_key(URL + "?token=SECRET")
+        assert base == cal.caltrans_layer_key(URL.replace("caltrans-gis.dot.ca.gov", "u:p@mirror.example.gov"))
+        assert "SECRET" not in base and "token" not in base
+
+
+# --------------------------------------------------------------------------- #
+# 6c. Strict functional-class configuration
+# --------------------------------------------------------------------------- #
+class TestFunctionalClassConfig:
+    @pytest.mark.parametrize(
+        "spec,expected",
+        [("1,2", (1, 2)), ("2,1,2", (1, 2)), ("1,3", (1, 3)), (" 1 , 2 ", (1, 2)), ("7", (7,))],
+    )
+    def test_valid_specs_normalize_deterministically(self, spec, expected):
+        assert cal.parse_functional_classes(spec) == expected
+
+    @pytest.mark.parametrize("spec", ["1,x", "1.9", "8", "0", "-1", "", " ", ",", None, "1,,x"])
+    def test_invalid_specs_are_rejected_not_defaulted(self, spec):
+        # A wholly/partly invalid operator value must NEVER silently become the default.
+        with pytest.raises(ValueError):
+            cal.parse_functional_classes(spec)
+
+    def test_settings_validator_rejects_malformed_and_normalizes(self):
+        from app.config import Settings
+
+        base = {"DB_PASS": "x", "JWT_SECRET": "y"}
+        assert Settings(**base, OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES="2,1,2").OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES == "1,2"
+        assert Settings(**base, OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES="1,3").OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES == "1,3"
+        for bad in ("1,x", "1.9", "8", ""):
+            with pytest.raises(Exception):
+                Settings(**base, OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES=bad)
+
+    def test_omitted_setting_uses_the_declared_default(self):
+        from app.config import Settings
+
+        s = Settings(DB_PASS="x", JWT_SECRET="y")
+        assert s.OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES == "1,2"
+
+    def test_upstream_non_integral_f_system_is_not_truncated(self):
+        # 1.9 must NOT become class 1 — it is rejected, so the feature is dropped.
+        for bad in (1.9, "1.9", "1e0", True):
+            f = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": IN_A},
+                 "properties": {"OBJECTID": 1, "F_System": bad}}
+            assert cal.normalize_caltrans_features([f], included_classes=(1, 2)) == []
+        # An integral float representation IS accepted.
+        f_ok = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": IN_A},
+                "properties": {"OBJECTID": 1, "F_System": 2.0}}
+        assert len(cal.normalize_caltrans_features([f_ok], included_classes=(1, 2))) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -464,6 +816,112 @@ class TestProvenanceAndSignature:
 
 
 # --------------------------------------------------------------------------- #
+# 7b. content_signature reflects the ACTUAL road result
+# --------------------------------------------------------------------------- #
+class TestRoadContentSignature:
+    def _layer(self, **over):
+        base = {
+            "available": True, "file": "roads.geojson", "sha256": "a" * 64, "bytes": 10,
+            "feature_count": 2, "filter_version": "caltrans_crs.v2:F_System[1,2]",
+            "functional_classes": [1, 2],
+            "source": {"provider": "caltrans_crs", "retrieved_at": "2026-07-22T00:00:00Z"},
+        }
+        base.update(over)
+        return base
+
+    def test_identical_packaged_roads_produce_the_same_signature(self):
+        a = osvc.road_content_fingerprint(self._layer())
+        b = osvc.road_content_fingerprint(self._layer())
+        assert a == b
+
+    def test_changing_only_retrieved_at_does_not_change_the_signature(self):
+        a = osvc.road_content_fingerprint(self._layer())
+        b = osvc.road_content_fingerprint(
+            self._layer(source={"provider": "caltrans_crs", "retrieved_at": "2027-01-01T00:00:00Z"})
+        )
+        assert a == b
+
+    def test_changing_roads_geojson_changes_the_signature(self):
+        assert osvc.road_content_fingerprint(self._layer()) != osvc.road_content_fingerprint(
+            self._layer(sha256="b" * 64)
+        )
+
+    def test_caltrans_success_and_tiger_fallback_differ(self):
+        caltrans = osvc.road_content_fingerprint(self._layer())
+        tiger = osvc.road_content_fingerprint(self._layer(
+            source={"provider": "us_census_tigerweb"},
+            fallback={"from": "caltrans_crs", "to": "census_tigerweb", "reason": "source_error"},
+            filter_version=None, functional_classes=None,
+        ))
+        assert caltrans != tiger
+
+    def test_available_and_unavailable_differ_and_reason_matters(self):
+        available = osvc.road_content_fingerprint(self._layer())
+        unavailable = osvc.road_content_fingerprint({"available": False, "reason": "source_error"})
+        other_reason = osvc.road_content_fingerprint({"available": False, "reason": "incomplete_source"})
+        assert len({available, unavailable, other_reason}) == 3
+
+    def test_fallback_recovery_produces_a_new_download_signature(self):
+        """A later run that recovers the primary provider must not look identical to the
+        earlier fallback run, or mobile would never re-download the better data."""
+        fell_back = osvc.road_content_fingerprint(self._layer(
+            source={"provider": "us_census_tigerweb"},
+            fallback={"from": "caltrans_crs", "to": "census_tigerweb", "reason": "incomplete_source"},
+        ))
+        recovered = osvc.road_content_fingerprint(self._layer())
+        assert fell_back != recovered
+
+    def test_finalized_signature_folds_the_fingerprint_and_is_deterministic(self):
+        base = osvc.content_signature(
+            gisa_updated_at="2026-01-01", geometry_json=None, road_bearing_deg=None, radius_m=1500.0
+        )
+        fp = osvc.road_content_fingerprint(self._layer())
+        final = osvc.finalize_content_signature(base, fp)
+        assert final == osvc.finalize_content_signature(base, fp)   # deterministic
+        assert final != base                                        # actually folded in
+        assert len(final) == 16
+        other = osvc.finalize_content_signature(base, osvc.road_content_fingerprint(self._layer(sha256="c" * 64)))
+        assert final != other
+
+    def test_legacy_content_signature_callers_are_unchanged(self):
+        legacy = dict(gisa_updated_at="2026-01-01", geometry_json=None, road_bearing_deg=None, radius_m=1500.0)
+        assert osvc.content_signature(**legacy) == osvc.content_signature(**legacy)
+
+    def test_builder_writes_the_finalized_signature_into_ctx_and_manifest(self, monkeypatch):
+        """The SAME finalized value must reach the manifest and (via ctx) catalog
+        registration — and two runs whose road output differs must differ."""
+        import numpy as np
+
+        from app.services import offline_scene_terrain as terrain_fmt
+
+        _caltrans_settings(monkeypatch)
+        heights = np.full((8, 8), 100.0, dtype="float32")
+        grid, _stats = terrain_fmt.encode_height_grid(heights)
+
+        def _run(session):
+            ctx = _ctx()
+            ctx["content_signature"] = "base-sig"
+            b = _builder(session)
+            monkeypatch.setattr(terrain_fmt, "decode_dem_tiff", lambda *a, **k: heights)
+            pkg = b.build_package(ctx, {"dem_bytes": b"x", "hillshade_bytes": b"", "usgs_meta": {}, "basemap_meta": {}})
+            m = json.loads(zipfile.ZipFile(io.BytesIO(pkg)).read("manifest.json"))
+            return ctx["content_signature"], m["content_signature"], m["context_layers"]["roads"]
+
+        ctx_sig, manifest_sig, roads = _run(PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A)]))
+        assert ctx_sig == manifest_sig != "base-sig"   # finalized, and shared with the catalog
+        assert roads["available"] is True
+
+        # A different road outcome (source down -> unavailable) must change the signature.
+        class Boom:
+            def get(self, *a, **k):
+                raise RuntimeError("down")
+
+        ctx_sig2, manifest_sig2, roads2 = _run(Boom())
+        assert roads2["available"] is False
+        assert ctx_sig2 == manifest_sig2 and manifest_sig2 != manifest_sig
+
+
+# --------------------------------------------------------------------------- #
 # Builder integration + failure policy
 # --------------------------------------------------------------------------- #
 def _ctx(bearing=None):
@@ -483,8 +941,10 @@ def _caltrans_settings(monkeypatch, *, required=False, fallback=""):
     monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED", True)
     monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "caltrans_crs")
     monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_ROADS_URL", URL)
-    monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES", "1,2,3")
+    monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES", "1,2")
     monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_PAGE_SIZE", 1000)
+    monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_MAX_PAGES", 100)
+    monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_MAX_FEATURES", 20000)
     monkeypatch.setattr(settings, "OFFLINE_SCENE_ROADS_REQUIRED", required)
     monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_FALLBACK_SOURCE", fallback)
 
@@ -499,16 +959,20 @@ def _builder(session):
 class TestBuilderIntegration:
     def test_packages_caltrans_roads_with_provenance_and_filter_version(self, monkeypatch):
         _caltrans_settings(monkeypatch)
-        s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A, county="SACRAMENTO", district=3), gj_feat(2, "SHS_099._P", 3, IN_B)])
+        s = PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A, county="SACRAMENTO", district=3), gj_feat(2, "SHS_099._P", 2, IN_B)])
         layers, assets = _builder(s)._build_context_layers(_ctx(), base_bytes=0)
         roads = layers["roads"]
         assert roads["available"] is True and ctxmod.ROADS_FILE in assets
         assert roads["road_kinds"] == ["road_centerline"]
         assert roads["source"]["provider"] == "caltrans_crs"
+        assert roads["source"]["dataset"] == "Caltrans CRS Functional Classification"
         assert roads["source"]["service"] == URL
-        assert roads["filter_version"] == "caltrans_crs.v1:F_System[1,2,3]"
-        assert roads["functional_classes"] == [1, 2, 3]
+        assert roads["filter_version"] == "caltrans_crs.v2:F_System[1,2]"
+        assert roads["functional_classes"] == [1, 2]
         assert roads["road_class_counts"].get("primary", 0) >= 1
+        # Truthful scope: nothing in the packaged road metadata claims ownership.
+        blob = json.dumps(roads).lower()
+        assert "state highway system" not in blob
         # cross-section is usable because roads.geojson provides snap geometry
         assert layers["road_cross_section"]["snap_available"] is True
 
@@ -562,6 +1026,199 @@ class TestBuilderIntegration:
         assert roads["available"] is True
         assert roads["source"]["provider"] == "us_census_tigerweb"  # the fallback source
         assert roads["fallback"] == {"from": "caltrans_crs", "to": "census_tigerweb", "reason": "source_error"}
+
+    def test_packaged_identity_survives_objectid_reassignment(self, monkeypatch):
+        """END-TO-END: a service refresh may reassign OBJECTIDs. With geometry and stable
+        attributes unchanged, the durable identities in the PACKAGED roads.geojson (after
+        the divided-corridor pairing rewrite) must be identical, while the provider's
+        OBJECTID is still retained distinctly as provenance."""
+        _caltrans_settings(monkeypatch)
+
+        def _package(oid_a, oid_b):
+            s = PagingSession([gj_feat(oid_a, "SHS_050._P", 1, IN_A), gj_feat(oid_b, "SHS_099._P", 2, IN_B)])
+            layers, assets = _builder(s)._build_context_layers(_ctx(), base_bytes=0)
+            gj = json.loads(assets[ctxmod.ROADS_FILE])
+            return (
+                sorted(f["properties"].get("source_feature_id") for f in gj["features"]),
+                sorted(f["properties"].get("provider_object_id") for f in gj["features"]),
+            )
+
+        ids_a, oids_a = _package(1, 2)
+        ids_b, oids_b = _package(987654, 987655)  # ONLY the OBJECTIDs changed
+        assert ids_a == ids_b and all(isinstance(i, str) and i for i in ids_a)
+        assert oids_a == [1, 2] and oids_b == [987654, 987655]  # provenance still truthful
+
+    def test_incomplete_source_optional_is_truthfully_unavailable_and_never_packaged(self, monkeypatch):
+        """A pagination cap hit while more features remain must NEVER be packaged as an
+        available road layer — no READY package may contain the truncated subset."""
+        _caltrans_settings(monkeypatch, required=False)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_PAGE_SIZE", 1)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_MAX_PAGES", 2)
+        feats = [gj_feat(i, f"SHS_0{i}._P", 1, [[-121.50 + i * 1e-4, 38.50], [-121.49 + i * 1e-4, 38.505]]) for i in range(10)]
+        layers, assets = _builder(PagingSession(feats))._build_context_layers(_ctx(), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert roads["reason"] == "incomplete_source"   # distinct from a generic source_error
+        assert ctxmod.ROADS_FILE not in assets          # the truncated subset is not packaged
+
+    def test_incomplete_source_required_fails_generation(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_PAGE_SIZE", 1)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_MAX_FEATURES", 2)
+        feats = [gj_feat(i, f"SHS_0{i}._P", 1, [[-121.50 + i * 1e-4, 38.50], [-121.49 + i * 1e-4, 38.505]]) for i in range(10)]
+        with pytest.raises(OfflineSceneBuildError, match="required"):
+            _builder(PagingSession(feats))._build_context_layers(_ctx(), base_bytes=0)
+
+    def test_explicit_fallback_after_incomplete_source_is_audited(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=False, fallback="census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_BASE_URL", "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_LAYERS", "2,6,8")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_PAGE_SIZE", 1)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_MAX_PAGES", 1)
+
+        class IncompleteThenTiger:
+            """Caltrans always reports more records remain (forcing the page cap); TIGERweb
+            serves a usable fallback."""
+
+            def get(self, url, params=None, timeout=None):
+                if "CRS_Functional_Classification" in url:
+                    return FakeResp({"features": [gj_feat(1, "SHS_050._P", 1, IN_A)], "exceededTransferLimit": True})
+                lid = int(url.rstrip("/").split("/")[-2])
+                return FakeResp({"features": [gj_feat(1, "US-50", 2, IN_A)]} if lid == 2 else {"features": []})
+
+        layers, assets = _builder(IncompleteThenTiger())._build_context_layers(_ctx(), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is True
+        assert roads["source"]["provider"] == "us_census_tigerweb"
+        assert roads["fallback"] == {"from": "caltrans_crs", "to": "census_tigerweb", "reason": "incomplete_source"}
+
+    def test_cancellation_never_becomes_source_error_or_triggers_fallback(self, monkeypatch):
+        """Cancellation is not a road failure: it leaves _build_context_layers immediately,
+        contacts no fallback provider, packages nothing, and is never reported as
+        source_error / incomplete_source — even with roads REQUIRED."""
+        _caltrans_settings(monkeypatch, required=True, fallback="census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_BASE_URL", "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_LAYERS", "2,6,8")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_PAGE_SIZE", 1)
+
+        state = {"n": 0}
+
+        def cancel():
+            state["n"] += 1
+            return state["n"] > 1  # allow page 1, then cancel
+
+        class Router:
+            def __init__(self):
+                self.caltrans_calls, self.tiger_calls = 0, 0
+
+            def get(self, url, params=None, timeout=None):
+                if "CRS_Functional_Classification" in url:
+                    self.caltrans_calls += 1
+                    return FakeResp({"features": [gj_feat(1, "SHS_050._P", 1, IN_A)], "exceededTransferLimit": True})
+                self.tiger_calls += 1
+                return FakeResp({"features": [gj_feat(9, "US-50", 2, IN_A)]})
+
+        s = Router()
+        ctx = dict(_ctx())
+        ctx["cancel_check"] = cancel
+        with pytest.raises(cal.CaltransFetchCancelled):
+            _builder(s)._build_context_layers(ctx, base_bytes=0)
+        assert s.caltrans_calls == 1, "exactly one page request before the cancellation"
+        assert s.tiger_calls == 0, "no fallback provider may be contacted after cancellation"
+
+    def test_worker_keeps_a_cancelled_job_cancelled_not_failed(self, monkeypatch):
+        """The worker maps a between-pages cancellation to its canonical CANCELLED result and
+        never uploads or registers a package."""
+        from app.worker import offline_scene_worker as worker
+
+        calls = {"upload": 0, "failed": 0}
+
+        class FakeBuilder:
+            def prepare_source_data(self, ctx, progress=None):
+                return {"usgs_meta": {}, "basemap_meta": {}}
+
+            def build_package(self, ctx, source, progress=None):
+                raise cal.CaltransFetchCancelled("cancelled between pages")
+
+            def validate_package(self, data):  # pragma: no cover - never reached
+                return True, None
+
+            def upload_and_register(self, *a, **k):  # pragma: no cover - must never run
+                calls["upload"] += 1
+                raise AssertionError("no upload may occur after cancellation")
+
+        def fake_update(db, job_id, **kw):
+            if kw.get("status") == "FAILED":
+                calls["failed"] += 1
+            return True
+
+        monkeypatch.setattr(worker, "_build_context", lambda db, job: {"submission_id": 1})
+        monkeypatch.setattr(worker, "_job_cancelled", lambda db, job_id: False)
+        monkeypatch.setattr(worker.jobs, "update_job_if_active", fake_update)
+        monkeypatch.setattr(worker.jobs, "progress_for", lambda s: 0)
+        monkeypatch.setattr(worker.jobs, "get_job", lambda db, job_id: {"id": job_id, "status": "CANCELLED"})
+
+        final = worker.process_job(object(), {"id": 7, "submission_id": 1}, builder=FakeBuilder())
+        assert final["status"] == "CANCELLED"
+        assert calls["upload"] == 0 and calls["failed"] == 0
+
+    @pytest.mark.parametrize(
+        "source,blank_setting",
+        [
+            ("caltrans_crs", "OFFLINE_SCENE_CALTRANS_ROADS_URL"),
+            ("census_tigerweb", "OFFLINE_SCENE_TIGERWEB_BASE_URL"),
+            ("arcgis_feature_service", "OFFLINE_SCENE_ROAD_SOURCE_URL"),
+        ],
+    )
+    def test_unconfigured_external_provider_never_packages_internal_geometry(
+        self, monkeypatch, source, blank_setting
+    ):
+        """An explicitly selected EXTERNAL provider with no endpoint must report
+        provider_not_configured — never silently package ERIS-internal bearing/inventory
+        geometry and label it as that provider."""
+        _caltrans_settings(monkeypatch)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", source)
+        monkeypatch.setattr(settings, blank_setting, "")
+        # A build context that DOES have usable internal geometry (bearing) — the tempting
+        # substitution. It must not be used for an external provider.
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=90.0), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert roads["reason"] == "provider_not_configured"
+        assert ctxmod.ROADS_FILE not in assets
+        assert "source" not in roads  # nothing claims a provider
+
+    def test_unconfigured_external_provider_fails_when_roads_required(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_ROADS_URL", "")
+        with pytest.raises(OfflineSceneBuildError, match="provider_not_configured"):
+            _builder(PagingSession([]))._build_context_layers(_ctx(bearing=90.0), base_bytes=0)
+
+    def test_unconfigured_fallback_is_not_reported_as_a_successful_fallback(self, monkeypatch):
+        """A fallback configured as arcgis_feature_service WITHOUT its URL must not appear as
+        a successful ArcGIS fallback while actually packaging internal context."""
+        _caltrans_settings(monkeypatch, required=False, fallback="arcgis_feature_service")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE_URL", "")
+
+        class Boom:
+            def get(self, *a, **k):
+                raise RuntimeError("caltrans down")
+
+        layers, assets = _builder(Boom())._build_context_layers(_ctx(bearing=90.0), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert "fallback" not in roads
+        assert ctxmod.ROADS_FILE not in assets
+        assert "arcgis" not in json.dumps(roads).lower()
+
+    def test_eris_internal_may_still_package_internal_geometry(self, monkeypatch):
+        """Only eris_internal is allowed to package internal bearing/inventory geometry."""
+        _caltrans_settings(monkeypatch)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "eris_internal")
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=90.0), base_bytes=0)
+        assert layers["roads"]["available"] is True
+        assert layers["roads"]["source"]["provider"] == "eris_internal"
+        assert ctxmod.ROADS_FILE in assets
 
     def test_provider_none_packages_no_roads(self, monkeypatch):
         _caltrans_settings(monkeypatch)
@@ -660,6 +1317,69 @@ class TestPackageIntegrity:
         pkg, _ = self._package(data, feature_count=5)  # declares 5, actually 1
         ok, reason = builder.validate_bundle_bytes(pkg)
         assert not ok and "feature_count mismatch" in reason
+
+
+# --------------------------------------------------------------------------- #
+# Strict roads.geojson validation (pure)
+# --------------------------------------------------------------------------- #
+class TestStrictRoadsGeojsonValidation:
+    def _fc(self, features):
+        return json.dumps({"type": "FeatureCollection", "features": features}).encode()
+
+    def _line(self, coords=None):
+        return {"type": "Feature", "geometry": {"type": "LineString", "coordinates": coords or IN_A}, "properties": {}}
+
+    def test_valid_collection_passes(self):
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([self._line()]), 1)
+        assert ok and reason is None
+
+    def test_wrong_container_type_rejected(self):
+        data = json.dumps({"type": "AnythingElse", "features": []}).encode()
+        ok, reason = ctxmod.validate_roads_geojson(data)
+        assert not ok and "FeatureCollection" in reason
+
+    def test_feature_without_feature_type_rejected(self):
+        bad = {"geometry": {"type": "LineString", "coordinates": IN_A}, "properties": {}}
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([bad]))
+        assert not ok and "Feature" in reason
+
+    def test_non_object_properties_rejected(self):
+        bad = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": IN_A}, "properties": "nope"}
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([bad]))
+        assert not ok and "properties" in reason
+
+    def test_empty_multilinestring_rejected(self):
+        bad = {"type": "Feature", "geometry": {"type": "MultiLineString", "coordinates": []}, "properties": {}}
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([bad]))
+        assert not ok and "no parts" in reason
+
+    def test_empty_multipart_member_rejected(self):
+        bad = {"type": "Feature", "geometry": {"type": "MultiLineString", "coordinates": [IN_A, []]}, "properties": {}}
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([bad]))
+        assert not ok and "2 vertices" in reason
+
+    @pytest.mark.parametrize("coord", [[True, False], [float("nan"), 38.5], [float("inf"), 38.5], [200.0, 38.5], [-121.5, 99.0], ["a", "b"], [1]])
+    def test_invalid_coordinates_rejected(self, coord):
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([self._line([[-121.5, 38.5], coord])]))
+        assert not ok and "coordinates" in reason
+
+    def test_features_not_a_list_rejected(self):
+        data = json.dumps({"type": "FeatureCollection", "features": {"a": 1}}).encode()
+        ok, reason = ctxmod.validate_roads_geojson(data)
+        assert not ok and "list" in reason
+
+    @pytest.mark.parametrize("count", [-1, 1.5, "2", True, None if False else "x"])
+    def test_invalid_feature_count_values_rejected(self, count):
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([self._line()]), count)
+        assert not ok and "feature_count" in reason
+
+    def test_zero_features_with_zero_count_is_valid(self):
+        ok, reason = ctxmod.validate_roads_geojson(self._fc([]), 0)
+        assert ok, reason
+
+    def test_not_json_rejected(self):
+        ok, reason = ctxmod.validate_roads_geojson(b"{nope")
+        assert not ok and "JSON" in reason
 
 
 # --------------------------------------------------------------------------- #

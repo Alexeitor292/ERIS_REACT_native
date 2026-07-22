@@ -591,21 +591,40 @@ def validate_context_layers(context_layers) -> tuple[bool, str | None]:
 
 def validate_roads_geojson(data: bytes, declared_feature_count=None) -> tuple[bool, str | None]:
     """Fail-closed validation of packaged roads.geojson BYTES (called by the bundle
-    validator, which already checked sha256 + byte length). Ensures the asset is a valid
-    GeoJSON FeatureCollection of ONLY LineString/MultiLineString features with finite,
-    in-range coordinates, and — when the manifest declares one — that the actual feature
-    count matches ``feature_count``. So malformed GeoJSON, a non-line geometry, invalid
-    coordinates, or a declared-count mismatch can never reach a READY package."""
+    validator, which already checked sha256 + byte length).
+
+    Requires, exactly:
+      * a top-level JSON object whose ``type`` is exactly ``"FeatureCollection"``;
+      * ``features`` is a list, and every item is an object whose ``type`` is exactly
+        ``"Feature"``;
+      * ``properties`` is an object when present (absent is tolerated for legacy packages);
+      * ``geometry.type`` is exactly ``LineString`` or ``MultiLineString``;
+      * a LineString has >= 2 valid vertices; a MultiLineString has >= 1 part and EVERY
+        part has >= 2 valid vertices;
+      * every coordinate is a finite, non-boolean number inside WGS84 bounds;
+      * a declared ``feature_count`` is a non-negative integer that matches exactly.
+
+    So malformed GeoJSON, a wrong container/feature type, an empty or holey multipart
+    geometry, boolean/NaN/infinite coordinates, or a declared-count mismatch can never reach
+    a READY package. A package with NO roads layer is unaffected (this is not called)."""
     try:
         obj = json.loads(data)
     except Exception:
         return False, "roads.geojson is not valid JSON"
-    if not isinstance(obj, dict) or not isinstance(obj.get("features"), list):
-        return False, "roads.geojson is not a GeoJSON FeatureCollection"
-    feats = obj["features"]
+    if not isinstance(obj, dict):
+        return False, "roads.geojson is not a JSON object"
+    if obj.get("type") != "FeatureCollection":
+        return False, f"roads.geojson type must be FeatureCollection, got {obj.get('type')!r}"
+    feats = obj.get("features")
+    if not isinstance(feats, list):
+        return False, "roads.geojson features must be a list"
     for f in feats:
         if not isinstance(f, dict):
             return False, "roads.geojson feature is not an object"
+        if f.get("type") != "Feature":
+            return False, f"roads.geojson feature type must be Feature, got {f.get('type')!r}"
+        if "properties" in f and f["properties"] is not None and not isinstance(f["properties"], dict):
+            return False, "roads.geojson feature properties must be an object"
         geom = f.get("geometry")
         if not isinstance(geom, dict):
             return False, "roads.geojson feature missing geometry"
@@ -614,8 +633,8 @@ def validate_roads_geojson(data: bytes, declared_feature_count=None) -> tuple[bo
         if gtype == "LineString":
             parts = [coords]
         elif gtype == "MultiLineString":
-            if not isinstance(coords, list):
-                return False, "roads.geojson invalid MultiLineString"
+            if not isinstance(coords, list) or not coords:
+                return False, "roads.geojson MultiLineString has no parts"
             parts = coords
         else:
             return False, f"roads.geojson unsupported geometry {gtype!r}"
@@ -623,16 +642,23 @@ def validate_roads_geojson(data: bytes, declared_feature_count=None) -> tuple[bo
             if not isinstance(part, list) or len(part) < 2:
                 return False, "roads.geojson line has fewer than 2 vertices"
             for c in part:
-                if not (
-                    isinstance(c, (list, tuple)) and len(c) >= 2
-                    and _finite(c[0]) and _finite(c[1])
-                    and -180.0 <= c[0] <= 180.0 and -90.0 <= c[1] <= 90.0
-                ):
+                if not (isinstance(c, (list, tuple)) and len(c) >= 2):
                     return False, "roads.geojson has invalid coordinates"
-    if declared_feature_count is not None and len(feats) != int(declared_feature_count):
-        return False, (
-            f"roads.geojson feature_count mismatch: declared {declared_feature_count}, actual {len(feats)}"
-        )
+                lon, lat = c[0], c[1]
+                # _finite already rejects bool (isinstance(True, int) is True in Python).
+                if not (_finite(lon) and _finite(lat)):
+                    return False, "roads.geojson has invalid coordinates"
+                if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+                    return False, "roads.geojson has invalid coordinates"
+    if declared_feature_count is not None:
+        if isinstance(declared_feature_count, bool) or not isinstance(declared_feature_count, int):
+            return False, f"roads.geojson feature_count must be an integer, got {declared_feature_count!r}"
+        if declared_feature_count < 0:
+            return False, f"roads.geojson feature_count must be non-negative, got {declared_feature_count}"
+        if len(feats) != declared_feature_count:
+            return False, (
+                f"roads.geojson feature_count mismatch: declared {declared_feature_count}, actual {len(feats)}"
+            )
     return True, None
 
 

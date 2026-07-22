@@ -29,10 +29,13 @@ import {
 
 // A normalized Caltrans road feature's `properties`, as packaged by the backend
 // (offline_scene_caltrans.build_caltrans_properties) BEFORE divided-corridor pairing adds
-// selection metadata.
+// selection metadata. Note the identity split: `provider_object_id` is the provider's
+// OBJECTID (provenance/pagination only) while `source_feature_id` is the DURABLE ERIS
+// identity, which is a string and independent of OBJECTID reassignment.
 function caltransProps(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    source_feature_id: 477930,
+    provider_object_id: 477930,
+    source_feature_id: "caltrans:9f2c1a77b4de3105c6a8b2e4",
     route_id: "SHS_050._P",
     NAME: "Route 50",
     functional_class: 1,
@@ -67,9 +70,28 @@ test("extra Caltrans display properties never affect classification or the selec
   assert.equal(info.hasSchema, false);
 });
 
-test("packaged Caltrans highways default to Highways display mode", () => {
+test("packaged Caltrans freeways default to Highways display mode", () => {
   assert.equal(defaultDisplayMode(["primary"]), "highways");
   assert.equal(defaultDisplayMode(["primary", "secondary"]), "highways");
+});
+
+test("an opt-in F_System 3 surface arterial is secondary, never a freeway candidate", () => {
+  // The backend maps F_System 3 ("Principal Arterial - Other") to road_class "secondary",
+  // so it is NOT presented or selected as a freeway in Highways mode.
+  const arterial = caltransProps({
+    functional_class: 3,
+    functional_class_label: "Principal Arterial - Other",
+    road_class: "secondary",
+    road_class_label: "Secondary road",
+    NAME: "Route 49",
+  });
+  assert.equal(featureRoadClass(arterial), "secondary");
+  const snap: SnapFeature = {
+    roadClass: "secondary", kind: "road_centerline", name: "Route 49",
+    distM: 5, snapLat: 38.5, snapLon: -121.5,
+  };
+  assert.deepEqual(gatherCandidates([snap], "highways"), []); // not a highway candidate
+  assert.equal(gatherCandidates([snap], "highways_secondary").length, 1); // still selectable
 });
 
 test("highway-first selection prefers a Caltrans highway over a nearer non-highway", () => {
@@ -100,8 +122,9 @@ test("a divided_highway_corridor derived from Caltrans _P/_S carriageways is sel
     selection_kind: "divided_highway_corridor",
     selectable: true,
     feature_id: "corridor-1",
-    member_source_feature_ids: ["477930", "477931"],
-    member_part_feature_ids: ["p-a", "p-b"],
+    // Pairing-derived ids ("r"/"p" + hash), never provider OBJECTIDs.
+    member_source_feature_ids: ["r8129076df999", "r8343c6f29897"],
+    member_part_feature_ids: ["pa7bbf53e0041", "pf7e341870b32"],
   });
   const info = parseSelection(corridor);
   assert.equal(info.selectable, true);

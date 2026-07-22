@@ -197,6 +197,28 @@ def validate_bundle_bytes(package_bytes: bytes) -> tuple[bool, str | None]:
     return True, None
 
 
+# Road sources that fetch from an EXTERNAL service. Each needs its own endpoint setting; a
+# missing/blank one means the operator's selected provider cannot run at all, which must be
+# reported as `provider_not_configured` — never silently satisfied with internal geometry.
+_EXTERNAL_ROAD_SOURCES = (
+    context_fmt.ROAD_SOURCE_TIGERWEB,
+    context_fmt.ROAD_SOURCE_ARCGIS,
+    context_fmt.ROAD_SOURCE_CALTRANS,
+)
+
+
+def _external_source_configured(road_source: str) -> bool:
+    """Whether an external road source has the configuration it requires to run."""
+    if road_source == context_fmt.ROAD_SOURCE_TIGERWEB:
+        return bool(str(settings.OFFLINE_SCENE_TIGERWEB_BASE_URL or "").strip()
+                    and context_fmt.parse_tigerweb_layers(settings.OFFLINE_SCENE_TIGERWEB_LAYERS))
+    if road_source == context_fmt.ROAD_SOURCE_ARCGIS:
+        return bool(str(settings.OFFLINE_SCENE_ROAD_SOURCE_URL or "").strip())
+    if road_source == context_fmt.ROAD_SOURCE_CALTRANS:
+        return bool(str(settings.OFFLINE_SCENE_CALTRANS_ROADS_URL or "").strip())
+    return True
+
+
 def _unavailable_roads_result(reason: str) -> dict:
     """A roads-collection result describing an unavailable roads layer (no asset packaged).
     Mirrors the successful-result shape so the caller handles both uniformly."""
@@ -355,6 +377,14 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         hillshade_bytes = source.get("hillshade_bytes") or b""
         base_bytes = len(grid_bytes) + len(hillshade_bytes)
         context_layers, assets = self._build_context_layers(ctx, base_bytes, progress=progress)
+        # Finalize the content signature from the ACTUAL road result (not merely the
+        # configured provider), then write the SAME value into the manifest and — because
+        # ctx is what upload_and_register reads — into the catalog row. This is what the
+        # mobile newest-package comparison comes down to.
+        ctx["content_signature"] = offline_scene_svc.finalize_content_signature(
+            ctx["content_signature"],
+            offline_scene_svc.road_content_fingerprint((context_layers or {}).get("roads")),
+        )
         manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"], terrain_meta, context_layers)
         return assemble_bundle(grid_bytes, hillshade_bytes, ctx.get("overlays") or {}, manifest, assets)
 
@@ -379,8 +409,16 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         """Fetch + build the roads context layer for ONE road source. Returns a result
         dict {layer, asset, roads_geojson, available, bytes, reason}. Raises on a
         transport/fetch failure so the caller can degrade, fall back, or (when required)
-        fail the job. Provider selection is explicit — a source is used only when it is
-        both selected AND configured; otherwise ERIS-internal context is packaged."""
+        fail the job.
+
+        Provider selection is explicit AND honest: when an EXTERNAL provider is selected but
+        its required endpoint is missing/blank, this returns `provider_not_configured` rather
+        than quietly packaging ERIS-internal bearing/inventory/submitted geometry and
+        labelling it as that provider. Only `eris_internal` may package internal context."""
+        if road_source in _EXTERNAL_ROAD_SOURCES and not _external_source_configured(road_source):
+            log("roads", "provider_not_configured", source=road_source)
+            return _unavailable_roads_result("provider_not_configured")
+
         external: list = []
         tiger_configured = bool(
             road_source == context_fmt.ROAD_SOURCE_TIGERWEB and settings.OFFLINE_SCENE_TIGERWEB_BASE_URL
@@ -405,9 +443,10 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                     timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
                 )
             elif caltrans_configured:
-                # Optional Caltrans CRS Functional Classification (California highways/
-                # freeways). Bounded, paginated, worker-only fetch; cancellation is
-                # re-checked between pages. Raises on an unrecoverable failure.
+                # Optional Caltrans CRS Functional Classification — freeway/expressway road
+                # CONTEXT by default (F_System 1,2); a functional classification, NOT an
+                # ownership record. Bounded, paginated, worker-only fetch; cancellation is
+                # re-checked between pages. Raises on an unrecoverable/incomplete result.
                 caltrans_classes = caltrans_fmt.parse_functional_classes(
                     settings.OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES
                 )
@@ -587,6 +626,22 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                     result = self._collect_road_layer(ctx, road_source, running, max_bytes, _emit, _log)
                 except OfflineSceneBuildError:
                     raise
+                except caltrans_fmt.CaltransFetchCancelled:
+                    # CANCELLATION IS NOT A ROAD FAILURE. It must leave _build_context_layers
+                    # immediately so that no fallback provider is contacted, it never becomes
+                    # source_error / incomplete_source, OFFLINE_SCENE_ROADS_REQUIRED cannot
+                    # convert it into an availability failure, and nothing is packaged,
+                    # uploaded or registered. The worker maps it to its canonical
+                    # cancelled-job result.
+                    _log("roads", "cancelled")
+                    raise
+                except caltrans_fmt.CaltransIncompleteSourceError as e:
+                    # A pagination cap was hit while MORE features remained. The subset is
+                    # known-truncated, so it is never packaged as an available layer — the
+                    # layer degrades with a distinct, truthful reason (and, when roads are
+                    # required, fails the job below).
+                    result = _unavailable_roads_result("incomplete_source")
+                    _log("roads", "incomplete_source", error=str(e)[:160])
                 except Exception as e:  # never corrupt the package on a road-source failure
                     result = _unavailable_roads_result("source_error")
                     _log("roads", "source_error", error=str(e)[:120])

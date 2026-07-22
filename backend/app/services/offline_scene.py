@@ -150,6 +150,54 @@ def content_signature(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def road_content_fingerprint(roads_layer: dict | None) -> str:
+    """Deterministic fingerprint of the ACTUAL packaged road result.
+
+    Computed from the finished manifest ``context_layers.roads`` block AFTER road collection,
+    so it distinguishes outcomes that the configured-provider inputs alone cannot:
+    a successful primary result, a successful audited fallback, an unavailable layer (and
+    WHY), a recovered primary after an earlier fallback, and any change to the packaged
+    roads.geojson bytes.
+
+    Included: availability, unavailable reason, the ACTUAL ``source.provider``,
+    ``filter_version``, ``functional_classes``, the audited ``fallback`` (from/to/reason),
+    and the roads.geojson ``sha256`` when packaged.
+
+    Deliberately EXCLUDED: ``retrieved_at`` and any other timestamp, transient log text, and
+    the package version — none of them describe the road content, and including them would
+    force a pointless mobile re-download on every regeneration. OBJECTID is never used."""
+    layer = roads_layer if isinstance(roads_layer, dict) else {}
+    available = bool(layer.get("available"))
+    source = layer.get("source") if isinstance(layer.get("source"), dict) else {}
+    fallback = layer.get("fallback") if isinstance(layer.get("fallback"), dict) else None
+    classes = layer.get("functional_classes")
+    payload = {
+        "available": available,
+        "reason": None if available else (layer.get("reason") or None),
+        "provider": source.get("provider"),
+        "filter_version": layer.get("filter_version"),
+        "functional_classes": list(classes) if isinstance(classes, list) else None,
+        "fallback": (
+            {"from": fallback.get("from"), "to": fallback.get("to"), "reason": fallback.get("reason")}
+            if fallback else None
+        ),
+        # The packaged bytes themselves: any change to roads.geojson changes this.
+        "sha256": layer.get("sha256") if available else None,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def finalize_content_signature(base_signature: str, road_fingerprint: str) -> str:
+    """Fold the actual road-result fingerprint into the pre-build content signature.
+
+    The builder calls this once the roads layer is final, and the SAME finalized value is
+    written to the manifest AND to the catalog row, so the mobile newest-package comparison
+    reacts to what was actually packaged rather than to what was merely configured."""
+    raw = f"{base_signature}|{road_fingerprint}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 # ---- defensive parsing of stored GISA metadata -----------------------------
 # Stored geometry / road-inventory snapshot / terrain grid JSON may be malformed,
 # a JSON string, or the wrong shape. These helpers NEVER raise and NEVER call
