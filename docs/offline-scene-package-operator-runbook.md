@@ -232,6 +232,22 @@ mobile UI surfaces these so the field user can see **exactly** which elevation a
 imagery they are viewing. Honor the imagery provider's attribution/licensing terms
 for offline redistribution.
 
+**Road-source attribution.** Each packaged `roads.geojson` records truthful provenance
+in `context_layers.roads.source` (`provider`, `dataset`, `attribution`, `service`,
+`retrieved_at`). Honor the source's terms:
+- `census_tigerweb` → "U.S. Census Bureau" (development context; never labelled Caltrans
+  or engineering/survey-grade).
+- `caltrans_crs` → **"California Department of Transportation (Caltrans), CRS Functional
+  Classification / Linear Reference System-derived data."** This is Caltrans
+  functional-classification linework used as road *context* — do not imply ERIS owns or
+  authored it, do not present it as an ownership record, and do not present it as
+  survey/engineering-grade centerline. The same credit is shown on the optional online
+  "Caltrans Freeways & Expressways" web map layer.
+  **Attribution is trusted and built in:** ERIS always emits its own expected Caltrans
+  credit and never copies upstream service text into the manifest or UI. So the credit
+  survives a missing/changed/malformed upstream copyright field, and upstream text can
+  never inject arbitrary content into a package manifest or the map UI.
+
 ## Secure-download model (reference)
 
 - Mobile never receives MinIO credentials and the bucket is never anonymous.
@@ -312,6 +328,66 @@ package works with **no cellular service** — the iOS viewer reads only local f
   request order. The manifest advertises only the classes actually packaged, via
   `road_classes` + `road_class_counts` (both omitted when no classified roads are
   present, e.g. `eris_internal`).
+- **Caltrans freeway/expressway road context** (`OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs`)
+  — an **optional** California source: the PUBLIC, credential-free Caltrans
+  **CRS Functional Classification** ArcGIS FeatureServer
+  (`OFFLINE_SCENE_CALTRANS_ROADS_URL`).
+
+  **What it is — and is not.** This layer publishes **functional classification** (how a
+  road *functions* in the network), **not ownership or jurisdiction**. `F_System` therefore
+  does **not** prove a feature belongs to the California State Highway System, is
+  Caltrans-owned, or is a State Route — and a filtered subset of it must never be described
+  as "the state highway system". `RouteID` (e.g. `SHS_050._P`) is a provider LRS identifier
+  and is treated as a display hint only. For an actual SHS/ownership dataset see
+  "Future state-highway (SHS) provider boundary" below.
+
+  **Inclusion policy.** Driven by `F_System` via
+  `OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES`. **Default `1,2`** = `1` Interstate + `2`
+  Other Freeways and Expressways — the conservative freeway/expressway scope matching the
+  product requirement. Class `3` ("Principal Arterial - Other") is a **surface arterial,
+  not a freeway**; operators may opt in with `1,2,3` for broader principal-arterial
+  context. Classes 4-7 (minor arterial / collectors / local) are outside ERIS's scope.
+  The ERIS-trusted `road_class` mapping is truthful: `1,2` → `primary`, `3,4` → `secondary`,
+  `5,6,7` → `local`.
+
+  **Packaged per feature:** `provider_object_id` (the provider's OBJECTID — provenance and
+  pagination only, **not** a durable identity: a republication may reassign it),
+  `provider_event_id` (the provider's persistent `EventID`, when published — this is what
+  correlates the same provider event across releases), `source_feature_id` (the durable ERIS
+  identity of ONE exact original road feature — with divided-corridor pairing enabled, the
+  default, the packaged value is the pairing pass's `r…` id, itself derived from the durable
+  id ERIS supplies as `provider_feature_id`; either way it is independent of OBJECTID),
+  `route_id`, `functional_class` + `functional_class_label`, `county`/`district` when
+  present, `provider:"caltrans_crs"`, the ERIS-trusted `road_class`, and a `NAME` route
+  label (e.g. `Route 50`) for the native identification callout.
+
+  **Identity formula.** `source_feature_id` = hash(identity version, canonical layer
+  identity, validated `EventID` when available, normalized `RouteID`, functional class,
+  **canonical geometry**). Geometry is always included because `EventID` is validated for
+  shape only — the provider does not guarantee it is unique — so an event-only identity
+  would merge distinct roads. It is coordinate-order, multipart-order and response-order
+  invariant, and unchanged when only OBJECTID changes.
+
+  **Untrusted geometry is rejected, never repaired.** If any vertex of any declared part is
+  malformed, non-finite, or outside WGS84 bounds, the WHOLE feature is dropped. ERIS never
+  skips a bad vertex and joins its neighbours, because that would invent a straight chord
+  across the corrupt point that does not exist in the source, and one malformed member of a
+  multipart geometry must not be able to create a false connection in the road network.
+
+  **Bounded + fail-closed.** The query is paginated and clipped to the package AOI (never
+  the statewide dataset) with
+  `OFFLINE_SCENE_CALTRANS_PAGE_SIZE`/`_MAX_FEATURES`/`_MAX_PAGES`/`_MAX_RESPONSE_MB`. If a
+  cap is reached **while the service reports more matching features remain**, the result is
+  known-truncated and is **never packaged**: the layer degrades with reason
+  `incomplete_source` (or fails the job when roads are required, or uses an explicitly
+  configured audited fallback). The manifest records `filter_version` + `functional_classes`
+  so a package is reproducible and auditable.
+
+  **Known limitations.** `F_System` is the only classification lever this layer exposes, so
+  the packaged set is a *functional* selection: some roads carried by other agencies appear,
+  and highways functionally classed below the configured set do not. This is Caltrans
+  functional-classification linework used as road **context** — **not** an ownership record
+  and **not** survey/engineering-grade centerline; ERIS does not own or author it.
 - **Overview** (`overview.png`) — ERIS server-rendered north-up inset.
 - **Aerial imagery** (`imagery.png`) — **opt-in**, USGS/USDA NAIP (public domain).
   `OFFLINE_SCENE_IMAGERY_ENABLED=false` by default; enable + validate on a worker
@@ -319,11 +395,53 @@ package works with **no cellular service** — the iOS viewer reads only local f
   as unavailable in the app and hillshade + roads keep working.
 
 **Config knobs:** see `backend/app/config.py` `OFFLINE_SCENE_ROADS_*`,
-`OFFLINE_SCENE_IMAGERY_*`, `OFFLINE_SCENE_OVERVIEW_*`. All context assets count
-toward `OFFLINE_SCENE_MAX_PACKAGE_MB`; imagery is skipped (not fatal) if it would
-exceed the cap. A road/imagery source failure marks that layer unavailable and
-never corrupts the terrain package (`OFFLINE_SCENE_IMAGERY_MANDATORY=true` opts
-into hard-failing the job if imagery cannot be retrieved).
+`OFFLINE_SCENE_CALTRANS_*`, `OFFLINE_SCENE_IMAGERY_*`, `OFFLINE_SCENE_OVERVIEW_*`. All
+context assets count toward `OFFLINE_SCENE_MAX_PACKAGE_MB`; imagery is skipped (not
+fatal) if it would exceed the cap. A road/imagery source failure marks that layer
+unavailable and never corrupts the terrain package (`OFFLINE_SCENE_IMAGERY_MANDATORY=true`
+opts into hard-failing the job if imagery cannot be retrieved).
+
+**Roads required vs optional (failure policy):**
+- An EXTERNAL provider (`census_tigerweb`, `arcgis_feature_service`, `caltrans_crs`) whose
+  required endpoint is missing/blank reports reason **`provider_not_configured`**. ERIS does
+  **not** quietly package internal bearing/Road-Inventory/submitted geometry and label it as
+  that provider — only `OFFLINE_SCENE_ROAD_SOURCE=eris_internal` may package internal
+  context. The same check applies to a configured fallback, so a fallback missing its URL is
+  never reported as a successful fallback.
+- **Cancellation is not a road failure.** If a job is cancelled during a long paginated road
+  fetch, generation aborts immediately: no fallback provider is contacted, the outcome is
+  never recorded as `source_error` or `incomplete_source`, `OFFLINE_SCENE_ROADS_REQUIRED`
+  cannot turn it into an availability failure, nothing is uploaded or registered, and the
+  job stays **CANCELLED** (not FAILED).
+- `OFFLINE_SCENE_ROADS_REQUIRED=false` (default) — a road-source failure/absence marks
+  the roads layer unavailable (with a truthful `reason`) and the terrain package still
+  builds.
+- `OFFLINE_SCENE_ROADS_REQUIRED=true` — a road retrieval/validation/filter/packaging
+  failure **fails the job**; no READY package is published without verified road data.
+  Applies to the selected provider, never to `OFFLINE_SCENE_ROAD_SOURCE=none`.
+- ERIS **never silently** falls back from one provider to another. Set
+  `OFFLINE_SCENE_ROAD_FALLBACK_SOURCE` to another real source (e.g. `census_tigerweb`) to
+  enable an **explicit** fallback; when it is used, the manifest `roads.fallback`
+  (`{from, to, reason}`) and the worker logs record it.
+- Package validation additionally re-parses `roads.geojson` and rejects a package whose
+  road layer is not valid line GeoJSON or whose actual feature count does not match the
+  declared `feature_count` — so no READY package can carry missing, partial, or
+  count-mismatched road data. The check is strict: the container `type` must be exactly
+  `FeatureCollection`, every item's `type` exactly `Feature`, `properties` an object when
+  present, geometry exactly `LineString`/`MultiLineString` with every part holding >= 2
+  valid vertices (an empty or holey multipart geometry is rejected), all coordinates finite
+  non-boolean numbers inside WGS84 bounds, and `feature_count` a non-negative integer.
+  A legacy package with no roads layer remains valid.
+
+**Content signature reflects the ACTUAL road result.** `content_signature` is finalized
+*after* road collection from the finished roads layer — availability, unavailable reason,
+the actual `source.provider`, `filter_version`, `functional_classes`, the audited
+`fallback`, and the packaged `roads.geojson` SHA-256 — and the same finalized value is
+written to both the manifest and the catalog row. So a Caltrans success, a TIGERweb
+fallback, an unavailable layer, and a later recovery of the primary provider each produce a
+different signature and therefore a correct mobile re-download decision. Timestamps
+(`retrieved_at`), transient log text and the package version are deliberately excluded, so
+regenerating identical roads does not force a pointless re-download.
 
 **Verify a generated package includes roads/overview/imagery metadata + checksums.**
 Download the object with the presigned grant (see the verification block above),
@@ -353,6 +471,61 @@ its `source` must carry provenance only (no credentials/tokens).
 surface, the north-up overview inset, Layers toggles, Terrain/Satellite/Hybrid
 switching (only when imagery packaged), and the Package Details sheet, all with the
 device in Airplane Mode.
+
+### Caltrans CRS Functional Classification source — select, verify, revert
+
+Select the optional Caltrans source (worker env / `docker/.env.proxmox`), then redeploy
+the `offline-scene-worker`:
+
+```sh
+OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs
+OFFLINE_SCENE_CALTRANS_ROADS_URL=https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0
+OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES=1,2   # default freeway/expressway scope; 1,2,3 adds surface principal arterials
+OFFLINE_SCENE_ROADS_REQUIRED=true               # optional: fail generation if no road data is packaged
+```
+
+**Confirm a generated package bundles Caltrans roads.** Use the manifest verification
+block above; for `caltrans_crs` the `roads` layer additionally carries
+`source.provider = "caltrans_crs"`, `source.dataset = "Caltrans CRS Functional
+Classification"`, `filter_version` (e.g. `caltrans_crs.v2:F_System[1,2]`), and
+`functional_classes`. Confirm `roads.geojson` is in the archive (`z.namelist()`), that
+`feature_count` matches `len(json.loads(z.read("roads.geojson"))["features"])`, and that
+`source.attribution` credits Caltrans and contains no token/URL query string.
+
+### Future state-highway (SHS) provider boundary
+
+`caltrans_crs` is a **functional-classification** source and must not be used to answer
+"is this road on the California State Highway System?" A real SHS provider must come from
+a dataset that **explicitly represents the SHS** — e.g. the Caltrans **Postmile / LRS
+network** — rather than inferring ownership from `F_System`.
+
+A Postmile/LRS-based provider is also likely to be a better *geometric* fit for ERIS:
+it supports independent route alignments, so geographically separated directional
+roadways (divided highways) can be preserved as distinct alignments with authoritative
+route/postmile references, instead of relying on ERIS's derived divided-corridor pairing.
+That work is **not** implemented here; it belongs in a separate, independently testable
+provider (tracked in `docs/adr-offline-road-context-source.md`).
+
+**Opt-in connectivity smoke test** (NOT part of CI). The automated suite is fully
+offline (mocked HTTP). To sanity-check live reachability of the Caltrans service against
+a tiny California AOI without generating a package:
+
+```sh
+cd backend && ./.venv/Scripts/python -c "
+from app.services.offline_scene_caltrans import fetch_caltrans_road_features as f
+b={'min_lat':38.55,'min_lon':-121.52,'max_lat':38.60,'max_lon':-121.46}  # ~5 km, Sacramento
+url='https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0'
+out=f(b, layer_url=url, functional_classes=(1,2), timeout_s=30, page_size=500, max_features=2000)
+print('features:', len(out)); print('sample:', out[0]['properties'] if out else None)"
+```
+
+Keep the AOI small and the limits strict; this is a manual reachability check only.
+
+**Revert** to the previous provider (or none): set `OFFLINE_SCENE_ROAD_SOURCE` back to
+`census_tigerweb` / `eris_internal` / `none`, clear `OFFLINE_SCENE_ROADS_REQUIRED` if you
+set it, and redeploy the worker. Already-registered packages are immutable and unaffected;
+only newly generated packages use the changed provider (their `content_signature` changes,
+so the mobile app re-downloads once).
 
 ## 12. Road-versus-imagery alignment diagnostic
 

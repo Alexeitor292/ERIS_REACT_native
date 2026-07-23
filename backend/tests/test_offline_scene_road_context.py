@@ -175,22 +175,27 @@ class TestRoadsProvenanceReflectsActualKind:
     def _b(self):
         return HillshadeReliefBuilder()
 
-    def test_external_configured_but_only_bearing_packaged_is_not_labeled_arcgis(self, monkeypatch):
+    def test_external_configured_with_no_features_never_packages_internal_bearing(self, monkeypatch):
+        """PROVIDER EXCLUSIVITY: an external provider that returns nothing must NOT borrow
+        the internal bearing geometry to publish available:true. It degrades truthfully to
+        no_centerline_features_in_area (so required mode fails and an explicit fallback is
+        the only route to internal geometry), and nothing is packaged."""
         monkeypatch.setattr(settings, "OFFLINE_SCENE_OVERVIEW_ENABLED", False)
         monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_ENABLED", False)
         monkeypatch.setattr(settings, "OFFLINE_SCENE_ROADS_ENABLED", True)
         monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED", True)
         monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "arcgis_feature_service")
         monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE_URL", "https://gis.example.gov/FeatureServer/0")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROADS_REQUIRED", False)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_FALLBACK_SOURCE", "")
         # Adapter returns NOTHING for this AOI; the incident still has a bearing.
         monkeypatch.setattr(ctxmod, "fetch_arcgis_road_features", lambda *a, **k: [])
         layers, assets = self._b()._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
         roads = layers["roads"]
-        assert roads["available"] is True and roads["road_kinds"] == ["road_bearing"]
-        # provenance must NOT claim ArcGIS centerlines and must NOT include the service URL
-        assert roads["source"]["provider"] == "eris_internal"
-        assert roads["source"]["dataset"] != "ArcGIS road centerlines"
-        assert "service" not in roads["source"]
+        assert roads["available"] is False
+        assert roads["reason"] == ctxmod.ROADS_REASON_NO_FEATURES
+        assert ctxmod.ROADS_FILE not in assets      # the bearing line is not packaged
+        assert "source" not in roads                # nothing claims a provider at all
 
     def test_external_centerline_present_is_labeled_arcgis_with_sanitized_service(self, monkeypatch):
         monkeypatch.setattr(settings, "OFFLINE_SCENE_OVERVIEW_ENABLED", False)

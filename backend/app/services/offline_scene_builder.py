@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..storage import put_object_bytes
 from . import offline_scene as offline_scene_svc
+from . import offline_scene_caltrans as caltrans_fmt
 from . import offline_scene_context as context_fmt
 from . import offline_scene_terrain as terrain_fmt
 from . import road_corridor_pairing as corridor_pairing
@@ -182,11 +183,53 @@ def validate_bundle_bytes(package_bytes: bytes) -> tuple[bool, str | None]:
                     return False, f"context asset {fname} checksum mismatch"
                 if layer.get("bytes") is not None and len(data) != int(layer["bytes"]):
                     return False, f"context asset {fname} size mismatch"
+                # Roads must additionally be valid GeoJSON (line features only) whose
+                # declared feature_count matches the actual collection — malformed or
+                # partial road data can never reach a READY package.
+                if name == "roads":
+                    ok, reason = context_fmt.validate_roads_geojson(data, layer.get("feature_count"))
+                    if not ok:
+                        return False, reason
     except zipfile.BadZipFile:
         return False, "not a valid package archive"
     except Exception as e:  # pragma: no cover - defensive
         return False, f"validation error: {e}"
     return True, None
+
+
+# Road sources that fetch from an EXTERNAL service. Each needs its own endpoint setting; a
+# missing/blank one means the operator's selected provider cannot run at all, which must be
+# reported as `provider_not_configured` — never silently satisfied with internal geometry.
+_EXTERNAL_ROAD_SOURCES = (
+    context_fmt.ROAD_SOURCE_TIGERWEB,
+    context_fmt.ROAD_SOURCE_ARCGIS,
+    context_fmt.ROAD_SOURCE_CALTRANS,
+)
+
+
+def _external_source_configured(road_source: str) -> bool:
+    """Whether an external road source has the configuration it requires to run."""
+    if road_source == context_fmt.ROAD_SOURCE_TIGERWEB:
+        return bool(str(settings.OFFLINE_SCENE_TIGERWEB_BASE_URL or "").strip()
+                    and context_fmt.parse_tigerweb_layers(settings.OFFLINE_SCENE_TIGERWEB_LAYERS))
+    if road_source == context_fmt.ROAD_SOURCE_ARCGIS:
+        return bool(str(settings.OFFLINE_SCENE_ROAD_SOURCE_URL or "").strip())
+    if road_source == context_fmt.ROAD_SOURCE_CALTRANS:
+        return bool(str(settings.OFFLINE_SCENE_CALTRANS_ROADS_URL or "").strip())
+    return True
+
+
+def _unavailable_roads_result(reason: str) -> dict:
+    """A roads-collection result describing an unavailable roads layer (no asset packaged).
+    Mirrors the successful-result shape so the caller handles both uniformly."""
+    return {
+        "layer": context_fmt.unavailable_layer(reason),
+        "asset": None,
+        "roads_geojson": None,
+        "available": False,
+        "bytes": 0,
+        "reason": reason,
+    }
 
 
 # ---- provider interface ----------------------------------------------------
@@ -334,6 +377,14 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         hillshade_bytes = source.get("hillshade_bytes") or b""
         base_bytes = len(grid_bytes) + len(hillshade_bytes)
         context_layers, assets = self._build_context_layers(ctx, base_bytes, progress=progress)
+        # Finalize the content signature from the ACTUAL road result (not merely the
+        # configured provider), then write the SAME value into the manifest and — because
+        # ctx is what upload_and_register reads — into the catalog row. This is what the
+        # mobile newest-package comparison comes down to.
+        ctx["content_signature"] = offline_scene_svc.finalize_content_signature(
+            ctx["content_signature"],
+            offline_scene_svc.road_content_fingerprint((context_layers or {}).get("roads")),
+        )
         manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"], terrain_meta, context_layers)
         return assemble_bundle(grid_bytes, hillshade_bytes, ctx.get("overlays") or {}, manifest, assets)
 
@@ -353,6 +404,200 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             min_corridor_length_m=float(settings.OFFLINE_SCENE_PAIR_MIN_CORRIDOR_LENGTH_M),
             midpoint_tolerance_m=float(settings.OFFLINE_SCENE_PAIR_MIDPOINT_TOLERANCE_M),
         )
+
+    def _collect_road_layer(self, ctx: dict, road_source: str, running: int, max_bytes: int, emit, log) -> dict:
+        """Fetch + build the roads context layer for ONE road source. Returns a result
+        dict {layer, asset, roads_geojson, available, bytes, reason}. Raises on a
+        transport/fetch failure so the caller can degrade, fall back, or (when required)
+        fail the job.
+
+        Provider selection is explicit AND honest: when an EXTERNAL provider is selected but
+        its required endpoint is missing/blank, this returns `provider_not_configured` rather
+        than quietly packaging ERIS-internal bearing/inventory/submitted geometry and
+        labelling it as that provider. Only `eris_internal` may package internal context."""
+        if road_source in _EXTERNAL_ROAD_SOURCES and not _external_source_configured(road_source):
+            log("roads", "provider_not_configured", source=road_source)
+            return _unavailable_roads_result("provider_not_configured")
+
+        external: list = []
+        tiger_configured = bool(
+            road_source == context_fmt.ROAD_SOURCE_TIGERWEB and settings.OFFLINE_SCENE_TIGERWEB_BASE_URL
+        )
+        arcgis_configured = bool(
+            road_source == context_fmt.ROAD_SOURCE_ARCGIS and settings.OFFLINE_SCENE_ROAD_SOURCE_URL
+        )
+        caltrans_configured = bool(
+            road_source == context_fmt.ROAD_SOURCE_CALTRANS and settings.OFFLINE_SCENE_CALTRANS_ROADS_URL
+        )
+        external_configured = tiger_configured or arcgis_configured or caltrans_configured
+        caltrans_classes: tuple[int, ...] | None = None
+        if external_configured:
+            bbuf = context_fmt.bounds_with_buffer(ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M)
+            if tiger_configured:
+                # Public U.S. Census TIGERweb (credential-free dev road-snap source). One
+                # layer failing does not discard the others; ALL failing raises -> roads
+                # degrade to source_error (the terrain package still builds).
+                external = context_fmt.fetch_tigerweb_road_features(
+                    bbuf, base_url=settings.OFFLINE_SCENE_TIGERWEB_BASE_URL,
+                    layers=settings.OFFLINE_SCENE_TIGERWEB_LAYERS,
+                    timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
+                )
+            elif caltrans_configured:
+                # Optional Caltrans CRS Functional Classification — freeway/expressway road
+                # CONTEXT by default (F_System 1,2); a functional classification, NOT an
+                # ownership record. Bounded, paginated, worker-only fetch; cancellation is
+                # re-checked between pages. Raises on an unrecoverable/incomplete result.
+                caltrans_classes = caltrans_fmt.parse_functional_classes(
+                    settings.OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES
+                )
+                external = caltrans_fmt.fetch_caltrans_road_features(
+                    bbuf,
+                    layer_url=settings.OFFLINE_SCENE_CALTRANS_ROADS_URL,
+                    functional_classes=caltrans_classes,
+                    timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S),
+                    page_size=int(settings.OFFLINE_SCENE_CALTRANS_PAGE_SIZE),
+                    max_features=int(settings.OFFLINE_SCENE_CALTRANS_MAX_FEATURES),
+                    max_pages=int(settings.OFFLINE_SCENE_CALTRANS_MAX_PAGES),
+                    max_response_bytes=int(settings.OFFLINE_SCENE_CALTRANS_MAX_RESPONSE_MB) * 1024 * 1024,
+                    retries=int(settings.OFFLINE_SCENE_CALTRANS_RETRIES),
+                    session=self._session, sleep=self._sleep, monotonic=self._monotonic, jitter=self._jitter,
+                    cancel_check=ctx.get("cancel_check"),
+                )
+            else:  # arcgis_feature_service
+                external = context_fmt.fetch_arcgis_road_features(
+                    bbuf, source_url=settings.OFFLINE_SCENE_ROAD_SOURCE_URL,
+                    timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
+                )
+
+        # PROVIDER EXCLUSIVITY: ERIS-internal context (Road Inventory geometry, submitted
+        # line geometry, the synthetic road-bearing line) belongs to `eris_internal` ONLY.
+        # An externally-sourced roads layer contains that provider's features and nothing
+        # else, so a provider that returned nothing cannot publish available:true under
+        # borrowed geometry — it degrades to no_centerline_features_in_area, which required
+        # mode fails on and an explicit (audited) fallback is the only way to package
+        # internal geometry instead.
+        include_internal_context = (road_source == context_fmt.ROAD_SOURCE_ERIS_INTERNAL)
+        geojson, count, roads_reason = context_fmt.roads_geojson_from_context(
+            {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M,
+            external_configured=external_configured,
+            include_internal_context=include_internal_context,
+        )
+        # Deterministic station-local divided-highway pairing (ADDITIVE): adds a stable
+        # feature_id + ERIS-derived selection_kind to every road, splits a paired
+        # carriageway into its diagnostic member portion + selectable unpaired portions,
+        # and appends derived divided_highway_corridor features so the map can show ONE
+        # yellow line through a shared corridor. road_class_counts must describe the
+        # ORIGINAL source roads, captured BEFORE the pairing rewrite.
+        source_features = list(geojson.get("features") or [])
+        source_class_counts = context_fmt.road_class_counts({"features": source_features})
+        source_count = len(source_features)
+        pairing_stats = None
+        if count > 0 and settings.OFFLINE_SCENE_DIVIDED_PAIRING_ENABLED:
+            try:
+                paired_features, pairing_stats = corridor_pairing.build_selection_features(
+                    geojson.get("features") or [], self._pairing_params()
+                )
+                geojson = {"type": "FeatureCollection", "features": paired_features}
+                count = len(paired_features)
+                log("roads", "paired", corridors=pairing_stats.get("divided_corridor_count", 0),
+                    kinds=",".join(pairing_stats.get("selection_kinds") or []))
+            except corridor_pairing.DuplicateSourceIdentityError as e:
+                # FAIL CLOSED, never swallow: two distinct packaged lines shared a pairing
+                # source identity. Publishing misleading unpaired output would hide the
+                # collision, so the package fails instead. (The packaging boundary guarantees
+                # unique per-part provider_feature_id; this should be unreachable.)
+                log("roads", "pairing_identity_collision", error=str(e)[:160])
+                raise OfflineSceneBuildError(
+                    f"Divided-corridor pairing found colliding road identities: {e}"
+                ) from e
+            except Exception as e:  # noqa: BLE001 — other pairing failures must never break packaging
+                pairing_stats = None
+                log("roads", "pairing_skipped", error=str(e)[:120])
+
+        roads_geojson = geojson if count > 0 else None
+        if count == 0:
+            # PRECISE reason (never generic "no_data").
+            log("roads", "unavailable", reason=roads_reason)
+            return {
+                "layer": context_fmt.unavailable_layer(roads_reason or "no_road_data"),
+                "asset": None, "roads_geojson": None, "available": False, "bytes": 0,
+                "reason": roads_reason or "no_road_data",
+            }
+
+        data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
+        if running + len(data) > max_bytes:
+            log("roads", "skipped_too_large", bytes=len(data))
+            return {
+                "layer": context_fmt.unavailable_layer("too_large"),
+                "asset": None, "roads_geojson": roads_geojson, "available": False, "bytes": 0,
+                "reason": "too_large",
+            }
+
+        # Provenance must reflect the ACTUAL richest kind packaged AND the actual provider —
+        # never claim ArcGIS/Caltrans for TIGERweb, never claim a centerline source when only
+        # a synthetic bearing/inventory/submitted line was packaged.
+        kinds = context_fmt.road_kinds_from_geojson(geojson)
+        has_centerline = "road_centerline" in kinds
+        if has_centerline and tiger_configured:
+            # U.S. Census Bureau — NOT Caltrans / not engineering-grade.
+            src = context_fmt.tigerweb_source_meta(settings.OFFLINE_SCENE_TIGERWEB_BASE_URL)
+        elif has_centerline and caltrans_configured:
+            # Authoritative Caltrans functional-classification linework (road CONTEXT).
+            src = caltrans_fmt.caltrans_source_meta(settings.OFFLINE_SCENE_CALTRANS_ROADS_URL)
+        elif has_centerline and arcgis_configured:
+            src = {
+                "provider": "arcgis_feature_service",
+                "dataset": "ArcGIS road centerlines",
+                "attribution": "Operator-configured ArcGIS road context",
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                "service": settings.OFFLINE_SCENE_ROAD_SOURCE_URL,  # sanitized by sanitize_source
+            }
+        else:
+            src = {
+                "provider": "eris_internal",
+                "dataset": "ERIS road context (bearing + inventory + submitted)",
+                "attribution": "ERIS road context",
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        extra: dict = {
+            "feature_count": count,                 # total features serialized in roads.geojson
+            "source_feature_count": source_count,   # original context features BEFORE pairing
+            "road_kinds": kinds,
+            # The road CLIPPING CONTRACT, persisted exactly as applied (bounds + buffer).
+            "clip_bounds": context_fmt.road_clip_bounds(ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M),
+            "buffer_m": float(settings.OFFLINE_SCENE_ROAD_BUFFER_M),
+        }
+        # Caltrans provenance: the exact inclusion/filter policy so a package is auditable
+        # and reproducible, and so the content signature changes when the filter changes.
+        if caltrans_configured and has_centerline:
+            classes = caltrans_classes or caltrans_fmt.parse_functional_classes(
+                settings.OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES
+            )
+            extra["filter_version"] = caltrans_fmt.caltrans_filter_version(classes)
+            extra["functional_classes"] = list(classes)
+        if source_class_counts:
+            extra["road_classes"] = sorted(source_class_counts)
+            extra["road_class_counts"] = source_class_counts
+        if pairing_stats:
+            extra["selection_kinds"] = pairing_stats["selection_kinds"]
+            extra["selection_kind_counts"] = pairing_stats["selection_kind_counts"]
+            extra["selectable_road_class_counts"] = pairing_stats["selectable_road_class_counts"]
+            if pairing_stats["diagnostic_kinds"]:
+                extra["diagnostic_kinds"] = pairing_stats["diagnostic_kinds"]
+                extra["diagnostic_kind_counts"] = pairing_stats["diagnostic_kind_counts"]
+            extra["selectable_feature_count"] = pairing_stats["selectable_feature_count"]
+            extra["diagnostic_feature_count"] = pairing_stats["diagnostic_feature_count"]
+            extra["context_feature_count"] = pairing_stats["context_feature_count"]
+            extra["divided_corridor_count"] = pairing_stats["divided_corridor_count"]
+            extra["pairing"] = pairing_stats["pairing"]
+
+        layer = context_fmt.available_layer(context_fmt.ROADS_FILE, data, src, **extra)
+        log("roads", "packaged", features=count, kinds=",".join(kinds), bytes=len(data))
+        return {
+            "layer": layer, "asset": data, "roads_geojson": roads_geojson,
+            "available": True, "bytes": len(data), "reason": None,
+        }
 
     def _build_context_layers(self, ctx: dict, base_bytes: int, progress=None) -> tuple[dict, dict]:
         """Collect roads / optional imagery / overview into (context_layers, assets).
@@ -375,148 +620,88 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                         sid, ctx.get("package_version"), layer, outcome,
                         " ".join(f"{k}={v}" for k, v in kv.items()))
 
-        # --- Roads (default: ERIS-internal; opt-in external ArcGIS centerline adapter) ---
+        # --- Roads (provider selected by OFFLINE_SCENE_ROAD_SOURCE) ---
+        # Failure semantics: a provider failure degrades the roads layer (unavailable +
+        # truthful reason) WITHOUT corrupting the terrain package — unless roads are
+        # REQUIRED, in which case the job fails and no READY package is published. An
+        # explicit (never silent) fallback source can be configured and is AUDITED in the
+        # manifest + logs. `none` packages no road context by design.
         roads_geojson = None
         roads_available = False
-        if settings.OFFLINE_SCENE_ROADS_ENABLED:
-            _emit("Collecting road context")
-            try:
-                external = []
-                road_source = str(settings.OFFLINE_SCENE_ROAD_SOURCE or "eris_internal")
-                tiger_configured = bool(road_source == "census_tigerweb" and settings.OFFLINE_SCENE_TIGERWEB_BASE_URL)
-                arcgis_configured = bool(road_source == "arcgis_feature_service" and settings.OFFLINE_SCENE_ROAD_SOURCE_URL)
-                external_configured = tiger_configured or arcgis_configured
-                if external_configured:
-                    bbuf = context_fmt.bounds_with_buffer(ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M)
-                    if tiger_configured:
-                        # Public U.S. Census TIGERweb (credential-free dev road-snap source).
-                        # One layer failing does not discard the others; ALL failing raises
-                        # -> roads degrade to source_error (the terrain package still builds).
-                        external = context_fmt.fetch_tigerweb_road_features(
-                            bbuf, base_url=settings.OFFLINE_SCENE_TIGERWEB_BASE_URL,
-                            layers=settings.OFFLINE_SCENE_TIGERWEB_LAYERS,
-                            timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
-                        )
-                    else:
-                        external = context_fmt.fetch_arcgis_road_features(
-                            bbuf, source_url=settings.OFFLINE_SCENE_ROAD_SOURCE_URL,
-                            timeout_s=int(settings.OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S), session=self._session,
-                        )
-                geojson, count, roads_reason = context_fmt.roads_geojson_from_context(
-                    {**ctx, "external_road_features": external}, settings.OFFLINE_SCENE_ROAD_BUFFER_M,
-                    external_configured=external_configured,
-                )
-                # Deterministic station-local divided-highway pairing (ADDITIVE): adds a
-                # stable feature_id + ERIS-derived selection_kind to every road, splits a
-                # paired carriageway into its diagnostic member portion + selectable
-                # unpaired portions, and appends derived divided_highway_corridor features
-                # so the map can show ONE yellow line through a shared corridor.
-                # road_class_counts must describe the ORIGINAL source roads, captured BEFORE
-                # the pairing rewrite splits carriageways and derives corridors — otherwise
-                # one source carriageway would be counted several times.
-                source_features = list(geojson.get("features") or [])
-                source_class_counts = context_fmt.road_class_counts({"features": source_features})
-                source_count = len(source_features)
-                pairing_stats = None
-                if count > 0 and settings.OFFLINE_SCENE_DIVIDED_PAIRING_ENABLED:
-                    try:
-                        paired_features, pairing_stats = corridor_pairing.build_selection_features(
-                            geojson.get("features") or [], self._pairing_params()
-                        )
-                        geojson = {"type": "FeatureCollection", "features": paired_features}
-                        count = len(paired_features)
-                        _log("roads", "paired", corridors=pairing_stats.get("divided_corridor_count", 0),
-                             kinds=",".join(pairing_stats.get("selection_kinds") or []))
-                    except Exception as e:  # noqa: BLE001 — pairing must never break packaging
-                        pairing_stats = None
-                        _log("roads", "pairing_skipped", error=str(e)[:120])
-                roads_geojson = geojson if count > 0 else None
-                if count > 0:
-                    data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
-                    if running + len(data) <= max_bytes:
-                        # Provenance must reflect the ACTUAL richest kind packaged AND the
-                        # actual provider — never claim ArcGIS/Caltrans for TIGERweb, and
-                        # never claim a centerline source when only a synthetic bearing/
-                        # inventory/submitted line was packaged.
-                        kinds = context_fmt.road_kinds_from_geojson(geojson)
-                        has_centerline = "road_centerline" in kinds
-                        if has_centerline and tiger_configured:
-                            # U.S. Census Bureau — NOT Caltrans / not engineering-grade.
-                            src = context_fmt.tigerweb_source_meta(settings.OFFLINE_SCENE_TIGERWEB_BASE_URL)
-                        elif has_centerline and arcgis_configured:
-                            src = {
-                                "provider": "arcgis_feature_service",
-                                "dataset": "ArcGIS road centerlines",
-                                "attribution": "Caltrans / ERIS road context",
-                                "retrieved_at": datetime.now(timezone.utc).isoformat(),
-                                "service": settings.OFFLINE_SCENE_ROAD_SOURCE_URL,  # sanitized by sanitize_source
-                            }
-                        else:
-                            src = {
-                                "provider": "eris_internal",
-                                "dataset": "ERIS road context (bearing + inventory + submitted)",
-                                "attribution": "Caltrans / ERIS road context",
-                                "retrieved_at": datetime.now(timezone.utc).isoformat(),
-                            }
-                        # Bounded, truthful road-class metadata — ONLY classes actually
-                        # packaged (so a highway-first UI can tell primary from local).
-                        # Derived from the ORIGINAL sources, never the rewritten collection.
-                        class_counts = source_class_counts
-                        extra = {
-                            # Total features actually serialized in roads.geojson.
-                            "feature_count": count,
-                            # Original source/context features BEFORE the pairing rewrite.
-                            "source_feature_count": source_count,
-                            "road_kinds": kinds,
-                            # The road CLIPPING CONTRACT, persisted exactly as applied.
-                            # Roads are clipped to bounds + buffer, so they legitimately
-                            # extend past the terrain/imagery footprint. A reader must use
-                            # THIS, not live config, to judge a coordinate in/out of bounds.
-                            "clip_bounds": context_fmt.road_clip_bounds(
-                                ctx["bounds"], settings.OFFLINE_SCENE_ROAD_BUFFER_M
-                            ),
-                            "buffer_m": float(settings.OFFLINE_SCENE_ROAD_BUFFER_M),
-                        }
-                        if class_counts:
-                            extra["road_classes"] = sorted(class_counts)
-                            extra["road_class_counts"] = class_counts
-                        # Divided-highway selection metadata — ONLY the kinds actually
-                        # packaged, plus the pairing method/version so a corridor can always
-                        # be traced back to the algorithm that produced it.
-                        if pairing_stats:
-                            # SELECTABLE candidate kinds only — diagnostics roles are kept
-                            # in a separate namespace so the selectable enum stays at four.
-                            extra["selection_kinds"] = pairing_stats["selection_kinds"]
-                            extra["selection_kind_counts"] = pairing_stats["selection_kind_counts"]
-                            extra["selectable_road_class_counts"] = pairing_stats["selectable_road_class_counts"]
-                            if pairing_stats["diagnostic_kinds"]:
-                                extra["diagnostic_kinds"] = pairing_stats["diagnostic_kinds"]
-                                extra["diagnostic_kind_counts"] = pairing_stats["diagnostic_kind_counts"]
-                            # Exact partition: feature_count == selectable + diagnostic + context.
-                            extra["selectable_feature_count"] = pairing_stats["selectable_feature_count"]
-                            extra["diagnostic_feature_count"] = pairing_stats["diagnostic_feature_count"]
-                            extra["context_feature_count"] = pairing_stats["context_feature_count"]
-                            extra["divided_corridor_count"] = pairing_stats["divided_corridor_count"]
-                            extra["pairing"] = pairing_stats["pairing"]
-                        layers["roads"] = context_fmt.available_layer(
-                            context_fmt.ROADS_FILE, data, src, **extra
-                        )
-                        assets[context_fmt.ROADS_FILE] = data
-                        running += len(data)
-                        roads_available = True
-                        _log("roads", "packaged", features=count, kinds=",".join(kinds), bytes=len(data))
-                    else:
-                        layers["roads"] = context_fmt.unavailable_layer("too_large")
-                        _log("roads", "skipped_too_large", bytes=len(data))
-                else:
-                    # PRECISE reason (never generic "no_data").
-                    layers["roads"] = context_fmt.unavailable_layer(roads_reason or "no_road_data")
-                    _log("roads", "unavailable", reason=roads_reason)
-            except Exception as e:  # never corrupt the package on a road-source failure
-                layers["roads"] = context_fmt.unavailable_layer("source_error")
-                _log("roads", "source_error", error=str(e)[:120])
-        else:
+        if not settings.OFFLINE_SCENE_ROADS_ENABLED:
             layers["roads"] = context_fmt.unavailable_layer("disabled")
+        else:
+            road_source = context_fmt.normalize_road_source(settings.OFFLINE_SCENE_ROAD_SOURCE)
+            roads_required = bool(
+                settings.OFFLINE_SCENE_ROADS_REQUIRED and road_source != context_fmt.ROAD_SOURCE_NONE
+            )
+            if road_source == context_fmt.ROAD_SOURCE_NONE:
+                layers["roads"] = context_fmt.unavailable_layer("provider_none")
+                _log("roads", "provider_none")
+            else:
+                _emit("Collecting road context")
+                try:
+                    result = self._collect_road_layer(ctx, road_source, running, max_bytes, _emit, _log)
+                except OfflineSceneBuildError:
+                    raise
+                except caltrans_fmt.CaltransFetchCancelled:
+                    # CANCELLATION IS NOT A ROAD FAILURE. It must leave _build_context_layers
+                    # immediately so that no fallback provider is contacted, it never becomes
+                    # source_error / incomplete_source, OFFLINE_SCENE_ROADS_REQUIRED cannot
+                    # convert it into an availability failure, and nothing is packaged,
+                    # uploaded or registered. The worker maps it to its canonical
+                    # cancelled-job result.
+                    _log("roads", "cancelled")
+                    raise
+                except context_fmt.RoadIdentityCollisionError as e:
+                    # A generated packaged-part identity mapped to two different geometries.
+                    # Never swallow into an unavailable layer: fail the package so the
+                    # collision is surfaced rather than silently resolved.
+                    _log("roads", "packaged_identity_collision", error=str(e)[:160])
+                    raise OfflineSceneBuildError(
+                        f"Packaged road identities collided: {e}"
+                    ) from e
+                except caltrans_fmt.CaltransIncompleteSourceError as e:
+                    # A pagination cap was hit while MORE features remained. The subset is
+                    # known-truncated, so it is never packaged as an available layer — the
+                    # layer degrades with a distinct, truthful reason (and, when roads are
+                    # required, fails the job below).
+                    result = _unavailable_roads_result("incomplete_source")
+                    _log("roads", "incomplete_source", error=str(e)[:160])
+                except Exception as e:  # never corrupt the package on a road-source failure
+                    result = _unavailable_roads_result("source_error")
+                    _log("roads", "source_error", error=str(e)[:120])
+
+                # EXPLICIT, AUDITED fallback (never a silent Caltrans->TIGER switch).
+                fallback_source = str(settings.OFFLINE_SCENE_ROAD_FALLBACK_SOURCE or "").strip().lower()
+                if (not result["available"]) and fallback_source and fallback_source != road_source:
+                    try:
+                        fb = self._collect_road_layer(ctx, fallback_source, running, max_bytes, _emit, _log)
+                        if fb["available"]:
+                            fb["layer"]["fallback"] = {
+                                "from": road_source, "to": fallback_source,
+                                "reason": result.get("reason") or "primary_unavailable",
+                            }
+                            result = fb
+                            _log("roads", "fallback_used", source=road_source, to=fallback_source)
+                    except Exception as e:  # noqa: BLE001 - a failing fallback is not fatal by itself
+                        _log("roads", "fallback_failed", to=fallback_source, error=str(e)[:120])
+
+                # REQUIRED policy: a required-but-unavailable roads layer FAILS the job so no
+                # READY package can carry missing/partial/unverified road data.
+                if roads_required and not result["available"]:
+                    raise OfflineSceneBuildError(
+                        f"Roads are required (OFFLINE_SCENE_ROADS_REQUIRED=true) for provider "
+                        f"'{road_source}' but none could be packaged "
+                        f"(reason: {result['layer'].get('reason')})."
+                    )
+
+                layers["roads"] = result["layer"]
+                if result["asset"] is not None:
+                    assets[context_fmt.ROADS_FILE] = result["asset"]
+                    running += result["bytes"]
+                roads_geojson = result["roads_geojson"]
+                roads_available = result["available"]
 
         # --- Road cross-section context (Road Inventory layout; licence-clean, tiny) ---
         if settings.OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED:

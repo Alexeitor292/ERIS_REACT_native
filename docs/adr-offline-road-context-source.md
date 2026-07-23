@@ -1,8 +1,9 @@
 # ADR: Offline road-context source for development and future production
 
-Status: **Accepted for development; backend adapter IMPLEMENTED (2026-07-14)**
+Status: **Accepted for development; backend adapters IMPLEMENTED — `census_tigerweb` (2026-07-14), `caltrans_crs` (2026-07-21)**
 
-Date: **2026-07-14**  
+Date: **2026-07-14** (addendum **2026-07-21**)
+
 Scope: automatic `.eristerrain` package generation and the native offline Cross Section tool
 
 > **Implementation note (2026-07-14).** `census_tigerweb` is implemented as a
@@ -12,6 +13,86 @@ Scope: automatic `.eristerrain` package generation and the native offline Cross 
 > Enterprise layer. No mobile, Objective-C, or Expo change was required, and **no new EAS
 > build is needed** — the shipped app already consumes `roads.geojson` with
 > `kind: "road_centerline"`.
+
+> **Addendum (2026-07-21) — `caltrans_crs` Caltrans freeway/expressway road context.** An
+> OPTIONAL, operator-selected provider (`OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs`) packages
+> **Caltrans freeway/expressway road context** for the package AOI from the PUBLIC,
+> credential-free Caltrans **CRS Functional Classification** ArcGIS FeatureServer
+> (`.../CHhighway/CRS_Functional_Classification/FeatureServer/0`). It lives in a dedicated
+> pure/worker module (`backend/app/services/offline_scene_caltrans.py`) so filter +
+> normalization stay separate from networking.
+>
+> **Truthful scope — classification, not ownership.** This layer publishes *functional
+> classification* (how a road functions in the network). It is **not** an ownership or
+> jurisdiction dataset: `F_System` does **not** prove that a feature belongs to the
+> California State Highway System, is Caltrans-owned, or is a State Route, and no filtered
+> subset of it may be described as "the state highway system". `RouteID` (e.g.
+> `SHS_050._P`) is a provider LRS identifier used as a **display hint only**.
+>
+> - **Filter (product policy):** inclusion is driven by `F_System` — the only classification
+>   lever the layer exposes. **Default `1,2`** (Interstate + Other Freeways and Expressways):
+>   the conservative freeway/expressway scope. Class `3` ("Principal Arterial - Other") is a
+>   **surface arterial, not a freeway**, and is opt-in via
+>   `OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES=1,2,3`. The `where` clause is built by a pure,
+>   unit-tested function from validated integer codes only — never string-concatenated input.
+>   The `road_class` mapping is truthful: `1,2` → `primary`, `3,4` → `secondary`, `5,6,7` →
+>   `local`.
+> - **Identity:** `OBJECTID` is treated as a per-response row id (kept as
+>   `provider_object_id` for provenance, stable pagination ordering and within-response
+>   dedupe) — **never** as durable identity, because a republication may reassign it. ONE
+>   formula is used for every feature:
+>   `source_feature_id = hash(identity version, canonical layer identity, validated EventID
+>   when available, normalized RouteID, functional class, canonical geometry)`.
+>   Canonical geometry is included **even when an EventID exists**: `EventID` is validated
+>   for shape only and the provider does not guarantee uniqueness, so an event-only identity
+>   gave several distinct geometries the same id and broke the one-feature-one-identity
+>   contract that `road_corridor_pairing` consumes. The id is deterministic, coordinate-order
+>   and multipart-order invariant, independent of response ordering, and unchanged when only
+>   OBJECTID changes. The provider's event value remains available separately as
+>   `provider_event_id` for provenance/cross-version correlation; the durable id is supplied
+>   as `provider_feature_id`, the hook the pairing pass already prefers, so its derived ids
+>   stay unique for two route events sharing one alignment.
+> - **Untrusted geometry is rejected, not repaired:** any malformed, non-finite or
+>   out-of-WGS84 vertex in any declared part drops the WHOLE feature. Skipping a bad vertex
+>   and joining its neighbours would INVENT a chord that does not exist in the source, and a
+>   malformed multipart member must not be able to bridge a gap in the road network.
+> - **Cancellation is not a road failure:** a cancellation observed between pages leaves the
+>   context-layer build immediately — no fallback is contacted, it never becomes
+>   `source_error`/`incomplete_source`, `OFFLINE_SCENE_ROADS_REQUIRED` cannot convert it into
+>   an availability failure, nothing is uploaded or registered, and the job stays CANCELLED.
+> - **Unconfigured external providers are honest:** an external provider selected without its
+>   endpoint reports `provider_not_configured` instead of silently packaging ERIS-internal
+>   geometry under that provider's name. Only `eris_internal` may package internal context.
+> - **Content signature reflects the actual result:** it is finalized after road collection
+>   from the finished roads layer (availability, reason, actual provider, filter_version,
+>   functional_classes, audited fallback, roads.geojson SHA-256), excluding timestamps and
+>   package version, and the same value goes to the manifest and the catalog row.
+> - **Pagination + safety:** bounded `resultOffset`/`resultRecordCount` pagination with
+>   `exceededTransferLimit` detection, hard-capped by `_MAX_PAGES`/`_MAX_FEATURES`; https-only
+>   endpoint, connect/read timeouts, bounded retry with jitter, max response size, JSON +
+>   geometry + coordinate validation, and cancellation re-checked between pages. It queries
+>   only the package AOI — never the statewide dataset. **Caps fail CLOSED:** reaching a cap
+>   while the service reports more matching features raises a typed
+>   `CaltransIncompleteSourceError`; the known-truncated subset is never packaged
+>   (`available:false`, reason `incomplete_source`).
+> - **Failure policy:** `OFFLINE_SCENE_ROADS_REQUIRED` makes roads mandatory (job fails
+>   rather than publishing a package without verified road data); `OFFLINE_SCENE_ROAD_SOURCE`
+>   now also accepts `none`; there is **no silent fallback** — an explicit, audited
+>   `OFFLINE_SCENE_ROAD_FALLBACK_SOURCE` records `roads.fallback` in the manifest+logs.
+> - **Provenance/attribution:** dataset `Caltrans CRS Functional Classification`, credit
+>   "California Department of Transportation (Caltrans), CRS Functional Classification /
+>   Linear Reference System-derived data". Attribution is **trusted and built in** — ERIS
+>   emits its own expected credit and never copies upstream service text into the manifest or
+>   UI, so the credit survives a missing/changed/malformed upstream copyright field and
+>   upstream text can never inject content. Road **context** only: not an ownership record,
+>   not survey/engineering-grade. No mobile/Objective-C change was required (the shipped app
+>   already renders `road_centerline` + `road_class`). The same public layer is also offered
+>   as an OPTIONAL online web toggle ("Caltrans Freeways & Expressways"), independent of
+>   whether a downloaded package contains packaged roads. That toggle is **opt-in**:
+>   `VITE_CALTRANS_HIGHWAYS_URL` is unset by default, and with no URL the web app constructs
+>   no layer at all (so it makes no request to the public service). Once configured the layer
+>   starts `visible:false`; ERIS does not claim zero network access for a configured-but-
+>   hidden layer, because the ArcGIS runtime may still load service metadata.
 
 ## Context
 
@@ -279,6 +360,32 @@ Advantages: managed hosting and ArcGIS tooling.
 Limitations: trial/subscription lifecycle, credits, account governance, and avoidable vendor coupling.
 
 ### 4. Caltrans ArcGIS Enterprise
+
+> **Update (2026-07-21).** The PUBLIC Caltrans **CRS Functional Classification**
+> FeatureServer is now implemented as `caltrans_crs` (see the addendum above) — a
+> credential-free **functional-classification road context** source. That is distinct from
+> the authenticated Caltrans **Enterprise** integration described here, which remains the
+> future path for authoritative route/postmile alignment and Road Inventory coupling.
+>
+> **Future state-highway (SHS) provider boundary — NOT implemented here.** `caltrans_crs`
+> must never be used to answer "is this road on the California State Highway System?"; it
+> classifies road *function*, not ownership. A real SHS provider must be built on a dataset
+> that **explicitly represents the SHS** — e.g. the Caltrans **Postmile / LRS network** —
+> rather than inferring ownership from `F_System`.
+>
+> Two reasons that is the right future direction, beyond correctness of ownership:
+> 1. The Postmile/LRS network carries authoritative **route + postmile** references, which is
+>    exactly what the Cross Section tool needs for verified upstation orientation (today
+>    `orientation_available` stays false without a separate authoritative bearing).
+> 2. It supports **independent route alignments**, so geographically separated directional
+>    roadways (divided highways) can be preserved as distinct authoritative alignments,
+>    rather than depending on ERIS's derived divided-corridor pairing
+>    (`docs/adr-divided-highway-corridor-pairing.md`) to reconstruct one corridor from two
+>    carriageways.
+>
+> This is deliberately deferred: it is a separate provider with its own schema, filter,
+> licensing review and tests, and it should land as an independently testable adapter rather
+> than being bolted onto the functional-classification source.
 
 This remains the likely production or authoritative integration when the organizational environment, service owner, credentials, licensing, network path, data contract, and security review are ready.
 

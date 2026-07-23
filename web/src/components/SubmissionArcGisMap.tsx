@@ -4,6 +4,7 @@ import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import Graphic from "@arcgis/core/Graphic";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import Point from "@arcgis/core/geometry/Point";
@@ -21,6 +22,19 @@ import Measurement from "@arcgis/core/widgets/Measurement";
 import CoordinateConversion from "@arcgis/core/widgets/CoordinateConversion";
 import Sketch from "@arcgis/core/widgets/Sketch";
 import Expand from "@arcgis/core/widgets/Expand";
+import { appConfig } from "../config";
+import { caltransHighwaysLayerConfig } from "./caltransHighwaysLayer";
+
+// Optional ONLINE Caltrans freeway/expressway context layer. OPT-IN: when
+// VITE_CALTRANS_HIGHWAYS_URL is unset the config helper returns null and NO layer is
+// constructed, so the deployment makes no request to the public service at all. The
+// construction policy (title, F_System 1,2 filter, trusted attribution, truthful
+// functional-classification wording) lives in the pure, unit-tested
+// ./caltransHighwaysLayer module.
+function createCaltransHighwaysLayer(): FeatureLayer | null {
+  const cfg = caltransHighwaysLayerConfig(appConfig.caltransHighwaysUrl);
+  return cfg ? new FeatureLayer(cfg as any) : null;
+}
 
 type Props = {
   geojson: any | null; // GeoJSON geometry object
@@ -86,9 +100,14 @@ export default function SubmissionArcGisMap({
     const graphicsLayer = new GraphicsLayer({ title: "Submission overlays" });
     layerRef.current = graphicsLayer;
 
+    // Optional Caltrans highways layer sits BELOW the submission overlays so drawn/loaded
+    // geometry always stays on top. It appears in the Layers + Legend widgets (off until
+    // toggled). Null when no URL is configured.
+    const caltransLayer = createCaltransHighwaysLayer();
+
     const map = new Map({
       basemap: "hybrid",
-      layers: [graphicsLayer],
+      layers: caltransLayer ? [caltransLayer, graphicsLayer] : [graphicsLayer],
     });
 
     const view = new MapView({

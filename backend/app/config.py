@@ -1,5 +1,5 @@
 from pathlib import Path
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[1]  # .../backend
@@ -130,14 +130,29 @@ class Settings(BaseSettings):
     # works in Airplane Mode. Small JSON metadata (not elevation — that is sampled from
     # the packaged terrain grid at cross-section time). Degrades gracefully.
     OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED: bool = Field(default=True)
-    # eris_internal | arcgis_feature_service | census_tigerweb
-    # See docs/adr-offline-road-context-source.md. census_tigerweb is the credential-free
-    # DEVELOPMENT road-snap source (public U.S. Census TIGERweb); arcgis_feature_service is
-    # retained for a future authorized Caltrans/ArcGIS Enterprise centerline layer.
+    # none | eris_internal | arcgis_feature_service | census_tigerweb | caltrans_crs
+    # See docs/adr-offline-road-context-source.md. `none` packages NO road context;
+    # census_tigerweb is the credential-free DEVELOPMENT road-snap source (public U.S.
+    # Census TIGERweb); arcgis_feature_service is a generic authorized ArcGIS/Enterprise
+    # centerline layer; caltrans_crs is the OPTIONAL Caltrans freeway/expressway road
+    # context (public Caltrans CRS Functional Classification FeatureServer — a functional
+    # classification, NOT an ownership dataset; see the caltrans block below). The value is
+    # validated at startup (an invalid provider is rejected).
     OFFLINE_SCENE_ROAD_SOURCE: str = Field(default="eris_internal")
     OFFLINE_SCENE_ROAD_SOURCE_URL: str | None = Field(default=None)  # required for arcgis_feature_service
     OFFLINE_SCENE_ROAD_BUFFER_M: float = Field(default=250.0)        # bounds buffer for clipping
     OFFLINE_SCENE_ROAD_FETCH_TIMEOUT_S: int = Field(default=30)
+    # Roads REQUIRED vs optional (applies to the selected provider, never to `none`).
+    # False (default): a road-source failure/absence marks the roads layer unavailable
+    # (with a truthful reason) and the terrain package still builds. True: a road
+    # retrieval/validation/filter/packaging failure FAILS the job — no READY package is
+    # ever published without verified road data.
+    OFFLINE_SCENE_ROADS_REQUIRED: bool = Field(default=False)
+    # EXPLICIT, AUDITED fallback. Empty (default) = NO fallback: ERIS never silently
+    # falls back from one provider to another. When set to another real source
+    # (eris_internal | census_tigerweb | arcgis_feature_service), a failure of the primary
+    # provider falls back to it AND records the fallback in the manifest + logs.
+    OFFLINE_SCENE_ROAD_FALLBACK_SOURCE: str = Field(default="")
     # Public U.S. Census TIGERweb Transportation MapServer (no credentials/tokens). Layers:
     # 2 = Primary Roads, 6 = Secondary Roads, 8 = Local Roads. Worker-side fetch ONLY —
     # the mobile app never contacts a road source. TIGERweb is road SNAP CONTEXT, not
@@ -146,6 +161,35 @@ class Settings(BaseSettings):
         default="https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer"
     )
     OFFLINE_SCENE_TIGERWEB_LAYERS: str = Field(default="2,6,8")
+
+    # --- Caltrans CRS Functional Classification (OPTIONAL freeway/expressway road context) ---
+    # Public, credential-free Caltrans ArcGIS Feature Service. Active ONLY when
+    # OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs (explicit selection). Worker-side fetch only —
+    # the mobile app never contacts this service; roads are packaged into roads.geojson.
+    # This layer publishes FUNCTIONAL CLASSIFICATION (how a road functions), NOT ownership:
+    # it does not establish that a feature is Caltrans-owned or a State Route, and a filtered
+    # subset must never be described as "the state highway system". Road CONTEXT only — not
+    # survey/engineering-grade centerline. See offline_scene_caltrans.py and
+    # docs/adr-offline-road-context-source.md.
+    OFFLINE_SCENE_CALTRANS_ROADS_URL: str = Field(
+        default="https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0"
+    )
+    # F_System functional-classification codes to INCLUDE. DEFAULT 1,2 = Interstate + Other
+    # Freeways and Expressways (the conservative freeway/expressway scope). Class 3
+    # ("Principal Arterial - Other") is a SURFACE arterial, NOT a freeway — operators may
+    # opt in with "1,2,3" for broader principal-arterial context. Codes 1-7 only; a supplied
+    # value that is malformed, out of range, floating-point or empty is REJECTED at startup
+    # (never ignored and never silently collapsed to the default).
+    OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES: str = Field(default="1,2")
+    # Bounded pagination + safety limits (never download the statewide dataset). Bounds are
+    # enforced, not just documented: the page size is capped at the service's advertised
+    # maxRecordCount (2000) because a larger request is silently clamped server-side, and the
+    # cap/backstop values must be >= 1 so a misconfiguration cannot make every job fail.
+    OFFLINE_SCENE_CALTRANS_PAGE_SIZE: int = Field(default=1000, ge=1, le=2000)
+    OFFLINE_SCENE_CALTRANS_MAX_FEATURES: int = Field(default=20000, ge=1)  # hard cap per package
+    OFFLINE_SCENE_CALTRANS_MAX_PAGES: int = Field(default=100, ge=1)       # infinite-pagination backstop
+    OFFLINE_SCENE_CALTRANS_MAX_RESPONSE_MB: int = Field(default=32, ge=1)  # per-page response ceiling
+    OFFLINE_SCENE_CALTRANS_RETRIES: int = Field(default=2, ge=0)           # bounded transient retries per page
 
     # --- Divided-highway corridor pairing (worker-side, deterministic) ----------
     # TIGERweb packages a divided highway as TWO primary centerlines. This pass decides —
@@ -222,6 +266,44 @@ class Settings(BaseSettings):
     # roads + incident + geometry. Licence-clean; no external data.
     OFFLINE_SCENE_OVERVIEW_ENABLED: bool = Field(default=True)
     OFFLINE_SCENE_OVERVIEW_PX: int = Field(default=512)
+
+    @field_validator("OFFLINE_SCENE_ROAD_SOURCE")
+    @classmethod
+    def _validate_road_source(cls, v):
+        # Reject an unknown road provider at startup (typed selection, not free strings).
+        from .services.offline_scene_context import normalize_road_source
+
+        return normalize_road_source(v)
+
+    @field_validator("OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES")
+    @classmethod
+    def _validate_caltrans_classes(cls, v):
+        # Strict: a supplied-but-malformed value is REJECTED at startup, never silently
+        # collapsed to the default (which would give the operator a different road scope
+        # than they asked for). Field defaults are not validated by pydantic, so genuinely
+        # omitting the setting still uses the declared default.
+        from .services.offline_scene_caltrans import parse_functional_classes
+
+        return ",".join(str(n) for n in parse_functional_classes(v))
+
+    @field_validator("OFFLINE_SCENE_ROAD_FALLBACK_SOURCE")
+    @classmethod
+    def _validate_road_fallback(cls, v):
+        s = str(v or "").strip().lower()
+        if not s:
+            return ""  # empty = no fallback (the default posture)
+        from .services.offline_scene_context import (
+            ROAD_SOURCE_CALTRANS,
+            ROAD_SOURCE_NONE,
+            VALID_ROAD_SOURCES,
+        )
+
+        allowed = VALID_ROAD_SOURCES - {ROAD_SOURCE_NONE, ROAD_SOURCE_CALTRANS}
+        if s not in allowed:
+            raise ValueError(
+                f"OFFLINE_SCENE_ROAD_FALLBACK_SOURCE must be empty or one of {sorted(allowed)}, got {v!r}"
+            )
+        return s
 
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

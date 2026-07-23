@@ -25,6 +25,7 @@ from ..db import SessionLocal
 from ..services import offline_scene as offline_scene_svc
 from ..services import offline_scene_jobs as jobs
 from ..services.offline_scene_builder import OfflineSceneBuildError, get_builder
+from ..services.offline_scene_caltrans import CaltransFetchCancelled
 from ..services.offline_scene_catalog import JobCancelledError, PackageRegistrationError
 
 logger = logging.getLogger("eris.offline_scene_worker")
@@ -40,6 +41,22 @@ class _JobAborted(Exception):
 def _job_cancelled(db: Session, job_id: int) -> bool:
     row = db.execute(text("SELECT status FROM offline_scene_jobs WHERE id=:id"), {"id": job_id}).first()
     return bool(row and row[0] == "CANCELLED")
+
+
+def _road_content_identity() -> tuple[str, str]:
+    """(road_provider, road_filter_version) for the content signature. `none` when roads
+    are disabled; for caltrans_crs the filter version embeds the included F_System set so
+    the signature changes when the inclusion policy changes."""
+    from ..services import offline_scene_caltrans as caltrans_fmt
+    from ..services import offline_scene_context as context_fmt
+
+    if not settings.OFFLINE_SCENE_ROADS_ENABLED:
+        return context_fmt.ROAD_SOURCE_NONE, context_fmt.ROAD_SOURCE_NONE
+    provider = context_fmt.normalize_road_source(settings.OFFLINE_SCENE_ROAD_SOURCE)
+    if provider == context_fmt.ROAD_SOURCE_CALTRANS:
+        classes = caltrans_fmt.parse_functional_classes(settings.OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES)
+        return provider, caltrans_fmt.caltrans_filter_version(classes)
+    return provider, provider
 
 
 def _build_context(db: Session, job: dict) -> dict:
@@ -78,11 +95,17 @@ def _build_context(db: Session, job: dict) -> dict:
     center_lat, center_lon = float(row["latitude"]), float(row["longitude"])
     radius_m = offline_scene_svc.clamp_radius_m(job["radius_m"], settings.OFFLINE_SCENE_MAX_RADIUS_M)
     bounds = offline_scene_svc.bounding_box(center_lat, center_lon, radius_m)
+    # Fold the road provider + its filter/inclusion identity into the content signature so
+    # a package is re-downloaded when the provider or its filter policy changes for the
+    # same AOI (see offline_scene.content_signature).
+    road_provider, road_filter_version = _road_content_identity()
     content_sig = offline_scene_svc.content_signature(
         gisa_updated_at=str(row["updated_at"]) if row["updated_at"] is not None else None,
         geometry_json=geometry,
         road_bearing_deg=bearing,
         radius_m=radius_m,
+        road_provider=road_provider,
+        road_filter_version=road_filter_version,
     )
     version = "g" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + f"-{job['id']}"
     return {
@@ -95,6 +118,9 @@ def _build_context(db: Session, job: dict) -> dict:
         "content_signature": content_sig,
         "road_inventory_geometry": road_inv_geom,
         "road_cross_section": road_cross_section,
+        # Between-page cancellation for long paginated road fetches (Caltrans). The builder
+        # calls this between pages; a cancelled job aborts the fetch promptly.
+        "cancel_check": lambda: _job_cancelled(db, job["id"]),
         "overlays": {
             "incident": {"lat": float(row["latitude"]), "lon": float(row["longitude"])},
             "geometry": geometry,
@@ -175,6 +201,12 @@ def process_job(db: Session, job: dict, builder=None) -> dict:
         return jobs.get_job(db, job_id)  # type: ignore[return-value]
     except _JobAborted:
         logger.info("offline-scene job %s aborted: cancelled by user", job_id)
+        return jobs.get_job(db, job_id)  # type: ignore[return-value]
+    except CaltransFetchCancelled:
+        # A long paginated road fetch observed the cancellation between pages and aborted.
+        # Treat it exactly like _JobAborted: the job stays CANCELLED (never FAILED), and
+        # nothing was packaged, uploaded or registered.
+        logger.info("offline-scene job %s aborted: cancelled during road fetch", job_id)
         return jobs.get_job(db, job_id)  # type: ignore[return-value]
     except JobCancelledError:
         logger.info("offline-scene job %s cancelled during registration; object orphaned + audited", job_id)

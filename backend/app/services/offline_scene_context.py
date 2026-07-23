@@ -35,6 +35,32 @@ from urllib.parse import urlparse, urlunparse
 
 _M_PER_DEG_LAT = 111_320.0
 
+# --- road-source provider vocabulary (typed selection, not arbitrary strings) -------
+# The offline road provider selected by OFFLINE_SCENE_ROAD_SOURCE. `none` packages NO
+# road context (intentionally unavailable); the others are documented in
+# docs/adr-offline-road-context-source.md. Selection is always EXPLICIT — an endpoint
+# being reachable never activates a provider on its own.
+ROAD_SOURCE_NONE = "none"
+ROAD_SOURCE_ERIS_INTERNAL = "eris_internal"
+ROAD_SOURCE_TIGERWEB = "census_tigerweb"
+ROAD_SOURCE_ARCGIS = "arcgis_feature_service"
+ROAD_SOURCE_CALTRANS = "caltrans_crs"
+VALID_ROAD_SOURCES = frozenset(
+    {ROAD_SOURCE_NONE, ROAD_SOURCE_ERIS_INTERNAL, ROAD_SOURCE_TIGERWEB, ROAD_SOURCE_ARCGIS, ROAD_SOURCE_CALTRANS}
+)
+
+
+def normalize_road_source(value) -> str:
+    """Validate + canonicalize a road-source value. Raises ValueError for an unknown
+    provider (an invalid provider is rejected, never silently coerced to a default)."""
+    v = str(value if value is not None else ROAD_SOURCE_ERIS_INTERNAL).strip().lower()
+    if v not in VALID_ROAD_SOURCES:
+        raise ValueError(
+            f"OFFLINE_SCENE_ROAD_SOURCE must be one of {sorted(VALID_ROAD_SOURCES)}, got {value!r}"
+        )
+    return v
+
+
 ROADS_FILE = "roads.geojson"
 IMAGERY_FILE = "imagery.png"          # legacy single-image aerial drape
 IMAGERY_TILE_DIR = "imagery"          # tiled aerial imagery -> imagery/{row}/{col}.jpg
@@ -299,19 +325,68 @@ ROADS_REASON_NO_BEARING = "no_road_bearing"
 ROADS_REASON_NO_SOURCE = "no_centerline_source_configured"
 ROADS_REASON_NO_FEATURES = "no_centerline_features_in_area"
 
+# --- two-level external-provider road identity -------------------------------------------
+# `provider_source_feature_id` is the durable identity of the COMPLETE original upstream
+# feature (set by the provider adapter, e.g. offline_scene_caltrans). One source feature can
+# be packaged as SEVERAL disconnected LineStrings — a MultiLineString, or a line that leaves
+# and re-enters the buffered bounds. Each packaged part must therefore get its OWN
+# `provider_feature_id` (the hook road_corridor_pairing prefers), or the pairing pass would
+# treat two independent lines as one and apply one component's paired range to the other.
+PROVIDER_SOURCE_ID_KEY = "provider_source_feature_id"
+PACKAGED_PART_ID_VERSION = 1
 
-def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configured: bool = False) -> tuple[dict, int, str | None]:
+
+class RoadIdentityCollisionError(ValueError):
+    """One generated packaged-part identity was associated with TWO DIFFERENT canonical
+    geometries. That is a genuine identity/hash collision, not a redundant duplicate, so it is
+    raised rather than silently resolved by dropping either geometry. The builder converts it
+    into a fail-closed package error; it must never be swallowed into an unavailable layer."""
+
+
+def packaged_part_provider_feature_id(source_id: str, part_coords, precision: int = 6) -> str:
+    """Deterministic pairing identity for ONE packaged (already-clipped) LineString.
+
+    Derived from the original-provider identity + the canonical, orientation-invariant
+    geometry of THIS clipped part (via ``_line_key``, which returns min(pts, reversed)) +
+    a versioned formula. So it is:
+      * unique per distinct clipped part (different geometry -> different id);
+      * identical for the same clipped part regardless of digitisation direction, multipart
+        input order, provider response order, or OBJECTID;
+      * never a sequential part ordinal.
+    Two parts from one original MultiLineString/leave-re-enter feature therefore get
+    DIFFERENT ids, while the same part stays stable."""
+    key = _line_key(part_coords, precision)  # tuple of (lon,lat) tuples, orientation-invariant
+    raw = json.dumps(
+        {"v": PACKAGED_PART_ID_VERSION, "src": str(source_id), "geom": [list(p) for p in key]},
+        sort_keys=True, separators=(",", ":"),
+    )
+    return "part:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def roads_geojson_from_context(
+    ctx: dict, buffer_m: float, *, external_configured: bool = False, include_internal_context: bool = True
+) -> tuple[dict, int, str | None]:
     """Assemble roads.geojson (a FeatureCollection) for the offline Cross Section snap,
     in PRIORITY order. Returns (geojson, count, reason) — reason is a PRECISE token when
     count == 0 (never a generic "no_data"):
 
-      A. external road_centerline features (arcgis_feature_service adapter, pre-fetched
-         into ctx['external_road_features']) — the richest, real road network.
+      A. external road_centerline features (the selected external provider's normalized
+         results, pre-fetched into ctx['external_road_features']).
       B. road-inventory line geometry (ctx['road_inventory_geometry']).
       C. submitted incident geometry, but ONLY the genuinely line-like parts
          (LineString/MultiLineString/paths) -> kind 'submitted_road_geometry'.
       D. a synthetic AOI-spanning road_bearing LineString (incident + roadBearingDeg),
          clipped to bounds — the snap/orientation fallback.
+
+    PROVIDER EXCLUSIVITY (``include_internal_context``): B/C/D are ERIS-INTERNAL context and
+    belong ONLY to ``eris_internal``. When an EXTERNAL provider is selected
+    (caltrans_crs / census_tigerweb / arcgis_feature_service) the caller passes
+    ``include_internal_context=False`` and this returns ONLY that provider's features.
+    Blending internal geometry into an externally-sourced layer would let a provider that
+    returned nothing still publish ``available: true`` under someone else's provenance,
+    silently bypassing ``no_centerline_features_in_area``, OFFLINE_SCENE_ROADS_REQUIRED and
+    the audited-fallback record. An operator who WANTS internal geometry after an external
+    miss configures the explicit ``eris_internal`` fallback, which is audited.
 
     ALL geometry is TRULY CLIPPED to bounds + buffer (Liang-Barsky per segment, see
     clip_line_to_bounds): a line crossing the AOI with both endpoints outside is retained
@@ -322,15 +397,53 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
     bounds = road_clip_bounds(ctx["bounds"], buffer_m)
     overlays = ctx.get("overlays") or {}
     features: list = []
+    # Exact packaged provider parts already emitted: provider_feature_id -> canonical geometry.
+    # Scoped to the whole assembly so a redundant part repeated across a MultiLineString's
+    # members (each arriving as its own _emit call) is still caught.
+    emitted_parts: dict = {}
 
     def _emit(line, props: dict) -> None:
         """Clip a raw line to the buffered bounds and emit ONE LineString Feature per
-        surviving (disconnected) part. No out-of-bounds coordinate is ever packaged."""
+        surviving (disconnected) part. No out-of-bounds coordinate is ever packaged.
+
+        PART-LEVEL PROVIDER IDENTITY: when the source feature carries a recognized external
+        provider identity (``provider_source_feature_id``), each emitted part gets its OWN
+        ``provider_feature_id`` derived from that source identity + this part's canonical
+        geometry — so a MultiLineString / leave-re-enter feature never hands the pairing pass
+        two independent lines under one id. Features without a provider identity
+        (eris_internal bearing/inventory/submitted, or a provider that publishes none) are
+        emitted unchanged — no provider identity is invented.
+
+        EXACT-DUPLICATE REMOVAL: an identical packaged provider part is emitted ONCE. A valid
+        but redundant MultiLineString can legitimately contain the same part twice; emitting
+        both would hand pairing two candidates with the same identity AND geometry, which
+        produces two features with the SAME final feature_id. The dedupe key is the final
+        ``provider_feature_id`` + the canonical (orientation-invariant) final geometry, so it
+        is independent of multipart order and coordinate direction and uses no sequential
+        index. Different source identities are never merged just because their geometry
+        overlaps, and one identity seen with two DIFFERENT geometries raises
+        ``RoadIdentityCollisionError`` instead of silently dropping either."""
+        src_id = props.get(PROVIDER_SOURCE_ID_KEY)
+        has_provider_identity = isinstance(src_id, str) and bool(src_id)
         for part in clip_line_to_bounds(line, bounds):
+            part_props = dict(props)
+            if has_provider_identity:
+                pid = packaged_part_provider_feature_id(src_id, part)
+                gkey = _line_key(part, 6)
+                prev = emitted_parts.get(pid)
+                if prev is not None:
+                    if prev != gkey:
+                        raise RoadIdentityCollisionError(
+                            f"packaged part identity {pid!r} maps to two different geometries; "
+                            "refusing to drop either"
+                        )
+                    continue                    # exact redundant part -> package it once
+                emitted_parts[pid] = gkey
+                part_props["provider_feature_id"] = pid
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": part},
-                "properties": dict(props),
+                "properties": part_props,
             })
 
     # A. External centerlines (already road_centerline kind); clipped to bounds.
@@ -343,32 +456,41 @@ def roads_geojson_from_context(ctx: dict, buffer_m: float, *, external_configure
         for line in _iter_line_only((feat or {}).get("geometry")):
             _emit(line, {**props, "kind": props.get("kind") or "road_centerline"})
 
-    # B. Road-inventory line geometry (route/postmile metadata when available).
-    inv_meta = {}
-    rxs_attrs = ((ctx.get("road_cross_section") or {}).get("attributes")) if isinstance(ctx.get("road_cross_section"), dict) else None
-    if isinstance(rxs_attrs, dict):
-        for k in ("route_name", "county_code", "begin_pm", "end_pm"):
-            if rxs_attrs.get(k) is not None:
-                inv_meta[k] = rxs_attrs[k]
-    for line in _iter_line_only(ctx.get("road_inventory_geometry")):
-        _emit(line, {"kind": "road_inventory", **inv_meta})
-
-    # C. Submitted incident geometry — ONLY line-like parts (never polygons).
-    for line in _iter_line_only(overlays.get("geometry")):
-        _emit(line, {"kind": "submitted_road_geometry"})
-
-    # D. Synthetic AOI-spanning road-bearing fallback (snap + orientation).
+    # B/C/D are ERIS-INTERNAL context. They belong to `eris_internal` ONLY — an external
+    # provider's layer must contain that provider's features and nothing else.
     incident = overlays.get("incident")
     bearing = overlays.get("roadBearingDeg")
-    if isinstance(incident, dict) and _finite(incident.get("lat")) and _finite(incident.get("lon")) and _finite(bearing):
-        span_m = _aoi_span_m(ctx.get("bounds") or {}) * 2.0 + 260.0
-        long_line = road_bearing_line(incident, float(bearing), length_m=span_m)
-        _emit(long_line, {"kind": "road_bearing", "bearing_deg": round(float(bearing), 1)})
+    if include_internal_context:
+        # B. Road-inventory line geometry (route/postmile metadata when available).
+        inv_meta = {}
+        rxs_attrs = ((ctx.get("road_cross_section") or {}).get("attributes")) if isinstance(ctx.get("road_cross_section"), dict) else None
+        if isinstance(rxs_attrs, dict):
+            for k in ("route_name", "county_code", "begin_pm", "end_pm"):
+                if rxs_attrs.get(k) is not None:
+                    inv_meta[k] = rxs_attrs[k]
+        for line in _iter_line_only(ctx.get("road_inventory_geometry")):
+            _emit(line, {"kind": "road_inventory", **inv_meta})
+
+        # C. Submitted incident geometry — ONLY line-like parts (never polygons).
+        for line in _iter_line_only(overlays.get("geometry")):
+            _emit(line, {"kind": "submitted_road_geometry"})
+
+        # D. Synthetic AOI-spanning road-bearing fallback (snap + orientation).
+        if isinstance(incident, dict) and _finite(incident.get("lat")) and _finite(incident.get("lon")) and _finite(bearing):
+            span_m = _aoi_span_m(ctx.get("bounds") or {}) * 2.0 + 260.0
+            long_line = road_bearing_line(incident, float(bearing), length_m=span_m)
+            _emit(long_line, {"kind": "road_bearing", "bearing_deg": round(float(bearing), 1)})
 
     count = len(features)
     reason = None
     if count == 0:
-        if external_configured:
+        if not include_internal_context:
+            # An EXTERNAL provider was selected and returned nothing usable here. Internal
+            # geometry may exist, but it is not this provider's data and must not make the
+            # layer "available" — say so precisely so required-mode fails and an explicit
+            # fallback is the only way internal geometry gets packaged.
+            reason = ROADS_REASON_NO_FEATURES
+        elif external_configured:
             reason = ROADS_REASON_NO_FEATURES  # a source is configured but returned nothing here
         elif ctx.get("road_inventory_geometry") is None and not _finite(bearing):
             # No inventory geometry and no bearing: the confirmed field blocker. The
@@ -560,6 +682,79 @@ def validate_context_layers(context_layers) -> tuple[bool, str | None]:
         sha = layer.get("sha256")
         if not (isinstance(sha, str) and len(sha) == 64):
             return False, f"context_layers.{name} available but missing/invalid sha256"
+    return True, None
+
+
+def validate_roads_geojson(data: bytes, declared_feature_count=None) -> tuple[bool, str | None]:
+    """Fail-closed validation of packaged roads.geojson BYTES (called by the bundle
+    validator, which already checked sha256 + byte length).
+
+    Requires, exactly:
+      * a top-level JSON object whose ``type`` is exactly ``"FeatureCollection"``;
+      * ``features`` is a list, and every item is an object whose ``type`` is exactly
+        ``"Feature"``;
+      * ``properties`` is an object when present (absent is tolerated for legacy packages);
+      * ``geometry.type`` is exactly ``LineString`` or ``MultiLineString``;
+      * a LineString has >= 2 valid vertices; a MultiLineString has >= 1 part and EVERY
+        part has >= 2 valid vertices;
+      * every coordinate is a finite, non-boolean number inside WGS84 bounds;
+      * a declared ``feature_count`` is a non-negative integer that matches exactly.
+
+    So malformed GeoJSON, a wrong container/feature type, an empty or holey multipart
+    geometry, boolean/NaN/infinite coordinates, or a declared-count mismatch can never reach
+    a READY package. A package with NO roads layer is unaffected (this is not called)."""
+    try:
+        obj = json.loads(data)
+    except Exception:
+        return False, "roads.geojson is not valid JSON"
+    if not isinstance(obj, dict):
+        return False, "roads.geojson is not a JSON object"
+    if obj.get("type") != "FeatureCollection":
+        return False, f"roads.geojson type must be FeatureCollection, got {obj.get('type')!r}"
+    feats = obj.get("features")
+    if not isinstance(feats, list):
+        return False, "roads.geojson features must be a list"
+    for f in feats:
+        if not isinstance(f, dict):
+            return False, "roads.geojson feature is not an object"
+        if f.get("type") != "Feature":
+            return False, f"roads.geojson feature type must be Feature, got {f.get('type')!r}"
+        if "properties" in f and f["properties"] is not None and not isinstance(f["properties"], dict):
+            return False, "roads.geojson feature properties must be an object"
+        geom = f.get("geometry")
+        if not isinstance(geom, dict):
+            return False, "roads.geojson feature missing geometry"
+        gtype = geom.get("type")
+        coords = geom.get("coordinates")
+        if gtype == "LineString":
+            parts = [coords]
+        elif gtype == "MultiLineString":
+            if not isinstance(coords, list) or not coords:
+                return False, "roads.geojson MultiLineString has no parts"
+            parts = coords
+        else:
+            return False, f"roads.geojson unsupported geometry {gtype!r}"
+        for part in parts:
+            if not isinstance(part, list) or len(part) < 2:
+                return False, "roads.geojson line has fewer than 2 vertices"
+            for c in part:
+                if not (isinstance(c, (list, tuple)) and len(c) >= 2):
+                    return False, "roads.geojson has invalid coordinates"
+                lon, lat = c[0], c[1]
+                # _finite already rejects bool (isinstance(True, int) is True in Python).
+                if not (_finite(lon) and _finite(lat)):
+                    return False, "roads.geojson has invalid coordinates"
+                if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+                    return False, "roads.geojson has invalid coordinates"
+    if declared_feature_count is not None:
+        if isinstance(declared_feature_count, bool) or not isinstance(declared_feature_count, int):
+            return False, f"roads.geojson feature_count must be an integer, got {declared_feature_count!r}"
+        if declared_feature_count < 0:
+            return False, f"roads.geojson feature_count must be non-negative, got {declared_feature_count}"
+        if len(feats) != declared_feature_count:
+            return False, (
+                f"roads.geojson feature_count mismatch: declared {declared_feature_count}, actual {len(feats)}"
+            )
     return True, None
 
 

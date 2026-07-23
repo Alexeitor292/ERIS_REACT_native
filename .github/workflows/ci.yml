@@ -186,7 +186,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Unit tests (node --test)
-        run: node --experimental-strip-types --test src/components/terrainScene.test.ts
+        run: node --experimental-strip-types --test src/components/terrainScene.test.ts src/components/caltransHighwaysLayer.test.ts
       - name: TypeScript check
         run: npx tsc -p tsconfig.json --noEmit
       - name: Production build
@@ -233,6 +233,7 @@ jobs:
           src/arcgis/roadClass.test.ts
           src/arcgis/corridorModel.test.ts
           src/arcgis/roadSelection.test.ts
+          src/arcgis/caltransRoads.test.ts
           src/arcgis/imagerySizing.test.ts
           src/arcgis/dividedCorridorInspection.test.ts
           src/arcgis/dividedSectionSampling.test.ts
