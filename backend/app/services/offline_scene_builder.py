@@ -165,6 +165,14 @@ def validate_bundle_bytes(package_bytes: bytes) -> tuple[bool, str | None]:
                 # Tiled imagery: every declared tile must be present + match sha256 +
                 # byte count (no partial/holey imagery ever reaches a READY package).
                 if name == "imagery" and layer.get("format") == "tiled":
+                    # A bundle that CLAIMS the exact-extent export contract must carry the
+                    # evidence for it: per-tile verification plus aggregate counts that
+                    # agree with the real tile count. A legacy bundle claims nothing and
+                    # is validated exactly as before (never relabelled as verified).
+                    from . import offline_scene_imagery as _imagery
+                    ok, reason = _imagery.validate_packaged_verification(layer)
+                    if not ok:
+                        return False, reason
                     for t in context_fmt.tiled_imagery_tiles(layer):
                         tname = t.get("file")
                         if tname not in names:
@@ -858,11 +866,15 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                         session=self._session,
                     )
 
-                data, src = imagery.run_with_retries(
+                data, src, verification = imagery.run_with_retries(
                     _fetch,
                     retries=int(settings.OFFLINE_SCENE_IMAGERY_TILE_RETRIES),
                     deadline_s=float(settings.OFFLINE_SCENE_IMAGERY_OVERALL_DEADLINE_S),
                     sleep=self._sleep, monotonic=self._monotonic, jitter=self._jitter,
+                    # An adjusted extent / wrong size / unsafe href is DETERMINISTIC:
+                    # retrying re-fetches the identical wrong answer. Fail closed at once
+                    # instead of spending the retry budget and the operator's time.
+                    is_retryable=lambda e: not isinstance(e, imagery.ImageryContractError),
                 )
                 source_meta = source_meta or src
                 imagery_bytes += len(data)
@@ -882,8 +894,20 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 dims = imagery.image_dimensions(data)
                 if dims:
                     meta["width_px"], meta["height_px"] = int(dims[0]), int(dims[1])
+                # Truthful, non-sensitive proof for THIS tile that the pixels really cover
+                # the bounds recorded above: the requested extent was verified against the
+                # service's own returned extent, and the delivered image was measured.
+                # fetch_imagery_tile has already failed closed on any mismatch.
+                meta.update(verification)
+                if not imagery.tile_verification_ok(meta):
+                    raise imagery.ImageryContractError("tile verification record is incomplete")
                 tile_metas.append(meta)
                 _emit(f"Packaging aerial imagery: {i + 1} of {n} tiles")
+            # Whole-set backstop: the layer may only CLAIM the exact-extent contract when
+            # every packaged tile individually backs the claim. Refusing here (inside the
+            # try, so partial tiles roll back) stops a build from silently degrading to a
+            # legacy-looking package that the legacy validator would happily accept.
+            imagery.assert_extents_verified(tile_metas)
         except Exception as e:  # roll back ANY partial tiles — never a holey imagery layer
             for t in plan["tiles"]:
                 assets.pop(t["file"], None)
@@ -899,12 +923,16 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
 
         # Record package-time EVIDENCE that the tiling is sound (assert_no_gaps_or_overlaps
         # raises but writes nothing, so a shipped bundle carried no proof the check ran).
-        diagnostics = imagery.tile_diagnostics(plan, tile_metas, present_files=set(assets.keys()))
+        diagnostics = imagery.tile_diagnostics(
+            plan, tile_metas, present_files=set(assets.keys()),
+            export_contract=imagery.IMAGERY_EXPORT_CONTRACT,
+        )
         layers["imagery"] = context_fmt.tiled_imagery_layer(
             plan, tile_metas, source_meta,
             jpeg_quality=int(settings.OFFLINE_SCENE_IMAGERY_JPEG_QUALITY),
             vintage=settings.OFFLINE_SCENE_IMAGERY_SOURCE_VINTAGE,
             diagnostics=diagnostics,
+            export_contract=imagery.IMAGERY_EXPORT_CONTRACT,
         )
         _log("imagery", "packaged_tiled", tiles=n, bytes=imagery_bytes,
              effective_mpp=plan.get("effective_meters_per_pixel"))

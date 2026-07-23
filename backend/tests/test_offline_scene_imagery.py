@@ -26,7 +26,39 @@ from app.services.offline_scene_builder import HillshadeReliefBuilder, OfflineSc
 # ~4.4 km N-S AOI near lat 38.5 (rectangular after cos-lat: narrower E-W).
 BOUNDS = {"min_lat": 38.48, "min_lon": -121.52, "max_lat": 38.52, "max_lon": -121.48}
 SQUARE = {"min_lat": 0.0, "min_lon": 0.0, "max_lat": 0.05, "max_lon": 0.05}  # equator: ~square metres
-FAKE_JPEG = b"\xff\xd8\xff" + b"\x00" * 512  # valid JPEG magic (is_jpeg -> no re-encode)
+
+
+def _jpeg_with_dims(w: int, h: int) -> bytes:
+    """Minimal JPEG carrying a real SOF0 frame header — what a decoder actually reads."""
+    sof = b"\xff\xc0" + (17).to_bytes(2, "big") + b"\x08" + h.to_bytes(2, "big") + w.to_bytes(2, "big")
+    sof += b"\x03" + b"\x01\x11\x00\x02\x11\x01\x03\x11\x01"
+    return b"\xff\xd8" + sof + b"\xff\xd9"
+
+
+# A measurable JPEG: under the exact-extent contract a packaged tile MUST have readable
+# dimensions that match the size the service declared, so a magic-only body can no
+# longer be packaged at all.
+FAKE_JPEG = _jpeg_with_dims(1024, 1024)
+
+
+def _verified_fetch(data: bytes, source: dict | None = None):
+    """A stubbed `fetch_imagery_tile` returning exactly what the real verified export
+    returns: (bytes, source, verification). The verification is derived from the tile's
+    OWN header, so it is self-consistent the way a genuine one is."""
+    dims = imagery.image_dimensions(data)
+    w, h = dims if dims else (0, 0)
+
+    def _fetch(bounds, **k):
+        return data, dict(source or {"provider": "usgs_naip", "attribution": "NAIP"}), {
+            "extent_verified": True,
+            "extent_max_delta_deg": 0.0,
+            "extent_tolerance_deg": imagery.EXTENT_TOLERANCE_DEG,
+            "requested_width_px": w, "requested_height_px": h,
+            "returned_width_px": w, "returned_height_px": h,
+            "dimensions_verified": True,
+        }
+
+    return _fetch
 
 
 # ---- tile planning ---------------------------------------------------------
@@ -204,7 +236,7 @@ class TestBuilderTiledImagery:
 
     def test_tiled_imagery_packaged_with_progress(self, monkeypatch):
         _tiled_settings(monkeypatch)
-        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", lambda bounds, **k: (FAKE_JPEG, {"provider": "usgs_naip", "attribution": "NAIP"}))
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _verified_fetch(FAKE_JPEG))
         progress: list = []
         b = self._builder()
         layers, assets = b._build_context_layers(_ctx(), base_bytes=0, progress=lambda status, msg: progress.append(msg))
@@ -227,7 +259,7 @@ class TestBuilderTiledImagery:
         from app.services import offline_scene_terrain as tf
 
         _tiled_settings(monkeypatch)
-        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", lambda bounds, **k: (FAKE_JPEG, {"provider": "usgs_naip"}))
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _verified_fetch(FAKE_JPEG))
         heights = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=np.float32)
         grid, stats = tf.encode_height_grid(heights)
         meta = tf.build_terrain_metadata(stats, BOUNDS, tf.grid_sha256(grid))
@@ -248,7 +280,7 @@ class TestBuilderTiledImagery:
         from app.services import offline_scene_terrain as tf
 
         _tiled_settings(monkeypatch)
-        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", lambda bounds, **k: (FAKE_JPEG, {"provider": "usgs_naip"}))
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _verified_fetch(FAKE_JPEG))
         heights = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         grid, stats = tf.encode_height_grid(heights)
         meta = tf.build_terrain_metadata(stats, BOUNDS, tf.grid_sha256(grid))
@@ -267,7 +299,7 @@ class TestBuilderTiledImagery:
         from app.services import offline_scene_terrain as tf
 
         _tiled_settings(monkeypatch)
-        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", lambda bounds, **k: (FAKE_JPEG, {"provider": "usgs_naip"}))
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _verified_fetch(FAKE_JPEG))
         heights = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         grid, stats = tf.encode_height_grid(heights)
         meta = tf.build_terrain_metadata(stats, BOUNDS, tf.grid_sha256(grid))
@@ -300,7 +332,7 @@ class TestBuilderTiledImagery:
         def _fail_after_first(bounds, **k):
             seen["n"] += 1
             if seen["n"] == 1:
-                return (FAKE_JPEG, {"provider": "usgs_naip"})
+                return _verified_fetch(FAKE_JPEG)(bounds, **k)
             raise TimeoutError("upstream 504")
 
         monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _fail_after_first)
@@ -310,6 +342,73 @@ class TestBuilderTiledImagery:
         assert layers["imagery"]["reason"].startswith("tile_failed")
         # NO partial imagery: the one tile that DID succeed was rolled back.
         assert not any(k.startswith("imagery/") for k in assets)
+
+    def test_packaged_tiles_carry_the_exact_extent_contract_and_evidence(self, monkeypatch):
+        _tiled_settings(monkeypatch)
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _verified_fetch(FAKE_JPEG))
+        layers, _assets = self._builder()._build_context_layers(_ctx(), base_bytes=0)
+        img = layers["imagery"]
+        assert img["export_contract"] == imagery.IMAGERY_EXPORT_CONTRACT
+        n = img["tile_count"]
+        for t in img["tiles"]:
+            assert imagery.tile_verification_ok(t)
+            assert t["extent_verified"] is True and t["dimensions_verified"] is True
+            assert t["returned_width_px"] == t["width_px"] == 1024
+        d = img["diagnostics"]
+        assert d["extents_verified"] is True
+        assert d["extents_verified_count"] == d["dimensions_verified_count"] == n
+        assert d["extent_mismatch_count"] == 0
+        assert d["adjust_aspect_ratio"] is False
+        assert d["export_contract"] == imagery.IMAGERY_EXPORT_CONTRACT
+
+    def test_a_bundle_claiming_the_contract_without_evidence_fails_closed(self, monkeypatch):
+        import numpy as np
+
+        from app.services import offline_scene_terrain as tf
+
+        _tiled_settings(monkeypatch)
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _verified_fetch(FAKE_JPEG))
+        heights = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        grid, stats = tf.encode_height_grid(heights)
+        meta = tf.build_terrain_metadata(stats, BOUNDS, tf.grid_sha256(grid))
+        b = self._builder()
+        layers, assets = b._build_context_layers(_ctx(), base_bytes=0)
+        # A package that still CLAIMS the contract but has lost one tile's proof must not
+        # validate — the claim can never outlive the evidence for it.
+        layers["imagery"]["tiles"][0].pop("extent_verified")
+        manifest = builder.build_manifest(_ctx(), self._usgs(), self._basemap(), meta, layers)
+        pkg = builder.assemble_bundle(grid, b"", {}, manifest, assets)
+        ok, reason = builder.validate_bundle_bytes(pkg)
+        assert not ok and "extent verification" in reason
+
+    def test_an_unverified_fetch_result_never_reaches_a_package(self, monkeypatch):
+        """Fail-closed at the builder: if a fetch somehow returns an incomplete
+        verification, the tile is rolled back rather than packaged as legacy."""
+        _tiled_settings(monkeypatch, mandatory=False, retries=0)
+
+        def _unverified(bounds, **k):
+            return FAKE_JPEG, {"provider": "usgs_naip"}, {"extent_verified": False}
+
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _unverified)
+        layers, assets = self._builder()._build_context_layers(_ctx(), base_bytes=0)
+        assert layers["imagery"]["available"] is False
+        assert "export_contract" not in layers["imagery"]
+        assert not any(k.startswith("imagery/") for k in assets), "no partial imagery"
+
+    def test_a_deterministic_contract_failure_is_not_retried(self, monkeypatch):
+        _tiled_settings(monkeypatch, mandatory=True, retries=3)
+        calls = {"n": 0}
+
+        def _adjusted(bounds, **k):
+            calls["n"] += 1
+            raise imagery.ImageryContractError(
+                "returned extent differs from the requested extent by 7.6e-04 deg")
+
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _adjusted)
+        with pytest.raises(OfflineSceneBuildError) as ei:
+            self._builder()._build_context_layers(_ctx(), base_bytes=0)
+        assert calls["n"] == 1, "an adjusted extent is identical on every attempt"
+        assert "tile (0,0)" in str(ei.value)
 
     def _usgs(self):
         return {"dataset": "USGS 3DEP", "version": "2026-07-07", "resolution": "3 m/px", "service": "svc"}

@@ -46,8 +46,14 @@ def _road(coords, road_class=None, kind="road_centerline", extra=None):
 
 
 def make_package(*, imagery="single", roads=None, tiles=None, incident=INCIDENT, road_source=None,
-                 clip_bounds=_AUTO, buffer_m=BUFFER_M) -> bytes:
-    """Build a STORED .eristerrain zip with a manifest + roads + imagery."""
+                 clip_bounds=_AUTO, buffer_m=BUFFER_M, extent_verified=False) -> bytes:
+    """Build a STORED .eristerrain zip with a manifest + roads + imagery.
+
+    `extent_verified` adds the exact-extent export contract to a TILED package (per-tile
+    verification + the aggregate diagnostics). Default False = a LEGACY package, which is
+    what every pre-existing test here models."""
+    from app.services import offline_scene_imagery as imgmod
+
     ctx: dict = {}
     files: dict = {}
 
@@ -56,10 +62,25 @@ def make_package(*, imagery="single", roads=None, tiles=None, incident=INCIDENT,
         ctx["imagery"] = {"available": True, "format": "single", "file": "imagery.png", "bounds": dict(BOUNDS)}
     elif imagery == "tiled":
         ctx_tiles = []
-        for name, b, color in (tiles or []):
+        for i, (name, b, color) in enumerate(tiles or []):
             files[name] = _solid(color, fmt="JPEG")
-            ctx_tiles.append({"file": name, "bounds": b, "row": 0, "column": 0})
+            t = {"file": name, "bounds": b, "row": 0, "column": i if extent_verified else 0}
+            if extent_verified:
+                t.update({
+                    "width_px": 64, "height_px": 64,
+                    "extent_verified": True, "extent_max_delta_deg": 0.0,
+                    "extent_tolerance_deg": imgmod.EXTENT_TOLERANCE_DEG,
+                    "requested_width_px": 64, "requested_height_px": 64,
+                    "returned_width_px": 64, "returned_height_px": 64,
+                    "dimensions_verified": True,
+                })
+            ctx_tiles.append(t)
         ctx["imagery"] = {"available": True, "format": "tiled", "bounds": dict(BOUNDS), "tiles": ctx_tiles}
+        if extent_verified:
+            ctx["imagery"]["export_contract"] = imgmod.IMAGERY_EXPORT_CONTRACT
+            ctx["imagery"]["tile_count"] = len(ctx_tiles)
+            ctx["imagery"]["diagnostics"] = imgmod.verification_diagnostics(
+                ctx_tiles, export_contract=imgmod.IMAGERY_EXPORT_CONTRACT)
     else:
         ctx["imagery"] = {"available": False, "reason": "not_configured"}
 
@@ -181,6 +202,82 @@ class TestImageryPlacement:
         tiled, _ = _run(make_package(imagery="tiled", tiles=self._tiles_west_east(False), roads=[road]), tmp_path / "t")
         assert single["transform"] == tiled["transform"]
         assert single["imagery_format"] == "single" and tiled["imagery_format"] == "tiled"
+
+    def test_extent_verified_tiles_are_still_placed_by_declared_bounds(self, tmp_path):
+        """Adding verification metadata must not change WHERE a tile goes: placement is
+        still driven solely by each tile's own declared bounds."""
+        tiles = self._tiles_west_east(scrambled_names=True)
+        plain, _ = _run(make_package(imagery="tiled", tiles=tiles, roads=[]), tmp_path / "p")
+        verified, out = _run(
+            make_package(imagery="tiled", tiles=tiles, roads=[], extent_verified=True), tmp_path / "v")
+        assert plain["transform"] == verified["transform"]
+        assert verified["imagery_tiles_placed"] == 2
+        im = Image.open(out / tool.IMAGE_NAME).convert("RGB")
+        w, h = im.size
+        assert im.getpixel((w // 4, h // 2))[0] > 200      # west still RED
+        assert im.getpixel((3 * w // 4, h // 2))[2] > 200  # east still BLUE
+
+
+# ---- exact-extent verification status in the report -------------------------
+
+class TestExtentVerificationReporting:
+    def _tiles(self):
+        midlon = (BOUNDS["min_lon"] + BOUNDS["max_lon"]) / 2
+        return [("imagery/0/0.jpg", {**BOUNDS, "max_lon": midlon}, (255, 0, 0)),
+                ("imagery/0/1.jpg", {**BOUNDS, "min_lon": midlon}, (0, 0, 255))]
+
+    def test_a_verified_package_reports_verified_with_counts(self, tmp_path):
+        report, _ = _run(make_package(imagery="tiled", tiles=self._tiles(), roads=[],
+                                      extent_verified=True), tmp_path)
+        ev = report["imagery_extent_verification"]
+        assert ev["status"] == "verified"
+        assert ev["contract"].startswith("exact_extent")
+        assert ev["extents_verified"] is True
+        assert ev["extents_verified_count"] == ev["tiles_declared"] == 2
+        assert ev["extent_mismatch_count"] == 0
+        assert ev["dimensions_verified_count"] == 2
+        assert ev["adjust_aspect_ratio"] is False
+        assert ev["reason"] is None
+
+    def test_a_legacy_package_is_reported_as_legacy_not_as_verified_or_failed(self, tmp_path):
+        report, _ = _run(make_package(imagery="tiled", tiles=self._tiles(), roads=[]), tmp_path)
+        ev = report["imagery_extent_verification"]
+        assert ev["status"] == "not_declared_legacy" and ev["contract"] is None
+        # It must NOT imply the check passed...
+        assert ev.get("extents_verified") is None
+        # ...and a single-image / no-imagery package is likewise not misreported.
+        single, _ = _run(make_package(imagery="single", roads=[]), tmp_path / "s")
+        assert single["imagery_extent_verification"]["status"] == "not_declared_legacy"
+        none, _ = _run(make_package(imagery=None, roads=[]), tmp_path / "n")
+        assert none["imagery_extent_verification"]["status"] == "no_imagery"
+
+    def test_a_claim_without_evidence_is_reported_inconsistent(self, tmp_path):
+        pkg = make_package(imagery="tiled", tiles=self._tiles(), roads=[], extent_verified=True)
+        # Strip one tile's proof while leaving the contract claim in place.
+        zf = zipfile.ZipFile(io.BytesIO(pkg))
+        man = json.loads(zf.read("manifest.json"))
+        man["context_layers"]["imagery"]["tiles"][1].pop("extent_verified")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as out:
+            out.writestr("manifest.json", json.dumps(man))
+            for n in zf.namelist():
+                if n != "manifest.json":
+                    out.writestr(n, zf.read(n))
+        report, _ = _run(buf.getvalue(), tmp_path)
+        ev = report["imagery_extent_verification"]
+        assert ev["status"] == "declared_but_inconsistent" and ev["reason"]
+
+    def test_the_verification_status_leaks_nothing(self, tmp_path):
+        src = {"provider": "us_census_tigerweb", "dataset": "TIGERweb",
+               "attribution": "U.S. Census Bureau",
+               "service": "https://u:P@ss@tigerweb.example.gov/x?token=SECRET"}
+        report, out = _run(make_package(imagery="tiled", tiles=self._tiles(),
+                                        roads=[_road([[-121.55, 38.45], [-121.45, 38.45]], "primary")],
+                                        road_source=src, extent_verified=True), tmp_path)
+        blob = (out / tool.REPORT_NAME).read_text()
+        for bad in ("SECRET", "token", "P@ss", "?", "href", "exportImage", "arcgisoutput"):
+            assert bad not in blob, f"report leaked {bad!r}"
+        assert report["imagery_extent_verification"]["status"] == "verified"
 
 
 # ---- roads: classes, malformed, out-of-bounds, report hygiene ---------------

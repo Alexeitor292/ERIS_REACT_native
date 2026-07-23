@@ -1,9 +1,13 @@
-"""Regression tests for the tiled-imagery double-buildings/misalignment fix and the
-road-bearing coverage fix (PR: fix/offline-terrain-tile-alignment-and-road-snap).
+"""Regression tests for the tiled-imagery export sizing and the road-bearing coverage
+fix (PR: fix/offline-terrain-tile-alignment-and-road-snap).
 
 - tile_export_dims must MATCH the tile's metric aspect (never force square for a
-  non-square bbox), so ImageServer does not expand the bbox to the requested aspect
-  and make adjacent tiles overlap (double buildings).
+  non-square bbox), so a packaged tile has SQUARE GROUND PIXELS (~equal m/px on both
+  axes). NOTE: aspect matching is a QUALITY choice and does NOT prevent ImageServer
+  from re-fitting the bbox — in EPSG:4326 output the service compares aspects in
+  DEGREES, where the metric-matched size differs most. Only adjustAspectRatio=false
+  plus returned-extent verification keeps the extent exact; that contract is covered
+  in test_offline_scene_exact_extent.py.
 - The synthetic road_bearing line must SPAN the AOI (clipped to bounds), not just a
   ~260 m stub near the incident, so a bearing-only package is tappable across the area.
 """
@@ -52,7 +56,7 @@ class TestTileExportDims:
         assert ctxmod.tile_export_dims({}, 512) == (512, 512)
 
     def test_export_params_use_matched_size(self):
-        p = ctxmod._export_tile_params(BOUNDS, 1024, 85)
+        p = ctxmod.export_tile_params(BOUNDS, 1024, 85)
         w_px, h_px = ctxmod.tile_export_dims(BOUNDS, 1024)
         assert p["size"] == f"{w_px},{h_px}" and p["format"] == "jpg"
 

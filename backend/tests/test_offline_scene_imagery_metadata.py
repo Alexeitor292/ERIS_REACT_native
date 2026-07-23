@@ -33,6 +33,26 @@ def _png_with_dims(w: int, h: int) -> bytes:
             + w.to_bytes(4, "big") + h.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00")
 
 
+def _verified_fetch(data: bytes, source: dict | None = None):
+    """A stubbed `fetch_imagery_tile` returning (bytes, source, verification) exactly as
+    the real exact-extent export does, with the verification derived from the tile's own
+    header so it is self-consistent."""
+    dims = imagery.image_dimensions(data)
+    w, h = dims if dims else (0, 0)
+
+    def _fetch(bounds, **k):
+        return data, dict(source or {"provider": "usgs_naip"}), {
+            "extent_verified": True,
+            "extent_max_delta_deg": 0.0,
+            "extent_tolerance_deg": imagery.EXTENT_TOLERANCE_DEG,
+            "requested_width_px": w, "requested_height_px": h,
+            "returned_width_px": w, "returned_height_px": h,
+            "dimensions_verified": True,
+        }
+
+    return _fetch
+
+
 def _plan(tile_px: int = 1024, target: float = 0.6, native: float | None = 0.6) -> dict:
     return imagery.plan_imagery_tiles(BOUNDS, tile_px=tile_px, target_mpp=target, source_native_mpp=native)
 
@@ -200,7 +220,7 @@ class TestBuilderImageryMetadata:
         _tiled_settings(monkeypatch)
         tile = _jpeg_with_dims(1024, 768)
         monkeypatch.setattr(ctxmod, "fetch_imagery_tile",
-                            lambda bounds, **k: (tile, {"provider": "usgs_naip", "attribution": "NAIP"}))
+                            _verified_fetch(tile, {"provider": "usgs_naip", "attribution": "NAIP"}))
         b = HillshadeReliefBuilder()
         b._session = object()
         layers, assets = b._build_context_layers(_ctx(), base_bytes=0)
@@ -219,23 +239,31 @@ class TestBuilderImageryMetadata:
         for t in img["tiles"]:
             assert t["file"] in assets
 
-    def test_unmeasurable_tiles_still_package_without_a_false_pixel_claim(self, monkeypatch):
+    def test_unmeasurable_tile_now_fails_closed_under_the_exact_extent_contract(self, monkeypatch):
+        # BEHAVIOUR CHANGE, deliberate. An unmeasurable header used to package fine (we
+        # simply omitted pixel_count). Under the exact-extent contract the measured
+        # dimensions ARE the proof that the delivered pixels are the ones the service
+        # verified, so an unreadable header can no longer back the claim and the tile
+        # fails closed instead of being packaged with an unverifiable registration.
         _tiled_settings(monkeypatch)
         monkeypatch.setattr(ctxmod, "fetch_imagery_tile",
-                            lambda bounds, **k: (FAKE_JPEG_MAGIC_ONLY, {"provider": "usgs_naip"}))
+                            _verified_fetch(FAKE_JPEG_MAGIC_ONLY, {"provider": "usgs_naip"}))
         b = HillshadeReliefBuilder()
         b._session = object()
-        layers, _ = b._build_context_layers(_ctx(), base_bytes=0)
+        layers, assets = b._build_context_layers(_ctx(), base_bytes=0)
         img = layers["imagery"]
-        assert img["available"] is True, "an unmeasurable header must not fail the package"
-        assert "pixel_count" not in img, "never claim a pixel count we did not measure"
-        assert img["diagnostics"]["dimensions_complete"] is False
+        assert img["available"] is False
+        assert img["reason"].startswith("tile_failed")
+        assert not any(k.startswith("imagery/") for k in assets), "no partial imagery"
+        # The honesty rule it used to guard still holds at the layer level: a layer built
+        # from unmeasured tiles never claims a pixel count.
+        legacy = ctxmod.tiled_imagery_layer(_plan(), [{"file": "imagery/0/0.jpg", "bytes": 10}], None)
+        assert "pixel_count" not in legacy
 
     def test_declared_vintage_is_packaged(self, monkeypatch):
         _tiled_settings(monkeypatch)
         monkeypatch.setattr(settings, "OFFLINE_SCENE_IMAGERY_SOURCE_VINTAGE", "NAIP 2022")
-        monkeypatch.setattr(ctxmod, "fetch_imagery_tile",
-                            lambda bounds, **k: (_jpeg_with_dims(64, 64), {"provider": "usgs_naip"}))
+        monkeypatch.setattr(ctxmod, "fetch_imagery_tile", _verified_fetch(_jpeg_with_dims(64, 64)))
         b = HillshadeReliefBuilder()
         b._session = object()
         layers, _ = b._build_context_layers(_ctx(), base_bytes=0)
