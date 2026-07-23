@@ -53,6 +53,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from . import offline_scene_context as context_fmt
+from . import road_role
 
 # ---- provider identity -----------------------------------------------------
 
@@ -556,6 +557,14 @@ def build_caltrans_properties(attrs: dict, fsys: int, *, layer_key: str, geometr
         name = caltrans_route_label(route_id)
         if name:
             props["NAME"] = name[:48]  # display label in the native identification callout
+        # Carriageway-continuity identity from the LRS RouteID (route family + P/S/...
+        # designator). This is the TRUTHFUL continuity signal the route-chaining pass uses
+        # to stitch a fragmented mainline; it asserts nothing about lanes/direction/ownership.
+        family, designator = road_role.caltrans_route_identity(route_id)
+        if family:
+            props["route_family"] = family
+        if designator:
+            props["carriageway_designator"] = designator
     durable_id = caltrans_source_feature_id(
         layer_key=layer_key, event_id=event_id, route_id=route_id,
         functional_class=fsys, geometry=geometry,
@@ -578,6 +587,19 @@ def build_caltrans_properties(attrs: dict, fsys: int, *, layer_key: str, geometr
     props["road_class"] = rc
     props["road_class_label"] = context_fmt.road_class_label(rc)
     props["kind"] = "road_centerline"
+    # PROVIDER-NEUTRAL ROLE, from what Caltrans CRS ACTUALLY STATES.
+    #
+    # The LRS route identity explicitly names ramps ("RAMP_116041_P",
+    # "RAMP_YIELD_116044_P"), so those are classified `ramp` on the PROVIDER's authority —
+    # not from geometry or imagery. F_System is a FUNCTION code and says nothing about
+    # mainline vs ramp, so every other route stays `unknown` (the route-chaining pass may
+    # later demote one to `connector`). The raw route_id/NAME above are kept verbatim for
+    # provenance; nothing about direction, lane count, shoulder width or ramp type is
+    # inferred. Written last, alongside the other unspoofable trusted fields.
+    declared = road_role.caltrans_role_from_identity(props)
+    props["road_role"] = declared
+    props["role_source"] = (road_role.ROLE_SOURCE_PROVIDER if declared == road_role.ROLE_RAMP
+                            else road_role.ROLE_SOURCE_UNSPECIFIED)
     return props
 
 

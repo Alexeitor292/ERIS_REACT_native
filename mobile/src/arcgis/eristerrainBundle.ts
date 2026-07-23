@@ -275,6 +275,59 @@ export function roadsUnavailableReason(
   return roads && typeof roads.reason === "string" ? roads.reason : "no_road_context";
 }
 
+/** True when the packaged roads layer records a COMPLETED external query that simply
+ *  found zero qualifying centerlines (DEFECT A) — as opposed to a provider failure. Used
+ *  so the UI can say "none here" rather than implying an error. */
+export function roadsQueryCompletedEmpty(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+): boolean {
+  const roads = manifest?.context_layers?.roads as Record<string, unknown> | undefined;
+  if (!roads || roads.available === true) return false;
+  return roads.query_completed === true && roads.reason === "no_centerline_features_in_area";
+}
+
+/**
+ * A concise, SANITIZED human message for why road selection / cross-section is
+ * unavailable. It maps the stable machine reason token to plain copy and NEVER surfaces
+ * an environment-variable name, an enum/class name, Python internals, a service URL, or
+ * raw worker text. Returns null when roads ARE available.
+ *
+ * A completed-but-empty external query (DEFECT A) is distinguished from a real failure:
+ * "no freeways/expressways here" is a truthful, non-alarming statement of fact, whereas a
+ * source error / incomplete result is reported as a data problem.
+ */
+export function roadsUnavailableMessage(
+  manifest: Pick<EristerrainManifest, "context_layers"> | null | undefined,
+): string | null {
+  const roads = manifest?.context_layers?.roads;
+  if (roads && roads.available === true) return null;
+  const reason = roadsUnavailableReason(manifest);
+  switch (reason) {
+    case "no_centerline_features_in_area":
+      // Completed query, zero qualifying roads: state it plainly, no error tone.
+      return "No mapped highways in this area";
+    case "disabled":
+      return "Road context is turned off for this package";
+    case "provider_none":
+    case "provider_not_configured":
+    case "no_centerline_source_configured":
+      return "No road data source is configured";
+    case "source_error":
+      return "Road data was unavailable when this package was built";
+    case "incomplete_source":
+      return "Road data was incomplete and was not included";
+    case "too_large":
+      return "Road data exceeded the package size limit";
+    case "no_road_inventory_geometry":
+    case "no_road_bearing":
+    case "no_road_data":
+    case "no_road_context":
+      return "No road context is available for this package";
+    default:
+      return "Road context is unavailable";
+  }
+}
+
 /** Packaged road cross-section context (road_cross_section.json): the Road Inventory-
  *  derived roadway layout + route/postmile metadata + upstation direction + provenance,
  *  so the native Cross Section tool works fully offline. Elevation is NOT in here — it

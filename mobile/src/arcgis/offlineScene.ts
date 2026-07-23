@@ -159,13 +159,19 @@ export function layerAvailabilityLabel(available: boolean, reason?: string | nul
   if (available) return "Included";
   switch (reason) {
     case "not_configured":
+    case "provider_not_configured":
       return "Not available (not configured)";
     case "source_error":
       return "Not available (source error)";
+    case "incomplete_source":
+      return "Not available (incomplete)";
     case "too_large":
       return "Not available (size limit)";
     case "no_data":
       return "Not available (no data)";
+    case "no_centerline_features_in_area":
+      // DEFECT A: a completed query found none here — not an error.
+      return "Not available (none in area)";
     case "disabled":
       return "Not available (disabled)";
     default:

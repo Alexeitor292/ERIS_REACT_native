@@ -216,6 +216,22 @@ class Settings(BaseSettings):
     # decides pairing, so it is a first-class configured threshold.
     OFFLINE_SCENE_PAIR_MIDPOINT_TOLERANCE_M: float = Field(default=3.0)
 
+    # Provider-neutral ROUTE-CHAIN pre-pass (road_route_chains): stitch a mainline fragmented
+    # by provider segmentation (e.g. the Caltrans CRS LRS event layer) into continuous
+    # carriageways and conservatively demote branch/ramp geometry to `connector` BEFORE
+    # pairing, so a ramp can never become a carriageway partner. A no-op for providers that
+    # carry no carriageway-continuity key (e.g. TIGER), so existing behaviour is unchanged.
+    OFFLINE_SCENE_ROUTE_CHAIN_ENABLED: bool = Field(default=True)
+    OFFLINE_SCENE_ROUTE_CHAIN_JOIN_GAP_M: float = Field(default=25.0)          # endpoint join distance
+    OFFLINE_SCENE_ROUTE_CHAIN_JOIN_BEARING_DEG: float = Field(default=35.0)    # axial continuity across a join
+    OFFLINE_SCENE_ROUTE_CHAIN_MIN_MAINLINE_LEN_M: float = Field(default=200.0)  # sustained-through-route length (a geometric reference, not a role claim)
+    OFFLINE_SCENE_ROUTE_CHAIN_CONNECTOR_MAX_LEN_M: float = Field(default=400.0)  # only a SHORT branch is a connector
+    OFFLINE_SCENE_ROUTE_CHAIN_BRANCH_ANGLE_DEG: float = Field(default=35.0)    # MIN acute deviation = a branch
+    # MAX deviation still treated as a branch. A near-perpendicular meeting is a
+    # grade-separated CROSSING (another highway), never a branch of this one.
+    OFFLINE_SCENE_ROUTE_CHAIN_BRANCH_ANGLE_MAX_DEG: float = Field(default=80.0)
+    OFFLINE_SCENE_ROUTE_CHAIN_JUNCTION_TOL_M: float = Field(default=30.0)      # endpoint-to-through-route attachment
+
     # Aerial/satellite imagery drape. OPT-IN: NAIP (USGS/USDA, public domain) is the
     # intended licence-clean provider, but must be validated on a live worker before
     # we claim "satellite imagery", so it defaults OFF. When off/uncovered/too-large/

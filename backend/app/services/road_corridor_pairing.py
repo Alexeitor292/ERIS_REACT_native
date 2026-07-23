@@ -35,13 +35,18 @@ import json
 import math
 from dataclasses import dataclass, field
 
+from . import road_role
+
 M_PER_DEG_LAT = 111320.0
 
 PAIRING_METHOD = "station_local_mutual_nearest"
 PAIRING_VERSION = 1
 
-# TIGER MTFCC for a ramp. `selection_kind` is an ERIS-DERIVED field; it may consult the
-# provider MTFCC (the only ramp signal) but NEVER overrides the trusted road_class.
+# TIGER MTFCC for a ramp. Retained for the legacy `is_ramp` helper + tests. Ramp/connector
+# exclusion now runs through the PROVIDER-NEUTRAL role model (road_role): pairing consults
+# a trusted normalized `road_role` and falls back to this MTFCC signal for a legacy TIGER
+# package that carries no role field. caltrans_crs has NO MTFCC, so its ramps/connectors are
+# identified by the geometry-based route-chaining pass (road_route_chains), never by MTFCC.
 RAMP_MTFCC = "S1630"
 
 # ONLY a real road centerline may become a selection candidate. roads.geojson also carries
@@ -465,8 +470,8 @@ def _candidate_lines(features: list, params: PairingParams) -> list:
             continue                       # only a real centerline can be a carriageway
         if props.get("road_class") != "primary":
             continue                       # ERIS-trusted class only
-        if is_ramp(props):
-            continue                       # a ramp never forms a carriageway pair
+        if road_role.is_non_carriageway(props):
+            continue                       # a ramp OR connector never forms a carriageway pair
         geom = f.get("geometry") if isinstance(f.get("geometry"), dict) else {}
         if geom.get("type") != "LineString":
             continue
@@ -886,6 +891,45 @@ def assert_unique_candidate_identities(features: list) -> None:
         seen[sid] = key
 
 
+class ProviderRampMislabeledError(ValueError):
+    """A feature the PROVIDER explicitly names a ramp was emitted as something else.
+
+    A provider-identified ramp emitted as `individual_carriageway` competes at mainline
+    priority in native selection and can displace the real divided corridor near on/off
+    ramps — the demonstrated Rocklin/I-80 defect. It is also never a valid diagnostics
+    member. Fail closed rather than publish a package whose selection_kind contradicts the
+    provider's own route identity."""
+
+
+def assert_provider_ramps_are_labeled_ramps(features: list) -> None:
+    """FAIL-CLOSED invariant: every emitted part whose PROVIDER route identity names a ramp
+    must carry selection_kind 'ramp', must stay selectable, and must never be a diagnostics
+    member. Checked on the ACTUAL emitted collection, so an adapter that forgot to set
+    road_role cannot silently ship mislabeled ramps."""
+    for f in features or []:
+        if not isinstance(f, dict):
+            continue
+        props = f.get("properties") if isinstance(f.get("properties"), dict) else {}
+        if not road_role.provider_declares_ramp(props):
+            continue
+        kind = props.get("selection_kind")
+        if kind != SELECTION_RAMP:
+            # Name the field that actually matched — the identity may have come from NAME,
+            # in which case reporting only route_id=None leaves the operator with no way to
+            # find the offending feature.
+            ident = next((f"{k}={props.get(k)!r}" for k in road_role.RAMP_IDENTITY_FIELDS
+                          if road_role.is_ramp_route_identity(props.get(k))), "identity=?")
+            raise ProviderRampMislabeledError(
+                f"provider-identified ramp emitted as selection_kind {kind!r} "
+                f"({ident}, feature_id={props.get('feature_id')!r}); it must be {SELECTION_RAMP!r}"
+            )
+        if props.get("diagnostic_kind") is not None:
+            raise ProviderRampMislabeledError(
+                f"provider-identified ramp emitted as diagnostic_kind "
+                f"{props.get('diagnostic_kind')!r}; a ramp is never a carriageway member"
+            )
+
+
 def assert_unique_emitted_feature_ids(features: list) -> None:
     """FINAL invariant backstop: every non-empty emitted ``feature_id`` is globally unique.
 
@@ -978,8 +1022,11 @@ def build_selection_features(features: list, params: PairingParams | None = None
             continue
 
         my_runs = runs.get(sid)
-        if is_ramp(props):
-            # A ramp NEVER participates in pairing, so it is always whole + selectable.
+        if road_role.role_of(props) == road_role.ROLE_RAMP:
+            # A RAMP (role supported) NEVER participates in pairing, so it is always whole
+            # + selectable. A CONNECTOR is likewise excluded from pairing (via the candidate
+            # gate) but stays an individually-selectable road below — it is not asserted to
+            # be a ramp when the source could not tell us that.
             rp = dict(base, **_selectable(SELECTION_RAMP))
             rp["feature_id"] = part_feature_id(sid, SELECTION_RAMP, coords)
             out.append(_feature(coords, rp))
@@ -1079,6 +1126,8 @@ def build_selection_features(features: list, params: PairingParams | None = None
             "midpoint_tolerance_m": p.midpoint_tolerance_m,
         },
     }
-    # FINAL invariant: never hand back a collection whose emitted feature_ids collide.
+    # FINAL invariants: never hand back a collection whose emitted feature_ids collide, nor
+    # one that contradicts the provider about which features are ramps.
     assert_unique_emitted_feature_ids(out)
+    assert_provider_ramps_are_labeled_ramps(out)
     return out, stats
