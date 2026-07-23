@@ -663,8 +663,13 @@ def pair_corridors(features: list, params: PairingParams | None = None) -> list:
 
     Deterministic and side-effect free. Emits ONE Corridor per paired run, only for the
     ordered pair id(A) < id(B), so the A<->B mirror is never materialised twice.
+
+    Runs the shared uniqueness preflight, so EVERY public pairing entry point (including a
+    direct pair_corridors() caller) fails closed on a repeated candidate source identity.
+    Raises ``DuplicateSourceIdentityError``.
     """
     p = params or PairingParams()
+    assert_unique_candidate_identities(features)
     lines = _candidate_lines(features, p)
     if len(lines) < 2:
         return []
@@ -840,14 +845,19 @@ def corridor_feature(c: Corridor, params: PairingParams, member_part_ids: list,
 
 
 def assert_unique_candidate_identities(features: list) -> None:
-    """FAIL-CLOSED guard, run before pairing: no two DIFFERENT packaged road centerlines may
-    share a pairing source identity.
+    """FAIL-CLOSED preflight: EVERY candidate road centerline must have a DISTINCT pairing
+    source identity — including two candidates whose geometry is identical.
 
-    Identical geometries sharing an id are harmless (a genuine duplicate). Two DIFFERENT
-    canonical geometries sharing an id is the disconnected-part collision this guards against
-    — it raises ``DuplicateSourceIdentityError`` rather than let pairing misapply a
-    component's range. The identity + canonical orientation exactly mirror ``_candidate_lines``
-    and ``build_selection_features``, so this sees precisely what pairing would."""
+    A repeated identity is never safe. ``build_selection_features`` derives each emitted
+    feature_id from (source id, role, canonical part geometry), so two candidates sharing an
+    identity AND geometry produce the SAME final feature_id and both get appended — breaking
+    the global feature_id-uniqueness contract and the 1:1 resolution of a corridor's
+    ``member_part_feature_ids``. Two candidates sharing an identity with DIFFERENT geometry is
+    the disconnected-part collision (one component's paired range applied to another).
+
+    Both fail closed here; the message distinguishes them. Exact redundant packaged parts are
+    the packaging boundary's job to remove (see ``roads_geojson_from_context``), not
+    something pairing may silently absorb."""
     seen: dict = {}   # source id -> canonical geometry key
     for f in features or []:
         if not isinstance(f, dict):
@@ -866,12 +876,35 @@ def assert_unique_candidate_identities(features: list) -> None:
         sid = source_feature_id(clean, props)
         key = tuple((round(x, 7), round(y, 7)) for x, y in clean)
         prev = seen.get(sid)
-        if prev is not None and prev != key:
+        if prev is not None:
+            same = "identical" if prev == key else "different"
             raise DuplicateSourceIdentityError(
-                f"two distinct packaged road centerlines share pairing source identity {sid!r}; "
-                "the packaging boundary must give each clipped LineString a unique provider_feature_id"
+                f"pairing source identity {sid!r} is repeated across candidates with {same} geometry; "
+                "every packaged road centerline must carry a unique provider_feature_id "
+                "(exact redundant parts must be removed at the packaging boundary)"
             )
         seen[sid] = key
+
+
+def assert_unique_emitted_feature_ids(features: list) -> None:
+    """FINAL invariant backstop: every non-empty emitted ``feature_id`` is globally unique.
+
+    Covers selectable, diagnostic member, derived corridor and retained context features.
+    Source-id uniqueness alone does not prove it, so this is asserted on the ACTUAL output
+    before it is returned — a collection with duplicate ids is never handed to the caller."""
+    seen: set = set()
+    for f in features or []:
+        if not isinstance(f, dict):
+            continue
+        fid = (f.get("properties") or {}).get("feature_id")
+        if not isinstance(fid, str) or not fid:
+            continue
+        if fid in seen:
+            raise DuplicateSourceIdentityError(
+                f"emitted feature_id {fid!r} is not unique; the packaged road collection would "
+                "break member_part_feature_ids 1:1 resolution"
+            )
+        seen.add(fid)
 
 
 def build_selection_features(features: list, params: PairingParams | None = None) -> tuple:
@@ -894,12 +927,15 @@ def build_selection_features(features: list, params: PairingParams | None = None
 
     Output is sorted deterministically; provider input order never affects the result.
 
-    Raises ``DuplicateSourceIdentityError`` (fail closed) if two DIFFERENT packaged road
-    centerlines share a pairing source identity — that would let one component's paired range
-    be applied to another. The caller must not swallow it into unpaired output.
+    Raises ``DuplicateSourceIdentityError`` (fail closed) when any packaged road centerline
+    repeats a pairing source identity — whether the geometry is identical (which would emit
+    the same feature_id twice) or different (which would apply one component's paired range
+    to another) — and again if the FINAL emitted collection somehow contains a duplicate
+    feature_id. The caller must not swallow either into unpaired output.
     """
     p = params or PairingParams()
-    assert_unique_candidate_identities(features)
+    # The uniqueness preflight runs inside pair_corridors(), so every entry point is covered
+    # without validating the same input twice.
     corridors = pair_corridors(features, p)
 
     # source_feature_id -> [(corridor_index, side, along_range)]
@@ -1043,4 +1079,6 @@ def build_selection_features(features: list, params: PairingParams | None = None
             "midpoint_tolerance_m": p.midpoint_tolerance_m,
         },
     }
+    # FINAL invariant: never hand back a collection whose emitted feature_ids collide.
+    assert_unique_emitted_feature_ids(out)
     return out, stats

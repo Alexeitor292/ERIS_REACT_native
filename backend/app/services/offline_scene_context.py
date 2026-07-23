@@ -336,6 +336,13 @@ PROVIDER_SOURCE_ID_KEY = "provider_source_feature_id"
 PACKAGED_PART_ID_VERSION = 1
 
 
+class RoadIdentityCollisionError(ValueError):
+    """One generated packaged-part identity was associated with TWO DIFFERENT canonical
+    geometries. That is a genuine identity/hash collision, not a redundant duplicate, so it is
+    raised rather than silently resolved by dropping either geometry. The builder converts it
+    into a fail-closed package error; it must never be swallowed into an unavailable layer."""
+
+
 def packaged_part_provider_feature_id(source_id: str, part_coords, precision: int = 6) -> str:
     """Deterministic pairing identity for ONE packaged (already-clipped) LineString.
 
@@ -390,6 +397,10 @@ def roads_geojson_from_context(
     bounds = road_clip_bounds(ctx["bounds"], buffer_m)
     overlays = ctx.get("overlays") or {}
     features: list = []
+    # Exact packaged provider parts already emitted: provider_feature_id -> canonical geometry.
+    # Scoped to the whole assembly so a redundant part repeated across a MultiLineString's
+    # members (each arriving as its own _emit call) is still caught.
+    emitted_parts: dict = {}
 
     def _emit(line, props: dict) -> None:
         """Clip a raw line to the buffered bounds and emit ONE LineString Feature per
@@ -401,13 +412,34 @@ def roads_geojson_from_context(
         geometry — so a MultiLineString / leave-re-enter feature never hands the pairing pass
         two independent lines under one id. Features without a provider identity
         (eris_internal bearing/inventory/submitted, or a provider that publishes none) are
-        emitted unchanged — no provider identity is invented."""
+        emitted unchanged — no provider identity is invented.
+
+        EXACT-DUPLICATE REMOVAL: an identical packaged provider part is emitted ONCE. A valid
+        but redundant MultiLineString can legitimately contain the same part twice; emitting
+        both would hand pairing two candidates with the same identity AND geometry, which
+        produces two features with the SAME final feature_id. The dedupe key is the final
+        ``provider_feature_id`` + the canonical (orientation-invariant) final geometry, so it
+        is independent of multipart order and coordinate direction and uses no sequential
+        index. Different source identities are never merged just because their geometry
+        overlaps, and one identity seen with two DIFFERENT geometries raises
+        ``RoadIdentityCollisionError`` instead of silently dropping either."""
         src_id = props.get(PROVIDER_SOURCE_ID_KEY)
         has_provider_identity = isinstance(src_id, str) and bool(src_id)
         for part in clip_line_to_bounds(line, bounds):
             part_props = dict(props)
             if has_provider_identity:
-                part_props["provider_feature_id"] = packaged_part_provider_feature_id(src_id, part)
+                pid = packaged_part_provider_feature_id(src_id, part)
+                gkey = _line_key(part, 6)
+                prev = emitted_parts.get(pid)
+                if prev is not None:
+                    if prev != gkey:
+                        raise RoadIdentityCollisionError(
+                            f"packaged part identity {pid!r} maps to two different geometries; "
+                            "refusing to drop either"
+                        )
+                    continue                    # exact redundant part -> package it once
+                emitted_parts[pid] = gkey
+                part_props["provider_feature_id"] = pid
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": part},

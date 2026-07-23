@@ -653,6 +653,14 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                     # cancelled-job result.
                     _log("roads", "cancelled")
                     raise
+                except context_fmt.RoadIdentityCollisionError as e:
+                    # A generated packaged-part identity mapped to two different geometries.
+                    # Never swallow into an unavailable layer: fail the package so the
+                    # collision is surfaced rather than silently resolved.
+                    _log("roads", "packaged_identity_collision", error=str(e)[:160])
+                    raise OfflineSceneBuildError(
+                        f"Packaged road identities collided: {e}"
+                    ) from e
                 except caltrans_fmt.CaltransIncompleteSourceError as e:
                     # A pagination cap was hit while MORE features remained. The subset is
                     # known-truncated, so it is never packaged as an available layer — the

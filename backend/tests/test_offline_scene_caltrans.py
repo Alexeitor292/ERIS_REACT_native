@@ -1701,22 +1701,163 @@ class TestClippedPartIdentity:
         with pytest.raises(pairing.DuplicateSourceIdentityError):
             pairing.build_selection_features(collide, pairing.PairingParams())
 
-    def test_identical_geometry_same_id_is_not_a_collision(self):
-        """Two IDENTICAL geometries sharing an id is a genuine duplicate, not the bug."""
+    def test_identical_geometry_sharing_an_id_now_fails_closed(self):
+        """REPLACES the old 'identical duplicates are harmless' assumption. Two candidates
+        sharing an identity AND geometry would emit the SAME final feature_id twice, so the
+        preflight must reject them."""
         one = _centerlines(_emit_caltrans([_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22)])]))[0]
         dup = json.loads(json.dumps([one, one]))
-        pairing.assert_unique_candidate_identities(dup)  # must NOT raise
+        with pytest.raises(pairing.DuplicateSourceIdentityError, match="identical geometry"):
+            pairing.assert_unique_candidate_identities(dup)
 
-    def test_builder_fails_closed_on_identity_collision(self, monkeypatch):
-        """If a duplicate identity ever reaches pairing, the builder fails the package rather
-        than swallow it into misleading unpaired output."""
+    def test_builder_fails_closed_on_packaged_identity_collision(self, monkeypatch):
+        """A generated part identity mapping to two DIFFERENT geometries fails the package at
+        the packaging boundary — never swallowed into an unavailable roads layer."""
         _caltrans_settings(monkeypatch)
-        # Force the packaging boundary to hand out a CONSTANT part id (reintroduce the bug),
-        # so two distinct clipped parts collide and pairing raises.
+        # Force a CONSTANT part id so two distinct clipped parts collide.
         monkeypatch.setattr(ctxmod, "packaged_part_provider_feature_id", lambda *a, **k: "part:COLLIDE")
         s = PagingSession([_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])])
         ctx = _ctx()
         ctx["bounds"] = _ID_BOUNDS
         ctx["center"] = {"lat": _ID_LAT0, "lon": _ID_LON0}
-        with pytest.raises(OfflineSceneBuildError, match="colliding road identities"):
+        with pytest.raises(OfflineSceneBuildError, match="Packaged road identities collided"):
             _builder(s)._build_context_layers(ctx, base_bytes=0)
+
+
+# --------------------------------------------------------------------------- #
+# Duplicate-emission invariant: an EXACT redundant packaged part is emitted once,
+# any repeated candidate identity fails closed, and every emitted feature_id is
+# globally unique.
+# --------------------------------------------------------------------------- #
+def _assert_globally_unique_ids(emitted):
+    """Every non-empty emitted feature_id is unique, and every corridor member id resolves
+    to exactly ONE emitted diagnostic member."""
+    fids = [f["properties"].get("feature_id") for f in emitted]
+    nonempty = [x for x in fids if isinstance(x, str) and x]
+    assert len(set(nonempty)) == len(nonempty), f"duplicate emitted feature_id: {nonempty}"
+    diag = [f["properties"]["feature_id"] for f in emitted
+            if f["properties"].get("diagnostic_kind") == "carriageway_member"]
+    assert len(set(diag)) == len(diag)
+    for f in emitted:
+        members = f["properties"].get("member_part_feature_ids") or []
+        for m in members:
+            assert diag.count(m) == 1, f"member id {m} must resolve to exactly one diagnostic member"
+
+
+class TestDuplicatePackagedPartIdentity:
+    def test_multipart_with_the_same_part_twice_is_packaged_once(self):
+        """Case 1: a valid but REDUNDANT MultiLineString containing the same part twice."""
+        part = _id_component(0, 0)
+        f = _caltrans_mls(1, "SHS_050._P", 1, [part, list(part)])
+        parts = _centerlines(_emit_caltrans([f]))
+        assert len(parts) == 1, "the exact redundant part must be packaged once"
+        assert len({p["properties"]["provider_feature_id"] for p in parts}) == 1
+        assert len({p["properties"]["provider_source_feature_id"] for p in parts}) == 1
+        emitted, stats = pairing.build_selection_features(_emit_caltrans([f]), pairing.PairingParams())
+        _assert_globally_unique_ids(emitted)
+        # Counts reflect what was ACTUALLY packaged, not the redundant input.
+        assert stats["feature_count"] == len(emitted) == 1
+        assert stats["source_feature_count"] == 1
+
+    def test_reversed_order_and_direction_give_the_same_bytes_and_identities(self):
+        """Case 2: duplicate parts reversed in order AND coordinate direction."""
+        part = _id_component(0, 0)
+        fwd = _emit_caltrans([_caltrans_mls(1, "SHS_050._P", 1, [part, list(part)])])
+        rev = _emit_caltrans([_caltrans_mls(1, "SHS_050._P", 1, [list(reversed(part)), list(reversed(part))])])
+        assert _pfid_set(fwd) == _pfid_set(rev)
+        assert ({p["properties"]["provider_source_feature_id"] for p in _centerlines(fwd)}
+                == {p["properties"]["provider_source_feature_id"] for p in _centerlines(rev)})
+        # The FINAL packaged bytes (pairing applies canonical orientation) are identical.
+        a, _ = pairing.build_selection_features(fwd, pairing.PairingParams())
+        b, _ = pairing.build_selection_features(rev, pairing.PairingParams())
+        assert json.dumps(a, sort_keys=True, separators=(",", ":")) == json.dumps(b, sort_keys=True, separators=(",", ":"))
+
+    def test_clipping_that_yields_the_same_final_part_twice_emits_once(self):
+        """Case 3: two multipart members that CLIP to the same final part (one forward, one
+        reversed) collapse to a single packaged LineString."""
+        part = _id_component(0, 0)
+        f = _caltrans_mls(2, "SHS_050._P", 1, [part, list(reversed(part))])
+        parts = _centerlines(_emit_caltrans([f]))
+        assert len(parts) == 1
+        emitted, _ = pairing.build_selection_features(_emit_caltrans([f]), pairing.PairingParams())
+        _assert_globally_unique_ids(emitted)
+
+    def test_direct_duplicate_to_build_selection_features_raises(self):
+        """Case 4: two identical candidates handed straight to build_selection_features."""
+        one = _centerlines(_emit_caltrans([_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22)])]))[0]
+        dup = json.loads(json.dumps([one, one]))
+        with pytest.raises(pairing.DuplicateSourceIdentityError):
+            pairing.build_selection_features(dup, pairing.PairingParams())
+
+    def test_direct_duplicate_to_pair_corridors_raises(self):
+        """Case 5: the same duplicate handed straight to pair_corridors()."""
+        one = _centerlines(_emit_caltrans([_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22)])]))[0]
+        dup = json.loads(json.dumps([one, one]))
+        with pytest.raises(pairing.DuplicateSourceIdentityError):
+            pairing.pair_corridors(dup, pairing.PairingParams())
+
+    def test_same_id_different_geometry_still_fails_closed(self):
+        """Case 6: one identity mapping to different geometries fails closed at BOTH the
+        packaging boundary and the pairing preflight."""
+        parts = _centerlines(_emit_caltrans(
+            [_caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])]))
+        collide = json.loads(json.dumps(parts))
+        collide[1]["properties"]["provider_feature_id"] = collide[0]["properties"]["provider_feature_id"]
+        with pytest.raises(pairing.DuplicateSourceIdentityError, match="different geometry"):
+            pairing.assert_unique_candidate_identities(collide)
+
+    def test_packaging_boundary_raises_on_a_true_identity_collision(self, monkeypatch):
+        """A generated part identity seen with two DIFFERENT geometries is a real collision:
+        raise rather than silently drop either geometry."""
+        monkeypatch.setattr(ctxmod, "packaged_part_provider_feature_id", lambda *a, **k: "part:COLLIDE")
+        f = _caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])
+        with pytest.raises(ctxmod.RoadIdentityCollisionError, match="two different geometries"):
+            _emit_caltrans([f])
+
+    def test_distinct_source_ids_with_identical_geometry_are_kept(self):
+        """Case 7: geometry-only dedupe must NOT happen — two different route events sharing
+        an alignment remain two distinct candidates."""
+        geom = _id_component(0, 0)
+        fa = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": geom},
+              "properties": {"OBJECTID": 1, "RouteID": "SHS_050._P", "F_System": 1}}
+        fb = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": geom},
+              "properties": {"OBJECTID": 2, "RouteID": "SHS_099._P", "F_System": 1}}
+        parts = _centerlines(_emit_caltrans([fa, fb]))
+        assert len(parts) == 2, "different source identities must not be geometry-deduped"
+        assert len(_pfid_set(parts)) == 2
+        assert len({p["properties"]["provider_source_feature_id"] for p in parts}) == 2
+
+    def test_two_independent_corridors_still_have_globally_unique_ids(self):
+        """Case 8: the accepted two-corridor scenario keeps every invariant."""
+        a = _caltrans_mls(1, "SHS_050._P", 1, [_id_component(0, 22), _id_component(4000, 22)])
+        b = _caltrans_mls(2, "SHS_050._S", 1, [_id_component(0, -22), _id_component(4000, -22)])
+        emitted, stats = pairing.build_selection_features(_emit_caltrans([a, b]), pairing.PairingParams())
+        assert stats["divided_corridor_count"] == 2
+        _assert_globally_unique_ids(emitted)
+
+    def test_output_level_assertion_rejects_duplicate_emitted_ids(self):
+        """The final backstop rejects a collection with duplicate emitted feature_ids."""
+        f = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": _id_component(0, 0)},
+             "properties": {"feature_id": "p-same", "kind": "road_centerline"}}
+        with pytest.raises(pairing.DuplicateSourceIdentityError, match="not unique"):
+            pairing.assert_unique_emitted_feature_ids([f, json.loads(json.dumps(f))])
+        # An empty/absent feature_id is not a duplicate.
+        pairing.assert_unique_emitted_feature_ids([{"properties": {}}, {"properties": {"feature_id": ""}}])
+
+    def test_caltrans_response_level_dedupe_still_intact(self):
+        """Case 9: the fetch-level dedupe (by durable identity) is unchanged."""
+        a = gj_feat(1, "SHS_050._P", 1, IN_A)
+        s = PagingSession([a, gj_feat(2, "SHS_099._P", 2, IN_B), json.loads(json.dumps(a))])
+        out = _fetch(s, page_size=1000)
+        assert sorted(f["properties"]["provider_object_id"] for f in out) == [1, 2]
+
+    def test_eris_internal_context_is_untouched_by_part_dedupe(self):
+        """Case 10: internal context carries no provider identity, so the dedupe never
+        applies to it and bearing/inventory geometry is packaged as before."""
+        ctx = {"bounds": _ID_BOUNDS, "external_road_features": [],
+               "road_inventory_geometry": {"type": "LineString", "coordinates": _id_component(0, 0)},
+               "overlays": {"incident": {"lat": _ID_LAT0, "lon": _ID_LON0}, "roadBearingDeg": 90.0}}
+        gj, count, _reason = ctxmod.roads_geojson_from_context(ctx, 250.0, external_configured=False)
+        kinds = {f["properties"].get("kind") for f in gj["features"]}
+        assert count >= 2 and {"road_inventory", "road_bearing"} <= kinds
+        assert all("provider_feature_id" not in f["properties"] for f in gj["features"])
