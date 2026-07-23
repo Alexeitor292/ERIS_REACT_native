@@ -59,6 +59,24 @@ def _road_content_identity() -> tuple[str, str]:
     return provider, provider
 
 
+def _imagery_content_identity() -> str:
+    """The aerial-imagery EXPORT CONTRACT identity for the content signature.
+
+    Not a user-visible setting — that is the point. The tiled registration fix changed
+    only backend code, so without this the corrected package would carry the same
+    signature as the mis-registered one and no device would re-download it."""
+    from ..services import offline_scene_imagery as imagery
+
+    if not settings.OFFLINE_SCENE_IMAGERY_ENABLED:
+        return "disabled"
+    mode = str(settings.OFFLINE_SCENE_IMAGERY_MODE or "").strip().lower()
+    if mode == "tiled":
+        return imagery.IMAGERY_EXPORT_CONTRACT
+    # The legacy single-image export performs no extent verification; say so plainly
+    # rather than borrowing the verified contract's name.
+    return f"single_unverified_extent:{mode or 'single'}"
+
+
 def _build_context(db: Session, job: dict) -> dict:
     """Assemble the build context (AOI + overlays + provenance signature) from the
     submission's GISA data. Overlays are drawn from real ERIS data only."""
@@ -106,6 +124,7 @@ def _build_context(db: Session, job: dict) -> dict:
         radius_m=radius_m,
         road_provider=road_provider,
         road_filter_version=road_filter_version,
+        imagery_export_contract=_imagery_content_identity(),
     )
     version = "g" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + f"-{job['id']}"
     return {

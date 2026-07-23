@@ -772,7 +772,16 @@ def imagery_is_tiled(imagery_layer) -> bool:
 
 def _validate_tiled_imagery_meta(layer: dict) -> tuple[bool, str | None]:
     """Structure of a tiled imagery layer (metadata only; per-tile asset presence/
-    CRC/SHA is checked by the bundle validator). Every tile needs file + 64-hex sha256."""
+    CRC/SHA is checked by the bundle validator). Every tile needs file + 64-hex sha256.
+
+    A layer that CLAIMS the exact-extent export contract must also carry complete,
+    self-consistent per-tile verification and matching aggregate counts. A legacy layer
+    claims nothing and is validated exactly as before — never relabelled as verified."""
+    from . import offline_scene_imagery as imagery
+
+    ok, reason = imagery.validate_packaged_verification(layer)
+    if not ok:
+        return False, reason
     tiles = layer.get("tiles")
     if not isinstance(tiles, list) or not tiles:
         return False, "context_layers.imagery tiled but has no tiles"
@@ -807,13 +816,17 @@ def tiled_imagery_tiles(imagery_layer) -> list:
 
 def tiled_imagery_layer(plan: dict, tile_metas: list, source: dict | None, *,
                         jpeg_quality: int | None = None, vintage: str | None = None,
-                        diagnostics: dict | None = None) -> dict:
+                        diagnostics: dict | None = None, export_contract: str | None = None) -> dict:
     """Assemble the manifest `context_layers.imagery` block for a TILED package from a
     tile plan and the per-tile packaged metadata (file/bounds/sha256/bytes/width_px/
     height_px). Reports the actual source + target/effective/source-native resolution,
     measured pixel count, total storage, compression quality, vintage availability and a
     gap/overlap diagnostic — never claims ArcGIS equivalence or detail finer than the
-    source truthfully provides."""
+    source truthfully provides.
+
+    `export_contract` records WHICH export/verification contract produced these tiles.
+    Supplied only by a build that actually verified every tile's returned extent; a
+    legacy package declares no contract and is never presented as verified."""
     total_bytes = sum(int(t.get("bytes") or 0) for t in tile_metas)
     # Measured from the DECODED tile headers, never from the requested size (the export is
     # aspect-matched, so tiles are generally not tile_size_px square).
@@ -836,6 +849,8 @@ def tiled_imagery_layer(plan: dict, tile_metas: list, source: dict | None, *,
     }
     if pixel_count > 0:
         layer["pixel_count"] = pixel_count
+    if export_contract:
+        layer["export_contract"] = str(export_contract)
     if jpeg_quality is not None:
         layer["jpeg_quality"] = int(jpeg_quality)
     # Acquisition vintage ONLY when the operator has truthfully declared the source's
@@ -951,11 +966,22 @@ def fetch_imagery_png(bounds: dict, *, export_url: str, px: int, timeout_s: int,
 
 def tile_export_dims(bounds: dict, px: int) -> tuple[int, int]:
     """Pixel (width, height) for a tile export whose ASPECT MATCHES the tile's metric
-    footprint (cos-lat adjusted). Requesting a SQUARE image for a non-square bbox lets
-    ImageServer adjust/expand the bbox to the requested aspect, so adjacent tiles cover
-    overlapping ground -> the SAME building appears in two tiles (double buildings) and
-    the imagery is misaligned to the terrain. Matching the aspect eliminates that: the
-    longer axis gets `px`, the shorter is scaled proportionally (min 1)."""
+    footprint (cos-lat adjusted): the longer ground axis gets `px`, the shorter is
+    scaled proportionally (min 1). This buys SQUARE GROUND PIXELS — ~the same metres
+    per pixel along both axes — which is a quality choice, nothing more.
+
+    IT IS NOT WHAT PREVENTS BBOX ADJUSTMENT, and believing it was caused the tiled
+    imagery to be mis-registered. ArcGIS compares the requested pixel aspect against the
+    bbox aspect expressed in the OUTPUT spatial reference. Output here is EPSG:4326, so
+    the comparison is in DEGREES (plate carree), where the tile is ~1.28:1 at latitude
+    38.8 while this function deliberately returns a ~1:1 metric-aspect size. Matching
+    the metric aspect therefore MAXIMISES the degree-space mismatch and, with
+    adjustAspectRatio defaulting to true, made ImageServer expand each tile's bbox by
+    ~28% of its height — every tile row repeated ~170 m of ground.
+
+    The one thing that keeps the exported extent exact is sending adjustAspectRatio=false
+    (imagery.ADJUST_ASPECT_RATIO) and then VERIFYING the returned extent. See
+    export_tile_params/fetch_imagery_tile."""
     tp = max(1, int(px))
     try:
         min_lat, max_lat = float(bounds["min_lat"]), float(bounds["max_lat"])
@@ -973,13 +999,26 @@ def tile_export_dims(bounds: dict, px: int) -> tuple[int, int]:
     return max(1, round(tp * w_m / h_m)), tp
 
 
-def _export_tile_params(bounds: dict, px: int, jpeg_quality: int) -> dict:
+def export_tile_params(bounds: dict, px: int, jpeg_quality: int) -> dict:
+    """The exact-extent tile export request.
+
+    Two parameters carry the whole contract:
+      * ``adjustAspectRatio=false`` — forbids ImageServer from silently re-fitting the
+        bbox to the requested pixel aspect. Without it the service defaults to TRUE and
+        returns pixels covering more ground than asked for.
+      * ``f=json`` — the response then STATES its extent, size and spatial reference,
+        which fetch_imagery_tile verifies before downloading anything. ``f=image``
+        returns only bytes, so an adjusted extent is structurally undetectable.
+    """
+    from . import offline_scene_imagery as imagery
+
     bbox = f"{bounds['min_lon']},{bounds['min_lat']},{bounds['max_lon']},{bounds['max_lat']}"
     w_px, h_px = tile_export_dims(bounds, px)
     return {
         "bbox": bbox, "bboxSR": "4326", "imageSR": "4326",
         "size": f"{w_px},{h_px}", "format": "jpg", "compressionQuality": str(int(jpeg_quality)),
-        "f": "image",
+        "adjustAspectRatio": "true" if imagery.ADJUST_ASPECT_RATIO else "false",
+        "f": "json",
     }
 
 
@@ -997,16 +1036,63 @@ def encode_jpeg(data: bytes, quality: int) -> bytes:
     return buf.getvalue()
 
 
+# A returned href may legitimately redirect (e.g. an output directory behind a rewrite),
+# but a redirect chain is also the classic way to escape an origin allow-list. Bounded,
+# and EVERY hop is re-validated against the same origin policy.
+_HREF_MAX_REDIRECTS = 3
+
+
+def _download_export_image(session, href: str, *, export_url: str, timeout_s: int) -> bytes:
+    """GET a verified export href, following at most _HREF_MAX_REDIRECTS hops and
+    re-applying the origin policy to every Location. Returns the raw body.
+
+    An HTTP failure is raised as a STATUS-ONLY message. `raise_for_status()` would put
+    the full resolved URL — the output path and its token query — into the exception,
+    which then reaches the job's error_details and the worker log. The status code is
+    all an operator needs and all we are willing to record.
+    """
+    from . import offline_scene_imagery as imagery
+
+    url = imagery.safe_export_href(href, service_url=export_url)
+    for _ in range(_HREF_MAX_REDIRECTS + 1):
+        resp = session.get(url, timeout=timeout_s, allow_redirects=False)
+        code = int(getattr(resp, "status_code", 200) or 200)
+        if code in (301, 302, 303, 307, 308):
+            loc = (resp.headers or {}).get("Location")
+            # Re-validate: https, no userinfo, same origin as the configured service.
+            url = imagery.safe_export_href(loc, service_url=export_url)
+            continue
+        if code >= 400:
+            # Transient by default (a 5xx should be retried); the retry policy decides.
+            raise RuntimeError(f"imagery tile download failed with HTTP {code}")
+        ctype = (resp.headers or {}).get("Content-Type", "")
+        if "json" in ctype or "html" in ctype:  # ArcGIS serves errors as JSON/HTML with HTTP 200
+            raise imagery.ImageryContractError("export download returned a service error body")
+        return resp.content
+    raise imagery.ImageryContractError("export download exceeded the redirect limit")
+
+
 def fetch_imagery_tile(
     bounds: dict, *, export_url: str, tile_px: int, timeout_s: int, jpeg_quality: int = 85, session=None
-) -> tuple[bytes, dict]:
-    """Fetch ONE aerial-imagery tile (JPEG) aligned to `bounds` from an ArcGIS
+) -> tuple[bytes, dict, dict]:
+    """Fetch ONE aerial-imagery tile (JPEG) covering EXACTLY `bounds` from an ArcGIS
     ImageServer exportImage endpoint (default NAIP, public domain). Worker-only.
 
-    Validates the response is a real image (not a JSON/HTML service error), and
-    normalises to JPEG when the service returned another format. Returns
-    (jpeg_bytes, source_meta). Raises on any failure so the caller's bounded retry
-    can decide transient-vs-terminal. NEVER embeds credentials in source_meta.
+    Extent-aware, fail-closed, in this order:
+      1. request the export with adjustAspectRatio=false and f=json;
+      2. VERIFY the metadata — no service error, returned width/height identical to the
+         requested size, a WGS84 extent whose four corners match the requested bbox
+         within imagery.EXTENT_TOLERANCE_DEG. An adjusted extent fails the tile here,
+         before any pixels exist, so it can never be packaged under the requested bounds;
+      3. only then download the href, after validating it (https, no userinfo, same
+         origin as the configured service, bounded re-validated redirects);
+      4. verify the delivered bytes are a real image of exactly the declared size,
+         re-encoding to JPEG (size-preserving) when the service returned another format.
+
+    Returns (jpeg_bytes, source_meta, verification). Raises on any failure so the caller's
+    bounded retry can decide transient-vs-terminal; ImageryContractError is deterministic
+    and must not be retried. NEVER puts the href, its query, a token or any service-
+    supplied text into source_meta, verification or an exception message.
     """
     import requests
 
@@ -1014,16 +1100,36 @@ def fetch_imagery_tile(
 
     s = session or requests.Session()
     url = export_url.rstrip("/") + "/exportImage"
-    resp = s.get(url, params=_export_tile_params(bounds, tile_px, jpeg_quality), timeout=timeout_s)
-    resp.raise_for_status()
-    ctype = resp.headers.get("Content-Type", "")
-    if "json" in ctype or "html" in ctype:  # ArcGIS returns errors as JSON/HTML with HTTP 200
-        raise RuntimeError(f"imagery tile export error: {resp.text[:180]}")
-    data = resp.content
-    if not imagery.is_supported_image(data):
-        raise RuntimeError("imagery tile export did not return an image")
+    params = export_tile_params(bounds, tile_px, jpeg_quality)
+    resp = s.get(url, params=params, timeout=timeout_s)
+    # Status-only, for the same reason as the download step: requests' HTTPError embeds
+    # the fully-resolved request URL in its message.
+    meta_code = int(getattr(resp, "status_code", 200) or 200)
+    if meta_code >= 400:
+        raise RuntimeError(f"imagery tile export failed with HTTP {meta_code}")
+    try:
+        meta = resp.json()
+    except Exception as e:  # noqa: BLE001 - HTML/garbage body instead of the JSON we asked for
+        raise imagery.ImageryContractError("export metadata was not parsable JSON") from e
+
+    req_w, req_h = (int(v) for v in str(params["size"]).split(","))
+    verification = imagery.verify_export_metadata(
+        meta, bounds=bounds, width_px=req_w, height_px=req_h
+    )
+    data = _download_export_image(
+        s, meta.get("href"), export_url=export_url, timeout_s=timeout_s
+    )
+    imagery.assert_encoded_dimensions(
+        data, width_px=verification["returned_width_px"], height_px=verification["returned_height_px"]
+    )
     if not imagery.is_jpeg(data):
+        # Re-encode preserves pixel dimensions; re-measure rather than assume it did.
         data = encode_jpeg(data, jpeg_quality)
+        imagery.assert_encoded_dimensions(
+            data, width_px=verification["returned_width_px"], height_px=verification["returned_height_px"]
+        )
+    verification = dict(verification)
+    verification["dimensions_verified"] = True
     source = {
         "provider": "usgs_naip",
         "dataset": "USGS/USDA NAIP (public domain)",
@@ -1031,7 +1137,7 @@ def fetch_imagery_tile(
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "service": export_url,
     }
-    return data, source
+    return data, source, verification
 
 
 def _esri_paths_to_geometry(geom: dict) -> dict | None:

@@ -216,6 +216,41 @@ class Package:
             "status": "declared",
         }
 
+    def imagery_extent_verification(self) -> dict:
+        """The package's OWN declared exact-extent verification status.
+
+        READ, never recomputed — this tool cannot re-contact the service, and it must not
+        imply an answer it did not obtain. Reports counts and the contract name only:
+        no href, query string, token or service URL ever reaches the JSON report.
+
+        A package predating the contract declares nothing, and is reported as
+        `not_declared_legacy` rather than as passing or failing a check it never ran.
+        """
+        from ..services import offline_scene_imagery as imagery
+
+        layer = self.context_layers.get("imagery")
+        if not isinstance(layer, dict) or layer.get("available") is not True:
+            return {"status": "no_imagery", "contract": None}
+        contract = layer.get("export_contract")
+        if not isinstance(contract, str) or not contract:
+            return {"status": "not_declared_legacy", "contract": None}
+        ok, reason = imagery.validate_packaged_verification(layer)
+        diag = layer.get("diagnostics") if isinstance(layer.get("diagnostics"), dict) else {}
+        tiles = layer.get("tiles") if isinstance(layer.get("tiles"), list) else []
+        return {
+            "status": "verified" if ok else "declared_but_inconsistent",
+            "contract": contract,
+            "adjust_aspect_ratio": diag.get("adjust_aspect_ratio"),
+            "extents_verified": diag.get("extents_verified"),
+            "extents_verified_count": diag.get("extents_verified_count"),
+            "extent_mismatch_count": diag.get("extent_mismatch_count"),
+            "dimensions_verified_count": diag.get("dimensions_verified_count"),
+            "extent_tolerance_deg": diag.get("extent_tolerance_deg"),
+            "tiles_declared": len(tiles),
+            # Built from OUR counts/coordinates only — never from a service response.
+            "reason": None if ok else reason,
+        }
+
     def road_source(self) -> dict:
         """Provider/dataset ONLY — never the service URL/query (no secrets in the report)."""
         layer = self.context_layers.get("roads")
@@ -370,6 +405,9 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
         "imagery_bounds": img_info["bounds"],
         "imagery_tiles_declared": len(img_info["tiles"]),
         "imagery_tiles_placed": tiles_placed,
+        # Whether the PACKAGE declares that every tile's returned extent was verified
+        # against the requested extent at export time. Non-sensitive counts only.
+        "imagery_extent_verification": pkg.imagery_extent_verification(),
         "road_feature_count": drawn,
         "road_class_counts": counts,                    # only classes actually present
         "road_kind_counts": kinds,
@@ -421,6 +459,10 @@ def main(argv=None) -> int:
     print(f"package_version        : {report['package_version']}")
     print(f"imagery_format         : {report['imagery_format']} "
           f"(tiles placed {report['imagery_tiles_placed']}/{report['imagery_tiles_declared']})")
+    _ev = report["imagery_extent_verification"]
+    print(f"imagery_extent_verify  : {_ev['status']}"
+          + (f" ({_ev.get('extents_verified_count')}/{_ev.get('tiles_declared')} tiles, "
+             f"mismatches={_ev.get('extent_mismatch_count')})" if _ev.get("contract") else ""))
     print(f"road_feature_count     : {report['road_feature_count']}")
     print(f"road_class_counts      : {report['road_class_counts']}")
     print(f"malformed_dropped      : {report['malformed_features_dropped']}")

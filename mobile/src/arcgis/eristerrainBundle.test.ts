@@ -491,6 +491,90 @@ test("tiled imagery: tile count not matching columns*rows fails closed", () => {
   assert.throws(() => extractAndValidateBundle(tiledBundle(m)), /tile count does not match/);
 });
 
+// ---- exact-extent export contract (backend-side registration proof) ---------
+//
+// The backend now proves each tile's exported extent matches the requested bounds and
+// records that proof in the manifest. Mobile needs NO change: it places tiles by their
+// declared `bounds`, and the new keys are additive. These tests pin that down so a
+// future reader change cannot start rejecting corrected packages, and so the placement
+// contract mobile actually relies on stays explicit.
+
+const EXTENT_VERIFICATION = {
+  width_px: 1024,
+  height_px: 1024,
+  extent_verified: true,
+  extent_max_delta_deg: 0,
+  extent_tolerance_deg: 1e-9,
+  requested_width_px: 1024,
+  requested_height_px: 1024,
+  returned_width_px: 1024,
+  returned_height_px: 1024,
+  dimensions_verified: true,
+};
+
+function manifestWithVerifiedTiledImagery() {
+  const m = manifestWithTiledImagery({
+    export_contract: "exact_extent_arcgis_export_v2",
+    diagnostics: {
+      export_contract: "exact_extent_arcgis_export_v2",
+      adjust_aspect_ratio: false,
+      extents_verified: true,
+      extents_verified_count: 2,
+      extent_mismatch_count: 0,
+      dimensions_verified_count: 2,
+      extent_tolerance_deg: 1e-9,
+    },
+  });
+  const imagery = (m.context_layers as { imagery: { tiles: Record<string, unknown>[] } }).imagery;
+  for (const t of imagery.tiles) Object.assign(t, EXTENT_VERIFICATION);
+  return m;
+}
+
+test("exact-extent package: additive verification metadata is accepted unchanged", () => {
+  const { manifest, files } = extractAndValidateBundle(tiledBundle(manifestWithVerifiedTiledImagery()));
+  assert.equal(contextLayerAvailable(manifest, "imagery"), true);
+  assert.equal(imageryMode(manifest), "tiled");
+  const tiles = imageryTiles(manifest);
+  assert.equal(tiles.length, 2);
+  assert.ok(files["imagery/0/0.jpg"] && files["imagery/0/1.jpg"]);
+  // The reader must not require, validate or choke on the new keys...
+  assert.equal((tiles[0] as unknown as Record<string, unknown>).extent_verified, true);
+  // ...and the summary is unaffected by them.
+  const s = summarizeContextLayers(manifestWithVerifiedTiledImagery() as never);
+  assert.equal(s.imageryMode, "tiled");
+  assert.equal(s.imageryTileCount, 2);
+});
+
+test("exact-extent package: placement still comes from each tile's DECLARED bounds", () => {
+  // This is the contract the fix protects: the renderer maps a tile image onto the
+  // rectangle named here, so those bounds must survive parsing byte-for-byte.
+  const { manifest } = extractAndValidateBundle(tiledBundle(manifestWithVerifiedTiledImagery()));
+  const tiles = imageryTiles(manifest);
+  assert.deepEqual(tiles[0].bounds, TILE_BOUNDS_L);
+  assert.deepEqual(tiles[1].bounds, TILE_BOUNDS_R);
+  // Adjacent tiles share the EXACT edge value — no overlap for the mosaic to duplicate.
+  assert.equal(tiles[0].bounds!.max_lon, tiles[1].bounds!.min_lon);
+});
+
+test("exact-extent package: the existing fail-closed checks still apply", () => {
+  // Verification metadata must not weaken integrity checking.
+  const bundle = tiledBundle(manifestWithVerifiedTiledImagery());
+  corruptEntryData(bundle, "imagery/0/1.jpg");
+  assert.throws(() => extractAndValidateBundle(bundle), /imagery\/0\/1\.jpg checksum mismatch/);
+  const missing = tiledBundle(manifestWithVerifiedTiledImagery(), [["imagery/0/0.jpg", TILE0]]);
+  assert.throws(() => extractAndValidateBundle(missing), /missing context asset imagery\/0\/1\.jpg/);
+});
+
+test("legacy tiled packages without the contract keep working (no forced re-download path)", () => {
+  // A package built before the contract carries none of the new keys; it must still
+  // parse and remain usable rather than being rejected as malformed.
+  const { manifest } = extractAndValidateBundle(tiledBundle(manifestWithTiledImagery()));
+  const imagery = manifest.context_layers?.imagery as Record<string, unknown>;
+  assert.equal(imagery.export_contract, undefined);
+  assert.equal(imageryMode(manifest), "tiled");
+  assert.equal(imageryTiles(manifest).length, 2);
+});
+
 // ---- road cross-section context (road_cross_section.json) -------------------
 
 const RXS = enc(JSON.stringify({
