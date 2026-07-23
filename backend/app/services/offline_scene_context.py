@@ -1036,15 +1036,46 @@ def encode_jpeg(data: bytes, quality: int) -> bytes:
     return buf.getvalue()
 
 
-# A returned href may legitimately redirect (e.g. an output directory behind a rewrite),
-# but a redirect chain is also the classic way to escape an origin allow-list. Bounded,
-# and EVERY hop is re-validated against the same origin policy.
+# A redirect may be legitimate (an output directory behind a rewrite), but a redirect
+# chain is also the classic way to escape an origin allow-list. Bounded, and EVERY hop
+# is re-validated against the same origin policy — on BOTH legs of the export.
 _HREF_MAX_REDIRECTS = 3
+_REDIRECT_CODES = (301, 302, 303, 307, 308)
+
+
+def _get_no_open_redirect(session, url: str, *, export_url: str, timeout_s: int, params=None):
+    """GET without ever letting the HTTP client follow a redirect on its own.
+
+    requests follows up to 30 redirects by default and re-checks NOTHING, so one
+    misdirected `Location` would let a worker be used to fetch an arbitrary host. Here
+    every hop is re-validated against the same policy as the export href (https, no
+    embedded userinfo, identical host+port to the configured service) and the chain is
+    bounded. Applies to the f=json metadata request as well as the image download: the
+    configured service is trusted to be *addressed*, not to be obeyed about where to go
+    next.
+
+    A transport failure is re-raised carrying only the exception CLASS. requests embeds
+    the fully-resolved URL in ConnectionError/SSLError/Timeout messages, and those reach
+    the worker log and the job's error_details.
+    """
+    from . import offline_scene_imagery as imagery
+
+    q = params
+    for _ in range(_HREF_MAX_REDIRECTS + 1):
+        try:
+            resp = session.get(url, params=q, timeout=timeout_s, allow_redirects=False)
+        except Exception as e:  # noqa: BLE001 - transport errors carry the URL in str(e)
+            raise RuntimeError(f"imagery export request failed: {type(e).__name__}") from e
+        if int(getattr(resp, "status_code", 200) or 200) not in _REDIRECT_CODES:
+            return resp
+        # The Location carries its own query; never re-append ours to a new target.
+        url = imagery.safe_export_href((resp.headers or {}).get("Location"), service_url=export_url)
+        q = None
+    raise imagery.ImageryContractError("export request exceeded the redirect limit")
 
 
 def _download_export_image(session, href: str, *, export_url: str, timeout_s: int) -> bytes:
-    """GET a verified export href, following at most _HREF_MAX_REDIRECTS hops and
-    re-applying the origin policy to every Location. Returns the raw body.
+    """GET a verified export href through the bounded, re-validated redirect policy.
 
     An HTTP failure is raised as a STATUS-ONLY message. `raise_for_status()` would put
     the full resolved URL — the output path and its token query — into the exception,
@@ -1054,22 +1085,15 @@ def _download_export_image(session, href: str, *, export_url: str, timeout_s: in
     from . import offline_scene_imagery as imagery
 
     url = imagery.safe_export_href(href, service_url=export_url)
-    for _ in range(_HREF_MAX_REDIRECTS + 1):
-        resp = session.get(url, timeout=timeout_s, allow_redirects=False)
-        code = int(getattr(resp, "status_code", 200) or 200)
-        if code in (301, 302, 303, 307, 308):
-            loc = (resp.headers or {}).get("Location")
-            # Re-validate: https, no userinfo, same origin as the configured service.
-            url = imagery.safe_export_href(loc, service_url=export_url)
-            continue
-        if code >= 400:
-            # Transient by default (a 5xx should be retried); the retry policy decides.
-            raise RuntimeError(f"imagery tile download failed with HTTP {code}")
-        ctype = (resp.headers or {}).get("Content-Type", "")
-        if "json" in ctype or "html" in ctype:  # ArcGIS serves errors as JSON/HTML with HTTP 200
-            raise imagery.ImageryContractError("export download returned a service error body")
-        return resp.content
-    raise imagery.ImageryContractError("export download exceeded the redirect limit")
+    resp = _get_no_open_redirect(session, url, export_url=export_url, timeout_s=timeout_s)
+    code = int(getattr(resp, "status_code", 200) or 200)
+    if code >= 400:
+        # Transient by default (a 5xx should be retried); the retry policy decides.
+        raise RuntimeError(f"imagery tile download failed with HTTP {code}")
+    ctype = (resp.headers or {}).get("Content-Type", "")
+    if "json" in ctype or "html" in ctype:  # ArcGIS serves errors as JSON/HTML with HTTP 200
+        raise imagery.ImageryContractError("export download returned a service error body")
+    return resp.content
 
 
 def fetch_imagery_tile(
@@ -1085,7 +1109,8 @@ def fetch_imagery_tile(
          within imagery.EXTENT_TOLERANCE_DEG. An adjusted extent fails the tile here,
          before any pixels exist, so it can never be packaged under the requested bounds;
       3. only then download the href, after validating it (https, no userinfo, same
-         origin as the configured service, bounded re-validated redirects);
+         origin as the configured service). NEITHER leg ever auto-follows a redirect:
+         both go through _get_no_open_redirect, so every hop is bounded and re-validated;
       4. verify the delivered bytes are a real image of exactly the declared size,
          re-encoding to JPEG (size-preserving) when the service returned another format.
 
@@ -1101,7 +1126,7 @@ def fetch_imagery_tile(
     s = session or requests.Session()
     url = export_url.rstrip("/") + "/exportImage"
     params = export_tile_params(bounds, tile_px, jpeg_quality)
-    resp = s.get(url, params=params, timeout=timeout_s)
+    resp = _get_no_open_redirect(s, url, export_url=export_url, timeout_s=timeout_s, params=params)
     # Status-only, for the same reason as the download step: requests' HTTPError embeds
     # the fully-resolved request URL in its message.
     meta_code = int(getattr(resp, "status_code", 200) or 200)

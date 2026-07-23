@@ -430,11 +430,76 @@ class TestDimensionsAndImage:
             _fetch(loop)
         assert len(loop.download_urls) <= 5
 
-    def test_the_download_never_auto_follows_redirects(self):
+    def test_NEITHER_leg_ever_auto_follows_redirects(self):
+        # Including the f=json metadata request. requests follows up to 30 redirects by
+        # default and re-checks nothing, so leaving that leg on autopilot would let the
+        # configured service redirect the worker anywhere it liked.
         s = _sized_session()
         _fetch(s)
-        dl = [c for c in s.calls if not c["url"].endswith("/exportImage")]
-        assert all(c["allow_redirects"] is False for c in dl)
+        assert s.calls, "no requests were made"
+        assert all(c["allow_redirects"] is False for c in s.calls)
+
+    def test_the_metadata_leg_revalidates_its_redirects_too(self):
+        w, h = ctxmod.tile_export_dims(BOUNDS, 1024)
+        img = FakeResp(content=_jpeg_with_dims(w, h), ctype="image/jpeg")
+
+        class MetaRedirectSession(FakeSession):
+            """Redirects the exportImage request itself before answering."""
+
+            def __init__(self, meta, image, *, to, hops=1):
+                super().__init__(meta, image)
+                self._to, self._left = to, hops
+
+            def get(self, url, params=None, timeout=None, allow_redirects=None):
+                self.calls.append({"url": url, "params": params, "timeout": timeout,
+                                   "allow_redirects": allow_redirects})
+                if url.endswith("/exportImage") or url == self._to:
+                    if self._left > 0:
+                        self._left -= 1
+                        return FakeResp(status=302, headers={"Location": self._to})
+                    return FakeResp(payload=self._meta)
+                return self._image
+
+        # Same-origin redirect on the metadata leg is followed, and the query is not
+        # re-appended to the new target.
+        ok = MetaRedirectSession(_meta(BOUNDS, w, h), img, to="https://imagery.example.gov/moved/exportImage")
+        data, _s, v = _fetch(ok)
+        assert imagery.is_jpeg(data) and v["extent_verified"] is True
+        followed = [c for c in ok.calls if c["url"] == "https://imagery.example.gov/moved/exportImage"]
+        assert followed and followed[0]["params"] is None, "our query must not ride onto a new target"
+
+        # An off-origin redirect on the metadata leg is REFUSED, not followed.
+        evil = MetaRedirectSession(_meta(BOUNDS, w, h), img, to="https://evil.test/exportImage")
+        with pytest.raises(imagery.ImageryContractError):
+            _fetch(evil)
+        assert not any(c["url"].startswith("https://evil.test") for c in evil.calls)
+
+        # And the chain is bounded on that leg too.
+        loop = MetaRedirectSession(_meta(BOUNDS, w, h), img,
+                                   to="https://imagery.example.gov/loop/exportImage", hops=99)
+        with pytest.raises(imagery.ImageryContractError, match="redirect limit"):
+            _fetch(loop)
+        assert len(loop.calls) <= 5
+
+    def test_transport_errors_report_the_exception_class_only(self):
+        """requests embeds the resolved URL in ConnectionError/SSLError/Timeout, and that
+        string reaches the worker log and the job's error_details."""
+
+        class ExplodingSession(FakeSession):
+            def get(self, url, params=None, timeout=None, allow_redirects=None):
+                raise OSError(
+                    f"HTTPSConnectionPool(host='imagery.example.gov'): "
+                    f"Max retries exceeded with url: /arcgis/x.jpg?token={TOKEN}")
+
+        with pytest.raises(RuntimeError) as ei:
+            _fetch(ExplodingSession(_meta(BOUNDS, 8, 8)))
+        msg = str(ei.value)
+        assert "OSError" in msg
+        for secret in (TOKEN, "imagery.example.gov", "HTTPSConnectionPool", "?", "arcgis"):
+            assert secret not in msg, f"{secret!r} leaked out of a transport error"
+        assert TOKEN not in imagery.sanitize_reason(ei.value)
+        # Still TRANSIENT: a connection blip must keep its retry budget.
+        assert not isinstance(ei.value, imagery.ImageryContractError)
 
 
 # ============================================================================
