@@ -580,3 +580,135 @@ def verification_ok(record) -> bool:
             return False
 
     return True
+
+
+def validate_packaged_verification(
+    elevation,
+    terrain,
+) -> tuple[bool, str | None]:
+    """Validate terrain-package claims without relabelling legacy bundles.
+
+    An absent contract remains a legacy/unverified package. Once a package names
+    ``exact_extent_arcgis_3dep_v1``, every build-time proof and every
+    terrain-georeferencing relationship becomes mandatory.
+    """
+
+    if not isinstance(elevation, dict):
+        return False, "missing elevation metadata"
+
+    contract = elevation.get("export_contract")
+    verification = elevation.get("verification")
+
+    if contract in (None, ""):
+        if (
+            elevation.get("extent_verified") is True
+            or verification not in (None, {})
+        ):
+            return (
+                False,
+                "terrain verification claim is missing its export contract",
+            )
+
+        return True, None
+
+    if contract != DEM_EXPORT_CONTRACT:
+        return False, "unsupported terrain export contract"
+
+    if elevation.get("extent_verified") is not True:
+        return False, "terrain extent is not declared verified"
+
+    if not verification_ok(verification):
+        return False, "terrain export verification is incomplete"
+
+    pixel_delta = _finite_number(
+        verification.get(
+            "raster_pixel_size_max_delta_deg"
+        )
+    )
+    tolerance = _finite_number(
+        verification.get("extent_tolerance_deg")
+    )
+
+    if (
+        pixel_delta is None
+        or tolerance is None
+        or pixel_delta < 0
+        or pixel_delta > tolerance
+    ):
+        return False, "terrain raster pixel-size proof is invalid"
+
+    if not isinstance(terrain, dict):
+        return False, "missing terrain metadata"
+
+    rows = _positive_whole(terrain.get("rows"))
+    columns = _positive_whole(terrain.get("columns"))
+
+    if rows is None or columns is None:
+        return False, "terrain dimensions are invalid"
+
+    if (
+        rows != _positive_whole(
+            verification.get("raster_height_px")
+        )
+        or columns != _positive_whole(
+            verification.get("raster_width_px")
+        )
+    ):
+        return (
+            False,
+            "terrain dimensions do not match the verified DEM raster",
+        )
+
+    try:
+        terrain_bounds = normalized_bounds(
+            terrain.get("bounds")
+        )
+        raster_bounds = normalized_bounds(
+            verification.get("raster_bounds")
+        )
+    except DemContractError:
+        return False, "terrain bounds are invalid"
+
+    for key in _BOUNDS_KEYS:
+        if (
+            abs(terrain_bounds[key] - raster_bounds[key])
+            > tolerance
+        ):
+            return (
+                False,
+                "terrain bounds do not match the verified DEM raster",
+            )
+
+    transform = terrain.get("local_transform")
+
+    if not isinstance(transform, dict):
+        return False, "missing terrain local transform"
+
+    expected = {
+        "origin_lon": terrain_bounds["min_lon"],
+        "origin_lat": terrain_bounds["max_lat"],
+        "lon_per_col": (
+            terrain_bounds["max_lon"]
+            - terrain_bounds["min_lon"]
+        )
+        / (columns - 1),
+        "lat_per_row": -(
+            terrain_bounds["max_lat"]
+            - terrain_bounds["min_lat"]
+        )
+        / (rows - 1),
+    }
+
+    for key, expected_value in expected.items():
+        actual = _finite_number(transform.get(key))
+
+        if (
+            actual is None
+            or abs(actual - expected_value) > tolerance
+        ):
+            return (
+                False,
+                "terrain local transform does not match verified bounds",
+            )
+
+    return True, None

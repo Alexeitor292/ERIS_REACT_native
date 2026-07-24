@@ -157,6 +157,60 @@ def validate_bundle_bytes(package_bytes: bytes) -> tuple[bool, str | None]:
                 return False, "terrain grid byte length does not match dimensions"
             if terrain.get("sha256") and terrain_fmt.grid_sha256(grid) != terrain["sha256"]:
                 return False, "terrain grid checksum mismatch"
+
+            elevation = manifest.get("elevation") or {}
+            ok, reason = dem_fmt.validate_packaged_verification(
+                elevation,
+                terrain,
+            )
+            if not ok:
+                return False, reason
+
+            # Legacy packages without a terrain export contract remain readable
+            # and are never relabelled as verified. A package that claims the
+            # current exact contract must carry the complete locally derived
+            # hillshade asset and evidence.
+            if (
+                elevation.get("export_contract")
+                == dem_fmt.DEM_EXPORT_CONTRACT
+            ):
+                basemap = manifest.get("basemap") or {}
+
+                if basemap.get("has_hillshade") is not True:
+                    return (
+                        False,
+                        "verified terrain package is missing local hillshade",
+                    )
+
+                hillshade_meta = basemap.get("hillshade")
+                ok, reason = terrain_fmt.validate_hillshade_metadata(
+                    hillshade_meta,
+                    terrain,
+                )
+                if not ok:
+                    return False, reason
+
+                hillshade_name = hillshade_meta["file"]
+
+                if hillshade_name not in names:
+                    return (
+                        False,
+                        f"missing local hillshade {hillshade_name}",
+                    )
+
+                files = manifest.get("files") or {}
+
+                if files.get("hillshade") != hillshade_name:
+                    return False, "hillshade file map does not match metadata"
+
+                hillshade_data = zf.read(hillshade_name)
+                ok, reason = terrain_fmt.validate_hillshade_asset(
+                    hillshade_data,
+                    hillshade_meta,
+                )
+                if not ok:
+                    return False, reason
+
             # Context layers: metadata structure + every DECLARED-available asset
             # must be present and match its sha256 (and byte count when declared).
             # Absent block / layer = unavailable, not an error (backward compatible).

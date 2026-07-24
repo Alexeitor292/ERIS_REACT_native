@@ -399,3 +399,193 @@ def decode_dem_tiff(tiff_bytes: bytes, max_dim: int = 512):
     # Treat absurd sentinels as no-data too.
     band = np.where(band < -1.0e6, np.nan, band)
     return band
+
+
+def inspect_hillshade_png(data) -> dict | None:
+    """Read the dependency-free PNG header expected from the local renderer."""
+
+    if (
+        not isinstance(data, (bytes, bytearray))
+        or len(data) < 26
+        or bytes(data[:8]) != b"\x89PNG\r\n\x1a\n"
+        or bytes(data[12:16]) != b"IHDR"
+    ):
+        return None
+
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    bit_depth = int(data[24])
+    color_type = int(data[25])
+
+    if width <= 0 or height <= 0:
+        return None
+
+    return {
+        "width_px": width,
+        "height_px": height,
+        "bit_depth": bit_depth,
+        "color_type": color_type,
+    }
+
+
+def validate_hillshade_metadata(
+    metadata,
+    terrain,
+) -> tuple[bool, str | None]:
+    """Validate metadata for hillshade derived from the verified terrain grid."""
+
+    if not isinstance(metadata, dict):
+        return False, "missing local hillshade metadata"
+
+    if metadata.get("file") != HILLSHADE_FILE:
+        return False, "invalid local hillshade filename"
+
+    if metadata.get("algorithm") != HILLSHADE_ALGORITHM:
+        return False, "unsupported local hillshade algorithm"
+
+    if metadata.get("source") != "verified_dem_grid":
+        return False, "invalid local hillshade source"
+
+    if not isinstance(terrain, dict):
+        return False, "missing terrain metadata"
+
+    try:
+        rows = int(terrain["rows"])
+        columns = int(terrain["columns"])
+        width = int(metadata["width_px"])
+        height = int(metadata["height_px"])
+    except (KeyError, TypeError, ValueError):
+        return False, "invalid local hillshade dimensions"
+
+    if width != columns or height != rows:
+        return (
+            False,
+            "local hillshade dimensions do not match terrain",
+        )
+
+    terrain_bounds = terrain.get("bounds")
+    hillshade_bounds = metadata.get("bounds")
+
+    if (
+        not isinstance(terrain_bounds, dict)
+        or not isinstance(hillshade_bounds, dict)
+    ):
+        return False, "missing local hillshade bounds"
+
+    for key in (
+        "min_lat",
+        "min_lon",
+        "max_lat",
+        "max_lon",
+    ):
+        try:
+            terrain_value = float(terrain_bounds[key])
+            hillshade_value = float(hillshade_bounds[key])
+        except (KeyError, TypeError, ValueError):
+            return False, "invalid local hillshade bounds"
+
+        if (
+            not math.isfinite(terrain_value)
+            or not math.isfinite(hillshade_value)
+            or abs(terrain_value - hillshade_value) > 1.0e-9
+        ):
+            return (
+                False,
+                "local hillshade bounds do not match terrain",
+            )
+
+    try:
+        expected_x, expected_y = ground_sample_spacing_m(
+            terrain_bounds,
+            rows,
+            columns,
+        )
+        actual_x = float(metadata["x_spacing_m"])
+        actual_y = float(metadata["y_spacing_m"])
+    except (KeyError, TypeError, ValueError):
+        return False, "invalid local hillshade ground spacing"
+
+    if (
+        not math.isfinite(actual_x)
+        or not math.isfinite(actual_y)
+        or abs(actual_x - expected_x) > 1.0e-5
+        or abs(actual_y - expected_y) > 1.0e-5
+    ):
+        return (
+            False,
+            "local hillshade ground spacing does not match terrain",
+        )
+
+    if metadata.get("azimuth_deg") != HILLSHADE_AZIMUTH_DEG:
+        return False, "unexpected local hillshade azimuth"
+
+    if metadata.get("altitude_deg") != HILLSHADE_ALTITUDE_DEG:
+        return False, "unexpected local hillshade altitude"
+
+    byte_count = metadata.get("bytes")
+
+    if (
+        isinstance(byte_count, bool)
+        or not isinstance(byte_count, int)
+        or byte_count <= 0
+    ):
+        return False, "invalid local hillshade byte count"
+
+    digest = metadata.get("sha256")
+
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(
+            char not in "0123456789abcdef"
+            for char in digest.lower()
+        )
+    ):
+        return False, "invalid local hillshade checksum"
+
+    no_data_pixels = metadata.get("no_data_pixels")
+
+    if (
+        isinstance(no_data_pixels, bool)
+        or not isinstance(no_data_pixels, int)
+        or no_data_pixels < 0
+        or no_data_pixels > rows * columns
+    ):
+        return False, "invalid local hillshade no-data count"
+
+    return True, None
+
+
+def validate_hillshade_asset(
+    data,
+    metadata,
+) -> tuple[bool, str | None]:
+    """Verify the actual packaged PNG against its declared metadata."""
+
+    header = inspect_hillshade_png(data)
+
+    if header is None:
+        return False, "local hillshade is not a valid PNG"
+
+    if (
+        header["bit_depth"] != 8
+        or header["color_type"] != 0
+    ):
+        return False, "local hillshade is not 8-bit grayscale"
+
+    if (
+        header["width_px"] != metadata.get("width_px")
+        or header["height_px"] != metadata.get("height_px")
+    ):
+        return (
+            False,
+            "local hillshade PNG dimensions do not match metadata",
+        )
+
+    if len(data) != metadata.get("bytes"):
+        return False, "local hillshade byte count mismatch"
+
+    if hashlib.sha256(data).hexdigest() != metadata.get("sha256"):
+        return False, "local hillshade checksum mismatch"
+
+    return True, None
