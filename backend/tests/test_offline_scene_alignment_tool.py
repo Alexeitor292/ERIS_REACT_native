@@ -314,6 +314,143 @@ class TestRoadsAndReport:
         # the bbox honestly reports the out-of-bounds extent (nothing hidden)
         assert report["road_geometry_bbox"]["max_lon"] > BOUNDS["max_lon"]
 
+    def test_selection_kind_counts_are_reported_including_a_zero_ramp(self, tmp_path):
+        """The evidence JSON must expose the SELECTION partition, with every category
+        present — a `ramp: 0` is itself the evidence of the Rocklin mislabeling defect."""
+        roads = [
+            _road([[-121.55, 38.45], [-121.45, 38.45]], "primary",
+                  extra={"selection_kind": "divided_highway_corridor", "selectable": True}),
+            _road([[-121.55, 38.46], [-121.45, 38.46]], "primary",
+                  extra={"selection_kind": "individual_carriageway", "selectable": True}),
+            _road([[-121.55, 38.47], [-121.45, 38.47]], "primary",
+                  extra={"diagnostic_kind": "carriageway_member", "selectable": False}),
+        ]
+        report, out = _run(make_package(roads=roads), tmp_path)
+        sk = report["selection_kind_counts"]
+        assert sk["divided_highway_corridor"] == 1
+        assert sk["individual_carriageway"] == 1
+        assert sk["ramp"] == 0, "a missing ramp category must be explicit, not absent"
+        assert sk["ordinary_road"] == 0
+        assert report["diagnostic_kind_counts"] == {"carriageway_member": 1}
+        assert report["selectable_feature_count"] == 2
+        assert report["diagnostic_feature_count"] == 1
+        # The JSON is the machine evidence; the counts must round-trip from disk.
+        on_disk = json.loads((out / tool.REPORT_NAME).read_text())
+        assert on_disk["selection_kind_counts"] == sk
+
+    def test_ramp_counts_are_reported_when_present(self, tmp_path):
+        roads = [
+            _road([[-121.55, 38.45], [-121.45, 38.45]], "primary",
+                  extra={"selection_kind": "ramp", "selectable": True}),
+            _road([[-121.55, 38.46], [-121.45, 38.46]], "primary",
+                  extra={"selection_kind": "ramp", "selectable": True}),
+        ]
+        report, _ = _run(make_package(roads=roads), tmp_path)
+        assert report["selection_kind_counts"]["ramp"] == 2
+
+    def test_categories_are_visually_distinguishable_and_diagnostics_are_thinner(self, tmp_path):
+        """Each category gets its own colour, and the non-selectable diagnostic is the
+        THINNEST so it can never read as a normal selectable road."""
+        # Distinct colours per category.
+        colors = {k: tool.SELECTION_STYLE[k]["color"] for k in tool.SELECTION_STYLE}
+        colors["diagnostic"] = tool.DIAGNOSTIC_STYLE["color"]
+        assert len(set(colors.values())) == len(colors), "categories must be distinguishable"
+        # The diagnostic is strictly thinner than every selectable category.
+        for k, style in tool.SELECTION_STYLE.items():
+            assert tool.DIAGNOSTIC_STYLE["width"] < style["width"], k
+        # ...and the categories actually reach the canvas.
+        roads = [
+            _road([[-121.55, 38.44], [-121.45, 38.44]], "primary",
+                  extra={"selection_kind": "divided_highway_corridor", "selectable": True}),
+            _road([[-121.55, 38.46], [-121.45, 38.46]], "primary",
+                  extra={"selection_kind": "ramp", "selectable": True}),
+        ]
+        _report, out = _run(make_package(roads=roads), tmp_path)
+        px = {c for _, c in (Image.open(out / tool.IMAGE_NAME).convert("RGB")
+                             .getcolors(maxcolors=1 << 24) or [])}
+        assert tool.SELECTION_STYLE["divided_highway_corridor"]["color"] in px
+        assert tool.SELECTION_STYLE["ramp"]["color"] in px
+
+    def test_a_legend_is_drawn_without_moving_any_road_coordinate(self, tmp_path):
+        """The legend is an overlay: identical road geometry must produce identical
+        transforms and bboxes with or without it."""
+        roads = [_road([[-121.55, 38.45], [-121.45, 38.45]], "primary",
+                       extra={"selection_kind": "ramp", "selectable": True})]
+        report, out = _run(make_package(roads=roads), tmp_path)
+        # The legend paints its background + label colours into the canvas corner.
+        im = Image.open(out / tool.IMAGE_NAME).convert("RGB")
+        w, h = im.size
+        corner = im.crop((0, h - h // 4, w // 2, h)).getcolors(maxcolors=1 << 24) or []
+        cc = {c for _, c in corner}
+        assert tool.LEGEND_FG in cc or tool.LEGEND_BG in cc, "legend not drawn"
+        # Coordinates untouched: the reported road bbox equals the input coordinates.
+        bbox = report["road_geometry_bbox"]
+        assert abs(bbox["min_lon"] - (-121.55)) < 1e-9
+        assert abs(bbox["max_lon"] - (-121.45)) < 1e-9
+        assert abs(bbox["min_lat"] - 38.45) < 1e-9 and abs(bbox["max_lat"] - 38.45) < 1e-9
+
+    def test_the_legend_never_covers_the_map_or_the_incident(self, tmp_path):
+        """REGRESSION (audit, HIGH): the legend used to be an OPAQUE panel painted over the
+        lower-left corner, erasing imagery, roads and even the incident marker — destroying
+        the very evidence this tool exists to show. It now lives in a band BELOW the map."""
+        incident = {"lat": 38.41, "lon": -121.58}      # lower-left of the AOI
+        roads = [_road([[-121.58, 38.405], [-121.42, 38.405]], "primary",
+                       extra={"selection_kind": "ramp", "selectable": True})]
+        report, out = _run(make_package(roads=roads, incident=incident), tmp_path, max_px=512)
+        im = Image.open(out / tool.IMAGE_NAME).convert("RGB")
+        w, total_h = im.size
+        map_h = report["output_image"]["map_height_px"]
+        band = report["output_image"]["legend_band_px"]
+        assert total_h == map_h + band and band > 0
+        # The incident marker survives (it used to vanish entirely under the panel).
+        map_area = im.crop((0, 0, w, map_h))
+        colors = {c for _, c in (map_area.getcolors(maxcolors=1 << 24) or [])}
+        assert tool.INCIDENT_COLOR in colors, "the legend erased the incident marker"
+        # The road survives across the FULL width, including the lower-left third.
+        ramp_rgb = tool.SELECTION_STYLE["ramp"]["color"]
+        left = map_area.crop((0, 0, w // 3, map_h))
+        right = map_area.crop((2 * w // 3, 0, w, map_h))
+        n_left = sum(n for n, c in (left.getcolors(maxcolors=1 << 24) or []) if c == ramp_rgb)
+        n_right = sum(n for n, c in (right.getcolors(maxcolors=1 << 24) or []) if c == ramp_rgb)
+        assert n_left > 0 and n_right > 0
+        assert n_left > n_right * 0.5, f"left third truncated: {n_left} vs {n_right}"
+        # No legend background bleeds into the map area.
+        assert tool.LEGEND_BG not in colors or tool.LEGEND_BG == tool.NO_IMAGERY_BG
+
+    def test_an_out_of_enum_selection_kind_is_surfaced_not_absorbed(self, tmp_path):
+        """REGRESSION (audit, HIGH): an unknown selection_kind inflated
+        selectable_feature_count while being absent from selection_kind_counts (breaking the
+        sum invariant) and was drawn in the SAME colour as individual_carriageway."""
+        roads = [
+            _road([[-121.55, 38.45], [-121.45, 38.45]], "primary",
+                  extra={"selection_kind": "frontage_road", "selectable": True}),
+            _road([[-121.55, 38.46], [-121.45, 38.46]], "primary",
+                  extra={"selection_kind": "carriageway_member", "selectable": True}),
+        ]
+        report, out = _run(make_package(roads=roads), tmp_path)
+        assert report["unknown_selection_kind_counts"] == {"carriageway_member": 1, "frontage_road": 1}
+        assert all(v == 0 for v in report["selection_kind_counts"].values())
+        # The tool's own invariant holds again.
+        assert (sum(report["selection_kind_counts"].values())
+                + sum(report["unknown_selection_kind_counts"].values())
+                == report["selectable_feature_count"] == 2)
+        # ...and it is drawn in the alarming colour, NOT the individual_carriageway colour.
+        colors = {c for _, c in (Image.open(out / tool.IMAGE_NAME).convert("RGB")
+                                 .getcolors(maxcolors=1 << 24) or [])}
+        assert tool.INVALID_SELECTION_STYLE["color"] in colors
+        assert tool.INVALID_SELECTION_STYLE["color"] != tool.SELECTION_STYLE["individual_carriageway"]["color"]
+
+    def test_legacy_package_without_selection_metadata_still_renders(self, tmp_path):
+        """A package predating the selection partition must not crash or invent categories."""
+        roads = [_road([[-121.55, 38.45], [-121.45, 38.45]], "primary")]
+        report, _ = _run(make_package(roads=roads), tmp_path)
+        assert report["selection_kind_counts"] == {
+            "divided_highway_corridor": 0, "individual_carriageway": 0,
+            "ramp": 0, "ordinary_road": 0,
+        }
+        assert report["diagnostic_kind_counts"] == {}
+        assert report["road_feature_count"] == 1
+
     def test_report_contains_no_credentials_paths_or_secrets(self, tmp_path):
         src = {"provider": "us_census_tigerweb", "dataset": "TIGERweb",
                "attribution": "U.S. Census Bureau",

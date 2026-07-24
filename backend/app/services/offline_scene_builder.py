@@ -37,6 +37,7 @@ from . import offline_scene_caltrans as caltrans_fmt
 from . import offline_scene_context as context_fmt
 from . import offline_scene_terrain as terrain_fmt
 from . import road_corridor_pairing as corridor_pairing
+from . import road_route_chains as route_chains
 from .offline_scene_catalog import JobCancelledError, register_ready_package
 
 logger = logging.getLogger("eris.offline_scene_builder")
@@ -229,7 +230,13 @@ def _external_source_configured(road_source: str) -> bool:
 
 def _unavailable_roads_result(reason: str) -> dict:
     """A roads-collection result describing an unavailable roads layer (no asset packaged).
-    Mirrors the successful-result shape so the caller handles both uniformly."""
+    Mirrors the successful-result shape so the caller handles both uniformly.
+
+    ``provider_query_complete_empty`` defaults False: EVERY failure/incomplete/unsafe road
+    outcome (provider_not_configured, source_error, incomplete_source, too_large, ...) must
+    keep failing closed when roads are required. Only a verified, COMPLETE external query
+    that returned zero qualifying centerlines flips it True (see ``_collect_road_layer``),
+    which is the one unavailable outcome that may still ship a READY terrain package."""
     return {
         "layer": context_fmt.unavailable_layer(reason),
         "asset": None,
@@ -237,6 +244,7 @@ def _unavailable_roads_result(reason: str) -> dict:
         "available": False,
         "bytes": 0,
         "reason": reason,
+        "provider_query_complete_empty": False,
     }
 
 
@@ -413,6 +421,21 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             midpoint_tolerance_m=float(settings.OFFLINE_SCENE_PAIR_MIDPOINT_TOLERANCE_M),
         )
 
+    # Route-chain stitching thresholds (see road_route_chains). Applied BEFORE pairing to
+    # reconstruct a mainline fragmented by provider segmentation and to conservatively demote
+    # branch geometry to `connector` so ramps cannot corrupt the derived midpoint.
+    def _chain_params(self) -> route_chains.ChainParams:
+        return route_chains.ChainParams(
+            enabled=bool(settings.OFFLINE_SCENE_ROUTE_CHAIN_ENABLED),
+            join_gap_m=float(settings.OFFLINE_SCENE_ROUTE_CHAIN_JOIN_GAP_M),
+            join_bearing_deg=float(settings.OFFLINE_SCENE_ROUTE_CHAIN_JOIN_BEARING_DEG),
+            min_mainline_len_m=float(settings.OFFLINE_SCENE_ROUTE_CHAIN_MIN_MAINLINE_LEN_M),
+            connector_max_len_m=float(settings.OFFLINE_SCENE_ROUTE_CHAIN_CONNECTOR_MAX_LEN_M),
+            branch_angle_deg=float(settings.OFFLINE_SCENE_ROUTE_CHAIN_BRANCH_ANGLE_DEG),
+            branch_angle_max_deg=float(settings.OFFLINE_SCENE_ROUTE_CHAIN_BRANCH_ANGLE_MAX_DEG),
+            junction_tol_m=float(settings.OFFLINE_SCENE_ROUTE_CHAIN_JUNCTION_TOL_M),
+        )
+
     def _collect_road_layer(self, ctx: dict, road_source: str, running: int, max_bytes: int, emit, log) -> dict:
         """Fetch + build the roads context layer for ONE road source. Returns a result
         dict {layer, asset, roads_geojson, available, bytes, reason}. Raises on a
@@ -500,10 +523,19 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         source_class_counts = context_fmt.road_class_counts({"features": source_features})
         source_count = len(source_features)
         pairing_stats = None
+        chain_stats = None
         if count > 0 and settings.OFFLINE_SCENE_DIVIDED_PAIRING_ENABLED:
             try:
+                # ROUTE-CHAIN PRE-PASS (provider-neutral): stitch a mainline fragmented by
+                # provider segmentation into continuous carriageways and demote branch/ramp
+                # geometry to `connector` BEFORE pairing, so a ramp can never become a
+                # carriageway partner and drag the midpoint off the mainline. A no-op for
+                # providers that carry no carriageway-continuity key (e.g. TIGER).
+                prepared_features, chain_stats = route_chains.stitch_route_chains(
+                    source_features, self._chain_params()
+                )
                 paired_features, pairing_stats = corridor_pairing.build_selection_features(
-                    geojson.get("features") or [], self._pairing_params()
+                    prepared_features, self._pairing_params()
                 )
                 geojson = {"type": "FeatureCollection", "features": paired_features}
                 count = len(paired_features)
@@ -518,6 +550,15 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 raise OfflineSceneBuildError(
                     f"Divided-corridor pairing found colliding road identities: {e}"
                 ) from e
+            except corridor_pairing.ProviderRampMislabeledError as e:
+                # FAIL CLOSED, never swallow: the emitted selection contradicts the PROVIDER
+                # about which features are ramps. Falling through to the generic handler would
+                # publish the UNPAIRED collection — no selection_kind, no corridors and no
+                # ramps at all — which is strictly worse than the mislabeling it detects.
+                log("roads", "provider_ramp_mislabeled", error=str(e)[:160])
+                raise OfflineSceneBuildError(
+                    f"Road selection contradicts the provider about ramps: {e}"
+                ) from e
             except Exception as e:  # noqa: BLE001 — other pairing failures must never break packaging
                 pairing_stats = None
                 log("roads", "pairing_skipped", error=str(e)[:120])
@@ -525,20 +566,63 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         roads_geojson = geojson if count > 0 else None
         if count == 0:
             # PRECISE reason (never generic "no_data").
-            log("roads", "unavailable", reason=roads_reason)
+            reason = roads_reason or "no_road_data"
+            # A COMPLETE, SUCCESSFUL external query that returned zero qualifying centerlines.
+            # Reaching here means the provider fetch already returned NORMALLY (a transport /
+            # permanent / incomplete-pagination / cancellation failure raises out of the fetch
+            # above and is handled by the caller BEFORE this point), and the only feature source
+            # for an external provider is that provider (include_internal_context is False), so
+            # `no_centerline_features_in_area` here is a verified empty result — not a failure.
+            # This is the ONE unavailable outcome allowed to ship a READY terrain/imagery
+            # package; every other reason keeps failing closed in required mode.
+            complete_empty = bool(
+                external_configured and reason == context_fmt.ROADS_REASON_NO_FEATURES
+            )
+            log("roads", "unavailable", reason=reason,
+                query_completed=complete_empty)
+            if complete_empty:
+                # TRUTHFUL provenance for a completed-but-empty external query: record the
+                # provider and (for Caltrans) the exact inclusion policy, and that the query
+                # COMPLETED, so the manifest is auditable and mobile can show an accurate,
+                # sanitized message without inventing a fallback source.
+                provider = None
+                filter_meta: dict = {}
+                if caltrans_configured:
+                    provider = caltrans_fmt.CALTRANS_PROVIDER
+                    classes = caltrans_classes or caltrans_fmt.parse_functional_classes(
+                        settings.OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES
+                    )
+                    filter_meta = {
+                        "filter_version": caltrans_fmt.caltrans_filter_version(classes),
+                        "functional_classes": list(classes),
+                    }
+                elif tiger_configured:
+                    provider = "us_census_tigerweb"
+                elif arcgis_configured:
+                    provider = "arcgis_feature_service"
+                layer = context_fmt.roads_unavailable_complete_layer(
+                    reason, provider=provider, **filter_meta
+                )
+                return {
+                    "layer": layer, "asset": None, "roads_geojson": None,
+                    "available": False, "bytes": 0, "reason": reason,
+                    "provider_query_complete_empty": True,
+                }
             return {
-                "layer": context_fmt.unavailable_layer(roads_reason or "no_road_data"),
+                "layer": context_fmt.unavailable_layer(reason),
                 "asset": None, "roads_geojson": None, "available": False, "bytes": 0,
-                "reason": roads_reason or "no_road_data",
+                "reason": reason, "provider_query_complete_empty": False,
             }
 
         data = json.dumps(geojson, separators=(",", ":")).encode("utf-8")
         if running + len(data) > max_bytes:
+            # Features EXISTED but were dropped to fit the package budget: an incomplete
+            # result, so it must keep failing closed in required mode (NOT a complete-empty).
             log("roads", "skipped_too_large", bytes=len(data))
             return {
                 "layer": context_fmt.unavailable_layer("too_large"),
                 "asset": None, "roads_geojson": roads_geojson, "available": False, "bytes": 0,
-                "reason": "too_large",
+                "reason": "too_large", "provider_query_complete_empty": False,
             }
 
         # Provenance must reflect the ACTUAL richest kind packaged AND the actual provider —
@@ -599,12 +683,17 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             extra["context_feature_count"] = pairing_stats["context_feature_count"]
             extra["divided_corridor_count"] = pairing_stats["divided_corridor_count"]
             extra["pairing"] = pairing_stats["pairing"]
+        # Route-chain provenance (auditable): how many source segments were stitched into
+        # mainlines and how many branches were demoted to connectors before pairing.
+        if chain_stats:
+            extra["route_chaining"] = chain_stats
 
         layer = context_fmt.available_layer(context_fmt.ROADS_FILE, data, src, **extra)
         log("roads", "packaged", features=count, kinds=",".join(kinds), bytes=len(data))
         return {
             "layer": layer, "asset": data, "roads_geojson": roads_geojson,
             "available": True, "bytes": len(data), "reason": None,
+            "provider_query_complete_empty": False,
         }
 
     def _build_context_layers(self, ctx: dict, base_bytes: int, progress=None) -> tuple[dict, dict]:
@@ -696,13 +785,22 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                         _log("roads", "fallback_failed", to=fallback_source, error=str(e)[:120])
 
                 # REQUIRED policy: a required-but-unavailable roads layer FAILS the job so no
-                # READY package can carry missing/partial/unverified road data.
-                if roads_required and not result["available"]:
+                # READY package can carry missing/partial/unverified road data — EXCEPT a
+                # verified, complete external query that simply found zero qualifying
+                # centerlines in this AOI. "Provider success is required" is enforced (a real
+                # failure still fails closed); "at least one feature is required" is NOT — a
+                # freeway-free area may still ship a READY terrain/imagery package with roads
+                # marked unavailable and a truthful, completed-query reason.
+                if (roads_required and not result["available"]
+                        and not result.get("provider_query_complete_empty")):
                     raise OfflineSceneBuildError(
                         f"Roads are required (OFFLINE_SCENE_ROADS_REQUIRED=true) for provider "
                         f"'{road_source}' but none could be packaged "
                         f"(reason: {result['layer'].get('reason')})."
                     )
+                if result.get("provider_query_complete_empty"):
+                    _log("roads", "complete_empty_allowed",
+                         reason=result["layer"].get("reason"), required=roads_required)
 
                 layers["roads"] = result["layer"]
                 if result["asset"] is not None:

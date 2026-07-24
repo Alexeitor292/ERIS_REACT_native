@@ -182,10 +182,16 @@ def road_content_fingerprint(roads_layer: dict | None) -> str:
     source = layer.get("source") if isinstance(layer.get("source"), dict) else {}
     fallback = layer.get("fallback") if isinstance(layer.get("fallback"), dict) else None
     classes = layer.get("functional_classes")
+    # Provider provenance: from the packaged source when available, else from a
+    # completed-but-empty external layer's top-level ``provider`` (DEFECT A) so switching
+    # provider still changes content identity even when both providers returned zero roads.
+    provider = source.get("provider") if source.get("provider") is not None else layer.get("provider")
     payload = {
         "available": available,
         "reason": None if available else (layer.get("reason") or None),
-        "provider": source.get("provider"),
+        "provider": provider,
+        # A completed-but-empty external query is a distinct content state from a failure.
+        "query_completed": bool(layer.get("query_completed")) if not available else None,
         "filter_version": layer.get("filter_version"),
         "functional_classes": list(classes) if isinstance(classes, list) else None,
         "fallback": (

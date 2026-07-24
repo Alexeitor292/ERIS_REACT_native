@@ -48,6 +48,27 @@ CLASS_STYLE = {
     "local": {"color": (0, 230, 255), "width": 2},        # cyan, thin
 }
 OTHER_ROAD_STYLE = {"color": (180, 255, 80), "width": 3}  # bearing/inventory/submitted
+
+# CATEGORY styling by SELECTION ROLE, which is what an operator is actually triaging:
+# a derived corridor midpoint, a selectable mainline carriageway, a selectable ramp, and a
+# NON-selectable diagnostics member. Roles are visually distinct in BOTH hue and width, and
+# the diagnostics member is deliberately the thinnest + dashed-looking so it can never be
+# mistaken for a normal selectable road. Styling only — no coordinate is altered and no
+# visual offset is applied.
+SELECTION_STYLE = {
+    "divided_highway_corridor": {"color": (255, 235, 0), "width": 8, "label": "Divided corridor midpoint"},
+    "individual_carriageway": {"color": (255, 0, 200), "width": 5, "label": "Individual mainline carriageway"},
+    "ramp": {"color": (0, 200, 255), "width": 4, "label": "Ramp"},
+    "ordinary_road": {"color": (150, 160, 175), "width": 2, "label": "Ordinary road"},
+}
+# Non-selectable raw carriageway member: thinnest, muted, so it reads as a diagnostic.
+DIAGNOSTIC_STYLE = {"color": (130, 95, 175), "width": 1, "label": "Carriageway-member diagnostic (not selectable)"}
+CONTEXT_STYLE = {"color": (180, 255, 80), "width": 2, "label": "Context geometry (bearing/inventory/submitted)"}
+# A selection_kind outside the known enum: drawn in a colour used by nothing else so role
+# drift is visible rather than disguised as a legitimate category.
+INVALID_SELECTION_STYLE = {"color": (255, 60, 60), "width": 6, "label": "Unknown selection_kind"}
+LEGEND_BG = (0, 0, 0)
+LEGEND_FG = (255, 255, 255)
 BOUNDARY_COLOR = (255, 255, 0)
 INCIDENT_COLOR = (60, 120, 255)
 NO_IMAGERY_BG = (24, 28, 36)
@@ -296,6 +317,46 @@ def _build_background(pkg: Package, img_info: dict, frame: dict, w: int, h: int)
     return canvas, t, placed
 
 
+def legend_band_height(w: int) -> int:
+    """Height of the reserved legend band appended BELOW the map."""
+    line_h = max(14, w // 90)
+    pad = max(8, w // 160)
+    return line_h * 5 + pad * 2
+
+
+def _render_legend_band(w: int, selection_counts: dict, diagnostic_counts: dict):
+    """The category legend rendered into its OWN image band.
+
+    Deliberately NOT an overlay on the map. This tool exists to answer "do the packaged
+    road coordinates line up with the packaged imagery", so painting an opaque panel over
+    the lower-left corner would destroy the very evidence being checked — it hid roads and
+    could erase the incident marker entirely. The band is composited BELOW the geographic
+    frame instead, so every map pixel stays inspectable.
+
+    Every category that CAN appear is listed with its live count, so a zero is explicit
+    (a "Ramp  (0)" line is itself the evidence of the mislabeling defect)."""
+    from PIL import Image, ImageDraw
+
+    rows = [(SELECTION_STYLE[k]["color"], SELECTION_STYLE[k]["width"],
+             SELECTION_STYLE[k]["label"], int(selection_counts.get(k, 0)))
+            for k in ("divided_highway_corridor", "individual_carriageway", "ramp", "ordinary_road")]
+    rows.append((DIAGNOSTIC_STYLE["color"], DIAGNOSTIC_STYLE["width"], DIAGNOSTIC_STYLE["label"],
+                 int(sum(diagnostic_counts.values()))))
+    line_h = max(14, w // 90)
+    pad = max(8, w // 160)
+    swatch_w = max(26, w // 42)
+    band_h = legend_band_height(w)
+    band = Image.new("RGB", (w, band_h), LEGEND_BG)
+    d = ImageDraw.Draw(band)
+    y = pad
+    for color, width_px, label, count in rows:
+        cy = y + line_h // 2
+        d.line([(pad, cy), (pad + swatch_w, cy)], fill=color, width=max(1, int(width_px)))
+        d.text((pad * 2 + swatch_w, y), f"{label}  ({count})", fill=LEGEND_FG)
+        y += line_h
+    return band
+
+
 def _iter_lines(geom):
     """Yield lists of [lon,lat] for LineString / MultiLineString only."""
     if not isinstance(geom, dict):
@@ -346,9 +407,39 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
     maxx = maxy = -math.inf
     drawn = 0
 
-    # Draw local -> secondary -> primary so highways end up ON TOP and stay visible.
+    selection_counts: dict = {}
+    diagnostic_counts: dict = {}
+    unknown_selection_counts: dict = {}   # selection_kind values outside the known enum
+
+    def _category_style(props: dict):
+        """Style by SELECTION ROLE so the categories an operator triages are visually
+        distinct. A non-selectable diagnostics member is the thinnest so it never reads as a
+        normal selectable road. Falls back to road-class styling for legacy packages that
+        carry no selection metadata."""
+        dk = props.get("diagnostic_kind")
+        if isinstance(dk, str) and dk:
+            return DIAGNOSTIC_STYLE
+        sk = props.get("selection_kind")
+        if isinstance(sk, str) and sk:
+            # An unknown role gets its OWN alarming style — never the colour the legend
+            # attributes to a real category, which would disguise enum drift.
+            return SELECTION_STYLE.get(sk, INVALID_SELECTION_STYLE)
+        if props.get("kind") != "road_centerline":
+            return CONTEXT_STYLE
+        return CLASS_STYLE.get(props.get("road_class"), OTHER_ROAD_STYLE)
+
+    # Draw diagnostics + context first, then ordinary/ramp, then mainline, then the derived
+    # corridor midpoint LAST so the authoritative selection sits on top and stays visible.
     def order_key(f):
         p = f.get("properties") if isinstance(f, dict) and isinstance(f.get("properties"), dict) else {}
+        dk = p.get("diagnostic_kind")
+        if isinstance(dk, str) and dk:
+            return 0
+        sk = p.get("selection_kind")
+        if isinstance(sk, str) and sk in SELECTION_STYLE:
+            return {"ordinary_road": 1, "ramp": 2,
+                    "individual_carriageway": 3, "divided_highway_corridor": 4}[sk]
+        # Legacy (no selection metadata): keep the original class ordering.
         return {"local": 0, "secondary": 1, "primary": 2}.get(p.get("road_class"), 0)
 
     valid_feats = [f for f in feats if isinstance(f, dict)]
@@ -358,7 +449,7 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
         props = f.get("properties") if isinstance(f.get("properties"), dict) else {}
         rc = props.get("road_class")
         kind = props.get("kind")
-        style = CLASS_STYLE.get(rc, OTHER_ROAD_STYLE)
+        style = _category_style(props)
         any_part = False
         for line in _iter_lines(f.get("geometry")):
             pts = []
@@ -384,6 +475,19 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
                 counts[rc] = counts.get(rc, 0) + 1
             if isinstance(kind, str):
                 kinds[kind] = kinds.get(kind, 0) + 1
+            # The SELECTION partition actually shipped (what native will offer the user).
+            # An OUT-OF-ENUM selection_kind is tracked separately, never folded into a known
+            # category: silently absorbing it would hide exactly the role/enum drift this
+            # renderer exists to expose (the Rocklin ramp mislabeling was that class of bug).
+            dk = props.get("diagnostic_kind")
+            sk = props.get("selection_kind")
+            if isinstance(dk, str) and dk:
+                diagnostic_counts[dk] = diagnostic_counts.get(dk, 0) + 1
+            elif isinstance(sk, str) and sk:
+                if sk in SELECTION_STYLE:
+                    selection_counts[sk] = selection_counts.get(sk, 0) + 1
+                else:
+                    unknown_selection_counts[sk] = unknown_selection_counts.get(sk, 0) + 1
         else:
             malformed += 1  # a feature with no drawable line part
 
@@ -393,6 +497,18 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
         ix, iy = lonlat_to_px(inc["lon"], inc["lat"], t)
         r = max(6, w // 140)
         draw.ellipse([ix - r, iy - r, ix + r, iy + r], fill=INCIDENT_COLOR, outline=(255, 255, 255), width=2)
+
+    # CATEGORY LEGEND — composited into a RESERVED BAND BELOW the map (never over it), so
+    # the reader can tell a corridor midpoint from a mainline carriageway, a ramp and a
+    # non-selectable diagnostic without any geographic pixel being covered. It touches no
+    # road coordinate and applies no visual offset.
+    from PIL import Image as _Image
+
+    band = _render_legend_band(w, selection_counts, diagnostic_counts)
+    composed = _Image.new("RGB", (w, h + band.height), NO_IMAGERY_BG)
+    composed.paste(canvas, (0, 0))
+    composed.paste(band, (0, h))
+    canvas = composed
 
     road_bbox = None
     if drawn and minx <= maxx:
@@ -411,6 +527,19 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
         "road_feature_count": drawn,
         "road_class_counts": counts,                    # only classes actually present
         "road_kind_counts": kinds,
+        # The SELECTION PARTITION actually shipped — what native will offer the user. Every
+        # selectable category is reported explicitly (including a 0) so a missing category
+        # such as `ramp` is visible evidence rather than a silent absence.
+        "selection_kind_counts": {
+            k: int(selection_counts.get(k, 0))
+            for k in ("divided_highway_corridor", "individual_carriageway", "ramp", "ordinary_road")
+        },
+        "diagnostic_kind_counts": dict(sorted(diagnostic_counts.items())),
+        # Any selection_kind outside the known enum — surfaced, never absorbed, so
+        # sum(selection_kind_counts) + sum(unknown) == selectable_feature_count holds.
+        "unknown_selection_kind_counts": dict(sorted(unknown_selection_counts.items())),
+        "selectable_feature_count": int(sum(selection_counts.values()) + sum(unknown_selection_counts.values())),
+        "diagnostic_feature_count": int(sum(diagnostic_counts.values())),
         "road_geometry_bbox": road_bbox,
         "malformed_features_dropped": malformed,
         # The road clipping contract, as DECLARED BY THE PACKAGE (never recomputed here).
@@ -423,7 +552,11 @@ def render(pkg: Package, max_px: int = MAX_CANVAS_PX) -> tuple[object, dict]:
         # clip_bounds — unknown, and we will not pretend terrain bounds are equivalent.
         "coordinates_outside_road_clip_bounds": outside_clip,
         "road_source": pkg.road_source(),               # provider/dataset/attribution only
-        "output_image": {"width_px": w, "height_px": h, "file": IMAGE_NAME},
+        # `map_height_px` is the GEOGRAPHIC frame the transform applies to; the legend band
+        # is appended below it, so height_px > map_height_px. No map pixel is covered.
+        "output_image": {"width_px": w, "height_px": h + legend_band_height(w),
+                         "map_height_px": h, "legend_band_px": legend_band_height(w),
+                         "file": IMAGE_NAME},
         "transform": t,                                 # deterministic lon/lat -> pixel
         "note": DISCLAIMER,
     }
@@ -465,6 +598,8 @@ def main(argv=None) -> int:
              f"mismatches={_ev.get('extent_mismatch_count')})" if _ev.get("contract") else ""))
     print(f"road_feature_count     : {report['road_feature_count']}")
     print(f"road_class_counts      : {report['road_class_counts']}")
+    print(f"selection_kind_counts  : {report['selection_kind_counts']}")
+    print(f"diagnostic_kind_counts : {report['diagnostic_kind_counts']}")
     print(f"malformed_dropped      : {report['malformed_features_dropped']}")
     print(f"road_clip_bounds       : {report['road_clip_bounds_status']} "
           f"(buffer_m={report['road_buffer_m']})")

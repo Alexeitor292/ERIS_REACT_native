@@ -5,8 +5,14 @@
 // the CAMERA is oriented along the roadway to give the immersive along-road view (the
 // mesh itself is not rotated, so the composited north-up aerial drape stays aligned).
 static const double kCorridorWorldHalf = 100.0;   // scene half-extent for the larger patch dimension
-static const double kCorridorVExag     = 1.5;     // modest display exaggeration (inspection readability)
-static const double kCorridorPlaneHtM  = 9.0;     // cross-section plane height above the road
+// DEFECT D: TRUE SCALE. Vertical and horizontal metres are equal (1.0x); the DEM is shown
+// at real proportions, not stretched. The factor lives in the display-only
+// `verticalExaggeration` property, which is currently fixed at 1.0 (no UI exposes it) and
+// is reported by -verticalScaleLabelText, so the scale on screen is never unstated.
+static const double kCorridorVExagDefault = 1.0;  // 1.0x = true scale (equal H/V metres)
+// A MODEST section-plane wall — tall enough to read the slice, short enough not to bury the
+// road. At true scale the previous 9 m translucent wall dominated the flat patch.
+static const double kCorridorPlaneHtM  = 2.5;     // cross-section plane height above the road
 
 static NSString *const kCorRenderingObservedDividedCorridor = @"observed_divided_corridor";
 static NSString *const kCorMedianSeparationLabel = @"Median / separation area";
@@ -35,6 +41,11 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 @property(nonatomic, assign) SCNVector3 focusCenter;      // the SNAPPED STATION on the surface (scene units)
 @property(nonatomic, assign) double stationEastM, stationSouthM;   // station offset from the patch centre
 @property(nonatomic, assign) double upstationDeg;
+// DISPLAY-ONLY vertical exaggeration (metres shown per metre of relief). Fixed at 1.0
+// (true scale) — nothing outside this file assigns it today. Never mutates the packaged
+// elevations: it is applied only at render time in -sceneYForElev:. Whatever its value, it
+// is stated on screen by -verticalScaleLabelText (addWarningOverlays:).
+@property(nonatomic, assign) double verticalExaggeration;
 @property(nonatomic, assign) SCNMatrix4 defaultCamTransform;
 @property(nonatomic, assign) SCNVector3 defaultCamTarget;
 @end
@@ -47,6 +58,7 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
     _slice = [slice isKindOfClass:[NSDictionary class]] ? slice : @{};
     _corridor = [corridor isKindOfClass:[NSDictionary class]] ? corridor : @{};
     _inspectionGeometry = [inspectionGeometry isKindOfClass:[NSDictionary class]] ? inspectionGeometry : nil;
+    _verticalExaggeration = kCorridorVExagDefault;   // 1.0x true scale unless explicitly set
   }
   return self;
 }
@@ -116,7 +128,7 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   return top + (bot - top) * fr;
 }
 
-- (float)sceneYForElev:(double)elevM { return (float)((elevM - self.minElevM) * self.supm * kCorridorVExag); }
+- (float)sceneYForElev:(double)elevM { return (float)((elevM - self.minElevM) * self.supm * self.verticalExaggeration); }
 
 // Patch-local (eastM, southM) -> corridor scene position on the surface + lift.
 - (SCNVector3)worldForEast:(double)eM south:(double)sM lift:(double)liftM {
@@ -217,7 +229,7 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 // Small upright marker (post + knob) pinning an observed point on the surface.
 - (SCNNode *)markerAtEast:(double)eM south:(double)sM color:(UIColor *)color heightM:(double)hM {
   SCNVector3 base = [self worldForEast:eM south:sM lift:0.1];
-  float h = (float)(hM * self.supm * kCorridorVExag);
+  float h = (float)(hM * self.supm * self.verticalExaggeration);
   float r = (float)MAX(0.35 * self.supm, 0.25);
   SCNNode *group = [SCNNode node];
   SCNCylinder *post = [SCNCylinder cylinderWithRadius:r * 0.35 height:h];
@@ -320,7 +332,7 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
     NSArray *p = sl[i];
     double eM = [p[0] doubleValue], sM = [p[1] doubleValue];
     SCNVector3 g = [self worldForEast:eM south:sM lift:0.2];
-    SCNVector3 top = SCNVector3Make(g.x, g.y + (float)(kCorridorPlaneHtM * self.supm * kCorridorVExag), g.z);
+    SCNVector3 top = SCNVector3Make(g.x, g.y + (float)(kCorridorPlaneHtM * self.supm * self.verticalExaggeration), g.z);
     verts[i * 2] = g; verts[i * 2 + 1] = top;
     [base addObject:[NSValue valueWithSCNVector3:g]];
   }
@@ -338,7 +350,9 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   SCNGeometry *geo = [SCNGeometry geometryWithSources:@[src] elements:@[el]];
   SCNMaterial *mat = [SCNMaterial material];
   mat.diffuse.contents = cyan; mat.lightingModelName = SCNLightingModelConstant;
-  mat.doubleSided = YES; mat.transparency = 0.34;
+  // DEFECT D: a LIGHTER, shorter plane. At true scale an opaque 34%-alpha wall buried the
+  // road; drop it to ~18% so the section reads without hiding the roadway beneath it.
+  mat.doubleSided = YES; mat.transparency = 0.18;
   geo.firstMaterial = mat;
   free(verts); free(idx);
   SCNNode *plane = [SCNNode nodeWithGeometry:geo];
@@ -377,7 +391,10 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   SCNVector3 c = self.focusCenter;
   double rad = self.upstationDeg * M_PI / 180.0;
   double ux = sin(rad), uz = -cos(rad);               // upstation direction in local XZ
-  double backM = 60.0, sideM = 14.0, upM = 30.0;
+  // DEFECT D: framing tuned for a TRUE-SCALE (1.0x) patch, which is much flatter than the
+  // old 1.5x-stretched relief. A lower, closer eye keeps the flat corridor readable instead
+  // of viewing it from a height tuned for exaggerated relief.
+  double backM = 46.0, sideM = 12.0, upM = 16.0;
   float back = (float)(backM * self.supm), side = (float)(sideM * self.supm), up = (float)(upM * self.supm);
   SCNVector3 camPos = SCNVector3Make(c.x - (float)ux * back - (float)uz * side, c.y + up, c.z - (float)uz * back + (float)ux * side);
   self.cameraNode.position = camPos;
@@ -391,6 +408,16 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
 
 #pragma mark - Warnings (Part 10) + honest limitations
 
+// A visible, labelled statement of the vertical DISPLAY scale (DEFECT D). At the 1.0x
+// default it reads "true scale"; any exaggeration is shown explicitly as a display factor.
+- (NSString *)verticalScaleLabelText {
+  double e = self.verticalExaggeration;
+  if (fabs(e - 1.0) < 1e-6) {
+    return @"Vertical scale: 1.0× (true scale — equal horizontal and vertical metres)";
+  }
+  return [NSString stringWithFormat:@"Vertical scale: %.1f× (display exaggeration — terrain is not this steep)", e];
+}
+
 - (void)addWarningOverlays:(BOOL)built {
   BOOL orientationAuthoritative = [self.slice[@"orientationAuthoritative"] boolValue];
   BOOL hasImagery = [self.corridor[@"hasImagery"] boolValue];
@@ -401,6 +428,11 @@ static NSString *CorStr(NSDictionary *d, NSString *k, NSString *def) {
   [lines addObject:hasImagery
       ? @"Offline aerial-terrain inspection — packaged imagery draped on the local terrain. Not street-level photography."
       : @"Offline terrain inspection (no packaged imagery here) — shaded relief. Not street-level photography."];
+  // DEFECT D: the drawn ground is the BARE-EARTH DEM sampled under the centerline — NOT the
+  // road pavement grade. Say so plainly so the profile is never read as measured roadway.
+  [lines addObject:@"Ground shown is the bare-earth terrain under the centerline (USGS 3DEP DEM) — not the road pavement grade."];
+  // DEFECT D: the vertical scale is a DISPLAY setting, shown explicitly. 1.0x = true scale.
+  [lines addObject:[self verticalScaleLabelText]];
   if (!orientationAuthoritative) {
     [lines addObject:@"Orientation follows packaged centerline geometry; upstation is not verified."];
   }

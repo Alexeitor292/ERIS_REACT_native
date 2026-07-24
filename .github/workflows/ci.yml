@@ -219,6 +219,10 @@ jobs:
         run: node scripts/check-road-cross-section-contract.mjs
       - name: Highway immersive cross-section source-contract (metre draping, class-aware roads, highway-first select, immersive/technical)
         run: node scripts/check-eris-highway-cross-section-contract.mjs
+      - name: Divided-corridor native source-contract (truthful separation/pavement wording, per-run NoData)
+        run: node scripts/check-eris-divided-corridor-native-contract.mjs
+      - name: Cross-section true-scale source-contract (1.0x default, display-only exaggeration, bare-earth-not-pavement)
+        run: node scripts/check-cross-section-scale-contract.mjs
       - name: Lint
         run: npx expo lint
       - name: TypeScript check
@@ -230,6 +234,7 @@ jobs:
           src/arcgis/eristerrainBundle.test.ts
           src/arcgis/terrainOverlays.test.ts
           src/arcgis/terrainScale.test.ts
+          src/arcgis/terrainSurfacePolicy.test.ts
           src/arcgis/roadClass.test.ts
           src/arcgis/corridorModel.test.ts
           src/arcgis/roadSelection.test.ts

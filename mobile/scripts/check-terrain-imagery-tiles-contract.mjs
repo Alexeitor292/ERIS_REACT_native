@@ -14,6 +14,9 @@
 //   * The terrain view controller does NO networking (offline-only) and NEVER
 //     mutates the read-only source-derived elevation grid (gridData single-assign).
 //   * Vertical exaggeration stays a display-only container Y-scale (exagNode).
+//   * ONE authoritative visible surface per base mode (DEFECT B): the base terrain mesh
+//     and the tiled imagery surface are never both visible, and aerial imagery uses a
+//     constant/unlit material (no specular whitening).
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -69,12 +72,21 @@ forbidMatch(/writeToFile:|writeToURL:|createFileAtPath:|removeItemAtPath:|remove
 // 7. Vertical exaggeration remains a display-only container Y-scale.
 requireMatch(/\bexagNode\b/, "vertical exaggeration must stay a display-only container Y-scale (exagNode).");
 
-// 8. DRAPE, not REPLACE (regression fix). The authoritative base terrain mesh must
-//    NEVER be hidden to show tiled imagery — imagery is an overlay draped above it.
-forbidMatch(/terrainNode\.hidden\s*=\s*useTiles/,
-  "REGRESSION: must NOT hide the base terrain for tiled imagery (terrainNode.hidden = useTiles). Drape imagery above the mesh instead.");
-requireMatch(/self\.terrainNode\.hidden\s*=\s*NO/, "the base terrain mesh must stay visible (drape overlay): self.terrainNode.hidden = NO.");
-requireMatch(/imageryDrapeLift/, "imagery patches must drape slightly ABOVE the mesh (imageryDrapeLift) to avoid z-fighting.");
+// 8. ONE authoritative visible surface per base mode (DEFECT B fix). The base terrain mesh
+//    and the tiled imagery surface must be MUTUALLY EXCLUSIVE — never both visible — so the
+//    triangular base can never protrude through the bilinear imagery patches. In tiled
+//    Satellite/Hybrid the base is hidden and the imagery surface is authoritative.
+requireMatch(/self\.terrainNode\.hidden\s*=\s*useTiles\s*;/,
+  "base terrain must hide exactly when the tiled imagery surface is shown (self.terrainNode.hidden = useTiles).");
+requireMatch(/self\.imageryTilesNode\.hidden\s*=\s*!useTiles\s*;/,
+  "tiled imagery must be visible exactly when it is the authoritative surface (self.imageryTilesNode.hidden = !useTiles).");
+// The old regression pattern (base ALWAYS visible under the drape) must not return.
+forbidMatch(/self\.terrainNode\.hidden\s*=\s*NO\s*;/,
+  "REGRESSION: base terrain must NOT be unconditionally visible under tiled imagery (self.terrainNode.hidden = NO).");
+// Aerial imagery is drawn UNLIT (constant material) so no scene light / specular can whiten it.
+requireMatch(/lightingModelName\s*=\s*SCNLightingModelConstant/,
+  "aerial imagery must use a constant/unlit material (SCNLightingModelConstant) — no specular whitening.");
+requireMatch(/imageryDrapeLift/, "imagery patches keep a metre-scale lift (imageryDrapeLift).");
 
 // 9. Runtime safety fallback: never show a broken/partial tiled surface.
 requireMatch(/disableTiledImagery\s*:/, "must have a runtime safety fallback that disables tiled imagery (disableTiledImagery:).");

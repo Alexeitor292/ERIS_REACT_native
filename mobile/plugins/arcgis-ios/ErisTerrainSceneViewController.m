@@ -999,7 +999,7 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
   self.imageryTilesNode = node;
   self.imageryTilesNode.hidden = YES;   // shown by applyBaseSurface when tiled imagery is active
   self.imageryPatchCount = built;
-  self.imageryTilesStatus = [NSString stringWithFormat:@"overlay drape on base terrain (%ld patches)", (long)built];
+  self.imageryTilesStatus = [NSString stringWithFormat:@"tiled imagery surface (%ld patches, base mesh hidden)", (long)built];
   [self.exagNode addChildNode:self.imageryTilesNode];   // under exagNode -> scales with exaggeration
 }
 
@@ -1071,7 +1071,7 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
   NSInteger nRows = (NSInteger)ceil(r1 - r0) + 1; nRows = MAX(2, MIN(kMaxPatchDim, nRows));
 
   NSUInteger vcount = (NSUInteger)(nRows * nCols);
-  float lift = [self imageryDrapeLift];   // drape slightly ABOVE the base mesh (no z-fight, no replacement)
+  float lift = [self imageryDrapeLift];   // sits just above where the (hidden) base mesh would be
   SCNVector3 *verts = malloc(sizeof(SCNVector3) * vcount);
   ErisTerrainTexCoord *uvs = malloc(sizeof(ErisTerrainTexCoord) * vcount);  // packed 2x float32 (no UV regression)
   for (NSInteger i = 0; i < nRows; i++) {
@@ -1113,6 +1113,10 @@ static double ErisSnapMaxMetersForClass(NSString *rc) {
   SCNGeometry *geo = [SCNGeometry geometryWithSources:@[vSrc, uvSrc] elements:@[el]];
 
   SCNMaterial *mat = [SCNMaterial material];
+  // DEFECT B: aerial imagery is drawn with a CONSTANT (unlit) material so no scene light
+  // or specular term can whiten it — matching the overlay convention. The imagery already
+  // carries its own illumination; a lit material only adds false highlights.
+  mat.lightingModelName = SCNLightingModelConstant;
   mat.diffuse.contents = img;             // the tile's own FULL-RESOLUTION decoded image
   mat.diffuse.wrapS = SCNWrapModeClamp;   // one tile image, one patch — never tile/repeat
   mat.diffuse.wrapT = SCNWrapModeClamp;
@@ -1611,42 +1615,58 @@ static NSArray *erisAsArray(id v) {
 // per-tile terrain patches (imageryTilesNode); legacy single-image imagery renders
 // as the terrain mesh diffuse. Hybrid blends aerial imagery with hillshade relief.
 - (void)applyBaseSurface {
+  // ONE authoritative visible terrain surface per base mode. Mirrors the tested pure
+  // policy in mobile/src/arcgis/terrainSurfacePolicy.ts (terrainSurfacePolicy).
+  //
+  // DEFECT B FIX: the base triangular terrain mesh and the tiled imagery patch surface are
+  // NEVER both visible. Previously the base mesh stayed visible under the imagery drape and
+  // — being piecewise-triangular vs the patches' bilinear/under-tessellated geometry — poked
+  // THROUGH the aerial imagery as white/grey facets (worsened by a lit material's specular).
+  // Now, in tiled Satellite/Hybrid the base mesh is HIDDEN and only the imagery surface (a
+  // constant/unlit material) is drawn; Terrain Relief shows the base mesh; missing/incomplete
+  // imagery falls back to relief. Exactly one surface, so nothing can protrude.
   BOOL wantImagery = (self.baseSurface != 0) && [self imageryUsable];
-  // Tiled imagery is a DRAPE OVERLAY, never a replacement. It is used only when every
-  // tile patch actually built (buildImageryTilesNode disables tiled + falls back
-  // otherwise), so a holey/broken tiled surface is never shown.
   BOOL allPatchesBuilt = self.imageryTiled && self.imageryTilesNode != nil
       && self.imageryTilesNode.childNodes.count == self.imageryTileMetas.count
       && self.imageryTileMetas.count > 0;
+  // Tiled imagery is the visible surface only when every declared tile built (25/25
+  // fail-closed) AND imagery is wanted for this mode.
   BOOL useTiles = wantImagery && allPatchesBuilt;
+  BOOL isHybrid = (self.baseSurface == 2);
+  BOOL legacySingle = wantImagery && !allPatchesBuilt && (self.imageryImage != nil);
 
-  // REGRESSION FIX: the authoritative base terrain mesh is ALWAYS visible. Tiled
-  // imagery patches are draped slightly ABOVE it (tiny lift, see buildImageryPatch) —
-  // never hidden/replaced. This preserves true-scale relief + vertical exaggeration
-  // (the mesh geometry is authoritative) and prevents a broken tiled surface from
-  // ever becoming the terrain the user sees.
-  self.terrainNode.hidden = NO;
+  // Mutually exclusive visibility: base hidden exactly when the tiled imagery surface is
+  // the authoritative surface. (terrainSurfacePolicy: baseTerrainVisible == !tiledImageryVisible)
+  self.terrainNode.hidden = useTiles;
   self.imageryTilesNode.hidden = !useTiles;
 
   SCNMaterial *mat = self.terrainNode.geometry.firstMaterial;
   if (mat == nil) return;
   mat.multiply.contents = nil;
   mat.multiply.intensity = 1.0;
+
+  if (useTiles) {                                                    // tiled Satellite/Hybrid
+    // The imagery patch surface is authoritative and unlit (see buildImageryPatch:); the
+    // base mesh is hidden, so there is no second surface to protrude and no whitening.
+    // Hybrid multiplies the per-tile hillshade onto the SAME imagery surface — never a
+    // second overlapping mesh.
+    [self applyTiledImageryHybrid:isHybrid];
+    return;
+  }
+
+  // Single visible surface = the base mesh. Paint its diffuse for the resolved mode.
   UIImage *diffuse = nil;
-  if (useTiles) {                                                    // tiled Satellite/Hybrid (drape)
-    // Base mesh shows hillshade relief UNDER the imagery drape (seen only at grazing
-    // angles / behind any gap); the tile patches carry the aerial imagery on top.
-    diffuse = self.hillshadeImage;
-    [self applyTiledImageryHybrid:(self.baseSurface == 2)];
-  } else if (self.baseSurface == 1 && self.imageryImage != nil) {    // satellite (legacy single image)
+  if (legacySingle && (self.baseSurface == 1 || isHybrid)) {        // legacy single-image aerial
+    // Aerial imagery on the base mesh is ALSO drawn unlit (no specular whitening).
+    mat.lightingModelName = SCNLightingModelConstant;
     diffuse = self.imageryImage;
-  } else if (self.baseSurface == 2 && self.imageryImage != nil) {    // hybrid: imagery x hillshade
-    diffuse = self.imageryImage;
-    if (self.hillshadeImage != nil) {
+    if (isHybrid && self.hillshadeImage != nil) {                  // legacy hybrid: imagery x hillshade
       mat.multiply.contents = self.hillshadeImage;
       mat.multiply.intensity = MAX(0.0, MIN(1.0, self.reliefIntensity));
     }
-  } else {                                                           // terrain relief (default)
+  } else {                                                          // terrain relief / fallback
+    // Shaded relief keeps the lit material so the sun brings out terrain form.
+    mat.lightingModelName = SCNLightingModelBlinn;
     diffuse = self.hillshadeImage;
   }
   mat.diffuse.contents = diffuse != nil ? (id)diffuse : (id)[UIColor colorWithRed:0.45 green:0.42 blue:0.36 alpha:1.0];
@@ -2016,12 +2036,14 @@ static NSArray *erisAsArray(id v) {
     [s appendString:self.hillshadeImage ? @"Surface texture: USGS 3DEP hillshade relief (no aerial imagery)\n"
                                         : @"Surface texture: none (elevation mesh only)\n"];
   }
-  // Imagery render diagnostics (regression triage): tiled imagery is a DRAPE OVERLAY —
-  // the base terrain mesh is never hidden/replaced.
+  // Imagery render diagnostics (regression triage): tiled imagery is the AUTHORITATIVE
+  // visible surface in Satellite/Hybrid — the base terrain mesh is hidden beneath it so the
+  // two surfaces are never both visible (DEFECT B).
   if (self.imageryTiled) {
-    [s appendFormat:@"Imagery render: %@\n", self.imageryTilesStatus ?: @"tiled overlay"];
+    [s appendFormat:@"Imagery render: %@\n", self.imageryTilesStatus ?: @"tiled surface"];
     [s appendFormat:@"Imagery patches built: %ld of %lu tiles\n", (long)self.imageryPatchCount, (unsigned long)self.imageryTileMetas.count];
-    [s appendString:@"Base terrain mesh hidden: no (imagery drapes above it)\n"];
+    BOOL baseHidden = self.terrainNode.hidden;
+    [s appendFormat:@"Base terrain mesh hidden: %@ (single visible surface per mode)\n", baseHidden ? @"yes" : @"no"];
   } else if (self.imageryTilesStatus.length > 0) {
     [s appendFormat:@"Imagery render: %@\n", self.imageryTilesStatus];   // e.g. tiled disabled -> fell back
   }

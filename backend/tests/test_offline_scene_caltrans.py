@@ -541,9 +541,14 @@ class TestNormalization:
         assert set(out) == {
             "provider_object_id", "provider_source_feature_id", "source_feature_id",
             "provider_feature_id", "route_id", "NAME",
+            "route_family", "carriageway_designator",   # truthful carriageway-continuity identity
+            "road_role", "role_source",                 # provider-neutral role (honestly UNKNOWN)
             "functional_class", "functional_class_label",
             "county", "district", "provider", "road_class", "road_class_label", "kind",
         }
+        # The provider carries NO mainline/ramp signal, so the adapter is honest:
+        assert out["road_role"] == "unknown" and out["role_source"] == "unspecified"
+        assert out["route_family"] == "50" and out["carriageway_designator"] == "P"
         # The complete-source durable identity is exposed for provenance/tracing.
         assert out["provider_source_feature_id"] == out["source_feature_id"]
         assert out["kind"] == "road_centerline" and out["provider"] == "caltrans_crs"
@@ -1269,12 +1274,24 @@ class TestBuilderIntegration:
         assert ctxmod.ROADS_FILE not in assets
 
     @pytest.mark.parametrize("bearing,inv", [(42.0, None), (None, {"type": "LineString", "coordinates": IN_A})])
-    def test_zero_features_with_internal_geometry_fails_when_roads_required(self, monkeypatch, bearing, inv):
+    def test_zero_features_with_internal_geometry_succeeds_when_roads_required(self, monkeypatch, bearing, inv):
+        """DEFECT A: a COMPLETE, SUCCESSFUL Caltrans query that finds zero freeway/expressway
+        centerlines must NOT fail the job even when roads are required — it ships a READY
+        terrain package with roads unavailable, a truthful completed-query reason, and NO
+        internal geometry borrowed and NO fallback."""
         _caltrans_settings(monkeypatch, required=True)
         ctx = _ctx(bearing=bearing)
         ctx["road_inventory_geometry"] = inv
-        with pytest.raises(OfflineSceneBuildError, match="required"):
-            _builder(PagingSession([]))._build_context_layers(ctx, base_bytes=0)
+        # Does not raise:
+        layers, assets = _builder(PagingSession([]))._build_context_layers(ctx, base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert roads["reason"] == ctxmod.ROADS_REASON_NO_FEATURES
+        assert roads["query_completed"] is True                 # provider ran and completed
+        assert roads["provider"] == "caltrans_crs"              # truthful provenance
+        assert "fallback" not in roads                          # no fallback invented
+        assert ctxmod.ROADS_FILE not in assets                  # no borrowed internal geometry
+        # Terrain/imagery may still be packaged; only the roads layer is unavailable.
 
     def test_explicit_eris_internal_fallback_packages_internal_geometry_audited(self, monkeypatch):
         """The ONLY sanctioned route to internal geometry after an external miss."""
@@ -1371,6 +1388,124 @@ class TestBuilderIntegration:
         layers, _ = _builder(s)._build_context_layers(_ctx(), base_bytes=0)
         assert layers["roads"]["available"] is False and layers["roads"]["reason"] == "provider_none"
         assert s.calls == []
+
+
+class TestDefectAEmptyRoadPolicy:
+    """DEFECT A — a COMPLETE, SUCCESSFUL external query returning zero qualifying centerlines
+    is NOT a failure. It ships a READY package with roads unavailable; only genuine
+    failures/incomplete/unsafe outcomes still fail closed when roads are required."""
+
+    def test_valid_empty_result_succeeds_without_roads_when_required(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=True)
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert roads["reason"] == ctxmod.ROADS_REASON_NO_FEATURES
+        assert roads["query_completed"] is True
+        assert roads["provider"] == "caltrans_crs"
+        assert roads["filter_version"] == "caltrans_crs.v2:F_System[1,2]"
+        assert roads["functional_classes"] == [1, 2]
+        assert ctxmod.ROADS_FILE not in assets            # no roads asset
+        assert "fallback" not in roads                    # no fallback invented
+
+    def test_configured_provider_transport_failure_still_fails_when_required(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=True)
+
+        class Boom:
+            def get(self, *a, **k):
+                raise RuntimeError("caltrans down")
+
+        with pytest.raises(OfflineSceneBuildError, match="required"):
+            _builder(Boom())._build_context_layers(_ctx(), base_bytes=0)
+
+    def test_provider_not_configured_still_fails_when_required(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_ROADS_URL", "")  # missing endpoint
+        with pytest.raises(OfflineSceneBuildError, match="required"):
+            _builder(PagingSession([]))._build_context_layers(_ctx(), base_bytes=0)
+
+    def test_incomplete_truncated_pagination_still_fails_when_required(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_PAGE_SIZE", 1)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_CALTRANS_MAX_PAGES", 1)  # cap below the real page count
+
+        class NeverEnds:
+            """Always says more remain, so the cap is hit while features remain -> incomplete."""
+
+            def get(self, url, params=None, timeout=None):
+                return FakeResp({"features": [gj_feat(1, "SHS_050._P", 1, IN_A)], "exceededTransferLimit": True})
+
+        with pytest.raises(OfflineSceneBuildError, match="required"):
+            _builder(NeverEnds())._build_context_layers(_ctx(), base_bytes=0)
+
+    def test_valid_empty_result_does_not_fall_back_or_borrow_internal(self, monkeypatch):
+        # Empty query + bearing available + NO fallback configured: nothing is borrowed.
+        _caltrans_settings(monkeypatch, required=True, fallback="")
+        layers, assets = _builder(PagingSession([]))._build_context_layers(_ctx(bearing=42.0), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False and roads["query_completed"] is True
+        assert "fallback" not in roads
+        assert ctxmod.ROADS_FILE not in assets
+        blob = json.dumps(roads).lower()
+        assert "census" not in blob and "tiger" not in blob and "eris_internal" not in blob
+
+    def test_layer_carries_no_env_var_or_python_internals(self, monkeypatch):
+        # The machine reason is a stable token; the layer must not leak settings names,
+        # enum class names, exception text or the service URL.
+        _caltrans_settings(monkeypatch, required=True)
+        layers, _ = _builder(PagingSession([]))._build_context_layers(_ctx(), base_bytes=0)
+        blob = json.dumps(layers["roads"])
+        for bad in ("OFFLINE_SCENE_ROADS_REQUIRED", "OfflineSceneBuildError", "Traceback",
+                    "CaltransFetch", URL, "http"):
+            assert bad not in blob
+
+    def test_tigerweb_partial_layer_failure_with_no_features_still_fails_closed(self, monkeypatch):
+        """REGRESSION (adversarial review): TIGERweb tolerates a SUBSET of layers failing.
+        An empty result after a partial failure is NOT a verified-empty answer — it may mean
+        the layer that held the roads failed — so it must NOT be treated as a completed-empty
+        query and must still fail closed when roads are required."""
+        _caltrans_settings(monkeypatch, required=True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_BASE_URL",
+                            "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_LAYERS", "2,6,8")
+
+        class PartialFailSession:
+            """Layer 2 (Primary) fails; layers 6/8 succeed but return nothing."""
+
+            def get(self, url, params=None, timeout=None):
+                lid = int(url.rstrip("/").split("/")[-2])
+                if lid == 2:
+                    raise RuntimeError("tigerweb layer 2 down")
+                return FakeResp({"features": []})
+
+        with pytest.raises(OfflineSceneBuildError, match="required"):
+            _builder(PartialFailSession())._build_context_layers(_ctx(), base_bytes=0)
+
+    def test_tigerweb_all_layers_ok_and_empty_is_a_genuine_completed_empty(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=True)
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_ROAD_SOURCE", "census_tigerweb")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_BASE_URL",
+                            "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer")
+        monkeypatch.setattr(settings, "OFFLINE_SCENE_TIGERWEB_LAYERS", "2,6,8")
+
+        class AllOkEmptySession:
+            def get(self, url, params=None, timeout=None):
+                return FakeResp({"features": []})
+
+        layers, _ = _builder(AllOkEmptySession())._build_context_layers(_ctx(), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert roads["query_completed"] is True
+        assert roads["provider"] == "us_census_tigerweb"
+
+    def test_optional_mode_valid_empty_is_also_completed_not_source_error(self, monkeypatch):
+        _caltrans_settings(monkeypatch, required=False)
+        layers, _ = _builder(PagingSession([]))._build_context_layers(_ctx(), base_bytes=0)
+        roads = layers["roads"]
+        assert roads["available"] is False
+        assert roads["reason"] == ctxmod.ROADS_REASON_NO_FEATURES     # NOT source_error
+        assert roads["query_completed"] is True
 
 
 # --------------------------------------------------------------------------- #

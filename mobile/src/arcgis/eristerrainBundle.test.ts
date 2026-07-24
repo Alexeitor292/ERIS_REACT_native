@@ -20,6 +20,8 @@ import {
   roadCrossSectionAvailable,
   roadCrossSectionUsability,
   roadsUnavailableReason,
+  roadsQueryCompletedEmpty,
+  roadsUnavailableMessage,
   summarizeContextLayers,
   validateBundleManifest,
   type TerrainMeta,
@@ -684,4 +686,60 @@ test("roadsUnavailableReason surfaces the precise token (never generic when pack
   assert.equal(roadsUnavailableReason({ context_layers: { roads: { available: false, reason: "disabled" } } } as never), "disabled");
   assert.equal(roadsUnavailableReason({ context_layers: { roads: { available: true, file: "roads.geojson", sha256: "b".repeat(64) } } } as never), null);
   assert.equal(roadsUnavailableReason({ context_layers: {} } as never), "no_road_context");
+});
+
+// ---- DEFECT A: completed-but-empty external road query --------------------------------
+
+test("DEFECT A: a completed-empty roads layer disables selection but is NOT an error", () => {
+  const m = {
+    context_layers: {
+      roads: {
+        available: false,
+        reason: "no_centerline_features_in_area",
+        query_completed: true,
+        provider: "caltrans_crs",
+        filter_version: "caltrans_crs.v2:F_System[1,2]",
+        functional_classes: [1, 2],
+      },
+      // A package with imagery + terrain but no roads is still fully usable for viewing.
+      road_cross_section: { available: true, file: "road_cross_section.json", sha256: "f".repeat(64) },
+    },
+  } as never;
+  // Road selection / cross-section snapping is disabled (roads not available).
+  assert.equal(contextLayerAvailable(m, "roads"), false);
+  assert.equal(roadCrossSectionUsability(m).snapAvailable, false);
+  assert.equal(roadCrossSectionUsability(m).fullyUsable, false);
+  // ...but the state is correctly recognised as a completed empty query, not a failure.
+  assert.equal(roadsQueryCompletedEmpty(m), true);
+  assert.equal(roadsUnavailableReason(m), "no_centerline_features_in_area");
+});
+
+test("DEFECT A: a source failure is NOT reported as a completed-empty query", () => {
+  const m = { context_layers: { roads: { available: false, reason: "source_error" } } } as never;
+  assert.equal(roadsQueryCompletedEmpty(m), false);
+  const empty = { context_layers: { roads: { available: false, reason: "no_centerline_features_in_area" } } } as never;
+  // Without the explicit query_completed flag, do not assume completion.
+  assert.equal(roadsQueryCompletedEmpty(empty), false);
+});
+
+test("DEFECT A: the human message is sanitized and useful (no internals leak)", () => {
+  const cases: Array<[string, boolean, string]> = [
+    ["no_centerline_features_in_area", true, "No mapped highways in this area"],
+    ["source_error", false, "Road data was unavailable when this package was built"],
+    ["incomplete_source", false, "Road data was incomplete and was not included"],
+    ["provider_not_configured", false, "No road data source is configured"],
+    ["disabled", false, "Road context is turned off for this package"],
+    ["too_large", false, "Road data exceeded the package size limit"],
+  ];
+  for (const [reason, done, expected] of cases) {
+    const m = { context_layers: { roads: { available: false, reason, query_completed: done } } } as never;
+    const msg = roadsUnavailableMessage(m);
+    assert.equal(msg, expected, `reason ${reason}`);
+    // Never leak env-var names, enum/class names, Python internals, URLs, or raw tokens.
+    for (const bad of ["OFFLINE_SCENE", "Error", "Exception", "Traceback", "http", "F_System", "_", "caltrans_crs"]) {
+      assert.ok(!msg!.includes(bad), `message for ${reason} leaked ${bad}: ${msg}`);
+    }
+  }
+  // Available roads => no message.
+  assert.equal(roadsUnavailableMessage({ context_layers: { roads: { available: true, file: "roads.geojson", sha256: "b".repeat(64) } } } as never), null);
 });

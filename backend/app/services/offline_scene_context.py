@@ -615,6 +615,27 @@ def unavailable_layer(reason: str) -> dict:
     return {"available": False, "reason": str(reason)[:80]}
 
 
+def roads_unavailable_complete_layer(reason: str, *, provider: str | None = None,
+                                     filter_version: str | None = None,
+                                     functional_classes=None) -> dict:
+    """An unavailable roads layer for a COMPLETE, SUCCESSFUL external query that returned
+    zero qualifying centerlines in the AOI.
+
+    Distinct from a plain ``unavailable_layer`` failure: it records ``query_completed: True``
+    plus truthful provider provenance (and, for Caltrans, the exact inclusion filter), so the
+    manifest is auditable, the package is honest that the provider ran and simply found no
+    freeway/expressway here, and the mobile app can show an accurate message WITHOUT implying
+    a source failure or inventing a fallback. Carries no asset and no fabricated geometry."""
+    layer: dict = {"available": False, "reason": str(reason)[:80], "query_completed": True}
+    if provider:
+        layer["provider"] = str(provider)[:64]
+    if filter_version:
+        layer["filter_version"] = str(filter_version)[:80]
+    if functional_classes is not None:
+        layer["functional_classes"] = list(functional_classes)
+    return layer
+
+
 # ---- truthful road-context description --------------------------------------
 # Do NOT claim "roads" / "routes" / "street network" when the package only holds a
 # derived road-bearing line. Describe exactly what was packaged.
@@ -1446,4 +1467,15 @@ def fetch_tigerweb_road_features(
             failures += 1
     if failures == len(ids):
         raise RuntimeError(f"all {len(ids)} TIGERweb road layers failed")
+    if failures and not combined:
+        # AN EMPTY RESULT AFTER A PARTIAL FAILURE IS NOT A VERIFIED-EMPTY ANSWER. With some
+        # layers failed and zero features from the survivors we cannot tell "there are no
+        # roads here" from "the layer that held the roads failed". Raising keeps the caller's
+        # completed-empty policy honest (it degrades to source_error and, when roads are
+        # REQUIRED, fails closed) instead of publishing a package that claims a completed
+        # query found nothing. A partial failure that still returned features keeps the
+        # documented tolerance above.
+        raise RuntimeError(
+            f"{failures} of {len(ids)} TIGERweb road layers failed and no features were returned"
+        )
     return dedupe_line_features(combined)

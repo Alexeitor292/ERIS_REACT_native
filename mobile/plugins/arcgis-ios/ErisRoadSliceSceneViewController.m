@@ -1,10 +1,12 @@
 #import "ErisRoadSliceSceneViewController.h"
 #import <SceneKit/SceneKit.h>
 
-// Scene scale: feet -> scene units, plus a modest vertical exaggeration so terrain
-// slope reads without dominating. All procedural — no textures, no network.
+// Scene scale: feet -> scene units. DEFECT D: TRUE SCALE — vertical and horizontal are
+// drawn at the same metres-per-unit (1.0x), so the section is not stretched. The factor
+// lives in the display-only `verticalExaggeration` property (currently fixed at 1.0) and is
+// always stated on screen. All procedural — no textures, no network.
 static const double kUnitsPerFt = 0.40;
-static const double kVExag = 2.0;
+static const double kVExagDefault = 1.0;   // 1.0x = true scale (equal H/V metres)
 static const double kDepth = 8.0;          // along-road extrusion (upstation slab depth)
 static const double kDeckThickness = 1.2;
 static const double kFtPerM = 3.280839895;
@@ -54,6 +56,10 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 @property(nonatomic, assign) double datumFt;
 @property(nonatomic, assign) BOOL hasElevation;
 @property(nonatomic, assign) BOOL technical;
+// DISPLAY-ONLY vertical exaggeration; fixed at 1.0 (true scale) — nothing outside this
+// file assigns it today. Applied only in -yUnits: at render time, never to the packaged
+// elevations. Whatever its value, it is stated on screen by -verticalScaleLabelText.
+@property(nonatomic, assign) double verticalExaggeration;
 @property(nonatomic, strong) UITextView *technicalPanel;
 @property(nonatomic, strong) UILabel *legendLabel;
 @property(nonatomic, strong) UIBarButtonItem *technicalItem;
@@ -70,6 +76,7 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
     _slice = [slice isKindOfClass:[NSDictionary class]] ? slice : @{};
     _road = [_slice[@"road"] isKindOfClass:[NSDictionary class]] ? _slice[@"road"] : @{};
     _inspectionGeometry = [inspectionGeometry isKindOfClass:[NSDictionary class]] ? inspectionGeometry : nil;
+    _verticalExaggeration = kVExagDefault;   // 1.0x true scale unless explicitly set
   }
   return self;
 }
@@ -220,7 +227,16 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
 }
 
 - (double)xUnits:(double)offsetFt { return offsetFt * kUnitsPerFt; }
-- (double)yUnits:(double)elevFt { return (elevFt - self.datumFt) * kUnitsPerFt * kVExag; }
+- (double)yUnits:(double)elevFt { return (elevFt - self.datumFt) * kUnitsPerFt * self.verticalExaggeration; }
+
+// A visible, labelled statement of the vertical DISPLAY scale (DEFECT D). 1.0x = true scale.
+- (NSString *)verticalScaleLabelText {
+  double e = self.verticalExaggeration;
+  if (fabs(e - 1.0) < 1e-6) {
+    return @"Vertical scale: 1.0× (true scale — equal horizontal and vertical distances)";
+  }
+  return [NSString stringWithFormat:@"Vertical scale: %.1f× (display exaggeration — terrain is not this steep)", e];
+}
 
 #pragma mark - Scene construction
 
@@ -769,12 +785,14 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
   NSString *orientNote = [self.slice[@"orientationAuthoritative"] boolValue]
       ? @"Upstation from the packaged bearing."
       : @"Orientation follows packaged centerline geometry; upstation is not verified.";
+  // DEFECT D: the vertical scale is a DISPLAY setting, stated explicitly. 1.0x = true scale.
+  NSString *scaleNote = [self verticalScaleLabelText];
   if ([self isObservedDividedCorridor]) {
     // No roadway-layout line: there is no layout. Only what was observed, plus the limit.
     NSDictionary *dc = self.inspectionGeometry;
     footer.text = [NSString stringWithFormat:
-                   @"Observed divided corridor: two carriageway centerlines (%@)  ·  Ground elevation: USGS 3DEP offline grid\n%@\n%@\n%@ — %@",
-                   dstr(dc, @"pairingMethod", @"station-local pairing"), snapNote, orientNote,
+                   @"Observed divided corridor: two carriageway centerlines (%@)  ·  Ground elevation: USGS 3DEP offline grid (bare-earth terrain under the centerline, not pavement grade)\n%@\n%@\n%@\n%@ — %@",
+                   dstr(dc, @"pairingMethod", @"station-local pairing"), snapNote, orientNote, scaleNote,
                    kSliceMedianSeparationLabel, kSliceMedianSeparationDetail];
   } else {
     NSString *layoutSrc = dstr(prov, @"roadLayoutSource", @"DEFAULT");
@@ -782,8 +800,8 @@ static BOOL disnull(id v) { return v == nil || [v isKindOfClass:[NSNull class]];
     NSString *defaultNote = [layoutSrc isEqualToString:@"DEFAULT"]
         ? @"\nDefault roadway assumptions — verify lane, shoulder, and median dimensions." : @"";
     footer.text = [NSString stringWithFormat:
-                   @"Roadway layout: %@  ·  Ground elevation: USGS 3DEP offline grid\n%@\n%@\nRoadway surface is schematic unless pavement crown/superelevation data is available.%@",
-                   layoutLabel, snapNote, orientNote, defaultNote];
+                   @"Roadway layout: %@  ·  Ground elevation: USGS 3DEP offline grid (bare-earth terrain under the centerline, not pavement grade)\n%@\n%@\n%@\nRoadway surface is schematic unless pavement crown/superelevation data is available.%@",
+                   layoutLabel, snapNote, orientNote, scaleNote, defaultNote];
   }
   [self.view addSubview:footer];
 
