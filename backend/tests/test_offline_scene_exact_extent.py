@@ -802,7 +802,12 @@ class TestContentIdentity:
 
     def test_the_contract_string_is_versioned_so_future_changes_invalidate(self):
         # A bare name would make the next contract change indistinguishable.
-        assert imagery.IMAGERY_EXPORT_CONTRACT.endswith("_v2")
+        stem, marker, version = (
+            imagery.IMAGERY_EXPORT_CONTRACT.rpartition("_v")
+        )
+        assert marker == "_v"
+        assert stem
+        assert version.isdigit()
         assert "exact_extent" in imagery.IMAGERY_EXPORT_CONTRACT
 
 # ============================================================================
@@ -871,4 +876,3 @@ class TestVerifiedContractCompatibility:
 
         assert ok is False
         assert "do not match" in reason
-
