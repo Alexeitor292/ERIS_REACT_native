@@ -5,8 +5,8 @@ ERIS generates a bounded offline 3D terrain package automatically — no manual
 ArcGIS Pro authoring. Chosen format: an ERIS terrain bundle ('eristerrain', a zip)
 because automated true-.mspk authoring requires ArcGIS Pro (Windows + license),
 which is not available on a Linux worker. The bundle contains a clipped USGS 3DEP
-DEM, a server-rendered hillshade, ERIS overlays, and a manifest, and is rendered
-natively at runtime (AGSScene from the local DEM + hillshade).
+DEM, a hillshade derived locally from that verified DEM, ERIS overlays, and a
+manifest, and is rendered natively at runtime from the local grid and texture.
 
 Provider interface (OfflineScenePackageBuilder):
   prepare_source_data() -> fetch + clip USGS 3DEP for the AOI
@@ -333,10 +333,9 @@ class OfflineScenePackageBuilder(ABC):
 class HillshadeReliefBuilder(OfflineScenePackageBuilder):
     """Licence-clean builder using an independently verified USGS 3DEP DEM.
 
-    This stage deliberately packages no hillshade. The former server-rendered
-    hillshade used the same unverified ``f=image`` path that mis-registered the
-    DEM. A later commit will derive hillshade locally from the already verified
-    height grid, so terrain and relief can never carry independent extents.
+    Hillshade is derived locally from the already verified height grid. Terrain
+    and relief therefore share one source grid, one geographic extent, and one
+    set of pixel dimensions; generating relief performs no additional request.
     """
 
     def __init__(self, session=None):
@@ -411,8 +410,11 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         }
         basemap_meta = {
             "provider": settings.OFFLINE_SCENE_IMAGERY_PROVIDER,
-            "source_label": "USGS 3DEP verified terrain relief",
+            "source_label": (
+                "Local hillshade derived from verified USGS 3DEP DEM"
+            ),
             "has_imagery": False,
+            # Decoding and local rendering happen in build_package.
             "has_hillshade": False,
         }
 
@@ -454,11 +456,52 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             terrain_fmt.grid_sha256(grid_bytes),
         )
 
-        # The old independently fetched server hillshade is intentionally gone.
-        # A following commit will render it locally from `heights`.
-        hillshade_bytes = b""
-        base_bytes = len(grid_bytes)
-        context_layers, assets = self._build_context_layers(ctx, base_bytes, progress=progress)
+        if progress:
+            progress(
+                "BUILDING_TERRAIN",
+                "Rendering local hillshade from verified DEM",
+            )
+
+        try:
+            hillshade_bytes, hillshade_meta = (
+                terrain_fmt.render_hillshade_png(
+                    heights,
+                    verified_bounds,
+                )
+            )
+        except Exception as exc:
+            raise OfflineSceneBuildError(
+                "Local hillshade generation failed: "
+                f"{type(exc).__name__}"
+            ) from exc
+
+        basemap_meta = dict(
+            source.get("basemap_meta") or {}
+        )
+        basemap_meta.update(
+            {
+                "provider": settings.OFFLINE_SCENE_IMAGERY_PROVIDER,
+                "source_label": (
+                    "Local hillshade derived from verified "
+                    "USGS 3DEP DEM"
+                ),
+                "has_imagery": False,
+                "has_hillshade": True,
+                "hillshade": hillshade_meta,
+            }
+        )
+
+        # upload_and_register reads source metadata after build_package, so keep
+        # the source object synchronized with the exact asset placed in the bundle.
+        source["basemap_meta"] = basemap_meta
+        source["hillshade_bytes"] = hillshade_bytes
+
+        base_bytes = len(grid_bytes) + len(hillshade_bytes)
+        context_layers, assets = self._build_context_layers(
+            ctx,
+            base_bytes,
+            progress=progress,
+        )
         # Finalize the content signature from the ACTUAL road result (not merely the
         # configured provider), then write the SAME value into the manifest and — because
         # ctx is what upload_and_register reads — into the catalog row. This is what the
@@ -467,8 +510,20 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             ctx["content_signature"],
             offline_scene_svc.road_content_fingerprint((context_layers or {}).get("roads")),
         )
-        manifest = build_manifest(ctx, source["usgs_meta"], source["basemap_meta"], terrain_meta, context_layers)
-        return assemble_bundle(grid_bytes, hillshade_bytes, ctx.get("overlays") or {}, manifest, assets)
+        manifest = build_manifest(
+            ctx,
+            source["usgs_meta"],
+            basemap_meta,
+            terrain_meta,
+            context_layers,
+        )
+        return assemble_bundle(
+            grid_bytes,
+            hillshade_bytes,
+            ctx.get("overlays") or {},
+            manifest,
+            assets,
+        )
 
     # Divided-highway pairing thresholds from config (see the ADR). Kept in one place so
     # the packaged `pairing` block always reports the values that were actually applied.

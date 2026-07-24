@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import io
+import math
+
 import numpy as np
 import pytest
+from PIL import Image
 
 from app.services import offline_scene_terrain as t
 
@@ -67,3 +71,140 @@ def test_validation_rejects_bad_metadata():
     assert t.validate_terrain_metadata(bad_enc)[0] is False
     bad_bounds = dict(base); bad_bounds["bounds"] = {"min_lat": 2, "min_lon": 1, "max_lat": 1, "max_lon": 2}
     assert t.validate_terrain_metadata(bad_bounds)[0] is False
+
+
+HILLSHADE_BOUNDS = {
+    "min_lat": 40.680000,
+    "min_lon": -123.100000,
+    "max_lat": 40.707000,
+    "max_lon": -123.064000,
+}
+
+
+def test_ground_sample_spacing_uses_physical_longitude_scale():
+    rows = 7
+    columns = 11
+
+    x_spacing, y_spacing = t.ground_sample_spacing_m(
+        HILLSHADE_BOUNDS,
+        rows,
+        columns,
+    )
+
+    midpoint_lat = (
+        HILLSHADE_BOUNDS["min_lat"]
+        + HILLSHADE_BOUNDS["max_lat"]
+    ) / 2.0
+
+    expected_x = (
+        (
+            HILLSHADE_BOUNDS["max_lon"]
+            - HILLSHADE_BOUNDS["min_lon"]
+        )
+        * 111_320.0
+        * math.cos(math.radians(midpoint_lat))
+        / (columns - 1)
+    )
+    expected_y = (
+        (
+            HILLSHADE_BOUNDS["max_lat"]
+            - HILLSHADE_BOUNDS["min_lat"]
+        )
+        * 111_320.0
+        / (rows - 1)
+    )
+
+    assert x_spacing == pytest.approx(expected_x)
+    assert y_spacing == pytest.approx(expected_y)
+    assert x_spacing != pytest.approx(y_spacing)
+
+
+def test_local_hillshade_is_deterministic_and_matches_grid_dimensions():
+    y, x = np.mgrid[-1.0:1.0:9j, -1.0:1.0:13j]
+    heights = (
+        100.0
+        + 80.0 * np.exp(-3.0 * (x * x + y * y))
+        + 15.0 * x
+    ).astype(np.float32)
+
+    first, first_meta = t.render_hillshade_png(
+        heights,
+        HILLSHADE_BOUNDS,
+    )
+    second, second_meta = t.render_hillshade_png(
+        heights,
+        HILLSHADE_BOUNDS,
+    )
+
+    assert first == second
+    assert first_meta == second_meta
+    assert first.startswith(b"\x89PNG\r\n\x1a\n")
+    assert (
+        first_meta["algorithm"]
+        == t.HILLSHADE_ALGORITHM
+    )
+    assert first_meta["source"] == "verified_dem_grid"
+    assert first_meta["width_px"] == 13
+    assert first_meta["height_px"] == 9
+    assert first_meta["bounds"] == HILLSHADE_BOUNDS
+    assert first_meta["sha256"] == t.grid_sha256(first)
+    assert first_meta["bytes"] == len(first)
+
+    image = Image.open(io.BytesIO(first))
+    pixels = np.asarray(image)
+
+    assert image.mode == "L"
+    assert image.size == (13, 9)
+    assert pixels.shape == heights.shape
+    assert np.unique(pixels).size > 1
+
+
+def test_local_hillshade_handles_no_data_without_mutating_source():
+    heights = np.arange(
+        35,
+        dtype=np.float32,
+    ).reshape(5, 7)
+    heights[2, 3] = np.nan
+    before = heights.copy()
+
+    data, meta = t.render_hillshade_png(
+        heights,
+        HILLSHADE_BOUNDS,
+    )
+
+    pixels = np.asarray(
+        Image.open(io.BytesIO(data))
+    )
+
+    assert np.array_equal(
+        heights,
+        before,
+        equal_nan=True,
+    )
+    assert meta["no_data_pixels"] == 1
+    assert pixels[2, 3] == t.HILLSHADE_NO_DATA_GRAY
+
+
+def test_local_hillshade_rejects_all_no_data_and_bad_bounds():
+    with pytest.raises(
+        ValueError,
+        match="no valid elevation",
+    ):
+        t.render_hillshade_png(
+            np.full((4, 4), np.nan),
+            HILLSHADE_BOUNDS,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="degenerate",
+    ):
+        t.render_hillshade_png(
+            np.ones((4, 4), dtype=np.float32),
+            {
+                "min_lat": 2.0,
+                "min_lon": 1.0,
+                "max_lat": 1.0,
+                "max_lon": 2.0,
+            },
+        )

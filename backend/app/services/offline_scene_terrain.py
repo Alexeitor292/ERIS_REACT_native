@@ -10,20 +10,32 @@ SceneKit renderer consumes directly:
                        min/max elevation, vertical_units, geographic bounds, a
                        local (col,row)->(lon,lat) transform, and the grid SHA-256.
 
-The grid encode/decode/validate here is pure numpy (unit-tested). The TIFF decode
-(decode_dem_tiff) uses rasterio, which ships in the geospatial worker image.
+The grid encode/decode/validate and local hillshade rendering are unit-tested.
+The TIFF decode (decode_dem_tiff) uses rasterio, which ships in the geospatial
+worker image. Hillshade is derived locally from the already verified DEM grid;
+it never performs another network request or carries an independent extent.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
+import math
 
 import numpy as np
 
 HEIGHT_GRID_FILE = "elevation-grid.bin"
+HILLSHADE_FILE = "hillshade.png"
+HILLSHADE_ALGORITHM = "local_verified_dem_gradient_v1"
+HILLSHADE_AZIMUTH_DEG = 315.0
+HILLSHADE_ALTITUDE_DEG = 45.0
+HILLSHADE_AMBIENT = 0.22
+HILLSHADE_NO_DATA_GRAY = 128
+
 DEFAULT_NO_DATA = -9999.0
 MAX_GRID_DIM = 4096
 MIN_GRID_DIM = 2
+_M_PER_DEG_LAT = 111_320.0
 
 
 def encode_height_grid(heights, no_data_out: float = DEFAULT_NO_DATA) -> tuple[bytes, dict]:
@@ -60,6 +72,258 @@ def decode_height_grid(data: bytes, rows: int, cols: int) -> np.ndarray:
 
 def grid_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def ground_sample_spacing_m(
+    bounds: dict,
+    rows: int,
+    columns: int,
+) -> tuple[float, float]:
+    """Return east-west and north-south sample spacing in physical metres.
+
+    The height grid spans its verified WGS84 bounds from edge sample to edge
+    sample. Longitude degrees are converted at the AOI midpoint latitude; the
+    latitude conversion uses the same local approximation as the rest of the
+    offline terrain pipeline.
+    """
+
+    if not isinstance(bounds, dict):
+        raise ValueError("hillshade bounds must be an object")
+
+    try:
+        min_lat = float(bounds["min_lat"])
+        min_lon = float(bounds["min_lon"])
+        max_lat = float(bounds["max_lat"])
+        max_lon = float(bounds["max_lon"])
+        row_count = int(rows)
+        column_count = int(columns)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "hillshade bounds or dimensions are invalid"
+        ) from exc
+
+    values = (
+        min_lat,
+        min_lon,
+        max_lat,
+        max_lon,
+    )
+
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("hillshade bounds are non-finite")
+
+    if (
+        max_lat <= min_lat
+        or max_lon <= min_lon
+        or row_count < MIN_GRID_DIM
+        or column_count < MIN_GRID_DIM
+    ):
+        raise ValueError(
+            "hillshade bounds or dimensions are degenerate"
+        )
+
+    midpoint_lat = (min_lat + max_lat) / 2.0
+    cosine = abs(math.cos(math.radians(midpoint_lat)))
+
+    if not math.isfinite(cosine) or cosine <= 1.0e-9:
+        raise ValueError(
+            "hillshade longitude spacing is undefined"
+        )
+
+    width_m = (
+        (max_lon - min_lon)
+        * _M_PER_DEG_LAT
+        * cosine
+    )
+    height_m = (
+        (max_lat - min_lat)
+        * _M_PER_DEG_LAT
+    )
+
+    x_spacing_m = width_m / (column_count - 1)
+    y_spacing_m = height_m / (row_count - 1)
+
+    if not (
+        math.isfinite(x_spacing_m)
+        and math.isfinite(y_spacing_m)
+        and x_spacing_m > 0.0
+        and y_spacing_m > 0.0
+    ):
+        raise ValueError(
+            "hillshade ground spacing is invalid"
+        )
+
+    return x_spacing_m, y_spacing_m
+
+
+def render_hillshade_png(
+    heights,
+    bounds: dict,
+    *,
+    azimuth_deg: float = HILLSHADE_AZIMUTH_DEG,
+    altitude_deg: float = HILLSHADE_ALTITUDE_DEG,
+) -> tuple[bytes, dict]:
+    """Render deterministic grayscale hillshade from a verified DEM grid.
+
+    Gradients use physical east-west and north-south metre spacing, so a degree
+    of longitude is never treated as the same ground distance as a degree of
+    latitude. Row zero is north; the row-axis derivative is therefore inverted
+    before constructing the surface normal.
+
+    Non-finite source cells are replaced by the finite-grid median only for
+    gradient calculation and are emitted as a neutral gray pixel. The source
+    height grid itself is never mutated.
+    """
+
+    arr = np.asarray(heights, dtype=np.float64)
+
+    if (
+        arr.ndim != 2
+        or arr.shape[0] < MIN_GRID_DIM
+        or arr.shape[1] < MIN_GRID_DIM
+    ):
+        raise ValueError(
+            "hillshade requires a two-dimensional terrain grid"
+        )
+
+    rows = int(arr.shape[0])
+    columns = int(arr.shape[1])
+
+    if rows > MAX_GRID_DIM or columns > MAX_GRID_DIM:
+        raise ValueError(
+            "hillshade grid exceeds the supported dimensions"
+        )
+
+    finite = np.isfinite(arr)
+
+    if not finite.any():
+        raise ValueError(
+            "hillshade terrain grid has no valid elevation data"
+        )
+
+    try:
+        azimuth = float(azimuth_deg)
+        altitude = float(altitude_deg)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "hillshade illumination is invalid"
+        ) from exc
+
+    if (
+        not math.isfinite(azimuth)
+        or not math.isfinite(altitude)
+        or altitude <= 0.0
+        or altitude > 90.0
+    ):
+        raise ValueError(
+            "hillshade illumination is invalid"
+        )
+
+    x_spacing_m, y_spacing_m = ground_sample_spacing_m(
+        bounds,
+        rows,
+        columns,
+    )
+
+    fill_value = float(np.median(arr[finite]))
+    working = np.where(finite, arr, fill_value)
+
+    # Axis zero increases toward the south. Convert its derivative to a
+    # north-positive derivative before constructing the physical surface normal.
+    dz_d_south, dz_d_east = np.gradient(
+        working,
+        y_spacing_m,
+        x_spacing_m,
+        edge_order=1,
+    )
+    dz_d_north = -dz_d_south
+
+    azimuth_rad = math.radians(azimuth % 360.0)
+    altitude_rad = math.radians(altitude)
+
+    sun_east = (
+        math.sin(azimuth_rad)
+        * math.cos(altitude_rad)
+    )
+    sun_north = (
+        math.cos(azimuth_rad)
+        * math.cos(altitude_rad)
+    )
+    sun_up = math.sin(altitude_rad)
+
+    normal_east = -dz_d_east
+    normal_north = -dz_d_north
+    normal_up = np.ones_like(working)
+
+    normal_length = np.sqrt(
+        normal_east * normal_east
+        + normal_north * normal_north
+        + normal_up * normal_up
+    )
+
+    illumination = (
+        normal_east * sun_east
+        + normal_north * sun_north
+        + normal_up * sun_up
+    ) / normal_length
+
+    illumination = np.clip(
+        illumination,
+        0.0,
+        1.0,
+    )
+
+    shade = (
+        HILLSHADE_AMBIENT
+        + (1.0 - HILLSHADE_AMBIENT) * illumination
+    )
+
+    pixels = np.rint(
+        np.clip(shade, 0.0, 1.0) * 255.0
+    ).astype(np.uint8)
+
+    pixels[~finite] = np.uint8(
+        HILLSHADE_NO_DATA_GRAY
+    )
+
+    try:
+        from PIL import Image
+    except Exception as exc:  # pragma: no cover - worker dependency gate
+        raise RuntimeError(
+            "local hillshade rendering requires Pillow"
+        ) from exc
+
+    output = io.BytesIO()
+    Image.fromarray(pixels).save(
+        output,
+        format="PNG",
+        optimize=False,
+        compress_level=9,
+    )
+    data = output.getvalue()
+
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise RuntimeError(
+            "local hillshade encoder did not produce a PNG"
+        )
+
+    metadata = {
+        "file": HILLSHADE_FILE,
+        "algorithm": HILLSHADE_ALGORITHM,
+        "source": "verified_dem_grid",
+        "width_px": columns,
+        "height_px": rows,
+        "bounds": dict(bounds),
+        "azimuth_deg": azimuth,
+        "altitude_deg": altitude,
+        "x_spacing_m": round(x_spacing_m, 6),
+        "y_spacing_m": round(y_spacing_m, 6),
+        "no_data_pixels": int((~finite).sum()),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+    }
+
+    return data, metadata
 
 
 def build_terrain_metadata(stats: dict, bounds: dict, grid_sha: str) -> dict:

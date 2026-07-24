@@ -12,6 +12,7 @@ import zipfile
 
 import numpy as np
 import pytest
+from PIL import Image
 from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds
 
@@ -235,7 +236,7 @@ def test_fetch_verified_dem_uses_two_safe_exact_extent_legs():
     )
 
 
-def test_builder_uses_raster_verified_bounds_and_packages_no_old_hillshade(
+def test_builder_uses_verified_bounds_and_packages_local_hillshade(
     monkeypatch,
 ):
     width = int(
@@ -305,8 +306,45 @@ def test_builder_uses_raster_verified_bounds_and_packages_no_old_hillshade(
         manifest = json.loads(
             archive.read("manifest.json")
         )
+        hillshade_bytes = archive.read(
+            "hillshade.png"
+        )
 
-    assert "hillshade.png" not in names
+    assert "hillshade.png" in names
+
+    hillshade = Image.open(
+        io.BytesIO(hillshade_bytes)
+    )
+
+    assert hillshade.mode == "L"
+    assert hillshade.size == (width, height)
+    assert source["hillshade_bytes"] == hillshade_bytes
+    assert (
+        source["basemap_meta"]["has_hillshade"]
+        is True
+    )
+    assert (
+        source["basemap_meta"]["hillshade"][
+            "algorithm"
+        ]
+        == builder_module.terrain_fmt.HILLSHADE_ALGORITHM
+    )
+    assert (
+        source["basemap_meta"]["hillshade"]["bounds"]
+        == pytest.approx(
+            verification["raster_bounds"]
+        )
+    )
+    assert (
+        manifest["basemap"]["has_hillshade"]
+        is True
+    )
+    assert (
+        manifest["basemap"]["hillshade"]["sha256"]
+        == builder_module.terrain_fmt.grid_sha256(
+            hillshade_bytes
+        )
+    )
     assert (
         manifest["elevation"]["export_contract"]
         == dem.DEM_EXPORT_CONTRACT
