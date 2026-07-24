@@ -1037,7 +1037,8 @@ def export_tile_params(bounds: dict, px: int, jpeg_quality: int) -> dict:
     w_px, h_px = tile_export_dims(bounds, px)
     return {
         "bbox": bbox, "bboxSR": "4326", "imageSR": "4326",
-        "size": f"{w_px},{h_px}", "format": "jpg", "compressionQuality": str(int(jpeg_quality)),
+        "size": f"{w_px},{h_px}", "format": imagery.UPSTREAM_EXPORT_FORMAT,
+        "compressionQuality": str(int(jpeg_quality)),
         "adjustAspectRatio": "true" if imagery.ADJUST_ASPECT_RATIO else "false",
         "f": "json",
     }

@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 
 from app.services import offline_scene_context as ctxmod
+from app.services import offline_scene_imagery as imagery
 
 BOUNDS = {"min_lat": 38.48, "min_lon": -121.52, "max_lat": 38.52, "max_lon": -121.48}
 _M = 111_320.0
@@ -58,7 +59,12 @@ class TestTileExportDims:
     def test_export_params_use_matched_size(self):
         p = ctxmod.export_tile_params(BOUNDS, 1024, 85)
         w_px, h_px = ctxmod.tile_export_dims(BOUNDS, 1024)
-        assert p["size"] == f"{w_px},{h_px}" and p["format"] == "jpg"
+        assert p["size"] == f"{w_px},{h_px}"
+        assert (
+            p["format"]
+            == imagery.UPSTREAM_EXPORT_FORMAT
+            == "jpgpng"
+        )
 
 
 class TestBearingLineCoversAOI:

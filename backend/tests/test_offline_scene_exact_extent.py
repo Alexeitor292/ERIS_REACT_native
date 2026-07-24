@@ -148,6 +148,21 @@ def _sized_session(bounds=BOUNDS, tile_px=1024, **meta_over) -> FakeSession:
 # ============================================================================
 
 class TestRequestContract:
+    def test_upstream_format_and_contract_versions_are_explicit(self):
+        assert imagery.UPSTREAM_EXPORT_FORMAT == "jpgpng"
+        assert (
+            imagery.IMAGERY_EXPORT_CONTRACT
+            == "exact_extent_arcgis_export_jpgpng_v3"
+        )
+        assert (
+            imagery.EXACT_EXTENT_EXPORT_CONTRACT_V2
+            in imagery.VERIFIED_EXPORT_CONTRACTS
+        )
+        assert (
+            imagery.IMAGERY_EXPORT_CONTRACT
+            in imagery.VERIFIED_EXPORT_CONTRACTS
+        )
+
     def test_adjust_aspect_ratio_false_is_always_sent(self):
         # THE fix. Omitting it lets ArcGIS default to true and re-fit the bbox.
         for b in (BOUNDS, FIELD_BOUNDS, {"min_lat": 0.0, "min_lon": 0.0, "max_lat": 0.05, "max_lon": 0.05}):
@@ -167,7 +182,8 @@ class TestRequestContract:
                              f"{BOUNDS['max_lon']},{BOUNDS['max_lat']}")
         assert p["bboxSR"] == "4326" and p["imageSR"] == "4326"
         assert p["size"] == f"{w},{h}"
-        assert p["format"] == "jpg" and p["compressionQuality"] == "73"
+        assert p["format"] == "jpgpng"
+        assert p["compressionQuality"] == "73"
 
     def test_the_contract_is_what_actually_goes_on_the_wire(self):
         s = _sized_session()
@@ -786,5 +802,77 @@ class TestContentIdentity:
 
     def test_the_contract_string_is_versioned_so_future_changes_invalidate(self):
         # A bare name would make the next contract change indistinguishable.
-        assert imagery.IMAGERY_EXPORT_CONTRACT.endswith("_v2")
+        stem, marker, version = (
+            imagery.IMAGERY_EXPORT_CONTRACT.rpartition("_v")
+        )
+        assert marker == "_v"
+        assert stem
+        assert version.isdigit()
         assert "exact_extent" in imagery.IMAGERY_EXPORT_CONTRACT
+
+# ============================================================================
+# F ? verified-contract compatibility across request-contract revisions
+# ============================================================================
+
+class TestVerifiedContractCompatibility:
+    @staticmethod
+    def _layer(contract: str) -> dict:
+        tile = {
+            "row": 0,
+            "column": 0,
+            "extent_verified": True,
+            "dimensions_verified": True,
+            "extent_max_delta_deg": 0.0,
+            "extent_tolerance_deg": imagery.EXTENT_TOLERANCE_DEG,
+            "returned_width_px": 8,
+            "returned_height_px": 8,
+            "width_px": 8,
+            "height_px": 8,
+        }
+
+        return {
+            "export_contract": contract,
+            "tile_count": 1,
+            "tiles": [tile],
+            "diagnostics": {
+                "export_contract": contract,
+                "adjust_aspect_ratio": False,
+                "extents_verified": True,
+                "extents_verified_count": 1,
+                "extent_mismatch_count": 0,
+                "dimensions_verified_count": 1,
+            },
+        }
+
+    @pytest.mark.parametrize(
+        "contract",
+        [
+            imagery.EXACT_EXTENT_EXPORT_CONTRACT_V2,
+            imagery.IMAGERY_EXPORT_CONTRACT,
+        ],
+    )
+    def test_known_verified_contracts_remain_strict(self, contract):
+        layer = self._layer(contract)
+
+        assert imagery.validate_packaged_verification(layer) == (
+            True,
+            None,
+        )
+
+        layer["diagnostics"]["extent_mismatch_count"] = 1
+
+        ok, reason = imagery.validate_packaged_verification(layer)
+
+        assert ok is False
+        assert "extent mismatch" in reason
+
+    def test_diagnostics_must_match_the_layer_contract(self):
+        layer = self._layer(imagery.IMAGERY_EXPORT_CONTRACT)
+        layer["diagnostics"]["export_contract"] = (
+            imagery.EXACT_EXTENT_EXPORT_CONTRACT_V2
+        )
+
+        ok, reason = imagery.validate_packaged_verification(layer)
+
+        assert ok is False
+        assert "do not match" in reason
