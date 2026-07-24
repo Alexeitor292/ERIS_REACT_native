@@ -38,7 +38,26 @@ IMAGERY_TILE_DIR = "imagery"
 # the answer deterministically invalidates every package built under an older
 # contract — a stale package can never be treated as equivalent to a current one.
 # BUMP THIS STRING whenever the request parameters or the verification rules change.
-IMAGERY_EXPORT_CONTRACT = "exact_extent_arcgis_export_v2"
+# v2 used a forced ArcGIS `jpg` export. A live NAIP field case proved that
+# one exact tile could return valid extent metadata but a consistently broken
+# generated JPEG href (HTTP 400), while `jpgpng` for the identical extent
+# succeeded. Keep v2 recognized so historical verified packages remain subject
+# to their strict verification gates.
+EXACT_EXTENT_EXPORT_CONTRACT_V2 = "exact_extent_arcgis_export_v2"
+
+# Ask ArcGIS to select JPEG when suitable and PNG when necessary. ERIS still
+# normalizes the delivered bytes to the package's JPEG tile contract after
+# verifying the service-declared extent, dimensions, and same-origin href.
+UPSTREAM_EXPORT_FORMAT = "jpgpng"
+
+IMAGERY_EXPORT_CONTRACT = "exact_extent_arcgis_export_jpgpng_v3"
+
+VERIFIED_EXPORT_CONTRACTS = frozenset(
+    {
+        EXACT_EXTENT_EXPORT_CONTRACT_V2,
+        IMAGERY_EXPORT_CONTRACT,
+    }
+)
 
 # ArcGIS `exportImage` defaults adjustAspectRatio=TRUE: when the requested pixel
 # aspect differs from the bbox aspect *expressed in the OUTPUT spatial reference*, the
@@ -565,7 +584,15 @@ def validate_packaged_verification(layer: dict) -> tuple[bool, str | None]:
     agree with the real tile count. Absent, false, malformed or inconsistent metadata all
     fail, so a claim can never outlive the evidence for it.
     """
-    if not isinstance(layer, dict) or layer.get("export_contract") != IMAGERY_EXPORT_CONTRACT:
+    if not isinstance(layer, dict):
+        return True, None
+
+    contract = layer.get("export_contract")
+
+    # Unknown or absent contracts are legacy and make no exact-extent claim.
+    # Every known verified contract remains strict even after a newer contract
+    # becomes current.
+    if contract not in VERIFIED_EXPORT_CONTRACTS:
         return True, None
     tiles = layer.get("tiles")
     if not isinstance(tiles, list) or not tiles:
@@ -578,8 +605,8 @@ def validate_packaged_verification(layer: dict) -> tuple[bool, str | None]:
     if not isinstance(diag, dict):
         return False, "imagery claims the exact-extent contract but has no diagnostics"
     n = len(tiles)
-    if diag.get("export_contract") != IMAGERY_EXPORT_CONTRACT:
-        return False, "imagery diagnostics do not declare the exact-extent contract"
+    if diag.get("export_contract") != contract:
+        return False, "imagery diagnostics do not match the layer export contract"
     if diag.get("adjust_aspect_ratio") is not False:
         return False, "imagery diagnostics do not record adjustAspectRatio=false"
     if diag.get("extents_verified") is not True:
