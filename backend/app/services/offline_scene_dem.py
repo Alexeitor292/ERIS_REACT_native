@@ -166,6 +166,139 @@ def safe_export_href(href, *, service_url: str) -> str:
         raise DemContractError(str(exc)) from exc
 
 
+def fetch_verified_dem(
+    bounds: dict,
+    *,
+    service_url: str,
+    width_px: int,
+    height_px: int,
+    timeout_s: int,
+    session=None,
+) -> tuple[bytes, dict]:
+    """Fetch and independently verify one exact-extent 3DEP GeoTIFF.
+
+    The two HTTP legs both use the existing bounded, same-origin redirect
+    policy:
+
+    1. request ``f=json`` metadata with ``adjustAspectRatio=false``;
+    2. verify the declared extent, size, and WGS84 spatial reference;
+    3. validate the generated same-origin HTTPS href;
+    4. download without automatic redirects;
+    5. independently inspect the delivered GeoTIFF.
+
+    No URL, href, token, provider body, or provider error text is copied into
+    exceptions or verification metadata.
+    """
+
+    import requests
+
+    from . import offline_scene_context as context
+
+    service = str(service_url or "").strip().rstrip("/")
+
+    if not service:
+        raise DemContractError("DEM service URL is missing")
+
+    width = _positive_whole(width_px)
+    height = _positive_whole(height_px)
+
+    if width is None or height is None:
+        raise DemContractError(
+            "DEM export dimensions are not positive integers"
+        )
+
+    client = session or requests.Session()
+    endpoint = service + "/exportImage"
+    params = export_params(bounds, width, height)
+
+    try:
+        response = context._get_no_open_redirect(
+            client,
+            endpoint,
+            export_url=service,
+            timeout_s=int(timeout_s),
+            params=params,
+        )
+    except shared_export.ImageryContractError as exc:
+        raise DemContractError(str(exc)) from exc
+    except RuntimeError as exc:
+        cause = exc.__cause__
+        kind = type(cause).__name__ if cause is not None else type(exc).__name__
+
+        raise RuntimeError(
+            f"DEM export request failed: {kind}"
+        ) from exc
+
+    status = int(
+        getattr(response, "status_code", 200) or 200
+    )
+
+    if status >= 400:
+        raise RuntimeError(
+            f"DEM export failed with HTTP {status}"
+        )
+
+    try:
+        metadata = response.json()
+    except Exception as exc:
+        raise DemContractError(
+            "DEM export metadata was not parsable JSON"
+        ) from exc
+
+    metadata_verification = verify_export_metadata(
+        metadata,
+        bounds=bounds,
+        width_px=width,
+        height_px=height,
+    )
+
+    href = safe_export_href(
+        metadata.get("href"),
+        service_url=service,
+    )
+
+    try:
+        data = context._download_export_image(
+            client,
+            href,
+            export_url=service,
+            timeout_s=int(timeout_s),
+        )
+    except shared_export.ImageryContractError as exc:
+        raise DemContractError(str(exc)) from exc
+    except RuntimeError as exc:
+        message = str(exc)
+        marker = "HTTP "
+
+        if marker in message:
+            status_text = message.rsplit(marker, 1)[1].split()[0]
+
+            raise RuntimeError(
+                f"DEM download failed with HTTP {status_text}"
+            ) from exc
+
+        cause = exc.__cause__
+        kind = type(cause).__name__ if cause is not None else type(exc).__name__
+
+        raise RuntimeError(
+            f"DEM download failed: {kind}"
+        ) from exc
+
+    raster_verification = inspect_dem_tiff(
+        data,
+        expected_bounds=metadata_verification["returned_bounds"],
+        width_px=metadata_verification["returned_width_px"],
+        height_px=metadata_verification["returned_height_px"],
+    )
+
+    verification = complete_verification(
+        metadata_verification,
+        raster_verification,
+    )
+
+    return data, verification
+
+
 def inspect_dem_tiff(
     data: bytes,
     *,

@@ -35,6 +35,7 @@ from ..storage import put_object_bytes
 from . import offline_scene as offline_scene_svc
 from . import offline_scene_caltrans as caltrans_fmt
 from . import offline_scene_context as context_fmt
+from . import offline_scene_dem as dem_fmt
 from . import offline_scene_terrain as terrain_fmt
 from . import road_corridor_pairing as corridor_pairing
 from . import road_route_chains as route_chains
@@ -90,6 +91,9 @@ def build_manifest(
             "version": usgs_meta.get("version"),
             "resolution": usgs_meta.get("resolution"),
             "service": usgs_meta.get("service"),
+            "export_contract": usgs_meta.get("export_contract"),
+            "extent_verified": usgs_meta.get("extent_verified") is True,
+            "verification": usgs_meta.get("verification"),
         },
         "terrain": terrain_meta,
         "basemap": basemap_meta,
@@ -327,9 +331,13 @@ class OfflineScenePackageBuilder(ABC):
 
 
 class HillshadeReliefBuilder(OfflineScenePackageBuilder):
-    """MVP, licence-clean builder: a clipped USGS 3DEP DEM + a server-rendered
-    hillshade (terrain relief). No streamed Esri/Google imagery is cached. A
-    licensed offline imagery provider can replace the basemap step later."""
+    """Licence-clean builder using an independently verified USGS 3DEP DEM.
+
+    This stage deliberately packages no hillshade. The former server-rendered
+    hillshade used the same unverified ``f=image`` path that mis-registered the
+    DEM. A later commit will derive hillshade locally from the already verified
+    height grid, so terrain and relief can never carry independent extents.
+    """
 
     def __init__(self, session=None):
         # Lazy import so the module loads without `requests` in pure-test contexts.
@@ -345,53 +353,111 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
         self._monotonic = time.monotonic
         self._jitter = lambda attempt: random.uniform(0.0, 0.5)
 
-    def _export(self, params: dict) -> bytes:
-        url = settings.OFFLINE_SCENE_3DEP_IMAGESERVER.rstrip("/") + "/exportImage"
-        resp = self._session.get(url, params=params, timeout=settings.OFFLINE_SCENE_FETCH_TIMEOUT_S)
-        resp.raise_for_status()
-        ctype = resp.headers.get("Content-Type", "")
-        if "json" in ctype:  # ArcGIS returns an error as JSON with HTTP 200
-            raise OfflineSceneBuildError(f"3DEP export error: {resp.text[:200]}")
-        return resp.content
-
     def prepare_source_data(self, ctx: dict, progress=None) -> dict:
         grid_px = int(settings.OFFLINE_SCENE_GRID_PX)
-        hs_px = int(settings.OFFLINE_SCENE_EXPORT_PX)
-        # Real 32-bit float elevation DEM (decoded to a height grid in build_package).
-        dem_bytes = self._export({**export_image_params(ctx["bounds"], grid_px), "format": "tiff", "pixelType": "F32"})
-        if not dem_bytes or not dem_bytes.startswith(_TIFF_MAGICS):
-            raise OfflineSceneBuildError("USGS 3DEP did not return a valid DEM for this area.")
-        if progress:
-            progress("BUILDING_TERRAIN", "Rendering hillshade from USGS 3DEP")
-        # Server-rendered hillshade (licence-clean relief texture).
-        hillshade_bytes = b""
+
         try:
-            rule = json.dumps({"rasterFunction": "Hillshade Gray"})
-            hillshade_bytes = self._export({**export_image_params(ctx["bounds"], hs_px), "format": "png", "renderingRule": rule})
-        except Exception:
-            hillshade_bytes = b""  # terrain mesh still renders from the height grid alone
-        resolution = aoi_resolution_m(ctx["bounds"], ctx["center"]["lat"], grid_px)
+            dem_bytes, verification = dem_fmt.fetch_verified_dem(
+                ctx["bounds"],
+                service_url=settings.OFFLINE_SCENE_3DEP_IMAGESERVER,
+                width_px=grid_px,
+                height_px=grid_px,
+                timeout_s=int(
+                    settings.OFFLINE_SCENE_FETCH_TIMEOUT_S
+                ),
+                session=self._session,
+            )
+        except dem_fmt.DemContractError as exc:
+            raise OfflineSceneBuildError(
+                "USGS 3DEP exact-extent verification failed: "
+                f"{exc}"
+            ) from exc
+        except Exception as exc:
+            raise OfflineSceneBuildError(
+                "USGS 3DEP fetch failed: "
+                f"{type(exc).__name__}"
+            ) from exc
+
+        if not dem_fmt.verification_ok(verification):
+            raise OfflineSceneBuildError(
+                "USGS 3DEP verification record is incomplete."
+            )
+
+        if progress:
+            progress(
+                "BUILDING_TERRAIN",
+                "Verified exact USGS 3DEP extent; decoding terrain",
+            )
+
+        verified_bounds = dict(
+            verification["raster_bounds"]
+        )
+        resolution = aoi_resolution_m(
+            verified_bounds,
+            ctx["center"]["lat"],
+            grid_px,
+        )
+
         usgs_meta = {
             "dataset": settings.OFFLINE_SCENE_3DEP_DATASET,
-            "version": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "version": datetime.now(timezone.utc).strftime(
+                "%Y-%m-%d"
+            ),
             "resolution": f"{resolution} m/px",
             "service": settings.OFFLINE_SCENE_3DEP_IMAGESERVER,
+            "export_contract": dem_fmt.DEM_EXPORT_CONTRACT,
+            "extent_verified": True,
+            "verification": dict(verification),
         }
         basemap_meta = {
             "provider": settings.OFFLINE_SCENE_IMAGERY_PROVIDER,
-            "source_label": "USGS 3DEP hillshade (terrain relief)" if hillshade_bytes else "USGS 3DEP terrain relief",
+            "source_label": "USGS 3DEP verified terrain relief",
             "has_imagery": False,
-            "has_hillshade": bool(hillshade_bytes),
+            "has_hillshade": False,
         }
-        return {"dem_bytes": dem_bytes, "hillshade_bytes": hillshade_bytes, "usgs_meta": usgs_meta, "basemap_meta": basemap_meta}
+
+        return {
+            "dem_bytes": dem_bytes,
+            "dem_verification": dict(verification),
+            "hillshade_bytes": b"",
+            "usgs_meta": usgs_meta,
+            "basemap_meta": basemap_meta,
+        }
 
     def build_package(self, ctx: dict, source: dict, progress=None) -> bytes:
-        # Decode the real USGS 3DEP DEM (handles no-data) into the canonical height grid.
-        heights = terrain_fmt.decode_dem_tiff(source["dem_bytes"], max_dim=int(settings.OFFLINE_SCENE_GRID_PX))
-        grid_bytes, stats = terrain_fmt.encode_height_grid(heights)
-        terrain_meta = terrain_fmt.build_terrain_metadata(stats, ctx["bounds"], terrain_fmt.grid_sha256(grid_bytes))
-        hillshade_bytes = source.get("hillshade_bytes") or b""
-        base_bytes = len(grid_bytes) + len(hillshade_bytes)
+        verification = source.get("dem_verification")
+
+        if not dem_fmt.verification_ok(verification):
+            raise OfflineSceneBuildError(
+                "Cannot package terrain without a complete exact-extent "
+                "DEM verification record."
+            )
+
+        # Decode only the independently verified USGS 3DEP GeoTIFF.
+        heights = terrain_fmt.decode_dem_tiff(
+            source["dem_bytes"],
+            max_dim=int(settings.OFFLINE_SCENE_GRID_PX),
+        )
+        grid_bytes, stats = terrain_fmt.encode_height_grid(
+            heights
+        )
+
+        # Never derive terrain georeferencing from the requested AOI. The raster
+        # bounds were independently read from the downloaded GeoTIFF and already
+        # proved equal to the ArcGIS-declared and requested extents.
+        verified_bounds = dict(
+            verification["raster_bounds"]
+        )
+        terrain_meta = terrain_fmt.build_terrain_metadata(
+            stats,
+            verified_bounds,
+            terrain_fmt.grid_sha256(grid_bytes),
+        )
+
+        # The old independently fetched server hillshade is intentionally gone.
+        # A following commit will render it locally from `heights`.
+        hillshade_bytes = b""
+        base_bytes = len(grid_bytes)
         context_layers, assets = self._build_context_layers(ctx, base_bytes, progress=progress)
         # Finalize the content signature from the ACTUAL road result (not merely the
         # configured provider), then write the SAME value into the manifest and — because
