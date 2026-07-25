@@ -79,6 +79,44 @@ def normalized_bounds(bounds: dict) -> dict:
     return result
 
 
+def sample_center_bounds(
+    raster_bounds: dict,
+    *,
+    pixel_width_deg: float,
+    pixel_height_deg: float,
+) -> dict:
+    """Coordinates of the first/last GeoTIFF pixel centers.
+
+    ``dataset.bounds`` describes OUTER pixel edges. Terrain vertices represent
+    pixel samples, whose coordinates sit half a pixel inside those edges. Mapping
+    the first/last samples onto the outer edges stretches N pixels across N-1
+    intervals and introduces a half-cell horizontal displacement.
+    """
+
+    coverage = normalized_bounds(raster_bounds)
+    pixel_width = _finite_number(pixel_width_deg)
+    pixel_height = _finite_number(pixel_height_deg)
+
+    if (
+        pixel_width is None
+        or pixel_height is None
+        or pixel_width <= 0
+        or pixel_height <= 0
+    ):
+        raise DemContractError(
+            "DEM raster pixel dimensions are invalid"
+        )
+
+    result = {
+        "min_lat": coverage["min_lat"] + pixel_height / 2.0,
+        "min_lon": coverage["min_lon"] + pixel_width / 2.0,
+        "max_lat": coverage["max_lat"] - pixel_height / 2.0,
+        "max_lon": coverage["max_lon"] - pixel_width / 2.0,
+    }
+
+    return normalized_bounds(result)
+
+
 def export_params(bounds: dict, width_px: int, height_px: int | None = None) -> dict:
     """Build the versioned exact-extent ArcGIS 3DEP export request."""
 
@@ -438,6 +476,14 @@ def inspect_dem_tiff(
             f"(delta {pixel_size_delta:.3e} deg)"
         )
 
+    pixel_width = float(transform.a)
+    pixel_height = abs(float(transform.e))
+    raster_sample_bounds = sample_center_bounds(
+        actual_bounds,
+        pixel_width_deg=pixel_width,
+        pixel_height_deg=pixel_height,
+    )
+
     return {
         "raster_verified": True,
         "raster_driver": "GTiff",
@@ -447,7 +493,12 @@ def inspect_dem_tiff(
         "raster_dtype": dtype,
         "raster_crs_wkid": DEM_EXPORT_WKID,
         "raster_transform_verified": True,
+        # OUTER coverage edges from dataset.bounds.
         "raster_bounds": actual_bounds,
+        # Actual pixel-center coordinates used by the terrain sample grid.
+        "raster_sample_bounds": raster_sample_bounds,
+        "raster_pixel_width_deg": pixel_width,
+        "raster_pixel_height_deg": pixel_height,
         "raster_bounds_max_delta_deg": worst_delta,
         "raster_pixel_size_max_delta_deg": pixel_size_delta,
     }
@@ -531,6 +582,10 @@ def verification_ok(record) -> bool:
     ):
         return False
 
+    # A terrain surface requires at least two sample centers per axis.
+    if raster_width < 2 or raster_height < 2:
+        return False
+
     extent_delta = _finite_number(
         record.get("extent_max_delta_deg")
     )
@@ -540,16 +595,32 @@ def verification_ok(record) -> bool:
     raster_delta = _finite_number(
         record.get("raster_bounds_max_delta_deg")
     )
+    pixel_delta = _finite_number(
+        record.get("raster_pixel_size_max_delta_deg")
+    )
+    pixel_width = _finite_number(
+        record.get("raster_pixel_width_deg")
+    )
+    pixel_height = _finite_number(
+        record.get("raster_pixel_height_deg")
+    )
 
     if (
         extent_delta is None
         or extent_tolerance is None
         or raster_delta is None
+        or pixel_delta is None
+        or pixel_width is None
+        or pixel_height is None
         or extent_delta < 0
         or extent_tolerance < 0
         or raster_delta < 0
+        or pixel_delta < 0
+        or pixel_width <= 0
+        or pixel_height <= 0
         or extent_delta > extent_tolerance
         or raster_delta > extent_tolerance
+        or pixel_delta > extent_tolerance
     ):
         return False
 
@@ -562,6 +633,14 @@ def verification_ok(record) -> bool:
         )
         raster_bounds = normalized_bounds(
             record.get("raster_bounds")
+        )
+        raster_sample_bounds = normalized_bounds(
+            record.get("raster_sample_bounds")
+        )
+        expected_sample_bounds = sample_center_bounds(
+            raster_bounds,
+            pixel_width_deg=pixel_width,
+            pixel_height_deg=pixel_height,
         )
     except DemContractError:
         return False
@@ -579,8 +658,33 @@ def verification_ok(record) -> bool:
         ):
             return False
 
-    return True
+        if (
+            abs(
+                raster_sample_bounds[key]
+                - expected_sample_bounds[key]
+            )
+            > extent_tolerance
+        ):
+            return False
 
+    # N sample centers contain N-1 center-to-center intervals. Their spacing
+    # must equal the independently verified GeoTIFF pixel size exactly.
+    sample_lon_step = (
+        raster_sample_bounds["max_lon"]
+        - raster_sample_bounds["min_lon"]
+    ) / (raster_width - 1)
+    sample_lat_step = (
+        raster_sample_bounds["max_lat"]
+        - raster_sample_bounds["min_lat"]
+    ) / (raster_height - 1)
+
+    if (
+        abs(sample_lon_step - pixel_width) > extent_tolerance
+        or abs(sample_lat_step - pixel_height) > extent_tolerance
+    ):
+        return False
+
+    return True
 
 def validate_packaged_verification(
     elevation,
@@ -620,20 +724,23 @@ def validate_packaged_verification(
     if not verification_ok(verification):
         return False, "terrain export verification is incomplete"
 
-    pixel_delta = _finite_number(
-        verification.get(
-            "raster_pixel_size_max_delta_deg"
-        )
-    )
     tolerance = _finite_number(
         verification.get("extent_tolerance_deg")
     )
+    pixel_width = _finite_number(
+        verification.get("raster_pixel_width_deg")
+    )
+    pixel_height = _finite_number(
+        verification.get("raster_pixel_height_deg")
+    )
 
     if (
-        pixel_delta is None
-        or tolerance is None
-        or pixel_delta < 0
-        or pixel_delta > tolerance
+        tolerance is None
+        or pixel_width is None
+        or pixel_height is None
+        or tolerance < 0
+        or pixel_width <= 0
+        or pixel_height <= 0
     ):
         return False, "terrain raster pixel-size proof is invalid"
 
@@ -663,20 +770,20 @@ def validate_packaged_verification(
         terrain_bounds = normalized_bounds(
             terrain.get("bounds")
         )
-        raster_bounds = normalized_bounds(
-            verification.get("raster_bounds")
+        sample_bounds = normalized_bounds(
+            verification.get("raster_sample_bounds")
         )
     except DemContractError:
         return False, "terrain bounds are invalid"
 
     for key in _BOUNDS_KEYS:
         if (
-            abs(terrain_bounds[key] - raster_bounds[key])
+            abs(terrain_bounds[key] - sample_bounds[key])
             > tolerance
         ):
             return (
                 False,
-                "terrain bounds do not match the verified DEM raster",
+                "terrain bounds do not match verified DEM sample centers",
             )
 
     transform = terrain.get("local_transform")
@@ -685,18 +792,10 @@ def validate_packaged_verification(
         return False, "missing terrain local transform"
 
     expected = {
-        "origin_lon": terrain_bounds["min_lon"],
-        "origin_lat": terrain_bounds["max_lat"],
-        "lon_per_col": (
-            terrain_bounds["max_lon"]
-            - terrain_bounds["min_lon"]
-        )
-        / (columns - 1),
-        "lat_per_row": -(
-            terrain_bounds["max_lat"]
-            - terrain_bounds["min_lat"]
-        )
-        / (rows - 1),
+        "origin_lon": sample_bounds["min_lon"],
+        "origin_lat": sample_bounds["max_lat"],
+        "lon_per_col": pixel_width,
+        "lat_per_row": -pixel_height,
     }
 
     for key, expected_value in expected.items():
@@ -708,7 +807,8 @@ def validate_packaged_verification(
         ):
             return (
                 False,
-                "terrain local transform does not match verified bounds",
+                "terrain local transform does not match "
+                "verified DEM sample centers",
             )
 
     return True, None

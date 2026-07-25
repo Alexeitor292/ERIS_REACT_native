@@ -332,7 +332,7 @@ def test_builder_uses_verified_bounds_and_packages_local_hillshade(
     assert (
         source["basemap_meta"]["hillshade"]["bounds"]
         == pytest.approx(
-            verification["raster_bounds"]
+            verification["raster_sample_bounds"]
         )
     )
     assert (
@@ -356,7 +356,7 @@ def test_builder_uses_verified_bounds_and_packages_local_hillshade(
     assert (
         manifest["terrain"]["bounds"]
         == pytest.approx(
-            verification["raster_bounds"]
+            verification["raster_sample_bounds"]
         )
     )
 

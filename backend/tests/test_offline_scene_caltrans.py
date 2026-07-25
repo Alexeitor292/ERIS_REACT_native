@@ -933,6 +933,18 @@ class TestRoadContentSignature:
         # This test exercises road-signature finalization, not DEM acquisition.
         # Supply the complete verification record now required by build_package
         # rather than weakening the production fail-closed boundary.
+        pixel_width = (
+            BOUNDS["max_lon"] - BOUNDS["min_lon"]
+        ) / 8
+        pixel_height = (
+            BOUNDS["max_lat"] - BOUNDS["min_lat"]
+        ) / 8
+        sample_bounds = dem_fmt.sample_center_bounds(
+            BOUNDS,
+            pixel_width_deg=pixel_width,
+            pixel_height_deg=pixel_height,
+        )
+
         dem_verification = {
             "export_contract": dem_fmt.DEM_EXPORT_CONTRACT,
             "adjust_aspect_ratio": False,
@@ -949,9 +961,13 @@ class TestRoadContentSignature:
             "extent_max_delta_deg": 0.0,
             "extent_tolerance_deg": dem_fmt.DEM_EXTENT_TOLERANCE_DEG,
             "raster_bounds_max_delta_deg": 0.0,
+            "raster_pixel_size_max_delta_deg": 0.0,
+            "raster_pixel_width_deg": pixel_width,
+            "raster_pixel_height_deg": pixel_height,
             "requested_bounds": dict(BOUNDS),
             "returned_bounds": dict(BOUNDS),
             "raster_bounds": dict(BOUNDS),
+            "raster_sample_bounds": sample_bounds,
         }
         assert dem_fmt.verification_ok(dem_verification)
 

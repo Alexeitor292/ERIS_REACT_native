@@ -402,3 +402,81 @@ class TestCompleteVerificationRecord:
                 metadata_result,
                 {},
             )
+
+
+def test_geotiff_verification_records_true_pixel_center_bounds():
+    result = dem.inspect_dem_tiff(
+        geotiff_bytes(),
+        expected_bounds=BOUNDS,
+        width_px=WIDTH,
+        height_px=HEIGHT,
+    )
+
+    pixel_width = (
+        BOUNDS["max_lon"] - BOUNDS["min_lon"]
+    ) / WIDTH
+    pixel_height = (
+        BOUNDS["max_lat"] - BOUNDS["min_lat"]
+    ) / HEIGHT
+
+    expected = {
+        "min_lat": BOUNDS["min_lat"] + pixel_height / 2.0,
+        "min_lon": BOUNDS["min_lon"] + pixel_width / 2.0,
+        "max_lat": BOUNDS["max_lat"] - pixel_height / 2.0,
+        "max_lon": BOUNDS["max_lon"] - pixel_width / 2.0,
+    }
+
+    assert result["raster_pixel_width_deg"] == pytest.approx(
+        pixel_width
+    )
+    assert result["raster_pixel_height_deg"] == pytest.approx(
+        pixel_height
+    )
+    assert result["raster_sample_bounds"] == pytest.approx(
+        expected
+    )
+    assert result["raster_sample_bounds"] != result["raster_bounds"]
+
+    assert (
+        (
+            result["raster_sample_bounds"]["max_lon"]
+            - result["raster_sample_bounds"]["min_lon"]
+        )
+        / (WIDTH - 1)
+        == pytest.approx(pixel_width)
+    )
+    assert (
+        (
+            result["raster_sample_bounds"]["max_lat"]
+            - result["raster_sample_bounds"]["min_lat"]
+        )
+        / (HEIGHT - 1)
+        == pytest.approx(pixel_height)
+    )
+
+
+def test_complete_verification_rejects_forged_sample_centers():
+    metadata_result = dem.verify_export_metadata(
+        metadata(),
+        bounds=BOUNDS,
+        width_px=WIDTH,
+        height_px=HEIGHT,
+    )
+    raster_result = dem.inspect_dem_tiff(
+        geotiff_bytes(),
+        expected_bounds=metadata_result["returned_bounds"],
+        width_px=WIDTH,
+        height_px=HEIGHT,
+    )
+    result = dem.complete_verification(
+        metadata_result,
+        raster_result,
+    )
+
+    forged = dict(result)
+    forged["raster_sample_bounds"] = dict(
+        result["raster_sample_bounds"]
+    )
+    forged["raster_sample_bounds"]["min_lon"] += 0.0001
+
+    assert dem.verification_ok(forged) is False

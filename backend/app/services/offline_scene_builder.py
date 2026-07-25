@@ -442,11 +442,11 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
                 "Verified exact USGS 3DEP extent; decoding terrain",
             )
 
-        verified_bounds = dict(
+        coverage_bounds = dict(
             verification["raster_bounds"]
         )
         resolution = aoi_resolution_m(
-            verified_bounds,
+            coverage_bounds,
             ctx["center"]["lat"],
             grid_px,
         )
@@ -498,15 +498,16 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             heights
         )
 
-        # Never derive terrain georeferencing from the requested AOI. The raster
-        # bounds were independently read from the downloaded GeoTIFF and already
-        # proved equal to the ArcGIS-declared and requested extents.
-        verified_bounds = dict(
-            verification["raster_bounds"]
+        # dataset.bounds are OUTER pixel edges. Each decoded height is a raster
+        # sample at a pixel CENTER, so the terrain vertices must span the verified
+        # first/last center coordinates. Mapping them onto the outer edges would
+        # stretch N samples across N-1 intervals and shift endpoints by half a cell.
+        terrain_bounds = dict(
+            verification["raster_sample_bounds"]
         )
         terrain_meta = terrain_fmt.build_terrain_metadata(
             stats,
-            verified_bounds,
+            terrain_bounds,
             terrain_fmt.grid_sha256(grid_bytes),
         )
 
@@ -520,7 +521,7 @@ class HillshadeReliefBuilder(OfflineScenePackageBuilder):
             hillshade_bytes, hillshade_meta = (
                 terrain_fmt.render_hillshade_png(
                     heights,
-                    verified_bounds,
+                    terrain_bounds,
                 )
             )
         except Exception as exc:

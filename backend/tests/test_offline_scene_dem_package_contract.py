@@ -11,6 +11,7 @@ import json
 import zipfile
 
 import numpy as np
+import pytest
 
 from app.services import offline_scene as scene
 from app.services import offline_scene_builder as builder
@@ -28,6 +29,18 @@ BOUNDS = {
 
 
 def _verification(rows: int, columns: int) -> dict:
+    pixel_width = (
+        BOUNDS["max_lon"] - BOUNDS["min_lon"]
+    ) / columns
+    pixel_height = (
+        BOUNDS["max_lat"] - BOUNDS["min_lat"]
+    ) / rows
+    sample_bounds = dem.sample_center_bounds(
+        BOUNDS,
+        pixel_width_deg=pixel_width,
+        pixel_height_deg=pixel_height,
+    )
+
     return {
         "export_contract": dem.DEM_EXPORT_CONTRACT,
         "adjust_aspect_ratio": False,
@@ -49,10 +62,12 @@ def _verification(rows: int, columns: int) -> dict:
         "raster_crs_wkid": 4326,
         "raster_transform_verified": True,
         "raster_bounds": dict(BOUNDS),
+        "raster_sample_bounds": sample_bounds,
+        "raster_pixel_width_deg": pixel_width,
+        "raster_pixel_height_deg": pixel_height,
         "raster_bounds_max_delta_deg": 0.0,
         "raster_pixel_size_max_delta_deg": 0.0,
     }
-
 
 def _ctx() -> dict:
     return {
@@ -80,16 +95,18 @@ def _exact_package() -> bytes:
     ).reshape(rows, columns)
 
     grid, stats = terrain.encode_height_grid(heights)
+    verification = _verification(rows, columns)
+    sample_bounds = verification["raster_sample_bounds"]
+
     terrain_meta = terrain.build_terrain_metadata(
         stats,
-        BOUNDS,
+        sample_bounds,
         terrain.grid_sha256(grid),
     )
     hillshade, hillshade_meta = terrain.render_hillshade_png(
         heights,
-        BOUNDS,
+        sample_bounds,
     )
-    verification = _verification(rows, columns)
 
     manifest = builder.build_manifest(
         _ctx(),
@@ -306,3 +323,39 @@ def test_exact_contract_rejects_hillshade_checksum_mismatch():
 
     assert ok is False
     assert "hillshade checksum" in reason
+
+
+def test_exact_package_terrain_uses_raster_sample_centers():
+    package = _exact_package()
+
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        manifest = json.loads(
+            archive.read("manifest.json")
+        )
+
+    verification = manifest["elevation"]["verification"]
+
+    assert (
+        manifest["terrain"]["bounds"]
+        == verification["raster_sample_bounds"]
+    )
+    assert (
+        manifest["terrain"]["bounds"]
+        != verification["raster_bounds"]
+    )
+    assert (
+        manifest["terrain"]["local_transform"]["lon_per_col"]
+        == pytest.approx(
+            verification["raster_pixel_width_deg"],
+            rel=0.0,
+            abs=dem.DEM_EXTENT_TOLERANCE_DEG,
+        )
+    )
+    assert (
+        manifest["terrain"]["local_transform"]["lat_per_row"]
+        == pytest.approx(
+            -verification["raster_pixel_height_deg"],
+            rel=0.0,
+            abs=dem.DEM_EXTENT_TOLERANCE_DEG,
+        )
+    )
