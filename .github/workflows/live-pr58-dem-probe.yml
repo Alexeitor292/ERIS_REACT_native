@@ -1,0 +1,95 @@
+name: PR58 live Submission 21 DEM acceptance
+
+on:
+  push:
+    branches:
+      - fix/offline-dem-exact-extent
+    paths:
+      - .github/workflows/live-pr58-dem-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  live-dem-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements-worker.txt
+
+      - name: Install worker dependencies
+        run: python -m pip install -r backend/requirements-worker.txt
+
+      - name: Fetch, verify, package, and validate Submission 21 terrain
+        env:
+          PYTHONPATH: backend
+        run: |
+          python - <<'PY'
+          import io
+          import json
+          import zipfile
+
+          from app.services import offline_scene as scene
+          from app.services.offline_scene_builder import HillshadeReliefBuilder
+          from app.services import offline_scene_dem as dem
+
+          center = {"lat": 40.859693, "lon": -123.511035}
+          radius_m = 1500.0
+          bounds = scene.bounding_box(center["lat"], center["lon"], radius_m)
+          expected = {
+              "min_lat": 40.846218,
+              "min_lon": -123.528851,
+              "max_lat": 40.873168,
+              "max_lon": -123.493219,
+          }
+          assert bounds == expected, (bounds, expected)
+
+          ctx = {
+              "submission_id": 21,
+              "package_version": "live-pr58-submission21",
+              "center": center,
+              "radius_m": radius_m,
+              "bounds": bounds,
+              "content_signature": "live-pr58-validation",
+              "overlays": {},
+          }
+
+          builder = HillshadeReliefBuilder()
+          source = builder.prepare_source_data(ctx)
+          verification = source["dem_verification"]
+          assert dem.verification_ok(verification), verification
+          assert verification["requested_bounds"] == expected
+          assert verification["returned_bounds"] == expected
+          assert verification["raster_bounds"] == expected
+
+          # This acceptance probe isolates the terrain contract. Context-layer
+          # providers are independently covered by existing live/CI validation.
+          builder._build_context_layers = lambda ctx, base_bytes, progress=None: ({}, {})
+          package = builder.build_package(ctx, source)
+          ok, reason = builder.validate_package(package)
+          assert ok, reason
+
+          with zipfile.ZipFile(io.BytesIO(package)) as archive:
+              manifest = json.loads(archive.read("manifest.json"))
+              names = set(archive.namelist())
+
+          assert "elevation-grid.bin" in names
+          assert "hillshade.png" in names
+          assert manifest["elevation"]["export_contract"] == dem.DEM_EXPORT_CONTRACT
+          assert manifest["elevation"]["extent_verified"] is True
+          assert manifest["terrain"]["bounds"] == verification["raster_sample_bounds"]
+          assert manifest["basemap"]["has_hillshade"] is True
+
+          print("SUBMISSION_21_LIVE_DEM_ACCEPTANCE=PASS")
+          print("requested_bounds=" + json.dumps(expected, sort_keys=True))
+          print("raster_sample_bounds=" + json.dumps(verification["raster_sample_bounds"], sort_keys=True))
+          print("raster_size=%sx%s" % (verification["raster_width_px"], verification["raster_height_px"]))
+          print("pixel_size_deg=%s,%s" % (verification["raster_pixel_width_deg"], verification["raster_pixel_height_deg"]))
+          print("package_bytes=%s" % len(package))
+          PY
