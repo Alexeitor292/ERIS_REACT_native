@@ -78,11 +78,17 @@ def _imagery_content_identity() -> str:
 
 
 def _terrain_content_identity() -> str:
-    """Exact DEM export/verification contract folded into package identity."""
+    """Terrain-generation contracts folded into package content identity.
+
+    Both the verified DEM georeferencing contract and the local hillshade
+    algorithm affect packaged bytes. Changing either must invalidate stale
+    packages already held by a device.
+    """
 
     from ..services import offline_scene_dem as dem
+    from ..services import offline_scene_terrain as terrain
 
-    return dem.DEM_EXPORT_CONTRACT
+    return f"{dem.DEM_EXPORT_CONTRACT}:{terrain.HILLSHADE_ALGORITHM}"
 
 
 def _build_context(db: Session, job: dict) -> dict:

@@ -204,9 +204,26 @@ def test_terrain_contract_changes_content_signature():
 
 
 def test_worker_uses_current_terrain_contract_identity():
-    assert (
-        worker._terrain_content_identity()
-        == dem.DEM_EXPORT_CONTRACT
+    assert worker._terrain_content_identity() == (
+        f"{dem.DEM_EXPORT_CONTRACT}:{terrain.HILLSHADE_ALGORITHM}"
+    )
+
+
+def test_worker_terrain_identity_changes_with_hillshade_algorithm(
+    monkeypatch,
+):
+    original = worker._terrain_content_identity()
+    monkeypatch.setattr(
+        terrain,
+        "HILLSHADE_ALGORITHM",
+        "local_verified_dem_gradient_v2",
+    )
+
+    changed = worker._terrain_content_identity()
+
+    assert changed != original
+    assert changed == (
+        f"{dem.DEM_EXPORT_CONTRACT}:local_verified_dem_gradient_v2"
     )
 
 
