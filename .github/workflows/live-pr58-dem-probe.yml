@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  DB_PASS: pr58-live-probe-unused
+  JWT_SECRET: pr58-live-probe-unused-ci-secret
+
 jobs:
   live-dem-acceptance:
     runs-on: ubuntu-latest
