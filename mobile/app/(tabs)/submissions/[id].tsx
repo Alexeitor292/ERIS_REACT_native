@@ -101,14 +101,21 @@ type FieldErrorMap = Partial<Record<keyof FormState, string>>;
 const DRAFT_LOCAL_CACHE_VERSION = 1;
 type PavementAnnotationId = "crack" | "settlement" | "bulge" | "rocks";
 type PavementAnnotationPoint = { x: number; y: number };
-type PavementAnnotationLayout = Record<PavementAnnotationId, { x: number; y: number; placed: boolean; rangeEnd: PavementAnnotationPoint | null }>;
+type PavementAnnotationLayoutItem = {
+  x: number;
+  y: number;
+  placed: boolean;
+  rangeEnd: PavementAnnotationPoint | null;
+  vertices: PavementAnnotationPoint[];
+};
+type PavementAnnotationLayout = Record<PavementAnnotationId, PavementAnnotationLayoutItem>;
 const PAVEMENT_ANNOTATION_FIELD = "pavement_ground_annotation_layout" as const;
 const PAVEMENT_ANNOTATION_ORDER: PavementAnnotationId[] = ["crack", "settlement", "bulge", "rocks"];
 const DEFAULT_PAVEMENT_ANNOTATION_LAYOUT: PavementAnnotationLayout = {
-  crack: { x: 0.08, y: 0.12, placed: false, rangeEnd: null },
-  settlement: { x: 0.58, y: 0.18, placed: false, rangeEnd: null },
-  bulge: { x: 0.2, y: 0.58, placed: false, rangeEnd: null },
-  rocks: { x: 0.62, y: 0.62, placed: false, rangeEnd: null },
+  crack: { x: 0.08, y: 0.12, placed: false, rangeEnd: null, vertices: [] },
+  settlement: { x: 0.58, y: 0.18, placed: false, rangeEnd: null, vertices: [] },
+  bulge: { x: 0.2, y: 0.58, placed: false, rangeEnd: null, vertices: [] },
+  rocks: { x: 0.62, y: 0.62, placed: false, rangeEnd: null, vertices: [] },
 };
 const PAVEMENT_ANNOTATION_TITLES: Record<PavementAnnotationId, string> = {
   crack: "Crack",
@@ -129,6 +136,11 @@ function parsePavementAnnotationPoint(raw: any): PavementAnnotationPoint | null 
   };
 }
 
+function parsePavementAnnotationVertices(raw: any): PavementAnnotationPoint[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(parsePavementAnnotationPoint).filter((point): point is PavementAnnotationPoint => !!point);
+}
+
 function parsePavementAnnotationLayout(raw: any): PavementAnnotationLayout {
   if (!raw || typeof raw !== "string") return { ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT };
   try {
@@ -137,11 +149,15 @@ function parsePavementAnnotationLayout(raw: any): PavementAnnotationLayout {
     PAVEMENT_ANNOTATION_ORDER.forEach((id) => {
       const item = parsed?.[id];
       if (item && Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y))) {
+        const legacyRangeEnd = parsePavementAnnotationPoint(item.rangeEnd);
+        const parsedVertices = parsePavementAnnotationVertices(item.vertices);
+        const vertices = parsedVertices.length ? parsedVertices : legacyRangeEnd ? [legacyRangeEnd] : [];
         next[id] = {
           x: clamp01(Number(item.x)),
           y: clamp01(Number(item.y)),
           placed: typeof item.placed === "boolean" ? item.placed : true,
-          rangeEnd: parsePavementAnnotationPoint(item.rangeEnd),
+          rangeEnd: vertices.length ? vertices[vertices.length - 1] : legacyRangeEnd,
+          vertices,
         };
       }
     });
@@ -154,11 +170,16 @@ function parsePavementAnnotationLayout(raw: any): PavementAnnotationLayout {
 function stringifyPavementAnnotationLayout(layout: PavementAnnotationLayout): string {
   const normalized = { ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT };
   PAVEMENT_ANNOTATION_ORDER.forEach((id) => {
+    const vertices = parsePavementAnnotationVertices(layout[id]?.vertices);
+    const legacyRangeEnd = vertices.length
+      ? vertices[vertices.length - 1]
+      : parsePavementAnnotationPoint(layout[id]?.rangeEnd);
     normalized[id] = {
       x: clamp01(Number(layout[id]?.x ?? DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id].x)),
       y: clamp01(Number(layout[id]?.y ?? DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id].y)),
       placed: !!layout[id]?.placed,
-      rangeEnd: parsePavementAnnotationPoint(layout[id]?.rangeEnd),
+      rangeEnd: legacyRangeEnd,
+      vertices: vertices.length ? vertices : legacyRangeEnd ? [legacyRangeEnd] : [],
     };
   });
   return JSON.stringify(normalized);
@@ -1576,6 +1597,8 @@ function PavementDrawerToken({
   );
 }
 
+type PavementMarkerHandle = "anchor" | number;
+
 function PavementCanvasMarker({
   id,
   glyph,
@@ -1583,7 +1606,7 @@ function PavementCanvasMarker({
   top,
   active,
   editable,
-  variant = "anchor",
+  handle,
   palette,
   onSelect,
   onDragStart,
@@ -1596,12 +1619,12 @@ function PavementCanvasMarker({
   top: number;
   active: boolean;
   editable: boolean;
-  variant?: "anchor" | "rangeEnd";
+  handle: PavementMarkerHandle;
   palette: AnnotationPalette;
-  onSelect: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd") => void;
-  onDragStart: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd") => void;
-  onDragMove: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", dx: number, dy: number) => void;
-  onDragEnd: (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", moved: boolean) => void;
+  onSelect: (id: PavementAnnotationId, handle: PavementMarkerHandle) => void;
+  onDragStart: (id: PavementAnnotationId, handle: PavementMarkerHandle) => void;
+  onDragMove: (id: PavementAnnotationId, handle: PavementMarkerHandle, dx: number, dy: number) => void;
+  onDragEnd: (id: PavementAnnotationId, handle: PavementMarkerHandle, moved: boolean) => void;
 }) {
   const movedRef = useRef(false);
   const responder = useMemo(
@@ -1613,26 +1636,26 @@ function PavementCanvasMarker({
         onMoveShouldSetPanResponderCapture: () => editable,
         onPanResponderGrant: () => {
           movedRef.current = false;
-          onDragStart(id, variant);
+          onDragStart(id, handle);
         },
         onPanResponderMove: (_evt, gesture) => {
           if (Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2) movedRef.current = true;
-          onDragMove(id, variant, gesture.dx, gesture.dy);
+          onDragMove(id, handle, gesture.dx, gesture.dy);
         },
         onPanResponderRelease: (_evt, gesture) => {
           const moved = movedRef.current || Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2;
-          onDragEnd(id, variant, moved);
-          if (!moved) onSelect(id, variant);
+          onDragEnd(id, handle, moved);
+          if (!moved) onSelect(id, handle);
         },
         onPanResponderTerminate: (_evt, gesture) => {
           const moved = movedRef.current || Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2;
-          onDragEnd(id, variant, moved);
-          if (!moved) onSelect(id, variant);
+          onDragEnd(id, handle, moved);
+          if (!moved) onSelect(id, handle);
         },
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
       }),
-    [editable, id, onDragEnd, onDragMove, onDragStart, onSelect, variant]
+    [editable, handle, id, onDragEnd, onDragMove, onDragStart, onSelect]
   );
 
   return (
@@ -1643,24 +1666,39 @@ function PavementCanvasMarker({
         {
           left,
           top,
-          borderColor: active ? "#ffffff" : palette.primary,
-          backgroundColor:
-            variant === "anchor"
-              ? active
-                ? palette.primary
-                : "rgba(255,255,255,0.85)"
-              : active
-                ? "#f8fbff"
-                : "rgba(255,255,255,0.65)",
+          width: 32,
+          height: 32,
+          borderRadius: 16,
+          borderWidth: 0,
+          backgroundColor: "transparent",
+          shadowOpacity: 0,
+          elevation: 0,
         },
-        variant === "rangeEnd" ? styles.annotationMarkerRangeEnd : null,
       ]}
     >
-      {variant === "anchor" ? (
-        <Text style={[styles.annotationMarkerText, { color: active ? "#ffffff" : palette.primary }]}>{glyph}</Text>
-      ) : (
-        <View style={[styles.annotationMarkerRangeEndDot, { backgroundColor: active ? palette.primary : "#0f172a" }]} />
-      )}
+      <View
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: 8,
+          borderWidth: 2,
+          borderColor: "#ffffff",
+          backgroundColor: active ? palette.primary : "rgba(248,251,255,0.94)",
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: "#020817",
+          shadowOpacity: 0.28,
+          shadowRadius: 4,
+          shadowOffset: { width: 0, height: 2 },
+          elevation: 3,
+        }}
+      >
+        {handle === "anchor" ? (
+          <Text style={{ color: active ? "#ffffff" : palette.primary, fontSize: 8, lineHeight: 10, fontWeight: "900" }}>{glyph}</Text>
+        ) : (
+          <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: active ? "#ffffff" : palette.primary }} />
+        )}
+      </View>
     </View>
   );
 }
@@ -1689,7 +1727,7 @@ function PavementGroundAnnotator({
   const MARKER_SIZE = 32;
   const { width: windowWidth } = useWindowDimensions();
   const stageRef = useRef<View | null>(null);
-  const markerDragRef = useRef<null | { id: PavementAnnotationId; handle: "anchor" | "rangeEnd"; originLeft: number; originTop: number; left: number; top: number }>(null);
+  const markerDragRef = useRef<null | { id: PavementAnnotationId; handle: PavementMarkerHandle; originLeft: number; originTop: number; left: number; top: number }>(null);
   const lastPersistedLayoutRef = useRef(form.pavement_ground_annotation_layout);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const [annotationLayout, setAnnotationLayout] = useState<PavementAnnotationLayout>(() =>
@@ -1702,8 +1740,14 @@ function PavementGroundAnnotator({
   const [stageAreaSize, setStageAreaSize] = useState({ width: 0, height: 0 });
   const [stageBounds, setStageBounds] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [drawerDrag, setDrawerDrag] = useState<null | { id: PavementAnnotationId; x: number; y: number }>(null);
-  const [markerDrag, setMarkerDrag] = useState<null | { id: PavementAnnotationId; handle: "anchor" | "rangeEnd"; originLeft: number; originTop: number; left: number; top: number }>(null);
+  const [markerDrag, setMarkerDrag] = useState<null | { id: PavementAnnotationId; handle: PavementMarkerHandle; originLeft: number; originTop: number; left: number; top: number }>(null);
   const [canvasPopoverAnnotation, setCanvasPopoverAnnotation] = useState<PavementAnnotationId | null>(null);
+  const [visibleLayers, setVisibleLayers] = useState<Record<PavementAnnotationId, boolean>>({
+    crack: true,
+    settlement: true,
+    bulge: true,
+    rocks: true,
+  });
 
   useEffect(() => {
     if (form.pavement_ground_annotation_layout === lastPersistedLayoutRef.current) return;
@@ -1761,9 +1805,7 @@ function PavementGroundAnnotator({
     const height = stageAreaSize.height;
     if (!width || !height) return { width: 0, height: 0 };
     const areaRatio = width / height;
-    if (imageAspectRatio >= areaRatio) {
-      return { width, height: width / imageAspectRatio };
-    }
+    if (imageAspectRatio >= areaRatio) return { width, height: width / imageAspectRatio };
     return { width: height * imageAspectRatio, height };
   }, [imageAspectRatio, stageAreaSize.height, stageAreaSize.width]);
 
@@ -1777,11 +1819,10 @@ function PavementGroundAnnotator({
     });
   }, []);
 
-  const markerStageBounds = useMemo(() => {
-    const maxLeft = Math.max(0, stageSize.width - MARKER_SIZE);
-    const maxTop = Math.max(0, stageSize.height - MARKER_SIZE);
-    return { maxLeft, maxTop };
-  }, [MARKER_SIZE, stageSize.height, stageSize.width]);
+  const markerStageBounds = useMemo(() => ({
+    maxLeft: Math.max(0, stageSize.width - MARKER_SIZE),
+    maxTop: Math.max(0, stageSize.height - MARKER_SIZE),
+  }), [stageSize.height, stageSize.width]);
 
   const clampMarkerPosition = useCallback(
     (left: number, top: number) => ({
@@ -1799,43 +1840,39 @@ function PavementGroundAnnotator({
     [clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop]
   );
 
+  const pointFromPosition = useCallback((left: number, top: number): PavementAnnotationPoint => ({
+    x: markerStageBounds.maxLeft > 0 ? left / markerStageBounds.maxLeft : 0,
+    y: markerStageBounds.maxTop > 0 ? top / markerStageBounds.maxTop : 0,
+  }), [markerStageBounds.maxLeft, markerStageBounds.maxTop]);
+
   const commitMarkerPosition = useCallback(
     (id: PavementAnnotationId, left: number, top: number, placed = true) => {
       const nextPosition = clampMarkerPosition(left, top);
       const current = annotationLayout[id];
       const next: PavementAnnotationLayout = {
         ...annotationLayout,
-        [id]: {
-          x: markerStageBounds.maxLeft > 0 ? nextPosition.left / markerStageBounds.maxLeft : 0,
-          y: markerStageBounds.maxTop > 0 ? nextPosition.top / markerStageBounds.maxTop : 0,
-          placed,
-          rangeEnd: current.rangeEnd,
-        },
+        [id]: { ...current, ...pointFromPosition(nextPosition.left, nextPosition.top), placed },
       };
       persistAnnotationLayout(next);
       return nextPosition;
     },
-    [annotationLayout, clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop, persistAnnotationLayout]
+    [annotationLayout, clampMarkerPosition, persistAnnotationLayout, pointFromPosition]
   );
 
-  const commitRangeEndPosition = useCallback(
-    (id: PavementAnnotationId, left: number, top: number) => {
+  const commitVertexPosition = useCallback(
+    (id: PavementAnnotationId, vertexIndex: number, left: number, top: number) => {
       const nextPosition = clampMarkerPosition(left, top);
       const current = annotationLayout[id];
+      const vertices = [...current.vertices];
+      vertices[vertexIndex] = pointFromPosition(nextPosition.left, nextPosition.top);
       const next: PavementAnnotationLayout = {
         ...annotationLayout,
-        [id]: {
-          ...current,
-          rangeEnd: {
-            x: markerStageBounds.maxLeft > 0 ? nextPosition.left / markerStageBounds.maxLeft : 0,
-            y: markerStageBounds.maxTop > 0 ? nextPosition.top / markerStageBounds.maxTop : 0,
-          },
-        },
+        [id]: { ...current, vertices, rangeEnd: vertices.length ? vertices[vertices.length - 1] : null },
       };
       persistAnnotationLayout(next);
       return nextPosition;
     },
-    [annotationLayout, clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop, persistAnnotationLayout]
+    [annotationLayout, clampMarkerPosition, persistAnnotationLayout, pointFromPosition]
   );
 
   useEffect(() => {
@@ -1847,50 +1884,34 @@ function PavementGroundAnnotator({
   const placeAnnotationAtPoint = useCallback(
     (id: PavementAnnotationId, pageX: number, pageY: number) => {
       if (stageBounds.width <= 0 || stageBounds.height <= 0) return false;
-      if (
-        pageX < stageBounds.x ||
-        pageX > stageBounds.x + stageBounds.width ||
-        pageY < stageBounds.y ||
-        pageY > stageBounds.y + stageBounds.height
-      ) {
-        return false;
-      }
-      const nextLeft = pageX - stageBounds.x - MARKER_SIZE / 2;
-      const nextTop = pageY - stageBounds.y - MARKER_SIZE / 2;
-      commitMarkerPosition(id, nextLeft, nextTop, true);
+      if (pageX < stageBounds.x || pageX > stageBounds.x + stageBounds.width || pageY < stageBounds.y || pageY > stageBounds.y + stageBounds.height) return false;
+      commitMarkerPosition(id, pageX - stageBounds.x - MARKER_SIZE / 2, pageY - stageBounds.y - MARKER_SIZE / 2, true);
       return true;
     },
-    [MARKER_SIZE, commitMarkerPosition, stageBounds.height, stageBounds.width, stageBounds.x, stageBounds.y]
+    [commitMarkerPosition, stageBounds.height, stageBounds.width, stageBounds.x, stageBounds.y]
   );
 
   const resetPositions = useCallback(() => {
     const next: PavementAnnotationLayout = { ...annotationLayout };
     PAVEMENT_ANNOTATION_ORDER.forEach((id) => {
       next[id] = {
-        ...DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id],
-        placed: annotationLayout[id]?.placed ?? false,
-        rangeEnd: annotationLayout[id]?.rangeEnd ?? null,
+        ...annotationLayout[id],
+        x: DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id].x,
+        y: DEFAULT_PAVEMENT_ANNOTATION_LAYOUT[id].y,
       };
     });
     persistAnnotationLayout(next);
   }, [annotationLayout, persistAnnotationLayout]);
 
-  const removePlacement = useCallback(
-    (id: PavementAnnotationId) => {
-      const next: PavementAnnotationLayout = {
-        ...annotationLayout,
-        [id]: {
-          ...annotationLayout[id],
-          placed: false,
-          rangeEnd: null,
-        },
-      };
-      persistAnnotationLayout(next);
-      if (activeAnnotation === id) setActiveAnnotation(null);
-      if (canvasPopoverAnnotation === id) setCanvasPopoverAnnotation(null);
-    },
-    [activeAnnotation, annotationLayout, canvasPopoverAnnotation, persistAnnotationLayout]
-  );
+  const removePlacement = useCallback((id: PavementAnnotationId) => {
+    const next: PavementAnnotationLayout = {
+      ...annotationLayout,
+      [id]: { ...annotationLayout[id], placed: false, rangeEnd: null, vertices: [] },
+    };
+    persistAnnotationLayout(next);
+    if (activeAnnotation === id) setActiveAnnotation(null);
+    if (canvasPopoverAnnotation === id) setCanvasPopoverAnnotation(null);
+  }, [activeAnnotation, annotationLayout, canvasPopoverAnnotation, persistAnnotationLayout]);
 
   const clearCrackMeasurements = useCallback(() => {
     setVal("crack_length_ft", "");
@@ -1899,191 +1920,131 @@ function PavementGroundAnnotator({
     setVal("crack_depth_in", "");
   }, [setVal]);
 
-  const glyphForAnnotation = useCallback((id: PavementAnnotationId) => {
-    if (id === "crack") return "C";
-    if (id === "settlement") return "S";
-    if (id === "bulge") return "B";
-    return "R";
+  const glyphForAnnotation = useCallback((id: PavementAnnotationId) => id === "crack" ? "C" : id === "settlement" ? "S" : id === "bulge" ? "B" : "R", []);
+
+  const annotationRows = useMemo(() => PAVEMENT_ANNOTATION_ORDER.map((id) => ({
+    id,
+    title: PAVEMENT_ANNOTATION_TITLES[id],
+    shortSummary: pavementAnnotationShortSummary(id, form),
+    longSummary: pavementAnnotationLongSummary(id, form),
+    hasValue: pavementAnnotationHasValue(id, form),
+    placed: annotationLayout[id]?.placed ?? false,
+  })), [annotationLayout, form]);
+
+  const selectAnnotationFromDrawer = useCallback((id: PavementAnnotationId) => {
+    setActiveAnnotation(id);
+    setCanvasPopoverAnnotation(null);
+    setDrawerOpen(true);
   }, []);
 
-  const annotationRows = useMemo(
-    () =>
-      PAVEMENT_ANNOTATION_ORDER.map((id) => ({
-        id,
-        title: PAVEMENT_ANNOTATION_TITLES[id],
-        shortSummary: pavementAnnotationShortSummary(id, form),
-        longSummary: pavementAnnotationLongSummary(id, form),
-        hasValue: pavementAnnotationHasValue(id, form),
-        placed: annotationLayout[id]?.placed ?? false,
-      })),
-    [annotationLayout, form]
-  );
+  const selectAnnotationFromCanvas = useCallback((id: PavementAnnotationId, _handle?: PavementMarkerHandle) => {
+    setActiveAnnotation(id);
+    setCanvasPopoverAnnotation(id);
+    setDrawerOpen(false);
+  }, []);
 
-  const selectAnnotationFromDrawer = useCallback(
-    (id: PavementAnnotationId) => {
-      setActiveAnnotation(id);
-      setCanvasPopoverAnnotation(null);
-      setDrawerOpen(true);
-    },
-    []
-  );
-
-  const selectAnnotationFromCanvas = useCallback(
-    (id: PavementAnnotationId, _handle?: "anchor" | "rangeEnd") => {
-      setActiveAnnotation(id);
-      setCanvasPopoverAnnotation(id);
-      setDrawerOpen(false);
-    },
-    []
-  );
+  const toggleLayer = useCallback((id: PavementAnnotationId) => {
+    setVisibleLayers((current) => {
+      const nextVisible = !current[id];
+      if (!nextVisible && activeAnnotation === id) {
+        setActiveAnnotation(null);
+        setCanvasPopoverAnnotation(null);
+      }
+      return { ...current, [id]: nextVisible };
+    });
+  }, [activeAnnotation]);
 
   const beginDrawerDrag = useCallback((id: PavementAnnotationId, pageX: number, pageY: number) => {
     refreshStageBounds();
     setDrawerDrag({ id, x: pageX, y: pageY });
   }, [refreshStageBounds]);
+  const moveDrawerDrag = useCallback((id: PavementAnnotationId, pageX: number, pageY: number) => setDrawerDrag({ id, x: pageX, y: pageY }), []);
+  const endDrawerDrag = useCallback((id: PavementAnnotationId, pageX: number, pageY: number, moved: boolean) => {
+    if (moved) placeAnnotationAtPoint(id, pageX, pageY);
+    setDrawerDrag(null);
+  }, [placeAnnotationAtPoint]);
 
-  const moveDrawerDrag = useCallback((id: PavementAnnotationId, pageX: number, pageY: number) => {
-    setDrawerDrag((current) => (current?.id === id ? { id, x: pageX, y: pageY } : { id, x: pageX, y: pageY }));
-  }, []);
+  const beginMarkerDrag = useCallback((id: PavementAnnotationId, handle: PavementMarkerHandle) => {
+    const layout = annotationLayout[id];
+    const point = handle === "anchor"
+      ? { left: layout.x * markerStageBounds.maxLeft, top: layout.y * markerStageBounds.maxTop }
+      : getLayoutPosition(layout.vertices[handle]);
+    if (!point) return;
+    const next = { id, handle, originLeft: point.left, originTop: point.top, left: point.left, top: point.top };
+    markerDragRef.current = next;
+    setMarkerDrag(next);
+  }, [annotationLayout, getLayoutPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop]);
 
-  const endDrawerDrag = useCallback(
-    (id: PavementAnnotationId, pageX: number, pageY: number, moved: boolean) => {
-      if (moved) {
-        placeAnnotationAtPoint(id, pageX, pageY);
-      }
-      setDrawerDrag(null);
-    },
-    [placeAnnotationAtPoint]
-  );
+  const moveMarkerDrag = useCallback((id: PavementAnnotationId, handle: PavementMarkerHandle, dx: number, dy: number) => {
+    const current = markerDragRef.current;
+    if (!current || current.id !== id || current.handle !== handle) return;
+    const nextPosition = clampMarkerPosition(current.originLeft + dx, current.originTop + dy);
+    const next = { ...current, left: nextPosition.left, top: nextPosition.top };
+    markerDragRef.current = next;
+    setMarkerDrag(next);
+  }, [clampMarkerPosition]);
 
-  const beginMarkerDrag = useCallback(
-    (id: PavementAnnotationId, handle: "anchor" | "rangeEnd") => {
-      const layout = annotationLayout[id];
-      const point =
-        handle === "rangeEnd"
-          ? getLayoutPosition(layout.rangeEnd)
-          : {
-              left: layout.x * markerStageBounds.maxLeft,
-              top: layout.y * markerStageBounds.maxTop,
-            };
-      if (!point) return;
-      const next = {
-        id,
-        handle,
-        originLeft: point.left,
-        originTop: point.top,
-        left: point.left,
-        top: point.top,
-      };
-      markerDragRef.current = next;
-      setMarkerDrag(next);
-    },
-    [annotationLayout, getLayoutPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop]
-  );
+  const endMarkerDrag = useCallback((id: PavementAnnotationId, handle: PavementMarkerHandle, moved: boolean) => {
+    const current = markerDragRef.current;
+    if (moved && current?.id === id && current.handle === handle) {
+      if (handle === "anchor") commitMarkerPosition(id, current.left, current.top, true);
+      else commitVertexPosition(id, handle, current.left, current.top);
+    }
+    markerDragRef.current = null;
+    setMarkerDrag(null);
+  }, [commitMarkerPosition, commitVertexPosition]);
 
-  const moveMarkerDrag = useCallback(
-    (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", dx: number, dy: number) => {
-      const current = markerDragRef.current;
-      if (!current || current.id !== id || current.handle !== handle) return;
-      const nextPosition = clampMarkerPosition(current.originLeft + dx, current.originTop + dy);
-      const next = {
-        ...current,
-        left: nextPosition.left,
-        top: nextPosition.top,
-      };
-      markerDragRef.current = next;
-      setMarkerDrag(next);
-    },
-    [clampMarkerPosition]
-  );
+  const appendVertex = useCallback((id: PavementAnnotationId) => {
+    const current = annotationLayout[id];
+    const previous = current.vertices.length
+      ? getLayoutPosition(current.vertices[current.vertices.length - 1])
+      : { left: current.x * markerStageBounds.maxLeft, top: current.y * markerStageBounds.maxTop };
+    if (!previous) return;
+    const direction = current.vertices.length % 2 === 0 ? 1 : -1;
+    const nextPosition = clampMarkerPosition(previous.left + Math.max(54, Math.min(markerStageBounds.maxLeft * 0.18, 110)), previous.top + direction * Math.max(28, Math.min(markerStageBounds.maxTop * 0.10, 60)));
+    const vertices = [...current.vertices, pointFromPosition(nextPosition.left, nextPosition.top)];
+    persistAnnotationLayout({
+      ...annotationLayout,
+      [id]: { ...current, vertices, rangeEnd: vertices[vertices.length - 1] },
+    });
+  }, [annotationLayout, clampMarkerPosition, getLayoutPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop, persistAnnotationLayout, pointFromPosition]);
 
-  const endMarkerDrag = useCallback(
-    (id: PavementAnnotationId, handle: "anchor" | "rangeEnd", moved: boolean) => {
-      const current = markerDragRef.current;
-      if (moved && current?.id === id && current.handle === handle) {
-        if (handle === "rangeEnd") {
-          commitRangeEndPosition(id, current.left, current.top);
-        } else {
-          commitMarkerPosition(id, current.left, current.top, true);
-        }
-      }
-      markerDragRef.current = null;
-      setMarkerDrag(null);
-    },
-    [commitMarkerPosition, commitRangeEndPosition]
-  );
+  const removeLastVertex = useCallback((id: PavementAnnotationId) => {
+    const current = annotationLayout[id];
+    if (!current.vertices.length) return;
+    const vertices = current.vertices.slice(0, -1);
+    persistAnnotationLayout({
+      ...annotationLayout,
+      [id]: { ...current, vertices, rangeEnd: vertices.length ? vertices[vertices.length - 1] : null },
+    });
+  }, [annotationLayout, persistAnnotationLayout]);
 
-  const addRangeReference = useCallback(
-    (id: PavementAnnotationId) => {
-      const current = annotationLayout[id];
-      const anchorLeft = current.x * markerStageBounds.maxLeft;
-      const anchorTop = current.y * markerStageBounds.maxTop;
-      const defaultOffset = Math.max(54, Math.min(markerStageBounds.maxLeft * 0.22, 120));
-      const nextPosition = clampMarkerPosition(anchorLeft + defaultOffset, anchorTop);
-      const next: PavementAnnotationLayout = {
-        ...annotationLayout,
-        [id]: {
-          ...current,
-          rangeEnd: {
-            x: markerStageBounds.maxLeft > 0 ? nextPosition.left / markerStageBounds.maxLeft : current.x,
-            y: markerStageBounds.maxTop > 0 ? nextPosition.top / markerStageBounds.maxTop : current.y,
-          },
-        },
-      };
-      persistAnnotationLayout(next);
-    },
-    [annotationLayout, clampMarkerPosition, markerStageBounds.maxLeft, markerStageBounds.maxTop, persistAnnotationLayout]
-  );
-
-  const removeRangeReference = useCallback(
-    (id: PavementAnnotationId) => {
-      const current = annotationLayout[id];
-      const next: PavementAnnotationLayout = {
-        ...annotationLayout,
-        [id]: {
-          ...current,
-          rangeEnd: null,
-        },
-      };
-      persistAnnotationLayout(next);
-    },
-    [annotationLayout, persistAnnotationLayout]
-  );
+  const removeLine = useCallback((id: PavementAnnotationId) => {
+    const current = annotationLayout[id];
+    persistAnnotationLayout({ ...annotationLayout, [id]: { ...current, vertices: [], rangeEnd: null } });
+  }, [annotationLayout, persistAnnotationLayout]);
 
   const renderAnnotationFields = (mode: "drawer" | "popover" = "drawer") => {
     const popoverMode = mode === "popover";
     const headingColor = popoverMode ? "#f8fbff" : palette.text;
     const secondaryColor = popoverMode ? "rgba(248,251,255,0.9)" : palette.muted;
     const panelBg = popoverMode ? "rgba(255,255,255,0.06)" : palette.panel;
-    if (!activeAnnotation) {
-      return <Text style={[styles.annotationDrawerEmptyText, { color: palette.muted }]}>Tap a label in the drawer or a marker on the photo to edit it.</Text>;
-    }
+    if (!activeAnnotation) return <Text style={[styles.annotationDrawerEmptyText, { color: palette.muted }]}>Tap a label or a line on the photo to edit it.</Text>;
+    const activeVertices = annotationLayout[activeAnnotation]?.vertices ?? [];
 
     return (
       <>
-        {!popoverMode ? (
-          <Text style={[styles.pickerTitle, styles.annotationFieldTitle, { color: headingColor }]}>{PAVEMENT_ANNOTATION_TITLES[activeAnnotation]}</Text>
-        ) : null}
-
+        {!popoverMode ? <Text style={[styles.pickerTitle, styles.annotationFieldTitle, { color: headingColor }]}>{PAVEMENT_ANNOTATION_TITLES[activeAnnotation]}</Text> : null}
         {activeAnnotation === "crack" ? (
           <>
             <Text style={[styles.label, styles.annotationFieldLabel, { color: secondaryColor }]}>Pavement/Ground Cracks</Text>
             <View style={styles.chips}>
               {(["YES", "NO"] as const).map((choice) => (
-                <Chip
-                  key={`annot-crack-${choice}`}
-                  label={choice}
-                  palette={palette}
-                  active={form.pavement_ground_cracks === choice}
-                  disabled={!canEdit}
-                  onPress={() => {
-                    if (!canEdit) return;
-                    setVal("pavement_ground_cracks", choice);
-                    if (choice !== "YES") {
-                      clearCrackMeasurements();
-                    }
-                  }}
-                />
+                <Chip key={`annot-crack-${choice}`} label={choice} palette={palette} active={form.pavement_ground_cracks === choice} disabled={!canEdit} onPress={() => {
+                  if (!canEdit) return;
+                  setVal("pavement_ground_cracks", choice);
+                  if (choice !== "YES") clearCrackMeasurements();
+                }} />
               ))}
             </View>
             {form.pavement_ground_cracks === "YES" ? (
@@ -2096,456 +2057,133 @@ function PavementGroundAnnotator({
             ) : null}
           </>
         ) : null}
-
-        {activeAnnotation === "settlement" ? (
-          <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Settlement (inches)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} />
-        ) : null}
-
-        {activeAnnotation === "bulge" ? (
-          <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} />
-        ) : null}
-
+        {activeAnnotation === "settlement" ? <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Settlement (inches)" value={form.settlement_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("settlement_in", v)} error={fieldErrors.settlement_in} /> : null}
+        {activeAnnotation === "bulge" ? <Field palette={{ ...palette, muted: secondaryColor, panel: panelBg, panelSoft: panelBg, text: headingColor }} label="Bulge (inches)" value={form.bulge_in} editable={canEdit} keyboardType="decimal-pad" onChangeText={(v) => setVal("bulge_in", v)} error={fieldErrors.bulge_in} /> : null}
         {activeAnnotation === "rocks" ? (
           <>
             <Text style={[styles.label, styles.annotationFieldLabel, { color: secondaryColor }]}>Indented by Rocks</Text>
             <View style={styles.chips}>
-              {(["YES", "NO"] as const).map((choice) => (
-                <Chip
-                  key={`annot-rocks-${choice}`}
-                  label={choice}
-                  palette={palette}
-                  active={form.indented_by_rocks === choice}
-                  disabled={!canEdit}
-                  onPress={() => {
-                    if (!canEdit) return;
-                    setVal("indented_by_rocks", choice);
-                  }}
-                />
-              ))}
+              {(["YES", "NO"] as const).map((choice) => <Chip key={`annot-rocks-${choice}`} label={choice} palette={palette} active={form.indented_by_rocks === choice} disabled={!canEdit} onPress={() => canEdit && setVal("indented_by_rocks", choice)} />)}
             </View>
           </>
         ) : null}
-
         {annotationLayout[activeAnnotation]?.placed ? (
-          <>
-            <View style={styles.annotationDetailActions}>
-              {annotationLayout[activeAnnotation]?.rangeEnd ? (
-                <Pressable
-                  style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]}
-                  onPress={() => removeRangeReference(activeAnnotation)}
-                  disabled={!canEdit}
-                >
-                  <Text style={[styles.btnGhostText, { color: headingColor }]}>Remove Range</Text>
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]}
-                  onPress={() => addRangeReference(activeAnnotation)}
-                  disabled={!canEdit}
-                >
-                  <Text style={[styles.btnGhostText, { color: headingColor }]}>Add Range</Text>
-                </Pressable>
-              )}
-              <Pressable
-                style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]}
-                onPress={() => removePlacement(activeAnnotation)}
-                disabled={!canEdit}
-              >
-                <Text style={[styles.btnGhostText, { color: headingColor }]}>Remove</Text>
+          <View style={styles.annotationDetailActions}>
+            <Pressable style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]} onPress={() => appendVertex(activeAnnotation)} disabled={!canEdit}>
+              <Text style={[styles.btnGhostText, { color: headingColor }]}>{activeVertices.length ? "Add Vertex" : "Add Line"}</Text>
+            </Pressable>
+            {activeVertices.length > 1 ? (
+              <Pressable style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]} onPress={() => removeLastVertex(activeAnnotation)} disabled={!canEdit}>
+                <Text style={[styles.btnGhostText, { color: headingColor }]}>Remove Last Vertex</Text>
               </Pressable>
-            </View>
-          </>
+            ) : null}
+            {activeVertices.length ? (
+              <Pressable style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]} onPress={() => removeLine(activeAnnotation)} disabled={!canEdit}>
+                <Text style={[styles.btnGhostText, { color: headingColor }]}>Remove Line</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={[styles.btnGhost, styles.annotationDetailActionBtn, { borderColor: palette.border, backgroundColor: panelBg }]} onPress={() => removePlacement(activeAnnotation)} disabled={!canEdit}>
+              <Text style={[styles.btnGhostText, { color: headingColor }]}>Remove</Text>
+            </Pressable>
+          </View>
         ) : null}
       </>
     );
   };
 
   const placedCount = annotationRows.filter((item) => item.placed).length;
+  const visibleLayerCount = PAVEMENT_ANNOTATION_ORDER.filter((id) => visibleLayers[id]).length;
   const drawerWidth = Math.min(360, Math.max(260, Math.round(windowWidth * 0.78)));
-  const drawerTranslateX = drawerProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [drawerWidth + 24, 0],
-  });
-  const activeAnnotationLayout = activeAnnotation ? annotationLayout[activeAnnotation] : null;
+  const drawerTranslateX = drawerProgress.interpolate({ inputRange: [0, 1], outputRange: [drawerWidth + 24, 0] });
   const activePopoverLayout = canvasPopoverAnnotation ? annotationLayout[canvasPopoverAnnotation] : null;
-  const activeAnnotationAnchorPosition =
-    canvasPopoverAnnotation && activePopoverLayout
-      ? markerDrag?.id === canvasPopoverAnnotation && markerDrag.handle === "anchor"
-        ? { left: markerDrag.left, top: markerDrag.top }
-        : {
-            left: activePopoverLayout.x * markerStageBounds.maxLeft,
-            top: activePopoverLayout.y * markerStageBounds.maxTop,
-          }
-      : null;
+  const activeAnnotationAnchorPosition = canvasPopoverAnnotation && activePopoverLayout
+    ? markerDrag?.id === canvasPopoverAnnotation && markerDrag.handle === "anchor"
+      ? { left: markerDrag.left, top: markerDrag.top }
+      : { left: activePopoverLayout.x * markerStageBounds.maxLeft, top: activePopoverLayout.y * markerStageBounds.maxTop }
+    : null;
   const activeCanvasPopupWidth = Math.min(320, Math.max(240, stageSize.width - 24));
   const activeCanvasPopupStyle = useMemo(() => {
     if (!canvasPopoverAnnotation || drawerOpen || !activePopoverLayout?.placed || !activeAnnotationAnchorPosition) return null;
     const preferredLeft = activeAnnotationAnchorPosition.left + MARKER_SIZE + 10;
     const fallbackLeft = activeAnnotationAnchorPosition.left - activeCanvasPopupWidth - 10;
     const usePreferredSide = preferredLeft + activeCanvasPopupWidth <= stageSize.width - 8;
-    const left = Math.max(
-      8,
-      Math.min(
-        usePreferredSide ? preferredLeft : fallbackLeft,
-        Math.max(8, stageSize.width - activeCanvasPopupWidth - 8)
-      )
-    );
-    const preferredTop = activeAnnotationAnchorPosition.top - 8;
-    const top = Math.max(8, Math.min(preferredTop, Math.max(8, stageSize.height - 240)));
+    const left = Math.max(8, Math.min(usePreferredSide ? preferredLeft : fallbackLeft, Math.max(8, stageSize.width - activeCanvasPopupWidth - 8)));
+    const top = Math.max(8, Math.min(activeAnnotationAnchorPosition.top - 8, Math.max(8, stageSize.height - 240)));
     return { left, top, width: activeCanvasPopupWidth, side: usePreferredSide ? "right" : "left" as const };
-  }, [
-    MARKER_SIZE,
-    activeAnnotationAnchorPosition,
-    activePopoverLayout?.placed,
-    activeCanvasPopupWidth,
-    canvasPopoverAnnotation,
-    drawerOpen,
-    stageSize.height,
-    stageSize.width,
-  ]);
+  }, [activeAnnotationAnchorPosition, activePopoverLayout?.placed, activeCanvasPopupWidth, canvasPopoverAnnotation, drawerOpen, stageSize.height, stageSize.width]);
 
   return (
     <View style={[styles.annotationCard, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
-      <Text style={[styles.annotationIntro, { color: palette.text }]}>
-        Upload a pavement photo, then place compact markers from the right-side label drawer in the fullscreen editor.
-      </Text>
-      {imageName ? (
-        <Text style={[styles.annotationSubtle, { color: palette.muted }]}>Using latest section photo: {imageName}</Text>
-      ) : (
-        <Text style={[styles.annotationSubtle, { color: palette.muted }]}>Upload a section photo first to unlock the fullscreen annotation editor.</Text>
-      )}
-
+      <Text style={[styles.annotationIntro, { color: palette.text }]}>Upload a pavement photo, then draw point, line, or polyline annotations in the fullscreen editor.</Text>
+      {imageName ? <Text style={[styles.annotationSubtle, { color: palette.muted }]}>Using latest section photo: {imageName}</Text> : <Text style={[styles.annotationSubtle, { color: palette.muted }]}>Upload a section photo first to unlock the fullscreen annotation editor.</Text>}
       <View style={styles.annotationToolbar}>
-        <Pressable
-          style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]}
-          onPress={onUploadPhoto}
-          disabled={!canEdit || busy}
-        >
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>
-            {busy ? "Working..." : imageSource ? "Upload Another Photo" : "Upload Photo"}
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]}
-          onPress={() => {
-            setEditorOpen(true);
-            if (!activeAnnotation) setActiveAnnotation("crack");
-          }}
-          disabled={busy}
-        >
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>Open Full Screen Editor</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]}
-          onPress={resetPositions}
-          disabled={!canEdit || busy}
-        >
-          <Text style={[styles.btnGhostText, { color: palette.text }]}>Reset Placed Marker Positions</Text>
-        </Pressable>
+        <Pressable style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]} onPress={onUploadPhoto} disabled={!canEdit || busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>{busy ? "Working..." : imageSource ? "Upload Another Photo" : "Upload Photo"}</Text></Pressable>
+        <Pressable style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]} onPress={() => { setEditorOpen(true); if (!activeAnnotation) setActiveAnnotation("crack"); }} disabled={busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>Open Full Screen Editor</Text></Pressable>
+        <Pressable style={[styles.btnGhost, styles.annotationToolbarButton, { borderColor: palette.border, backgroundColor: palette.panel }]} onPress={resetPositions} disabled={!canEdit || busy}><Text style={[styles.btnGhostText, { color: palette.text }]}>Reset Placed Marker Positions</Text></Pressable>
       </View>
-
       {imageSource ? (
-        <Pressable
-          style={[styles.annotationPreviewShell, { borderColor: palette.border, backgroundColor: palette.panel }]}
-          onPress={() => setEditorOpen(true)}
-        >
-          <Image
-            source={imageSource}
-            style={styles.annotationPreviewImage}
-            resizeMode="cover"
-            onLoad={(event) => {
-              const source = event.nativeEvent.source;
-              if (source?.width && source?.height) {
-                setImageAspectRatio(source.width / source.height);
-              }
-            }}
-          />
-          <View style={styles.annotationPreviewOverlay}>
-            <Text style={styles.annotationPreviewOverlayText}>
-              {placedCount ? `${placedCount} marker${placedCount === 1 ? "" : "s"} placed` : "Open Full Screen Editor"}
-            </Text>
-          </View>
+        <Pressable style={[styles.annotationPreviewShell, { borderColor: palette.border, backgroundColor: palette.panel }]} onPress={() => setEditorOpen(true)}>
+          <Image source={imageSource} style={styles.annotationPreviewImage} resizeMode="cover" onLoad={(event) => { const source = event.nativeEvent.source; if (source?.width && source?.height) setImageAspectRatio(source.width / source.height); }} />
+          <View style={styles.annotationPreviewOverlay}><Text style={styles.annotationPreviewOverlayText}>{placedCount ? `${placedCount} annotation${placedCount === 1 ? "" : "s"} placed` : "Open Full Screen Editor"}</Text></View>
         </Pressable>
       ) : (
-        <View style={[styles.annotationEmptyState, { borderColor: palette.border, backgroundColor: palette.panel }]}>
-          <Text style={[styles.annotationEmptyTitle, { color: palette.text }]}>No pavement photo yet</Text>
-          <Text style={[styles.annotationSubtle, { color: palette.muted }]}>
-            Upload a picture for this section to start dropping markers onto the image.
-          </Text>
-        </View>
+        <View style={[styles.annotationEmptyState, { borderColor: palette.border, backgroundColor: palette.panel }]}><Text style={[styles.annotationEmptyTitle, { color: palette.text }]}>No pavement photo yet</Text><Text style={[styles.annotationSubtle, { color: palette.muted }]}>Upload a picture for this section to start drawing annotations.</Text></View>
       )}
-
-      <View style={styles.annotationSummaryList}>
-        {annotationRows.map((item) => (
-          <Pressable
-            key={`summary-${item.id}`}
-            style={[styles.annotationSummaryRow, { borderColor: palette.border, backgroundColor: palette.panel }]}
-            onPress={() => {
-              setActiveAnnotation(item.id);
-              setEditorOpen(true);
-            }}
-          >
-            <View
-              style={[
-                styles.annotationSummaryDot,
-                { backgroundColor: item.placed ? palette.primary : palette.border },
-              ]}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.annotationSummaryTitle, { color: palette.text }]}>{item.title}</Text>
-              <Text style={[styles.annotationSummaryText, { color: palette.muted }]}>{item.longSummary}</Text>
-            </View>
-            <Text style={[styles.annotationSummaryAction, { color: palette.primary }]}>
-              {item.placed ? "Placed" : "Place"}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <View style={styles.annotationSummaryList}>{annotationRows.map((item) => <Pressable key={`summary-${item.id}`} style={[styles.annotationSummaryRow, { borderColor: palette.border, backgroundColor: palette.panel }]} onPress={() => { setActiveAnnotation(item.id); setEditorOpen(true); }}><View style={[styles.annotationSummaryDot, { backgroundColor: item.placed ? palette.primary : palette.border }]} /><View style={{ flex: 1 }}><Text style={[styles.annotationSummaryTitle, { color: palette.text }]}>{item.title}</Text><Text style={[styles.annotationSummaryText, { color: palette.muted }]}>{item.longSummary}</Text></View><Text style={[styles.annotationSummaryAction, { color: palette.primary }]}>{item.placed ? "Placed" : "Place"}</Text></Pressable>)}</View>
 
       <Modal visible={editorOpen} animationType="slide" onRequestClose={() => setEditorOpen(false)}>
         <View style={[styles.annotationEditorScreen, { backgroundColor: "#091321" }]}>
-          <View style={styles.annotationEditorTopBar}>
-            <Text style={styles.annotationEditorTitle}>Pavement Photo Editor</Text>
-            <View style={styles.annotationEditorTopBarSpacer} />
-            <View style={styles.annotationEditorHeaderActions}>
-              <Pressable
-                style={[
-                  styles.annotationEditorCloseBtn,
-                  styles.annotationEditorHeaderBtn,
-                  drawerOpen ? styles.annotationEditorDrawerToggleBtnActive : null,
-                ]}
-                onPress={() => setDrawerOpen((current) => !current)}
-              >
-                <Text style={styles.annotationEditorCloseText}>{drawerOpen ? "Hide Labels" : "Show Labels"}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.annotationEditorCloseBtn, styles.annotationEditorHeaderBtn]}
-                onPress={() => setEditorOpen(false)}
-              >
-                <Text style={styles.annotationEditorCloseText}>Done</Text>
-              </Pressable>
-            </View>
-          </View>
-
+          <View style={styles.annotationEditorTopBar}><Text style={styles.annotationEditorTitle}>Pavement Photo Editor</Text><View style={styles.annotationEditorTopBarSpacer} /><View style={styles.annotationEditorHeaderActions}><Pressable style={[styles.annotationEditorCloseBtn, styles.annotationEditorHeaderBtn, drawerOpen ? styles.annotationEditorDrawerToggleBtnActive : null]} onPress={() => setDrawerOpen((current) => !current)}><Text style={styles.annotationEditorCloseText}>{drawerOpen ? "Hide Controls" : `Layers ${visibleLayerCount}/4`}</Text></Pressable><Pressable style={[styles.annotationEditorCloseBtn, styles.annotationEditorHeaderBtn]} onPress={() => setEditorOpen(false)}><Text style={styles.annotationEditorCloseText}>Done</Text></Pressable></View></View>
           <View style={styles.annotationEditorBody}>
             <View style={styles.annotationEditorCanvasArea} onLayout={(event) => setStageAreaSize(event.nativeEvent.layout)}>
               {imageSource ? (
-                <View
-                  ref={stageRef}
-                  collapsable={false}
-                  onLayout={refreshStageBounds}
-                  style={[
-                    styles.annotationEditorStage,
-                    {
-                      width: stageSize.width || 0,
-                      height: stageSize.height || 0,
-                    },
-                  ]}
-                >
+                <View ref={stageRef} collapsable={false} onLayout={refreshStageBounds} style={[styles.annotationEditorStage, { width: stageSize.width || 0, height: stageSize.height || 0 }]}>
                   <Image source={imageSource} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-                  {annotationRows
-                    .filter((item) => item.placed)
-                    .map((item) => {
-                      const layout = annotationLayout[item.id];
-                      const anchorLeft =
-                        markerDrag?.id === item.id && markerDrag.handle === "anchor"
-                          ? markerDrag.left
-                          : layout.x * markerStageBounds.maxLeft;
-                      const anchorTop =
-                        markerDrag?.id === item.id && markerDrag.handle === "anchor"
-                          ? markerDrag.top
-                          : layout.y * markerStageBounds.maxTop;
-                      const rangeEndPosition =
-                        markerDrag?.id === item.id && markerDrag.handle === "rangeEnd"
-                          ? { left: markerDrag.left, top: markerDrag.top }
-                          : getLayoutPosition(layout.rangeEnd);
-                      const lineStartX = anchorLeft + MARKER_SIZE / 2;
-                      const lineStartY = anchorTop + MARKER_SIZE / 2;
-                      const lineEndX = rangeEndPosition ? rangeEndPosition.left + MARKER_SIZE / 2 : null;
-                      const lineEndY = rangeEndPosition ? rangeEndPosition.top + MARKER_SIZE / 2 : null;
-                      const lineDeltaX = lineEndX != null ? lineEndX - lineStartX : 0;
-                      const lineDeltaY = lineEndY != null ? lineEndY - lineStartY : 0;
-                      const lineLength = Math.sqrt(lineDeltaX * lineDeltaX + lineDeltaY * lineDeltaY);
-                      const lineAngle = Math.atan2(lineDeltaY, lineDeltaX);
-                      const lineCenterX = rangeEndPosition && lineEndX != null ? (lineStartX + lineEndX) / 2 : 0;
-                      const lineCenterY = rangeEndPosition && lineEndY != null ? (lineStartY + lineEndY) / 2 : 0;
-                      return (
-                        <View key={`marker-${item.id}`}>
-                          {rangeEndPosition && lineEndX != null && lineEndY != null ? (
-                            <View
-                              pointerEvents="none"
-                              style={[
-                                styles.annotationRangeLine,
-                                {
-                                  left: lineCenterX - lineLength / 2,
-                                  top: lineCenterY - 1,
-                                  width: lineLength,
-                                  transform: [{ rotateZ: `${lineAngle}rad` }],
-                                  backgroundColor: activeAnnotation === item.id ? "#f8fbff" : "rgba(248,251,255,0.86)",
-                                },
-                              ]}
-                            >
-                              <View
-                                style={[
-                                  styles.annotationRangeCap,
-                                  { backgroundColor: activeAnnotation === item.id ? "#f8fbff" : "rgba(248,251,255,0.86)" },
-                                ]}
-                              />
-                              <View
-                                style={[
-                                  styles.annotationRangeCap,
-                                  styles.annotationRangeCapEnd,
-                                  { backgroundColor: activeAnnotation === item.id ? "#f8fbff" : "rgba(248,251,255,0.86)" },
-                                ]}
-                              />
-                            </View>
-                          ) : null}
-                          <PavementCanvasMarker
-                            id={item.id}
-                            glyph={glyphForAnnotation(item.id)}
-                            left={anchorLeft}
-                            top={anchorTop}
-                          active={activeAnnotation === item.id}
-                          editable={canEdit}
-                          palette={palette}
-                          onSelect={selectAnnotationFromCanvas}
-                          onDragStart={beginMarkerDrag}
-                          onDragMove={moveMarkerDrag}
-                          onDragEnd={endMarkerDrag}
-                          />
-                          {rangeEndPosition ? (
-                            <PavementCanvasMarker
-                              id={item.id}
-                              glyph=""
-                              left={rangeEndPosition.left}
-                              top={rangeEndPosition.top}
-                              active={activeAnnotation === item.id}
-                              editable={canEdit}
-                              variant="rangeEnd"
-                              palette={palette}
-                              onSelect={selectAnnotationFromCanvas}
-                              onDragStart={beginMarkerDrag}
-                              onDragMove={moveMarkerDrag}
-                              onDragEnd={endMarkerDrag}
-                            />
-                          ) : null}
-                        </View>
-                      );
-                    })}
-                  {activeCanvasPopupStyle ? (
-                    <View style={styles.annotationCanvasPopoverLayer}>
-                      <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setCanvasPopoverAnnotation(null)} />
-                      <Pressable
-                        style={[
-                          styles.annotationCanvasPopover,
-                          {
-                            left: activeCanvasPopupStyle.left,
-                            top: activeCanvasPopupStyle.top,
-                            width: activeCanvasPopupStyle.width,
-                            borderColor: palette.border,
-                            backgroundColor: "rgba(9,19,33,0.94)",
-                          },
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.annotationCanvasPopoverArrow,
-                            activeCanvasPopupStyle.side === "left" ? styles.annotationCanvasPopoverArrowLeft : styles.annotationCanvasPopoverArrowRight,
-                            activeCanvasPopupStyle.side === "left"
-                              ? { borderLeftColor: "rgba(9,19,33,0.94)" }
-                              : { borderRightColor: "rgba(9,19,33,0.94)" },
-                          ]}
-                        />
-                        <View style={styles.annotationCanvasPopoverHeader}>
-                          <Text style={styles.annotationCanvasPopoverHeaderTitle}>
-                            {canvasPopoverAnnotation ? PAVEMENT_ANNOTATION_TITLES[canvasPopoverAnnotation] : ""}
-                          </Text>
-                          <Pressable style={styles.annotationCanvasPopoverCloseBtn} onPress={() => setCanvasPopoverAnnotation(null)}>
-                            <Text style={styles.annotationCanvasPopoverCloseText}>X</Text>
-                          </Pressable>
-                        </View>
-                        <ScrollView
-                          style={styles.annotationCanvasPopoverScroll}
-                          contentContainerStyle={styles.annotationCanvasPopoverScrollContent}
-                          keyboardShouldPersistTaps="handled"
-                        >
-                          {renderAnnotationFields("popover")}
-                        </ScrollView>
-                      </Pressable>
-                    </View>
-                  ) : null}
+                  {annotationRows.filter((item) => item.placed && visibleLayers[item.id]).map((item) => {
+                    const layout = annotationLayout[item.id];
+                    const anchorPosition = markerDrag?.id === item.id && markerDrag.handle === "anchor" ? { left: markerDrag.left, top: markerDrag.top } : { left: layout.x * markerStageBounds.maxLeft, top: layout.y * markerStageBounds.maxTop };
+                    const vertexPositions = layout.vertices.map((vertex, vertexIndex) => markerDrag?.id === item.id && markerDrag.handle === vertexIndex ? { left: markerDrag.left, top: markerDrag.top } : getLayoutPosition(vertex)).filter((point): point is { left: number; top: number } => !!point);
+                    const positions = [anchorPosition, ...vertexPositions];
+                    const selected = activeAnnotation === item.id;
+                    const showVertices = selected || positions.length === 1;
+                    return (
+                      <View key={`marker-${item.id}`}>
+                        {positions.slice(0, -1).map((start, segmentIndex) => {
+                          const end = positions[segmentIndex + 1];
+                          const startX = start.left + MARKER_SIZE / 2;
+                          const startY = start.top + MARKER_SIZE / 2;
+                          const endX = end.left + MARKER_SIZE / 2;
+                          const endY = end.top + MARKER_SIZE / 2;
+                          const dx = endX - startX;
+                          const dy = endY - startY;
+                          const length = Math.sqrt(dx * dx + dy * dy);
+                          const angle = Math.atan2(dy, dx);
+                          const centerX = (startX + endX) / 2;
+                          const centerY = (startY + endY) / 2;
+                          return <Pressable key={`segment-${item.id}-${segmentIndex}`} onPress={() => selectAnnotationFromCanvas(item.id)} style={{ position: "absolute", left: centerX - length / 2, top: centerY - 11, width: length, height: 22, transform: [{ rotateZ: `${angle}rad` }], justifyContent: "center", zIndex: 1 }}><View pointerEvents="none" style={{ width: "100%", height: selected ? 3 : 2, borderRadius: 999, backgroundColor: selected ? "#f8fbff" : "rgba(248,251,255,0.88)" }} /></Pressable>;
+                        })}
+                        {showVertices ? <PavementCanvasMarker id={item.id} glyph={glyphForAnnotation(item.id)} left={anchorPosition.left} top={anchorPosition.top} active={selected} editable={canEdit} handle="anchor" palette={palette} onSelect={selectAnnotationFromCanvas} onDragStart={beginMarkerDrag} onDragMove={moveMarkerDrag} onDragEnd={endMarkerDrag} /> : null}
+                        {selected ? vertexPositions.map((position, vertexIndex) => <PavementCanvasMarker key={`vertex-${item.id}-${vertexIndex}`} id={item.id} glyph="" left={position.left} top={position.top} active={selected} editable={canEdit} handle={vertexIndex} palette={palette} onSelect={selectAnnotationFromCanvas} onDragStart={beginMarkerDrag} onDragMove={moveMarkerDrag} onDragEnd={endMarkerDrag} />) : null}
+                      </View>
+                    );
+                  })}
+                  {activeCanvasPopupStyle ? <View style={styles.annotationCanvasPopoverLayer}><Pressable style={StyleSheet.absoluteFillObject} onPress={() => setCanvasPopoverAnnotation(null)} /><Pressable style={[styles.annotationCanvasPopover, { left: activeCanvasPopupStyle.left, top: activeCanvasPopupStyle.top, width: activeCanvasPopupStyle.width, borderColor: palette.border, backgroundColor: "rgba(9,19,33,0.94)" }]}><View style={[styles.annotationCanvasPopoverArrow, activeCanvasPopupStyle.side === "left" ? styles.annotationCanvasPopoverArrowLeft : styles.annotationCanvasPopoverArrowRight, activeCanvasPopupStyle.side === "left" ? { borderLeftColor: "rgba(9,19,33,0.94)" } : { borderRightColor: "rgba(9,19,33,0.94)" }]} /><View style={styles.annotationCanvasPopoverHeader}><Text style={styles.annotationCanvasPopoverHeaderTitle}>{canvasPopoverAnnotation ? PAVEMENT_ANNOTATION_TITLES[canvasPopoverAnnotation] : ""}</Text><Pressable style={styles.annotationCanvasPopoverCloseBtn} onPress={() => setCanvasPopoverAnnotation(null)}><Text style={styles.annotationCanvasPopoverCloseText}>X</Text></Pressable></View><ScrollView style={styles.annotationCanvasPopoverScroll} contentContainerStyle={styles.annotationCanvasPopoverScrollContent} keyboardShouldPersistTaps="handled">{renderAnnotationFields("popover")}</ScrollView></Pressable></View> : null}
                 </View>
-              ) : (
-                <View style={styles.annotationEditorEmpty}>
-                  <Text style={styles.annotationEditorEmptyTitle}>Upload a section photo to annotate</Text>
-                  <Text style={styles.annotationEditorEmptyText}>Once a photo is attached, this editor stays clean and only shows compact markers that you place.</Text>
-                  <Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary, minWidth: 180 }]} onPress={onUploadPhoto} disabled={!canEdit || busy}>
-                    <Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Upload Photo"}</Text>
-                  </Pressable>
-                </View>
-              )}
+              ) : <View style={styles.annotationEditorEmpty}><Text style={styles.annotationEditorEmptyTitle}>Upload a section photo to annotate</Text><Text style={styles.annotationEditorEmptyText}>Once a photo is attached, draw point, line, and polyline annotations over it.</Text><Pressable style={[styles.btnPrimary, { backgroundColor: palette.primary, minWidth: 180 }]} onPress={onUploadPhoto} disabled={!canEdit || busy}><Text style={styles.btnPrimaryText}>{busy ? "Working..." : "Upload Photo"}</Text></Pressable></View>}
             </View>
-
-            <Animated.View
-              pointerEvents={drawerOpen ? "auto" : "none"}
-              style={[
-                styles.annotationEditorDrawer,
-                {
-                  transform: [{ translateX: drawerTranslateX }],
-                  width: drawerWidth,
-                  borderColor: palette.border,
-                  backgroundColor: palette.panelSoft,
-                },
-              ]}
-            >
-              <Text style={[styles.annotationEditorDrawerTitle, { color: palette.text }]}>Labels</Text>
-              <Text style={[styles.annotationEditorDrawerHelp, { color: palette.muted }]}>
-                Swipe a label left onto the photo. Tap a label or marker any time to reopen its detail form.
-              </Text>
-              <ScrollView
-                style={styles.annotationEditorDrawerScroll}
-                contentContainerStyle={styles.annotationEditorDrawerScrollContent}
-                scrollEnabled={!drawerDrag}
-                keyboardShouldPersistTaps="handled"
-              >
-                {annotationRows.map((item) => (
-                  <PavementDrawerToken
-                    key={`drawer-${item.id}`}
-                    id={item.id}
-                    title={item.title}
-                    summary={item.longSummary}
-                    placed={item.placed}
-                    active={activeAnnotation === item.id}
-                    editable={canEdit}
-                    palette={palette}
-                    onSelect={selectAnnotationFromDrawer}
-                    onDragStart={beginDrawerDrag}
-                    onDragMove={moveDrawerDrag}
-                    onDragEnd={endDrawerDrag}
-                  />
-                ))}
-
-                <View style={[styles.annotationEditorDetailPanel, { borderColor: palette.border, backgroundColor: palette.panel }]}>
-                  {renderAnnotationFields()}
-                </View>
+            <Animated.View pointerEvents={drawerOpen ? "auto" : "none"} style={[styles.annotationEditorDrawer, { transform: [{ translateX: drawerTranslateX }], width: drawerWidth, borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+              <Text style={[styles.annotationEditorDrawerTitle, { color: palette.text }]}>Layers</Text>
+              <Text style={[styles.annotationEditorDrawerHelp, { color: palette.muted }]}>Hide or show each pavement condition without changing its saved assessment data.</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10, marginBottom: 8 }}>{annotationRows.map((item) => <Pressable key={`layer-${item.id}`} onPress={() => toggleLayer(item.id)} style={{ borderWidth: 1, borderColor: visibleLayers[item.id] ? palette.primary : palette.border, backgroundColor: visibleLayers[item.id] ? palette.panel : "rgba(255,255,255,0.03)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 }}><Text style={{ color: visibleLayers[item.id] ? palette.text : palette.muted, fontSize: 11, fontWeight: "800" }}>{visibleLayers[item.id] ? "ON" : "OFF"} · {item.title}</Text></Pressable>)}</View>
+              <Text style={[styles.annotationEditorDrawerTitle, { color: palette.text, marginTop: 4 }]}>Annotations</Text>
+              <Text style={[styles.annotationEditorDrawerHelp, { color: palette.muted }]}>Swipe a label onto the photo to place it. Add a line, then keep adding vertices to make a polyline. Tap any line to reveal its vertices.</Text>
+              <ScrollView style={styles.annotationEditorDrawerScroll} contentContainerStyle={styles.annotationEditorDrawerScrollContent} scrollEnabled={!drawerDrag} keyboardShouldPersistTaps="handled">
+                {annotationRows.map((item) => <PavementDrawerToken key={`drawer-${item.id}`} id={item.id} title={item.title} summary={item.longSummary} placed={item.placed} active={activeAnnotation === item.id} editable={canEdit} palette={palette} onSelect={selectAnnotationFromDrawer} onDragStart={beginDrawerDrag} onDragMove={moveDrawerDrag} onDragEnd={endDrawerDrag} />)}
+                <View style={[styles.annotationEditorDetailPanel, { borderColor: palette.border, backgroundColor: palette.panel }]}>{renderAnnotationFields()}</View>
               </ScrollView>
             </Animated.View>
           </View>
-
-          {drawerDrag ? (
-            <View
-              pointerEvents="none"
-              style={[
-                styles.annotationDragGhost,
-                {
-                  left: drawerDrag.x - 60,
-                  top: drawerDrag.y - 22,
-                },
-              ]}
-            >
-              <Text style={styles.annotationDragGhostText}>{PAVEMENT_ANNOTATION_TITLES[drawerDrag.id]}</Text>
-            </View>
-          ) : null}
+          {drawerDrag ? <View pointerEvents="none" style={[styles.annotationDragGhost, { left: drawerDrag.x - 60, top: drawerDrag.y - 22 }]}><Text style={styles.annotationDragGhostText}>{PAVEMENT_ANNOTATION_TITLES[drawerDrag.id]}</Text></View> : null}
         </View>
       </Modal>
     </View>
