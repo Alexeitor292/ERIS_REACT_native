@@ -103,12 +103,13 @@ class Settings(BaseSettings):
         default="https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
     )
     OFFLINE_SCENE_3DEP_DATASET: str = Field(default="USGS 3DEP (3DEPElevation ImageServer)")
-    OFFLINE_SCENE_EXPORT_PX: int = Field(default=1024)  # hillshade texture px
-    OFFLINE_SCENE_GRID_PX: int = Field(default=256)      # terrain height-grid dimension
+    # Retained for configuration compatibility with older workers. Exact local
+    # hillshade now matches OFFLINE_SCENE_GRID_PX and does not use a separate export.
+    OFFLINE_SCENE_EXPORT_PX: int = Field(default=1024)
+    OFFLINE_SCENE_GRID_PX: int = Field(default=256)      # terrain + hillshade dimensions
     OFFLINE_SCENE_FETCH_TIMEOUT_S: int = Field(default=60)
-    # Basemap/imagery provider for the generated package. "usgs_hillshade" is the
-    # licence-clean default (server-rendered hillshade from USGS 3DEP). A licensed
-    # offline imagery provider can be added later without redesigning the pipeline.
+    # Basemap/imagery provider for the generated package. "usgs_hillshade" means a
+    # licence-clean hillshade derived locally from the verified USGS 3DEP DEM.
     OFFLINE_SCENE_IMAGERY_PROVIDER: str = Field(default="usgs_hillshade")
 
     # --- Offline context layers (roads / imagery / overview) --------------------

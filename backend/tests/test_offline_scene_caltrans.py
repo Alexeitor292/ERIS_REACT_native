@@ -923,20 +923,83 @@ class TestRoadContentSignature:
         registration — and two runs whose road output differs must differ."""
         import numpy as np
 
+        from app.services import offline_scene_dem as dem_fmt
         from app.services import offline_scene_terrain as terrain_fmt
 
         _caltrans_settings(monkeypatch)
         heights = np.full((8, 8), 100.0, dtype="float32")
         grid, _stats = terrain_fmt.encode_height_grid(heights)
 
+        # This test exercises road-signature finalization, not DEM acquisition.
+        # Supply the complete verification record now required by build_package
+        # rather than weakening the production fail-closed boundary.
+        pixel_width = (
+            BOUNDS["max_lon"] - BOUNDS["min_lon"]
+        ) / 8
+        pixel_height = (
+            BOUNDS["max_lat"] - BOUNDS["min_lat"]
+        ) / 8
+        sample_bounds = dem_fmt.sample_center_bounds(
+            BOUNDS,
+            pixel_width_deg=pixel_width,
+            pixel_height_deg=pixel_height,
+        )
+
+        dem_verification = {
+            "export_contract": dem_fmt.DEM_EXPORT_CONTRACT,
+            "adjust_aspect_ratio": False,
+            "extent_verified": True,
+            "raster_verified": True,
+            "raster_transform_verified": True,
+            "raster_crs_wkid": 4326,
+            "requested_width_px": 8,
+            "requested_height_px": 8,
+            "returned_width_px": 8,
+            "returned_height_px": 8,
+            "raster_width_px": 8,
+            "raster_height_px": 8,
+            "extent_max_delta_deg": 0.0,
+            "extent_tolerance_deg": dem_fmt.DEM_EXTENT_TOLERANCE_DEG,
+            "raster_bounds_max_delta_deg": 0.0,
+            "raster_pixel_size_max_delta_deg": 0.0,
+            "raster_pixel_width_deg": pixel_width,
+            "raster_pixel_height_deg": pixel_height,
+            "requested_bounds": dict(BOUNDS),
+            "returned_bounds": dict(BOUNDS),
+            "raster_bounds": dict(BOUNDS),
+            "raster_sample_bounds": sample_bounds,
+        }
+        assert dem_fmt.verification_ok(dem_verification)
+
         def _run(session):
             ctx = _ctx()
             ctx["content_signature"] = "base-sig"
             b = _builder(session)
-            monkeypatch.setattr(terrain_fmt, "decode_dem_tiff", lambda *a, **k: heights)
-            pkg = b.build_package(ctx, {"dem_bytes": b"x", "hillshade_bytes": b"", "usgs_meta": {}, "basemap_meta": {}})
-            m = json.loads(zipfile.ZipFile(io.BytesIO(pkg)).read("manifest.json"))
-            return ctx["content_signature"], m["content_signature"], m["context_layers"]["roads"]
+            monkeypatch.setattr(
+                terrain_fmt,
+                "decode_dem_tiff",
+                lambda *a, **k: heights,
+            )
+            pkg = b.build_package(
+                ctx,
+                {
+                    "dem_bytes": b"x",
+                    "dem_verification": dict(dem_verification),
+                    "hillshade_bytes": b"",
+                    "usgs_meta": {},
+                    "basemap_meta": {},
+                },
+            )
+            m = json.loads(
+                zipfile.ZipFile(
+                    io.BytesIO(pkg)
+                ).read("manifest.json")
+            )
+            return (
+                ctx["content_signature"],
+                m["content_signature"],
+                m["context_layers"]["roads"],
+            )
 
         ctx_sig, manifest_sig, roads = _run(PagingSession([gj_feat(1, "SHS_050._P", 1, IN_A)]))
         assert ctx_sig == manifest_sig != "base-sig"   # finalized, and shared with the catalog

@@ -77,6 +77,20 @@ def _imagery_content_identity() -> str:
     return f"single_unverified_extent:{mode or 'single'}"
 
 
+def _terrain_content_identity() -> str:
+    """Terrain-generation contracts folded into package content identity.
+
+    Both the verified DEM georeferencing contract and the local hillshade
+    algorithm affect packaged bytes. Changing either must invalidate stale
+    packages already held by a device.
+    """
+
+    from ..services import offline_scene_dem as dem
+    from ..services import offline_scene_terrain as terrain
+
+    return f"{dem.DEM_EXPORT_CONTRACT}:{terrain.HILLSHADE_ALGORITHM}"
+
+
 def _build_context(db: Session, job: dict) -> dict:
     """Assemble the build context (AOI + overlays + provenance signature) from the
     submission's GISA data. Overlays are drawn from real ERIS data only."""
@@ -125,6 +139,7 @@ def _build_context(db: Session, job: dict) -> dict:
         road_provider=road_provider,
         road_filter_version=road_filter_version,
         imagery_export_contract=_imagery_content_identity(),
+        terrain_export_contract=_terrain_content_identity(),
     )
     version = "g" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + f"-{job['id']}"
     return {
