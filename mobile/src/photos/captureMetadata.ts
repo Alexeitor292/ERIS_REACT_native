@@ -14,16 +14,22 @@ export type PhotoCaptureMetadata = {
   provenance?: { asset_id?: string | null; exif_tags_present?: string[] } | null;
 };
 
+export type CameraDirectionSnapshot = {
+  heading: number;
+  accuracyCode: number;
+  reference: "TRUE_NORTH";
+};
+
 export type DeviceCaptureSnapshot = {
   capturedAt: string;
   position: Location.LocationObject | null;
-  heading: Location.LocationHeadingObject | null;
+  cameraDirection: CameraDirectionSnapshot | null;
 };
 
 type AssetLike = { assetId?: string | null; exif?: Record<string, unknown> | null };
 
 export const MAX_MAPPED_PHOTO_ACCURACY_M = 20;
-export const MIN_MAPPED_HEADING_ACCURACY_CODE = 3;
+export const MIN_MAPPED_HEADING_ACCURACY_CODE = 2;
 
 const finite = (value: unknown): number | null => {
   if (value == null || value === "") return null;
@@ -67,14 +73,10 @@ export function photoCaptureMetadataFromAsset(asset: AssetLike): PhotoCaptureMet
   const validCoordinates =
     latitude != null && longitude != null &&
     latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
-  // EXIF GPS without an uncertainty radius is not strong enough to place field
-  // evidence. Keep the tags as provenance, but do not invent confidence.
   const validLocation =
     validCoordinates && horizontalAccuracy != null &&
     horizontalAccuracy >= 0 && horizontalAccuracy <= MAX_MAPPED_PHOTO_ACCURACY_M;
 
-  // GPSImgDirection has no accuracy estimate. For the evidence map, direction is
-  // therefore sourced from the live, quality-gated true-north device reading.
   const tags = [
     "GPSLatitude", "GPSLongitude", "GPSHPositioningError", "GPSAltitude",
     "GPSImgDirection", "GPSImgDirectionRef", "DateTimeOriginal",
@@ -106,13 +108,16 @@ export function photoCaptureMetadataFromDeviceSnapshot(
       ? snapshot.position
       : null;
 
-  const reliableTrueHeading =
-    snapshot.heading && snapshot.heading.trueHeading >= 0 &&
-    snapshot.heading.accuracy >= MIN_MAPPED_HEADING_ACCURACY_CODE
-      ? normalizePhotoHeading(snapshot.heading.trueHeading)
+  const direction = snapshot.cameraDirection;
+  const reliableHeading =
+    direction &&
+    direction.reference === "TRUE_NORTH" &&
+    Number.isFinite(direction.accuracyCode) &&
+    direction.accuracyCode >= MIN_MAPPED_HEADING_ACCURACY_CODE
+      ? normalizePhotoHeading(direction.heading)
       : null;
 
-  if (!reliablePosition && reliableTrueHeading == null) return null;
+  if (!reliablePosition && reliableHeading == null) return null;
 
   return {
     captured_at: snapshot.capturedAt,
@@ -120,14 +125,14 @@ export function photoCaptureMetadataFromDeviceSnapshot(
     longitude: reliablePosition?.coords.longitude ?? null,
     horizontal_accuracy_m: reliablePosition ? positionAccuracy : null,
     altitude_m: reliablePosition?.coords.altitude ?? null,
-    camera_heading_deg: reliableTrueHeading,
+    camera_heading_deg: reliableHeading,
     camera_heading_accuracy_code:
-      reliableTrueHeading != null && snapshot.heading
-        ? Math.max(0, Math.min(3, Math.round(snapshot.heading.accuracy)))
+      reliableHeading != null && direction
+        ? Math.max(0, Math.min(3, Math.round(direction.accuracyCode)))
         : null,
-    heading_reference: reliableTrueHeading != null ? "TRUE_NORTH" : null,
+    heading_reference: reliableHeading != null ? "TRUE_NORTH" : null,
     location_source: reliablePosition ? "DEVICE_AT_CAPTURE" : null,
-    heading_source: reliableTrueHeading != null ? "DEVICE_TRUE_HEADING" : null,
+    heading_source: reliableHeading != null ? "DEVICE_TRUE_HEADING" : null,
     provenance: null,
   };
 }
