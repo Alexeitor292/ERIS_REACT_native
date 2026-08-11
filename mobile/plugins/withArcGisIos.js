@@ -8,6 +8,8 @@ const ARC_GIS_POD = "pod 'ArcGIS-Runtime-SDK-iOS', '100.15.6'";
 const IOS_FILES = [
   "ArcGisModule.h",
   "ArcGisModule.m",
+  "ErisCameraDirectionModule.h",
+  "ErisCameraDirectionModule.m",
   "ArcGisPencilSketchViewController.h",
   "ArcGisPencilSketchViewController.m",
   "ArcGisSketchStore.h",
@@ -41,7 +43,6 @@ function patchPodfile(podfileContent) {
   );
 
   if (targetLineIndex === -1) {
-    // Fallback: append to file if target block is not found.
     return `${podfileContent}\n${ARC_GIS_POD}\n`;
   }
 
@@ -101,7 +102,4 @@ module.exports = function withArcGisIos(config) {
   return next;
 };
 
-// The compilable (.m) sources this plugin injects, without extensions. CI asserts each one
-// produced a CompileC line, so a green iOS build can never again mean "compiled something
-// else". Derived from IOS_FILES so the two cannot drift.
 module.exports.__IOS_SOURCES__ = IOS_FILES.filter((f) => f.endsWith(".m")).map((f) => f.slice(0, -2));
