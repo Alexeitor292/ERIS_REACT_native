@@ -17,7 +17,8 @@
     "check:highway-cross-section": "node scripts/check-eris-highway-cross-section-contract.mjs",
     "check:divided-corridor-native": "node scripts/check-eris-divided-corridor-native-contract.mjs",
     "check:cross-section-scale": "node scripts/check-cross-section-scale-contract.mjs",
-    "test": "node scripts/check-arcgis-native-selectors.mjs && node scripts/check-terrain-texcoord-contract.mjs && node scripts/check-terrain-exaggeration-contract.mjs && node scripts/check-terrain-imagery-tiles-contract.mjs && node scripts/check-road-cross-section-contract.mjs && node scripts/check-eris-highway-cross-section-contract.mjs && node scripts/check-eris-divided-corridor-native-contract.mjs && node scripts/check-cross-section-scale-contract.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts src/arcgis/terrainScale.test.ts src/arcgis/terrainSurfacePolicy.test.ts src/arcgis/roadClass.test.ts src/arcgis/corridorModel.test.ts src/arcgis/roadSelection.test.ts src/arcgis/caltransRoads.test.ts src/arcgis/imagerySizing.test.ts src/arcgis/dividedCorridorInspection.test.ts src/arcgis/dividedSectionSampling.test.ts src/arcgis/dividedTerrainRuns.test.ts src/measurements/roadCrossSectionSlice.test.ts src/measurements/roadCrossSectionParity.test.ts src/components/roadCrossSectionSliceModel.test.ts"
+    "test": "node scripts/check-site-photo-map-contract.mjs && node scripts/check-arcgis-native-selectors.mjs && node scripts/check-terrain-texcoord-contract.mjs && node scripts/check-terrain-exaggeration-contract.mjs && node scripts/check-terrain-imagery-tiles-contract.mjs && node scripts/check-road-cross-section-contract.mjs && node scripts/check-eris-highway-cross-section-contract.mjs && node scripts/check-eris-divided-corridor-native-contract.mjs && node scripts/check-cross-section-scale-contract.mjs && node --experimental-strip-types --test src/arcgis/offlineScene.test.ts src/arcgis/eristerrainBundle.test.ts src/arcgis/terrainOverlays.test.ts src/arcgis/terrainScale.test.ts src/arcgis/terrainSurfacePolicy.test.ts src/arcgis/roadClass.test.ts src/arcgis/corridorModel.test.ts src/arcgis/roadSelection.test.ts src/arcgis/caltransRoads.test.ts src/arcgis/imagerySizing.test.ts src/arcgis/dividedCorridorInspection.test.ts src/arcgis/dividedSectionSampling.test.ts src/arcgis/dividedTerrainRuns.test.ts src/measurements/roadCrossSectionSlice.test.ts src/measurements/roadCrossSectionParity.test.ts src/components/roadCrossSectionSliceModel.test.ts",
+    "check:site-photo-map": "node scripts/check-site-photo-map-contract.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -25,6 +26,7 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "expo": "~54.0.33",
+    "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.20",
     "expo-document-picker": "~14.0.7",

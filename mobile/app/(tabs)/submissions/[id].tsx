@@ -9,7 +9,7 @@ import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathnam
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
-import { buildTerrainGrid, fetchElevationProfile, generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaElevationProfile, type GisaRoadInventoryContext, type GisaTerrainGrid } from "../../../src/api/submissions";
+import { buildTerrainGrid, fetchElevationProfile, generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, getSubmissionPhotoMap, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaElevationProfile, type GisaRoadInventoryContext, type GisaTerrainGrid } from "../../../src/api/submissions";
 import { terrainLabel, explainRoadInventoryField } from "../../../src/roadInventory/roadInventoryGlossary";
 import { enqueueOfflineOp } from "../../../src/offline/queue";
 import { triggerOfflineSyncNow } from "../../../src/offline/syncLoop";
@@ -33,6 +33,8 @@ import { buildSubmissionDescriptor } from "../../../src/utils/submissionLabel";
 import { enrichPointFromArcgisClient } from "../../../src/utils/arcgisEnrichment";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../../../src/utils/precision";
 import { prepareUploadFile } from "../../../src/utils/uploadFile";
+import { MappedPhotoCamera, type MappedPhotoCapture } from "../../../src/components/MappedPhotoCamera";
+import { photoCaptureMetadataFromAsset } from "../../../src/photos/captureMetadata";
 import {
   CALTRANS_COUNTIES,
   CALTRANS_DISTRICTS,
@@ -2228,6 +2230,7 @@ export default function SubmissionDetailScreen() {
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>({});
   const [localAttachmentUris, setLocalAttachmentUris] = useState<Record<number, string>>({});
   const [failedPreviewIds, setFailedPreviewIds] = useState<Record<number, boolean>>({});
+  const [mappedCameraRequest, setMappedCameraRequest] = useState<{ sectionKey: string | null } | null>(null);
   const [fullscreenPhoto, setFullscreenPhoto] = useState<{ uri: string; name: string; isLocal: boolean } | null>(null);
   const [figureCitationRequest, setFigureCitationRequest] = useState<FigureCitationRequest | null>(null);
   const [selectedSectionKey, setSelectedSectionKey] = useState<string | null>(null);
@@ -3308,6 +3311,7 @@ export default function SubmissionDetailScreen() {
       result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images", "videos"],
         quality: 0.85,
+        exif: true,
         allowsMultipleSelection: false,
         preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
       });
@@ -3345,12 +3349,13 @@ export default function SubmissionDetailScreen() {
       return;
     }
     const kind = inferAttachmentKind(file.name, file.type);
+    const captureMetadata = kind === "PHOTO" ? photoCaptureMetadataFromAsset(asset) : null;
 
     if (isLocalId) {
       await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
       await enqueueOfflineOp("UPLOAD_ATTACHMENT", {
         submissionId: id,
-        file,
+        file: { ...file, captureMetadata },
         sectionKey: sectionKey ?? null,
         kind,
       });
@@ -3365,7 +3370,7 @@ export default function SubmissionDetailScreen() {
         token,
         id,
         file,
-        { sectionKey: sectionKey ?? null, kind }
+        { sectionKey: sectionKey ?? null, kind, captureMetadata }
       );
       registerLocalAttachmentUri(Number(uploaded?.attachment_id), file.uri);
       await load();
@@ -3469,8 +3474,38 @@ export default function SubmissionDetailScreen() {
     }
   }
 
+  async function handleMappedPhotoCaptured(capture: MappedPhotoCapture) {
+    if (!token || !id) return;
+    const sectionKey = mappedCameraRequest?.sectionKey ?? null;
+    setMappedCameraRequest(null);
+    let file: { uri: string; name: string; type: string };
+    try { file = await prepareUploadFile({ uri: capture.uri, name: capture.name, type: capture.type }); }
+    catch (err: any) { Alert.alert("Photo unavailable", String(err?.message ?? err ?? "Unable to access captured photo.")); return; }
+    const captureMetadata = capture.captureMetadata;
+    if (isLocalId) {
+      await enqueueOfflineOp("CREATE_SUBMISSION_FOR_LOCAL_DRAFT", { localId: id });
+      await enqueueOfflineOp("UPLOAD_ATTACHMENT", { submissionId: id, file: { ...file, captureMetadata }, sectionKey, kind: "PHOTO" });
+      Alert.alert("Photo Queued", "The mapped field photo was saved locally and will upload after sync."); triggerOfflineSyncNow().catch(() => {}); return;
+    }
+    setBusy(true);
+    try {
+      const uploaded = await uploadSubmissionAttachment(token, id, file, { sectionKey, kind: "PHOTO", captureMetadata });
+      registerLocalAttachmentUri(Number(uploaded?.attachment_id), file.uri); await load();
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return; const msg = String(err?.message ?? err ?? "Unable to upload photo.");
+      if (isLikelyOfflineError(msg)) { await enqueueOfflineOp("UPLOAD_ATTACHMENT", { submissionId: id, file: { ...file, captureMetadata }, sectionKey, kind: "PHOTO" }); Alert.alert("Photo Queued", "The mapped field photo will upload automatically when connectivity returns."); triggerOfflineSyncNow().catch(() => {}); return; }
+      Alert.alert("Photo upload failed", msg);
+    } finally { setBusy(false); }
+  }
+
+  async function takeAndUploadPhoto(sectionKey?: string | null) {
+    if (!token || !id) return;
+    setMappedCameraRequest({ sectionKey: sectionKey ?? null });
+  }
+
   function promptUploadSource(sectionKey?: string | null) {
     Alert.alert("Upload Source", "Choose where to pick the file from.", [
+      { text: "Camera", onPress: () => { takeAndUploadPhoto(sectionKey).catch(() => {}); } },
       { text: "Gallery", onPress: () => { pickAndUploadAttachment(sectionKey).catch(() => {}); } },
       { text: "Files (CAD/PDF/etc)", onPress: () => { pickAndUploadDocument(sectionKey).catch(() => {}); } },
       { text: "Cancel", style: "cancel" },
@@ -3789,6 +3824,19 @@ export default function SubmissionDetailScreen() {
       },
     });
   }, [draftEntryStatus, form.latitude, form.longitude, id]);
+
+  const openSitePhotoMap = useCallback(async () => {
+    if (!token || !id) return;
+    if (isLocalId) { Alert.alert("Sync Required", "Sync this local draft before opening its Site Photo Map."); return; }
+    if (Platform.OS !== "ios") { Alert.alert("Unavailable", "The native Site Photo Map is currently available on iOS."); return; }
+    setBusy(true);
+    try {
+      const bridge = await import("../../../src/arcgis/ArcGISNative");
+      if (!bridge.isArcGisNativeAvailable() || !bridge.supportsSitePhotoMap()) { Alert.alert("App Rebuild Required", "This ERIS development client does not contain the Site Photo Map native module yet. Rebuild the EAS development client once."); return; }
+      const payload = await getSubmissionPhotoMap(token, id); await bridge.openSitePhotoMap(payload);
+    } catch (err: any) { if (isSessionExpiredError(err)) return; Alert.alert("Site Photo Map failed", String(err?.message ?? err ?? "Unable to open Site Photo Map.")); }
+    finally { setBusy(false); }
+  }, [id, isLocalId, token]);
 
   const openLocationInGoogleMaps = useCallback(async () => {
     const lat = normalizeCoordinateValue(form.latitude);
@@ -4232,6 +4280,11 @@ export default function SubmissionDetailScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.bg }}>
+    <MappedPhotoCamera
+      visible={mappedCameraRequest !== null}
+      onCancel={() => setMappedCameraRequest(null)}
+      onCaptured={handleMappedPhotoCaptured}
+    />
     <ScrollView
       style={[styles.container, { backgroundColor: palette.bg }]}
       contentInsetAdjustmentBehavior={isIOS ? "automatic" : "never"}
@@ -4407,6 +4460,13 @@ export default function SubmissionDetailScreen() {
           ) : null}
         </ScrollSafePressable>
         <View style={styles.locationActionRow}>
+          <Pressable
+            style={[styles.btnGhost, styles.locationActionButton, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
+            onPress={() => openSitePhotoMap().catch(() => {})}
+            disabled={busy || isLocalId}
+          >
+            <Text style={[styles.btnGhostText, { color: palette.text }]}>Site Photo Map</Text>
+          </Pressable>
           <Pressable
             style={[styles.btnGhost, styles.locationActionButton, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}
             onPress={openLocationInGoogleMaps}

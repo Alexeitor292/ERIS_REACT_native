@@ -2,6 +2,7 @@ import { apiFetch } from "./client";
 import { getApiBaseCandidates, getApiBaseUrl } from "./baseUrl";
 import { prepareUploadFile } from "../utils/uploadFile";
 import type { SceneAreaDescriptor, SceneDownloadGrant, OfflineSceneJob } from "../arcgis/offlineScene";
+import type { PhotoCaptureMetadata } from "../photos/captureMetadata";
 
 export async function getSubmission(token: string, id: string) {
   return apiFetch(`/submissions/${id}`, { token });
@@ -10,8 +11,8 @@ export async function getSubmission(token: string, id: string) {
 export async function uploadSubmissionAttachment(
   token: string,
   submissionId: string,
-  file: { uri: string; name: string; type: string },
-  opts?: { sectionKey?: string | null; kind?: "PHOTO" | "VIDEO" | "DOC" | "SKETCH" }
+  file: { uri: string; name: string; type: string; captureMetadata?: PhotoCaptureMetadata | null },
+  opts?: { sectionKey?: string | null; kind?: "PHOTO" | "VIDEO" | "DOC" | "SKETCH"; captureMetadata?: PhotoCaptureMetadata | null }
 ) {
   const preparedFile = await prepareUploadFile(file);
   const params = new URLSearchParams();
@@ -26,6 +27,8 @@ export async function uploadSubmissionAttachment(
   for (const base of baseCandidates) {
     const formData = new FormData();
     formData.append("file", preparedFile as any);
+    const captureMetadata = opts?.captureMetadata ?? file.captureMetadata ?? null;
+    if (captureMetadata) formData.append("capture_metadata_json", JSON.stringify(captureMetadata));
     try {
       const response = await fetch(`${base}/submissions/${submissionId}/attachments${suffix}`, {
         method: "POST",
@@ -334,4 +337,15 @@ export type GeoEnrichment = {
 export async function enrichPoint(token: string, lat: number, lon: number) {
   const q = `/geo/enrich-point?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}`;
   return apiFetch<GeoEnrichment>(q, { token });
+}
+
+
+export type SitePhotoMapResponse = {
+  submission_id:number; incident_id?:number|null; incident:{latitude?:number|null;longitude?:number|null}; affected_geometry?:unknown|null;
+  summary:{photos_total:number;photos_geotagged:number;photos_with_heading:number;photos_unmapped:number};
+  photos:Array<{attachment_id:number;file_name:string;mime_type:string;section_key?:string|null;source_scope:"SUBMISSION"|"INCIDENT";captured_at?:string|null;latitude?:number|null;longitude?:number|null;horizontal_accuracy_m?:number|null;altitude_m?:number|null;camera_heading_deg?:number|null;camera_heading_accuracy_code?:number|null;heading_reference?:string|null;location_source?:string|null;heading_source?:string|null;download_url?:string|null}>;
+};
+
+export async function getSubmissionPhotoMap(token:string,id:string){
+  return apiFetch<SitePhotoMapResponse>(`/submissions/${id}/photo-map`,{token});
 }

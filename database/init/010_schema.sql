@@ -119,6 +119,34 @@ CREATE TABLE IF NOT EXISTS attachments (
       CHECK (sha256 IS NULL OR CHAR_LENGTH(sha256) = 64)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS attachment_capture_metadata (
+    attachment_id BIGINT PRIMARY KEY,
+    captured_at DATETIME NULL,
+    latitude DECIMAL(10,7) NULL,
+    longitude DECIMAL(10,7) NULL,
+    horizontal_accuracy_m DECIMAL(10,3) NULL,
+    altitude_m DECIMAL(10,3) NULL,
+    camera_heading_deg DECIMAL(7,3) NULL,
+    camera_heading_accuracy_code SMALLINT NULL,
+    heading_reference VARCHAR(24) NULL,
+    location_source VARCHAR(32) NULL,
+    heading_source VARCHAR(32) NULL,
+    metadata_json JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_attachment_capture_metadata_attachment
+      FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE,
+    INDEX idx_attachment_capture_geo (latitude, longitude),
+    CONSTRAINT chk_attachment_capture_lat CHECK (latitude IS NULL OR (latitude >= -90 AND latitude <= 90)),
+    CONSTRAINT chk_attachment_capture_lon CHECK (longitude IS NULL OR (longitude >= -180 AND longitude <= 180)),
+    CONSTRAINT chk_attachment_capture_accuracy CHECK (horizontal_accuracy_m IS NULL OR horizontal_accuracy_m >= 0),
+    CONSTRAINT chk_attachment_capture_heading CHECK (camera_heading_deg IS NULL OR (camera_heading_deg >= 0 AND camera_heading_deg < 360)),
+    CONSTRAINT chk_attachment_capture_heading_accuracy CHECK (camera_heading_accuracy_code IS NULL OR (camera_heading_accuracy_code >= 0 AND camera_heading_accuracy_code <= 3)),
+    CONSTRAINT chk_attachment_capture_heading_ref CHECK (heading_reference IS NULL OR heading_reference IN ('TRUE_NORTH', 'MAGNETIC_NORTH', 'UNKNOWN')),
+    CONSTRAINT chk_attachment_capture_location_source CHECK (location_source IS NULL OR location_source IN ('DEVICE_AT_CAPTURE', 'EXIF_GPS', 'MANUAL', 'UNKNOWN')),
+    CONSTRAINT chk_attachment_capture_heading_source CHECK (heading_source IS NULL OR heading_source IN ('DEVICE_TRUE_HEADING', 'DEVICE_MAGNETIC_HEADING', 'EXIF_GPS_IMG_DIRECTION', 'MANUAL', 'UNKNOWN'))
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS attachment_links (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     submission_id BIGINT NOT NULL,

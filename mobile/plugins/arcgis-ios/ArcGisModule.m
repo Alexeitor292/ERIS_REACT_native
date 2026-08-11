@@ -8,6 +8,7 @@
 #import "ArcGisSketchStore.h"
 #import "ArcGisSketchViewController.h"
 #import "ArcGisMissionCenterViewController.h"
+#import "ArcGisPhotoMapViewController.h"
 #import "ArcGisPencilSketchViewController.h"
 #import "ArcGisTerrainSceneViewController.h"
 #import "ErisTerrainSceneViewController.h"
@@ -182,6 +183,22 @@ RCT_REMAP_METHOD(startMissionCenterMap,
     }
 
     ArcGisMissionCenterViewController *vc = [[ArcGisMissionCenterViewController alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [root presentViewController:nav animated:YES completion:nil];
+    resolve(nil);
+  });
+}
+
+RCT_REMAP_METHOD(openSitePhotoMap,
+                 openSitePhotoMap:(NSString *)paramsJson
+                 resolverOpenSitePhotoMap:(RCTPromiseResolveBlock)resolve
+                 rejecterOpenSitePhotoMap:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *root = RCTPresentedViewController();
+    if (root == nil) { reject(@"E_OPEN_SITE_PHOTO_MAP", @"No active view controller.", nil); return; }
+    ArcGisPhotoMapViewController *vc = [[ArcGisPhotoMapViewController alloc] init];
+    vc.payloadJson = paramsJson;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     [root presentViewController:nav animated:YES completion:nil];

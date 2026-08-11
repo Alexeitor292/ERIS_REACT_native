@@ -16,6 +16,8 @@ const IOS_FILES = [
   "ArcGisSketchViewController.m",
   "ArcGisMissionCenterViewController.h",
   "ArcGisMissionCenterViewController.m",
+  "ArcGisPhotoMapViewController.h",
+  "ArcGisPhotoMapViewController.m",
   "ArcGisTerrainSceneViewController.h",
   "ArcGisTerrainSceneViewController.m",
   "ErisTerrainSceneViewController.h",

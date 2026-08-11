@@ -86,10 +86,15 @@ class TestAlembicScripts:
         heads = self._script_dir().get_heads()
         assert heads, "No Alembic head revisions found in migration scripts"
 
-    def test_offline_scene_jobs_is_head(self):
+    def test_migration_chain_has_single_head(self):
         heads = self._script_dir().get_heads()
-        assert "0014_offline_scene_worker_hb" in heads, (
-            f"0014_offline_scene_worker_hb not in heads: {heads}"
+        assert len(heads) == 1, f"Expected exactly one Alembic head, found: {heads}"
+
+    def test_photo_geo_migration_in_chain(self):
+        sd = self._script_dir()
+        revisions = {r.revision for r in sd.walk_revisions()}
+        assert "20260810_photo_geo" in revisions, (
+            f"20260810_photo_geo missing from migration chain: {sorted(revisions)}"
         )
 
     def test_baseline_in_chain(self):

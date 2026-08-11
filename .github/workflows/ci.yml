@@ -127,12 +127,18 @@ jobs:
         run: |
           alembic stamp 0001_baseline
           alembic upgrade head
-          alembic current | grep -q "0014_offline_scene_worker_hb"
+          SCRIPT_HEAD=$(alembic heads | awk 'NR==1 {print $1}')
+          CURRENT_HEAD=$(alembic current | awk 'NR==1 {print $1}')
+          test -n "$SCRIPT_HEAD"
+          test "$CURRENT_HEAD" = "$SCRIPT_HEAD" || {
+            echo "database revision $CURRENT_HEAD does not match script head $SCRIPT_HEAD"
+            exit 1
+          }
       - name: alembic upgrade head is idempotent (no-op on re-run)
         run: alembic upgrade head
       - name: Assert key tables exist at head
         run: |
-          for t in submissions offline_scene_packages offline_scene_jobs offline_scene_orphaned_objects offline_scene_worker_heartbeats; do
+          for t in submissions offline_scene_packages offline_scene_jobs offline_scene_orphaned_objects offline_scene_worker_heartbeats attachment_capture_metadata; do
             mysql -h 127.0.0.1 -u root -prootpassword -e "SELECT 1 FROM $t LIMIT 1;" eris_migtest \
               || { echo "missing table $t at head"; exit 1; }
           done

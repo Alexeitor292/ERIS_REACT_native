@@ -41,7 +41,12 @@ type QueuePayloadMap = {
   SUBMIT_SUBMISSION: { submissionId: string; comment?: string | null };
   UPLOAD_ATTACHMENT: {
     submissionId: string;
-    file: { uri: string; name: string; type: string };
+    file: {
+      uri: string;
+      name: string;
+      type: string;
+      captureMetadata?: import("../photos/captureMetadata").PhotoCaptureMetadata | null;
+    };
     sectionKey?: string | null;
     kind?: "PHOTO" | "VIDEO" | "DOC" | "SKETCH";
   };

@@ -10,6 +10,7 @@ type ArcGisNativeModule = {
   setInitialGeometry(esriJson: string): Promise<void>;
   startSketchPolygon(): Promise<void>;
   startMissionCenterMap(): Promise<void>;
+  openSitePhotoMap(paramsJson: string): Promise<void>;
   startPencilSketch(): Promise<void>;
   getSketchGeoJson(): Promise<string>; // returns GeoJSON or Esri JSON geometry string
   getSketchImagePath(): Promise<string>;
@@ -63,6 +64,15 @@ function hasMethod(name: ArcGisMethodName): boolean {
 
 export function supportsMissionCenterMap(): boolean {
   return hasMethod("setMissionIncidents") && hasMethod("startMissionCenterMap");
+}
+
+export function supportsSitePhotoMap(): boolean {
+  return hasMethod("openSitePhotoMap");
+}
+
+export async function openSitePhotoMap(payload: unknown): Promise<void> {
+  if (!hasMethod("openSitePhotoMap")) throw new Error("Native Site Photo Map is missing in this app build. Rebuild the EAS development client.");
+  return requireArcGisModule().openSitePhotoMap(JSON.stringify(payload));
 }
 
 export function supportsOfflineTerrainScene(): boolean {
