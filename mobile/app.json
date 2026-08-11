@@ -12,7 +12,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.juancampos.eris.mobile",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMotionUsageDescription": "ERIS uses device motion to determine the true-north direction the rear camera is facing when field evidence photos are captured."
       }
     },
     "android": {
@@ -64,7 +65,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "ERIS uses your location and compass heading to map where field photos were taken and the direction the camera faced."
+          "locationWhenInUsePermission": "ERIS uses your location and device sensors to map where field photos were taken and the direction the rear camera faced."
         }
       ]
     ],
