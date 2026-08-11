@@ -1,0 +1,44 @@
+name: Site Photo Map Contract
+
+on:
+  pull_request:
+    paths:
+      - "mobile/src/photos/**"
+      - "mobile/src/components/MappedPhotoCamera.tsx"
+      - "mobile/plugins/arcgis-ios/ErisCameraDirectionModule.*"
+      - "mobile/plugins/arcgis-ios/ArcGisPhotoMapViewController.m"
+      - "mobile/plugins/withArcGisIos.js"
+      - "mobile/app.json"
+      - "mobile/scripts/check-site-photo-map-contract.mjs"
+      - ".github/workflows/site-photo-map-contract.yml"
+  push:
+    paths:
+      - "mobile/src/photos/**"
+      - "mobile/src/components/MappedPhotoCamera.tsx"
+      - "mobile/plugins/arcgis-ios/ErisCameraDirectionModule.*"
+      - "mobile/plugins/arcgis-ios/ArcGisPhotoMapViewController.m"
+      - "mobile/plugins/withArcGisIos.js"
+      - "mobile/app.json"
+      - "mobile/scripts/check-site-photo-map-contract.mjs"
+      - ".github/workflows/site-photo-map-contract.yml"
+
+jobs:
+  contract:
+    name: Native camera telemetry contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Site Photo Map source contract
+        run: node scripts/check-site-photo-map-contract.mjs
+      - name: TypeScript check
+        run: npx tsc -p tsconfig.json --noEmit
