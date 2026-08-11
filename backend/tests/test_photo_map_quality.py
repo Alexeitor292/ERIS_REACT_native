@@ -37,6 +37,12 @@ def test_missing_gps_accuracy_is_not_mapped():
     assert out["longitude"] is None
 
 
+def test_medium_camera_direction_is_allowed():
+    out = _quality_gated_capture(row(camera_heading_accuracy_code=2))
+    assert out["camera_heading_deg"] == 90.0
+    assert out["heading_reference"] == "TRUE_NORTH"
+
+
 def test_low_confidence_heading_is_suppressed():
     out = _quality_gated_capture(row(camera_heading_accuracy_code=1))
     assert out["camera_heading_deg"] is None
