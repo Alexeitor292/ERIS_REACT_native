@@ -13,6 +13,9 @@ from ..storage import object_access_url
 
 router = APIRouter(tags=["photo-map"])
 
+_MAX_MAPPED_PHOTO_ACCURACY_M = 20.0
+_MIN_MAPPED_HEADING_ACCURACY_CODE = 3
+
 
 def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
     if is_admin(user) or is_reviewer(user) or is_operational_user(user):
@@ -45,6 +48,55 @@ def _finite(value):
     except (TypeError, ValueError):
         return None
     return out if math.isfinite(out) else None
+
+
+def _int_or_none(value):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quality_gated_capture(row) -> dict:
+    """Return telemetry safe to present as mapped evidence.
+
+    The database keeps the original observation for auditability. The map API is
+    stricter: weak GPS fixes and weak/non-true-north headings are withheld rather
+    than displayed as if they were exact.
+    """
+    latitude = _finite(row["latitude"])
+    longitude = _finite(row["longitude"])
+    horizontal_accuracy = _finite(row["horizontal_accuracy_m"])
+    location_ok = (
+        latitude is not None
+        and longitude is not None
+        and horizontal_accuracy is not None
+        and 0 <= horizontal_accuracy <= _MAX_MAPPED_PHOTO_ACCURACY_M
+    )
+
+    heading = _finite(row["camera_heading_deg"])
+    heading_accuracy = _int_or_none(row["camera_heading_accuracy_code"])
+    heading_reference = row["heading_reference"]
+    heading_ok = (
+        heading is not None
+        and heading_accuracy is not None
+        and heading_accuracy >= _MIN_MAPPED_HEADING_ACCURACY_CODE
+        and heading_reference == "TRUE_NORTH"
+    )
+
+    return {
+        "latitude": latitude if location_ok else None,
+        "longitude": longitude if location_ok else None,
+        "horizontal_accuracy_m": horizontal_accuracy,
+        "altitude_m": _finite(row["altitude_m"]) if location_ok else None,
+        "camera_heading_deg": heading if heading_ok else None,
+        "camera_heading_accuracy_code": heading_accuracy,
+        "heading_reference": heading_reference if heading_ok else None,
+        "location_source": row["location_source"] if location_ok else None,
+        "heading_source": row["heading_source"] if heading_ok else None,
+    }
 
 
 @router.get("/submissions/{submission_id}/photo-map")
@@ -89,18 +141,13 @@ def submission_photo_map(submission_id: int = Path(..., ge=1), db: Session = Dep
         aid = int(row["attachment_id"])
         if aid in deduped and deduped[aid]["source_scope"] == "SUBMISSION":
             continue
+        capture = _quality_gated_capture(row)
         deduped[aid] = {
             "attachment_id": aid,
             "file_name": row["file_name"], "mime_type": row["mime_type"],
             "section_key": row["section_key"], "source_scope": row["source_scope"],
             "captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
-            "latitude": _finite(row["latitude"]), "longitude": _finite(row["longitude"]),
-            "horizontal_accuracy_m": _finite(row["horizontal_accuracy_m"]),
-            "altitude_m": _finite(row["altitude_m"]),
-            "camera_heading_deg": _finite(row["camera_heading_deg"]),
-            "camera_heading_accuracy_code": int(row["camera_heading_accuracy_code"]) if row["camera_heading_accuracy_code"] is not None else None,
-            "heading_reference": row["heading_reference"], "location_source": row["location_source"],
-            "heading_source": row["heading_source"],
+            **capture,
             "download_url": object_access_url(str(row["storage_bucket"] or settings.MINIO_BUCKET), str(row["storage_key"]), expires_seconds=900),
         }
 
