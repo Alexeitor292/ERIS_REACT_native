@@ -133,12 +133,15 @@
     [self.photoOverlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:point symbol:pin attributes:attributes]];
 
     NSNumber *heading = row[@"camera_heading_deg"];
-    if ([heading isKindOfClass:[NSNumber class]]) {
+    NSString *headingReference = [row[@"heading_reference"] isKindOfClass:[NSString class]] ? row[@"heading_reference"] : nil;
+    if ([heading isKindOfClass:[NSNumber class]] && [headingReference isEqualToString:@"TRUE_NORTH"]) {
       AGSSimpleMarkerSymbol *arrow = [[AGSSimpleMarkerSymbol alloc] initWithStyle:AGSSimpleMarkerSymbolStyleTriangle color:[UIColor colorWithRed:1 green:.72 blue:.10 alpha:.94] size:23];
       arrow.outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid color:[UIColor colorWithWhite:.08 alpha:.9] width:1.2];
       arrow.angleAlignment = AGSSymbolAngleAlignmentMap;
       double normalized = fmod(heading.doubleValue, 360.0); if (normalized < 0) normalized += 360.0;
-      arrow.angle = (float)fmod(360.0 - normalized, 360.0);
+      // ArcGIS marker angles rotate clockwise. Compass azimuth is also clockwise
+      // from north, so use the normalized heading directly; do not mirror it.
+      arrow.angle = (float)normalized;
       arrow.offsetY = 12;
       [self.headingOverlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:point symbol:arrow attributes:@{@"kind": @"heading"}]];
     }
