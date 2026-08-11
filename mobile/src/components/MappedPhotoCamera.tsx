@@ -64,9 +64,6 @@ export function MappedPhotoCamera({
         setHeadingLabel("Direction unavailable");
         return;
       }
-      if (locationPermission.ios?.accuracy === "reduced") {
-        setLocationLabel("Precise Location is off • enable it in iOS Settings");
-      }
       if (!(await Location.hasServicesEnabledAsync()) || disposed) {
         setLocationLabel("Location services disabled");
         setHeadingLabel("Direction unavailable");
