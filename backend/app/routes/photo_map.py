@@ -14,7 +14,7 @@ from ..storage import object_access_url
 router = APIRouter(tags=["photo-map"])
 
 _MAX_MAPPED_PHOTO_ACCURACY_M = 20.0
-_MIN_MAPPED_HEADING_ACCURACY_CODE = 3
+_MIN_MAPPED_HEADING_ACCURACY_CODE = 2
 
 
 def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
