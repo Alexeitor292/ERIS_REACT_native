@@ -31,6 +31,7 @@ from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .migrations_check import check_migration_head
 from .routes.incidents import router as incidents_router
+from .routes.photo_map import router as photo_map_router
 from .routes.assessments import router as assessments_router
 from .routes.workflow_tree import router as workflow_tree_router
 from .routes.road_inventory import router as road_inventory_router
@@ -95,6 +96,7 @@ app.include_router(auth_router)
 app.include_router(arcgis_router)
 app.include_router(gisa_router)
 app.include_router(incidents_router)
+app.include_router(photo_map_router)
 app.include_router(assessments_router)
 app.include_router(workflow_tree_router)
 app.include_router(road_inventory_router)

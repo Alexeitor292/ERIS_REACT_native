@@ -46,7 +46,27 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ERIS uses your photo library to attach field evidence to an incident."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ERIS uses the camera to capture mapped field evidence.",
+          "microphonePermission": "ERIS does not record audio for mapped field photos.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ERIS uses your location and compass heading to map where field photos were taken and the direction the camera faced."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
