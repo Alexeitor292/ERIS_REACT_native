@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 
 import {
+  MAX_MAPPED_PHOTO_ACCURACY_M,
+  MIN_MAPPED_HEADING_ACCURACY_CODE,
   mergePhotoCaptureMetadata,
   normalizePhotoHeading,
   photoCaptureMetadataFromAsset,
@@ -20,6 +22,9 @@ export type MappedPhotoCapture = {
 
 type TimedHeading = { value: Location.LocationHeadingObject; observedAt: number };
 type TimedPosition = { value: Location.LocationObject; observedAt: number };
+
+const MAX_HEADING_AGE_MS = 1500;
+const MAX_POSITION_AGE_MS = 2500;
 
 export function MappedPhotoCamera({
   visible,
@@ -59,6 +64,9 @@ export function MappedPhotoCamera({
         setHeadingLabel("Direction unavailable");
         return;
       }
+      if (locationPermission.ios?.accuracy === "reduced") {
+        setLocationLabel("Precise Location is off • enable it in iOS Settings");
+      }
       if (!(await Location.hasServicesEnabledAsync()) || disposed) {
         setLocationLabel("Location services disabled");
         setHeadingLabel("Direction unavailable");
@@ -69,9 +77,14 @@ export function MappedPhotoCamera({
         headingSub = await Location.watchHeadingAsync((value) => {
           if (disposed) return;
           headingRef.current = { value, observedAt: Date.now() };
-          const selected = value.trueHeading >= 0 ? value.trueHeading : value.magHeading;
-          const normalized = normalizePhotoHeading(selected);
-          setHeadingLabel(normalized == null ? "Direction unavailable" : `Camera direction ${Math.round(normalized)}°`);
+          const normalized = value.trueHeading >= 0 ? normalizePhotoHeading(value.trueHeading) : null;
+          if (normalized == null) {
+            setHeadingLabel("True direction acquiring…");
+          } else if (value.accuracy < MIN_MAPPED_HEADING_ACCURACY_CODE) {
+            setHeadingLabel(`Direction weak • ${Math.round(normalized)}° not saved`);
+          } else {
+            setHeadingLabel(`Direction ${Math.round(normalized)}° • high confidence`);
+          }
         });
       } catch {
         setHeadingLabel("Direction unavailable");
@@ -79,12 +92,18 @@ export function MappedPhotoCamera({
 
       try {
         positionSub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Highest, timeInterval: 1000, distanceInterval: 0 },
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },
           (value) => {
             if (disposed) return;
             positionRef.current = { value, observedAt: Date.now() };
             const accuracy = value.coords.accuracy;
-            setLocationLabel(accuracy != null ? `GPS ±${Math.round(accuracy)} m` : "GPS ready");
+            if (accuracy == null) {
+              setLocationLabel("GPS accuracy unknown • not saved");
+            } else if (accuracy > MAX_MAPPED_PHOTO_ACCURACY_M) {
+              setLocationLabel(`GPS weak ±${Math.round(accuracy)} m • not saved`);
+            } else {
+              setLocationLabel(`GPS locked ±${Math.round(accuracy)} m`);
+            }
           },
         );
       } catch {
@@ -107,12 +126,17 @@ export function MappedPhotoCamera({
       const capturedAt = new Date(shutterAtMs).toISOString();
       const headingTimed = headingRef.current;
       const headingAtShutter =
-        headingTimed && shutterAtMs - headingTimed.observedAt <= 3000 && headingTimed.value.accuracy >= 1
+        headingTimed &&
+        shutterAtMs - headingTimed.observedAt <= MAX_HEADING_AGE_MS &&
+        headingTimed.value.accuracy >= MIN_MAPPED_HEADING_ACCURACY_CODE &&
+        headingTimed.value.trueHeading >= 0
           ? headingTimed.value
           : null;
       const positionTimed = positionRef.current;
       const positionAtShutter =
-        positionTimed && shutterAtMs - positionTimed.observedAt <= 5000 ? positionTimed.value : null;
+        positionTimed && shutterAtMs - positionTimed.observedAt <= MAX_POSITION_AGE_MS
+          ? positionTimed.value
+          : null;
 
       const picture = await cameraRef.current.takePictureAsync({ quality: 0.9, exif: true });
       if (!picture?.uri) throw new Error("Camera did not return an image file.");
@@ -181,7 +205,7 @@ export function MappedPhotoCamera({
                 </Pressable>
               </View>
               <Text style={styles.hint}>
-                Heading is sampled at shutter press. Stale direction is discarded instead of drawing a misleading arrow.
+                ERIS only maps GPS fixes at ±20 m or better and true-north headings with high compass confidence. Weak readings are discarded instead of shown as exact evidence.
               </Text>
             </View>
           </SafeAreaView>
