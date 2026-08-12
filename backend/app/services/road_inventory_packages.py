@@ -1,18 +1,27 @@
 """Road inventory mobile package generation service.
 
 Generates a gzip-compressed JSON package for a published road inventory dataset
-and stores it in MinIO.  One json_gz package row per dataset is maintained in
+and stores it in MinIO. One json_gz package row per dataset is maintained in
 road_inventory_packages via upsert.
+
+Schema v2 extends the existing road-segment snapshot with a Caltrans SHN
+Postmiles Tenth point snapshot. Mobile uses those point geometries to resolve
+coordinates <-> district/county/route/postmile without connectivity.
 
 Package file format:
   {
-    "schema_version": 1,
+    "schema_version": 2,
     "dataset_version_id": <int>,
     "version_tag": "<str>",
     "extract_date": "<YYYY-MM-DD or null>",
     "generated_at": "<ISO timestamp>",
     "row_count": <int>,
-    "segments": [{ ... }]
+    "segments": [{ ... }],
+    "location_reference": {
+      "source": "CALTRANS_SHN_POSTMILES_TENTH",
+      "point_count": <int>
+    },
+    "postmile_points": [{ ... }]
   }
 
 Storage key pattern:
@@ -31,6 +40,7 @@ from typing import Any
 from sqlalchemy import text
 
 from ..storage import ensure_bucket_exists, object_access_url, put_object_bytes
+from .caltrans_postmile_reference import fetch_postmile_reference_points
 
 _ROAD_INVENTORY_BUCKET = "road-inventory"
 _PACKAGE_TYPE = "json_gz"
@@ -47,8 +57,12 @@ def generate_package_for_dataset(
 ) -> dict:
     """Generate a json.gz package for a published dataset.
 
+    The package is replaced only after both the internal road inventory and the
+    Caltrans geospatial reference have been built successfully. A Caltrans fetch
+    failure therefore leaves the previously generated package untouched.
+
     Raises ValueError if the dataset does not exist or is not published.
-    Raises RuntimeError if MinIO storage fails.
+    Raises RuntimeError if a dependency/storage operation fails.
     Returns package metadata dict with download_url (None if URL generation fails).
     """
     dataset = db.execute(text("""
@@ -104,16 +118,26 @@ def generate_package_for_dataset(
         for r in rows
     ]
 
+    # Server-side only. The mobile client never depends on live Caltrans access in
+    # the field; it receives this snapshot through the normal authenticated ERIS
+    # package sync and verifies the package SHA-256 before use.
+    postmile_points = fetch_postmile_reference_points()
+
     generated_at = _now()
     extract_date = dataset["extract_date"]
     payload = {
-        "schema_version":     1,
+        "schema_version":     2,
         "dataset_version_id": dataset_version_id,
         "version_tag":        dataset["version_tag"],
         "extract_date":       extract_date.isoformat() if extract_date else None,
         "generated_at":       generated_at.isoformat(),
         "row_count":          len(segments),
         "segments":           segments,
+        "location_reference": {
+            "source": "CALTRANS_SHN_POSTMILES_TENTH",
+            "point_count": len(postmile_points),
+        },
+        "postmile_points": postmile_points,
     }
 
     raw_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -180,6 +204,7 @@ def generate_package_for_dataset(
         "size_bytes":         file_size_bytes,
         "sha256":             sha256,
         "generated_at":       generated_at.isoformat(),
+        "location_point_count": len(postmile_points),
         "download_url":       download_url,
     }
 

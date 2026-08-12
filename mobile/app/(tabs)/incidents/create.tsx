@@ -1,6 +1,5 @@
-import IncidentsScreen from "./index";
+import CreateIncidentScreen from "@/src/components/CreateIncidentScreen";
 
 export default function CreateIncidentTab() {
-  return <IncidentsScreen />;
+  return <CreateIncidentScreen />;
 }
-
