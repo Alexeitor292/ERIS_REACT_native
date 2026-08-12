@@ -1,9 +1,13 @@
 name: CI
 
-# Validate on every branch push AND every pull request (not only main), so
-# feature branches like feature/native-offline-3d-terrain-mobile are gated too.
+# Pull requests gate feature branches. Push CI is reserved for main so the same
+# required job names are never emitted twice for one feature-branch commit; the
+# duplicate push + pull_request runs could leave branch protection waiting on a
+# slower/stuck duplicate even after the authoritative PR run had passed.
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
