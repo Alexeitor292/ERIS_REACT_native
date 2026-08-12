@@ -8,7 +8,15 @@ c("src/photos/captureMetadata.ts", ["DEVICE_AT_CAPTURE","MAX_MAPPED_PHOTO_ACCURA
 c("src/photos/CameraDirectionNative.ts", ["ErisCameraDirection","startTracking","getDirection","TRUE_NORTH"]);
 c("src/components/MappedPhotoCamera.tsx", ["CameraView","BestForNavigation","bestFreshPosition","readNativeCameraDirection","Rear camera","POSITION_WINDOW_MS = 3000"]);
 forbid("src/components/MappedPhotoCamera.tsx", ["watchHeadingAsync"]);
-c("plugins/arcgis-ios/ErisCameraDirectionModule.m", ["CoreMotion","CMAttitudeReferenceFrameXTrueNorthZVertical","Rear camera looks","atan2(east, north)","CMMagneticFieldCalibrationAccuracyMedium"]);
+c("plugins/arcgis-ios/ErisCameraDirectionModule.m", [
+  "CoreMotion",
+  "CMAttitudeReferenceFrameXTrueNorthZVertical",
+  "const double north = -r.m31;",
+  "const double west = -r.m32;",
+  "const double east = -west;",
+  "atan2(east, north)",
+  "CMMagneticFieldCalibrationAccuracyMedium",
+]);
 c("plugins/withArcGisIos.js", ["ErisCameraDirectionModule.h","ErisCameraDirectionModule.m"]);
 c("app.json", ["NSMotionUsageDescription"]);
 c("src/api/submissions.ts", ["capture_metadata_json","/photo-map"]);
