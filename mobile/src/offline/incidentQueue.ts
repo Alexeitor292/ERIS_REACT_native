@@ -10,6 +10,7 @@ import { normalizeCoordinateValue, normalizePostMileInput } from "../utils/preci
 import { getLargeItemAsync, setLargeItemAsync } from "./secureStoreLarge";
 
 const STORAGE_KEY = "offline_incident_queue_v1";
+const UNCERTAIN_CREATE_WINDOW_MS = 90_000;
 
 export type QueuedIncidentFile = {
   uri: string;
@@ -27,6 +28,7 @@ export type QueuedIncidentRecord = {
   payload: IncidentCreatePayload;
   files: QueuedIncidentFile[];
   serverIncidentId: number | null;
+  lastCreateAttemptAt: string | null;
   attempts: number;
   syncState: "PENDING" | "ERROR";
   lastError: string | null;
@@ -69,6 +71,7 @@ async function readQueue(): Promise<QueuedIncidentRecord[]> {
           typeof x.serverIncidentId === "number" && Number.isFinite(x.serverIncidentId)
             ? x.serverIncidentId
             : null,
+        lastCreateAttemptAt: x.lastCreateAttemptAt ? String(x.lastCreateAttemptAt) : null,
         attempts: Number.isFinite(Number(x.attempts)) ? Number(x.attempts) : 0,
         syncState: x.syncState === "ERROR" ? "ERROR" : "PENDING",
         lastError: x.lastError ? String(x.lastError) : null,
@@ -95,6 +98,7 @@ export async function enqueueIncidentForSync(
     payload,
     files: files.map((file) => ({ ...file, uploaded: false })),
     serverIncidentId: null,
+    lastCreateAttemptAt: null,
     attempts: 0,
     syncState: "PENDING",
     lastError: null,
@@ -122,6 +126,10 @@ function sameCoordinate(a: unknown, b: unknown): boolean {
   return av != null && bv != null && Math.abs(av - bv) <= 0.000001;
 }
 
+function sameOptionalDate(a: unknown, b: unknown): boolean {
+  return String(a ?? "").slice(0, 10) === String(b ?? "").slice(0, 10);
+}
+
 function likelySameIncident(record: QueuedIncidentRecord, incident: Incident): boolean {
   const payload = record.payload;
   if (!sameCoordinate(payload.latitude, incident.latitude)) return false;
@@ -130,30 +138,32 @@ function likelySameIncident(record: QueuedIncidentRecord, incident: Incident): b
   if (norm(payload.county) !== norm(incident.county)) return false;
   if (norm(payload.route).replace(/^0+/, "") !== norm(incident.route).replace(/^0+/, "")) return false;
   if (normalizePostMileInput(payload.post_mile) !== normalizePostMileInput(incident.post_mile)) return false;
+  if (norm(payload.title) !== norm(incident.title)) return false;
+  if (norm(payload.incident_type) !== norm(incident.incident_type)) return false;
   if (norm(payload.description) !== norm(incident.description)) return false;
+  if (!sameOptionalDate(payload.first_observed_at, incident.first_observed_at)) return false;
+  if (!sameOptionalDate(payload.first_occurred_at, incident.first_occurred_at)) return false;
 
-  const expectedDate = String(payload.first_observed_at || "").slice(0, 10);
-  const actualDate = String(incident.first_observed_at || "").slice(0, 10);
-  if (expectedDate !== actualDate) return false;
-
-  const queuedAt = Date.parse(record.createdAt);
+  const attemptedAt = Date.parse(record.lastCreateAttemptAt || "");
   const serverCreatedAt = Date.parse(incident.created_at);
-  if (Number.isFinite(queuedAt) && Number.isFinite(serverCreatedAt)) {
-    if (serverCreatedAt < queuedAt - 5 * 60_000) return false;
-  }
+  if (!Number.isFinite(attemptedAt) || !Number.isFinite(serverCreatedAt)) return false;
+  if (Math.abs(serverCreatedAt - attemptedAt) > UNCERTAIN_CREATE_WINDOW_MS) return false;
   return true;
 }
 
 /**
  * A POST can be committed server-side while its response is lost. Before a
  * previously-attempted local incident is POSTed again, reconcile against the
- * reporter-visible incident list. If reconciliation itself cannot be completed,
+ * reporter-visible incident list. Reconciliation uses the exact timestamp that
+ * was durably persisted immediately before the POST, plus the incident's full
+ * location/date/text fingerprint. If reconciliation itself cannot be completed,
  * fail closed and do not perform another POST.
  */
 async function reconcileUncertainCreate(
   token: string,
   record: QueuedIncidentRecord,
 ): Promise<number | null> {
+  if (!record.lastCreateAttemptAt) return null;
   const response = await listIncidents(token, { limit: 200, scope: "mobile" });
   const match = (response.items ?? []).find((incident) => likelySameIncident(record, incident));
   return match?.id ?? null;
@@ -167,7 +177,7 @@ async function syncOne(
   let next = { ...record, files: record.files.map((file) => ({ ...file })) };
 
   if (!next.serverIncidentId) {
-    if (next.attempts > 0) {
+    if (next.attempts > 0 && next.lastCreateAttemptAt) {
       const reconciledId = await reconcileUncertainCreate(token, next);
       if (reconciledId) {
         next.serverIncidentId = reconciledId;
@@ -179,6 +189,15 @@ async function syncOne(
     }
 
     if (!next.serverIncidentId) {
+      // Persist the attempt boundary before the network mutation. If the server
+      // commits but the response is lost, the next retry has a narrow, durable
+      // time window for reconciliation and never needs to blind-POST.
+      next.lastCreateAttemptAt = new Date().toISOString();
+      next.updatedAt = next.lastCreateAttemptAt;
+      next.lastError = null;
+      next.syncState = "PENDING";
+      await persist(next);
+
       const created = await createIncident(token, next.payload);
       next.serverIncidentId = created.incident.id;
       next.updatedAt = new Date().toISOString();
