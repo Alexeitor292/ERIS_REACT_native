@@ -259,26 +259,139 @@ jobs:
 
   ios-native:
     name: iOS native compile (simulator, no signing)
-    # macos-15 ships Xcode 16.x (React Native / Expo SDK 54 require Xcode >= 16.1).
+    # Keep this job/check present on every CI run so branch protection can require it.
+    # The expensive native work is skipped only when the diff cannot affect iOS output.
     runs-on: macos-15
     defaults:
       run:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect iOS-native-impacting changes
+        id: native-changes
+        working-directory: .
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch --no-tags origin "$BASE_REF"
+            RANGE="origin/${BASE_REF}...HEAD"
+          elif [ -n "${BEFORE_SHA:-}" ] && ! printf '%s' "$BEFORE_SHA" | grep -qE '^0+$'; then
+            RANGE="${BEFORE_SHA}..HEAD"
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            RANGE="HEAD^..HEAD"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "No reliable diff base; running the authoritative native compile."
+            exit 0
+          fi
+
+          echo "Inspecting changed paths in $RANGE"
+          changed="$(git diff --name-only "$RANGE")"
+          printf '%s\n' "$changed"
+
+          run=false
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/ci.yml|\
+              mobile/app.json|\
+              mobile/app.config.*|\
+              mobile/package.json|\
+              mobile/package-lock.json|\
+              mobile/eas.json|\
+              mobile/react-native.config.*|\
+              mobile/*.config.js|\
+              mobile/plugins/*|\
+              mobile/ios/*|\
+              mobile/patches/*)
+                run=true
+                break
+                ;;
+            esac
+          done <<< "$changed"
+
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "iOS native compile required: $run"
+
+      - name: Native compile not required for this diff
+        if: steps.native-changes.outputs.run != 'true'
+        working-directory: .
+        run: echo "No iOS-native-impacting changes detected; authoritative native compile intentionally skipped."
+
       - uses: actions/setup-node@v4
+        if: steps.native-changes.outputs.run == 'true'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: mobile/package-lock.json
+
+      - name: Resolve Xcode cache key
+        if: steps.native-changes.outputs.run == 'true'
+        id: xcode-version
+        working-directory: .
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          version="$(xcodebuild -version | tr '\n' '-' | tr -cd '[:alnum:]._-')"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CocoaPods downloads
+        if: steps.native-changes.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: cocoapods-${{ runner.os }}-${{ steps.xcode-version.outputs.value }}-${{ hashFiles('mobile/package-lock.json', 'mobile/package.json', 'mobile/app.json', 'mobile/plugins/withArcGisIos.js', 'mobile/plugins/arcgis-ios/**') }}
+          restore-keys: |
+            cocoapods-${{ runner.os }}-${{ steps.xcode-version.outputs.value }}-
+
+      - name: Cache Xcode DerivedData
+        if: steps.native-changes.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          # Exact-key only: never restore DerivedData from different native inputs.
+          key: deriveddata-${{ runner.os }}-${{ steps.xcode-version.outputs.value }}-${{ hashFiles('.github/workflows/ci.yml', 'mobile/package-lock.json', 'mobile/package.json', 'mobile/app.json', 'mobile/plugins/withArcGisIos.js', 'mobile/plugins/arcgis-ios/**') }}
+
       - name: Install dependencies
+        if: steps.native-changes.outputs.run == 'true'
         run: npm ci
+
       - name: Expo iOS prebuild
-        run: npx expo prebuild --platform ios --clean
+        if: steps.native-changes.outputs.run == 'true'
+        run: npx expo prebuild --platform ios --clean --no-install
+
       - name: CocoaPods install
+        if: steps.native-changes.outputs.run == 'true'
         working-directory: mobile/ios
         run: pod install
+
+      - name: Force ERIS native sources to compile in this run
+        if: steps.native-changes.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          # A DerivedData hit may legitimately reuse third-party objects. Our injected
+          # Objective-C must still compile on every authoritative run so the CompileC
+          # evidence below can never be satisfied by an old cached object.
+          for f in $(node -e "process.stdout.write(require('./plugins/withArcGisIos.js').__IOS_SOURCES__.join(' '))"); do
+            src="$(find ios -name "${f}.m" -print -quit)"
+            if [ -z "$src" ]; then
+              echo "::error::Generated iOS source missing: ${f}.m"
+              exit 1
+            fi
+            touch "$src"
+          done
+
       - name: Resolve workspace + scheme
+        if: steps.native-changes.outputs.run == 'true'
         id: xc
         working-directory: mobile/ios
         run: |
@@ -293,7 +406,9 @@ jobs:
           echo "workspace=$WS  project=$PROJ  scheme=$SCHEME"
           echo "workspace=$WS" >> "$GITHUB_OUTPUT"
           echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+
       - name: Xcode simulator build (signing disabled)
+        if: steps.native-changes.outputs.run == 'true'
         working-directory: mobile/ios
         run: |
           set -o pipefail
@@ -302,7 +417,9 @@ jobs:
             -scheme "${{ steps.xc.outputs.scheme }}" \
             -sdk iphonesimulator -configuration Debug \
             CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/xcodebuild.log
+
       - name: Verify the ERIS native sources were actually compiled
+        if: steps.native-changes.outputs.run == 'true'
         working-directory: mobile/ios
         # A green build only means something if it compiled OUR Objective-C. Assert each
         # injected source produced a CompileC line, so a scheme/plugin regression fails
