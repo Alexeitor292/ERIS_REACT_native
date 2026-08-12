@@ -1,26 +1,11 @@
 name: Site Photo Map Contract
 
+# This workflow is a required status check. Required checks must run for every
+# PR/push; path-filtering the workflow leaves unrelated PRs permanently stuck in
+# an "Expected" state with no check run to satisfy the repository rule.
 on:
   pull_request:
-    paths:
-      - "mobile/src/photos/**"
-      - "mobile/src/components/MappedPhotoCamera.tsx"
-      - "mobile/plugins/arcgis-ios/ErisCameraDirectionModule.*"
-      - "mobile/plugins/arcgis-ios/ArcGisPhotoMapViewController.m"
-      - "mobile/plugins/withArcGisIos.js"
-      - "mobile/app.json"
-      - "mobile/scripts/check-site-photo-map-contract.mjs"
-      - ".github/workflows/site-photo-map-contract.yml"
   push:
-    paths:
-      - "mobile/src/photos/**"
-      - "mobile/src/components/MappedPhotoCamera.tsx"
-      - "mobile/plugins/arcgis-ios/ErisCameraDirectionModule.*"
-      - "mobile/plugins/arcgis-ios/ArcGisPhotoMapViewController.m"
-      - "mobile/plugins/withArcGisIos.js"
-      - "mobile/app.json"
-      - "mobile/scripts/check-site-photo-map-contract.mjs"
-      - ".github/workflows/site-photo-map-contract.yml"
 
 jobs:
   contract:
