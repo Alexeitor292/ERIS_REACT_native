@@ -34,8 +34,11 @@ requireText(roadOffline, "lookupLocalLocationByCoordinates", "coordinates-to-roa
 requireText(roadOffline, "lookupLocalCoordinatesByRoad", "road-to-coordinates implementation");
 requireText(roadOffline, "CALTRANS_SHN_POSTMILES_TENTH_OFFLINE", "offline provenance");
 
-requireText(incidentQueue, "serverIncidentId", "persisted sync checkpoint");
+requireText(incidentQueue, "serverIncidentId", "persisted server incident checkpoint");
+requireText(incidentQueue, "lastCreateAttemptAt", "persisted create-attempt checkpoint");
+requireText(incidentQueue, "UNCERTAIN_CREATE_WINDOW_MS", "bounded uncertain-create reconciliation window");
 requireText(incidentQueue, "reconcileUncertainCreate", "fail-closed uncertain-create reconciliation");
+requireText(incidentQueue, "await persist(next);", "pre/post mutation durable checkpoint");
 requireText(incidentQueue, "uploaded: true", "per-file upload checkpoint");
 requireText(syncLoop, "flushQueuedIncidents", "automatic incident retry loop");
 requireText(createRoute, "CreateIncidentScreen", "dedicated Create Incident route");
