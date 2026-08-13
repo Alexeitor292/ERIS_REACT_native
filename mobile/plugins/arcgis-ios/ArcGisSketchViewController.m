@@ -8,6 +8,7 @@
 
 @property(nonatomic, strong) AGSMapView *mapView;
 @property(nonatomic, strong) AGSSketchEditor *sketchEditor;
+@property(nonatomic, strong) AGSGraphicsOverlay *incidentLocationOverlay;
 @property(nonatomic, strong) AGSMobileMapPackage *mobileMapPackage;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *undoStack;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *redoStack;
@@ -40,6 +41,13 @@
   self.mapView.translatesAutoresizingMaskIntoConstraints = NO;
   self.mapView.map = map;
   [self.view addSubview:self.mapView];
+
+  // The incident/submission seed is a reference location, not the device's GPS
+  // position and not editable sketch geometry. Keep it in its own graphics
+  // overlay so it remains visible while the blue ArcGIS locationDisplay dot and
+  // the red sketch editor are both active.
+  self.incidentLocationOverlay = [[AGSGraphicsOverlay alloc] init];
+  [self.mapView.graphicsOverlays addObject:self.incidentLocationOverlay];
 
   self.undoStack = [NSMutableArray array];
   self.redoStack = [NSMutableArray array];
@@ -155,6 +163,10 @@
     if (offlineMap != nil) {
       weakSelf.mapView.map = offlineMap;
       weakSelf.mapView.sketchEditor = weakSelf.sketchEditor;
+      // Loading an MMPK can apply the package's own initial viewpoint after the
+      // screen has already centered. Re-assert the field incident reference so
+      // the user remains at the expected location and the marker stays visible.
+      [weakSelf centerFromInitialLocation];
       [weakSelf toast:@"Offline map package loaded."];
     }
   }];
@@ -232,16 +244,68 @@
   return YES;
 }
 
+- (void)renderIncidentLocationMarkerAtPoint:(AGSPoint *)point {
+  if (point == nil || self.incidentLocationOverlay == nil) {
+    return;
+  }
+
+  [self.incidentLocationOverlay.graphics removeAllObjects];
+
+  // A soft halo makes the incident reference visible on both dark imagery and
+  // light street/topographic basemaps without resembling ArcGIS' blue GPS dot.
+  UIColor *incidentRed = [UIColor colorWithRed:0.91 green:0.18 blue:0.18 alpha:1.0];
+  AGSSimpleMarkerSymbol *halo = [[AGSSimpleMarkerSymbol alloc]
+      initWithStyle:AGSSimpleMarkerSymbolStyleCircle
+              color:[incidentRed colorWithAlphaComponent:0.20]
+               size:30.0];
+  halo.outline = [[AGSSimpleLineSymbol alloc]
+      initWithStyle:AGSSimpleLineSymbolStyleSolid
+              color:[incidentRed colorWithAlphaComponent:0.75]
+              width:1.5];
+
+  AGSGraphic *haloGraphic = [[AGSGraphic alloc]
+      initWithGeometry:point
+                symbol:halo
+            attributes:@{ @"kind": @"incident_location" }];
+  [self.incidentLocationOverlay.graphics addObject:haloGraphic];
+
+  AGSSimpleMarkerSymbol *marker = [[AGSSimpleMarkerSymbol alloc]
+      initWithStyle:AGSSimpleMarkerSymbolStyleDiamond
+              color:incidentRed
+               size:18.0];
+  marker.outline = [[AGSSimpleLineSymbol alloc]
+      initWithStyle:AGSSimpleLineSymbolStyleSolid
+              color:[UIColor whiteColor]
+              width:2.5];
+
+  AGSGraphic *markerGraphic = [[AGSGraphic alloc]
+      initWithGeometry:point
+                symbol:marker
+            attributes:@{ @"kind": @"incident_location", @"title": @"Incident Location" }];
+  [self.incidentLocationOverlay.graphics addObject:markerGraphic];
+}
+
 - (void)centerFromInitialLocation {
   NSNumber *lat = [ArcGisSketchStore initialLatitude];
   NSNumber *lon = [ArcGisSketchStore initialLongitude];
   if (lat == nil || lon == nil) {
+    [self.incidentLocationOverlay.graphics removeAllObjects];
     return;
   }
 
-  AGSPoint *point = [AGSPoint pointWithX:lon.doubleValue
-                                       y:lat.doubleValue
+  double latitude = lat.doubleValue;
+  double longitude = lon.doubleValue;
+  if (!isfinite(latitude) || !isfinite(longitude) ||
+      latitude < -90.0 || latitude > 90.0 ||
+      longitude < -180.0 || longitude > 180.0) {
+    [self.incidentLocationOverlay.graphics removeAllObjects];
+    return;
+  }
+
+  AGSPoint *point = [AGSPoint pointWithX:longitude
+                                       y:latitude
                          spatialReference:AGSSpatialReference.WGS84];
+  [self renderIncidentLocationMarkerAtPoint:point];
   [self.mapView setViewpointCenter:point scale:12000 completion:nil];
 }
 

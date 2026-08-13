@@ -1,0 +1,28 @@
+name: Incident Map Location Contract
+
+on:
+  pull_request:
+    paths:
+      - "mobile/plugins/arcgis-ios/ArcGisSketchViewController.m"
+      - "mobile/scripts/check-incident-map-location-contract.mjs"
+      - ".github/workflows/incident-map-location-contract.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "mobile/plugins/arcgis-ios/ArcGisSketchViewController.m"
+      - "mobile/scripts/check-incident-map-location-contract.mjs"
+      - ".github/workflows/incident-map-location-contract.yml"
+
+jobs:
+  contract:
+    name: Incident map location contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Assert incident marker remains distinct from phone GPS
+        working-directory: mobile
+        run: node scripts/check-incident-map-location-contract.mjs
