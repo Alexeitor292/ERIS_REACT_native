@@ -1,4 +1,10 @@
 import { NativeModules } from "react-native";
+import {
+  applyQueuedPhotoCorrectionsToPayload,
+  enqueuePhotoCorrectionsForSync,
+  type PhotoCorrectionState,
+} from "../offline/fieldPhotoMetadata";
+import { triggerOfflineSyncNow } from "../offline/syncLoop";
 
 type ArcGisNativeModule = {
   loadMmpk(path: string): Promise<void>;
@@ -10,7 +16,7 @@ type ArcGisNativeModule = {
   setInitialGeometry(esriJson: string): Promise<void>;
   startSketchPolygon(): Promise<void>;
   startMissionCenterMap(): Promise<void>;
-  openSitePhotoMap(paramsJson: string): Promise<void>;
+  openSitePhotoMap(paramsJson: string): Promise<string>;
   startPencilSketch(): Promise<void>;
   getSketchGeoJson(): Promise<string>; // returns GeoJSON or Esri JSON geometry string
   getSketchImagePath(): Promise<string>;
@@ -70,9 +76,38 @@ export function supportsSitePhotoMap(): boolean {
   return hasMethod("openSitePhotoMap");
 }
 
-export async function openSitePhotoMap(payload: unknown): Promise<void> {
+export async function openSitePhotoMap(payload: any): Promise<void> {
   if (!hasMethod("openSitePhotoMap")) throw new Error("Native Site Photo Map is missing in this app build. Rebuild the EAS development client.");
-  return requireArcGisModule().openSitePhotoMap(JSON.stringify(payload));
+
+  // Apply any durable-but-not-yet-synced corrections before opening native so
+  // an offline reopen still shows the field worker's latest saved edits.
+  const preparedPayload = await applyQueuedPhotoCorrectionsToPayload(payload);
+  const resultJson = await requireArcGisModule().openSitePhotoMap(JSON.stringify(preparedPayload));
+  if (typeof resultJson !== "string" || resultJson.trim().length === 0) return;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(resultJson);
+  } catch {
+    throw new Error("Site Photo Map returned invalid correction data.");
+  }
+
+  const submissionId = Number(preparedPayload?.submission_id);
+  const rawCorrections = Array.isArray(parsed?.corrections) ? parsed.corrections : [];
+  const corrections: PhotoCorrectionState[] = rawCorrections
+    .map((item: any) => ({
+      attachment_id: Number(item?.attachment_id),
+      location_override: item?.location_override == null
+        ? null
+        : { latitude: Number(item.location_override.latitude), longitude: Number(item.location_override.longitude) },
+      heading_override_deg: item?.heading_override_deg == null ? null : Number(item.heading_override_deg),
+    }))
+    .filter((item: PhotoCorrectionState) => Number.isInteger(item.attachment_id) && item.attachment_id > 0);
+
+  if (Number.isInteger(submissionId) && submissionId > 0 && corrections.length > 0) {
+    const queued = await enqueuePhotoCorrectionsForSync(submissionId, corrections);
+    if (queued > 0) triggerOfflineSyncNow().catch(() => {});
+  }
 }
 
 export function supportsOfflineTerrainScene(): boolean {
@@ -125,7 +160,7 @@ export async function setLicenseKey(licenseKey: string) {
 export async function setMissionIncidents(incidentsJson: string) {
   if (!hasMethod("setMissionIncidents")) {
     throw new Error(
-      "ArcGIS Mission Center method missing in this app build. Rebuild the app to include latest native ArcGIS module."
+      "ArcGIS Mission Center method missing in this app build. Rebuild the app to include latest ArcGIS module."
     );
   }
   return requireArcGisModule().setMissionIncidents(incidentsJson);
