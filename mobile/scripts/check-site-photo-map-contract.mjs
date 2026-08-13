@@ -14,7 +14,25 @@ c("app.json", ["NSMotionUsageDescription"]);
 c("src/api/submissions.ts", ["capture_metadata_json","/photo-map"]);
 c("src/offline/fieldPhotoMetadata.ts", ["offline_photo_correction_queue_v1","enqueuePhotoCorrectionsForSync","flushQueuedPhotoCorrections","applyQueuedPhotoCorrectionsToPayload"]);
 c("src/offline/syncLoop.ts", ["flushQueuedPhotoCorrections"]);
-c("src/arcgis/ArcGISNative.ts", ["openSitePhotoMap","supportsSitePhotoMap","applyQueuedPhotoCorrectionsToPayload","enqueuePhotoCorrectionsForSync","Promise<string>"]);
+c("src/offline/localAttachmentUris.ts", [
+  "draft_local_attachment_uris_",
+  "staged-uploads",
+  "resolveAvailableLocalAttachmentUri",
+  "FileSystem.documentDirectory",
+  "FileSystem.getInfoAsync",
+  "matches.length !== 1",
+]);
+c("src/arcgis/ArcGISNative.ts", [
+  "openSitePhotoMap",
+  "supportsSitePhotoMap",
+  "applyQueuedPhotoCorrectionsToPayload",
+  "enqueuePhotoCorrectionsForSync",
+  "Promise<string>",
+  "resolveAvailableLocalAttachmentUri",
+  "preferLocalSitePhotoFiles",
+  "download_url: localUri",
+  "local_uri: localUri",
+]);
 c("plugins/arcgis-ios/ArcGisModule.m", ["ErisPhotoMapDidFinishNotification","resultJson","resolve(resultJson)"]);
 c("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
   "AGSBasemapStyleArcGISImagery",
@@ -39,7 +57,10 @@ c("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
   "captured_metadata",
   "can_edit_correction",
   "ErisPhotoMapDidFinishNotification",
+  "download_url",
+  "Open Photo",
+  "openURL:url",
 ]);
 forbid("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", ["360.0 - normalized","AGSSimpleMarkerSymbolStyleTriangle","arrow.angle = (float)normalized"]);
-c("app/(tabs)/submissions/[id].tsx", ["Site Photo Map","MappedPhotoCamera","exif: true","captureMetadata"]);
+c("app/(tabs)/submissions/[id].tsx", ["Site Photo Map","MappedPhotoCamera","exif: true","captureMetadata","draft_local_attachment_uris_","registerLocalAttachmentUri"]);
 console.log("Site Photo Map source contract: PASS");
