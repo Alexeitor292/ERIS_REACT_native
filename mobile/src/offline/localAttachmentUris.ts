@@ -5,9 +5,20 @@ import { getLargeItemAsync, setLargeItemAsync } from "./secureStoreLarge";
 export type LocalAttachmentUriMap = Record<number, string>;
 
 const LOCAL_ATTACHMENT_CACHE_PREFIX = "draft_local_attachment_uris_";
+const STAGED_UPLOAD_DIR_NAME = "staged-uploads";
 
 function safeSubmissionId(submissionId: string | number): string {
   return String(submissionId || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function sanitizeFileName(name: string): string {
+  const leaf = String(name || "").split(/[\\/]/).pop() || "";
+  return leaf.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function stagedUploadDirectoryUri(): string | null {
+  const root = FileSystem.documentDirectory?.replace(/\/+$/, "");
+  return root ? `${root}/${STAGED_UPLOAD_DIR_NAME}` : null;
 }
 
 export function localAttachmentUriCacheKey(submissionId: string | number): string {
@@ -58,24 +69,54 @@ export async function registerLocalAttachmentUri(
   await writeLocalAttachmentUris(submissionId, { ...current, [attachmentId]: uri });
 }
 
+async function existingFileUri(uri: string | null | undefined): Promise<string | null> {
+  if (!isLocalAttachmentUri(uri)) return null;
+  const normalized = String(uri).trim();
+  if (!/^file:/i.test(normalized)) return normalized;
+  try {
+    const info = await FileSystem.getInfoAsync(normalized);
+    return info.exists ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+async function recoverUniqueStagedFile(fileName?: string | null): Promise<string | null> {
+  const sanitized = sanitizeFileName(fileName || "");
+  const directory = stagedUploadDirectoryUri();
+  if (!sanitized || !directory) return null;
+
+  try {
+    const info = await FileSystem.getInfoAsync(directory);
+    if (!info.exists) return null;
+    const entries = await FileSystem.readDirectoryAsync(directory);
+    // prepareUploadFile prefixes each staged file with timestamp_random_. Only
+    // recover automatically when the original filename identifies one file
+    // unambiguously; two uploads named image.jpg must never be guessed between.
+    const suffix = `_${sanitized}`;
+    const matches = entries.filter((entry) => entry === sanitized || entry.endsWith(suffix));
+    if (matches.length !== 1) return null;
+    const candidate = `${directory}/${matches[0]}`;
+    return await existingFileUri(candidate);
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveAvailableLocalAttachmentUri(
   submissionId: string | number,
   attachmentId: number,
+  fileName?: string | null,
 ): Promise<string | null> {
   const current = await readLocalAttachmentUris(submissionId);
-  const uri = current[attachmentId];
-  if (!isLocalAttachmentUri(uri)) return null;
+  const cached = await existingFileUri(current[attachmentId]);
+  if (cached) return cached;
 
-  // Files staged by ERIS live under FileSystem.documentDirectory and must still
-  // exist before native receives the URI. Other local schemes (content://,
-  // ph://, assets-library://) are owned by the OS, so let the OS resolve them.
-  if (/^file:/i.test(uri)) {
-    try {
-      const info = await FileSystem.getInfoAsync(uri);
-      if (!info.exists) return null;
-    } catch {
-      return null;
-    }
-  }
-  return uri;
+  // Old/offline-queued uploads may predate the attachment-id mapping. The file
+  // itself is still durably staged in Documents; recover it only when filename
+  // matching is unique, then persist the authoritative attachment-id mapping.
+  const recovered = await recoverUniqueStagedFile(fileName);
+  if (!recovered) return null;
+  await registerLocalAttachmentUri(submissionId, attachmentId, recovered).catch(() => {});
+  return recovered;
 }
