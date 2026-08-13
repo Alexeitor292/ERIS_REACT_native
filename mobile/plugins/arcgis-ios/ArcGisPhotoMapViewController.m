@@ -61,6 +61,7 @@
   [self renderPhotos];
   [self renderSummary];
   [self fitView];
+  [self startLiveLocationDisplay];
 }
 
 - (void)onClose { [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -71,6 +72,14 @@
   if (raw.length == 0) return;
   id parsed = [NSJSONSerialization JSONObjectWithData:[raw dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
   if ([parsed isKindOfClass:[NSDictionary class]]) self.payload = parsed;
+}
+
+- (void)startLiveLocationDisplay {
+  // ArcGIS LocationDisplay owns the continuously-updated device position. Keep
+  // auto-pan off so GPS updates move only the blue user marker and never pull the
+  // map away from the incident/photos the field worker is reviewing.
+  self.mapView.locationDisplay.autoPanMode = AGSLocationDisplayAutoPanModeOff;
+  [self.mapView.locationDisplay startWithCompletion:^(__unused NSError *_Nullable error) {}];
 }
 
 - (NSArray<AGSPoint *> *)pointsFromRing:(id)ring {
@@ -119,32 +128,77 @@
   }
 }
 
+- (UIImage *)cameraDirectionConeImageWithSize:(CGFloat)size {
+  // Google-Maps-style direction fan: a translucent, screen-space sector with its
+  // apex exactly at the photo coordinate. The picture symbol rotates around the
+  // apex, so the fan stays legible at every map zoom level.
+  UIGraphicsBeginImageContextWithOptions(CGSizeMake(size, size), NO, 0.0);
+  CGContextRef ctx = UIGraphicsGetCurrentContext();
+  if (ctx == nil) {
+    UIGraphicsEndImageContext();
+    return nil;
+  }
+
+  const CGFloat center = size / 2.0;
+  const CGFloat radius = size * 0.47;
+  const CGFloat halfAngleDeg = 24.0;
+  const CGFloat halfAngle = halfAngleDeg * (CGFloat)M_PI / 180.0;
+  const CGFloat north = -(CGFloat)M_PI_2;
+  const CGFloat start = north - halfAngle;
+  const CGFloat end = north + halfAngle;
+
+  CGPoint apex = CGPointMake(center, center);
+  CGPoint startPoint = CGPointMake(center + radius * cos(start), center + radius * sin(start));
+
+  UIBezierPath *fan = [UIBezierPath bezierPath];
+  [fan moveToPoint:apex];
+  [fan addLineToPoint:startPoint];
+  [fan addArcWithCenter:apex radius:radius startAngle:start endAngle:end clockwise:YES];
+  [fan closePath];
+
+  UIColor *googleBlue = [UIColor colorWithRed:0.12 green:0.45 blue:0.95 alpha:1.0];
+  [[googleBlue colorWithAlphaComponent:0.28] setFill];
+  [fan fill];
+  fan.lineWidth = 1.5;
+  [[googleBlue colorWithAlphaComponent:0.62] setStroke];
+  [fan stroke];
+
+  UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+  return image;
+}
+
 - (void)renderPhotos {
   NSArray *photos = [self.payload[@"photos"] isKindOfClass:[NSArray class]] ? self.payload[@"photos"] : @[];
+  UIImage *coneImage = [self cameraDirectionConeImageWithSize:76.0];
   for (id raw in photos) {
     if (![raw isKindOfClass:[NSDictionary class]]) continue;
     NSDictionary *row = raw;
     NSNumber *lat = row[@"latitude"], *lon = row[@"longitude"];
     if (![lat isKindOfClass:[NSNumber class]] || ![lon isKindOfClass:[NSNumber class]]) continue;
     AGSPoint *point = [AGSPoint pointWithX:lon.doubleValue y:lat.doubleValue spatialReference:AGSSpatialReference.WGS84];
-    AGSSimpleMarkerSymbol *pin = [[AGSSimpleMarkerSymbol alloc] initWithStyle:AGSSimpleMarkerSymbolStyleCircle color:[UIColor colorWithRed:.05 green:.60 blue:.95 alpha:1] size:12];
-    pin.outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid color:UIColor.whiteColor width:2];
-    NSMutableDictionary *attributes = [row mutableCopy]; attributes[@"kind"] = @"photo";
-    [self.photoOverlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:point symbol:pin attributes:attributes]];
 
     NSNumber *heading = row[@"camera_heading_deg"];
     NSString *headingReference = [row[@"heading_reference"] isKindOfClass:[NSString class]] ? row[@"heading_reference"] : nil;
-    if ([heading isKindOfClass:[NSNumber class]] && [headingReference isEqualToString:@"TRUE_NORTH"]) {
-      AGSSimpleMarkerSymbol *arrow = [[AGSSimpleMarkerSymbol alloc] initWithStyle:AGSSimpleMarkerSymbolStyleTriangle color:[UIColor colorWithRed:1 green:.72 blue:.10 alpha:.94] size:23];
-      arrow.outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid color:[UIColor colorWithWhite:.08 alpha:.9] width:1.2];
-      arrow.angleAlignment = AGSSymbolAngleAlignmentMap;
+    if (coneImage != nil && [heading isKindOfClass:[NSNumber class]] && [headingReference isEqualToString:@"TRUE_NORTH"]) {
+      AGSPictureMarkerSymbol *cone = [AGSPictureMarkerSymbol pictureMarkerSymbolWithImage:coneImage];
+      cone.width = 76.0;
+      cone.height = 76.0;
+      cone.angleAlignment = AGSSymbolAngleAlignmentMap;
       double normalized = fmod(heading.doubleValue, 360.0); if (normalized < 0) normalized += 360.0;
-      // ArcGIS marker angles rotate clockwise. Compass azimuth is also clockwise
-      // from north, so use the normalized heading directly; do not mirror it.
-      arrow.angle = (float)normalized;
-      arrow.offsetY = 12;
-      [self.headingOverlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:point symbol:arrow attributes:@{@"kind": @"heading"}]];
+      // The source image points straight north. ArcGIS map-aligned marker angles
+      // rotate clockwise, matching a true-north compass azimuth directly.
+      cone.angle = (float)normalized;
+      [self.headingOverlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:point symbol:cone attributes:@{@"kind": @"heading_cone"}]];
     }
+
+    // Draw the capture point above the direction fan, matching the visual model
+    // used by Google Maps: solid blue center, crisp white border, direction behind.
+    UIColor *googleBlue = [UIColor colorWithRed:0.12 green:0.45 blue:0.95 alpha:1.0];
+    AGSSimpleMarkerSymbol *pin = [[AGSSimpleMarkerSymbol alloc] initWithStyle:AGSSimpleMarkerSymbolStyleCircle color:googleBlue size:14];
+    pin.outline = [[AGSSimpleLineSymbol alloc] initWithStyle:AGSSimpleLineSymbolStyleSolid color:UIColor.whiteColor width:2.5];
+    NSMutableDictionary *attributes = [row mutableCopy]; attributes[@"kind"] = @"photo";
+    [self.photoOverlay.graphics addObject:[[AGSGraphic alloc] initWithGeometry:point symbol:pin attributes:attributes]];
   }
 }
 
