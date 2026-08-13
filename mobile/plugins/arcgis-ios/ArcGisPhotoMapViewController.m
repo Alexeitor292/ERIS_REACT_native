@@ -402,7 +402,7 @@ static NSString *const ErisPhotoMapDidFinishNotification = @"ErisPhotoMapDidFini
 
 - (void)beginEditingPhotoGraphic:(AGSGraphic *)graphic {
   NSNumber *attachmentId = [graphic.attributes[@"attachment_id"] isKindOfClass:[NSNumber class]] ? graphic.attributes[@"attachment_id"] : nil;
-  if (!attachmentId || ![self.payload[@"can_edit_corrections"] boolValue]) return;
+  if (!attachmentId || ![graphic.attributes[@"can_edit_correction"] boolValue]) return;
   [self finishEditingPhoto];
   self.editingAttachmentId = attachmentId;
   self.editingPhotoGraphic = graphic;
@@ -535,7 +535,7 @@ static NSString *const ErisPhotoMapDidFinishNotification = @"ErisPhotoMapDidFini
   if ([correction[@"heading_overridden"] boolValue]) [details addObject:@"Direction: manually corrected"];
 
   UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:[details componentsJoinedByString:@"\n"] preferredStyle:UIAlertControllerStyleActionSheet];
-  if ([self.payload[@"can_edit_corrections"] boolValue]) {
+  if ([attributes[@"can_edit_correction"] boolValue]) {
     __weak typeof(self) weakSelf = self;
     [sheet addAction:[UIAlertAction actionWithTitle:@"Adjust Position & Direction" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [weakSelf beginEditingPhotoGraphic:graphic]; }]];
   }
