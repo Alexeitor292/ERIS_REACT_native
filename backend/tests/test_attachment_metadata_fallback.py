@@ -6,11 +6,13 @@ from app.services.field_media_ingest import _coordinate, _heading_reference, mer
 def test_coordinate_refs():
     assert _coordinate((39, 30, 0), "N") == 39.5
     assert _coordinate((121, 1, 3), "W") < 0
+    assert _coordinate((121, 1, 3), b"W\x00") < 0
 
 
 def test_direction_refs():
     assert _heading_reference("T") == "TRUE_NORTH"
     assert _heading_reference("M") == "MAGNETIC_NORTH"
+    assert _heading_reference(b"T\x00") == "TRUE_NORTH"
 
 
 def test_fallback_fills_null_fields_without_overwriting_existing_values():
