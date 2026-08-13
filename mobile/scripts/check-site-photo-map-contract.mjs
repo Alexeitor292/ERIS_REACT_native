@@ -21,7 +21,24 @@ c("plugins/withArcGisIos.js", ["ErisCameraDirectionModule.h","ErisCameraDirectio
 c("app.json", ["NSMotionUsageDescription"]);
 c("src/api/submissions.ts", ["capture_metadata_json","/photo-map"]);
 c("src/arcgis/ArcGISNative.ts", ["openSitePhotoMap","supportsSitePhotoMap"]);
-c("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", ["AGSBasemapStyleArcGISImagery","AGSSymbolAngleAlignmentMap","heading_reference","TRUE_NORTH","arrow.angle = (float)normalized","identifyGraphicsOverlay"]);
-forbid("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", ["360.0 - normalized"]);
+c("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
+  "AGSBasemapStyleArcGISImagery",
+  "cameraDirectionConeImageWithSize",
+  "AGSPictureMarkerSymbol",
+  "AGSSymbolAngleAlignmentMap",
+  "heading_reference",
+  "TRUE_NORTH",
+  "cone.angle = (float)normalized",
+  "heading_cone",
+  "startLiveLocationDisplay",
+  "AGSLocationDisplayAutoPanModeOff",
+  "locationDisplay startWithCompletion",
+  "identifyGraphicsOverlay",
+]);
+forbid("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
+  "360.0 - normalized",
+  "AGSSimpleMarkerSymbolStyleTriangle",
+  "arrow.angle = (float)normalized",
+]);
 c("app/(tabs)/submissions/[id].tsx", ["Site Photo Map","MappedPhotoCamera","exif: true","captureMetadata"]);
 console.log("Site Photo Map source contract: PASS");
