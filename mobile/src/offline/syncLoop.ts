@@ -2,6 +2,7 @@ import { AppState, AppStateStatus } from "react-native";
 import { getToken } from "../auth/tokenStore";
 import { flushOfflineQueue } from "./queue";
 import { flushQueuedIncidents } from "./incidentQueue";
+import { flushQueuedPhotoCorrections } from "./fieldPhotoMetadata";
 
 let started = false;
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -21,14 +22,15 @@ async function runSyncOnce(): Promise<OfflineSyncRunResult> {
     const token = await getToken();
     if (!token) return { processed: 0, remaining: 0, skipped: true };
 
-    // Keep the established submission queue ordering semantics intact, then run
-    // the independent incident queue. Either queue can retain failed work for the
-    // next retry without discarding the other queue's durable state.
+    // Keep submission/incident ordering intact, then flush append-only photo
+    // metadata corrections. Any queue can retain failed work for a later retry
+    // without discarding successful work from the other durable queues.
     const submissionResult = await flushOfflineQueue(token);
     const incidentResult = await flushQueuedIncidents(token);
+    const photoCorrectionResult = await flushQueuedPhotoCorrections(token);
     return {
-      processed: submissionResult.processed + incidentResult.processed,
-      remaining: submissionResult.remaining + incidentResult.remaining,
+      processed: submissionResult.processed + incidentResult.processed + photoCorrectionResult.processed,
+      remaining: submissionResult.remaining + incidentResult.remaining + photoCorrectionResult.remaining,
       skipped: false,
     };
   } catch {
