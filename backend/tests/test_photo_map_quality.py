@@ -24,17 +24,20 @@ def test_good_capture_is_mapped_and_headed():
     assert out["camera_heading_deg"] == 90.0
 
 
-def test_weak_gps_is_not_mapped():
+def test_weak_gps_is_mapped_with_uncertainty_preserved():
     out = _quality_gated_capture(row(horizontal_accuracy_m=45.0))
-    assert out["latitude"] is None
-    assert out["longitude"] is None
-    assert out["location_source"] is None
+    assert out["latitude"] == 38.58
+    assert out["longitude"] == -121.49
+    assert out["horizontal_accuracy_m"] == 45.0
+    assert out["location_source"] == "DEVICE_AT_CAPTURE"
 
 
-def test_missing_gps_accuracy_is_not_mapped():
-    out = _quality_gated_capture(row(horizontal_accuracy_m=None))
-    assert out["latitude"] is None
-    assert out["longitude"] is None
+def test_missing_gps_accuracy_still_maps_measured_coordinate():
+    out = _quality_gated_capture(row(horizontal_accuracy_m=None, location_source="EXIF_GPS"))
+    assert out["latitude"] == 38.58
+    assert out["longitude"] == -121.49
+    assert out["horizontal_accuracy_m"] is None
+    assert out["location_source"] == "EXIF_GPS"
 
 
 def test_medium_camera_direction_is_allowed():
