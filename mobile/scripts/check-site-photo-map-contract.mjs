@@ -12,6 +12,19 @@ c("plugins/arcgis-ios/ErisCameraDirectionModule.m", ["CoreMotion","CMAttitudeRef
 c("plugins/withArcGisIos.js", ["ErisCameraDirectionModule.h","ErisCameraDirectionModule.m"]);
 c("app.json", ["NSMotionUsageDescription"]);
 c("src/api/submissions.ts", ["capture_metadata_json","/photo-map"]);
+c("src/api/client.ts", [
+  "readSitePhotoMapCache",
+  "writeSitePhotoMapCache",
+  "sitePhotoMapSubmissionId",
+  "if (photoMapSubmissionId && opts.token)",
+]);
+c("src/offline/sitePhotoMapCache.ts", [
+  "site_photo_map_payload_v1_",
+  "stripEphemeralServerUrls",
+  "download_url: _downloadUrl",
+  "writeSitePhotoMapCache",
+  "readSitePhotoMapCache",
+]);
 c("src/offline/fieldPhotoMetadata.ts", ["offline_photo_correction_queue_v1","enqueuePhotoCorrectionsForSync","flushQueuedPhotoCorrections","applyQueuedPhotoCorrectionsToPayload"]);
 c("src/offline/syncLoop.ts", ["flushQueuedPhotoCorrections"]);
 c("src/offline/localAttachmentUris.ts", [
@@ -21,6 +34,12 @@ c("src/offline/localAttachmentUris.ts", [
   "FileSystem.documentDirectory",
   "FileSystem.getInfoAsync",
   "matches.length !== 1",
+]);
+c("src/offline/queue.ts", [
+  "registerLocalAttachmentUri",
+  "const uploaded = await uploadSubmissionAttachment",
+  "Number(uploaded?.attachment_id)",
+  "registerLocalAttachmentUri(submissionId, attachmentId, payload.file.uri)",
 ]);
 c("src/arcgis/ArcGISNative.ts", [
   "openSitePhotoMap",
