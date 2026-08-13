@@ -25,6 +25,13 @@ type QueuedPhotoCorrection = PhotoCorrectionState & {
   lastError: string | null;
 };
 
+type PhotoMapPayloadLike = {
+  submission_id?: unknown;
+  photos?: any[];
+  summary?: unknown;
+  [key: string]: unknown;
+};
+
 export type PhotoCorrectionQueueSyncResult = {
   processed: number;
   remaining: number;
@@ -199,7 +206,7 @@ function capturedHeadingIsMappable(photo: any): boolean {
     && captured?.heading_reference === "TRUE_NORTH";
 }
 
-export async function applyQueuedPhotoCorrectionsToPayload<T extends any>(payload: T): Promise<T> {
+export async function applyQueuedPhotoCorrectionsToPayload<T extends PhotoMapPayloadLike>(payload: T): Promise<T> {
   const submissionId = Number(payload?.submission_id);
   if (!Number.isInteger(submissionId) || submissionId <= 0 || !Array.isArray(payload?.photos)) return payload;
 
@@ -273,5 +280,5 @@ export async function applyQueuedPhotoCorrectionsToPayload<T extends any>(payloa
       photos_with_heading: headed.length,
       photos_unmapped: photos.length - mapped.length,
     },
-  };
+  } as T;
 }
