@@ -33,6 +33,15 @@ def _number(value):
     return out if math.isfinite(out) else None
 
 
+def _text(value) -> str:
+    if isinstance(value, bytes):
+        try:
+            return value.decode("ascii", errors="ignore").strip("\x00 ")
+        except Exception:
+            return ""
+    return str(value or "").strip()
+
+
 def _coordinate(value, ref):
     if not isinstance(value, (tuple, list)) or len(value) < 3:
         return None
@@ -42,7 +51,7 @@ def _coordinate(value, ref):
     if d is None or m is None or s is None:
         return None
     magnitude = abs(d) + abs(m) / 60.0 + abs(s) / 3600.0
-    normalized_ref = str(ref or "").strip().upper()
+    normalized_ref = _text(ref).upper()
     if normalized_ref in {"S", "W"}:
         return -magnitude
     if normalized_ref in {"N", "E"}:
@@ -51,7 +60,7 @@ def _coordinate(value, ref):
 
 
 def _heading_reference(value):
-    normalized = str(value or "").strip().upper()
+    normalized = _text(value).upper()
     if normalized in {"T", "TRUE", "TRUE_NORTH"}:
         return "TRUE_NORTH"
     if normalized in {"M", "MAGNETIC", "MAGNETIC_NORTH"}:
@@ -83,6 +92,13 @@ def _iso_like_exif_date(value):
     return f"{y}-{mo}-{d}T{h}:{mi}:{s}"
 
 
+def _altitude_reference_is_below(value) -> bool:
+    if isinstance(value, bytes):
+        return bool(value) and value[0] == 1
+    numeric = _number(value)
+    return numeric is not None and int(numeric) == 1
+
+
 def extract_embedded_photo_metadata(content: bytes) -> dict | None:
     if not content:
         return None
@@ -111,7 +127,7 @@ def extract_embedded_photo_metadata(content: bytes) -> dict | None:
             horizontal_accuracy = raw_accuracy if raw_accuracy is not None and raw_accuracy >= 0 else None
 
             altitude = _number(gps.get(_GPS_ALT))
-            if altitude is not None and int(_number(gps.get(_GPS_ALT_REF)) or 0) == 1:
+            if altitude is not None and _altitude_reference_is_below(gps.get(_GPS_ALT_REF)):
                 altitude = -abs(altitude)
 
             direction = _number(gps.get(_GPS_IMG_DIRECTION))
@@ -119,8 +135,9 @@ def extract_embedded_photo_metadata(content: bytes) -> dict | None:
                 direction = direction % 360.0
             direction_ref = _heading_reference(gps.get(_GPS_IMG_DIRECTION_REF))
 
+            date_value = _date_value(exif)
             out = {
-                "captured_at": _iso_like_exif_date(_date_value(exif)),
+                "captured_at": _iso_like_exif_date(date_value),
                 "latitude": latitude if valid_location else None,
                 "longitude": longitude if valid_location else None,
                 "horizontal_accuracy_m": horizontal_accuracy if valid_location else None,
@@ -141,7 +158,7 @@ def extract_embedded_photo_metadata(content: bytes) -> dict | None:
                             ("GPSAltitude", gps.get(_GPS_ALT) is not None),
                             ("GPSImgDirection", gps.get(_GPS_IMG_DIRECTION) is not None),
                             ("GPSImgDirectionRef", gps.get(_GPS_IMG_DIRECTION_REF) is not None),
-                            ("DateTimeOriginal", _date_value(exif) is not None),
+                            ("DateTimeOriginal", date_value is not None),
                         )
                         if present
                     ],
@@ -223,6 +240,18 @@ def install_upload_metadata_fallback() -> None:
     photos._field_media_ingest_installed = True
 
 
+def _existing_metadata_json(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
 def backfill_missing_photo_metadata(db) -> dict:
     from .. import photos
     from ..config import settings
@@ -273,10 +302,12 @@ def backfill_missing_photo_metadata(db) -> dict:
                 "heading_reference",
                 "location_source",
                 "heading_source",
-                "metadata_json",
             ):
                 if existing.get(key) is not None:
                     merged[key] = existing[key]
+            existing_metadata = _existing_metadata_json(existing.get("metadata_json"))
+            if existing_metadata is not None:
+                merged["metadata_json"] = existing_metadata
             normalized = merged
 
         photos._store_capture_metadata(db, int(row["id"]), normalized)
