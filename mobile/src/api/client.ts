@@ -1,6 +1,8 @@
 import { getApiBaseUrl } from "./baseUrl";
 import { router } from "expo-router";
 import { clearToken, markOnlineAuthSuccess, setSessionExpiredNotice } from "../auth/tokenStore";
+import { readSitePhotoMapCache, writeSitePhotoMapCache } from "../offline/sitePhotoMapCache";
+import { authenticatedRequestHeaders } from "./authHeaders";
 
 export class SessionExpiredError extends Error {
   constructor() {
@@ -29,23 +31,45 @@ async function handleUnauthorized() {
   }
 }
 
+function sitePhotoMapSubmissionId(path: string, method: string): string | null {
+  if (method !== "GET") return null;
+  const match = path.match(/^\/submissions\/([^/]+)\/photo-map$/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
 export async function apiFetch<T = any>(
   path: string,
   opts: { method?: string; token?: string; body?: any } = {}
 ): Promise<T> {
   const base = getApiBaseUrl();
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const method = opts.method ?? "GET";
   const url = `${base}${normalizedPath}`;
+  const photoMapSubmissionId = sitePhotoMapSubmissionId(normalizedPath, method);
 
-  const headers: Record<string, string> = {};
-  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  const headers: Record<string, string> = opts.token
+    ? authenticatedRequestHeaders(opts.token)
+    : {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
-  const res = await fetch(url, {
-    method: opts.method ?? "GET",
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch (error) {
+    // The Site Photo Map is a field workflow. Once an authenticated snapshot has
+    // been obtained, lack of reception must not prevent reopening it. Explicit
+    // server responses still go through the normal authorization/error handling
+    // below and can never be bypassed by this cache.
+    if (photoMapSubmissionId && opts.token) {
+      const cached = await readSitePhotoMapCache(photoMapSubmissionId);
+      if (cached) return cached as T;
+    }
+    throw error;
+  }
 
   if (res.status === 401 && normalizedPath !== "/auth/login") {
     await handleUnauthorized();
@@ -62,5 +86,9 @@ export async function apiFetch<T = any>(
   if (opts.token) {
     markOnlineAuthSuccess().catch(() => {});
   }
-  return (await res.json()) as T;
+  const data = (await res.json()) as T;
+  if (photoMapSubmissionId && opts.token) {
+    await writeSitePhotoMapCache(photoMapSubmissionId, data).catch(() => {});
+  }
+  return data;
 }
