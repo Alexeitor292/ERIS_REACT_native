@@ -4,10 +4,32 @@ const root = path.resolve(import.meta.dirname, "..");
 function text(file) { return fs.readFileSync(path.join(root, file), "utf8"); }
 function c(file, needles) { const source=text(file); for (const needle of needles) if(!source.includes(needle)) throw new Error(`${file} missing ${needle}`); }
 function forbid(file, needles) { const source=text(file); for (const needle of needles) if(source.includes(needle)) throw new Error(`${file} contains forbidden ${needle}`); }
-c("src/photos/captureMetadata.ts", ["DEVICE_AT_CAPTURE","MAX_MAPPED_PHOTO_ACCURACY_M = 20","MIN_MAPPED_HEADING_ACCURACY_CODE = 2","CameraDirectionSnapshot","DEVICE_TRUE_HEADING"]);
+c("src/photos/captureMetadata.ts", [
+  "DEVICE_AT_CAPTURE",
+  "MAX_MAPPED_PHOTO_ACCURACY_M = 20",
+  "MIN_MAPPED_HEADING_ACCURACY_CODE = 2",
+  "CameraDirectionSnapshot",
+  "DEVICE_TRUE_HEADING",
+  "GPSImgDirection",
+  "EXIF_GPS_IMG_DIRECTION",
+  "return direct;",
+  "horizontal_accuracy_m: validLocation ? horizontalAccuracy : null",
+]);
 c("src/photos/CameraDirectionNative.ts", ["ErisCameraDirection","startTracking","getDirection","TRUE_NORTH"]);
-c("src/components/MappedPhotoCamera.tsx", ["CameraView","BestForNavigation","bestFreshPosition","readNativeCameraDirection","Rear camera","POSITION_WINDOW_MS = 3000"]);
-forbid("src/components/MappedPhotoCamera.tsx", ["watchHeadingAsync"]);
+c("src/components/MappedPhotoCamera.tsx", [
+  "CameraView",
+  "BestForNavigation",
+  "bestFreshPosition",
+  "readNativeCameraDirection",
+  "Rear camera",
+  "POSITION_WINDOW_MS = 3000",
+  "mapped with uncertainty",
+  "GPS accuracy is preserved as uncertainty",
+]);
+forbid("src/components/MappedPhotoCamera.tsx", [
+  "watchHeadingAsync",
+  ".filter((sample) => positionAccuracy(sample) <= MAX_MAPPED_PHOTO_ACCURACY_M)",
+]);
 c("plugins/arcgis-ios/ErisCameraDirectionModule.m", ["CoreMotion","CMAttitudeReferenceFrameXTrueNorthZVertical","const double north = -r.m31;","const double west = -r.m32;","const double east = -west;","atan2(east, north)","CMMagneticFieldCalibrationAccuracyMedium"]);
 c("plugins/withArcGisIos.js", ["ErisCameraDirectionModule.h","ErisCameraDirectionModule.m"]);
 c("app.json", ["NSMotionUsageDescription"]);
