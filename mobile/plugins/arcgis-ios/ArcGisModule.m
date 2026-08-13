@@ -197,12 +197,31 @@ RCT_REMAP_METHOD(openSitePhotoMap,
   dispatch_async(dispatch_get_main_queue(), ^{
     UIViewController *root = RCTPresentedViewController();
     if (root == nil) { reject(@"E_OPEN_SITE_PHOTO_MAP", @"No active view controller.", nil); return; }
+
     ArcGisPhotoMapViewController *vc = [[ArcGisPhotoMapViewController alloc] init];
     vc.payloadJson = paramsJson;
+    __block BOOL didResolve = NO;
+    __block id observer = nil;
+    observer = [[NSNotificationCenter defaultCenter]
+        addObserverForName:@"ErisPhotoMapDidFinishNotification"
+                    object:vc
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *note) {
+      if (didResolve) return;
+      didResolve = YES;
+      if (observer) {
+        [[NSNotificationCenter defaultCenter] removeObserver:observer];
+        observer = nil;
+      }
+      NSString *resultJson = [note.userInfo[@"resultJson"] isKindOfClass:[NSString class]]
+          ? note.userInfo[@"resultJson"]
+          : @"{\"corrections\":[]}";
+      resolve(resultJson);
+    }];
+
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     [root presentViewController:nav animated:YES completion:nil];
-    resolve(nil);
   });
 }
 
@@ -211,9 +230,6 @@ RCT_REMAP_METHOD(openOfflineTerrainScene,
                  resolverOpenOfflineScene:(RCTPromiseResolveBlock)resolve
                  rejecterOpenOfflineScene:(RCTPromiseRejectBlock)reject) {
   [ArcGisSketchStore setOfflineSceneParamsJson:paramsJson];
-  // Route by package format: 'mspk' -> ArcGIS Runtime SceneView; 'eristerrain'
-  // (default) -> native SceneKit terrain renderer. An eristerrain bundle is NEVER
-  // loaded as an Esri AGSMobileScenePackage.
   NSString *format = @"eristerrain";
   NSData *jd = [paramsJson dataUsingEncoding:NSUTF8StringEncoding];
   id parsed = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
@@ -293,7 +309,6 @@ RCT_REMAP_METHOD(validateScenePackage,
       reject(@"E_VALIDATE_PKG", error.localizedDescription ?: @"Package failed to load.", error);
       return;
     }
-    // A valid offline 3D package must contain at least one usable scene.
     resolve(@(pkg.scenes.count > 0));
   }];
 }
