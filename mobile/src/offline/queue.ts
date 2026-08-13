@@ -14,6 +14,7 @@ import {
   markLocalDraftSynced,
   resolveServerSubmissionId,
 } from "./localDrafts";
+import { registerLocalAttachmentUri } from "./localAttachmentUris";
 
 const OFFLINE_QUEUE_KEY = "offline_sync_queue_v1";
 const OFFLINE_QUEUE_META_KEY = "offline_sync_queue_meta_v2";
@@ -313,12 +314,16 @@ async function executeQueueItem(token: string, item: OfflineQueueItem): Promise<
     case "UPLOAD_ATTACHMENT": {
       const payload = item.payload as QueuePayloadMap["UPLOAD_ATTACHMENT"];
       const submissionId = await resolveSubmissionIdOrThrow(payload.submissionId);
-      await uploadSubmissionAttachment(
+      const uploaded = await uploadSubmissionAttachment(
         token,
         submissionId,
         payload.file,
         { sectionKey: payload.sectionKey ?? null, kind: payload.kind }
       );
+      const attachmentId = Number(uploaded?.attachment_id);
+      if (Number.isInteger(attachmentId) && attachmentId > 0) {
+        await registerLocalAttachmentUri(submissionId, attachmentId, payload.file.uri);
+      }
       return;
     }
     default:
