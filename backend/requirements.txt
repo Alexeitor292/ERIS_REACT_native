@@ -12,6 +12,7 @@ email-validator
 reportlab
 pypdf
 openpyxl>=3.1
+Pillow>=12.3,<13
 alembic>=1.13,<2.0
 pytest>=8.0
 httpx
