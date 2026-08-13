@@ -4,6 +4,7 @@ import {
   enqueuePhotoCorrectionsForSync,
   type PhotoCorrectionState,
 } from "../offline/fieldPhotoMetadata";
+import { resolveAvailableLocalAttachmentUri } from "../offline/localAttachmentUris";
 import { triggerOfflineSyncNow } from "../offline/syncLoop";
 
 type ArcGisNativeModule = {
@@ -18,28 +19,22 @@ type ArcGisNativeModule = {
   startMissionCenterMap(): Promise<void>;
   openSitePhotoMap(paramsJson: string): Promise<string>;
   startPencilSketch(): Promise<void>;
-  getSketchGeoJson(): Promise<string>; // returns GeoJSON or Esri JSON geometry string
+  getSketchGeoJson(): Promise<string>;
   getSketchImagePath(): Promise<string>;
   clearSketch(): Promise<void>;
-  // Native offline 3D terrain SceneView. Opens a locally-downloaded .mspk
-  // (Mobile Scene Package) with local elevation + basemap; renders overlays from
-  // the supplied params. The .mspk download/management itself is done in JS
-  // (expo-file-system); this only renders. paramsJson: see OpenOfflineSceneParams.
   openOfflineTerrainScene(paramsJson: string): Promise<void>;
-  // Integrity (native, no JS crypto dependency): SHA-256 of a local file, and a
-  // real load-check that the .mspk opens as an AGSMobileScenePackage.
   sha256OfFile(path: string): Promise<string>;
   validateScenePackage(path: string): Promise<boolean>;
 };
 
 export type OpenOfflineSceneParams = {
-  packagePath: string; // local file path to the downloaded package
-  packageFormat?: string; // "eristerrain" (default) or "mspk"
-  extractedDir?: string | null; // extracted eristerrain dir (manifest+grid+hillshade)
+  packagePath: string;
+  packageFormat?: string;
+  extractedDir?: string | null;
   incident: { lat: number; lon: number };
   incidentLabel?: string | null;
-  geometry?: unknown | null; // uploaded incident geometry (GeoJSON or Esri JSON)
-  roadBearingDeg?: number | null; // only drawn when a real bearing exists
+  geometry?: unknown | null;
+  roadBearingDeg?: number | null;
   sampleExtent?: { minLat: number; minLon: number; maxLat: number; maxLon: number } | null;
   packageVersion?: string | null;
   downloadedAt?: string | null;
@@ -47,19 +42,12 @@ export type OpenOfflineSceneParams = {
 };
 
 const { ArcGis } = NativeModules as { ArcGis: ArcGisNativeModule };
-
 type ArcGisMethodName = keyof ArcGisNativeModule;
 
-export function isArcGisNativeAvailable(): boolean {
-  return !!ArcGis;
-}
+export function isArcGisNativeAvailable(): boolean { return !!ArcGis; }
 
 function requireArcGisModule(): ArcGisNativeModule {
-  if (!ArcGis) {
-    throw new Error(
-      "ArcGis native module not found. Did you run expo prebuild and rebuild the app?"
-    );
-  }
+  if (!ArcGis) throw new Error("ArcGis native module not found. Did you run expo prebuild and rebuild the app?");
   return ArcGis;
 }
 
@@ -72,34 +60,45 @@ export function supportsMissionCenterMap(): boolean {
   return hasMethod("setMissionIncidents") && hasMethod("startMissionCenterMap");
 }
 
-export function supportsSitePhotoMap(): boolean {
-  return hasMethod("openSitePhotoMap");
+export function supportsSitePhotoMap(): boolean { return hasMethod("openSitePhotoMap"); }
+
+async function preferLocalSitePhotoFiles(payload: any): Promise<any> {
+  const submissionId = Number(payload?.submission_id);
+  if (!Number.isInteger(submissionId) || submissionId <= 0 || !Array.isArray(payload?.photos)) return payload;
+  const photos = await Promise.all(payload.photos.map(async (photo: any) => {
+    const attachmentId = Number(photo?.attachment_id);
+    if (!Number.isInteger(attachmentId) || attachmentId <= 0) return photo;
+    const localUri = await resolveAvailableLocalAttachmentUri(
+      submissionId,
+      attachmentId,
+      typeof photo?.file_name === "string" ? photo.file_name : null,
+    );
+    if (!localUri) return photo;
+    return { ...photo, download_url: localUri, local_uri: localUri };
+  }));
+  return { ...payload, photos };
 }
 
 export async function openSitePhotoMap(payload: any): Promise<void> {
   if (!hasMethod("openSitePhotoMap")) throw new Error("Native Site Photo Map is missing in this app build. Rebuild the EAS development client.");
-
-  // Apply any durable-but-not-yet-synced corrections before opening native so
-  // an offline reopen still shows the field worker's latest saved edits.
-  const preparedPayload = await applyQueuedPhotoCorrectionsToPayload(payload);
+  const correctedPayload = await applyQueuedPhotoCorrectionsToPayload(payload);
+  const preparedPayload = await preferLocalSitePhotoFiles(correctedPayload);
   const resultJson = await requireArcGisModule().openSitePhotoMap(JSON.stringify(preparedPayload));
   if (typeof resultJson !== "string" || resultJson.trim().length === 0) return;
 
   let parsed: any;
-  try {
-    parsed = JSON.parse(resultJson);
-  } catch {
-    throw new Error("Site Photo Map returned invalid correction data.");
-  }
+  try { parsed = JSON.parse(resultJson); }
+  catch { throw new Error("Site Photo Map returned invalid correction data."); }
 
   const submissionId = Number(preparedPayload?.submission_id);
   const rawCorrections = Array.isArray(parsed?.corrections) ? parsed.corrections : [];
   const corrections: PhotoCorrectionState[] = rawCorrections
     .map((item: any) => ({
       attachment_id: Number(item?.attachment_id),
-      location_override: item?.location_override == null
-        ? null
-        : { latitude: Number(item.location_override.latitude), longitude: Number(item.location_override.longitude) },
+      location_override: item?.location_override == null ? null : {
+        latitude: Number(item.location_override.latitude),
+        longitude: Number(item.location_override.longitude),
+      },
       heading_override_deg: item?.heading_override_deg == null ? null : Number(item.heading_override_deg),
     }))
     .filter((item: PhotoCorrectionState) => Number.isInteger(item.attachment_id) && item.attachment_id > 0);
@@ -110,89 +109,45 @@ export async function openSitePhotoMap(payload: any): Promise<void> {
   }
 }
 
-export function supportsOfflineTerrainScene(): boolean {
-  return hasMethod("openOfflineTerrainScene");
-}
-
-export function supportsScenePackageIntegrity(): boolean {
-  return hasMethod("sha256OfFile") && hasMethod("validateScenePackage");
-}
+export function supportsOfflineTerrainScene(): boolean { return hasMethod("openOfflineTerrainScene"); }
+export function supportsScenePackageIntegrity(): boolean { return hasMethod("sha256OfFile") && hasMethod("validateScenePackage"); }
 
 export async function sha256OfFile(path: string): Promise<string> {
-  if (!hasMethod("sha256OfFile")) {
-    throw new Error("Native SHA-256 missing in this app build. Rebuild the app (EAS dev build).");
-  }
+  if (!hasMethod("sha256OfFile")) throw new Error("Native SHA-256 missing in this app build. Rebuild the app (EAS dev build).");
   return requireArcGisModule().sha256OfFile(path);
 }
 
 export async function validateScenePackage(path: string): Promise<boolean> {
-  if (!hasMethod("validateScenePackage")) {
-    throw new Error("Native scene-package validation missing in this app build. Rebuild the app (EAS dev build).");
-  }
+  if (!hasMethod("validateScenePackage")) throw new Error("Native scene-package validation missing in this app build. Rebuild the app (EAS dev build).");
   return requireArcGisModule().validateScenePackage(path);
 }
 
 export async function openOfflineTerrainScene(params: OpenOfflineSceneParams): Promise<void> {
-  if (!hasMethod("openOfflineTerrainScene")) {
-    throw new Error(
-      "Native 3D terrain viewer missing in this app build. Rebuild the app (EAS dev build) to include the latest native ArcGIS module.",
-    );
-  }
+  if (!hasMethod("openOfflineTerrainScene")) throw new Error("Native 3D terrain viewer missing in this app build. Rebuild the EAS development client to include the latest native ArcGIS module.");
   return requireArcGisModule().openOfflineTerrainScene(JSON.stringify(params));
 }
 
-export async function loadMmpk(path: string) {
-  return requireArcGisModule().loadMmpk(path);
-}
-
-export async function downloadMmpk(url: string): Promise<string> {
-  return requireArcGisModule().downloadMmpk(url);
-}
-
-export async function setApiKey(apiKey: string) {
-  return requireArcGisModule().setApiKey(apiKey);
-}
-
-export async function setLicenseKey(licenseKey: string) {
-  return requireArcGisModule().setLicenseKey(licenseKey);
-}
+export async function loadMmpk(path: string) { return requireArcGisModule().loadMmpk(path); }
+export async function downloadMmpk(url: string): Promise<string> { return requireArcGisModule().downloadMmpk(url); }
+export async function setApiKey(apiKey: string) { return requireArcGisModule().setApiKey(apiKey); }
+export async function setLicenseKey(licenseKey: string) { return requireArcGisModule().setLicenseKey(licenseKey); }
 
 export async function setMissionIncidents(incidentsJson: string) {
-  if (!hasMethod("setMissionIncidents")) {
-    throw new Error(
-      "ArcGIS Mission Center method missing in this app build. Rebuild the app to include latest ArcGIS module."
-    );
-  }
+  if (!hasMethod("setMissionIncidents")) throw new Error("ArcGIS Mission Center method missing in this app build. Rebuild the app to include latest ArcGIS module.");
   return requireArcGisModule().setMissionIncidents(incidentsJson);
 }
 
-export async function setInitialLocation(latitude: number, longitude: number) {
-  return requireArcGisModule().setInitialLocation(latitude, longitude);
-}
-
-export async function setInitialGeometry(esriJson: string) {
-  return requireArcGisModule().setInitialGeometry(esriJson);
-}
-
-export async function startSketchPolygon() {
-  return requireArcGisModule().startSketchPolygon();
-}
+export async function setInitialLocation(latitude: number, longitude: number) { return requireArcGisModule().setInitialLocation(latitude, longitude); }
+export async function setInitialGeometry(esriJson: string) { return requireArcGisModule().setInitialGeometry(esriJson); }
+export async function startSketchPolygon() { return requireArcGisModule().startSketchPolygon(); }
 
 export async function startMissionCenterMap() {
-  if (!hasMethod("startMissionCenterMap")) {
-    throw new Error(
-      "ArcGIS Mission Center launcher missing in this app build. Rebuild the app to include latest native ArcGIS module."
-    );
-  }
+  if (!hasMethod("startMissionCenterMap")) throw new Error("ArcGIS Mission Center launcher missing in this app build. Rebuild the app to include latest ArcGIS module.");
   return requireArcGisModule().startMissionCenterMap();
 }
 
 export async function startPencilSketch() {
-  if (!hasMethod("startPencilSketch")) {
-    throw new Error(
-      "Pencil sketch launcher missing in this app build. Rebuild the app to include the latest native module."
-    );
-  }
+  if (!hasMethod("startPencilSketch")) throw new Error("Pencil sketch launcher missing in this app build. Rebuild the app to include the latest native module.");
   return requireArcGisModule().startPencilSketch();
 }
 
@@ -202,17 +157,11 @@ export async function getSketchGeometry(): Promise<any> {
 }
 
 export async function getSketchImagePath(): Promise<string> {
-  if (!hasMethod("getSketchImagePath")) {
-    throw new Error(
-      "Sketch image export missing in this app build. Rebuild the app to include the latest native module."
-    );
-  }
+  if (!hasMethod("getSketchImagePath")) throw new Error("Sketch image export missing in this app build. Rebuild the app to include the latest native module.");
   return requireArcGisModule().getSketchImagePath();
 }
 
-export async function clearSketch() {
-  return requireArcGisModule().clearSketch();
-}
+export async function clearSketch() { return requireArcGisModule().clearSketch(); }
 
 function webMercatorToWgs84XY(x: number, y: number): [number, number] {
   const lon = (x / 20037508.34) * 180;
@@ -233,52 +182,27 @@ function mapCoords(value: any, mapper: (coord: [number, number]) => [number, num
   if (!Array.isArray(value)) return value;
   if (value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number") {
     const [x, y] = mapper([Number(value[0]), Number(value[1])]);
-    const out = [...value];
-    out[0] = x;
-    out[1] = y;
-    return out;
+    const out = [...value]; out[0] = x; out[1] = y; return out;
   }
   return value.map((v) => mapCoords(v, mapper));
 }
 
 function normalizeGeometryJson(raw: any): any {
   if (!raw || typeof raw !== "object") return raw;
-
-  // Already GeoJSON.
   if (typeof raw.type === "string" && raw.coordinates) {
-    if (looksLikeWebMercatorCoord(raw.coordinates)) {
-      return {
-        ...raw,
-        coordinates: mapCoords(raw.coordinates, ([x, y]) => webMercatorToWgs84XY(x, y)),
-      };
-    }
+    if (looksLikeWebMercatorCoord(raw.coordinates)) return { ...raw, coordinates: mapCoords(raw.coordinates, ([x, y]) => webMercatorToWgs84XY(x, y)) };
     return raw;
   }
-
   const wkid = Number(raw?.spatialReference?.wkid ?? 0);
   const isWebMercator = wkid === 3857 || wkid === 102100;
-  const convert = (coords: any) =>
-    isWebMercator || looksLikeWebMercatorCoord(coords)
-      ? mapCoords(coords, ([x, y]) => webMercatorToWgs84XY(x, y))
-      : coords;
-
-  // Esri JSON -> GeoJSON conversion for basic geometry types.
-  if (typeof raw.x === "number" && typeof raw.y === "number") {
-    const point = convert([raw.x, raw.y]);
-    return { type: "Point", coordinates: point };
-  }
-  if (Array.isArray(raw.points)) {
-    return { type: "MultiPoint", coordinates: convert(raw.points) };
-  }
+  const convert = (coords: any) => isWebMercator || looksLikeWebMercatorCoord(coords)
+    ? mapCoords(coords, ([x, y]) => webMercatorToWgs84XY(x, y)) : coords;
+  if (typeof raw.x === "number" && typeof raw.y === "number") return { type: "Point", coordinates: convert([raw.x, raw.y]) };
+  if (Array.isArray(raw.points)) return { type: "MultiPoint", coordinates: convert(raw.points) };
   if (Array.isArray(raw.paths)) {
-    if (raw.paths.length === 1) {
-      return { type: "LineString", coordinates: convert(raw.paths[0]) };
-    }
+    if (raw.paths.length === 1) return { type: "LineString", coordinates: convert(raw.paths[0]) };
     return { type: "MultiLineString", coordinates: convert(raw.paths) };
   }
-  if (Array.isArray(raw.rings)) {
-    return { type: "Polygon", coordinates: convert(raw.rings) };
-  }
-
+  if (Array.isArray(raw.rings)) return { type: "Polygon", coordinates: convert(raw.rings) };
   return raw;
 }
