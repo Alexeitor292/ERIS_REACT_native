@@ -44,15 +44,24 @@ export const normalizePhotoHeading = (value: unknown): number | null => {
 };
 
 function coordinate(value: unknown, ref: unknown): number | null {
-  const sign = ["S", "W"].includes(String(ref || "").toUpperCase()) ? -1 : 1;
+  const normalizedRef = String(ref || "").trim().toUpperCase();
   const direct = finite(value);
-  if (direct != null) return Math.abs(direct) * sign;
+  if (direct != null) {
+    if (["S", "W"].includes(normalizedRef)) return -Math.abs(direct);
+    if (["N", "E"].includes(normalizedRef)) return Math.abs(direct);
+    // iOS commonly returns an already-signed decimal coordinate without a Ref.
+    // Preserve that sign instead of forcing west/south values positive.
+    return direct;
+  }
   if (!Array.isArray(value) || value.length < 3) return null;
   const d = finite(value[0]);
   const m = finite(value[1]);
   const sec = finite(value[2]);
   if (d == null || m == null || sec == null) return null;
-  return (Math.abs(d) + m / 60 + sec / 3600) * sign;
+  const magnitude = Math.abs(d) + Math.abs(m) / 60 + Math.abs(sec) / 3600;
+  if (["S", "W"].includes(normalizedRef)) return -magnitude;
+  if (["N", "E"].includes(normalizedRef)) return magnitude;
+  return d < 0 ? -magnitude : magnitude;
 }
 
 function exifDate(value: unknown): string | null {
@@ -63,50 +72,70 @@ function exifDate(value: unknown): string | null {
     : null;
 }
 
+function exifHeadingReference(value: unknown): "TRUE_NORTH" | "MAGNETIC_NORTH" | "UNKNOWN" | null {
+  if (value == null || value === "") return null;
+  const normalized = String(value).trim().toUpperCase();
+  if (normalized === "T" || normalized === "TRUE" || normalized === "TRUE_NORTH") return "TRUE_NORTH";
+  if (normalized === "M" || normalized === "MAGNETIC" || normalized === "MAGNETIC_NORTH") return "MAGNETIC_NORTH";
+  return "UNKNOWN";
+}
+
 export function photoCaptureMetadataFromAsset(asset: AssetLike): PhotoCaptureMetadata | null {
   const exif = asset.exif;
   if (!exif) return null;
 
   const latitude = coordinate(exif.GPSLatitude, exif.GPSLatitudeRef);
   const longitude = coordinate(exif.GPSLongitude, exif.GPSLongitudeRef);
-  const horizontalAccuracy = finite(exif.GPSHPositioningError);
-  const validCoordinates =
+  const rawHorizontalAccuracy = finite(exif.GPSHPositioningError);
+  const horizontalAccuracy = rawHorizontalAccuracy != null && rawHorizontalAccuracy >= 0
+    ? rawHorizontalAccuracy
+    : null;
+  const validLocation =
     latitude != null && longitude != null &&
     latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
-  const validLocation =
-    validCoordinates && horizontalAccuracy != null &&
-    horizontalAccuracy >= 0 && horizontalAccuracy <= MAX_MAPPED_PHOTO_ACCURACY_M;
+
+  const heading = normalizePhotoHeading(exif.GPSImgDirection);
+  const headingReference = exifHeadingReference(exif.GPSImgDirectionRef);
+  const hasHeading = heading != null;
 
   const tags = [
-    "GPSLatitude", "GPSLongitude", "GPSHPositioningError", "GPSAltitude",
-    "GPSImgDirection", "GPSImgDirectionRef", "DateTimeOriginal",
+    "GPSLatitude", "GPSLatitudeRef", "GPSLongitude", "GPSLongitudeRef",
+    "GPSHPositioningError", "GPSAltitude", "GPSImgDirection",
+    "GPSImgDirectionRef", "DateTimeOriginal",
   ].filter((key) => exif[key] != null);
 
   const out: PhotoCaptureMetadata = {
     captured_at: exifDate(exif.DateTimeOriginal ?? exif.DateTime),
     latitude: validLocation ? latitude : null,
     longitude: validLocation ? longitude : null,
+    // Unknown or weak accuracy is evidence about uncertainty, not a reason to
+    // erase an otherwise valid measured coordinate.
     horizontal_accuracy_m: validLocation ? horizontalAccuracy : null,
     altitude_m: validLocation ? finite(exif.GPSAltitude) : null,
-    camera_heading_deg: null,
+    camera_heading_deg: hasHeading ? heading : null,
     camera_heading_accuracy_code: null,
-    heading_reference: null,
+    heading_reference: hasHeading ? (headingReference ?? "UNKNOWN") : null,
     location_source: validLocation ? "EXIF_GPS" : null,
-    heading_source: null,
+    heading_source: hasHeading ? "EXIF_GPS_IMG_DIRECTION" : null,
     provenance: { asset_id: asset.assetId ?? null, exif_tags_present: tags },
   };
-  return out.captured_at || out.latitude != null || tags.length > 0 ? out : null;
+  return out.captured_at || out.latitude != null || out.camera_heading_deg != null || tags.length > 0 ? out : null;
 }
 
 export function photoCaptureMetadataFromDeviceSnapshot(
   snapshot: DeviceCaptureSnapshot,
 ): PhotoCaptureMetadata | null {
-  const positionAccuracy = finite(snapshot.position?.coords.accuracy);
-  const reliablePosition =
-    snapshot.position && positionAccuracy != null && positionAccuracy >= 0 &&
-    positionAccuracy <= MAX_MAPPED_PHOTO_ACCURACY_M
+  const latitude = finite(snapshot.position?.coords.latitude);
+  const longitude = finite(snapshot.position?.coords.longitude);
+  const measuredPosition =
+    snapshot.position && latitude != null && longitude != null &&
+    latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
       ? snapshot.position
       : null;
+  const rawPositionAccuracy = finite(snapshot.position?.coords.accuracy);
+  const positionAccuracy = rawPositionAccuracy != null && rawPositionAccuracy >= 0
+    ? rawPositionAccuracy
+    : null;
 
   const direction = snapshot.cameraDirection;
   const reliableHeading =
@@ -117,21 +146,21 @@ export function photoCaptureMetadataFromDeviceSnapshot(
       ? normalizePhotoHeading(direction.heading)
       : null;
 
-  if (!reliablePosition && reliableHeading == null) return null;
+  if (!measuredPosition && reliableHeading == null) return null;
 
   return {
     captured_at: snapshot.capturedAt,
-    latitude: reliablePosition?.coords.latitude ?? null,
-    longitude: reliablePosition?.coords.longitude ?? null,
-    horizontal_accuracy_m: reliablePosition ? positionAccuracy : null,
-    altitude_m: reliablePosition?.coords.altitude ?? null,
+    latitude: measuredPosition?.coords.latitude ?? null,
+    longitude: measuredPosition?.coords.longitude ?? null,
+    horizontal_accuracy_m: measuredPosition ? positionAccuracy : null,
+    altitude_m: measuredPosition?.coords.altitude ?? null,
     camera_heading_deg: reliableHeading,
     camera_heading_accuracy_code:
       reliableHeading != null && direction
         ? Math.max(0, Math.min(3, Math.round(direction.accuracyCode)))
         : null,
     heading_reference: reliableHeading != null ? "TRUE_NORTH" : null,
-    location_source: reliablePosition ? "DEVICE_AT_CAPTURE" : null,
+    location_source: measuredPosition ? "DEVICE_AT_CAPTURE" : null,
     heading_source: reliableHeading != null ? "DEVICE_TRUE_HEADING" : null,
     provenance: null,
   };

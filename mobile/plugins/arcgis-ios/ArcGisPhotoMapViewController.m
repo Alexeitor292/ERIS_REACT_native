@@ -346,8 +346,19 @@ static NSString *const ErisPhotoMapDidFinishNotification = @"ErisPhotoMapDidFini
   for (AGSGraphic *graphic in self.contextOverlay.graphics) if (graphic.geometry) [geometries addObject:graphic.geometry];
   for (AGSGraphic *graphic in self.photoOverlay.graphics) if (graphic.geometry) [geometries addObject:graphic.geometry];
   if (geometries.count == 0) return;
+
+  if (geometries.count == 1 && [geometries.firstObject isKindOfClass:[AGSPoint class]]) {
+    [self.mapView setViewpointCenter:(AGSPoint *)geometries.firstObject scale:12000 completion:nil];
+    return;
+  }
+
   AGSEnvelope *extent = [AGSGeometryEngine combineExtentsOfGeometries:geometries];
-  if (extent) [self.mapView setViewpointGeometry:extent padding:90 completion:nil];
+  if (!extent) return;
+  if (extent.width <= 0.000001 && extent.height <= 0.000001 && extent.center) {
+    [self.mapView setViewpointCenter:extent.center scale:12000 completion:nil];
+    return;
+  }
+  [self.mapView setViewpointGeometry:extent padding:90 completion:nil];
 }
 
 - (NSString *)cardinal:(double)heading {
@@ -374,7 +385,9 @@ static NSString *const ErisPhotoMapDidFinishNotification = @"ErisPhotoMapDidFini
   NSNumber *lat = [captured[@"latitude"] isKindOfClass:[NSNumber class]] ? captured[@"latitude"] : nil;
   NSNumber *lon = [captured[@"longitude"] isKindOfClass:[NSNumber class]] ? captured[@"longitude"] : nil;
   NSNumber *accuracy = [captured[@"horizontal_accuracy_m"] isKindOfClass:[NSNumber class]] ? captured[@"horizontal_accuracy_m"] : nil;
-  if (!lat || !lon || !accuracy || accuracy.doubleValue < 0 || accuracy.doubleValue > 20.0) return NO;
+  if (!lat || !lon) return NO;
+  if (lat.doubleValue < -90.0 || lat.doubleValue > 90.0 || lon.doubleValue < -180.0 || lon.doubleValue > 180.0) return NO;
+  if (accuracy && accuracy.doubleValue < 0) return NO;
   if (pointOut) *pointOut = [AGSPoint pointWithX:lon.doubleValue y:lat.doubleValue spatialReference:AGSSpatialReference.WGS84];
   return YES;
 }
@@ -384,7 +397,10 @@ static NSString *const ErisPhotoMapDidFinishNotification = @"ErisPhotoMapDidFini
   NSNumber *heading = [captured[@"camera_heading_deg"] isKindOfClass:[NSNumber class]] ? captured[@"camera_heading_deg"] : nil;
   NSNumber *accuracy = [captured[@"camera_heading_accuracy_code"] isKindOfClass:[NSNumber class]] ? captured[@"camera_heading_accuracy_code"] : nil;
   NSString *reference = [captured[@"heading_reference"] isKindOfClass:[NSString class]] ? captured[@"heading_reference"] : nil;
-  if (!heading || !accuracy || accuracy.integerValue < 2 || ![reference isEqualToString:@"TRUE_NORTH"]) return nil;
+  NSString *source = [captured[@"heading_source"] isKindOfClass:[NSString class]] ? captured[@"heading_source"] : nil;
+  if (!heading || heading.doubleValue < 0.0 || heading.doubleValue >= 360.0 || ![reference isEqualToString:@"TRUE_NORTH"]) return nil;
+  if ([source isEqualToString:@"EXIF_GPS_IMG_DIRECTION"]) return heading;
+  if (!accuracy || accuracy.integerValue < 2) return nil;
   return heading;
 }
 
@@ -483,7 +499,7 @@ static NSString *const ErisPhotoMapDidFinishNotification = @"ErisPhotoMapDidFini
   if ([self capturedLocationForRow:row point:&capturedPoint] && capturedPoint) {
     [self.positionEditor replaceGeometry:capturedPoint];
   } else {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Captured GPS unavailable" message:@"The original GPS fix did not meet the map quality threshold. Saving this reset will make the photo unmapped until a new manual position is set." preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Captured GPS unavailable" message:@"The original photo did not contain a usable captured coordinate. Saving this reset will make the photo unmapped until a new manual position is set." preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
   }
