@@ -193,7 +193,8 @@ export function MappedPhotoCamera({
   }, [cameraPermission?.granted, visible]);
 
   async function takeMappedPhoto() {
-    if (!cameraReady || !cameraRef.curt || capturing) return;
+    const camera = cameraRef.current;
+    if (!cameraReady || !camera || capturing) return;
     setCapturing(true);
     try {
       const shutterAtMs = Date.now();
@@ -211,7 +212,7 @@ export function MappedPhotoCamera({
       }
       const cameraDirection = cameraDirectionSnapshot(directionSample);
 
-      const picture = await cameraRef.current.takePictureAsync({ quality: 0.9, exif: true });
+      const picture = await camera.takePictureAsync({ quality: 0.9, exif: true });
       if (!picture?.uri) throw new Error("Camera did not return an image file.");
 
       const deviceMetadata = photoCaptureMetadataFromDeviceSnapshot({
