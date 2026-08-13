@@ -42,7 +42,6 @@ function positionAccuracy(sample: TimedPosition): number {
 function bestFreshPosition(samples: TimedPosition[], shutterAtMs: number): Location.LocationObject | null {
   const candidates = samples
     .filter((sample) => Math.abs(shutterAtMs - sample.observedAt) <= POSITION_WINDOW_MS)
-    .filter((sample) => positionAccuracy(sample) <= MAX_MAPPED_PHOTO_ACCURACY_M)
     .sort((a, b) => {
       const accuracyDelta = positionAccuracy(a) - positionAccuracy(b);
       return accuracyDelta !== 0 ? accuracyDelta : b.observedAt - a.observedAt;
@@ -102,15 +101,16 @@ export function MappedPhotoCamera({
         { value, observedAt: now },
       ].slice(-20);
 
-      const accuracy = value.coords.accuracy;
       const best = bestFreshPosition(positionSamplesRef.current, now);
       const bestAccuracy = best?.coords.accuracy;
-      if (bestAccuracy != null && Number.isFinite(bestAccuracy)) {
+      if (bestAccuracy != null && Number.isFinite(bestAccuracy) && bestAccuracy <= MAX_MAPPED_PHOTO_ACCURACY_M) {
         setLocationLabel(`GPS best recent ±${Math.round(bestAccuracy)} m`);
-      } else if (accuracy != null && Number.isFinite(accuracy)) {
-        setLocationLabel(`GPS weak ±${Math.round(accuracy)} m • photo may be unmapped`);
+      } else if (bestAccuracy != null && Number.isFinite(bestAccuracy)) {
+        setLocationLabel(`GPS weak ±${Math.round(bestAccuracy)} m • mapped with uncertainty`);
+      } else if (best) {
+        setLocationLabel("GPS fix acquired • accuracy unknown");
       } else {
-        setLocationLabel("GPS accuracy unknown • photo may be unmapped");
+        setLocationLabel("GPS acquiring…");
       }
     };
 
@@ -141,7 +141,7 @@ export function MappedPhotoCamera({
       }
 
       if (!supportsNativeCameraDirection()) {
-        setHeadingLabel("Camera-axis direction requires the latest iOS development build");
+        setHeadingLabel("Camera-axis direction requires the latest iOS build");
         return;
       }
 
@@ -193,7 +193,7 @@ export function MappedPhotoCamera({
   }, [cameraPermission?.granted, visible]);
 
   async function takeMappedPhoto() {
-    if (!cameraReady || !cameraRef.current || capturing) return;
+    if (!cameraReady || !cameraRef.curt || capturing) return;
     setCapturing(true);
     try {
       const shutterAtMs = Date.now();
@@ -278,7 +278,7 @@ export function MappedPhotoCamera({
                 </Pressable>
               </View>
               <Text style={styles.hint}>
-                ERIS selects the best fresh GPS fix near shutter time and computes true-north direction from the rear camera axis. Weak GPS or magnetic calibration is retained as uncertainty, not presented as exact evidence.
+                ERIS records the best fresh GPS fix near shutter time and computes true-north direction from the rear camera axis. GPS accuracy is preserved as uncertainty instead of deleting an otherwise valid measured location.
               </Text>
             </View>
           </SafeAreaView>
