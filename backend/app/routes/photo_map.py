@@ -19,6 +19,16 @@ _MIN_MAPPED_HEADING_ACCURACY_CODE = 2
 _CLIENT_CORRECTION_UUID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 
 
+def _owns_linked_incident(db: Session, *, user_id: int, submission_id: int) -> bool:
+    return bool(db.execute(text("""
+        SELECT 1
+        FROM incident_submission_links l
+        JOIN incidents i ON i.id=l.incident_id
+        WHERE l.submission_id=:sid AND i.created_by_user_id=:uid
+        LIMIT 1
+    """), {"sid": submission_id, "uid": user_id}).first())
+
+
 def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
     if is_admin(user) or is_reviewer(user) or is_operational_user(user):
         return True
@@ -28,7 +38,9 @@ def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool
                EXISTS(SELECT 1 FROM submission_editors e WHERE e.submission_id=s.id AND e.user_id=:uid) AS has_edit_grant
         FROM submissions s WHERE s.id=:sid LIMIT 1
     """), {"sid": submission_id, "uid": user["id"]}).mappings().first()
-    return bool(row) and (int(row["owner_id"]) == int(user["id"]) or bool(row["has_view_grant"]) or bool(row["has_edit_grant"]))
+    if bool(row) and (int(row["owner_id"]) == int(user["id"]) or bool(row["has_view_grant"]) or bool(row["has_edit_grant"])):
+        return True
+    return _owns_linked_incident(db, user_id=int(user["id"]), submission_id=submission_id)
 
 
 def _can_edit_submission(db: Session, *, user: dict, submission_id: int) -> bool:
@@ -54,6 +66,29 @@ def _photo_belongs_to_submission(db: Session, *, submission_id: int, attachment_
         WHERE l.submission_id=:sid AND ia.attachment_id=:aid AND ia.kind='PHOTO'
         LIMIT 1
     """), {"sid": submission_id, "aid": attachment_id}).first())
+
+
+def _owns_incident_photo(db: Session, *, user_id: int, submission_id: int, attachment_id: int) -> bool:
+    return bool(db.execute(text("""
+        SELECT 1
+        FROM incident_submission_links l
+        JOIN incidents i ON i.id=l.incident_id
+        JOIN incident_attachments ia ON ia.incident_id=i.id
+        WHERE l.submission_id=:sid
+          AND ia.attachment_id=:aid
+          AND ia.kind='PHOTO'
+          AND i.created_by_user_id=:uid
+        LIMIT 1
+    """), {"sid": submission_id, "aid": attachment_id, "uid": user_id}).first())
+
+
+def _can_edit_photo(db: Session, *, user: dict, submission_id: int, attachment_id: int) -> bool:
+    return _can_edit_submission(db, user=user, submission_id=submission_id) or _owns_incident_photo(
+        db,
+        user_id=int(user["id"]),
+        submission_id=submission_id,
+        attachment_id=attachment_id,
+    )
 
 
 def _json_value(value):
@@ -262,10 +297,12 @@ def put_photo_correction(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    if not _can_edit_submission(db, user=user, submission_id=submission_id):
-        raise HTTPException(status_code=403, detail="Not allowed to correct photos for this submission")
+    if not _can_view_submission(db, user=user, submission_id=submission_id):
+        raise HTTPException(status_code=403, detail="Not allowed to view this submission photo map")
     if not _photo_belongs_to_submission(db, submission_id=submission_id, attachment_id=attachment_id):
         raise HTTPException(status_code=404, detail="Photo attachment not found in this submission")
+    if not _can_edit_photo(db, user=user, submission_id=submission_id, attachment_id=attachment_id):
+        raise HTTPException(status_code=403, detail="Not allowed to correct this photo")
 
     normalized = _normalize_correction_payload(payload)
     existing = db.execute(text("""
@@ -307,7 +344,7 @@ def submission_photo_map(submission_id: int = Path(..., ge=1), db: Session = Dep
     if not db.execute(text("SELECT 1 FROM submissions WHERE id=:sid LIMIT 1"), {"sid": submission_id}).first():
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    can_edit_corrections = _can_edit_submission(db, user=user, submission_id=submission_id)
+    submission_can_edit = _can_edit_submission(db, user=user, submission_id=submission_id)
     gisa = db.execute(text("SELECT latitude, longitude, geometry_json FROM submission_gisa WHERE submission_id=:sid LIMIT 1"), {"sid": submission_id}).mappings().first()
     incident = db.execute(text("""
         SELECT i.id, i.latitude, i.longitude
@@ -364,10 +401,17 @@ def submission_photo_map(submission_id: int = Path(..., ge=1), db: Session = Dep
         if aid in deduped and deduped[aid]["source_scope"] == "SUBMISSION":
             continue
         capture = _effective_capture(row)
+        can_edit_photo = submission_can_edit or _owns_incident_photo(
+            db,
+            user_id=int(user["id"]),
+            submission_id=submission_id,
+            attachment_id=aid,
+        )
         deduped[aid] = {
             "attachment_id": aid,
             "file_name": row["file_name"], "mime_type": row["mime_type"],
             "section_key": row["section_key"], "source_scope": row["source_scope"],
+            "can_edit_correction": can_edit_photo,
             "captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
             **capture,
             "download_url": object_access_url(str(row["storage_bucket"] or settings.MINIO_BUCKET), str(row["storage_key"]), expires_seconds=900),
@@ -384,7 +428,7 @@ def submission_photo_map(submission_id: int = Path(..., ge=1), db: Session = Dep
     return {
         "submission_id": submission_id,
         "incident_id": int(incident["id"]) if incident else None,
-        "can_edit_corrections": can_edit_corrections,
+        "can_edit_corrections": any(bool(p["can_edit_correction"]) for p in photos),
         "incident": {"latitude": lat, "longitude": lon},
         "affected_geometry": _json_value(gisa["geometry_json"] if gisa else None),
         "summary": {"photos_total": len(photos), "photos_geotagged": len(mapped),
