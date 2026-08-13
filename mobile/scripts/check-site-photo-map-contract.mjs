@@ -101,7 +101,15 @@ c("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
   "download_url",
   "Open Photo",
   "openURL:url",
+  "setViewpointCenter:(AGSPoint *)geometries.firstObject scale:12000",
+  "extent.width <= 0.000001",
+  "EXIF_GPS_IMG_DIRECTION",
 ]);
-forbid("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", ["360.0 - normalized","AGSSimpleMarkerSymbolStyleTriangle","arrow.angle = (float)normalized"]);
+forbid("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
+  "360.0 - normalized",
+  "AGSSimpleMarkerSymbolStyleTriangle",
+  "arrow.angle = (float)normalized",
+  "accuracy.doubleValue > 20.0",
+]);
 c("app/(tabs)/submissions/[id].tsx", ["Site Photo Map","MappedPhotoCamera","exif: true","captureMetadata","draft_local_attachment_uris_","registerLocalAttachmentUri"]);
 console.log("Site Photo Map source contract: PASS");
