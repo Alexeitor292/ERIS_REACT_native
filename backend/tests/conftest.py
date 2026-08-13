@@ -19,6 +19,32 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
 
+@pytest.fixture(autouse=True)
+def package_reference_fixture(monkeypatch):
+    from app.services import road_inventory_packages as packages
+
+    point = {
+        "object_id": 1,
+        "district_code": "03",
+        "county_code": "PLA",
+        "route_name": "80",
+        "route_suffix_code": None,
+        "pm_route_id": "PLA080",
+        "pm_prefix_code": None,
+        "postmile": 1.0,
+        "pm_suffix_code": None,
+        "postmile_compound": "1.0",
+        "odometer": 1.0,
+        "pm_interval": 0.1,
+        "highway_segment": "A",
+        "align_code": "C",
+        "direction": "E",
+        "latitude": 38.8,
+        "longitude": -121.2,
+    }
+    monkeypatch.setattr(packages, "fetch_postmile_reference_points", lambda: [point])
+
+
 @pytest.fixture(scope="session")
 def client():
     """
