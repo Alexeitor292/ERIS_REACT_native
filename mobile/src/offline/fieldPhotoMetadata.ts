@@ -1,0 +1,1 @@
+// Field photo metadata support.
