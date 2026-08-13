@@ -8,19 +8,14 @@ c("src/photos/captureMetadata.ts", ["DEVICE_AT_CAPTURE","MAX_MAPPED_PHOTO_ACCURA
 c("src/photos/CameraDirectionNative.ts", ["ErisCameraDirection","startTracking","getDirection","TRUE_NORTH"]);
 c("src/components/MappedPhotoCamera.tsx", ["CameraView","BestForNavigation","bestFreshPosition","readNativeCameraDirection","Rear camera","POSITION_WINDOW_MS = 3000"]);
 forbid("src/components/MappedPhotoCamera.tsx", ["watchHeadingAsync"]);
-c("plugins/arcgis-ios/ErisCameraDirectionModule.m", [
-  "CoreMotion",
-  "CMAttitudeReferenceFrameXTrueNorthZVertical",
-  "const double north = -r.m31;",
-  "const double west = -r.m32;",
-  "const double east = -west;",
-  "atan2(east, north)",
-  "CMMagneticFieldCalibrationAccuracyMedium",
-]);
+c("plugins/arcgis-ios/ErisCameraDirectionModule.m", ["CoreMotion","CMAttitudeReferenceFrameXTrueNorthZVertical","const double north = -r.m31;","const double west = -r.m32;","const double east = -west;","atan2(east, north)","CMMagneticFieldCalibrationAccuracyMedium"]);
 c("plugins/withArcGisIos.js", ["ErisCameraDirectionModule.h","ErisCameraDirectionModule.m"]);
 c("app.json", ["NSMotionUsageDescription"]);
 c("src/api/submissions.ts", ["capture_metadata_json","/photo-map"]);
-c("src/arcgis/ArcGISNative.ts", ["openSitePhotoMap","supportsSitePhotoMap"]);
+c("src/offline/fieldPhotoMetadata.ts", ["offline_photo_correction_queue_v1","enqueuePhotoCorrectionsForSync","flushQueuedPhotoCorrections","applyQueuedPhotoCorrectionsToPayload"]);
+c("src/offline/syncLoop.ts", ["flushQueuedPhotoCorrections"]);
+c("src/arcgis/ArcGISNative.ts", ["openSitePhotoMap","supportsSitePhotoMap","applyQueuedPhotoCorrectionsToPayload","enqueuePhotoCorrectionsForSync","Promise<string>"]);
+c("plugins/arcgis-ios/ArcGisModule.m", ["ErisPhotoMapDidFinishNotification","resultJson","resolve(resultJson)"]);
 c("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
   "AGSBasemapStyleArcGISImagery",
   "cameraDirectionConeImageWithSize",
@@ -34,11 +29,17 @@ c("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
   "AGSLocationDisplayAutoPanModeOff",
   "locationDisplay startWithCompletion",
   "identifyGraphicsOverlay",
+  "AGSSketchEditor",
+  "startWithGeometry",
+  "replaceGeometry",
+  "Adjust Position & Direction",
+  "Reset Position",
+  "Reset Direction",
+  "headingSlider",
+  "captured_metadata",
+  "can_edit_correction",
+  "ErisPhotoMapDidFinishNotification",
 ]);
-forbid("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", [
-  "360.0 - normalized",
-  "AGSSimpleMarkerSymbolStyleTriangle",
-  "arrow.angle = (float)normalized",
-]);
+forbid("plugins/arcgis-ios/ArcGisPhotoMapViewController.m", ["360.0 - normalized","AGSSimpleMarkerSymbolStyleTriangle","arrow.angle = (float)normalized"]);
 c("app/(tabs)/submissions/[id].tsx", ["Site Photo Map","MappedPhotoCamera","exif: true","captureMetadata"]);
 console.log("Site Photo Map source contract: PASS");
