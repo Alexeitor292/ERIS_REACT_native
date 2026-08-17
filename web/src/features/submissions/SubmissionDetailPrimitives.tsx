@@ -44,3 +44,17 @@ export function SubmissionDisclosureSection({
     </details>
   );
 }
+
+// Compatibility aliases keep the first extraction behavior-preserving while the
+// page is decomposed in small, independently testable slices.
+export function S({ s }: { s: string }) {
+  return <SubmissionStatusBadge status={s} />;
+}
+
+export function R({ l, v }: { l: string; v: unknown }) {
+  return <SubmissionDetailRow label={l} value={v} />;
+}
+
+export function Section({ title, children, open = false }: { title: string; children: ReactNode; open?: boolean }) {
+  return <SubmissionDisclosureSection title={title} open={open}>{children}</SubmissionDisclosureSection>;
+}
