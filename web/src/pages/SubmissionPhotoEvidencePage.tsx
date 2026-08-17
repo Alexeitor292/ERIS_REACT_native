@@ -87,7 +87,7 @@ function formatMeters(value: number | null | undefined) {
 
 function sourceLabel(source: string | null | undefined) {
   if (!source) return "Not recorded";
-  return source.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return source.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter: string) => letter.toUpperCase());
 }
 
 function EvidenceBadge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "good" | "brand" | "bad" }) {
