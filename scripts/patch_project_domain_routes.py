@@ -67,7 +67,7 @@ text = replace_once(
     "incident serializer project fields",
 )
 
-# New incidents must be unclassified regardless of legacy client payload.
+# New incidents must be unclassified regardless of a legacy client payload.
 text = replace_once(
     text,
     '                :title, :incident_type, :description, NULL, \'PENDING_REVIEW\', :lat, :lon,\n',
@@ -122,7 +122,10 @@ for forbidden in [
 path.write_text(text, encoding="utf-8")
 
 
-# assessments.py: Project association is mandatory before coordinator triage.
+# assessments.py: Project association is mandatory before coordinator outcomes
+# that route or close an incident. NEEDS_REPORTER_INFORMATION intentionally stays
+# available before Project association because the coordinator may need corrected
+# location/context before deciding which Project owns the report.
 path = Path("backend/app/routes/assessments.py")
 text = path.read_text(encoding="utf-8")
 needle = '''    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
@@ -138,13 +141,31 @@ replacement = '''    if str(incident["current_stage"]).upper() != "COORDINATOR_R
             status_code=409,
             detail="Triage is only allowed while the incident is in coordinator review",
         )
-    if incident.get("project_id") is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Associate the incident with a Project before recording triage",
-        )
 
     disposition = payload.disposition
+    if incident.get("project_id") is None and disposition != "NEEDS_REPORTER_INFORMATION":
+        raise HTTPException(
+            status_code=409,
+            detail="Associate the incident with a Project before recording this triage outcome",
+        )
 '''
 text = replace_once(text, needle, replacement, "assessment triage project gate")
+path.write_text(text, encoding="utf-8")
+
+
+# projects.py: a non-admin coordinator may inspect nearby Project context, but
+# may only associate the incident to a Project within that coordinator's district.
+path = Path("backend/app/routes/projects.py")
+text = path.read_text(encoding="utf-8")
+needle = '''            if str(target_row["status"]).upper() != "OPEN":
+                raise HTTPException(status_code=409, detail="Only an open Project can accept an incident")
+            target_project_id = int(payload.project_id)
+'''
+replacement = '''            if str(target_row["status"]).upper() != "OPEN":
+                raise HTTPException(status_code=409, detail="Only an open Project can accept an incident")
+            if not is_admin(user):
+                incidents_routes._ensure_incident_district_access(user, target_row.get("district"))
+            target_project_id = int(payload.project_id)
+'''
+text = replace_once(text, needle, replacement, "existing project district authority")
 path.write_text(text, encoding="utf-8")
