@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useState } from "react";
 import { SubmissionStatusBadge } from "./SubmissionDetailPrimitives";
 
@@ -25,6 +25,7 @@ export default function SubmissionDetailHeader({
   onReject,
   onDelete,
 }: Props) {
+  const { id } = useParams();
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -53,6 +54,15 @@ export default function SubmissionDetailHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {!invalid && id ? (
+            <Link
+              to={`/submissions/${id}/photo-evidence`}
+              className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-semibold hover:bg-[var(--panel-soft)]"
+            >
+              Photo evidence
+            </Link>
+          ) : null}
+
           <button
             type="button"
             onClick={onRefresh}
