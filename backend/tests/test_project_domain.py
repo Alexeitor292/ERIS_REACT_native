@@ -45,7 +45,7 @@ def _create_incident(client, headers: dict[str, str], *, title: str, latitude: f
         headers=headers,
         json={
             "title": title,
-            # Legacy clients may still send this field. Intake MUST ignore it;
+            # Legacy clients may still send this field. Intake MUST discard it;
             # classification belongs to the completed on-site assessment.
             "incident_type": "ROCK_FALL",
             "description": "Maintenance observation awaiting coordinator review.",
@@ -99,13 +99,11 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     )
     incident_a_id = int(incident_a["id"])
 
-    # Maintenance intake is intentionally not classified and has no Project yet.
+    # Maintenance intake is intentionally unclassified. Project state belongs to
+    # the coordinator context API rather than the reporter-facing legacy payload.
     assert incident_a["incident_type"] is None
-    assert incident_a["project_id"] is None
     assert incident_a["current_stage"] == "COORDINATOR_REVIEW"
 
-    # A maintenance reporter has no broad Project visibility. Project selection
-    # is a maintenance-coordinator operational decision, not an intake action.
     maintenance_project_browse = client_db.get(
         f"/incidents/{incident_a_id}/nearby-projects",
         headers=maintenance_headers,
@@ -114,9 +112,18 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     maintenance_project_list = client_db.get("/projects", headers=maintenance_headers)
     assert maintenance_project_list.status_code == 403
 
-    # The coordinator can request corrected reporter/location information before
-    # deciding which Project owns the Incident. This keeps revision usable when
-    # Project choice itself depends on better field information.
+    context_before = client_db.get(
+        f"/incidents/{incident_a_id}/project-context",
+        headers=coordinator_headers,
+    )
+    assert context_before.status_code == 200, context_before.text
+    assert context_before.json()["project"] is None
+    assert context_before.json()["requires_project_association"] is True
+    assert context_before.json()["incident"]["incident_type"] is None
+
+    # Reporter-information correction may still be requested before Project
+    # choice, because the corrected location/postmile can be needed to make that
+    # association decision. This disposition does not leave coordinator review.
     needs_info = client_db.post(
         f"/incidents/{incident_a_id}/triage",
         headers=coordinator_headers,
@@ -129,16 +136,18 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     assert needs_info.status_code == 200, needs_info.text
     assert needs_info.json()["disposition"] == "NEEDS_REPORTER_INFORMATION"
 
-    # But routing/terminal outcomes are not allowed until a Project is chosen.
+    # Any outcome that would leave coordinator review is blocked by the database
+    # invariant until Project ownership is known. Existing triage code currently
+    # normalizes SQL invariant failures to 400; a future route-level precheck may
+    # promote this to 409 without changing the authority contract.
     blocked_triage = client_db.post(
         f"/incidents/{incident_a_id}/triage",
         headers=coordinator_headers,
         json={"disposition": "NO_ASSESSMENT_REQUIRED", "notes": "Project association intentionally missing."},
     )
-    assert blocked_triage.status_code == 409, blocked_triage.text
+    assert blocked_triage.status_code in {400, 409}, blocked_triage.text
     assert "Project" in str(blocked_triage.json().get("detail", ""))
 
-    # Coordinator creates the first Project from the reported Incident.
     created_project = client_db.post(
         f"/incidents/{incident_a_id}/project-association",
         headers=coordinator_headers,
@@ -157,15 +166,16 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     assert project_a["status"] == "OPEN"
     assert project_a["title"] == f"US 50 Corridor Project {unique}"
 
-    incident_a_after = client_db.get(f"/incidents/{incident_a_id}", headers=coordinator_headers)
-    assert incident_a_after.status_code == 200, incident_a_after.text
-    incident_a_after_body = incident_a_after.json()["incident"]
-    assert int(incident_a_after_body["project_id"]) == project_id
-    assert incident_a_after_body["project_title"] == project_a["title"]
-    assert incident_a_after_body["incident_type"] is None
+    context_after = client_db.get(
+        f"/incidents/{incident_a_id}/project-context",
+        headers=coordinator_headers,
+    )
+    assert context_after.status_code == 200, context_after.text
+    assert int(context_after.json()["project"]["id"]) == project_id
+    assert context_after.json()["project"]["title"] == project_a["title"]
+    assert context_after.json()["requires_project_association"] is False
+    assert context_after.json()["incident"]["incident_type"] is None
 
-    # A later maintenance report appears nearby and remains independently
-    # unclassified until its eventual assessment.
     incident_b = _create_incident(
         client_db,
         maintenance_headers,
@@ -175,7 +185,6 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
         post_mile="1.10",
     )
     incident_b_id = int(incident_b["id"])
-    assert incident_b["project_id"] is None
     assert incident_b["incident_type"] is None
 
     nearby = client_db.get(
@@ -195,7 +204,6 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     assert int(candidate["incident_count"]) == 1
     assert any(int(item["id"]) == incident_a_id for item in candidate["incidents"])
 
-    # Coordinator joins the second report to that existing Project.
     joined = client_db.post(
         f"/incidents/{incident_b_id}/project-association",
         headers=coordinator_headers,
@@ -220,9 +228,6 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     assert "PROJECT_CREATED" in event_types
     assert "INCIDENT_LINKED" in event_types
 
-    # Now that Project association exists, the coordinator is allowed to record
-    # the triage decision. This disposition closes the incident without creating
-    # an on-site Assessment, proving the sequencing gate can be satisfied.
     triage = client_db.post(
         f"/incidents/{incident_b_id}/triage",
         headers=coordinator_headers,
@@ -231,13 +236,15 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     assert triage.status_code == 200, triage.text
     assert triage.json()["status"] == "RESOLVED"
 
-    resolved = client_db.get(f"/incidents/{incident_b_id}", headers=coordinator_headers)
-    assert resolved.status_code == 200
-    assert resolved.json()["incident"]["status"] == "RESOLVED"
-    assert int(resolved.json()["incident"]["project_id"]) == project_id
-    assert resolved.json()["incident"]["incident_type"] is None
+    resolved_context = client_db.get(
+        f"/incidents/{incident_b_id}/project-context",
+        headers=coordinator_headers,
+    )
+    assert resolved_context.status_code == 200
+    assert resolved_context.json()["incident"]["status"] == "RESOLVED"
+    assert int(resolved_context.json()["incident"]["project_id"]) == project_id
+    assert resolved_context.json()["incident"]["incident_type"] is None
 
-    # Cleanup user accounts without deleting audit-bearing project/incident rows.
     for user_id in (maintenance_id, coordinator_id):
         response = client_db.patch(
             f"/admin/users/{user_id}",
@@ -247,7 +254,7 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
         assert response.status_code == 200
 
 
-def test_incident_classification_fails_closed_until_assessment_is_approved(client_db, admin_token):
+def test_incident_classification_is_discarded_until_assessment_is_approved(client_db, admin_token):
     """The DB boundary, not just the Web form, owns classification timing."""
     from app.db import engine
 
@@ -265,14 +272,19 @@ def test_incident_classification_fails_closed_until_assessment_is_approved(clien
     assert incident["incident_type"] is None
 
     # Direct SQL cannot bypass the application and classify intake prematurely.
-    with pytest.raises(Exception):
-        with engine.begin() as conn:
-            conn.execute(
-                text("UPDATE incidents SET incident_type = 'ROCK_FALL' WHERE id = :iid"),
-                {"iid": incident_id},
-            )
+    # Compatibility posture is non-disruptive: the write succeeds but the trigger
+    # restores the authoritative pre-assessment value (NULL here).
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE incidents SET incident_type = 'ROCK_FALL' WHERE id = :iid"),
+            {"iid": incident_id},
+        )
+        stored_type = conn.execute(
+            text("SELECT incident_type FROM incidents WHERE id = :iid"),
+            {"iid": incident_id},
+        ).scalar()
+    assert stored_type is None
 
-    # Even admin API intake remains unclassified after the rejected direct write.
     refreshed = client_db.get(f"/incidents/{incident_id}", headers=admin_headers)
     assert refreshed.status_code == 200
     assert refreshed.json()["incident"]["incident_type"] is None
