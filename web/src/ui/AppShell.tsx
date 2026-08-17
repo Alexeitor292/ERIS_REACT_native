@@ -1,7 +1,6 @@
-import { Link, NavLink } from "react-router-dom";
-import { ReactNode, useMemo, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthContext";
-import { useUiSettings } from "./UiSettingsContext";
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -10,21 +9,41 @@ function cn(...classes: Array<string | false | null | undefined>) {
 function navAbbrev(label: string) {
   const words = label.trim().split(/\s+/);
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return words.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
+  return words.slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("");
+}
+
+function pageDescription(pathname: string) {
+  if (/^\/submissions\/[^/]+$/.test(pathname)) {
+    return "Inspect field data, mapped evidence, attachments, terrain context, and review history.";
+  }
+
+  const descriptions: Array<[string, string]> = [
+    ["/mission-center", "Operational overview of active incidents, assessments, and field activity."],
+    ["/incidents", "Manage emergency events and coordinate the field records associated with them."],
+    ["/assessments", "Review geotechnical assessments and supporting field information."],
+    ["/submissions", "Find, inspect, and review field submissions received by ERIS."],
+    ["/admin/users", "Manage ERIS user access, account status, and assigned roles."],
+    ["/admin/road-inventory", "Manage authoritative roadway reference data used by ERIS workflows."],
+    ["/settings", "Manage your ERIS preferences and application experience."],
+  ];
+
+  return descriptions.find(([path]) => pathname.startsWith(path))?.[1]
+    ?? "Emergency response operations and geotechnical review.";
 }
 
 function NavItem({ to, label, collapsed }: { to: string; label: string; collapsed?: boolean }) {
   const abbrev = useMemo(() => navAbbrev(label), [label]);
+
   return (
     <NavLink
       to={to}
       className={({ isActive }) =>
         cn(
-          "block rounded-lg px-3 py-2 text-sm font-medium transition-all",
+          "block rounded-lg px-3 py-2 text-sm font-medium transition-[background-color,color,box-shadow]",
           collapsed ? "text-center" : "",
           isActive
             ? "bg-[var(--brand)] text-white shadow-[0_8px_20px_rgba(31,94,255,0.25)]"
-            : "bg-[var(--panel-soft)] text-[var(--ink)] hover:brightness-95"
+            : "text-[var(--ink)] hover:bg-[var(--panel-soft)]"
         )
       }
       title={collapsed ? label : undefined}
@@ -34,34 +53,87 @@ function NavItem({ to, label, collapsed }: { to: string; label: string; collapse
   );
 }
 
+function NavGroup({
+  label,
+  collapsed,
+  children,
+}: {
+  label: string;
+  collapsed?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <div
+        className={cn(
+          "mb-1 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted",
+          collapsed ? "sr-only" : ""
+        )}
+      >
+        {label}
+      </div>
+      <nav className="space-y-1">{children}</nav>
+    </div>
+  );
+}
+
+function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
+  const { me } = useAuth();
+
+  return (
+    <div className="space-y-5">
+      <NavGroup label="Operations" collapsed={collapsed}>
+        <NavItem to="/mission-center" label="Mission Center" collapsed={collapsed} />
+        <NavItem to="/incidents" label="Incidents" collapsed={collapsed} />
+        <NavItem to="/assessments" label="Assessments" collapsed={collapsed} />
+        <NavItem to="/submissions" label="Submissions" collapsed={collapsed} />
+      </NavGroup>
+
+      {me?.roles?.includes("ADMIN") && (
+        <NavGroup label="Administration" collapsed={collapsed}>
+          <NavItem to="/admin/users" label="Users" collapsed={collapsed} />
+          <NavItem to="/admin/road-inventory" label="Road Inventory" collapsed={collapsed} />
+        </NavGroup>
+      )}
+
+      <NavGroup label="Account" collapsed={collapsed}>
+        <NavItem to="/settings" label="Settings" collapsed={collapsed} />
+      </NavGroup>
+    </div>
+  );
+}
+
 export default function AppShell({ title, children }: { title: string; children: ReactNode }) {
   const { me, logout } = useAuth();
-  const { theme } = useUiSettings();
-  const [navExpanded, setNavExpanded] = useState(false);
+  const { pathname } = useLocation();
+  const [navExpanded, setNavExpanded] = useState(true);
+  const description = pageDescription(pathname);
+  const displayName = me?.full_name?.trim() || me?.email || "Signed-in user";
 
   return (
     <div className="min-h-screen flex flex-col text-[var(--ink)]">
-      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[color:var(--panel)]/90 backdrop-blur">
-        <div className="mx-auto w-full max-w-[1900px] px-4 md:px-6 py-3 flex items-center gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="h-9 w-9 rounded bg-[var(--brand)] text-white flex items-center justify-center text-xs font-bold tracking-wide shrink-0">
+      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[color:var(--panel)]/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-[1900px] items-center gap-3 px-4 py-3 md:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-[var(--brand)] text-xs font-bold tracking-wide text-white">
               ERIS
             </div>
-            <div className="leading-tight min-w-0">
-              <div className="text-sm font-semibold truncate">Emergency Response Information System</div>
-              <div className="text-xs text-muted truncate">Caltrans | Geotechnical Services</div>
+            <div className="min-w-0 leading-tight">
+              <div className="truncate text-sm font-semibold">Emergency Response Information System</div>
+              <div className="truncate text-xs text-muted">Caltrans | Geotechnical Services</div>
             </div>
           </div>
 
           <div className="ml-auto flex items-center gap-3">
-            <div className="hidden md:block text-right">
-              <div className="text-sm font-medium truncate">{me?.email ?? "-"}</div>
-              <div className="text-xs text-muted">{me?.roles?.join(", ") ?? ""}</div>
+            <div className="hidden text-right md:block">
+              <div className="max-w-64 truncate text-sm font-medium">{displayName}</div>
+              <div className="text-xs text-muted">{me?.roles?.join(" · ") || "ERIS user"}</div>
             </div>
 
             <button
+              type="button"
               onClick={logout}
-              className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm hover:brightness-95"
+              className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]"
             >
               Sign out
             </button>
@@ -69,70 +141,52 @@ export default function AppShell({ title, children }: { title: string; children:
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-[1900px] px-4 md:px-6 py-6 flex-1 flex flex-col gap-4 lg:flex-row lg:gap-6">
+      <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-4 px-4 py-6 md:px-6 lg:flex-row lg:gap-6">
         <aside className="lg:hidden">
           <div className="product-card p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>
-            <nav className="space-y-1.5">
-              <NavItem to="/mission-center" label="Mission Center" />
-              <NavItem to="/incidents" label="Incidents" />
-              <NavItem to="/assessments" label="Assessments" />
-              <NavItem to="/submissions" label="Submissions" />
-              <NavItem to="/settings" label="Settings" />
-              {me?.roles?.includes("ADMIN") && <NavItem to="/admin/users" label="Admin Users" />}
-              {me?.roles?.includes("ADMIN") && <NavItem to="/admin/road-inventory" label="Road Inventory" />}
-            </nav>
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>
+            <SidebarNavigation />
           </div>
         </aside>
 
         <aside
           className={cn(
-            "hidden lg:block shrink-0 transition-[width] duration-200 ease-out",
+            "hidden shrink-0 transition-[width] duration-200 ease-out lg:block",
             navExpanded ? "w-64" : "w-16"
           )}
-          onMouseEnter={() => setNavExpanded(true)}
-          onMouseLeave={() => setNavExpanded(false)}
         >
-          <div className="product-card p-2 h-full">
-            <div className={cn("px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted", navExpanded ? "" : "text-center")}>
-              {navExpanded ? "Navigation" : "Nav"}
+          <div className="product-card sticky top-[82px] p-2">
+            <div className={cn("mb-3 flex items-center", navExpanded ? "justify-between px-1" : "justify-center")}>
+              {navExpanded && (
+                <div className="px-2 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>
+              )}
+              <button
+                type="button"
+                aria-label={navExpanded ? "Collapse navigation" : "Expand navigation"}
+                aria-expanded={navExpanded}
+                title={navExpanded ? "Collapse navigation" : "Expand navigation"}
+                onClick={() => setNavExpanded((expanded) => !expanded)}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel)] text-sm font-semibold text-muted hover:bg-[var(--panel-soft)] hover:text-[var(--ink)]"
+              >
+                {navExpanded ? "‹" : "›"}
+              </button>
             </div>
-            <nav className="space-y-1.5">
-              <NavItem to="/mission-center" label="Mission Center" collapsed={!navExpanded} />
-              <NavItem to="/incidents" label="Incidents" collapsed={!navExpanded} />
-              <NavItem to="/assessments" label="Assessments" collapsed={!navExpanded} />
-              <NavItem to="/submissions" label="Submissions" collapsed={!navExpanded} />
-              <NavItem to="/settings" label="Settings" collapsed={!navExpanded} />
-              {me?.roles?.includes("ADMIN") && <NavItem to="/admin/users" label="Admin Users" collapsed={!navExpanded} />}
-              {me?.roles?.includes("ADMIN") && <NavItem to="/admin/road-inventory" label="Road Inventory" collapsed={!navExpanded} />}
-            </nav>
 
-            <div className={cn("mt-4 border-t border-[var(--line)] pt-3 text-xs text-muted px-2", navExpanded ? "" : "hidden")}>
-              <div className="font-semibold text-[var(--ink)]">Environment</div>
-              <div>Web Portal (Vite)</div>
-              <div className="mt-1">Theme: {theme}</div>
-              <div className="mt-1">
-                <Link className="underline" to="/submissions">
-                  Back to dashboard
-                </Link>
-              </div>
-            </div>
+            <SidebarNavigation collapsed={!navExpanded} />
           </div>
         </aside>
 
         <main className="min-w-0 flex-1">
           <div className="mb-4">
             <h1 className="text-xl font-semibold">{title}</h1>
-            <p className="mt-1 text-sm text-muted">
-              Internal review portal for field submissions and attachments.
-            </p>
+            <p className="mt-1 max-w-4xl text-sm text-muted">{description}</p>
           </div>
           <div className="product-card h-full overflow-hidden">{children}</div>
         </main>
       </div>
 
       <footer className="mt-auto border-t border-[var(--line)] bg-[color:var(--panel)]/70">
-        <div className="mx-auto w-full max-w-[1900px] px-4 md:px-6 py-4 text-xs text-muted">
+        <div className="mx-auto w-full max-w-[1900px] px-4 py-4 text-xs text-muted md:px-6">
           © {new Date().getFullYear()} Caltrans | ERIS (Internal)
         </div>
       </footer>

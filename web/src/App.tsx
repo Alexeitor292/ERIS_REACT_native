@@ -10,6 +10,7 @@ import AssessmentsPage from "./pages/AssessmentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
+import RoleRoute from "./auth/RoleRoute";
 
 export default function App() {
   return (
@@ -61,17 +62,17 @@ export default function App() {
           <Route
             path="/admin/users"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={["ADMIN"]}>
                 <AdminUsersPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
             path="/admin/road-inventory"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={["ADMIN"]}>
                 <RoadInventoryPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
