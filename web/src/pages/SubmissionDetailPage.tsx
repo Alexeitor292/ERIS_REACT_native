@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { GisaElevationProfile, GisaLookups, GisaTerrainGrid, SubmissionDetail } from "../api/types";
+import type { GisaElevationProfile, GisaLookups, GisaTerrainGrid, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
 import { TerrainRelief } from "../components/TerrainRelief";
 // Lazy-loaded so ArcGIS SceneView's heavy 3D modules are fetched only when the
 // user actually opens the 3D Terrain tab — the normal page never eagerly loads it.
@@ -14,6 +14,7 @@ import { appConfig } from "../config";
 import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
+import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
 import { R, Section } from "../features/submissions/SubmissionDetailPrimitives";
 import {
   boolToTri,
@@ -51,13 +52,11 @@ import {
   textValue as t,
   triToBool,
   tryExtractRoute,
-  type AdminUser,
   type DashboardCardId,
   type DashboardCardPosition,
   type DashboardLayoutState,
   type DistrictContact,
   type IncidentTypeOption,
-  type SharedUser,
   type SubmissionDraft as Draft,
   type Tri,
 } from "../features/submissions/submissionDetailModel";
@@ -92,8 +91,8 @@ export default function SubmissionDetailPage() {
   const [openDistrictContactIds, setOpenDistrictContactIds] = useState<Record<string, boolean>>({});
   const [geom, setGeom] = useState<any | null>(null);
   const [shareQuery, setShareQuery] = useState("");
-  const [shareCandidates, setShareCandidates] = useState<AdminUser[]>([]);
-  const [sharedWith, setSharedWith] = useState<SharedUser[]>([]);
+  const [shareCandidates, setShareCandidates] = useState<SubmissionPermissionUser[]>([]);
+  const [sharedWith, setSharedWith] = useState<SubmissionPermissionGrant[]>([]);
   const [geoBusy, setGeoBusy] = useState(false);
   const [geoSaveState, setGeoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [geoSaveMessage, setGeoSaveMessage] = useState("");
@@ -155,7 +154,7 @@ export default function SubmissionDetailPage() {
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
   const canAct = canReview && data?.submission.status === "SUBMITTED";
-  const canManageSharing = !!me?.roles?.includes("ADMIN");
+  const canManageSharing = data?.submission.can_manage_permissions === true;
   const canDeleteSubmission =
     !!data?.submission &&
     (me?.roles?.includes("ADMIN") ||
@@ -367,10 +366,13 @@ export default function SubmissionDetailPage() {
       setInc(d.incident_types ?? []);
       setImm(d.actions?.immediate ?? []);
       setFol(d.actions?.follow_up ?? []);
-      if (canManageSharing) {
-        const sharedRes = await api<{ items: SharedUser[] }>(`/submissions/${sid}/shared-with`);
-        setSharedWith(sharedRes.items ?? []);
+      const loadedCanManageSharing = d.submission.can_manage_permissions === true;
+      if (loadedCanManageSharing) {
+        const permissions = await api<SubmissionPermissions>(`/submissions/${sid}/permissions`);
+        setShareCandidates(permissions.available_users ?? []);
+        setSharedWith(permissions.readers ?? []);
       } else {
+        setShareCandidates([]);
         setSharedWith([]);
       }
     } catch (e: any) {
@@ -424,20 +426,6 @@ export default function SubmissionDetailPage() {
     setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setErr(e?.message ?? "Submit failed"); setBusy(false); }
   }
   async function review(decision: "APPROVE" | "REJECT") { setBusy(true); setErr(null); try { await api(`/submissions/${sid}/review`, { method: "POST", body: JSON.stringify({ decision, comment: reviewNote.trim() || null }) }); await load(); } catch (e: any) { setErr(e?.message ?? "Review failed"); setBusy(false); } }
-  async function searchShareCandidates() {
-    if (!canManageSharing) return;
-    const q = shareQuery.trim();
-    if (!q) {
-      setShareCandidates([]);
-      return;
-    }
-    try {
-      const res = await api<{ items: AdminUser[] }>(`/admin/users?q=${encodeURIComponent(q)}`);
-      setShareCandidates((res.items ?? []).filter((u) => u.id !== data?.submission.created_by_user_id));
-    } catch (e: any) {
-      setErr(e?.message ?? "User search failed");
-    }
-  }
   async function addShare(userId: number) {
     if (!canManageSharing) return;
     setBusy(true); setErr(null);
@@ -598,7 +586,7 @@ export default function SubmissionDetailPage() {
     }
   }
 
-  useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid, canManageSharing]);
+  useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid]);
 
   // Prefill bearing from road inventory snapshot when available
   useEffect(() => {
@@ -1949,42 +1937,17 @@ export default function SubmissionDetailPage() {
               onOpenAttachment={openDownloadUrl}
             />
 
-            {canManageSharing && (
-              <Section title="Access Sharing">
-                <div className="flex gap-2">
-                  <input
-                    className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
-                    placeholder="Search users by email or name"
-                    value={shareQuery}
-                    onChange={(e) => setShareQuery(e.target.value)}
-                  />
-                  <button onClick={searchShareCandidates} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">Search</button>
-                </div>
-                {shareCandidates.length > 0 ? (
-                  <div className="mt-2 space-y-1">
-                    {shareCandidates.map((u) => (
-                      <div key={u.id} className="flex items-center justify-between rounded border border-[var(--line)] p-2 text-sm">
-                        <div>{u.full_name} ({u.email})</div>
-                        <button onClick={() => addShare(u.id)} className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs">Grant Access</button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Users with explicit access</div>
-                {sharedWith.length === 0 ? (
-                  <div className="mt-1 text-sm text-muted">No explicit grants yet.</div>
-                ) : (
-                  <div className="mt-2 space-y-1">
-                    {sharedWith.map((u) => (
-                      <div key={u.user_id} className="flex items-center justify-between rounded border border-[var(--line)] p-2 text-sm">
-                        <div>{u.full_name} ({u.email})</div>
-                        <button onClick={() => removeShare(u.user_id)} className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs">Revoke</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
-            )}
+            {canManageSharing ? (
+              <SubmissionAccessSharing
+                query={shareQuery}
+                availableUsers={shareCandidates}
+                sharedWith={sharedWith}
+                busy={busy}
+                onQueryChange={setShareQuery}
+                onGrant={addShare}
+                onRevoke={removeShare}
+              />
+            ) : null}
           </div>
         )}
       </div>
