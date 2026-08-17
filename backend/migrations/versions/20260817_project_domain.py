@@ -198,9 +198,10 @@ def upgrade() -> None:
 
     # Fail closed at the data boundary: coordinator intake may be temporarily
     # projectless, but every route beyond coordinator review requires a Project.
-    # Legacy clients may still send an intake incident_type. Do not break those
-    # clients; discard intake classification because the authoritative
-    # classification comes only from the completed on-site Assessment.
+    # A Project owns one district in this domain model, so member incidents must
+    # stay in that same district. Legacy clients may still send an intake
+    # incident_type; discard that premature classification instead of breaking
+    # the report because type authority belongs to the completed Assessment.
     op.execute("DROP TRIGGER IF EXISTS trg_incident_project_required_bi")
     op.execute(
         """
@@ -212,6 +213,17 @@ def upgrade() -> None:
             SIGNAL SQLSTATE '45000'
               SET MESSAGE_TEXT = 'Incident must belong to a Project before leaving coordinator review';
           END IF;
+
+          IF NEW.project_id IS NOT NULL AND EXISTS (
+            SELECT 1
+            FROM projects p
+            WHERE p.id = NEW.project_id
+              AND COALESCE(CAST(p.district AS UNSIGNED), 0) <> COALESCE(CAST(NEW.district AS UNSIGNED), 0)
+          ) THEN
+            SIGNAL SQLSTATE '45000'
+              SET MESSAGE_TEXT = 'Incident and Project must belong to the same district';
+          END IF;
+
           SET NEW.incident_type = NULL;
         END
         """
@@ -227,6 +239,16 @@ def upgrade() -> None:
           IF NEW.current_stage <> 'COORDINATOR_REVIEW' AND NEW.project_id IS NULL THEN
             SIGNAL SQLSTATE '45000'
               SET MESSAGE_TEXT = 'Incident must belong to a Project before leaving coordinator review';
+          END IF;
+
+          IF NEW.project_id IS NOT NULL AND EXISTS (
+            SELECT 1
+            FROM projects p
+            WHERE p.id = NEW.project_id
+              AND COALESCE(CAST(p.district AS UNSIGNED), 0) <> COALESCE(CAST(NEW.district AS UNSIGNED), 0)
+          ) THEN
+            SIGNAL SQLSTATE '45000'
+              SET MESSAGE_TEXT = 'Incident and Project must belong to the same district';
           END IF;
 
           IF NOT (NEW.incident_type <=> OLD.incident_type)
