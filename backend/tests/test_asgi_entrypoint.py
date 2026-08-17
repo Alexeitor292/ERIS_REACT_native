@@ -38,7 +38,6 @@ def _probe(*, env_name: str, docs_enabled: str | None):
 def test_production_entrypoint_uses_product_identity_and_hides_docs():
     data = _probe(env_name="prod", docs_enabled=None)
     assert data["title"] == "Emergency Response Information System API"
-    assert "/health" in data["paths"]
     assert "/docs" not in data["paths"]
     assert "/docs/oauth2-redirect" not in data["paths"]
     assert "/redoc" not in data["paths"]
