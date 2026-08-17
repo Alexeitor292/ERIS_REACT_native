@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import SubmissionsPage from "./pages/SubmissionsPage";
 import SubmissionDetailPage from "./pages/SubmissionDetailPage";
+import SubmissionPhotoEvidencePage from "./pages/SubmissionPhotoEvidencePage";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import RoadInventoryPage from "./pages/RoadInventoryPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -48,6 +49,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <MissionCenterPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/submissions/:id/photo-evidence"
+            element={
+              <ProtectedRoute>
+                <SubmissionPhotoEvidencePage />
               </ProtectedRoute>
             }
           />

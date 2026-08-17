@@ -57,10 +57,6 @@
   --bg-glow-b: color-mix(in oklab, var(--accent) 18%, transparent);
 }
 
-:root[data-density="compact"] {
-  --space-scale: 0.88;
-}
-
 html,
 body,
 #root {
@@ -106,5 +102,3 @@ body {
   );
   border: 1px solid var(--line);
 }
-
-
