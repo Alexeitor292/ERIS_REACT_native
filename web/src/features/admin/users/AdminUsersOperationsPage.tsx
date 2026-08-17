@@ -149,7 +149,7 @@ export default function AdminUsersOperationsPage() {
     try {
       const roles = draftRoles[user.id] ?? [];
       await api(`/admin/users/${user.id}/roles`, {
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({ roles }),
       });
       setNotice(`Updated roles for ${user.full_name}.`);
