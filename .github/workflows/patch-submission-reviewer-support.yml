@@ -19,8 +19,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply exact guarded extraction
-        shell: python
+        shell: bash
         run: |
+          set -Eeuo pipefail
+          python - <<'PY'
           from pathlib import Path
 
           path = Path("web/src/pages/SubmissionDetailPage.tsx")
@@ -80,6 +82,7 @@ jobs:
               raise SystemExit('Legacy generic "Open Photo" action is still present')
 
           path.write_text(text, encoding="utf-8")
+          PY
 
       - name: Verify Web build
         working-directory: web
@@ -93,7 +96,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           git diff --check
-          git diff --exit-code -- .github/workflows/patch-submission-reviewer-support.yml || true
           test -n "$(git status --porcelain -- web/src/pages/SubmissionDetailPage.tsx)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
