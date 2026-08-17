@@ -243,3 +243,92 @@ class TestIncidents:
     def test_list_without_auth_rejected(self, client_db):
         resp = client_db.get("/incidents")
         assert resp.status_code == 401
+
+    def test_engineer_assignment_rejects_active_non_engineer(self, admin_token, client_db):
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        unique = uuid4().hex
+        created_user = client_db.post(
+            "/admin/users",
+            headers=headers,
+            json={
+                "email": f"not-engineer-{unique}@example.test",
+                "full_name": "Not An Engineer",
+                "password": "eligibility-test-password",
+                "roles": ["MAINTENANCE"],
+            },
+        )
+        assert created_user.status_code == 201
+        user_id = int(created_user.json()["id"])
+
+        incident = client_db.post(
+            "/incidents",
+            headers=headers,
+            json={
+                "title": f"eligibility-reject-{unique}",
+                "first_observed_at": "2026-08-17T12:00:00",
+                "latitude": 38.5816,
+                "longitude": -121.4944,
+                "district": "03",
+                "county": "SAC",
+                "route": "50",
+                "post_mile": "1.0",
+            },
+        )
+        assert incident.status_code == 200
+        incident_id = int(incident.json()["incident"]["id"])
+
+        assigned = client_db.post(
+            f"/incidents/{incident_id}/assign",
+            headers=headers,
+            json={"assignee_user_id": user_id},
+        )
+        assert assigned.status_code == 400
+        assert "active GeoTech engineer or admin" in str(assigned.json().get("detail", ""))
+
+        client_db.patch(
+            f"/admin/users/{user_id}",
+            headers=headers,
+            json={"is_active": False},
+        )
+
+    def test_engineer_assignment_allows_legacy_field_worker(self, admin_token, client_db):
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        unique = uuid4().hex
+        created_user = client_db.post(
+            "/admin/users",
+            headers=headers,
+            json={
+                "email": f"legacy-engineer-{unique}@example.test",
+                "full_name": "Legacy GeoTech Engineer",
+                "password": "eligibility-test-password",
+                "roles": ["FIELD_WORKER"],
+            },
+        )
+        assert created_user.status_code == 201
+        user_id = int(created_user.json()["id"])
+
+        incident = client_db.post(
+            "/incidents",
+            headers=headers,
+            json={
+                "title": f"eligibility-allow-{unique}",
+                "first_observed_at": "2026-08-17T12:05:00",
+                "latitude": 38.5817,
+                "longitude": -121.4945,
+                "district": "03",
+                "county": "SAC",
+                "route": "50",
+                "post_mile": "1.1",
+            },
+        )
+        assert incident.status_code == 200
+        incident_id = int(incident.json()["incident"]["id"])
+
+        assigned = client_db.post(
+            f"/incidents/{incident_id}/assign",
+            headers=headers,
+            json={"assignee_user_id": user_id},
+        )
+        assert assigned.status_code == 200
+        assert int(assigned.json()["assignee_user_id"]) == user_id
+        assert int(assigned.json()["linked_submission_id"]) > 0
