@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 
+import AuthGateLoading from "../auth/AuthGateLoading";
 import { useAuth } from "../auth/AuthContext";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, token, isInitializing } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -22,6 +23,9 @@ export default function LoginPage() {
       // Browser storage may be unavailable under hardened/private policies.
     }
   }, []);
+
+  if (isInitializing && token) return <AuthGateLoading />;
+  if (!isInitializing && token) return <Navigate to="/mission-center" replace />;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
