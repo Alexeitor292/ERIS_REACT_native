@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SubmissionStatusBadge } from "./SubmissionDetailPrimitives";
+import { getSubmissionPhotoEvidence, type PhotoEvidenceSummary } from "./photoEvidenceApi";
 
 type Props = {
   status?: string;
@@ -26,7 +27,38 @@ export default function SubmissionDetailHeader({
   onDelete,
 }: Props) {
   const { id } = useParams();
+  const submissionId = Number(id);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [evidenceSummary, setEvidenceSummary] = useState<PhotoEvidenceSummary | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+
+  useEffect(() => {
+    if (invalid || !Number.isInteger(submissionId) || submissionId <= 0) {
+      setEvidenceSummary(null);
+      return;
+    }
+    let cancelled = false;
+    setEvidenceLoading(true);
+    getSubmissionPhotoEvidence(submissionId)
+      .then((response) => {
+        if (!cancelled) setEvidenceSummary(response.summary);
+      })
+      .catch(() => {
+        if (!cancelled) setEvidenceSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setEvidenceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [invalid, submissionId]);
+
+  const evidenceLabel = evidenceLoading
+    ? "Checking evidence…"
+    : evidenceSummary
+      ? `${evidenceSummary.photos_total} photo${evidenceSummary.photos_total === 1 ? "" : "s"} · ${evidenceSummary.photos_geotagged} mapped`
+      : "Photo evidence";
 
   return (
     <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3">
@@ -50,6 +82,11 @@ export default function SubmissionDetailHeader({
             ) : status === "APPROVED" ? (
               <span className="text-xs text-muted">Review complete</span>
             ) : null}
+            {evidenceSummary && evidenceSummary.photos_unmapped > 0 ? (
+              <span className="inline-flex rounded-full border border-[color:color-mix(in_oklab,var(--bad)_35%,var(--line))] bg-[color:color-mix(in_oklab,var(--bad)_7%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--bad)]">
+                {evidenceSummary.photos_unmapped} unmapped
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -58,8 +95,9 @@ export default function SubmissionDetailHeader({
             <Link
               to={`/submissions/${id}/photo-evidence`}
               className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-semibold hover:bg-[var(--panel-soft)]"
+              title={evidenceSummary ? `${evidenceSummary.photos_with_heading} photos include usable camera heading` : undefined}
             >
-              Photo evidence
+              {evidenceLabel}
             </Link>
           ) : null}
 
