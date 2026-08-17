@@ -1,49 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "../../api/client";
 import { formatCoordinate } from "../../utils/precision";
-
-type PhotoCorrection = {
-  has_history: boolean;
-  location_overridden: boolean;
-  heading_overridden: boolean;
-  location_override: { latitude: number | null; longitude: number | null } | null;
-  heading_override_deg: number | null;
-  corrected_by_user_id: number | null;
-  corrected_at: string | null;
-};
-
-type PhotoEvidence = {
-  attachment_id: number;
-  file_name: string;
-  mime_type: string;
-  section_key: string | null;
-  source_scope: "SUBMISSION" | "INCIDENT" | string;
-  captured_at: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  horizontal_accuracy_m: number | null;
-  altitude_m: number | null;
-  camera_heading_deg: number | null;
-  heading_reference: string | null;
-  location_source: string | null;
-  heading_source: string | null;
-  correction: PhotoCorrection;
-  download_url: string;
-};
-
-type PhotoMapResponse = {
-  submission_id: number;
-  incident_id: number | null;
-  incident: { latitude: number | null; longitude: number | null };
-  summary: {
-    photos_total: number;
-    photos_geotagged: number;
-    photos_with_heading: number;
-    photos_unmapped: number;
-  };
-  photos: PhotoEvidence[];
-};
+import { getSubmissionPhotoEvidence, type PhotoMapResponse } from "./photoEvidenceApi";
 
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -92,7 +50,7 @@ export default function SubmissionPhotoEvidencePanel({ submissionId }: { submiss
     setLoading(true);
     setError(null);
     try {
-      setPhotoMap(await api<PhotoMapResponse>(`/submissions/${submissionId}/photo-map`));
+      setPhotoMap(await getSubmissionPhotoEvidence(submissionId));
       setImageErrors({});
     } catch (e: any) {
       setError(e?.message ?? "Failed to load photo evidence.");
