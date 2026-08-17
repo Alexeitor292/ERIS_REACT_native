@@ -13,6 +13,7 @@ import { getToken } from "../auth/token";
 import { appConfig } from "../config";
 import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
+import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
 import { R, Section } from "../features/submissions/SubmissionDetailPrimitives";
 import {
   boolToTri,
@@ -1937,17 +1938,16 @@ export default function SubmissionDetailPage() {
               <R l="Status" v={data.submission.status} />
             </Section>
 
-            <Section title="Reviewer Note" open>
-              <textarea value={reviewNote} onChange={(e)=>setReviewNote(e.target.value)} rows={3} disabled={busy||!canReview} className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" />
-            </Section>
-
-            <Section title="Attachments">
-              <div className="overflow-x-auto">{data.attachments.length===0?<div className="text-sm text-muted">No attachments.</div>:<table className="w-full border-collapse"><thead><tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted"><th className="py-2 px-2">ID</th><th className="py-2 px-2">File</th><th className="py-2 px-2">Type</th><th className="py-2 px-2">Size</th><th className="py-2 px-2"></th></tr></thead><tbody>{data.attachments.map((a)=><tr key={a.id} className="border-b border-[var(--line)]/50"><td className="py-2 px-2 text-sm">{a.id}</td><td className="py-2 px-2 text-sm">{a.file_name}</td><td className="py-2 px-2 text-sm">{a.mime_type}</td><td className="py-2 px-2 text-sm">{a.file_size_bytes.toLocaleString()}</td><td className="py-2 px-2 text-sm"><button onClick={()=>openDownloadUrl(a.id)} disabled={downloading===a.id} className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs">{downloading===a.id?"Opening...":"Open Photo"}</button></td></tr>)}</tbody></table>}</div>
-            </Section>
-
-            <Section title="Workflow Events">
-              <div>{data.workflow_events.length===0?<div className="text-sm text-muted">No workflow events.</div>:<ol className="space-y-2">{data.workflow_events.map((e)=><li key={e.id} className="rounded border border-[var(--line)] p-2 text-sm"><div className="text-xs text-muted">{e.created_at}</div><div className="font-medium">{e.event_type} ({e.from_status ?? "-"} {"->"} {e.to_status ?? "-"})</div><div className="text-xs text-muted">Actor {e.actor_user_id}{e.comment ? ` - ${e.comment}` : ""}</div></li>)}</ol>}</div>
-            </Section>
+            <SubmissionReviewerSupport
+              reviewNote={reviewNote}
+              canReview={canReview}
+              busy={busy}
+              attachments={data.attachments}
+              workflowEvents={data.workflow_events}
+              downloadingAttachmentId={downloading}
+              onReviewNoteChange={setReviewNote}
+              onOpenAttachment={openDownloadUrl}
+            />
 
             {canManageSharing && (
               <Section title="Access Sharing">
