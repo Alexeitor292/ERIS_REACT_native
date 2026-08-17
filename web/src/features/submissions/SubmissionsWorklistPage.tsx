@@ -11,6 +11,11 @@ import { SubmissionStatusBadge } from "./SubmissionDetailPrimitives";
 
 const PAGE_SIZE = 50;
 type SortMode = "NEWEST" | "SUBMITTED_FIRST" | "OLDEST";
+type SubmissionPage = {
+  items: Submission[];
+  has_more: boolean;
+  next_cursor: number | null;
+};
 
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -40,20 +45,21 @@ export default function SubmissionsWorklistPage() {
   const [status, setStatus] = useState("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("NEWEST");
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
-  const [resultLimit, setResultLimit] = useState(PAGE_SIZE);
-  const [mayHaveMore, setMayHaveMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  async function load(limit = resultLimit) {
+  async function loadFirstPage() {
     setError(null);
     setLoading(true);
     try {
-      const data = await api<{ items: Submission[] }>(`/submissions?limit=${limit}`);
+      const data = await api<SubmissionPage>(`/submissions/page?limit=${PAGE_SIZE}`);
       setItems(data.items ?? []);
-      setResultLimit(limit);
-      setMayHaveMore((data.items ?? []).length >= limit);
+      setHasMore(Boolean(data.has_more));
+      setNextCursor(data.next_cursor ?? null);
       setMenuOpenId(null);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load submissions.");
@@ -62,8 +68,28 @@ export default function SubmissionsWorklistPage() {
     }
   }
 
+  async function loadOlder() {
+    if (!hasMore || nextCursor == null || loadingMore) return;
+    setError(null);
+    setLoadingMore(true);
+    try {
+      const data = await api<SubmissionPage>(`/submissions/page?limit=${PAGE_SIZE}&before_id=${nextCursor}`);
+      setItems((previous) => {
+        const knownIds = new Set(previous.map((item) => item.id));
+        const additional = (data.items ?? []).filter((item) => !knownIds.has(item.id));
+        return [...previous, ...additional];
+      });
+      setHasMore(Boolean(data.has_more));
+      setNextCursor(data.next_cursor ?? null);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load older submissions.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   useEffect(() => {
-    load(PAGE_SIZE);
+    loadFirstPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -76,13 +102,14 @@ export default function SubmissionsWorklistPage() {
 
   async function confirmDelete() {
     if (!deleteTarget) return;
+    const deletedId = deleteTarget.id;
     setDeleteBusy(true);
     setError(null);
     try {
-      await api(`/submissions/${deleteTarget.id}`, { method: "DELETE" });
+      await api(`/submissions/${deletedId}`, { method: "DELETE" });
+      setItems((previous) => previous.filter((submission) => submission.id !== deletedId));
       setDeleteTarget(null);
       setMenuOpenId(null);
-      await load(resultLimit);
     } catch (e: any) {
       setError(e?.message ?? "Failed to delete submission.");
     } finally {
@@ -183,7 +210,7 @@ export default function SubmissionsWorklistPage() {
 
           <div className="flex gap-2">
             {hasFilters ? <button type="button" onClick={() => { setQuery(""); setStatus("ALL"); }} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Clear filters</button> : null}
-            <button type="button" onClick={() => load(resultLimit)} disabled={loading} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{loading && items.length > 0 ? "Refreshing…" : "Refresh"}</button>
+            <button type="button" onClick={loadFirstPage} disabled={loading || loadingMore} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{loading && items.length > 0 ? "Refreshing…" : "Refresh"}</button>
           </div>
         </div>
 
@@ -222,7 +249,7 @@ export default function SubmissionsWorklistPage() {
 
         <div className="mt-3 flex flex-col gap-2 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
           <div>Showing {visibleItems.length} matching {visibleItems.length === 1 ? "submission" : "submissions"} from {items.length} loaded.</div>
-          {mayHaveMore ? <button type="button" onClick={() => load(resultLimit + PAGE_SIZE)} disabled={loading} className="self-start rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-1.5 text-sm font-medium text-[var(--ink)] hover:bg-[var(--panel-soft)] disabled:opacity-50 sm:self-auto">{loading ? "Loading…" : "Load older submissions"}</button> : <span>All currently accessible submissions are loaded.</span>}
+          {hasMore ? <button type="button" onClick={loadOlder} disabled={loading || loadingMore} className="self-start rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-1.5 text-sm font-medium text-[var(--ink)] hover:bg-[var(--panel-soft)] disabled:opacity-50 sm:self-auto">{loadingMore ? "Loading…" : "Load older submissions"}</button> : <span>All currently accessible submissions are loaded.</span>}
         </div>
       </div>
 
