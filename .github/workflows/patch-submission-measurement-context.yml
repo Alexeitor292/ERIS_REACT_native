@@ -1,0 +1,39 @@
+name: Patch Submission Measurement Context
+
+on:
+  push:
+    branches:
+      - feature/submission-measurement-context
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/submission-measurement-context
+          fetch-depth: 0
+
+      - name: Apply guarded extraction
+        run: python scripts/patch_submission_measurement_context.py
+
+      - name: Verify Web build
+        working-directory: web
+        run: |
+          npm ci
+          npm run test
+          npx tsc --noEmit
+          npm run build
+
+      - name: Commit extraction
+        run: |
+          set -Eeuo pipefail
+          git diff --check
+          test -n "$(git status --porcelain -- web/src/pages/SubmissionDetailPage.tsx)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/src/pages/SubmissionDetailPage.tsx
+          git commit -m "refactor(web): extract submission measurement context"
+          git push origin HEAD:feature/submission-measurement-context
