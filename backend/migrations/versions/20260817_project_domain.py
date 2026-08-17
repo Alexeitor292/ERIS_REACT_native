@@ -198,6 +198,9 @@ def upgrade() -> None:
 
     # Fail closed at the data boundary: coordinator intake may be temporarily
     # projectless, but every route beyond coordinator review requires a Project.
+    # Legacy clients may still send an intake incident_type. Do not break those
+    # clients; discard intake classification because the authoritative
+    # classification comes only from the completed on-site Assessment.
     op.execute("DROP TRIGGER IF EXISTS trg_incident_project_required_bi")
     op.execute(
         """
@@ -209,10 +212,7 @@ def upgrade() -> None:
             SIGNAL SQLSTATE '45000'
               SET MESSAGE_TEXT = 'Incident must belong to a Project before leaving coordinator review';
           END IF;
-          IF NEW.incident_type IS NOT NULL THEN
-            SIGNAL SQLSTATE '45000'
-              SET MESSAGE_TEXT = 'Incident type is assigned only after on-site assessment';
-          END IF;
+          SET NEW.incident_type = NULL;
         END
         """
     )
@@ -238,8 +238,7 @@ def upgrade() -> None:
                  AND a.state IN ('APPROVED', 'FINALIZED')
              )
           THEN
-            SIGNAL SQLSTATE '45000'
-              SET MESSAGE_TEXT = 'Incident type is assigned only after on-site assessment';
+            SET NEW.incident_type = OLD.incident_type;
           END IF;
         END
         """
