@@ -8,7 +8,7 @@ import {
   formatWorkflowTimestamp,
   workflowEventLabel,
   workflowTransitionLabel,
-} from "./submissionReviewerSupportModel";
+} from "./submissionReviewerSupportModel.ts";
 
 const baseAttachment = {
   id: 1,
