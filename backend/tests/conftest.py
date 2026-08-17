@@ -144,7 +144,7 @@ def _install_project_aware_db_client(client: TestClient) -> None:
     before the request reaches FastAPI.
     """
     raw_post = client.post
-    advancement = re.compile(r"^/incidents/(\d+)/(?:triage|coordinator/forward|assign)$")
+    advancement = re.compile(r"^/incidents/(\d+)/(?:triage|coordinator/forward|assign|resolve)$")
 
     def project_aware_post(url, *args, **kwargs):
         url_text = str(url)
