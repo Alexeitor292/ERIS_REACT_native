@@ -91,6 +91,10 @@ export type RoutingUserOption = {
   metadata: Record<string, unknown>;
 };
 
+export type AssignmentUserOption = RoutingUserOption & {
+  roles: string[];
+};
+
 export type AssessmentQueue = "office_chief" | "branch_chief" | "engineer" | "reviewer";
 
 export function listAssessments(params: {
@@ -116,6 +120,13 @@ export function getAssessmentForIncident(incidentId: number): Promise<Assessment
 
 export function routingPreview(district: string): Promise<RoutingPreview> {
   return api<RoutingPreview>(`/assessments/routing/preview?district=${encodeURIComponent(district)}`);
+}
+
+export function assessmentAssignmentOptions(
+  assessmentId: number,
+  kind: "ENGINEER" | "REVIEWER"
+): Promise<{ assessment_id: number; kind: string; office_code: string | null; items: AssignmentUserOption[] }> {
+  return api(`/admin/assessment-assignment-options/${assessmentId}?kind=${encodeURIComponent(kind)}`);
 }
 
 export function triageIncident(

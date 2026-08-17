@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -10,9 +10,12 @@ from sqlalchemy.orm import Session
 from .db import get_db
 from .deps import require_roles
 from .auth import hash_password
-from .user_metadata import parse_user_metadata, user_metadata_json
+from .roles import ADMIN, GEOTECH_BRANCH_CHIEF, GEOTECH_ENGINEER, GEOTECH_OFFICE_CHIEF, OPERATIONAL_ROLES, expand_roles
+from .user_metadata import normalize_office_code, parse_user_metadata, user_metadata_json
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+ASSESSMENT_ASSIGNMENT_DIRECTORY_ROLES = expand_roles(GEOTECH_OFFICE_CHIEF, GEOTECH_BRANCH_CHIEF) + [ADMIN]
 
 
 # -----------------------------
@@ -131,6 +134,102 @@ def _set_roles(db: Session, user_id: int, roles: list[str]) -> None:
         ),
         {"uid": user_id, "names": tuple(roles)},
     )
+
+
+def _role_predicate_params(roles: list[str] | set[str]) -> tuple[str, dict[str, str]]:
+    ordered = sorted({str(role) for role in roles})
+    params = {f"role_{index}": role for index, role in enumerate(ordered)}
+    placeholders = ", ".join(f":role_{index}" for index in range(len(ordered)))
+    return placeholders, params
+
+
+# -----------------------------
+# Assessment assignment directory
+# -----------------------------
+@router.get("/assessment-assignment-options/{assessment_id}")
+def assessment_assignment_options(
+    assessment_id: int = Path(..., ge=1),
+    kind: str = Query(..., pattern="^(ENGINEER|REVIEWER)$"),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(ASSESSMENT_ASSIGNMENT_DIRECTORY_ROLES)),
+):
+    """Return active identities eligible for assessment assignment UI.
+
+    This exposes only names and routing metadata. Existing assessment write
+    endpoints remain authoritative for every assignment action.
+    """
+    assessment = db.execute(
+        text("SELECT id, office_code FROM assessments WHERE id = :aid LIMIT 1"),
+        {"aid": assessment_id},
+    ).mappings().first()
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+
+    assessment_office = normalize_office_code(assessment.get("office_code"))
+    user_roles = set(user.get("roles") or [])
+    if ADMIN not in user_roles:
+        user_office = normalize_office_code((user.get("metadata") or {}).get("office_code"))
+        if not user_office or (assessment_office and user_office != assessment_office):
+            raise HTTPException(status_code=403, detail="Assessment is outside your assigned office")
+
+    if kind == "ENGINEER":
+        eligible_roles = set(expand_roles(GEOTECH_ENGINEER)) | {ADMIN}
+    else:
+        eligible_roles = set(OPERATIONAL_ROLES)
+
+    role_placeholders, params = _role_predicate_params(eligible_roles)
+    params["office_code"] = assessment_office or ""
+
+    office_filter = ""
+    if kind == "ENGINEER" and assessment_office:
+        office_filter = """
+          AND (
+            COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
+            OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = ''
+          )
+        """
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT DISTINCT u.id, u.email, u.full_name, u.metadata_json
+            FROM users u
+            JOIN user_roles ur ON ur.user_id = u.id
+            JOIN roles r ON r.id = ur.role_id
+            WHERE u.is_active = 1
+              AND r.name IN ({role_placeholders})
+              {office_filter}
+            ORDER BY
+              CASE
+                WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
+                THEN 0 ELSE 1
+              END,
+              u.full_name ASC,
+              u.id ASC
+            """
+        ),
+        params,
+    ).mappings().all()
+
+    items = []
+    for row in rows:
+        uid = int(row["id"])
+        items.append(
+            {
+                "id": uid,
+                "email": row["email"],
+                "full_name": row["full_name"],
+                "metadata": parse_user_metadata(row.get("metadata_json")),
+                "roles": _get_user_roles(db, uid),
+            }
+        )
+
+    return {
+        "assessment_id": assessment_id,
+        "kind": kind,
+        "office_code": assessment_office,
+        "items": items,
+    }
 
 
 # -----------------------------

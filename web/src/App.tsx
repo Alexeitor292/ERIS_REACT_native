@@ -9,6 +9,7 @@ import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
 import AssessmentsPage from "./pages/AssessmentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
+import NotFoundPage from "./pages/NotFoundPage";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import RoleRoute from "./auth/RoleRoute";
@@ -92,6 +93,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
