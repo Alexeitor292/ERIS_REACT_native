@@ -33,6 +33,46 @@ class ProjectPatchRequest(BaseModel):
     description: str | None = None
 
 
+def _incident_row(db: Session, incident_id: int) -> dict | None:
+    row = db.execute(
+        text(
+            """
+            SELECT
+              i.id, i.project_id, i.title, i.description, i.incident_type,
+              i.location_id, i.first_observed_at, i.first_occurred_at,
+              i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
+              i.office_code, i.current_stage, i.status, i.reporter_user_id,
+              i.created_at, i.updated_at, i.resolved_at, i.resolved_by_user_id
+            FROM incidents i
+            WHERE i.id = :iid
+            LIMIT 1
+            """
+        ),
+        {"iid": incident_id},
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+def _incident_summary(row: dict) -> dict:
+    return {
+        "id": int(row["id"]),
+        "project_id": int(row["project_id"]) if row.get("project_id") is not None else None,
+        "title": row["title"],
+        "incident_type": row.get("incident_type"),
+        "status": row["status"],
+        "current_stage": row["current_stage"],
+        "latitude": float(row["latitude"]),
+        "longitude": float(row["longitude"]),
+        "district": row.get("district"),
+        "county": row.get("county"),
+        "route": row.get("route"),
+        "post_mile": row.get("post_mile"),
+        "first_observed_at": row.get("first_observed_at"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
 def _project_row(db: Session, project_id: int):
     return db.execute(
         text(
@@ -64,17 +104,17 @@ def _serialize_project(row: dict) -> dict:
         "id": int(row["id"]),
         "project_uuid": row["project_uuid"],
         "title": row["title"],
-        "description": row["description"],
+        "description": row.get("description"),
         "status": row["status"],
         "anchor_location_id": int(row["anchor_location_id"]) if row.get("anchor_location_id") is not None else None,
         "anchor_latitude": float(row["anchor_latitude"]),
         "anchor_longitude": float(row["anchor_longitude"]),
         "centroid_latitude": float(row["centroid_latitude"]) if row.get("centroid_latitude") is not None else float(row["anchor_latitude"]),
         "centroid_longitude": float(row["centroid_longitude"]) if row.get("centroid_longitude") is not None else float(row["anchor_longitude"]),
-        "district": row["district"],
-        "county": row["county"],
-        "route": row["route"],
-        "post_mile": row["post_mile"],
+        "district": row.get("district"),
+        "county": row.get("county"),
+        "route": row.get("route"),
+        "post_mile": row.get("post_mile"),
         "created_from_incident_id": int(row["created_from_incident_id"]) if row.get("created_from_incident_id") is not None else None,
         "created_by_user_id": int(row["created_by_user_id"]),
         "source": row["source"],
@@ -93,7 +133,7 @@ def _project_incidents(db: Session, project_id: int) -> list[dict]:
         text(
             """
             SELECT
-              i.id, i.title, i.incident_type, i.status, i.current_stage,
+              i.id, i.project_id, i.title, i.incident_type, i.status, i.current_stage,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.first_observed_at, i.created_at, i.updated_at
             FROM incidents i
@@ -103,25 +143,7 @@ def _project_incidents(db: Session, project_id: int) -> list[dict]:
         ),
         {"pid": project_id},
     ).mappings().all()
-    return [
-        {
-            "id": int(row["id"]),
-            "title": row["title"],
-            "incident_type": row["incident_type"],
-            "status": row["status"],
-            "current_stage": row["current_stage"],
-            "latitude": float(row["latitude"]),
-            "longitude": float(row["longitude"]),
-            "district": row["district"],
-            "county": row["county"],
-            "route": row["route"],
-            "post_mile": row["post_mile"],
-            "first_observed_at": row["first_observed_at"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-        for row in rows
-    ]
+    return [_incident_summary(dict(row)) for row in rows]
 
 
 def _project_events(db: Session, project_id: int) -> list[dict]:
@@ -140,7 +162,7 @@ def _project_events(db: Session, project_id: int) -> list[dict]:
         ),
         {"pid": project_id},
     ).mappings().all()
-    out: list[dict] = []
+    items: list[dict] = []
     for row in rows:
         metadata = row["metadata_json"]
         if isinstance(metadata, str):
@@ -148,7 +170,7 @@ def _project_events(db: Session, project_id: int) -> list[dict]:
                 metadata = json.loads(metadata)
             except Exception:
                 metadata = None
-        out.append(
+        items.append(
             {
                 "id": int(row["id"]),
                 "project_id": int(row["project_id"]),
@@ -162,7 +184,7 @@ def _project_events(db: Session, project_id: int) -> list[dict]:
                 "created_at": row["created_at"],
             }
         )
-    return out
+    return items
 
 
 def _record_project_event(
@@ -196,13 +218,24 @@ def _record_project_event(
 
 
 def _generated_project_title(incident: dict) -> str:
-    route = str(incident.get("route") or "").strip()
-    pm = str(incident.get("post_mile") or "").strip()
-    county = str(incident.get("county") or "").strip()
     district = str(incident.get("district") or "").strip()
-    parts = [part for part in [f"D{district}" if district else None, county or None, f"R{route}" if route else None, f"PM {pm}" if pm else None] if part]
-    suffix = " · ".join(parts)
-    return f"Incident #{int(incident['id'])} Project" + (f" · {suffix}" if suffix else "")
+    county = str(incident.get("county") or "").strip()
+    route = str(incident.get("route") or "").strip()
+    post_mile = str(incident.get("post_mile") or "").strip()
+    pieces = [
+        f"D{district}" if district else None,
+        county or None,
+        f"R{route}" if route else None,
+        f"PM {post_mile}" if post_mile else None,
+    ]
+    location = " · ".join(piece for piece in pieces if piece)
+    return f"Incident #{int(incident['id'])} Project" + (f" · {location}" if location else "")
+
+
+def _ensure_manage_scope(user: dict, incident_or_project: dict) -> None:
+    if is_admin(user):
+        return
+    incidents_routes._ensure_incident_district_access(user, incident_or_project.get("district"))
 
 
 @router.get("/projects")
@@ -216,12 +249,12 @@ def list_projects(
     where: list[str] = []
     params: dict[str, object] = {"limit": limit}
     if status:
-        normalized_status = status.strip().upper()
-        if normalized_status not in {"OPEN", "CLOSED", "ARCHIVED", "ALL"}:
+        normalized = status.strip().upper()
+        if normalized not in {"OPEN", "CLOSED", "ARCHIVED", "ALL"}:
             raise HTTPException(status_code=400, detail="Invalid project status")
-        if normalized_status != "ALL":
+        if normalized != "ALL":
             where.append("p.status = :status")
-            params["status"] = normalized_status
+            params["status"] = normalized
     if q and q.strip():
         where.append("(p.title LIKE :q OR p.description LIKE :q OR p.route LIKE :q OR p.county LIKE :q)")
         params["q"] = f"%{q.strip()}%"
@@ -279,8 +312,7 @@ def update_project(
     row = _project_row(db, project_id)
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
-    if not is_admin(user):
-        incidents_routes._ensure_incident_district_access(user, row.get("district"))
+    _ensure_manage_scope(user, dict(row))
 
     sets: list[str] = []
     params: dict[str, object] = {"pid": project_id}
@@ -309,6 +341,29 @@ def update_project(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/incidents/{incident_id}/project-context")
+def incident_project_context(
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(PROJECT_MANAGE_ROLES)),
+):
+    incident = _incident_row(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    _ensure_manage_scope(user, incident)
+    project = None
+    if incident.get("project_id") is not None:
+        project_row = _project_row(db, int(incident["project_id"]))
+        if project_row:
+            project = _serialize_project(dict(project_row))
+    return {
+        "incident": _incident_summary(incident),
+        "project": project,
+        "requires_project_association": project is None,
+        "can_change_association": str(incident["current_stage"]).upper() == "COORDINATOR_REVIEW" or is_admin(user),
+    }
+
+
 @router.get("/incidents/{incident_id}/nearby-projects")
 def nearby_projects_for_incident(
     incident_id: int = Path(..., ge=1),
@@ -317,10 +372,10 @@ def nearby_projects_for_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(PROJECT_MANAGE_ROLES)),
 ):
-    incident = incidents_routes._incident_with_assignment(db, incident_id)
+    incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    incidents_routes._ensure_incident_district_access(user, incident.get("district"))
+    _ensure_manage_scope(user, incident)
 
     lat = float(incident["latitude"])
     lon = float(incident["longitude"])
@@ -359,17 +414,7 @@ def nearby_projects_for_incident(
         items.append(project)
 
     return {
-        "incident": {
-            "id": int(incident["id"]),
-            "title": incident["title"],
-            "latitude": lat,
-            "longitude": lon,
-            "district": incident["district"],
-            "county": incident["county"],
-            "route": incident["route"],
-            "post_mile": incident["post_mile"],
-            "project_id": int(incident["project_id"]) if incident.get("project_id") is not None else None,
-        },
+        "incident": _incident_summary(incident),
         "radius_m": radius_m,
         "items": items,
     }
@@ -382,11 +427,10 @@ def associate_incident_project(
     db: Session = Depends(get_db),
     user=Depends(require_roles(PROJECT_MANAGE_ROLES)),
 ):
-    incident_row = incidents_routes._incident_with_assignment(db, incident_id)
-    if not incident_row:
+    incident = _incident_row(db, incident_id)
+    if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    incident = dict(incident_row)
-    incidents_routes._ensure_incident_district_access(user, incident.get("district"))
+    _ensure_manage_scope(user, incident)
     if str(incident["status"]).upper() == "RESOLVED" and not is_admin(user):
         raise HTTPException(status_code=409, detail="Only an administrator may regroup a resolved incident")
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW" and not is_admin(user):
@@ -434,10 +478,10 @@ def associate_incident_project(
                     "location_id": incident.get("location_id"),
                     "lat": incident["latitude"],
                     "lon": incident["longitude"],
-                    "district": incident["district"],
-                    "county": incident["county"],
-                    "route": incident["route"],
-                    "post_mile": incident["post_mile"],
+                    "district": incident.get("district"),
+                    "county": incident.get("county"),
+                    "route": incident.get("route"),
+                    "post_mile": incident.get("post_mile"),
                     "iid": incident_id,
                     "uid": actor_id,
                 },
@@ -489,9 +533,8 @@ def associate_incident_project(
             metadata={"from_project_id": old_project_id, "mode": mode},
         )
 
-        # Historical one-incident backfill Projects become empty when a real
-        # coordinator groups that incident elsewhere. Archive those placeholders
-        # automatically so they do not remain as phantom nearby Projects.
+        # Historical one-incident migration placeholders disappear from active
+        # Project discovery after the incident is regrouped into its real Project.
         if old_project_id is not None:
             db.execute(
                 text(
@@ -507,9 +550,10 @@ def associate_incident_project(
             )
 
         db.commit()
+        target = _project_row(db, target_project_id)
         return {
             "incident_id": incident_id,
-            "project": _serialize_project(dict(_project_row(db, target_project_id))),
+            "project": _serialize_project(dict(target)),
             "created": created,
             "changed": True,
         }
