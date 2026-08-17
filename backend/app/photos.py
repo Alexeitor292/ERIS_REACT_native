@@ -8,17 +8,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import hashlib
 
-from .deps import require_roles
+from .deps import get_current_user, require_roles
 from .db import get_db
 from .storage import put_object_bytes, make_object_key
 from .config import settings
-from .permissions import require_is_owner_or_admin
+from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
 
 router = APIRouter(tags=["photos"])
 
 _LOCATION_SOURCES = {"DEVICE_AT_CAPTURE", "EXIF_GPS", "MANUAL", "UNKNOWN"}
 _HEADING_SOURCES = {"DEVICE_TRUE_HEADING", "DEVICE_MAGNETIC_HEADING", "EXIF_GPS_IMG_DIRECTION", "MANUAL", "UNKNOWN"}
 _HEADING_REFERENCES = {"TRUE_NORTH", "MAGNETIC_NORTH", "UNKNOWN"}
+_SUBMISSION_STATUSES = {"DRAFT", "SUBMITTED", "APPROVED", "REJECTED"}
 
 
 def _normalize_section_key(section_key: str | None) -> str | None:
@@ -255,3 +256,67 @@ async def upload_submission_attachment(submission_id: int = Path(..., ge=1), fil
         submission_id=submission_id, file=file, section_key=section_key, kind=kind,
         capture_metadata_json=capture_metadata_json, db=db, user=user,
     )
+
+
+@router.get("/submissions/page")
+def list_submissions_page(
+    limit: int = Query(default=50, ge=1, le=200),
+    before_id: int | None = Query(default=None, ge=1),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Cursor-paginated submission worklist preserving the legacy visibility rules."""
+    params: dict[str, object] = {"limit_plus_one": limit + 1}
+    predicates: list[str] = []
+
+    if before_id is not None:
+        params["before_id"] = before_id
+        predicates.append("s.id < :before_id")
+
+    if status_filter:
+        normalized_status = status_filter.strip().upper()
+        if normalized_status not in _SUBMISSION_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status filter")
+        params["status"] = normalized_status
+        predicates.append("s.status = :status")
+
+    select_sql = """
+        SELECT DISTINCT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,
+               s.created_at, s.submitted_at, s.reviewed_at,
+               g.district, g.county, g.route, g.post_mile
+        FROM submissions s
+    """
+
+    if is_admin(user) or is_reviewer(user):
+        joins_sql = "LEFT JOIN submission_gisa g ON g.submission_id = s.id"
+    else:
+        params["uid"] = int(user["id"])
+        joins_sql = """
+            LEFT JOIN submission_visibility v
+              ON v.submission_id = s.id AND v.user_id = :uid
+            LEFT JOIN submission_editors e
+              ON e.submission_id = s.id AND e.user_id = :uid
+            LEFT JOIN submission_gisa g ON g.submission_id = s.id
+        """
+        predicates.insert(0, "(s.created_by_user_id = :uid OR v.user_id IS NOT NULL OR e.user_id IS NOT NULL)")
+
+    where_sql = f"WHERE {' AND '.join(predicates)}" if predicates else ""
+    rows = db.execute(text(f"""
+        {select_sql}
+        {joins_sql}
+        {where_sql}
+        ORDER BY s.id DESC
+        LIMIT :limit_plus_one
+    """), params).mappings().all()
+
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    items = [dict(row) for row in page_rows]
+    next_cursor = int(page_rows[-1]["id"]) if has_more and page_rows else None
+
+    return {
+        "items": items,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
+    }
