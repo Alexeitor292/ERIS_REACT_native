@@ -142,7 +142,7 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     # promote this to 409 without changing the authority contract.
     blocked_triage = client_db.post(
         f"/incidents/{incident_a_id}/triage",
-        headers=coordinator_headers,
+        headers={**coordinator_headers, "X-ERIS-Test-Preserve-Projectless": "1"},
         json={"disposition": "NO_ASSESSMENT_REQUIRED", "notes": "Project association intentionally missing."},
     )
     assert blocked_triage.status_code in {400, 409}, blocked_triage.text
