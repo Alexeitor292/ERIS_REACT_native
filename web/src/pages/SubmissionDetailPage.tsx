@@ -1,12 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { GisaElevationProfile, GisaLookups, GisaTerrainGrid, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
-import { TerrainRelief } from "../components/TerrainRelief";
-// Lazy-loaded so ArcGIS SceneView's heavy 3D modules are fetched only when the
-// user actually opens the 3D Terrain tab — the normal page never eagerly loads it.
-const InteractiveTerrainScene = lazy(() => import("../components/InteractiveTerrainScene"));
-import { friendlyFieldLabel, friendlyFieldValue, fieldDescription, terrainLabel } from "../utils/roadInventoryGlossary";
+import type { GisaLookups, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import { getToken } from "../auth/token";
@@ -15,6 +10,7 @@ import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
 import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
+import SubmissionMeasurementContext from "../features/submissions/SubmissionMeasurementContext";
 import { R, Section } from "../features/submissions/SubmissionDetailPrimitives";
 import {
   boolToTri,
@@ -130,27 +126,6 @@ export default function SubmissionDetailPage() {
     Default: buildDefaultDashboardLayout(),
   });
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => buildDefaultDashboardLayout());
-  const [elevFetching, setElevFetching] = useState(false);
-  const [elevError, setElevError] = useState<string | null>(null);
-  const [bearingInput, setBearingInput] = useState<string>("");
-  const [terrainView, setTerrainView] = useState<"profile" | "terrain">("profile");
-  const [terrainFetching, setTerrainFetching] = useState(false);
-  const [terrainError, setTerrainError] = useState<string | null>(null);
-  const [riDetailsOpen, setRiDetailsOpen] = useState(false);
-  const [searchParams] = useSearchParams();
-  const deepLinkTerrain = searchParams.get("section") === "terrain";
-
-  // Deep link (e.g. the mobile "Open full 3D map" handoff: /submissions/:id?section=terrain):
-  // open the 3D Terrain view and scroll it into view once the page is mounted.
-  useEffect(() => {
-    if (!deepLinkTerrain) return;
-    setTerrainView("terrain");
-    const t = window.setTimeout(() => {
-      document.getElementById("terrain-3d-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 400);
-    return () => window.clearTimeout(t);
-  }, [deepLinkTerrain]);
-
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
   const canAct = canReview && data?.submission.status === "SUBMITTED";
@@ -448,40 +423,6 @@ export default function SubmissionDetailPage() {
       setBusy(false);
     }
   }
-  async function fetchElevation(force: boolean) {
-    const parsedBearing = bearingInput.trim() ? parseFloat(bearingInput) : NaN;
-    const road_bearing_deg = isFinite(parsedBearing) && parsedBearing >= 0 && parsedBearing < 360
-      ? parsedBearing : null;
-    setElevFetching(true); setElevError(null);
-    try {
-      await api<{ elevation_profile: GisaElevationProfile }>(
-        `/submissions/${sid}/gisa/elevation-profile`,
-        { method: "POST", body: JSON.stringify({ force, road_bearing_deg }) },
-      );
-      await load();
-    } catch (e: any) {
-      setElevError(e?.message ?? "Elevation fetch failed");
-    } finally {
-      setElevFetching(false);
-    }
-  }
-  async function fetchTerrain(force: boolean) {
-    const parsedBearing = bearingInput.trim() ? parseFloat(bearingInput) : NaN;
-    const road_bearing_deg = isFinite(parsedBearing) && parsedBearing >= 0 && parsedBearing < 360
-      ? parsedBearing : null;
-    setTerrainFetching(true); setTerrainError(null);
-    try {
-      await api<{ terrain: GisaTerrainGrid }>(
-        `/submissions/${sid}/gisa/terrain-grid`,
-        { method: "POST", body: JSON.stringify({ force, road_bearing_deg }) },
-      );
-      await load();
-    } catch (e: any) {
-      setTerrainError(e?.message ?? "Terrain build failed");
-    } finally {
-      setTerrainFetching(false);
-    }
-  }
   async function openDownloadUrl(id: number) {
     setDownloading(id);
     try {
@@ -587,15 +528,6 @@ export default function SubmissionDetailPage() {
   }
 
   useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid]);
-
-  // Prefill bearing from road inventory snapshot when available
-  useEffect(() => {
-    const snapBearing = data?.gisa?.road_inventory_context?.snapshot?.road_bearing_deg;
-    if (snapBearing != null && bearingInput === "") {
-      setBearingInput(String(snapBearing));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.gisa?.road_inventory_context?.snapshot?.road_bearing_deg]);
 
   const box = "rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3";
   const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
@@ -1658,214 +1590,11 @@ export default function SubmissionDetailPage() {
                     <div {...cardFrameProps("measurements")}>
                         {layoutTools("measurements")}
                         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Measurements</div>
-                        {data.gisa?.road_inventory_context ? (() => {
-                          const ri = data.gisa!.road_inventory_context!;
-                          const sn = ri.snapshot ?? {};
-                          const terrainCode = (sn.terrain_code ?? sn.THY_TERRAIN_CODE) as string | null | undefined;
-                          return (
-                            <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--good)_32%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_8%,transparent)] px-2.5 py-2 text-xs">
-                              <div className="mb-1 font-semibold text-[var(--good)]">Road inventory context</div>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
-                                {sn.county_code != null && <span>County: <span className="text-[var(--ink)]">{String(sn.county_code)}</span></span>}
-                                {sn.route_name != null && <span>Route: <span className="text-[var(--ink)]">{String(sn.route_name)}</span></span>}
-                                {(sn.begin_pm != null || sn.end_pm != null) && (
-                                  <span className="col-span-2">Postmile: <span className="text-[var(--ink)]">{String(sn.begin_pm ?? "?")} – {String(sn.end_pm ?? "?")} mi</span></span>
-                                )}
-                                {terrainCode && (
-                                  <span className="col-span-2">Terrain: <span className="text-[var(--ink)]">{terrainLabel(terrainCode)}</span></span>
-                                )}
-                                {(sn.left_lanes != null || sn.right_lanes != null) && (
-                                  <span>Lanes: <span className="text-[var(--ink)]">{sn.left_lanes != null ? `${sn.left_lanes} LT` : "?"} / {sn.right_lanes != null ? `${sn.right_lanes} RT` : "?"}</span></span>
-                                )}
-                                <span>Match: <span className="text-[var(--ink)]">{ri.match_method ?? "—"}</span></span>
-                                {ri.checked_at && <span>Checked: <span className="text-[var(--ink)]">{ri.checked_at.slice(0, 10)}</span></span>}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setRiDetailsOpen((v) => !v)}
-                                className="mt-1.5 text-[10px] font-medium text-[var(--good)] hover:opacity-80"
-                              >
-                                {riDetailsOpen ? "▲ Hide field details" : "▼ Field meanings & raw values"}
-                              </button>
-                              {riDetailsOpen && Object.keys(sn).length > 0 && (
-                                <div className="mt-2 border-t border-[color:color-mix(in_oklab,var(--good)_20%,transparent)] pt-2">
-                                  <div className="mb-1 text-[9px] italic text-[var(--good)]">
-                                    CA Highways (HICOMP) dataset — v{ri.dataset_version_id}, segment {ri.segment_id}. Raw field names shown for traceability.
-                                  </div>
-                                  <div className="grid grid-cols-1 gap-y-1">
-                                    {Object.entries(sn).map(([key, val]) => (
-                                      <div key={key} className="text-[10px]">
-                                        <span className="font-medium text-[var(--ink)]">{friendlyFieldLabel(key)}: </span>
-                                        <span className="text-[var(--ink)]">{friendlyFieldValue(key, val)}</span>
-                                        <span className="ml-1 text-[var(--muted)] opacity-60">({key})</span>
-                                        {fieldDescription(key) && (
-                                          <div className="text-[9px] italic text-muted pl-2">{fieldDescription(key)}</div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              <div className="mt-1 text-[10px] italic text-[var(--good)]">
-                                Road inventory values from the published CA Highways dataset.
-                              </div>
-                            </div>
-                          );
-                        })() : (
-                          <div className="mb-2 text-xs italic text-muted">No road inventory context. Diagram uses form / default roadway assumptions.</div>
-                        )}
-                        <div className="mb-2 inline-flex overflow-hidden rounded border border-[var(--line)] text-[11px]">
-                          {(["profile", "terrain"] as const).map((mode) => (
-                            <button
-                              key={mode}
-                              onClick={() => setTerrainView(mode)}
-                              className={`px-2.5 py-1 font-medium ${terrainView === mode ? "bg-[var(--brand)] text-white" : "bg-[var(--panel-soft)] text-[var(--ink)] hover:brightness-95"}`}
-                            >
-                              {mode === "profile" ? "Elevation Profile" : "3D Terrain"}
-                            </button>
-                          ))}
-                        </div>
-
-                        {terrainView === "terrain" && (
-                          <div className="mb-2" id="terrain-3d-section">
-                            <Suspense
-                              fallback={
-                                <div
-                                  className="flex items-center justify-center rounded-lg border border-[var(--line)] bg-[#0f172a]/80 text-center"
-                                  style={{ height: 460 }}
-                                >
-                                  <div className="text-xs text-white/85">
-                                    <div className="mx-auto mb-2 h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                                    Loading 3D terrain & imagery…
-                                  </div>
-                                </div>
-                              }
-                            >
-                              <InteractiveTerrainScene
-                                location={{ latitude: data.gisa?.latitude ?? null, longitude: data.gisa?.longitude ?? null }}
-                                terrain={data.gisa?.elevation_terrain ?? null}
-                                geometryJson={(data.gisa?.geometry_json as Record<string, unknown> | null) ?? null}
-                                route={data.gisa?.route ?? null}
-                                postMile={data.gisa?.post_mile ?? null}
-                                county={data.gisa?.county ?? null}
-                                incidentLabel={`Submission #${data.submission.id}`}
-                              />
-                            </Suspense>
-
-                            <details className="mt-2 rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1.5">
-                              <summary className="cursor-pointer text-[11px] font-medium text-[var(--ink)]">
-                                USGS sampled relief (diagnostic)
-                              </summary>
-                              <div className="mt-2">
-                                <div className="mb-1 flex flex-wrap items-center gap-2">
-                                  <button
-                                    disabled={terrainFetching}
-                                    onClick={() => fetchTerrain(true)}
-                                    className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-90 hover:opacity-100 disabled:opacity-40"
-                                  >
-                                    {terrainFetching ? "Building…" : data.gisa?.elevation_terrain ? "Rebuild terrain" : "Build terrain"}
-                                  </button>
-                                  <span className="text-[9px] italic text-muted">
-                                    Samples an 11×11 USGS 3DEP grid (~200×200 m), road-aligned. Cached; feeds the
-                                    classification and the scene&apos;s sample-extent overlay.
-                                  </span>
-                                </div>
-                                <TerrainRelief terrain={data.gisa?.elevation_terrain ?? null} />
-                                {terrainError && <div className="mt-1 text-[10px] text-[var(--error)]">{terrainError}</div>}
-                              </div>
-                            </details>
-                          </div>
-                        )}
-
-                        {terrainView === "profile" && (() => {
-                          const ep = data.gisa?.elevation_profile;
-                          const epMeta = (ep?.profile as Record<string, unknown> | null | undefined)?.metadata as Record<string, unknown> | null | undefined;
-                          const bearingUsed = epMeta?.road_bearing_deg_used as number | null | undefined;
-                          const bearingSource = epMeta?.road_bearing_source as string | null | undefined;
-                          const bearingSourceLabel =
-                            bearingSource === "arcgis_postmile_geometry" ? "auto from postmile geometry" :
-                            bearingSource === "road_inventory_snapshot" ? "road inventory snapshot" :
-                            bearingSource ?? "request";
-                          const bearingNote = bearingUsed != null
-                            ? `${Math.round(bearingUsed)}° (${bearingSourceLabel})`
-                            : "not set — classification may be UNKNOWN";
-                          const classReason = (ep?.classification_reason ?? (epMeta?.classification_reason as string | null | undefined)) as string | null | undefined;
-                          const reasonNote = (epMeta?.classification_note as string | undefined) ?? (
-                            classReason === "ROAD_BEARING_UNAVAILABLE" ? "Road bearing could not be resolved, so only center elevation is available." :
-                            classReason === "INSUFFICIENT_VALID_SAMPLES" ? "Not enough valid USGS samples on both sides of the road to classify the terrain." :
-                            classReason === "AMBIGUOUS_TERRAIN" ? "Terrain is mixed/ambiguous: the sampled cross-section does not match a single shape." :
-                            undefined
-                          );
-                          return ep ? (
-                            <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_28%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,transparent)] px-2.5 py-2 text-xs">
-                              <div className="mb-1.5 flex items-center justify-between">
-                                <span className="font-semibold text-[var(--brand)]">Elevation profile</span>
-                                <button
-                                  disabled={elevFetching}
-                                  onClick={() => fetchElevation(true)}
-                                  className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
-                                >
-                                  {elevFetching ? "Refreshing…" : "Refresh"}
-                                </button>
-                              </div>
-                              <div className="mb-1.5 flex items-center gap-2">
-                                <label className="shrink-0 text-[10px] text-muted">Road bearing (deg):</label>
-                                <input
-                                  type="number" min="0" max="359" step="1"
-                                  placeholder="0–359"
-                                  value={bearingInput}
-                                  onChange={(e) => setBearingInput(e.target.value)}
-                                  className="w-20 rounded border border-[var(--line)] bg-[var(--panel)] px-1.5 py-0.5 text-[10px] text-[var(--ink)]"
-                                />
-                                <span className="text-[9px] italic text-muted">Optional. Leave blank to auto-derive from postmile geometry when available.</span>
-                              </div>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted">
-                                <span>Source: <span className="text-[var(--ink)]">{ep.source ?? "—"}</span></span>
-                                <span>Classification: <span className="text-[var(--ink)]">{ep.classification ?? "—"}</span></span>
-                                {ep.confidence != null && (
-                                  <span>Confidence: <span className="text-[var(--ink)]">{(ep.confidence * 100).toFixed(0)}%</span></span>
-                                )}
-                                {ep.checked_at && (
-                                  <span>Checked: <span className="text-[var(--ink)]">{ep.checked_at.slice(0, 10)}</span></span>
-                                )}
-                                <span className="col-span-2">Bearing: <span className={`${bearingUsed != null ? "text-[var(--ink)]" : "text-[var(--muted)] italic"}`}>{bearingNote}</span></span>
-                                {ep.classification === "UNKNOWN" && reasonNote && (
-                                  <span className="col-span-2">Why UNKNOWN: <span className="text-[var(--ink)]">{reasonNote}</span></span>
-                                )}
-                              </div>
-                              {ep.error && (
-                                <div className="mt-1 text-[10px] text-[var(--error)]">{ep.error}</div>
-                              )}
-                              {elevError && <div className="mt-1 text-[10px] text-[var(--error)]">{elevError}</div>}
-                            </div>
-                          ) : (
-                            <div className="mb-2 rounded border border-[color:color-mix(in_oklab,var(--brand)_15%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_4%,transparent)] px-2.5 py-2 text-xs">
-                              <div className="mb-1.5 font-semibold text-[var(--brand)]">Elevation profile</div>
-                              <div className="mb-1.5 flex items-center gap-2">
-                                <label className="shrink-0 text-[10px] text-muted">Road bearing (deg):</label>
-                                <input
-                                  type="number" min="0" max="359" step="1"
-                                  placeholder="0–359"
-                                  value={bearingInput}
-                                  onChange={(e) => setBearingInput(e.target.value)}
-                                  className="w-20 rounded border border-[var(--line)] bg-[var(--panel)] px-1.5 py-0.5 text-[10px] text-[var(--ink)]"
-                                />
-                                <span className="text-[9px] italic text-muted">Optional. Leave blank to auto-derive from postmile geometry when available.</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs italic text-muted">No elevation profile fetched.</span>
-                                <button
-                                  disabled={elevFetching}
-                                  onClick={() => fetchElevation(false)}
-                                  className="rounded bg-[var(--brand)] px-2 py-0.5 text-[10px] font-medium text-white opacity-80 hover:opacity-100 disabled:opacity-40"
-                                >
-                                  {elevFetching ? "Fetching…" : "Fetch Elevation Profile"}
-                                </button>
-                              </div>
-                              {elevError && <div className="mt-1 text-[10px] text-[var(--error)]">{elevError}</div>}
-                            </div>
-                          );
-                        })()}
+                        <SubmissionMeasurementContext
+                          submissionId={data.submission.id}
+                          gisa={data.gisa}
+                          onReload={load}
+                        />
                         <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
                           <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
                         </div>
