@@ -11,7 +11,9 @@ not advance beyond COORDINATOR_REVIEW until a project is associated.
 Historical incidents are backfilled one-project-per-incident. This preserves
 all existing workflow state without guessing which historical incidents belong
 together; authorized coordinators can regroup them later through the Project
-association workflow.
+association workflow. created_from_incident_id is intentionally indexed rather
+than unique so regrouping can create a durable replacement Project while the
+archived legacy Project still retains its provenance.
 """
 
 from alembic import op
@@ -55,7 +57,7 @@ def upgrade() -> None:
             CONSTRAINT fk_project_closed_by FOREIGN KEY (closed_by_user_id)
               REFERENCES users(id) ON DELETE SET NULL,
 
-            UNIQUE KEY uk_project_created_from_incident (created_from_incident_id),
+            INDEX idx_project_created_from_incident (created_from_incident_id),
             INDEX idx_projects_status_updated (status, updated_at),
             INDEX idx_projects_geo (anchor_latitude, anchor_longitude),
             INDEX idx_projects_route (district, county, route, post_mile),
