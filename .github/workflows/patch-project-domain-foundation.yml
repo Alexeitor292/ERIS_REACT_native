@@ -1,0 +1,41 @@
+name: Patch Project Domain Foundation
+
+on:
+  push:
+    branches:
+      - feature/project-domain-foundation
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/project-domain-foundation
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply guarded Project-domain wiring
+        run: python scripts/patch_project_domain_routes.py
+
+      - name: Validate patched Python sources
+        run: |
+          set -Eeuo pipefail
+          python -m compileall -q backend/app backend/migrations
+          git diff --check
+
+      - name: Commit guarded wiring
+        run: |
+          set -Eeuo pipefail
+          test -n "$(git status --porcelain -- backend/app/main.py backend/app/routes/incidents.py backend/app/routes/assessments.py backend/app/routes/projects.py)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/main.py backend/app/routes/incidents.py backend/app/routes/assessments.py backend/app/routes/projects.py
+          git commit -m "feat(projects): wire Project authority into incident workflow"
+          git push origin HEAD:feature/project-domain-foundation
