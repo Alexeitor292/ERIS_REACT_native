@@ -25,6 +25,19 @@ import pytest
 
 pytestmark = pytest.mark.db
 
+
+def _associate_project(client_db, headers: dict[str, str], incident_id: int) -> None:
+    response = client_db.post(
+        f"/incidents/{incident_id}/project-association",
+        headers=headers,
+        json={
+            "mode": "CREATE_NEW",
+            "title": f"Integration Project {incident_id}",
+            "notes": "Legacy DB fixture Project association.",
+        },
+    )
+    assert response.status_code == 200, f"Project association failed: {response.status_code} {response.text}"
+
 _RUN = uuid.uuid4().hex[:8]
 
 
@@ -140,6 +153,7 @@ def triaged(client_db, tokens):
     """Admin creates a district-04 (WEST) incident and triages it
     ASSESSMENT_REQUIRED, creating the Assessment."""
     incident_id = _create_incident(client_db, tokens["admin"])
+    _associate_project(client_db, _auth(tokens["admin"]), incident_id)
     resp = client_db.post(
         f"/incidents/{incident_id}/triage",
         json={"disposition": "ASSESSMENT_REQUIRED", "notes": "Needs geotech assessment"},
@@ -292,6 +306,7 @@ class TestCoordinatorTriage:
         incident_id = _create_incident(
             client_db, tokens["admin"], district="01", county="Del Norte", route="101"
         )
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         resp = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "ASSESSMENT_REQUIRED", "notes": "route it"},
@@ -304,6 +319,7 @@ class TestCoordinatorTriage:
         incident_id = _create_incident(
             client_db, tokens["admin"], district="01", county="Humboldt", route="299"
         )
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         resp = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "NO_ASSESSMENT_REQUIRED", "notes": "minor, no assessment"},
@@ -347,6 +363,7 @@ class TestTriageOutcomes:
     def test_no_assessment_preserves_location_metadata(self, client_db, tokens):
         incident_id, before = _create_and_link(client_db, tokens["admin"])
         assert before.get("mode") == "CREATE_NEW"
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         resp = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "NO_ASSESSMENT_REQUIRED", "notes": "n/a"},
@@ -364,6 +381,7 @@ class TestTriageOutcomes:
     def test_duplicate_links_target_and_preserves_metadata(self, client_db, tokens):
         target_id = _create_incident(client_db, tokens["admin"], district="04", county="Marin", route="1")
         incident_id, _ = _create_and_link(client_db, tokens["admin"])
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         resp = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={
@@ -383,6 +401,7 @@ class TestTriageOutcomes:
 
     def test_duplicate_invalid_target_rejected(self, client_db, tokens):
         incident_id = _create_incident(client_db, tokens["admin"], district="04", county="Marin", route="1")
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         resp = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "DUPLICATE_OR_LINKED", "target_incident_id": 99999999},

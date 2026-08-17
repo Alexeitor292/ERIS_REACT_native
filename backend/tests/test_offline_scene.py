@@ -14,6 +14,19 @@ import pytest
 pytestmark = pytest.mark.db
 
 
+def _associate_project(client_db, headers: dict[str, str], incident_id: int) -> None:
+    response = client_db.post(
+        f"/incidents/{incident_id}/project-association",
+        headers=headers,
+        json={
+            "mode": "CREATE_NEW",
+            "title": f"Integration Project {incident_id}",
+            "notes": "Legacy DB fixture Project association.",
+        },
+    )
+    assert response.status_code == 200, f"Project association failed: {response.status_code} {response.text}"
+
+
 def _create_submission_with_gisa(client_db, admin_token, lat=37.7, lon=-122.4) -> tuple[int, int]:
     payload = {
         "first_observed_at": "2026-06-10T00:00:00",
@@ -23,6 +36,7 @@ def _create_submission_with_gisa(client_db, admin_token, lat=37.7, lon=-122.4) -
     resp = client_db.post("/incidents", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
     assert resp.status_code == 200, resp.text
     incident_id = resp.json()["incident"]["id"]
+    _associate_project(client_db, {"Authorization": f"Bearer {admin_token}"}, int(incident_id))
     client_db.post(f"/incidents/{incident_id}/location-link", json={"mode": "CREATE_NEW"},
                    headers={"Authorization": f"Bearer {admin_token}"})
     fwd = client_db.post(f"/incidents/{incident_id}/coordinator/forward", json={"comment": "osp"},

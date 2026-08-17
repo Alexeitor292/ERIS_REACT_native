@@ -22,6 +22,19 @@ import pytest
 
 pytestmark = pytest.mark.db
 
+
+def _associate_project(client_db, headers: dict[str, str], incident_id: int) -> None:
+    response = client_db.post(
+        f"/incidents/{incident_id}/project-association",
+        headers=headers,
+        json={
+            "mode": "CREATE_NEW",
+            "title": f"Integration Project {incident_id}",
+            "notes": "Legacy DB fixture Project association.",
+        },
+    )
+    assert response.status_code == 200, f"Project association failed: {response.status_code} {response.text}"
+
 _RUN = uuid.uuid4().hex[:8]
 
 
@@ -129,6 +142,7 @@ class TestAssessmentRequiredPath:
         incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
 
         # Triage -> assessment required (admin bypasses district scope).
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         r = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "ASSESSMENT_REQUIRED", "notes": "needs geotech"},
@@ -213,6 +227,7 @@ class TestAssessmentRequiredPath:
 class TestNeedsInfoLoop:
     def test_waiting_on_reporter(self, client_db, tokens, ids):
         incident_id = _create_incident(client_db, tokens["maintenance"], district="01", county="Humboldt", route="299")
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         r = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "NEEDS_REPORTER_INFORMATION", "notes": "clarify location", "revision_fields": ["description"]},
@@ -239,6 +254,7 @@ class TestNeedsInfoLoop:
 class TestNoAssessment:
     def test_terminal_disposition(self, client_db, tokens):
         incident_id = _create_incident(client_db, tokens["maintenance"], district="01", county="Lassen", route="36")
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         r = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "NO_ASSESSMENT_REQUIRED", "notes": "minor"},
@@ -266,6 +282,7 @@ class TestDuplicate:
     def test_linked_terminal(self, client_db, tokens):
         target_id = _create_incident(client_db, tokens["admin"], district="01", county="Modoc", route="395")
         incident_id = _create_incident(client_db, tokens["maintenance"], district="01", county="Modoc", route="395")
+        _associate_project(client_db, _auth(tokens["admin"]), incident_id)
         r = client_db.post(
             f"/incidents/{incident_id}/triage",
             json={"disposition": "DUPLICATE_OR_LINKED", "notes": "dup", "target_incident_id": target_id},
@@ -292,6 +309,7 @@ def _drive_to_submitted(client_db, tokens, ids):
     Returns (incident_id, assessment_id)."""
     admin, oc, bc, eng = tokens["admin"], tokens["officechief"], tokens["branchchief"], tokens["engineer"]
     incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
+    _associate_project(client_db, _auth(tokens["admin"]), incident_id)
     aid = client_db.post(
         f"/incidents/{incident_id}/triage",
         json={"disposition": "ASSESSMENT_REQUIRED"},

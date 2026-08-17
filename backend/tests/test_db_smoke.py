@@ -11,6 +11,19 @@ import pytest
 pytestmark = pytest.mark.db
 
 
+def _associate_project(client_db, headers: dict[str, str], incident_id: int) -> None:
+    response = client_db.post(
+        f"/incidents/{incident_id}/project-association",
+        headers=headers,
+        json={
+            "mode": "CREATE_NEW",
+            "title": f"Integration Project {incident_id}",
+            "notes": "Legacy DB fixture Project association.",
+        },
+    )
+    assert response.status_code == 200, f"Project association failed: {response.status_code} {response.text}"
+
+
 class TestAlembicCurrent:
     def test_db_at_head(self, client_db):
         from alembic.config import Config
@@ -276,6 +289,7 @@ class TestIncidents:
         )
         assert incident.status_code == 200
         incident_id = int(incident.json()["incident"]["id"])
+        _associate_project(client_db, headers, incident_id)
 
         assigned = client_db.post(
             f"/incidents/{incident_id}/assign",
@@ -323,6 +337,7 @@ class TestIncidents:
         )
         assert incident.status_code == 200
         incident_id = int(incident.json()["incident"]["id"])
+        _associate_project(client_db, headers, incident_id)
 
         assigned = client_db.post(
             f"/incidents/{incident_id}/assign",

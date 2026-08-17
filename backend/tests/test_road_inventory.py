@@ -20,6 +20,19 @@ import pytest
 pytestmark = pytest.mark.db
 
 
+def _associate_project(client_db, headers: dict[str, str], incident_id: int) -> None:
+    response = client_db.post(
+        f"/incidents/{incident_id}/project-association",
+        headers=headers,
+        json={
+            "mode": "CREATE_NEW",
+            "title": f"Integration Project {incident_id}",
+            "notes": "Legacy DB fixture Project association.",
+        },
+    )
+    assert response.status_code == 200, f"Project association failed: {response.status_code} {response.text}"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -958,6 +971,7 @@ class TestSubmissionGisaRiContext:
 
     def _link_location_and_forward(self, client_db, admin_token, incident_id: int) -> int:
         """Link a new location and forward the incident so a submission is created."""
+        _associate_project(client_db, {"Authorization": f"Bearer {admin_token}"}, int(incident_id))
         link_resp = client_db.post(
             f"/incidents/{incident_id}/location-link",
             json={"mode": "CREATE_NEW"},
