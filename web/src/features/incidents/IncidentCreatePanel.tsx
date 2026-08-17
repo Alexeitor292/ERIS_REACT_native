@@ -1,4 +1,4 @@
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode, RefObject } from "react";
 
 import { formatCoordinate, normalizePostMileInput, normalizeRouteInput } from "../../utils/precision";
 import { formatFileSize, type IncidentCreateForm, type PendingIncidentUpload } from "./incidentUiModel";
@@ -7,7 +7,7 @@ type Props = {
   form: IncidentCreateForm;
   pendingFiles: PendingIncidentUpload[];
   busy: boolean;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  fileInputRef: RefObject<HTMLInputElement | null>;
   onFormChange: (next: IncidentCreateForm) => void;
   onFiles: (files: FileList | null) => void;
   onRemoveFile: (index: number) => void;
@@ -17,7 +17,7 @@ type Props = {
 
 const inputClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
 
-function Field({ label, required = false, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({ label, required = false, children }: { label: string; required?: boolean; children: ReactNode }) {
   return (
     <label className="grid gap-1.5 text-sm">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted">
