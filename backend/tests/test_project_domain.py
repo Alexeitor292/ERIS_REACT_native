@@ -2,17 +2,19 @@
 
 These tests exercise the real MariaDB-backed API contract:
 - maintenance intake is intentionally unclassified
-- coordinator triage is blocked until Project association
+- a coordinator may request corrected reporter information before Project choice
+- routing/terminal triage is blocked until Project association
 - a coordinator can create a Project from an Incident
 - nearby Project discovery returns map-ready Project + Incident geography
 - a second Incident can join the same Project
+- maintenance reporters cannot browse the operational Project directory/map
 - once associated, coordinator triage may advance/close the Incident
-- the global ADMIN user directory remains unrelated to this workflow
 """
 
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 
 pytestmark = pytest.mark.db
 
@@ -102,8 +104,32 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
     assert incident_a["project_id"] is None
     assert incident_a["current_stage"] == "COORDINATOR_REVIEW"
 
-    # The coordinator cannot triage/rout the report before deciding which Project
-    # owns it. This is the server-side sequencing invariant, not just a UI rule.
+    # A maintenance reporter has no broad Project visibility. Project selection
+    # is a maintenance-coordinator operational decision, not an intake action.
+    maintenance_project_browse = client_db.get(
+        f"/incidents/{incident_a_id}/nearby-projects",
+        headers=maintenance_headers,
+    )
+    assert maintenance_project_browse.status_code == 403
+    maintenance_project_list = client_db.get("/projects", headers=maintenance_headers)
+    assert maintenance_project_list.status_code == 403
+
+    # The coordinator can request corrected reporter/location information before
+    # deciding which Project owns the Incident. This keeps revision usable when
+    # Project choice itself depends on better field information.
+    needs_info = client_db.post(
+        f"/incidents/{incident_a_id}/triage",
+        headers=coordinator_headers,
+        json={
+            "disposition": "NEEDS_REPORTER_INFORMATION",
+            "notes": "Confirm the reported post mile before Project association.",
+            "revision_fields": ["post_mile"],
+        },
+    )
+    assert needs_info.status_code == 200, needs_info.text
+    assert needs_info.json()["disposition"] == "NEEDS_REPORTER_INFORMATION"
+
+    # But routing/terminal outcomes are not allowed until a Project is chosen.
     blocked_triage = client_db.post(
         f"/incidents/{incident_a_id}/triage",
         headers=coordinator_headers,
@@ -219,3 +245,34 @@ def test_project_is_parent_authority_for_incident_intake_and_triage(client_db, a
             json={"is_active": False},
         )
         assert response.status_code == 200
+
+
+def test_incident_classification_fails_closed_until_assessment_is_approved(client_db, admin_token):
+    """The DB boundary, not just the Web form, owns classification timing."""
+    from app.db import engine
+
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    unique = uuid4().hex
+    incident = _create_incident(
+        client_db,
+        admin_headers,
+        title=f"Classification boundary {unique}",
+        latitude=38.5900,
+        longitude=-121.4900,
+        post_mile="2.00",
+    )
+    incident_id = int(incident["id"])
+    assert incident["incident_type"] is None
+
+    # Direct SQL cannot bypass the application and classify intake prematurely.
+    with pytest.raises(Exception):
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE incidents SET incident_type = 'ROCK_FALL' WHERE id = :iid"),
+                {"iid": incident_id},
+            )
+
+    # Even admin API intake remains unclassified after the rejected direct write.
+    refreshed = client_db.get(f"/incidents/{incident_id}", headers=admin_headers)
+    assert refreshed.status_code == 200
+    assert refreshed.json()["incident"]["incident_type"] is None
