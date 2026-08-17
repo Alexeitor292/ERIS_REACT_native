@@ -166,8 +166,33 @@ export type GisaLookups = {
   };
 };
 
+export type SubmissionPermissionUser = {
+  id: number;
+  email: string;
+  full_name: string;
+};
+
+export type SubmissionPermissionGrant = {
+  user_id: number;
+  email: string;
+  full_name: string;
+};
+
+export type SubmissionPermissions = {
+  owner: SubmissionPermissionUser;
+  readers: SubmissionPermissionGrant[];
+  editors: SubmissionPermissionGrant[];
+  can_manage: boolean;
+  available_users: SubmissionPermissionUser[];
+};
+
 export type SubmissionDetail = {
-  submission: Submission & { updated_at: string; submitted_at: string | null };
+  submission: Submission & {
+    updated_at: string;
+    submitted_at: string | null;
+    can_edit?: boolean;
+    can_manage_permissions?: boolean;
+  };
   gisa: Gisa | null;
   incident_types: string[];
   actions: { immediate: string[]; follow_up: string[] };
