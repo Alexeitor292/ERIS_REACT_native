@@ -23,6 +23,7 @@ from . import projects as _projects  # noqa: E402
 from . import project_lifecycle as _project_lifecycle  # noqa: E402
 from . import incident_classification as _incident_classification  # noqa: E402
 from . import mission_center_gis as _mission_center_gis  # noqa: E402
+from . import terrain_cross_sections as _terrain_cross_sections  # noqa: E402
 
 _incidents.router.include_router(_event_groups.router)
 _incidents.router.include_router(_event_group_lifecycle.router)
@@ -32,6 +33,11 @@ _incidents.router.include_router(_projects.router)
 _incidents.router.include_router(_project_lifecycle.router)
 _incidents.router.include_router(_incident_classification.router)
 _incidents.router.include_router(_mission_center_gis.router)
+
+# Caltrans Projects are an engineering/business reference domain, not Incident
+# Event Groups. They are intentionally exposed only through the Terrain Cross
+# Sections API; there is no standalone Project workspace/navigation entry.
+_incidents.router.include_router(_terrain_cross_sections.router)
 
 # Keep mobile road-inventory package bytes behind ERIS authentication. The
 # object store remains private and never needs anonymous download policy.
