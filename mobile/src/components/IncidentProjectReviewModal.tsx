@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -28,19 +27,7 @@ type Props = {
   onAssociated: () => void | Promise<void>;
 };
 
-type MapBounds = {
-  minLat: number;
-  maxLat: number;
-  minLon: number;
-  maxLon: number;
-};
-
-function locationLabel(value: {
-  district?: string | null;
-  county?: string | null;
-  route?: string | null;
-  post_mile?: string | null;
-}) {
+function locationLabel(value: { district?: string | null; county?: string | null; route?: string | null; post_mile?: string | null }) {
   return [
     value.district ? `D${value.district}` : null,
     value.county || null,
@@ -57,68 +44,16 @@ function milesFromMeters(meters: number) {
 function generatedTitle(context: IncidentProjectContext | null) {
   const incident = context?.incident;
   if (!incident) return "";
-  const parts = [
-    incident.route ? `Route ${incident.route}` : null,
-    incident.post_mile ? `PM ${incident.post_mile}` : null,
-    incident.county || null,
-  ].filter(Boolean);
-  return parts.length ? `${parts.join(" · ")} Project` : `Incident #${incident.id} Project`;
+  const parts = [incident.route ? `Route ${incident.route}` : null, incident.post_mile ? `PM ${incident.post_mile}` : null, incident.county || null].filter(Boolean);
+  return parts.length ? `${parts.join(" · ")} Event Group` : `Incident #${incident.id} Event Group`;
 }
 
-function computeBounds(context: IncidentProjectContext | null, projects: NearbyProject[]): MapBounds | null {
-  if (!context) return null;
-  const points: Array<{ lat: number; lon: number }> = [
-    { lat: context.incident.latitude, lon: context.incident.longitude },
-  ];
-  for (const project of projects) {
-    points.push({ lat: project.centroid_latitude, lon: project.centroid_longitude });
-    for (const incident of project.incidents) {
-      points.push({ lat: incident.latitude, lon: incident.longitude });
-    }
-  }
-  const finite = points.filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
-  if (!finite.length) return null;
-  const minLatRaw = Math.min(...finite.map((point) => point.lat));
-  const maxLatRaw = Math.max(...finite.map((point) => point.lat));
-  const minLonRaw = Math.min(...finite.map((point) => point.lon));
-  const maxLonRaw = Math.max(...finite.map((point) => point.lon));
-  const latPad = Math.max((maxLatRaw - minLatRaw) * 0.18, 0.01);
-  const lonPad = Math.max((maxLonRaw - minLonRaw) * 0.18, 0.01);
-  return {
-    minLat: minLatRaw - latPad,
-    maxLat: maxLatRaw + latPad,
-    minLon: minLonRaw - lonPad,
-    maxLon: maxLonRaw + lonPad,
-  };
-}
-
-function mapPreviewUrl(bounds: MapBounds | null) {
-  if (!bounds) return null;
-  const bbox = [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat].join(",");
-  return `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${encodeURIComponent(bbox)}&bboxSR=4326&imageSR=4326&size=1200,700&format=jpg&f=image`;
-}
-
-function markerPosition(lat: number, lon: number, bounds: MapBounds | null) {
-  if (!bounds || bounds.maxLat <= bounds.minLat || bounds.maxLon <= bounds.minLon) return null;
-  const x = ((lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * 100;
-  const y = ((bounds.maxLat - lat) / (bounds.maxLat - bounds.minLat)) * 100;
-  return {
-    left: `${Math.max(3, Math.min(97, x))}%` as `${number}%`,
-    top: `${Math.max(4, Math.min(96, y))}%` as `${number}%`,
-  };
-}
-
-export default function IncidentProjectReviewModal({
-  incidentId,
-  visible,
-  onClose,
-  onAssociated,
-}: Props) {
+export default function IncidentProjectReviewModal({ incidentId, visible, onClose, onAssociated }: Props) {
   const { palette } = useUiSettings();
   const [context, setContext] = useState<IncidentProjectContext | null>(null);
-  const [projects, setProjects] = useState<NearbyProject[]>([]);
+  const [groups, setGroups] = useState<NearbyProject[]>([]);
   const [radiusMiles, setRadiusMiles] = useState(5);
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [mode, setMode] = useState<"EXISTING" | "CREATE_NEW">("EXISTING");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -142,20 +77,20 @@ export default function IncidentProjectReviewModal({
         getNearbyProjects(token, incidentId, nextRadius),
       ]);
       setContext(nextContext);
-      setProjects(nearby.items ?? []);
+      setGroups(nearby.items ?? []);
       if (nextContext.project) {
         setMode("EXISTING");
-        setSelectedProjectId(nextContext.project.id);
+        setSelectedId(nextContext.project.id);
       } else if (nearby.items?.length) {
         setMode("EXISTING");
-        setSelectedProjectId((current) => current ?? nearby.items[0].id);
+        setSelectedId((current) => current ?? nearby.items[0].id);
       } else {
         setMode("CREATE_NEW");
-        setSelectedProjectId(null);
+        setSelectedId(null);
       }
       setTitle((current) => current || generatedTitle(nextContext));
     } catch (e: any) {
-      setError(String(e?.message ?? "Failed to load Project context."));
+      setError(String(e?.message ?? "Failed to load Event Group context."));
     } finally {
       setBusy(false);
     }
@@ -164,9 +99,9 @@ export default function IncidentProjectReviewModal({
   useEffect(() => {
     if (!visible || !incidentId) return;
     setContext(null);
-    setProjects([]);
+    setGroups([]);
     setRadiusMiles(5);
-    setSelectedProjectId(null);
+    setSelectedId(null);
     setMode("EXISTING");
     setTitle("");
     setDescription("");
@@ -177,25 +112,15 @@ export default function IncidentProjectReviewModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, incidentId]);
 
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId)
-      ?? (context?.project?.id === selectedProjectId ? context.project : null),
-    [context?.project, projects, selectedProjectId],
+  const selected = useMemo(
+    () => groups.find((group) => group.id === selectedId) ?? (context?.project?.id === selectedId ? context.project : null),
+    [context?.project, groups, selectedId],
   );
-  const bounds = useMemo(() => computeBounds(context, projects), [context, projects]);
-  const previewUrl = useMemo(() => mapPreviewUrl(bounds), [bounds]);
-  const currentProjectId = context?.project?.id ?? null;
-  const associationChanged = mode === "CREATE_NEW"
-    || (mode === "EXISTING" && selectedProjectId != null && selectedProjectId !== currentProjectId);
 
   async function associate() {
     if (!incidentId || !context?.can_change_association) return;
-    if (mode === "EXISTING" && !selectedProjectId) {
-      setError("Select an existing Project first.");
-      return;
-    }
-    if (mode === "CREATE_NEW" && !title.trim()) {
-      setError("Project title is required.");
+    if (mode === "EXISTING" && !selectedId) {
+      setError("Select an existing Event Group first.");
       return;
     }
     const token = await getToken();
@@ -203,7 +128,6 @@ export default function IncidentProjectReviewModal({
       setError("Your session is no longer available. Sign in again.");
       return;
     }
-
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -212,21 +136,14 @@ export default function IncidentProjectReviewModal({
         token,
         incidentId,
         mode === "EXISTING"
-          ? { mode, project_id: selectedProjectId!, notes: notes.trim() || null }
-          : {
-              mode,
-              title: title.trim(),
-              description: description.trim() || null,
-              notes: notes.trim() || null,
-            },
+          ? { mode, project_id: selectedId!, notes: notes.trim() || null }
+          : { mode, title: title.trim(), description: description.trim() || null, notes: notes.trim() || null },
       );
-      setNotice(result.created
-        ? "Project created and Incident associated."
-        : "Incident associated with the selected Project.");
+      setNotice(result.created ? "Event Group created and Incident associated." : "Incident associated with the selected Event Group.");
       await load(radiusMiles);
       await onAssociated();
     } catch (e: any) {
-      setError(String(e?.message ?? "Failed to associate Project."));
+      setError(String(e?.message ?? "Failed to associate Event Group."));
     } finally {
       setBusy(false);
     }
@@ -239,143 +156,45 @@ export default function IncidentProjectReviewModal({
           <View style={[styles.header, { borderColor: palette.border }]}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.eyebrow, { color: palette.muted }]}>Coordinator review</Text>
-              <Text style={[styles.title, { color: palette.text }]}>Choose Project for Incident #{incidentId ?? ""}</Text>
-              <Text style={[styles.subtitle, { color: palette.muted }]}>Compare the reported location with nearby Projects before triage or engineering assignment.</Text>
+              <Text style={[styles.title, { color: palette.text }]}>Event Group for Incident #{incidentId ?? ""}</Text>
+              <Text style={[styles.subtitle, { color: palette.muted }]}>Event Groups provide shared context. The Incident remains its own historical record and receives its permanent key only when coordinator approval advances it.</Text>
             </View>
-            <Pressable onPress={onClose} style={[styles.smallButton, { borderColor: palette.border }]}>
-              <Text style={{ color: palette.text, fontWeight: "700" }}>Close</Text>
-            </Pressable>
+            <Pressable onPress={onClose} style={[styles.smallButton, { borderColor: palette.border }]}><Text style={{ color: palette.text, fontWeight: "700" }}>Close</Text></Pressable>
           </View>
 
           <ScrollView contentContainerStyle={styles.content}>
             {error ? <View style={[styles.message, { borderColor: palette.danger }]}><Text style={{ color: palette.danger }}>{error}</Text></View> : null}
             {notice ? <View style={[styles.message, { borderColor: palette.primary }]}><Text style={{ color: palette.text }}>{notice}</Text></View> : null}
 
-            {!context ? (
-              <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={{ color: palette.muted }}>Loading Project context…</Text></View>
-            ) : (
+            {!context ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={{ color: palette.muted }}>Loading Event Group context…</Text></View> : (
               <>
-                <View style={[styles.summaryCard, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
-                  <Text style={[styles.summaryTitle, { color: palette.text }]}>Incident #{context.incident.id}</Text>
-                  <Text style={{ color: palette.muted }}>{locationLabel(context.incident)}</Text>
-                  <Text style={{ color: palette.muted, marginTop: 4 }}>{context.incident.latitude.toFixed(6)}, {context.incident.longitude.toFixed(6)}</Text>
-                  <Text style={{ color: palette.text, marginTop: 8, fontWeight: "700" }}>Current Project: {context.project?.title ?? "Not assigned"}</Text>
-                  <Text style={{ color: palette.muted, marginTop: 2 }}>Classification remains unassigned until the on-site assessment.</Text>
+                <View style={[styles.card, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
+                  <Text style={{ color: palette.text, fontWeight: "800" }}>Incident #{context.incident.id}</Text>
+                  <Text style={{ color: palette.muted, marginTop: 4 }}>{locationLabel(context.incident)}</Text>
+                  <Text style={{ color: palette.text, marginTop: 8, fontWeight: "700" }}>Current Event Group: {context.project?.title ?? "Not assigned"}</Text>
                 </View>
-
-                {previewUrl ? (
-                  <View style={[styles.map, { borderColor: palette.border }]}>
-                    <Image source={{ uri: previewUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-                    {(() => {
-                      const position = markerPosition(context.incident.latitude, context.incident.longitude, bounds);
-                      return position ? <View pointerEvents="none" style={[styles.incidentMarker, position]}><Text style={styles.markerText}>I</Text></View> : null;
-                    })()}
-                    {projects.map((project) => {
-                      const position = markerPosition(project.centroid_latitude, project.centroid_longitude, bounds);
-                      if (!position) return null;
-                      const selected = mode === "EXISTING" && selectedProjectId === project.id;
-                      return (
-                        <Pressable
-                          key={`project-marker-${project.id}`}
-                          onPress={() => { setMode("EXISTING"); setSelectedProjectId(project.id); }}
-                          style={[styles.projectMarker, position, { backgroundColor: selected ? palette.primary : "#ffffff", borderColor: selected ? "#ffffff" : palette.primary }]}
-                        >
-                          <Text style={[styles.markerText, { color: selected ? "#ffffff" : palette.primary }]}>P</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : null}
 
                 <View style={styles.radiusRow}>
-                  {[5, 10, 25, 50].map((radius) => (
-                    <Pressable
-                      key={radius}
-                      disabled={busy}
-                      onPress={() => { setRadiusMiles(radius); load(radius).catch(() => {}); }}
-                      style={[styles.radiusButton, { borderColor: radiusMiles === radius ? palette.primary : palette.border, backgroundColor: radiusMiles === radius ? palette.panelSoft : palette.panel }]}
-                    >
-                      <Text style={{ color: radiusMiles === radius ? palette.primary : palette.text, fontWeight: "700" }}>{radius} mi</Text>
-                    </Pressable>
-                  ))}
+                  {[5, 10, 25, 50].map((radius) => <Pressable key={radius} disabled={busy} onPress={() => { setRadiusMiles(radius); load(radius).catch(() => {}); }} style={[styles.radiusButton, { borderColor: radiusMiles === radius ? palette.primary : palette.border }]}><Text style={{ color: radiusMiles === radius ? palette.primary : palette.text, fontWeight: "700" }}>{radius} mi</Text></Pressable>)}
                 </View>
 
-                <Text style={[styles.sectionTitle, { color: palette.text }]}>Nearby open Projects</Text>
-                {projects.length === 0 ? (
-                  <View style={[styles.emptyCard, { borderColor: palette.border }]}><Text style={{ color: palette.muted }}>No open Projects were found in this radius.</Text></View>
-                ) : projects.map((project) => {
-                  const selected = mode === "EXISTING" && selectedProjectId === project.id;
-                  return (
-                    <Pressable
-                      key={project.id}
-                      onPress={() => { setMode("EXISTING"); setSelectedProjectId(project.id); }}
-                      style={[styles.projectCard, { borderColor: selected ? palette.primary : palette.border, backgroundColor: palette.panelSoft }]}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: palette.text, fontWeight: "800" }}>{project.title}</Text>
-                        <Text style={{ color: palette.muted, marginTop: 3 }}>{locationLabel(project)}</Text>
-                        <Text style={{ color: palette.muted, marginTop: 3 }}>{project.incident_count} incidents · {project.open_incident_count} active</Text>
-                      </View>
-                      <Text style={{ color: palette.primary, fontWeight: "800" }}>{milesFromMeters(project.nearest_distance_m)}</Text>
-                    </Pressable>
-                  );
+                <Text style={[styles.sectionTitle, { color: palette.text }]}>Nearby open Event Groups</Text>
+                {groups.length === 0 ? <View style={[styles.card, { borderColor: palette.border }]}><Text style={{ color: palette.muted }}>No open Event Groups were found. Create a new one for this Incident.</Text></View> : groups.map((group) => {
+                  const isSelected = mode === "EXISTING" && selectedId === group.id;
+                  return <Pressable key={group.id} onPress={() => { setMode("EXISTING"); setSelectedId(group.id); }} style={[styles.card, { borderColor: isSelected ? palette.primary : palette.border, backgroundColor: palette.panelSoft }]}><View style={styles.row}><View style={{ flex: 1 }}><Text style={{ color: palette.text, fontWeight: "800" }}>{group.title}</Text><Text style={{ color: palette.muted, marginTop: 3 }}>{locationLabel(group)}</Text><Text style={{ color: palette.muted, marginTop: 3 }}>{group.incident_count} associated Incident{group.incident_count === 1 ? "" : "s"}</Text></View><Text style={{ color: palette.primary, fontWeight: "800" }}>{milesFromMeters(group.nearest_distance_m)}</Text></View></Pressable>;
                 })}
 
                 <View style={styles.modeRow}>
-                  <Pressable onPress={() => setMode("EXISTING")} style={[styles.modeButton, { borderColor: mode === "EXISTING" ? palette.primary : palette.border }]}>
-                    <Text style={{ color: mode === "EXISTING" ? palette.primary : palette.text, fontWeight: "800" }}>Existing Project</Text>
-                  </Pressable>
-                  <Pressable onPress={() => setMode("CREATE_NEW")} style={[styles.modeButton, { borderColor: mode === "CREATE_NEW" ? palette.primary : palette.border }]}>
-                    <Text style={{ color: mode === "CREATE_NEW" ? palette.primary : palette.text, fontWeight: "800" }}>Create new</Text>
-                  </Pressable>
+                  <Pressable onPress={() => setMode("EXISTING")} style={[styles.modeButton, { borderColor: mode === "EXISTING" ? palette.primary : palette.border }]}><Text style={{ color: mode === "EXISTING" ? palette.primary : palette.text, fontWeight: "800" }}>Existing group</Text></Pressable>
+                  <Pressable onPress={() => setMode("CREATE_NEW")} style={[styles.modeButton, { borderColor: mode === "CREATE_NEW" ? palette.primary : palette.border }]}><Text style={{ color: mode === "CREATE_NEW" ? palette.primary : palette.text, fontWeight: "800" }}>New group</Text></Pressable>
                 </View>
 
-                {mode === "EXISTING" ? (
-                  <View style={[styles.summaryCard, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
-                    <Text style={{ color: palette.muted, fontWeight: "700" }}>Selected Project</Text>
-                    <Text style={{ color: palette.text, fontWeight: "800", marginTop: 4 }}>{selectedProject?.title ?? "Select a Project above"}</Text>
-                    {selectedProject ? <Text style={{ color: palette.muted, marginTop: 3 }}>{locationLabel(selectedProject)}</Text> : null}
-                  </View>
-                ) : (
-                  <View style={{ gap: 8 }}>
-                    <Text style={[styles.fieldLabel, { color: palette.muted }]}>Project title</Text>
-                    <TextInput value={title} onChangeText={setTitle} style={[styles.input, { color: palette.text, borderColor: palette.border, backgroundColor: palette.panelSoft }]} />
-                    <Text style={[styles.fieldLabel, { color: palette.muted }]}>Description</Text>
-                    <TextInput value={description} onChangeText={setDescription} multiline style={[styles.input, styles.multiline, { color: palette.text, borderColor: palette.border, backgroundColor: palette.panelSoft }]} />
-                  </View>
-                )}
+                {mode === "EXISTING" ? <View style={[styles.card, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}><Text style={{ color: palette.muted, fontWeight: "700" }}>Selected Event Group</Text><Text style={{ color: palette.text, fontWeight: "800", marginTop: 4 }}>{selected?.title ?? "Select a group above"}</Text></View> : <View style={{ gap: 8 }}><Text style={[styles.fieldLabel, { color: palette.muted }]}>EVENT GROUP TITLE</Text><TextInput value={title} onChangeText={setTitle} style={[styles.input, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} /><Text style={[styles.fieldLabel, { color: palette.muted }]}>DESCRIPTION</Text><TextInput value={description} onChangeText={setDescription} multiline style={[styles.input, styles.multiline, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} /></View>}
 
-                <Text style={[styles.fieldLabel, { color: palette.muted }]}>Coordinator note</Text>
-                <TextInput
-                  value={notes}
-                  onChangeText={setNotes}
-                  multiline
-                  placeholder="Why this Project matches the Incident (optional)"
-                  placeholderTextColor={palette.muted}
-                  style={[styles.input, styles.multiline, { color: palette.text, borderColor: palette.border, backgroundColor: palette.panelSoft }]}
-                />
+                <Text style={[styles.fieldLabel, { color: palette.muted }]}>COORDINATOR NOTE</Text>
+                <TextInput value={notes} onChangeText={setNotes} multiline style={[styles.input, styles.multiline, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} />
 
-                {context.can_change_association ? (
-                  <Pressable
-                    disabled={busy || !associationChanged || (mode === "EXISTING" && !selectedProjectId) || (mode === "CREATE_NEW" && !title.trim())}
-                    onPress={associate}
-                    style={[styles.primaryButton, { backgroundColor: palette.primary }, (busy || !associationChanged) && { opacity: 0.5 }]}
-                  >
-                    {busy ? <ActivityIndicator color="#ffffff" /> : <Text style={{ color: "#ffffff", fontWeight: "800" }}>{mode === "CREATE_NEW" ? "Create Project and associate" : currentProjectId === selectedProjectId ? "Project already assigned" : "Associate with selected Project"}</Text>}
-                  </Pressable>
-                ) : null}
-
-                {context.project ? (
-                  <View style={[styles.message, { borderColor: palette.primary }]}>
-                    <Text style={{ color: palette.text, fontWeight: "700" }}>Project requirement satisfied.</Text>
-                    <Text style={{ color: palette.muted, marginTop: 3 }}>You can close this panel and continue coordinator triage.</Text>
-                  </View>
-                ) : (
-                  <View style={[styles.message, { borderColor: palette.danger }]}>
-                    <Text style={{ color: palette.text, fontWeight: "700" }}>Project association required.</Text>
-                    <Text style={{ color: palette.muted, marginTop: 3 }}>ERIS will not allow triage or engineering assignment to advance until this Incident belongs to a Project.</Text>
-                  </View>
-                )}
+                <Pressable disabled={busy || !context.can_change_association || (mode === "EXISTING" && !selectedId)} onPress={associate} style={[styles.primaryButton, { backgroundColor: palette.primary, opacity: busy ? 0.55 : 1 }]}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : mode === "CREATE_NEW" ? "Create Event Group and associate" : "Use selected Event Group"}</Text></Pressable>
               </>
             )}
           </ScrollView>
@@ -387,30 +206,25 @@ export default function IncidentProjectReviewModal({
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
-  sheet: { maxHeight: "94%", borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: "hidden" },
+  sheet: { maxHeight: "94%", borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1 },
   header: { flexDirection: "row", gap: 12, padding: 16, borderBottomWidth: 1 },
-  content: { padding: 16, gap: 12, paddingBottom: 40 },
-  eyebrow: { fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
-  title: { fontSize: 20, fontWeight: "900", marginTop: 3 },
-  subtitle: { fontSize: 13, marginTop: 4, lineHeight: 18 },
-  smallButton: { borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8, alignSelf: "flex-start" },
-  loading: { minHeight: 160, alignItems: "center", justifyContent: "center", gap: 10 },
-  message: { borderWidth: 1, borderRadius: 10, padding: 10 },
-  summaryCard: { borderWidth: 1, borderRadius: 12, padding: 12 },
-  summaryTitle: { fontSize: 15, fontWeight: "900" },
-  map: { height: 260, borderWidth: 1, borderRadius: 14, overflow: "hidden", position: "relative" },
-  incidentMarker: { position: "absolute", width: 30, height: 30, marginLeft: -15, marginTop: -15, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#dc2626", borderWidth: 3, borderColor: "#ffffff" },
-  projectMarker: { position: "absolute", width: 30, height: 30, marginLeft: -15, marginTop: -15, borderRadius: 15, alignItems: "center", justifyContent: "center", borderWidth: 3 },
-  markerText: { color: "#ffffff", fontWeight: "900", fontSize: 12 },
-  radiusRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  eyebrow: { fontSize: 11, fontWeight: "800", letterSpacing: 1.1, textTransform: "uppercase" },
+  title: { marginTop: 3, fontSize: 20, fontWeight: "800" },
+  subtitle: { marginTop: 4, fontSize: 13, lineHeight: 18 },
+  smallButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: "flex-start" },
+  content: { padding: 16, gap: 12, paddingBottom: 32 },
+  loading: { paddingVertical: 40, alignItems: "center", gap: 10 },
+  message: { borderWidth: 1, borderRadius: 8, padding: 10 },
+  card: { borderWidth: 1, borderRadius: 10, padding: 12 },
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  radiusRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   radiusButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  sectionTitle: { fontSize: 15, fontWeight: "900", marginTop: 2 },
-  emptyCard: { borderWidth: 1, borderStyle: "dashed", borderRadius: 10, padding: 14 },
-  projectCard: { flexDirection: "row", gap: 10, borderWidth: 1, borderRadius: 11, padding: 11 },
-  modeRow: { flexDirection: "row", gap: 8, marginTop: 4 },
-  modeButton: { flex: 1, borderWidth: 1, borderRadius: 9, alignItems: "center", paddingVertical: 10 },
-  fieldLabel: { fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
-  input: { borderWidth: 1, borderRadius: 9, paddingHorizontal: 11, paddingVertical: 10, fontSize: 14 },
-  multiline: { minHeight: 76, textAlignVertical: "top" },
-  primaryButton: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13, alignItems: "center", justifyContent: "center", minHeight: 48 },
+  sectionTitle: { marginTop: 4, fontSize: 14, fontWeight: "800" },
+  modeRow: { flexDirection: "row", gap: 8 },
+  modeButton: { flex: 1, borderWidth: 1, borderRadius: 8, padding: 10, alignItems: "center" },
+  fieldLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 0.7, marginTop: 2 },
+  input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 14 },
+  multiline: { minHeight: 72, textAlignVertical: "top" },
+  primaryButton: { borderRadius: 10, paddingVertical: 12, alignItems: "center", marginTop: 4 },
+  primaryButtonText: { color: "#fff", fontSize: 14, fontWeight: "800" },
 });
