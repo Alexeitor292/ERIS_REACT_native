@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..constants.gisa_lookups import GISA_INCIDENT_TYPE_LUT
 from ..db import get_db
 from ..deps import require_roles
-from ..roles import MAINTENANCE_FIELD_WORKER, OPERATIONAL_ROLES, ROLE_ALIASES
-from . import incidents as incidents_routes
+from ..roles import (
+    MAINTENANCE_FIELD_WORKER,
+    OPERATIONAL_ROLES,
+    ROLE_ALIASES,
+    is_maintenance_only,
+)
 
 router = APIRouter(tags=["incident-classification"])
 
@@ -16,6 +21,11 @@ CLASSIFICATION_READ_ROLES = sorted(OPERATIONAL_ROLES | ROLE_ALIASES[MAINTENANCE_
 _LABEL_BY_CODE = {str(item["code"]): str(item["label"]) for item in GISA_INCIDENT_TYPE_LUT}
 _OFFICIAL_STATES = {"SUBMITTED", "APPROVED", "FINALIZED"}
 _CONFIRMED_STATES = {"APPROVED", "FINALIZED"}
+_MAX_BATCH = 500
+
+
+class IncidentClassificationQuery(BaseModel):
+    incident_ids: list[int]
 
 
 def _classification_view(assessment_state: str | None, codes: list[str]) -> dict:
@@ -57,67 +67,118 @@ def _classification_view(assessment_state: str | None, codes: list[str]) -> dict
     }
 
 
+def _assigned_at(state: str | None, row: dict) -> object | None:
+    if state == "FINALIZED":
+        return row.get("finalized_at") or row.get("approved_at") or row.get("submitted_at")
+    if state == "APPROVED":
+        return row.get("approved_at") or row.get("submitted_at")
+    if state == "SUBMITTED":
+        return row.get("submitted_at")
+    return None
+
+
+def _classification_payload(incident_id: int, row: dict, codes: list[str]) -> dict:
+    assessment_id = int(row["assessment_id"]) if row.get("assessment_id") is not None else None
+    assessment_state = str(row["assessment_state"]).upper() if row.get("assessment_state") else None
+    submission_id = int(row["submission_id"]) if row.get("submission_id") is not None else None
+    return {
+        "incident_id": incident_id,
+        "source": "GISA_ASSESSMENT",
+        "assessment_id": assessment_id,
+        "assessment_state": assessment_state,
+        "submission_id": submission_id,
+        "assigned_at": _assigned_at(assessment_state, row),
+        **_classification_view(assessment_state, codes),
+    }
+
+
+def _classification_batch(*, db: Session, user: dict, incident_ids: list[int]) -> list[dict]:
+    ordered_ids: list[int] = []
+    seen: set[int] = set()
+    for raw_id in incident_ids:
+        incident_id = int(raw_id)
+        if incident_id < 1:
+            raise HTTPException(status_code=422, detail="incident_ids must contain positive integers")
+        if incident_id not in seen:
+            ordered_ids.append(incident_id)
+            seen.add(incident_id)
+
+    if not ordered_ids:
+        return []
+    if len(ordered_ids) > _MAX_BATCH:
+        raise HTTPException(status_code=422, detail=f"At most {_MAX_BATCH} Incident classifications may be requested at once")
+
+    params: dict[str, object] = {f"iid_{index}": incident_id for index, incident_id in enumerate(ordered_ids)}
+    placeholders = ", ".join(f":iid_{index}" for index in range(len(ordered_ids)))
+    scope_sql = ""
+    if is_maintenance_only(user):
+        scope_sql = " AND i.reporter_user_id = :reporter_user_id"
+        params["reporter_user_id"] = int(user["id"])
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT
+              i.id AS incident_id,
+              a.id AS assessment_id,
+              a.state AS assessment_state,
+              a.submission_id,
+              a.submitted_at,
+              a.approved_at,
+              a.finalized_at,
+              CASE
+                WHEN a.state IN ('SUBMITTED', 'APPROVED', 'FINALIZED')
+                THEN it.incident_type_code
+                ELSE NULL
+              END AS incident_type_code
+            FROM incidents i
+            LEFT JOIN assessments a ON a.incident_id = i.id
+            LEFT JOIN submission_gisa_incident_types it
+              ON it.submission_id = a.submission_id
+             AND a.state IN ('SUBMITTED', 'APPROVED', 'FINALIZED')
+            WHERE i.id IN ({placeholders}){scope_sql}
+            ORDER BY i.id ASC, it.incident_type_code ASC
+            """
+        ),
+        params,
+    ).mappings().all()
+
+    grouped: dict[int, dict] = {}
+    for raw_row in rows:
+        row = dict(raw_row)
+        incident_id = int(row["incident_id"])
+        entry = grouped.setdefault(incident_id, {"row": row, "codes": []})
+        code = row.get("incident_type_code")
+        if code is not None:
+            entry["codes"].append(str(code))
+
+    if set(grouped) != set(ordered_ids):
+        if is_maintenance_only(user):
+            raise HTTPException(status_code=403, detail="One or more Incidents are outside your reporting scope")
+        raise HTTPException(status_code=404, detail="One or more Incidents were not found")
+
+    return [
+        _classification_payload(incident_id, grouped[incident_id]["row"], grouped[incident_id]["codes"])
+        for incident_id in ordered_ids
+    ]
+
+
 @router.get("/incidents/{incident_id}/classification")
 def get_incident_classification(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     user=Depends(require_roles(CLASSIFICATION_READ_ROLES)),
 ):
-    incident = incidents_routes._incident_with_assignment(db, incident_id)
-    if not incident:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    incidents_routes._ensure_incident_scope_access(user, dict(incident))
+    return _classification_batch(db=db, user=user, incident_ids=[incident_id])[0]
 
-    assessment = db.execute(
-        text(
-            """
-            SELECT
-              a.id, a.state, a.submission_id,
-              a.submitted_at, a.approved_at, a.finalized_at
-            FROM assessments a
-            WHERE a.incident_id = :iid
-            LIMIT 1
-            """
-        ),
-        {"iid": incident_id},
-    ).mappings().first()
 
-    assessment_state = str(assessment["state"]) if assessment else None
-    submission_id = int(assessment["submission_id"]) if assessment and assessment["submission_id"] is not None else None
-
-    codes: list[str] = []
-    if submission_id is not None and assessment_state in _OFFICIAL_STATES:
-        codes = [
-            str(code)
-            for code in db.execute(
-                text(
-                    """
-                    SELECT incident_type_code
-                    FROM submission_gisa_incident_types
-                    WHERE submission_id = :sid
-                    ORDER BY incident_type_code
-                    """
-                ),
-                {"sid": submission_id},
-            ).scalars().all()
-        ]
-
-    classification = _classification_view(assessment_state, codes)
-    assigned_at = None
-    if assessment:
-        if assessment_state == "FINALIZED":
-            assigned_at = assessment["finalized_at"] or assessment["approved_at"] or assessment["submitted_at"]
-        elif assessment_state == "APPROVED":
-            assigned_at = assessment["approved_at"] or assessment["submitted_at"]
-        elif assessment_state == "SUBMITTED":
-            assigned_at = assessment["submitted_at"]
-
-    return {
-        "incident_id": incident_id,
-        "source": "GISA_ASSESSMENT",
-        "assessment_id": int(assessment["id"]) if assessment else None,
-        "assessment_state": assessment_state,
-        "submission_id": submission_id,
-        "assigned_at": assigned_at,
-        **classification,
-    }
+@router.post("/incident-classifications/query")
+def query_incident_classifications(
+    payload: IncidentClassificationQuery,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(CLASSIFICATION_READ_ROLES)),
+):
+    """Return assessment-derived classifications for up to 500 Incidents in one
+    scoped query. This is the list/detail API for Project workspaces and avoids an
+    N+1 request pattern as Projects accumulate many Incidents."""
+    return {"items": _classification_batch(db=db, user=user, incident_ids=payload.incident_ids)}
