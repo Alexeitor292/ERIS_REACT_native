@@ -4,10 +4,10 @@ Revision ID: 20260818_event_group_approval_provenance
 Revises: 20260818_event_group_provisional_cleanup
 Create Date: 2026-08-18
 
-Canonical coordinator approval writes approved_by_user_id directly. This trigger
-also covers the established Assessment triage route: some triage dispositions
-advance/resolve the Incident before triage_decided_by_user_id is written, so a
-later update backfills the same coordinator actor without changing incident_key.
+Canonical coordinator approval writes incident_key and approved_by_user_id
+directly. This trigger also covers established Assessment triage routes. It only
+mints a key when the application did not already provide one, so notification,
+API response, and stored historical identity stay identical.
 """
 
 from alembic import op
@@ -41,7 +41,7 @@ def upgrade() -> None:
               SIGNAL SQLSTATE '45000'
                 SET MESSAGE_TEXT = 'Coordinator must determine the Event Group before approval';
             END IF;
-            SET NEW.incident_key = UUID();
+            SET NEW.incident_key = COALESCE(NEW.incident_key, UUID());
             SET NEW.approved_at = COALESCE(NEW.approved_at, NOW());
             SET NEW.approved_by_user_id = COALESCE(
               NEW.approved_by_user_id,
@@ -50,9 +50,9 @@ def upgrade() -> None:
             );
           END IF;
 
-          # Assessment-required triage advances current_stage before the legacy
-          # route writes triage_decided_by_user_id. Backfill actor on that second
-          # update while preserving the already-minted immutable key.
+          /* Assessment-required triage advances current_stage before the legacy
+             route writes triage_decided_by_user_id. Backfill actor on that
+             second update while preserving the already-minted immutable key. */
           IF NEW.incident_key IS NOT NULL
              AND NEW.approved_by_user_id IS NULL
              AND NEW.triage_decided_by_user_id IS NOT NULL
@@ -111,7 +111,7 @@ def downgrade() -> None:
               SIGNAL SQLSTATE '45000'
                 SET MESSAGE_TEXT = 'Coordinator must determine the Event Group before approval';
             END IF;
-            SET NEW.incident_key = UUID();
+            SET NEW.incident_key = COALESCE(NEW.incident_key, UUID());
             SET NEW.approved_at = COALESCE(NEW.approved_at, NOW());
           END IF;
 
