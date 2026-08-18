@@ -18,6 +18,19 @@ export type ProjectIncidentSummary = {
   updated_at: string | null;
 };
 
+export type IncidentClassification = {
+  incident_id: number;
+  source: "GISA_ASSESSMENT";
+  assessment_id: number | null;
+  assessment_state: string | null;
+  submission_id: number | null;
+  assigned_at: string | null;
+  classification_status: "UNCLASSIFIED" | "CLASSIFIED_PENDING_REVIEW" | "CLASSIFIED";
+  reason: string;
+  confirmed: boolean;
+  codes: Array<{ code: string; label: string }>;
+};
+
 export type ProjectSummary = {
   id: number;
   project_uuid: string;
@@ -91,7 +104,7 @@ export type ProjectAssociationResponse = {
 
 export function milesFromMeters(meters: number): string {
   const miles = meters / 1609.344;
-  if (miles < 160.9344) return `${Math.round(meters * 3.28084)} ft away`;
+  if (miles < 0.1) return `${Math.round(meters * 3.28084)} ft away`;
   return `${miles.toFixed(miles < 10 ? 1 : 0)} mi away`;
 }
 
@@ -109,4 +122,12 @@ export function projectStatusLabel(status: ProjectStatus): string {
   if (status === "CLOSED") return "Closed";
   if (status === "ARCHIVED") return "Archived";
   return "Open";
+}
+
+export function classificationLabel(classification: IncidentClassification | undefined): string {
+  if (!classification) return "Loading classification…";
+  if (classification.codes.length > 0) return classification.codes.map((item) => item.label).join(" · ");
+  if (classification.reason === "ASSESSMENT_NOT_STARTED") return "Unclassified · assessment not started";
+  if (classification.reason === "ASSESSMENT_IN_PROGRESS") return "Unclassified · assessment in progress";
+  return "Unclassified · no type recorded";
 }
