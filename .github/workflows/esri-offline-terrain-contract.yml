@@ -1,0 +1,28 @@
+name: Esri Offline Terrain Contract
+
+on:
+  pull_request:
+    paths:
+      - 'mobile/plugins/arcgis-ios/ArcGisEristerrainSceneViewController.*'
+      - 'mobile/plugins/withArcGisIos.js'
+      - 'mobile/scripts/check-esri-offline-terrain-contract.mjs'
+      - '.github/workflows/esri-offline-terrain-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/plugins/arcgis-ios/ArcGisEristerrainSceneViewController.*'
+      - 'mobile/plugins/withArcGisIos.js'
+      - 'mobile/scripts/check-esri-offline-terrain-contract.mjs'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/check-esri-offline-terrain-contract.mjs
