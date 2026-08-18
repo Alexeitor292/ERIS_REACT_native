@@ -7,12 +7,15 @@ const plugin = fs.readFileSync(path.join(root, "plugins/withArcGisIos.js"), "utf
 
 const requiredController = [
   "esri-terrain.tpkx",
+  "esri-imagery.tpkx",
+  "self.payload[@\"incident\"]",
   "AGSTileCache",
-  "initWithFileURL",
   "AGSArcGISTiledElevationSource",
+  "AGSArcGISTiledLayer",
   "initWithTileCache",
   "surface.elevationSources = @[elevation]",
   "surface.elevationExaggeration = 1.0",
+  "[scene.operationalLayers addObject:imageryLayer]",
   "AGSSceneView",
 ];
 for (const token of requiredController) {
@@ -27,8 +30,8 @@ for (const token of [
   if (!plugin.includes(token)) throw new Error(`ArcGIS iOS plugin missing Esri terrain routing token: ${token}`);
 }
 
-if (controller.includes("elevation3d.arcgis.com") || controller.includes("tiledbasemaps.arcgis.com")) {
-  throw new Error("Native offline Terrain3D viewer must not contact an elevation service at render time.");
+if (controller.includes("elevation3d.arcgis.com") || controller.includes("tiledbasemaps.arcgis.com") || controller.includes("services.arcgisonline.com")) {
+  throw new Error("Native offline scene must not contact Esri terrain/imagery services at render time.");
 }
 
-console.log("Esri offline Terrain3D native contract OK");
+console.log("Esri offline Terrain3D + World Imagery native contract OK");
