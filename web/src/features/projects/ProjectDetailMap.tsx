@@ -9,16 +9,18 @@ import Home from "@arcgis/core/widgets/Home";
 import Compass from "@arcgis/core/widgets/Compass";
 import ScaleBar from "@arcgis/core/widgets/ScaleBar";
 
-import type { ProjectIncidentSummary, ProjectSummary } from "./projectTypes";
+import type { IncidentClassification, ProjectIncidentSummary, ProjectSummary } from "./projectTypes";
+import { classificationLabel } from "./projectTypes";
 
 type Props = {
   project: ProjectSummary;
   incidents: ProjectIncidentSummary[];
+  classifications?: Record<number, IncidentClassification>;
   onOpenIncident?: (incidentId: number) => void;
   height?: number;
 };
 
-export default function ProjectDetailMap({ project, incidents, onOpenIncident, height = 420 }: Props) {
+export default function ProjectDetailMap({ project, incidents, classifications = {}, onOpenIncident, height = 420 }: Props) {
   const divRef = useRef<HTMLDivElement | null>(null);
   const onOpenIncidentRef = useRef(onOpenIncident);
 
@@ -53,6 +55,7 @@ export default function ProjectDetailMap({ project, incidents, onOpenIncident, h
     ];
 
     for (const incident of incidents) {
+      const classification = classifications[incident.id];
       graphics.push(new Graphic({
         geometry: new Point({ longitude: incident.longitude, latitude: incident.latitude, spatialReference: { wkid: 4326 } }),
         symbol: {
@@ -66,11 +69,12 @@ export default function ProjectDetailMap({ project, incidents, onOpenIncident, h
           incident_id: incident.id,
           title: incident.title || `Incident #${incident.id}`,
           status: incident.status,
-          classification: incident.incident_type || "Unclassified",
+          classification: classificationLabel(classification),
+          classification_review: classification?.classification_status === "CLASSIFIED_PENDING_REVIEW" ? "Pending review" : classification?.confirmed ? "Confirmed" : "Not yet classified",
         },
         popupTemplate: {
           title: "Incident #{incident_id}",
-          content: "{title}<br/><strong>Status:</strong> {status}<br/><strong>Classification:</strong> {classification}",
+          content: "{title}<br/><strong>Status:</strong> {status}<br/><strong>Classification:</strong> {classification}<br/><strong>Classification state:</strong> {classification_review}",
         } as any,
       }));
     }
@@ -95,7 +99,7 @@ export default function ProjectDetailMap({ project, incidents, onOpenIncident, h
       clickHandle.remove();
       view.destroy();
     };
-  }, [incidents, project]);
+  }, [classifications, incidents, project]);
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
