@@ -1,7 +1,7 @@
 """Capture coordinator approval actor for legacy triage transitions.
 
-Revision ID: 20260818_event_group_approval_provenance
-Revises: 20260818_event_group_provisional_cleanup
+Revision ID: 20260818_event_group_approval
+Revises: 20260818_event_group_cleanup
 Create Date: 2026-08-18
 
 Canonical coordinator approval writes incident_key and approved_by_user_id
@@ -12,8 +12,8 @@ API response, and stored historical identity stay identical.
 
 from alembic import op
 
-revision = "20260818_event_group_approval_provenance"
-down_revision = "20260818_event_group_provisional_cleanup"
+revision = "20260818_event_group_approval"
+down_revision = "20260818_event_group_cleanup"
 branch_labels = None
 depends_on = None
 
