@@ -37,6 +37,8 @@ import {
 } from "@/src/api/assessments";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
 import IncidentWorkflowTree from "@/src/components/IncidentWorkflowTree";
+import IncidentProjectReviewModal from "@/src/components/IncidentProjectReviewModal";
+import { getIncidentProjectContext } from "@/src/api/projects";
 import { useUiSettings } from "@/src/ui/UiSettingsContext";
 import { queueIncidentMapPreload } from "@/src/offline/mapPreload";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue } from "@/src/utils/precision";
@@ -418,6 +420,7 @@ export default function IncidentsTabScreen() {
   const [items, setItems] = useState<Incident[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [assignIncidentId, setAssignIncidentId] = useState<number | null>(null);
+  const [projectReviewIncidentId, setProjectReviewIncidentId] = useState<number | null>(null);
   const [branchRouteIncident, setBranchRouteIncident] = useState<Incident | null>(null);
   const [branchChiefOptions, setBranchChiefOptions] = useState<RoutingUserOption[]>([]);
   const [branchChiefOptionsLoading, setBranchChiefOptionsLoading] = useState(false);
@@ -1281,6 +1284,29 @@ export default function IncidentsTabScreen() {
     if (!token || !reviewIncident || !triageDisposition) return;
     const notes = coordinatorComment.trim() || undefined;
 
+    // Any coordinator outcome that advances/closes the Incident requires its
+    // Project parent first. Reporter-information revision intentionally remains
+    // available before Project choice because corrected geography may be needed
+    // to make the association decision.
+    if (triageDisposition !== "NEEDS_REPORTER_INFORMATION") {
+      try {
+        const projectContext = await getIncidentProjectContext(token, reviewIncident.id);
+        if (projectContext.requires_project_association) {
+          const incidentId = reviewIncident.id;
+          closeCoordinatorReview();
+          setProjectReviewIncidentId(incidentId);
+          Alert.alert(
+            "Project required",
+            "Choose an existing Project or create a new Project for this Incident before recording this triage decision.",
+          );
+          return;
+        }
+      } catch (e: any) {
+        if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
+        return;
+      }
+    }
+
     // Per-disposition validation mirrors the server contract.
     if (triageDisposition === "NEEDS_REPORTER_INFORMATION" && !notes) {
       Alert.alert("Note required", "Add a note so the maintenance crew knows what to correct.");
@@ -1903,12 +1929,20 @@ export default function IncidentsTabScreen() {
                 ) : null}
                 <View style={[styles.actions, { marginTop: 8 }]}>
                   {canCoordinatorReview && item.current_stage === "COORDINATOR_REVIEW" ? (
-                    <Pressable
-                      style={[styles.smallBtn, { borderColor: palette.border }]}
-                      onPress={() => openCoordinatorReview(item)}
-                    >
-                      <Text style={{ color: palette.text, fontWeight: "700" }}>Review Location</Text>
-                    </Pressable>
+                    <>
+                      <Pressable
+                        style={[styles.smallBtn, { borderColor: palette.border }]}
+                        onPress={() => openCoordinatorReview(item)}
+                      >
+                        <Text style={{ color: palette.text, fontWeight: "700" }}>Review Location</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.smallBtn, { borderColor: palette.primary }]}
+                        onPress={() => setProjectReviewIncidentId(item.id)}
+                      >
+                        <Text style={{ color: palette.primary, fontWeight: "800" }}>Review Project</Text>
+                      </Pressable>
+                    </>
                   ) : null}
                   {isOfficeChiefMobile && item.current_stage === "OFFICE_CHIEF_REVIEW" ? (
                     <Pressable
@@ -1918,7 +1952,7 @@ export default function IncidentsTabScreen() {
                       <Text style={{ color: palette.text, fontWeight: "700" }}>Route to Branch Chief</Text>
                     </Pressable>
                   ) : null}
-                  {isAdmin ? (
+                  {isAdmin && item.current_stage === "ENGINEER_ASSIGNED" ? (
                     <>
                       <Pressable
                         style={[styles.smallBtn, { borderColor: palette.border }]}
@@ -1931,7 +1965,7 @@ export default function IncidentsTabScreen() {
                       </Pressable>
                     </>
                   ) : null}
-                  {canResolve && !isMaintenanceWorkerMobile && item.status !== "RESOLVED" ? (
+                  {canResolve && !isMaintenanceWorkerMobile && item.status !== "RESOLVED" && item.current_stage !== "COORDINATOR_REVIEW" ? (
                     <Pressable style={[styles.smallBtn, { borderColor: palette.border }]} onPress={() => onResolve(item.id)}>
                       <Text style={{ color: palette.text, fontWeight: "700" }}>Resolve</Text>
                     </Pressable>
@@ -2313,6 +2347,13 @@ export default function IncidentsTabScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <IncidentProjectReviewModal
+        incidentId={projectReviewIncidentId}
+        visible={projectReviewIncidentId != null}
+        onClose={() => setProjectReviewIncidentId(null)}
+        onAssociated={load}
+      />
 
       <Modal visible={assignIncidentId != null} transparent animationType="fade" onRequestClose={() => setAssignIncidentId(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setAssignIncidentId(null)}>

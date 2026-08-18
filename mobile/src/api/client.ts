@@ -92,3 +92,32 @@ export async function apiFetch<T = any>(
   }
   return data;
 }
+
+export async function apiFetchBytes(
+  path: string,
+  opts: { method?: string; token?: string } = {},
+): Promise<Uint8Array> {
+  const base = getApiBaseUrl();
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const method = opts.method ?? "GET";
+  const headers: Record<string, string> = opts.token
+    ? authenticatedRequestHeaders(opts.token)
+    : {};
+
+  const res = await fetch(`${base}${normalizedPath}`, { method, headers });
+
+  if (res.status === 401) {
+    await handleUnauthorized();
+    throw new SessionExpiredError();
+  }
+  if (!res.ok) {
+    if (res.status >= 500) {
+      throw new Error("Internal server error. Please try again later.");
+    }
+    const text = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+
+  if (opts.token) markOnlineAuthSuccess().catch(() => {});
+  return new Uint8Array(await res.arrayBuffer());
+}

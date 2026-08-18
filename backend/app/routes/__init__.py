@@ -22,3 +22,10 @@ _incidents.router.include_router(_projects.router)
 _incidents.router.include_router(_project_lifecycle.router)
 _incidents.router.include_router(_incident_classification.router)
 _incidents.router.include_router(_mission_center_gis.router)
+
+# Keep mobile road-inventory package bytes behind ERIS authentication. The
+# object store remains private and never needs anonymous download policy.
+from . import road_inventory as _road_inventory  # noqa: E402
+from . import road_inventory_mobile_download as _road_inventory_mobile_download  # noqa: E402
+
+_road_inventory.router.include_router(_road_inventory_mobile_download.router)
