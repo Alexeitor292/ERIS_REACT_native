@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import SubmissionsPage from "./pages/SubmissionsPage";
 import SubmissionDetailPage from "./pages/SubmissionDetailPage";
@@ -9,8 +9,8 @@ import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
 import AssessmentsPage from "./pages/AssessmentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
-import ProjectsPage from "./pages/ProjectsPage";
-import ProjectDetailPage from "./pages/ProjectDetailPage";
+import EventGroupsPage from "./pages/EventGroupsPage";
+import EventGroupDetailPage from "./pages/EventGroupDetailPage";
 import TerrainCrossSectionsPage from "./pages/TerrainCrossSectionsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { AuthProvider } from "./auth/AuthContext";
@@ -42,21 +42,23 @@ export default function App() {
             }
           />
           <Route
-            path="/projects"
+            path="/event-groups"
             element={
               <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
-                <ProjectsPage />
+                <EventGroupsPage />
               </RoleRoute>
             }
           />
           <Route
-            path="/projects/:id"
+            path="/event-groups/:id"
             element={
               <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
-                <ProjectDetailPage />
+                <EventGroupDetailPage />
               </RoleRoute>
             }
           />
+          <Route path="/projects" element={<Navigate to="/event-groups" replace />} />
+          <Route path="/projects/:id" element={<LegacyProjectRedirect />} />
           <Route
             path="/assessments"
             element={
@@ -126,4 +128,9 @@ export default function App() {
       </BrowserRouter>
     </AuthProvider>
   );
+}
+
+function LegacyProjectRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/event-groups/${id ?? ""}`} replace />;
 }
