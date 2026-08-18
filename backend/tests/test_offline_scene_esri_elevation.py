@@ -11,6 +11,7 @@ from app.services.offline_scene_esri_elevation import (
     _aoi,
     _available_levels,
     _job_urls,
+    _same_origin,
     export_imagery_tpkx,
     export_terrain_tpkx,
 )
@@ -56,6 +57,15 @@ def test_job_urls_support_both_arcgis_async_shapes():
         "https://example.test/arcgis/rest/services/Terrain/ImageServer/jobs/j123",
         "https://example.test/arcgis/rest/services/Terrain/ImageServer/exportTiles/jobs/j123",
     ]
+
+
+def test_arcgis_credential_is_only_eligible_for_same_origin_result_urls():
+    service = "https://tiledbasemaps.arcgis.com/arcgis/rest/services/World_Imagery/MapServer"
+    assert _same_origin(service, "https://tiledbasemaps.arcgis.com/jobs/result.tpkx")
+    assert _same_origin(service, "https://tiledbasemaps.arcgis.com:443/jobs/result.tpkx")
+    assert not _same_origin(service, "https://lws-job-results.s3.amazonaws.com/result.tpkx?sig=abc")
+    assert not _same_origin(service, "http://tiledbasemaps.arcgis.com/jobs/result.tpkx")
+    assert not _same_origin(service, "https://evil.example/jobs/result.tpkx")
 
 
 @pytest.mark.parametrize("exporter", [export_terrain_tpkx, export_imagery_tpkx])
