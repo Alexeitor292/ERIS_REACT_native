@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { TriageDisposition } from "../../api/assessments";
 import ModalDialog from "../../ui/ModalDialog";
+import ProjectAssociationDialog from "../projects/ProjectAssociationDialog";
 
 export type TriageDialogState = {
   incidentId: number;
@@ -64,16 +65,31 @@ export function IncidentTriageDialog({ state, busy, onChange, onClose, onConfirm
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const [projectReviewComplete, setProjectReviewComplete] = useState(false);
   const selected = TRIAGE_OPTIONS.find((option) => option.value === state.disposition);
+
+  if (!projectReviewComplete) {
+    return (
+      <ProjectAssociationDialog
+        incidentId={state.incidentId}
+        onClose={onClose}
+        onContinueToTriage={() => setProjectReviewComplete(true)}
+      />
+    );
+  }
+
   return (
     <DialogShell
       titleId="incident-triage-dialog-title"
       title={`Triage incident #${state.incidentId}`}
-      description="Choose the coordinator disposition. ERIS records this decision in the incident timeline and preserves the existing routing behavior."
+      description="Project ownership is confirmed. Record the coordinator disposition; incident classification remains unassigned until the on-site assessment determines it."
       busy={busy}
       onClose={onClose}
     >
       <div className="grid gap-4">
+        <div className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_42%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_9%,transparent)] px-3 py-2 text-sm text-[var(--good)]">
+          Project association confirmed for this coordinator review.
+        </div>
         <Field label="Disposition">
           <select data-dialog-initial-focus="true" className={inputClass} value={state.disposition} onChange={(event) => onChange({ ...state, disposition: event.target.value as TriageDisposition })}>
             {TRIAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -83,9 +99,12 @@ export function IncidentTriageDialog({ state, busy, onChange, onClose, onConfirm
         <Field label="Decision notes">
           <textarea rows={4} className={inputClass} value={state.notes} onChange={(event) => onChange({ ...state, notes: event.target.value })} placeholder="Add context that should be preserved in the incident timeline." />
         </Field>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">{busy ? "Recording…" : "Record triage decision"}</button>
+        <div className="flex justify-between gap-2">
+          <button type="button" onClick={() => setProjectReviewComplete(false)} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Review Project again</button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={onConfirm} disabled={busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">{busy ? "Recording…" : "Record triage decision"}</button>
+          </div>
         </div>
       </div>
     </DialogShell>

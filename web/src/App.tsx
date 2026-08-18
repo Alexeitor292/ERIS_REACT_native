@@ -9,10 +9,13 @@ import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
 import AssessmentsPage from "./pages/AssessmentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
+import ProjectsPage from "./pages/ProjectsPage";
+import ProjectDetailPage from "./pages/ProjectDetailPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import RoleRoute from "./auth/RoleRoute";
+import { OPERATIONAL_ROLE_NAMES } from "./utils/roleModel";
 
 export default function App() {
   return (
@@ -35,6 +38,22 @@ export default function App() {
               <ProtectedRoute>
                 <IncidentsPage />
               </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
+                <ProjectsPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/projects/:id"
+            element={
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
+                <ProjectDetailPage />
+              </RoleRoute>
             }
           />
           <Route

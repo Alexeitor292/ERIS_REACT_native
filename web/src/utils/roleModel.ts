@@ -14,14 +14,15 @@ export const CANONICAL = {
 } as const;
 
 const MAINTENANCE_REPORTING = new Set(["MAINTENANCE_FIELD_WORKER", "MAINTENANCE"]);
-const OPERATIONAL = new Set([
+export const OPERATIONAL_ROLE_NAMES = [
   ...CANONICAL.MAINTENANCE_COORDINATOR,
   ...CANONICAL.GEOTECH_OFFICE_CHIEF,
   ...CANONICAL.GEOTECH_BRANCH_CHIEF,
   ...CANONICAL.GEOTECH_ENGINEER,
   "REVIEWER",
   "ADMIN",
-]);
+] as const;
+const OPERATIONAL = new Set<string>(OPERATIONAL_ROLE_NAMES);
 
 export function hasRole(roles: string[] | undefined, canonical: keyof typeof CANONICAL): boolean {
   const set = new Set(roles ?? []);

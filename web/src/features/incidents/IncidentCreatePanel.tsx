@@ -46,8 +46,8 @@ export default function IncidentCreatePanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Create incident</h2>
-          <p className="mt-1 text-sm text-muted">
-            Required fields are marked with an asterisk. Supporting files upload after ERIS creates the incident record.
+          <p className="mt-1 max-w-3xl text-sm text-muted">
+            Record what maintenance observed and where it occurred. The incident remains unclassified until the on-site assessment determines its incident type.
           </p>
         </div>
         <button
@@ -60,16 +60,19 @@ export default function IncidentCreatePanel({
         </button>
       </div>
 
+      <div className="mt-4 rounded-lg border border-[color:color-mix(in_oklab,var(--brand)_30%,var(--line))] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))] px-3 py-2 text-sm">
+        <span className="font-semibold">Classification:</span> <span className="text-muted">Unclassified · assigned after field assessment</span>
+      </div>
+
       <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Field label="Title" required>
           <input className={inputClass} value={form.title} onChange={(event) => setField("title", event.target.value)} />
         </Field>
-        <Field label="Incident type">
-          <input className={inputClass} value={form.incident_type} onChange={(event) => setField("incident_type", event.target.value)} />
-        </Field>
-        <Field label="Description">
-          <textarea className={`${inputClass} min-h-20`} value={form.description} onChange={(event) => setField("description", event.target.value)} />
-        </Field>
+        <div className="md:col-span-1 xl:col-span-2">
+          <Field label="Description">
+            <textarea className={`${inputClass} min-h-20 w-full`} value={form.description} onChange={(event) => setField("description", event.target.value)} />
+          </Field>
+        </div>
         <Field label="First observed" required>
           <input type="datetime-local" className={inputClass} value={form.first_observed_at} onChange={(event) => setField("first_observed_at", event.target.value)} />
         </Field>

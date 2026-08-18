@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthContext";
+import { isOperationalUser } from "../utils/roleModel";
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -16,9 +17,13 @@ function pageDescription(pathname: string) {
   if (/^\/submissions\/[^/]+$/.test(pathname)) {
     return "Inspect field data, mapped evidence, attachments, terrain context, and review history.";
   }
+  if (/^\/projects\/[^/]+$/.test(pathname)) {
+    return "Review the Project area, associated Incidents, and Project history.";
+  }
 
   const descriptions: Array<[string, string]> = [
     ["/mission-center", "Operational overview of active incidents, assessments, and field activity."],
+    ["/projects", "Manage operational Projects and the Incidents grouped under each response area."],
     ["/incidents", "Manage emergency events and coordinate the field records associated with them."],
     ["/assessments", "Review geotechnical assessments and supporting field information."],
     ["/submissions", "Find, inspect, and review field submissions received by ERIS."],
@@ -79,11 +84,13 @@ function NavGroup({
 
 function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
   const { me } = useAuth();
+  const operational = isOperationalUser(me?.roles);
 
   return (
     <div className="space-y-5">
       <NavGroup label="Operations" collapsed={collapsed}>
         <NavItem to="/mission-center" label="Mission Center" collapsed={collapsed} />
+        {operational ? <NavItem to="/projects" label="Projects" collapsed={collapsed} /> : null}
         <NavItem to="/incidents" label="Incidents" collapsed={collapsed} />
         <NavItem to="/assessments" label="Assessments" collapsed={collapsed} />
         <NavItem to="/submissions" label="Submissions" collapsed={collapsed} />
