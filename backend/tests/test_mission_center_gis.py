@@ -159,8 +159,13 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
         )
         submission_id = int(submission_result.lastrowid)
         conn.execute(
-            text("INSERT INTO incident_submission_links (incident_id, submission_id) VALUES (:iid, :sid)"),
-            {"iid": incident_id, "sid": submission_id},
+            text(
+                """
+                INSERT INTO incident_submission_links (incident_id, submission_id, linked_by_user_id)
+                VALUES (:iid, :sid, :uid)
+                """
+            ),
+            {"iid": incident_id, "sid": submission_id, "uid": admin_user_id},
         )
         conn.execute(
             text(
