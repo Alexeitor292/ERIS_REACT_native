@@ -64,6 +64,70 @@ def _record_group_move_if_needed(
     )
 
 
+@router.delete("/incidents/{incident_id}/provisional")
+def discard_provisional_incident(
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "ADMIN"])),
+):
+    """Discard an intake Incident only before it receives historical identity."""
+
+    incident = event_group_routes._incident_row(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    if incident.get("incident_key") is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Coordinator-approved Incidents are historical and cannot be discarded",
+        )
+    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
+        raise HTTPException(status_code=409, detail="Only coordinator-review Incidents are provisional")
+
+    roles = set(user.get("roles") or [])
+    if "ADMIN" not in roles and "MAINT_COORDINATOR" not in roles:
+        if int(incident["reporter_user_id"]) != int(user["id"]):
+            raise HTTPException(status_code=403, detail="Only the reporter or Maintenance Coordinator may discard this provisional Incident")
+    elif "ADMIN" not in roles:
+        incidents_routes._ensure_incident_district_access(user, incident.get("district"))
+
+    event_group_id = int(incident["event_group_id"]) if incident.get("event_group_id") is not None else None
+
+    try:
+        if event_group_id is not None:
+            # A coordinator-created one-Incident group may have been staged during
+            # review. Archive that now-empty context rather than leaving an active
+            # orphan after the provisional Incident is discarded.
+            db.execute(
+                text(
+                    """
+                    UPDATE event_groups eg
+                    SET eg.status = 'ARCHIVED', eg.updated_at = NOW()
+                    WHERE eg.id = :egid
+                      AND eg.source = 'COORDINATOR_CREATED'
+                      AND eg.created_from_incident_id = :iid
+                      AND (SELECT COUNT(*) FROM incidents i WHERE i.event_group_id = eg.id) = 1
+                    """
+                ),
+                {"egid": event_group_id, "iid": incident_id},
+            )
+
+        result = db.execute(
+            text("DELETE FROM incidents WHERE id = :iid AND incident_key IS NULL"),
+            {"iid": incident_id},
+        )
+        if result.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Incident is no longer provisional")
+        db.commit()
+        return {"incident_id": incident_id, "discarded": True}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Provisional Incident could not be discarded: {exc}")
+
+
 @router.post("/incidents/{incident_id}/coordinator/approve")
 def coordinator_approve_incident(
     payload: IncidentCoordinatorApprovalRequest,
@@ -152,9 +216,6 @@ def coordinator_approve_incident(
 
         incident_key = str(uuid.uuid4())
 
-        # The linked technical submission is created while the Incident still
-        # carries its internal database id. Its lifetime remains attached to the
-        # Incident; the permanent incident_key is the historical external identity.
         linked_submission_id = incidents_routes._ensure_linked_submission(
             db=db,
             incident_row=incident,
@@ -162,7 +223,7 @@ def coordinator_approve_incident(
             actor_user_id=actor_id,
         )
 
-        db.execute(
+        update_result = db.execute(
             text(
                 """
                 UPDATE incidents
@@ -187,6 +248,8 @@ def coordinator_approve_incident(
                 "office_code": office_code,
             },
         )
+        if update_result.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Incident approval state changed concurrently; reload and try again")
 
         incidents_routes._set_stage_assignment(
             db=db,
