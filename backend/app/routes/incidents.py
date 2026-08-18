@@ -1621,6 +1621,21 @@ def assign_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["ADMIN"])),
 ):
+    # Backward-compatible endpoint for older Admin clients. Fail at the API
+    # boundary with a controlled workflow response instead of leaking the
+    # MariaDB trigger/SQL text when a pre-Project Incident is assigned.
+    project_row = db.execute(
+        text("SELECT project_id FROM incidents WHERE id = :iid LIMIT 1"),
+        {"iid": incident_id},
+    ).mappings().first()
+    if not project_row:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if project_row["project_id"] is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Choose or create a Project for this Incident before engineering assignment.",
+        )
+
     try:
         result = _assign_incident(
             db=db,
