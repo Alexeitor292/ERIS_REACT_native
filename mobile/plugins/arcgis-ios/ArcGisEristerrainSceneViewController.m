@@ -41,7 +41,7 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
   self.statusLabel.textAlignment = NSTextAlignmentCenter;
   self.statusLabel.layer.cornerRadius = 8;
   self.statusLabel.clipsToBounds = YES;
-  self.statusLabel.text = @"Loading local Terrain 3D…";
+  self.statusLabel.text = @"Loading local Terrain 3D + imagery…";
   [self.view addSubview:self.statusLabel];
   [NSLayoutConstraint activateConstraints:@[
     [self.statusLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.leadingAnchor constant:16],
@@ -62,7 +62,11 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
   return [obj isKindOfClass:NSDictionary.class] ? obj : @{};
 }
 
-- (NSURL *)extractTerrainTPKXFromBundle:(NSString *)path version:(NSString *)version error:(NSError **)error {
+- (NSURL *)extractStoredEntry:(NSString *)entryName
+                   outputName:(NSString *)outputName
+                     fromPath:(NSString *)path
+                      version:(NSString *)version
+                        error:(NSError **)error {
   NSData *archive = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:error];
   if (!archive) return nil;
   const uint8_t *b = archive.bytes;
@@ -90,7 +94,7 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
     if (off + 46 + nameLen > n) break;
     NSData *nameData = [NSData dataWithBytes:b + off + 46 length:nameLen];
     NSString *name = [[NSString alloc] initWithData:nameData encoding:NSUTF8StringEncoding];
-    if ([name isEqualToString:@"esri-terrain.tpkx"] && method == 0) {
+    if ([name isEqualToString:entryName] && method == 0) {
       localOffset = loc; size = comp; found = YES; break;
     }
     off += 46 + nameLen + extraLen + commentLen;
@@ -104,12 +108,12 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
   NSURL *cache = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
   NSString *safeVersion = version.length ? version : @"current";
   NSURL *dir = [[cache URLByAppendingPathComponent:@"eris-esri-terrain" isDirectory:YES] URLByAppendingPathComponent:safeVersion isDirectory:YES];
-  [[NSFileManager defaultManager] createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:error];
-  NSURL *target = [dir URLByAppendingPathComponent:@"terrain.tpkx"];
+  if (![[NSFileManager defaultManager] createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+  NSURL *target = [dir URLByAppendingPathComponent:outputName];
   NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:target.path error:nil];
   if ([attrs[NSFileSize] unsignedLongLongValue] == size) return target;
-  NSData *payload = [archive subdataWithRange:NSMakeRange(start, size)];
-  if (![payload writeToURL:target options:NSDataWritingAtomic error:error]) return nil;
+  NSData *entryData = [archive subdataWithRange:NSMakeRange(start, size)];
+  if (![entryData writeToURL:target options:NSDataWritingAtomic error:error]) return nil;
   return target;
 }
 
@@ -117,36 +121,49 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
   self.payload = [self readPayload];
   NSString *packagePath = [self.payload[@"packagePath"] isKindOfClass:NSString.class] ? self.payload[@"packagePath"] : nil;
   NSString *version = [self.payload[@"packageVersion"] isKindOfClass:NSString.class] ? self.payload[@"packageVersion"] : @"current";
-  NSDictionary *center = [self.payload[@"center"] isKindOfClass:NSDictionary.class] ? self.payload[@"center"] : nil;
-  self.incidentLat = [center[@"lat"] doubleValue];
-  self.incidentLon = [center[@"lon"] doubleValue];
+  // ArcGISNative.ts deliberately calls this object `incident`; use that one shared
+  // payload rather than inventing a second coordinate contract for the new viewer.
+  NSDictionary *incident = [self.payload[@"incident"] isKindOfClass:NSDictionary.class] ? self.payload[@"incident"] : nil;
+  self.incidentLat = [incident[@"lat"] doubleValue];
+  self.incidentLon = [incident[@"lon"] doubleValue];
   if (!packagePath.length) { [self fatal:@"Offline package path is missing."]; return; }
 
   NSError *extractError = nil;
-  NSURL *tpkx = [self extractTerrainTPKXFromBundle:packagePath version:version error:&extractError];
-  if (!tpkx) { [self fatal:extractError.localizedDescription ?: @"This package does not contain the Esri Terrain 3D tile cache. Re-download the area."]; return; }
+  NSURL *terrainURL = [self extractStoredEntry:@"esri-terrain.tpkx" outputName:@"terrain.tpkx" fromPath:packagePath version:version error:&extractError];
+  if (!terrainURL) { [self fatal:extractError.localizedDescription ?: @"This package does not contain the Esri Terrain 3D cache. Re-download the area."]; return; }
+  NSURL *imageryURL = [self extractStoredEntry:@"esri-imagery.tpkx" outputName:@"imagery.tpkx" fromPath:packagePath version:version error:&extractError];
+  if (!imageryURL) { [self fatal:extractError.localizedDescription ?: @"This package does not contain the Esri World Imagery cache. Re-download the area."]; return; }
 
-  AGSTileCache *cache = [[AGSTileCache alloc] initWithFileURL:tpkx];
-  AGSArcGISTiledElevationSource *elevation = [[AGSArcGISTiledElevationSource alloc] initWithTileCache:cache];
+  AGSTileCache *terrainCache = [[AGSTileCache alloc] initWithFileURL:terrainURL];
+  AGSArcGISTiledElevationSource *elevation = [[AGSArcGISTiledElevationSource alloc] initWithTileCache:terrainCache];
   AGSSurface *surface = [AGSSurface surface];
   surface.elevationSources = @[elevation];
   surface.elevationExaggeration = 1.0;
 
+  AGSTileCache *imageryCache = [[AGSTileCache alloc] initWithFileURL:imageryURL];
+  AGSArcGISTiledLayer *imageryLayer = [[AGSArcGISTiledLayer alloc] initWithTileCache:imageryCache];
+  imageryLayer.name = @"Offline World Imagery";
+
   AGSScene *scene = [[AGSScene alloc] init];
   scene.baseSurface = surface;
+  [scene.operationalLayers addObject:imageryLayer];
+
   self.overlay = [[AGSGraphicsOverlay alloc] init];
   self.overlay.sceneProperties.surfacePlacement = AGSSurfacePlacementDraped;
   [self.sceneView.graphicsOverlays addObject:self.overlay];
   self.sceneView.scene = scene;
 
   __weak typeof(self) weakSelf = self;
-  [elevation loadWithCompletion:^(NSError * _Nullable error) {
+  [elevation loadWithCompletion:^(NSError * _Nullable elevationError) {
     __strong typeof(weakSelf) self = weakSelf;
     if (!self) return;
-    if (error) { [self fatal:error.localizedDescription ?: @"Local Terrain 3D failed to load."]; return; }
-    [self drawOperationalOverlays];
-    self.statusLabel.text = @"Offline · Esri Terrain 3D · 1.0×";
-    [self resetCamera];
+    if (elevationError) { [self fatal:elevationError.localizedDescription ?: @"Local Terrain 3D failed to load."]; return; }
+    [imageryLayer loadWithCompletion:^(NSError * _Nullable imageryError) {
+      if (imageryError) { [self fatal:imageryError.localizedDescription ?: @"Local World Imagery failed to load."]; return; }
+      [self drawOperationalOverlays];
+      self.statusLabel.text = @"Offline · Esri Terrain 3D + World Imagery · 1.0×";
+      [self resetCamera];
+    }];
   }];
 }
 
