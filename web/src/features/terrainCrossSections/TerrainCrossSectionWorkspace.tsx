@@ -15,6 +15,7 @@ import * as geodeticDensifyOperator from "@arcgis/core/geometry/operators/geodet
 
 import CrossSectionProfileChart from "./CrossSectionProfileChart";
 import SceneDualScaleBar from "./SceneDualScaleBar";
+import TerrainSlice3D from "./TerrainSlice3D";
 import {
   adaptiveSampleSpacingMeters,
   controlPointDistances,
@@ -29,6 +30,7 @@ import {
 type SceneState = "loading" | "ready" | "error";
 type BasemapMode = "satellite" | "topo-vector";
 type WorkspacePanel = "profile" | "details" | "points" | "settings";
+type ProfileView = "profile" | "slice";
 
 const WGS84 = SpatialReference.WGS84;
 const CALIFORNIA_CENTER: [number, number] = [-119.4179, 36.7783];
@@ -75,6 +77,7 @@ export default function TerrainCrossSectionWorkspace() {
   const [sceneScale, setSceneScale] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<WorkspacePanel | null>(null);
   const [focusMode, setFocusMode] = useState(false);
+  const [profileView, setProfileView] = useState<ProfileView>("profile");
 
   drawingRef.current = drawing;
 
@@ -205,6 +208,7 @@ export default function TerrainCrossSectionWorkspace() {
         setActualSpacingM(null);
         setProfileError(null);
         setActivePanel(null);
+        setProfileView("profile");
       });
 
       setSceneState("ready");
@@ -327,6 +331,7 @@ export default function TerrainCrossSectionWorkspace() {
     setActualSpacingM(null);
     setProfileError(null);
     setActivePanel(null);
+    setProfileView("profile");
     setDrawing(true);
   }
 
@@ -336,6 +341,7 @@ export default function TerrainCrossSectionWorkspace() {
     setActualSpacingM(null);
     setProfileError(null);
     setActivePanel(null);
+    setProfileView("profile");
     setDrawing(true);
   }
 
@@ -346,6 +352,7 @@ export default function TerrainCrossSectionWorkspace() {
     setActualSpacingM(null);
     setProfileError(null);
     setActivePanel(null);
+    setProfileView("profile");
   }
 
   function clearAll() {
@@ -356,6 +363,7 @@ export default function TerrainCrossSectionWorkspace() {
     setActualSpacingM(null);
     setProfileError(null);
     setActivePanel(null);
+    setProfileView("profile");
   }
 
   function togglePanel(panel: WorkspacePanel) {
@@ -399,6 +407,7 @@ export default function TerrainCrossSectionWorkspace() {
       const nextProfile = profileFromPath(path, elevation.noDataValue);
       if (!nextProfile) throw new Error("No usable DEM elevation samples were returned for this path.");
       setProfile(nextProfile);
+      setProfileView("profile");
       setActivePanel("profile");
 
       const profileLine = new Polyline({
@@ -413,6 +422,7 @@ export default function TerrainCrossSectionWorkspace() {
     } catch (error: any) {
       setProfile(null);
       setActivePanel(null);
+      setProfileView("profile");
       setProfileError(error?.message ?? "Failed to sample ArcGIS terrain elevation.");
     } finally {
       setProfileBusy(false);
@@ -428,7 +438,7 @@ export default function TerrainCrossSectionWorkspace() {
   const displayedDistanceM = profile?.stats.total_distance_m ?? draftDistanceM;
   const panelWide = activePanel === "profile";
   const panelTitle = activePanel === "profile"
-    ? "Elevation profile"
+    ? "Elevation analysis"
     : activePanel === "details"
       ? "Cross-section statistics"
       : activePanel === "points"
@@ -436,8 +446,10 @@ export default function TerrainCrossSectionWorkspace() {
         : "Cross-section setup";
   const panelSubtitle = activePanel === "profile"
     ? profile
-      ? `${formatHorizontalDistance(profile.stats.total_distance_m, metric)} · ${profile.stats.sample_count.toLocaleString()} DEM samples`
-      : "Build a profile to view the elevation graph"
+      ? profileView === "slice"
+        ? `3D DEM slice along ${formatHorizontalDistance(profile.stats.total_distance_m, metric)} of selected terrain`
+        : `${formatHorizontalDistance(profile.stats.total_distance_m, metric)} · ${profile.stats.sample_count.toLocaleString()} DEM samples`
+      : "Build a profile to inspect terrain elevation"
     : activePanel === "details"
       ? "DEM profile measurements"
       : activePanel === "points"
@@ -550,7 +562,7 @@ export default function TerrainCrossSectionWorkspace() {
 
       <aside
         className={`absolute bottom-3 right-20 top-16 z-30 overflow-y-auto rounded-xl border border-[var(--line)] bg-[color:var(--panel)]/97 text-[var(--ink)] shadow-2xl backdrop-blur-md transition-[width,transform,opacity] duration-200 ${panelWide
-          ? "w-[min(620px,calc(100%-6rem))]"
+          ? "w-[min(720px,calc(100%-6rem))]"
           : "w-[min(360px,calc(100%-6rem))]"} ${activePanel
           ? "translate-x-0 opacity-100"
           : "pointer-events-none translate-x-5 opacity-0"}`}
@@ -575,25 +587,55 @@ export default function TerrainCrossSectionWorkspace() {
 
             {activePanel === "profile" && profile ? (
               <div>
+                <div className="flex border-b border-[var(--line)] bg-[var(--panel-soft)] p-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setProfileView("profile")}
+                    className={`flex-1 rounded-md px-3 py-2 text-xs font-semibold ${profileView === "profile"
+                      ? "bg-[var(--panel)] text-[var(--ink)] shadow-sm"
+                      : "text-muted hover:text-[var(--ink)]"}`}
+                  >
+                    Elevation Profile
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProfileView("slice")}
+                    className={`flex-1 rounded-md px-3 py-2 text-xs font-semibold ${profileView === "slice"
+                      ? "bg-[var(--panel)] text-[var(--ink)] shadow-sm"
+                      : "text-muted hover:text-[var(--ink)]"}`}
+                  >
+                    3D Terrain Slice
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-3 gap-px border-b border-[var(--line)] bg-[var(--line)]">
                   <DrawerMetric label="Path" value={formatHorizontalDistance(profile.stats.total_distance_m, metric)} />
                   <DrawerMetric label="Samples" value={profile.stats.sample_count.toLocaleString()} />
                   <DrawerMetric label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
                 </div>
-                <div className="p-3">
-                  <CrossSectionProfileChart
-                    profile={profile}
-                    controlDistances={controlDistances}
-                    metric={metric}
-                    onHoverSample={showHoverSample}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-px border-t border-[var(--line)] bg-[var(--line)]">
-                  <DrawerMetric label="Minimum" value={formatElevation(profile.stats.min_elevation_m, metric)} />
-                  <DrawerMetric label="Maximum" value={formatElevation(profile.stats.max_elevation_m, metric)} />
-                  <DrawerMetric label="Gain" value={formatElevation(profile.stats.elevation_gain_m, metric)} />
-                  <DrawerMetric label="Loss" value={formatElevation(profile.stats.elevation_loss_m, metric)} />
-                </div>
+
+                {profileView === "profile" ? (
+                  <>
+                    <div className="p-3">
+                      <CrossSectionProfileChart
+                        profile={profile}
+                        controlDistances={controlDistances}
+                        metric={metric}
+                        onHoverSample={showHoverSample}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-px border-t border-[var(--line)] bg-[var(--line)]">
+                      <DrawerMetric label="Minimum" value={formatElevation(profile.stats.min_elevation_m, metric)} />
+                      <DrawerMetric label="Maximum" value={formatElevation(profile.stats.max_elevation_m, metric)} />
+                      <DrawerMetric label="Gain" value={formatElevation(profile.stats.elevation_gain_m, metric)} />
+                      <DrawerMetric label="Loss" value={formatElevation(profile.stats.elevation_loss_m, metric)} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-3">
+                    <TerrainSlice3D profile={profile} metric={metric} />
+                  </div>
+                )}
               </div>
             ) : null}
 
@@ -707,8 +749,8 @@ export default function TerrainCrossSectionWorkspace() {
           onClick={() => togglePanel("profile")}
           className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white shadow backdrop-blur-sm"
         >
-          <span className="font-semibold">Profile</span>
-          <span className="ml-2 text-white/75">{formatHorizontalDistance(profile.stats.total_distance_m, metric)} · {profile.stats.sample_count.toLocaleString()} samples</span>
+          <span className="font-semibold">Elevation analysis</span>
+          <span className="ml-2 text-white/75">Profile + 3D slice · {formatHorizontalDistance(profile.stats.total_distance_m, metric)}</span>
         </button>
       ) : controlPoints.length >= 2 && !drawing ? (
         <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur-sm">
