@@ -7,6 +7,10 @@ Create Date: 2026-08-18
 Incident is the operational root. Event Group is a shared grouping attribute.
 A coordinator-review Incident is provisional until coordinator approval mints
 an immutable incident_key and finalizes an event_group_id.
+
+The old Project API/table names remain as compatibility views for one transition
+window. event_group_id is canonical; project_id is a deprecated mirrored alias
+for older clients and is not the domain relationship.
 """
 
 from alembic import op
@@ -18,7 +22,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Remove Project-era triggers before moving the data model.
     for trigger in (
         "trg_project_close_active_incidents_bu",
         "trg_incident_project_open_bu",
@@ -72,8 +75,6 @@ def upgrade() -> None:
         """
     )
 
-    # Preserve numeric IDs so every existing association and audit reference can
-    # be migrated deterministically without inventing new group identity.
     op.execute(
         """
         INSERT INTO event_groups (
@@ -122,6 +123,10 @@ def upgrade() -> None:
               'EVENT_GROUP_UPDATED',
               'EVENT_GROUP_CLOSED',
               'EVENT_GROUP_REOPENED',
+              'PROJECT_CREATED',
+              'PROJECT_UPDATED',
+              'PROJECT_CLOSED',
+              'PROJECT_REOPENED',
               'LEGACY_BACKFILL'
             ))
         ) ENGINE=InnoDB
@@ -164,27 +169,8 @@ def upgrade() -> None:
             FOREIGN KEY (approved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
         """
     )
-
     op.execute("UPDATE incidents SET event_group_id = project_id")
 
-    # The prior migration created one LEGACY_BACKFILL Project for every historical
-    # Incident. A still-provisional coordinator-review Incident must not inherit a
-    # placeholder as an implicit grouping decision. Explicit coordinator-created
-    # associations are preserved.
-    op.execute(
-        """
-        UPDATE incidents i
-        JOIN event_groups eg ON eg.id = i.event_group_id
-        SET i.event_group_id = NULL
-        WHERE i.current_stage = 'COORDINATOR_REVIEW'
-          AND eg.source = 'LEGACY_BACKFILL'
-        """
-    )
-
-    # Existing Incidents that already advanced beyond coordinator review are
-    # historical records. Mint permanent identities while preserving their current
-    # Event Group. Exact legacy approval actor/time was not stored, so approved_at
-    # uses the best available historical activity timestamp and actor stays NULL.
     op.execute(
         """
         UPDATE incidents
@@ -195,26 +181,97 @@ def upgrade() -> None:
         """
     )
 
+    op.execute("DROP TABLE project_events")
+    op.execute("ALTER TABLE incidents DROP FOREIGN KEY fk_incident_project")
+    op.execute("DROP TABLE projects")
+
     op.execute(
         """
-        UPDATE event_groups eg
-        SET eg.status = 'ARCHIVED', eg.updated_at = NOW()
-        WHERE eg.source = 'LEGACY_BACKFILL'
-          AND NOT EXISTS (
-            SELECT 1 FROM incidents i WHERE i.event_group_id = eg.id
-          )
+        CREATE VIEW projects AS
+        SELECT
+          id,
+          event_group_key AS project_uuid,
+          title,
+          description,
+          status,
+          anchor_location_id,
+          anchor_latitude,
+          anchor_longitude,
+          district,
+          county,
+          route,
+          post_mile,
+          created_from_incident_id,
+          created_by_user_id,
+          source,
+          closed_at,
+          closed_by_user_id,
+          created_at,
+          updated_at
+        FROM event_groups
+        """
+    )
+    op.execute(
+        """
+        CREATE VIEW project_events AS
+        SELECT
+          id,
+          event_group_id AS project_id,
+          incident_id,
+          actor_user_id,
+          event_type,
+          notes,
+          metadata_json,
+          created_at
+        FROM event_group_events
         """
     )
 
-    # Remove the old parent-shaped schema after all data has been copied.
-    op.execute("DROP TABLE project_events")
-    op.execute("ALTER TABLE incidents DROP FOREIGN KEY fk_incident_project")
-    op.execute("ALTER TABLE incidents DROP INDEX idx_incidents_project")
-    op.execute("ALTER TABLE incidents DROP COLUMN project_id")
-    op.execute("DROP TABLE projects")
+    op.execute(
+        """
+        CREATE TRIGGER trg_incident_event_group_sync_bi
+        BEFORE INSERT ON incidents
+        FOR EACH ROW
+        BEGIN
+          IF NEW.event_group_id IS NULL AND NEW.project_id IS NOT NULL THEN
+            SET NEW.event_group_id = NEW.project_id;
+          ELSEIF NEW.project_id IS NULL AND NEW.event_group_id IS NOT NULL THEN
+            SET NEW.project_id = NEW.event_group_id;
+          ELSEIF NEW.project_id IS NOT NULL
+             AND NEW.event_group_id IS NOT NULL
+             AND NEW.project_id <> NEW.event_group_id
+          THEN
+            SIGNAL SQLSTATE '45000'
+              SET MESSAGE_TEXT = 'project_id compatibility alias must match event_group_id';
+          END IF;
+        END
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_incident_event_group_sync_bu
+        BEFORE UPDATE ON incidents
+        FOR EACH ROW
+        BEGIN
+          IF NOT (NEW.project_id <=> OLD.project_id)
+             AND (NEW.event_group_id <=> OLD.event_group_id)
+          THEN
+            SET NEW.event_group_id = NEW.project_id;
+          ELSEIF NOT (NEW.event_group_id <=> OLD.event_group_id)
+             AND (NEW.project_id <=> OLD.project_id)
+          THEN
+            SET NEW.project_id = NEW.event_group_id;
+          ELSEIF NEW.project_id IS NOT NULL
+             AND NEW.event_group_id IS NOT NULL
+             AND NEW.project_id <> NEW.event_group_id
+          THEN
+            SIGNAL SQLSTATE '45000'
+              SET MESSAGE_TEXT = 'project_id compatibility alias must match event_group_id';
+          END IF;
+        END
+        """
+    )
 
-    # Group assignment remains constrained to active groups, but the Event Group
-    # is an Incident attribute rather than an ownership/parent relationship.
     op.execute(
         """
         CREATE TRIGGER trg_incident_event_group_open_bi
@@ -233,7 +290,6 @@ def upgrade() -> None:
         END
         """
     )
-
     op.execute(
         """
         CREATE TRIGGER trg_incident_event_group_open_bu
@@ -254,8 +310,6 @@ def upgrade() -> None:
         """
     )
 
-    # Preserve the assessment-derived incident classification invariant from the
-    # Project-era trigger while enforcing the new approval identity boundary.
     op.execute(
         """
         CREATE TRIGGER trg_incident_identity_bi
@@ -276,7 +330,6 @@ def upgrade() -> None:
         END
         """
     )
-
     op.execute(
         """
         CREATE TRIGGER trg_incident_identity_bu
@@ -288,6 +341,18 @@ def upgrade() -> None:
           THEN
             SIGNAL SQLSTATE '45000'
               SET MESSAGE_TEXT = 'Permanent Incident key is immutable';
+          END IF;
+
+          IF OLD.current_stage = 'COORDINATOR_REVIEW'
+             AND NEW.current_stage <> 'COORDINATOR_REVIEW'
+             AND OLD.incident_key IS NULL
+          THEN
+            IF NEW.event_group_id IS NULL THEN
+              SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Coordinator must determine the Event Group before approval';
+            END IF;
+            SET NEW.incident_key = UUID();
+            SET NEW.approved_at = COALESCE(NEW.approved_at, NOW());
           END IF;
 
           IF NEW.current_stage <> 'COORDINATOR_REVIEW'
@@ -305,8 +370,7 @@ def upgrade() -> None:
           IF NOT (NEW.incident_type <=> OLD.incident_type)
              AND NEW.incident_type IS NOT NULL
              AND NOT EXISTS (
-               SELECT 1
-               FROM assessments a
+               SELECT 1 FROM assessments a
                WHERE a.incident_id = NEW.id
                  AND a.state IN ('APPROVED', 'FINALIZED')
              )
@@ -330,7 +394,6 @@ def upgrade() -> None:
         END
         """
     )
-
     op.execute(
         """
         CREATE TRIGGER trg_event_group_close_active_incidents_bu
@@ -362,8 +425,13 @@ def downgrade() -> None:
         "trg_incident_identity_bi",
         "trg_incident_event_group_open_bu",
         "trg_incident_event_group_open_bi",
+        "trg_incident_event_group_sync_bu",
+        "trg_incident_event_group_sync_bi",
     ):
         op.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+
+    op.execute("DROP VIEW IF EXISTS project_events")
+    op.execute("DROP VIEW IF EXISTS projects")
 
     op.execute(
         """
@@ -402,7 +470,6 @@ def downgrade() -> None:
         ) ENGINE=InnoDB
         """
     )
-
     op.execute(
         """
         INSERT INTO projects (
@@ -437,15 +504,10 @@ def downgrade() -> None:
             CONSTRAINT fk_project_event_incident FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE SET NULL,
             CONSTRAINT fk_project_event_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL,
             INDEX idx_project_events_project_created (project_id, created_at),
-            INDEX idx_project_events_incident_created (incident_id, created_at),
-            CONSTRAINT chk_project_event_type CHECK (event_type IN (
-              'PROJECT_CREATED', 'INCIDENT_LINKED', 'INCIDENT_MOVED_IN', 'INCIDENT_MOVED_OUT',
-              'PROJECT_UPDATED', 'PROJECT_CLOSED', 'PROJECT_REOPENED', 'LEGACY_BACKFILL'
-            ))
+            INDEX idx_project_events_incident_created (incident_id, created_at)
         ) ENGINE=InnoDB
         """
     )
-
     op.execute(
         """
         INSERT INTO project_events (
@@ -466,16 +528,8 @@ def downgrade() -> None:
         """
     )
 
-    op.execute(
-        """
-        ALTER TABLE incidents
-          ADD COLUMN project_id BIGINT NULL AFTER id,
-          ADD INDEX idx_incidents_project (project_id),
-          ADD CONSTRAINT fk_incident_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT
-        """
-    )
     op.execute("UPDATE incidents SET project_id = event_group_id")
-
+    op.execute("ALTER TABLE incidents ADD CONSTRAINT fk_incident_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT")
     op.execute("ALTER TABLE incidents DROP FOREIGN KEY fk_incident_approved_by")
     op.execute("ALTER TABLE incidents DROP FOREIGN KEY fk_incident_event_group")
     op.execute("ALTER TABLE incidents DROP INDEX uq_incidents_incident_key")
