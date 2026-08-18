@@ -3,7 +3,7 @@ import AppShell from "../ui/AppShell";
 
 export default function TerrainCrossSectionsPage() {
   return (
-    <AppShell title="Terrain Cross Sections">
+    <AppShell title="Terrain Cross Sections" workspace>
       <TerrainCrossSectionWorkspace />
     </AppShell>
   );
