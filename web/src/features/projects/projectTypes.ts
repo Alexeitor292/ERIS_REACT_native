@@ -91,7 +91,7 @@ export type ProjectAssociationResponse = {
 
 export function milesFromMeters(meters: number): string {
   const miles = meters / 1609.344;
-  if (miles < 160.9344) return `${Math.round(meters * 3.28084)} ft away`;
+  if (miles < 0.1) return `${Math.round(meters * 3.28084)} ft away`;
   return `${miles.toFixed(miles < 10 ? 1 : 0)} mi away`;
 }
 

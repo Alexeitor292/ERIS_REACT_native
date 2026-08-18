@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { api } from "../api/client";
+import type { IncidentClassification, IncidentClassificationQueryResponse } from "../features/incidents/incidentClassification";
+import { classificationLabel } from "../features/incidents/incidentClassification";
 import ProjectDetailMap from "../features/projects/ProjectDetailMap";
 import type { ProjectDetailResponse } from "../features/projects/projectTypes";
 import { projectLocationLabel, projectStatusLabel } from "../features/projects/projectTypes";
@@ -17,11 +19,25 @@ function eventLabel(value: string): string {
   return value.toLowerCase().replace(/_/g, " ").replace(/(^|\s)\S/g, (match) => match.toUpperCase());
 }
 
+function ClassificationCell({ classification }: { classification: IncidentClassification | undefined }) {
+  const label = classificationLabel(classification);
+  const pending = classification?.classification_status === "CLASSIFIED_PENDING_REVIEW";
+  const confirmed = classification?.classification_status === "CLASSIFIED";
+  return (
+    <div>
+      <div className={confirmed || pending ? "font-medium" : "text-muted"}>{label}</div>
+      {pending ? <div className="mt-1 text-xs font-semibold text-[var(--brand)]">Pending assessment review</div> : null}
+      {confirmed ? <div className="mt-1 text-xs text-muted">Confirmed from approved assessment</div> : null}
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const navigate = useNavigate();
   const projectId = Number(params.id);
   const [detail, setDetail] = useState<ProjectDetailResponse | null>(null);
+  const [classifications, setClassifications] = useState<Record<number, IncidentClassification>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +49,15 @@ export default function ProjectDetailPage() {
     setBusy(true);
     setError(null);
     try {
-      setDetail(await api<ProjectDetailResponse>(`/projects/${projectId}`));
+      const nextDetail = await api<ProjectDetailResponse>(`/projects/${projectId}`);
+      setDetail(nextDetail);
+      const classificationResponse = await api<IncidentClassificationQueryResponse>("/incident-classifications/query", {
+        method: "POST",
+        body: JSON.stringify({ incident_ids: nextDetail.incidents.map((incident) => incident.id) }),
+      });
+      setClassifications(
+        Object.fromEntries((classificationResponse.items ?? []).map((classification) => [classification.incident_id, classification]))
+      );
     } catch (e: any) {
       setError(e?.message ?? "Failed to load Project.");
     } finally {
@@ -77,11 +101,11 @@ export default function ProjectDetailPage() {
               <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted">Latest incident activity</div><div className="mt-1 text-sm font-semibold">{formatDate(detail.project.latest_incident_activity_at)}</div></div>
             </div>
 
-            <ProjectDetailMap project={detail.project} incidents={detail.incidents} />
+            <ProjectDetailMap project={detail.project} incidents={detail.incidents} classifications={classifications} />
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
               <section className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
-                <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-3"><h2 className="text-sm font-semibold">Project incidents</h2><p className="mt-0.5 text-xs text-muted">Each Incident retains its own assessment, classification, evidence, and workflow.</p></div>
+                <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-3"><h2 className="text-sm font-semibold">Project incidents</h2><p className="mt-0.5 text-xs text-muted">Each Incident retains its own assessment, classification, evidence, and workflow. Classification is sourced from the assessment, not the Project.</p></div>
                 <div className="overflow-auto">
                   <table className="w-full border-collapse">
                     <thead><tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted"><th className="px-3 py-2.5">Incident</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5">Classification</th><th className="px-3 py-2.5">Status</th><th className="px-3 py-2.5 text-right">Action</th></tr></thead>
@@ -90,9 +114,9 @@ export default function ProjectDetailPage() {
                         <tr key={incident.id} className="border-b border-[var(--line)]/60 last:border-b-0 hover:bg-[var(--panel-soft)]">
                           <td className="px-3 py-3"><div className="text-sm font-semibold">#{incident.id} {incident.title || "Incident"}</div><div className="mt-0.5 text-xs text-muted">Observed {formatDate(incident.first_observed_at)}</div></td>
                           <td className="px-3 py-3 text-sm text-muted">{projectLocationLabel({ district: incident.district, county: incident.county, route: incident.route, post_mile: incident.post_mile })}</td>
-                          <td className="px-3 py-3 text-sm"><span className={incident.incident_type ? "font-medium" : "text-muted"}>{incident.incident_type || "Unclassified · pending assessment"}</span></td>
+                          <td className="px-3 py-3 text-sm"><ClassificationCell classification={classifications[incident.id]} /></td>
                           <td className="px-3 py-3 text-sm text-muted">{incident.status}</td>
-                          <td className="px-3 py-3 text-right"><button type="button" onClick={() => navigate(`/incidents`)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)]">Open in Incidents</button></td>
+                          <td className="px-3 py-3 text-right"><button type="button" onClick={() => navigate("/incidents")} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)]">Open in Incidents</button></td>
                         </tr>
                       ))}
                     </tbody>
