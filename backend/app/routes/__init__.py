@@ -18,6 +18,7 @@ from . import incidents as _incidents  # noqa: E402
 from . import event_groups as _event_groups  # noqa: E402
 from . import event_group_lifecycle as _event_group_lifecycle  # noqa: E402
 from . import incident_approval as _incident_approval  # noqa: E402
+from . import mission_center_event_groups as _mission_center_event_groups  # noqa: E402
 from . import projects as _projects  # noqa: E402
 from . import project_lifecycle as _project_lifecycle  # noqa: E402
 from . import incident_classification as _incident_classification  # noqa: E402
@@ -26,6 +27,7 @@ from . import mission_center_gis as _mission_center_gis  # noqa: E402
 _incidents.router.include_router(_event_groups.router)
 _incidents.router.include_router(_event_group_lifecycle.router)
 _incidents.router.include_router(_incident_approval.router)
+_incidents.router.include_router(_mission_center_event_groups.router)
 _incidents.router.include_router(_projects.router)
 _incidents.router.include_router(_project_lifecycle.router)
 _incidents.router.include_router(_incident_classification.router)
