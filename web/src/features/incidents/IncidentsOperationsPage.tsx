@@ -10,6 +10,8 @@ import AppShell from "../../ui/AppShell";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileValue, normalizeRouteValue } from "../../utils/precision";
 import { canTriage } from "../../utils/roleModel";
 import IncidentCreatePanel from "./IncidentCreatePanel";
+import type { IncidentClassification, IncidentClassificationQueryResponse } from "./incidentClassification";
+import { classificationLabel, classificationStateLabel } from "./incidentClassification";
 import {
   IncidentResolveDialog,
   IncidentTriageDialog,
@@ -33,6 +35,16 @@ function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
   );
 }
 
+function IncidentClassificationText({ classification }: { classification: IncidentClassification | undefined }) {
+  const stateLabel = classificationStateLabel(classification);
+  return (
+    <div>
+      <div className="text-xs text-muted">{classificationLabel(classification)}</div>
+      {stateLabel ? <div className={`mt-0.5 text-[11px] font-semibold ${classification?.confirmed ? "text-[var(--good)]" : "text-[var(--brand)]"}`}>{stateLabel}</div> : null}
+    </div>
+  );
+}
+
 export default function IncidentsOperationsPage() {
   const { me } = useAuth();
   const navigate = useNavigate();
@@ -40,6 +52,7 @@ export default function IncidentsOperationsPage() {
   const isAdmin = !!me?.roles?.includes("ADMIN");
 
   const [items, setItems] = useState<Incident[]>([]);
+  const [classifications, setClassifications] = useState<Record<number, IncidentClassification>>({});
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [assignByIncidentId, setAssignByIncidentId] = useState<Record<number, string>>({});
   const [statusFilter, setStatusFilter] = useState<"ALL" | IncidentStatus>("ALL");
@@ -63,12 +76,21 @@ export default function IncidentsOperationsPage() {
       if (unclaimedOnly) query.set("unclaimed_only", "true");
       const suffix = query.toString() ? `?${query.toString()}` : "";
       const response = await api<{ items: Incident[] }>(`/incidents${suffix}`);
-      setItems(response.items ?? []);
+      const nextItems = response.items ?? [];
 
-      if (isAdmin) {
-        const usersResponse = await api<{ items: AdminUser[] }>("/admin/users");
-        setUsers(usersResponse.items ?? []);
-      }
+      const [classificationResponse, usersResponse] = await Promise.all([
+        api<IncidentClassificationQueryResponse>("/incident-classifications/query", {
+          method: "POST",
+          body: JSON.stringify({ incident_ids: nextItems.map((incident) => incident.id) }),
+        }),
+        isAdmin ? api<{ items: AdminUser[] }>("/admin/users") : Promise.resolve(null),
+      ]);
+
+      setItems(nextItems);
+      setClassifications(
+        Object.fromEntries((classificationResponse.items ?? []).map((classification) => [classification.incident_id, classification]))
+      );
+      if (usersResponse) setUsers(usersResponse.items ?? []);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load incidents.");
     } finally {
@@ -146,7 +168,6 @@ export default function IncidentsOperationsPage() {
         method: "POST",
         body: JSON.stringify({
           title: form.title.trim(),
-          incident_type: form.incident_type.trim() || null,
           description: form.description.trim() || null,
           first_observed_at: form.first_observed_at,
           first_occurred_at: form.first_occurred_at.trim() || null,
@@ -336,8 +357,8 @@ export default function IncidentsOperationsPage() {
                   <tr key={incident.id} className="border-b border-[var(--line)]/60 align-top last:border-b-0 hover:bg-[var(--panel-soft)]">
                     <td className="px-3 py-3 text-sm font-semibold tabular-nums">#{incident.id}</td>
                     <td className="px-3 py-3 text-sm">
-                      <div className="font-semibold">{incident.title}</div>
-                      <div className="text-xs text-muted">{incident.incident_type || "Type not recorded"}</div>
+                      <div className="font-semibold">{incident.title || `Incident #${incident.id}`}</div>
+                      <IncidentClassificationText classification={classifications[incident.id]} />
                     </td>
                     <td className="px-3 py-3 text-sm text-muted tabular-nums">{formatCoordinate(incident.latitude)}, {formatCoordinate(incident.longitude)}</td>
                     <td className="px-3 py-3 text-sm"><IncidentStatusBadge status={incident.status} /></td>
