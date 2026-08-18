@@ -18,7 +18,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -134,6 +134,21 @@ def _aoi(bounds: dict) -> str:
 def _job_urls(service_url: str, job_id: str) -> list[str]:
     root = service_url.rstrip("/")
     return [f"{root}/jobs/{job_id}", f"{root}/exportTiles/jobs/{job_id}"]
+
+
+def _same_origin(left: str, right: str) -> bool:
+    """Whether two HTTPS URLs share scheme, host and effective port."""
+    try:
+        a = urlparse(left)
+        b = urlparse(right)
+        return (
+            a.scheme.lower() == b.scheme.lower()
+            and a.hostname == b.hostname
+            and (a.port or (443 if a.scheme.lower() == "https" else 80))
+            == (b.port or (443 if b.scheme.lower() == "https" else 80))
+        )
+    except Exception:
+        return False
 
 
 def _extract_inline_output_url(job: dict) -> str | None:
@@ -290,8 +305,12 @@ def export_tile_cache_tpkx(
     if not download_url.lower().startswith(("http://", "https://")):
         download_url = urljoin(service_url + "/", download_url)
 
+    # ArcGIS Online commonly returns a pre-signed external object-storage URL.
+    # Adding our ArcGIS credential there would leak it to another origin and can
+    # invalidate that URL's own signature. Only same-origin result URLs receive it.
+    download_params = {"token": token} if _same_origin(download_url, service_url) else None
     try:
-        r = session.get(download_url, params={"token": token}, timeout=max(timeout_s, 120))
+        r = session.get(download_url, params=download_params, timeout=max(timeout_s, 120))
         r.raise_for_status()
         data = bytes(r.content)
     except requests.RequestException as exc:
@@ -366,7 +385,5 @@ def export_imagery_tpkx(
         timeout_s=timeout_s,
         poll_interval_s=poll_interval_s,
         max_wait_s=max_wait_s,
-        # Preserve the service imagery as closely as practical instead of asking
-        # the export job to further optimize/recompress it.
         optimize_tiles_for_size=False,
     )
