@@ -11,6 +11,7 @@ import AssessmentsPage from "./pages/AssessmentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
+import TerrainCrossSectionsPage from "./pages/TerrainCrossSectionsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { AuthProvider } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
@@ -70,6 +71,14 @@ export default function App() {
               <ProtectedRoute>
                 <MissionCenterPage />
               </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/gis/terrain-cross-sections"
+            element={
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
+                <TerrainCrossSectionsPage />
+              </RoleRoute>
             }
           />
           <Route
