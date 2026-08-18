@@ -71,7 +71,8 @@ def _incident_row(db: Session, incident_id: int) -> dict | None:
         text(
             """
             SELECT
-              i.id, i.project_id, i.title, i.description, i.status, i.current_stage,
+              i.id, i.project_id, i.title, i.description, i.incident_type,
+              i.status, i.current_stage,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.first_observed_at, i.first_occurred_at, i.created_at, i.updated_at,
               MAX(isl.submission_id) AS linked_submission_id
@@ -232,6 +233,7 @@ def mission_center_incident_gis(
             "project_id": int(incident["project_id"]) if incident.get("project_id") is not None else None,
             "title": incident.get("title"),
             "description": incident.get("description"),
+            "incident_type": incident.get("incident_type"),
             "status": incident.get("status"),
             "current_stage": incident.get("current_stage"),
             "latitude": float(incident["latitude"]),
