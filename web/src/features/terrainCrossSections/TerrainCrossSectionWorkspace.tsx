@@ -13,7 +13,9 @@ import Compass from "@arcgis/core/widgets/Compass";
 import Search from "@arcgis/core/widgets/Search";
 import * as geodeticDensifyOperator from "@arcgis/core/geometry/operators/geodeticDensifyOperator";
 
+import type { SavedCrossSectionDetail } from "../../api/terrainCrossSections";
 import CrossSectionProfileChart from "./CrossSectionProfileChart";
+import CrossSectionSaveDialog from "./CrossSectionSaveDialog";
 import SceneDualScaleBar from "./SceneDualScaleBar";
 import TerrainSlice3D from "./TerrainSlice3D";
 import {
@@ -78,6 +80,8 @@ export default function TerrainCrossSectionWorkspace() {
   const [activePanel, setActivePanel] = useState<WorkspacePanel | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [profileView, setProfileView] = useState<ProfileView>("profile");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [savedCrossSection, setSavedCrossSection] = useState<SavedCrossSectionDetail | null>(null);
 
   drawingRef.current = drawing;
 
@@ -332,6 +336,7 @@ export default function TerrainCrossSectionWorkspace() {
     setProfileError(null);
     setActivePanel(null);
     setProfileView("profile");
+    setSavedCrossSection(null);
     setDrawing(true);
   }
 
@@ -364,6 +369,7 @@ export default function TerrainCrossSectionWorkspace() {
     setProfileError(null);
     setActivePanel(null);
     setProfileView("profile");
+    setSavedCrossSection(null);
   }
 
   function togglePanel(panel: WorkspacePanel) {
@@ -433,6 +439,12 @@ export default function TerrainCrossSectionWorkspace() {
     point,
     distance: controlDistances[index] ?? 0,
     elevation: nearestSampleElevation(profile, controlDistances[index] ?? 0),
+  }));
+  const savePoints = profileControlRows.map(({ point, distance, elevation }) => ({
+    latitude: point.latitude,
+    longitude: point.longitude,
+    distance_m: distance,
+    elevation_m: elevation,
   }));
 
   const displayedDistanceM = profile?.stats.total_distance_m ?? draftDistanceM;
@@ -506,6 +518,15 @@ export default function TerrainCrossSectionWorkspace() {
 
           <button
             type="button"
+            onClick={() => setSaveDialogOpen(true)}
+            disabled={controlPoints.length < 2 || profileBusy}
+            className="rounded-lg border border-emerald-300/40 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-50 hover:bg-emerald-500/25 disabled:opacity-35"
+          >
+            {savedCrossSection ? "Save changes" : "Save"}
+          </button>
+
+          <button
+            type="button"
             onClick={clearAll}
             disabled={controlPoints.length === 0 || profileBusy}
             className="rounded-lg px-2.5 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15 disabled:opacity-35"
@@ -544,6 +565,11 @@ export default function TerrainCrossSectionWorkspace() {
             {focusMode ? "Exit full screen" : "Full screen"}
           </button>
         </div>
+        {savedCrossSection?.project ? (
+          <div className="pointer-events-auto mt-1 inline-flex rounded-lg border border-emerald-300/30 bg-slate-950/75 px-3 py-1.5 text-[11px] text-emerald-100 backdrop-blur-md">
+            Saved to {savedCrossSection.project.project_number ? `${savedCrossSection.project.project_number} · ` : ""}{savedCrossSection.project.title}
+          </div>
+        ) : null}
       </div>
 
       {drawing ? (
@@ -781,6 +807,18 @@ export default function TerrainCrossSectionWorkspace() {
             <div className="mt-2 max-w-lg text-sm text-white/75">{sceneError ?? "ArcGIS terrain could not be loaded."}</div>
           </div>
         </div>
+      ) : null}
+
+      {saveDialogOpen ? (
+        <CrossSectionSaveDialog
+          draftPoints={savePoints}
+          profile={profile}
+          preferredSpacingM={preferredSpacingM}
+          actualSpacingM={actualSpacingM}
+          currentSaved={savedCrossSection}
+          onClose={() => setSaveDialogOpen(false)}
+          onSaved={setSavedCrossSection}
+        />
       ) : null}
     </div>
   );
