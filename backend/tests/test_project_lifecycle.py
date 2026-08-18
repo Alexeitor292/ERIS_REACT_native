@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 
 pytestmark = pytest.mark.db
 
@@ -27,6 +28,8 @@ def _create_incident(client_db, headers: dict[str, str], post_mile: str) -> int:
 
 
 def test_project_close_reopen_and_active_incident_gate(client_db, admin_token) -> None:
+    from app.db import engine
+
     headers = {"Authorization": f"Bearer {admin_token}"}
     first_incident_id = _create_incident(client_db, headers, "10.0")
 
@@ -85,6 +88,22 @@ def test_project_close_reopen_and_active_incident_gate(client_db, admin_token) -
     assert closed_target.status_code == 409, closed_target.text
     assert "open Project" in str(closed_target.json()["detail"])
 
+    # The same rule is enforced by MariaDB, not only by the API. A direct SQL
+    # attempt cannot attach an Incident to a closed Project.
+    with pytest.raises(Exception):
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE incidents SET project_id = :pid WHERE id = :iid"),
+                {"pid": project_id, "iid": second_incident_id},
+            )
+
+    with engine.begin() as conn:
+        stored_project_id = conn.execute(
+            text("SELECT project_id FROM incidents WHERE id = :iid"),
+            {"iid": second_incident_id},
+        ).scalar()
+    assert stored_project_id is None
+
     reopened = client_db.post(
         f"/projects/{project_id}/reopen",
         headers=headers,
@@ -103,8 +122,18 @@ def test_project_close_reopen_and_active_incident_gate(client_db, admin_token) -
     assert joined.status_code == 200, joined.text
     assert int(joined.json()["project"]["id"]) == project_id
 
+    # Once an active Incident belongs to the reopened Project, direct SQL cannot
+    # close it behind the application's back.
+    with pytest.raises(Exception):
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE projects SET status = 'CLOSED' WHERE id = :pid"),
+                {"pid": project_id},
+            )
+
     detail = client_db.get(f"/projects/{project_id}", headers=headers)
     assert detail.status_code == 200, detail.text
+    assert detail.json()["project"]["status"] == "OPEN"
     event_types = [event["event_type"] for event in detail.json()["events"]]
     assert event_types.count("PROJECT_CLOSED") == 1
     assert event_types.count("PROJECT_REOPENED") == 1
