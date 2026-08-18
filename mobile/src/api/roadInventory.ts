@@ -1,3 +1,4 @@
+import { getToken } from "../auth/tokenStore";
 import { apiFetch, apiFetchBytes } from "./client";
 
 export type RoadInventoryManifest = {
@@ -41,7 +42,9 @@ export async function getRoadInventoryPackage(
 }
 
 export async function downloadRoadInventoryPackage(
-  token: string,
+  _legacyDownloadUrl: string,
 ): Promise<Uint8Array> {
+  const token = await getToken();
+  if (!token) throw new Error("Not authenticated. Please sign in again.");
   return apiFetchBytes("/road-inventory/mobile-package/download", { token });
 }
