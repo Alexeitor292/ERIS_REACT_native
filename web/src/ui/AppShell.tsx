@@ -117,7 +117,15 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-export default function AppShell({ title, children }: { title: string; children: ReactNode }) {
+export default function AppShell({
+  title,
+  children,
+  workspace = false,
+}: {
+  title: string;
+  children: ReactNode;
+  workspace?: boolean;
+}) {
   const { me, logout } = useAuth();
   const { pathname } = useLocation();
   const [navExpanded, setNavExpanded] = useState(true);
@@ -125,8 +133,8 @@ export default function AppShell({ title, children }: { title: string; children:
   const displayName = me?.full_name?.trim() || me?.email || "Signed-in user";
 
   return (
-    <div className="min-h-screen flex flex-col text-[var(--ink)]">
-      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[color:var(--panel)]/95 backdrop-blur">
+    <div className={cn("flex flex-col text-[var(--ink)]", workspace ? "min-h-screen lg:h-screen lg:overflow-hidden" : "min-h-screen")}>
+      <header className="sticky top-0 z-20 shrink-0 border-b border-[var(--line)] bg-[color:var(--panel)]/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-[1900px] items-center gap-3 px-4 py-3 md:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-[var(--brand)] text-xs font-bold tracking-wide text-white">
@@ -155,7 +163,14 @@ export default function AppShell({ title, children }: { title: string; children:
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1900px] flex-1 flex-col gap-4 px-4 py-6 md:px-6 lg:flex-row lg:gap-6">
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[1900px] flex-1 flex-col px-4 md:px-6 lg:flex-row",
+          workspace
+            ? "gap-3 py-3 lg:min-h-0 lg:gap-4"
+            : "gap-4 py-6 lg:gap-6"
+        )}
+      >
         <aside className="lg:hidden">
           <div className="product-card p-3">
             <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>
@@ -190,20 +205,22 @@ export default function AppShell({ title, children }: { title: string; children:
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1">
-          <div className="mb-4">
-            <h1 className="text-xl font-semibold">{title}</h1>
+        <main className={cn("min-w-0 flex-1", workspace ? "lg:flex lg:min-h-0 lg:flex-col" : "")}>
+          <div className={workspace ? "mb-2 shrink-0" : "mb-4"}>
+            <h1 className={workspace ? "text-lg font-semibold" : "text-xl font-semibold"}>{title}</h1>
             <p className="mt-1 max-w-4xl text-sm text-muted">{description}</p>
           </div>
-          <div className="product-card min-h-full overflow-hidden">{children}</div>
+          <div className={cn("product-card overflow-hidden", workspace ? "lg:min-h-0 lg:flex-1" : "min-h-full")}>{children}</div>
         </main>
       </div>
 
-      <footer className="mt-auto border-t border-[var(--line)] bg-[color:var(--panel)]/70">
-        <div className="mx-auto w-full max-w-[1900px] px-4 py-4 text-xs text-muted md:px-6">
-          © {new Date().getFullYear()} Caltrans | ERIS (Internal)
-        </div>
-      </footer>
+      {!workspace ? (
+        <footer className="mt-auto border-t border-[var(--line)] bg-[color:var(--panel)]/70">
+          <div className="mx-auto w-full max-w-[1900px] px-4 py-4 text-xs text-muted md:px-6">
+            © {new Date().getFullYear()} Caltrans | ERIS (Internal)
+          </div>
+        </footer>
+      ) : null}
     </div>
   );
 }

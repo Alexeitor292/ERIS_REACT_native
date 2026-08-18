@@ -28,6 +28,7 @@ import {
 
 type SceneState = "loading" | "ready" | "error";
 type BasemapMode = "satellite" | "topo-vector";
+type WorkspacePanel = "details" | "points" | "settings";
 
 const WGS84 = SpatialReference.WGS84;
 const CALIFORNIA_CENTER: [number, number] = [-119.4179, 36.7783];
@@ -72,6 +73,8 @@ export default function TerrainCrossSectionWorkspace() {
   const [metric, setMetric] = useState(false);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("satellite");
   const [sceneScale, setSceneScale] = useState<number | null>(null);
+  const [activePanel, setActivePanel] = useState<WorkspacePanel | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   drawingRef.current = drawing;
 
@@ -187,6 +190,7 @@ export default function TerrainCrossSectionWorkspace() {
         setProfile(null);
         setActualSpacingM(null);
         setProfileError(null);
+        setProfileOpen(false);
       });
 
       setSceneState("ready");
@@ -251,8 +255,8 @@ export default function TerrainCrossSectionWorkspace() {
           type: "simple-marker",
           style: "circle",
           color: [37, 99, 235, 1],
-          size: 11,
-          outline: { color: [255, 255, 255, 1], width: 2 },
+          size: 9,
+          outline: { color: [255, 255, 255, 1], width: 1.5 },
         } as never,
         attributes: { point_number: index + 1 },
         popupTemplate: {
@@ -268,8 +272,8 @@ export default function TerrainCrossSectionWorkspace() {
           color: [255, 255, 255, 1],
           haloColor: [15, 23, 42, 0.95],
           haloSize: 2,
-          yoffset: 18,
-          font: { size: 11, weight: "bold" },
+          yoffset: 16,
+          font: { size: 10, weight: "bold" },
         } as never,
       }));
     });
@@ -308,6 +312,8 @@ export default function TerrainCrossSectionWorkspace() {
     setProfile(null);
     setActualSpacingM(null);
     setProfileError(null);
+    setActivePanel(null);
+    setProfileOpen(false);
     setDrawing(true);
   }
 
@@ -316,6 +322,8 @@ export default function TerrainCrossSectionWorkspace() {
     setProfile(null);
     setActualSpacingM(null);
     setProfileError(null);
+    setActivePanel(null);
+    setProfileOpen(false);
     setDrawing(true);
   }
 
@@ -325,6 +333,7 @@ export default function TerrainCrossSectionWorkspace() {
     setProfile(null);
     setActualSpacingM(null);
     setProfileError(null);
+    setProfileOpen(false);
   }
 
   function clearAll() {
@@ -334,12 +343,25 @@ export default function TerrainCrossSectionWorkspace() {
     setProfile(null);
     setActualSpacingM(null);
     setProfileError(null);
+    setActivePanel(null);
+    setProfileOpen(false);
   }
 
-  async function buildProfile() {
+  function togglePanel(panel: WorkspacePanel) {
+    setProfileOpen(false);
+    setActivePanel((current) => current === panel ? null : panel);
+  }
+
+  function toggleProfile() {
+    if (!profile) return;
+    setActivePanel(null);
+    setProfileOpen((open) => !open);
+  }
+
+  async function buildProfile(spacingOverride?: number) {
     const map = mapRef.current;
     const view = viewRef.current;
-    if (!map || !view || controlPoints.length < 2) return;
+    if (!map || !view || controlPoints.length < 2 || profileBusy) return;
 
     setDrawing(false);
     setProfileBusy(true);
@@ -352,7 +374,7 @@ export default function TerrainCrossSectionWorkspace() {
       });
       const totalLength = pathLengthMeters(controlPoints);
       const spacing = adaptiveSampleSpacingMeters(totalLength, {
-        preferredSpacingM,
+        preferredSpacingM: spacingOverride ?? preferredSpacingM,
         maxSamples: MAX_RENDER_SAMPLES,
       });
       setActualSpacingM(spacing);
@@ -373,6 +395,8 @@ export default function TerrainCrossSectionWorkspace() {
       const nextProfile = profileFromPath(path, elevation.noDataValue);
       if (!nextProfile) throw new Error("No usable DEM elevation samples were returned for this path.");
       setProfile(nextProfile);
+      setActivePanel(null);
+      setProfileOpen(true);
 
       const profileLine = new Polyline({
         hasZ: true,
@@ -385,6 +409,7 @@ export default function TerrainCrossSectionWorkspace() {
       }
     } catch (error: any) {
       setProfile(null);
+      setProfileOpen(false);
       setProfileError(error?.message ?? "Failed to sample ArcGIS terrain elevation.");
     } finally {
       setProfileBusy(false);
@@ -397,135 +422,334 @@ export default function TerrainCrossSectionWorkspace() {
     elevation: nearestSampleElevation(profile, controlDistances[index] ?? 0),
   }));
 
+  const displayedDistanceM = profile?.stats.total_distance_m ?? draftDistanceM;
+
   return (
-    <div className="flex min-h-[760px] flex-col gap-4 p-4 md:p-5">
-      <div className="flex flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-4 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <div className="text-sm font-semibold">ArcGIS DEM cross-section workspace</div>
-          <div className="mt-1 max-w-4xl text-sm text-muted">
-            Select two or more control points directly on the 3D terrain. ERIS connects them into one continuous cross-section path, samples the ArcGIS elevation surface between them, and plots the resulting profile. This Web tool has no fixed 1.5 km path limit.
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={beginDrawing} disabled={sceneState !== "ready" || profileBusy} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">New cross section</button>
-          {controlPoints.length > 0 && !drawing ? <button type="button" onClick={continueDrawing} disabled={profileBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Add more points</button> : null}
-          <button type="button" onClick={undoLastPoint} disabled={controlPoints.length === 0 || profileBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Undo point</button>
-          <button type="button" onClick={clearAll} disabled={controlPoints.length === 0 || profileBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium text-[var(--bad)] hover:bg-[var(--panel-soft)] disabled:opacity-50">Clear</button>
-        </div>
-      </div>
+    <div className="relative h-full min-h-[620px] overflow-hidden bg-[#0f172a]">
+      <div ref={containerRef} className="absolute inset-0" />
 
-      <div className="grid flex-1 items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(520px,0.85fr)]">
-        <div className="relative min-h-[560px] overflow-hidden rounded-xl border border-[var(--line)] bg-[#0f172a] xl:sticky xl:top-[82px] xl:h-[calc(100vh-110px)] xl:max-h-[780px]">
-          <div ref={containerRef} className="absolute inset-0" />
+      <div className="pointer-events-none absolute left-14 top-3 z-30 max-w-[calc(100%-360px)]">
+        <div className="pointer-events-auto flex flex-wrap items-center gap-1 rounded-xl border border-white/20 bg-slate-950/80 p-1.5 text-white shadow-lg backdrop-blur-md">
+          <button
+            type="button"
+            onClick={beginDrawing}
+            disabled={sceneState !== "ready" || profileBusy}
+            className="rounded-lg bg-[var(--brand)] px-3 py-2 text-xs font-semibold text-white hover:brightness-95 disabled:opacity-50"
+          >
+            + New
+          </button>
 
-          <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[min(90%,520px)] rounded-lg bg-black/60 px-3 py-2 text-white backdrop-blur-sm">
-            <div className="text-xs font-semibold">Terrain Cross Sections</div>
-            <div className="mt-0.5 text-[11px] text-white/75">
-              {drawing
-                ? `Drawing active — click the DEM to place P${controlPoints.length + 1}. Pan/rotate with drag; use Finish profile when ready.`
-                : controlPoints.length >= 2
-                  ? "Selection complete. Build the profile or add more control points."
-                  : "Search or navigate to an area, then start a new cross section."}
-            </div>
-          </div>
-
-          <div className="absolute bottom-3 left-3 z-10 flex overflow-hidden rounded-lg border border-white/20 bg-black/55 text-[11px] text-white backdrop-blur-sm">
-            {(["satellite", "topo-vector"] as BasemapMode[]).map((mode) => (
-              <button key={mode} type="button" onClick={() => setBasemapMode(mode)} className={`px-3 py-2 ${basemapMode === mode ? "bg-white/20 font-semibold" : "hover:bg-white/10"}`}>{mode === "satellite" ? "Imagery" : "Topographic"}</button>
-            ))}
-          </div>
-
-          <SceneDualScaleBar scale={sceneScale} />
-
-          {sceneState === "loading" ? (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0f172a]/80 text-sm text-white">Loading ArcGIS 3D terrain…</div>
-          ) : null}
-          {sceneState === "error" ? (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0f172a]/90 p-8 text-center text-white">
-              <div><div className="text-base font-semibold">3D terrain unavailable</div><div className="mt-2 max-w-lg text-sm text-white/75">{sceneError ?? "ArcGIS terrain could not be loaded."}</div></div>
-            </div>
-          ) : null}
-        </div>
-
-        <aside className="flex min-h-0 flex-col gap-3">
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div><div className="text-sm font-semibold">Cross-section controls</div><div className="mt-0.5 text-xs text-muted">No Incident or Submission is required.</div></div>
-              <div className="inline-flex overflow-hidden rounded-md border border-[var(--line)] text-xs">
-                <button type="button" onClick={() => setMetric(false)} className={`px-2.5 py-1.5 ${!metric ? "bg-[var(--brand)] text-white" : "bg-[var(--panel-soft)]"}`}>US</button>
-                <button type="button" onClick={() => setMetric(true)} className={`px-2.5 py-1.5 ${metric ? "bg-[var(--brand)] text-white" : "bg-[var(--panel-soft)]"}`}>Metric</button>
-              </div>
-            </div>
-
-            <label className="mt-4 grid gap-1.5 text-xs font-semibold text-muted">
-              Preferred DEM sample spacing
-              <select value={preferredSpacingM} onChange={(event) => setPreferredSpacingM(Number(event.target.value))} disabled={profileBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal text-[var(--ink)]">
-                <option value={5}>5 m — high detail</option>
-                <option value={10}>10 m — default</option>
-                <option value={25}>25 m — long transects</option>
-                <option value={50}>50 m — regional</option>
-              </select>
-            </label>
-            <div className="mt-2 text-[11px] leading-5 text-muted">Very long paths are not rejected. ERIS increases the actual spacing only when necessary to keep the profile within approximately {MAX_RENDER_SAMPLES.toLocaleString()} render samples.</div>
-
-            <button type="button" onClick={buildProfile} disabled={controlPoints.length < 2 || profileBusy || sceneState !== "ready"} className="mt-4 w-full rounded-md bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">
-              {profileBusy ? "Sampling DEM…" : drawing ? "Finish & build profile" : profile ? "Rebuild profile" : "Build cross section"}
+          {controlPoints.length > 0 && !drawing ? (
+            <button
+              type="button"
+              onClick={continueDrawing}
+              disabled={profileBusy}
+              className="rounded-lg px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10 disabled:opacity-50"
+            >
+              Add points
             </button>
-            {profileError ? <div role="alert" className="mt-3 rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-xs text-[var(--bad)]">{profileError}</div> : null}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 2xl:grid-cols-3">
-            <MetricCard label="Path distance" value={formatHorizontalDistance(profile?.stats.total_distance_m ?? draftDistanceM, metric)} />
-            <MetricCard label="DEM samples" value={profile ? profile.stats.sample_count.toLocaleString() : "—"} />
-            <MetricCard label="Actual spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
-            <MetricCard label="Min elevation" value={profile ? formatElevation(profile.stats.min_elevation_m, metric) : "—"} />
-            <MetricCard label="Max elevation" value={profile ? formatElevation(profile.stats.max_elevation_m, metric) : "—"} />
-            <MetricCard label="Elevation range" value={profile ? formatElevation(profile.stats.elevation_range_m, metric) : "—"} />
-          </div>
-
-          {profile ? (
-            <>
-              <CrossSectionProfileChart profile={profile} controlDistances={controlDistances} metric={metric} onHoverSample={showHoverSample} />
-              <div className="grid grid-cols-2 gap-3">
-                <MetricCard label="Cumulative gain" value={formatElevation(profile.stats.elevation_gain_m, metric)} />
-                <MetricCard label="Cumulative loss" value={formatElevation(profile.stats.elevation_loss_m, metric)} />
-                <MetricCard label="Start elevation" value={formatElevation(profile.samples[0].elevation_m, metric)} />
-                <MetricCard label="End elevation" value={formatElevation(profile.samples[profile.samples.length - 1].elevation_m, metric)} />
-              </div>
-            </>
           ) : null}
 
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold">Selected control points</div>
-              <div className="text-xs font-semibold tabular-nums text-muted">{controlPoints.length} point{controlPoints.length === 1 ? "" : "s"}</div>
-            </div>
-            {controlPoints.length === 0 ? (
-              <div className="mt-3 rounded-lg border border-dashed border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">Start a cross section, then click the DEM to add P1, P2, P3, and additional vertices.</div>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {profileControlRows.map(({ point, distance, elevation }, index) => (
-                  <div key={pointKey(point)} className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3">
-                    <div className="flex items-center justify-between"><div className="text-sm font-semibold">P{index + 1}</div><div className="text-xs font-medium text-[var(--brand)]">{formatHorizontalDistance(distance, metric)}</div></div>
-                    <div className="mt-1 text-xs tabular-nums text-muted">{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</div>
-                    <div className="mt-1 text-xs text-muted">Elevation: <span className="font-medium text-[var(--ink)]">{elevation == null ? "Sample profile to resolve" : formatElevation(elevation, metric)}</span></div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <button
+            type="button"
+            onClick={undoLastPoint}
+            disabled={controlPoints.length === 0 || profileBusy}
+            className="rounded-lg px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10 disabled:opacity-35"
+          >
+            Undo
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void buildProfile()}
+            disabled={controlPoints.length < 2 || profileBusy || sceneState !== "ready"}
+            className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-35"
+          >
+            {profileBusy ? "Sampling…" : drawing ? "Finish & profile" : profile ? "Rebuild" : "Build profile"}
+          </button>
+
+          <button
+            type="button"
+            onClick={clearAll}
+            disabled={controlPoints.length === 0 || profileBusy}
+            className="rounded-lg px-2.5 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15 disabled:opacity-35"
+            title="Clear cross section"
+          >
+            Clear
+          </button>
+
+          <div className="mx-1 h-5 w-px bg-white/20" />
+
+          <div className="inline-flex overflow-hidden rounded-lg border border-white/20 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setMetric(false)}
+              className={`px-2.5 py-2 ${!metric ? "bg-white text-slate-900" : "text-white/80 hover:bg-white/10"}`}
+            >
+              US
+            </button>
+            <button
+              type="button"
+              onClick={() => setMetric(true)}
+              className={`px-2.5 py-2 ${metric ? "bg-white text-slate-900" : "text-white/80 hover:bg-white/10"}`}
+            >
+              Metric
+            </button>
           </div>
-        </aside>
+        </div>
       </div>
 
+      {drawing ? (
+        <div className="pointer-events-none absolute left-14 top-16 z-20 rounded-lg border border-white/15 bg-black/65 px-3 py-2 text-xs font-medium text-white shadow backdrop-blur-sm">
+          Click terrain to place P{controlPoints.length + 1}
+          {controlPoints.length >= 2 ? <span className="ml-2 text-white/65">Finish when the path is complete.</span> : null}
+        </div>
+      ) : null}
+
+      <div className="absolute right-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-white/20 bg-slate-950/75 p-1.5 text-white shadow-lg backdrop-blur-md">
+        <MapPanelButton label="Stats" active={activePanel === "details"} onClick={() => togglePanel("details")} />
+        <MapPanelButton label={`Points ${controlPoints.length}`} active={activePanel === "points"} onClick={() => togglePanel("points")} />
+        <MapPanelButton label="Setup" active={activePanel === "settings"} onClick={() => togglePanel("settings")} />
+      </div>
+
+      <aside
+        className={`absolute bottom-20 right-16 top-20 z-30 w-[min(360px,calc(100%-5rem))] overflow-y-auto rounded-xl border border-[var(--line)] bg-[color:var(--panel)]/96 text-[var(--ink)] shadow-2xl backdrop-blur-md transition-all duration-200 ${activePanel ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-5 opacity-0"}`}
+        aria-hidden={!activePanel}
+      >
+        {activePanel ? (
+          <>
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--line)] bg-[color:var(--panel)]/95 px-4 py-3 backdrop-blur-md">
+              <div>
+                <div className="text-sm font-semibold">
+                  {activePanel === "details" ? "Cross-section statistics" : activePanel === "points" ? "Control points" : "Cross-section setup"}
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted">
+                  {activePanel === "details"
+                    ? "DEM profile measurements"
+                    : activePanel === "points"
+                      ? `${controlPoints.length} selected point${controlPoints.length === 1 ? "" : "s"}`
+                      : "Sampling and map display"}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel-soft)] text-sm font-semibold hover:bg-[var(--panel)]"
+                aria-label="Close panel"
+              >
+                ×
+              </button>
+            </div>
+
+            {activePanel === "details" ? (
+              <div className="grid grid-cols-2 gap-px bg-[var(--line)]">
+                <DrawerMetric label="Path" value={formatHorizontalDistance(displayedDistanceM, metric)} />
+                <DrawerMetric label="Samples" value={profile ? profile.stats.sample_count.toLocaleString() : "—"} />
+                <DrawerMetric label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
+                <DrawerMetric label="Elevation range" value={profile ? formatElevation(profile.stats.elevation_range_m, metric) : "—"} />
+                <DrawerMetric label="Minimum" value={profile ? formatElevation(profile.stats.min_elevation_m, metric) : "—"} />
+                <DrawerMetric label="Maximum" value={profile ? formatElevation(profile.stats.max_elevation_m, metric) : "—"} />
+                <DrawerMetric label="Gain" value={profile ? formatElevation(profile.stats.elevation_gain_m, metric) : "—"} />
+                <DrawerMetric label="Loss" value={profile ? formatElevation(profile.stats.elevation_loss_m, metric) : "—"} />
+                <DrawerMetric label="Start" value={profile ? formatElevation(profile.samples[0].elevation_m, metric) : "—"} />
+                <DrawerMetric label="End" value={profile ? formatElevation(profile.samples[profile.samples.length - 1].elevation_m, metric) : "—"} />
+              </div>
+            ) : null}
+
+            {activePanel === "points" ? (
+              <div>
+                {controlPoints.length === 0 ? (
+                  <div className="p-5 text-sm text-muted">Start a cross section and click the terrain to place control points.</div>
+                ) : (
+                  profileControlRows.map(({ point, distance, elevation }, index) => (
+                    <div key={pointKey(point)} className="border-b border-[var(--line)] px-4 py-3 last:border-b-0">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold">P{index + 1}</div>
+                        <div className="text-xs font-semibold tabular-nums text-[var(--brand)]">{formatHorizontalDistance(distance, metric)}</div>
+                      </div>
+                      <div className="mt-1 text-xs tabular-nums text-muted">{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</div>
+                      <div className="mt-1 text-xs text-muted">
+                        Elevation <span className="font-medium text-[var(--ink)]">{elevation == null ? "Sample profile to resolve" : formatElevation(elevation, metric)}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+
+            {activePanel === "settings" ? (
+              <div className="space-y-5 p-4">
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted">DEM sample spacing</div>
+                  <select
+                    value={preferredSpacingM}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      setPreferredSpacingM(next);
+                      if (profile && !drawing) void buildProfile(next);
+                    }}
+                    disabled={profileBusy}
+                    className="w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+                  >
+                    <option value={5}>5 m — high detail</option>
+                    <option value={10}>10 m — default</option>
+                    <option value={25}>25 m — long transects</option>
+                    <option value={50}>50 m — regional</option>
+                  </select>
+                  <div className="mt-2 text-xs leading-5 text-muted">
+                    Long paths remain allowed. ERIS increases actual spacing only when needed to stay within approximately {MAX_RENDER_SAMPLES.toLocaleString()} render samples.
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted">Basemap</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBasemapMode("satellite")}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium ${basemapMode === "satellite" ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]" : "border-[var(--line)] bg-[var(--panel-soft)]"}`}
+                    >
+                      Imagery
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBasemapMode("topo-vector")}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium ${basemapMode === "topo-vector" ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]" : "border-[var(--line)] bg-[var(--panel-soft)]"}`}
+                    >
+                      Topographic
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-xs leading-5 text-muted">
+                  This tool samples the ArcGIS ground elevation surface directly. No Incident or Submission is required.
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </aside>
+
+      <div className="absolute bottom-3 left-3 z-20 flex overflow-hidden rounded-lg border border-white/20 bg-black/55 text-[11px] text-white backdrop-blur-sm">
+        {(["satellite", "topo-vector"] as BasemapMode[]).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setBasemapMode(mode)}
+            className={`px-3 py-2 ${basemapMode === mode ? "bg-white/20 font-semibold" : "hover:bg-white/10"}`}
+          >
+            {mode === "satellite" ? "Imagery" : "Topographic"}
+          </button>
+        ))}
+      </div>
+
+      {!profileOpen ? <SceneDualScaleBar scale={sceneScale} /> : null}
+
+      {profile ? (
+        <button
+          type="button"
+          onClick={toggleProfile}
+          className={`absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-xl border border-white/20 bg-slate-950/80 px-4 py-2.5 text-left text-white shadow-lg backdrop-blur-md transition-opacity ${profileOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}
+        >
+          <div className="flex items-center gap-4 text-xs">
+            <span className="font-semibold text-white">Profile ↑</span>
+            <span><strong>{formatHorizontalDistance(profile.stats.total_distance_m, metric)}</strong> path</span>
+            <span><strong>{profile.stats.sample_count.toLocaleString()}</strong> samples</span>
+            <span><strong>{actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`}</strong> spacing</span>
+            <span className="hidden xl:inline"><strong>{formatElevation(profile.stats.elevation_range_m, metric)}</strong> range</span>
+          </div>
+        </button>
+      ) : controlPoints.length >= 2 && !drawing ? (
+        <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur-sm">
+          {formatHorizontalDistance(draftDistanceM, metric)} path selected · Build profile to sample the DEM
+        </div>
+      ) : null}
+
+      {profile && profileOpen ? (
+        <section className="absolute inset-x-0 bottom-0 z-40 h-[44%] min-h-[330px] max-h-[470px] overflow-y-auto border-t border-[var(--line)] bg-[color:var(--panel)]/98 text-[var(--ink)] shadow-2xl backdrop-blur-md">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-[var(--line)] bg-[color:var(--panel)]/96 px-4 py-2.5 backdrop-blur-md">
+            <button
+              type="button"
+              onClick={toggleProfile}
+              className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--panel)]"
+            >
+              ↓ Profile
+            </button>
+            <CompactStat label="Path" value={formatHorizontalDistance(profile.stats.total_distance_m, metric)} />
+            <CompactStat label="Samples" value={profile.stats.sample_count.toLocaleString()} />
+            <CompactStat label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
+            <CompactStat label="Min" value={formatElevation(profile.stats.min_elevation_m, metric)} />
+            <CompactStat label="Max" value={formatElevation(profile.stats.max_elevation_m, metric)} />
+            <CompactStat label="Gain / loss" value={`${formatElevation(profile.stats.elevation_gain_m, metric)} / ${formatElevation(profile.stats.elevation_loss_m, metric)}`} />
+          </div>
+          <div className="p-3">
+            <CrossSectionProfileChart
+              profile={profile}
+              controlDistances={controlDistances}
+              metric={metric}
+              onHoverSample={showHoverSample}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {profileError ? (
+        <div role="alert" className="absolute left-1/2 top-20 z-40 max-w-xl -translate-x-1/2 rounded-lg border border-red-300/50 bg-red-950/85 px-4 py-3 text-sm text-red-50 shadow-xl backdrop-blur-md">
+          {profileError}
+        </div>
+      ) : null}
+
+      {sceneState === "loading" ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0f172a]/80 text-sm text-white">Loading ArcGIS 3D terrain…</div>
+      ) : null}
+
+      {sceneState === "error" ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0f172a]/90 p-8 text-center text-white">
+          <div>
+            <div className="text-base font-semibold">3D terrain unavailable</div>
+            <div className="mt-2 max-w-lg text-sm text-white/75">{sceneError ?? "ArcGIS terrain could not be loaded."}</div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MapPanelButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`min-w-16 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${active ? "bg-white text-slate-900" : "text-white/85 hover:bg-white/10 hover:text-white"}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function DrawerMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-[var(--panel)] p-3">
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">{label}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
+      <div className="mt-1 text-sm font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function CompactStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline gap-1.5 text-xs">
+      <span className="text-muted">{label}</span>
+      <span className="font-semibold tabular-nums">{value}</span>
     </div>
   );
 }
