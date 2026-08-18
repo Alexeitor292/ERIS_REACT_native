@@ -17,14 +17,14 @@ function pageDescription(pathname: string) {
   if (/^\/submissions\/[^/]+$/.test(pathname)) {
     return "Inspect field data, mapped evidence, attachments, terrain context, and review history.";
   }
-  if (/^\/projects\/[^/]+$/.test(pathname)) {
-    return "Review the Project area, associated Incidents, and Project history.";
+  if (/^\/event-groups\/[^/]+$/.test(pathname)) {
+    return "Review shared Event Group context and the independent Incidents associated with it.";
   }
 
   const descriptions: Array<[string, string]> = [
-    ["/mission-center", "Explore California Projects, Incidents, saved geometry, and mapped field-photo evidence through ArcGIS."],
+    ["/mission-center", "Explore California Event Groups, Incidents, saved geometry, and mapped field-photo evidence through ArcGIS."],
     ["/gis/terrain-cross-sections", "Create multi-point terrain cross sections directly on the ArcGIS DEM without an Incident or Submission."],
-    ["/projects", "Manage operational Projects and the Incidents grouped under each response area."],
+    ["/event-groups", "Manage Event Groups used as shared grouping attributes across independent Incidents."],
     ["/incidents", "Manage emergency events and coordinate the field records associated with them."],
     ["/assessments", "Review geotechnical assessments and supporting field information."],
     ["/submissions", "Find, inspect, and review field submissions received by ERIS."],
@@ -59,25 +59,10 @@ function NavItem({ to, label, collapsed }: { to: string; label: string; collapse
   );
 }
 
-function NavGroup({
-  label,
-  collapsed,
-  children,
-}: {
-  label: string;
-  collapsed?: boolean;
-  children: ReactNode;
-}) {
+function NavGroup({ label, collapsed, children }: { label: string; collapsed?: boolean; children: ReactNode }) {
   return (
     <div>
-      <div
-        className={cn(
-          "mb-1 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted",
-          collapsed ? "sr-only" : ""
-        )}
-      >
-        {label}
-      </div>
+      <div className={cn("mb-1 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted", collapsed ? "sr-only" : "")}>{label}</div>
       <nav className="space-y-1">{children}</nav>
     </div>
   );
@@ -91,7 +76,7 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
     <div className="space-y-5">
       <NavGroup label="Operations" collapsed={collapsed}>
         {operational ? <NavItem to="/mission-center" label="Mission Center" collapsed={collapsed} /> : null}
-        {operational ? <NavItem to="/projects" label="Projects" collapsed={collapsed} /> : null}
+        {operational ? <NavItem to="/event-groups" label="Event Groups" collapsed={collapsed} /> : null}
         <NavItem to="/incidents" label="Incidents" collapsed={collapsed} />
         <NavItem to="/assessments" label="Assessments" collapsed={collapsed} />
         <NavItem to="/submissions" label="Submissions" collapsed={collapsed} />
@@ -117,15 +102,7 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-export default function AppShell({
-  title,
-  children,
-  workspace = false,
-}: {
-  title: string;
-  children: ReactNode;
-  workspace?: boolean;
-}) {
+export default function AppShell({ title, children, workspace = false }: { title: string; children: ReactNode; workspace?: boolean }) {
   const { me, logout } = useAuth();
   const { pathname } = useLocation();
   const [navExpanded, setNavExpanded] = useState(true);
@@ -137,90 +114,34 @@ export default function AppShell({
       <header className="sticky top-0 z-20 shrink-0 border-b border-[var(--line)] bg-[color:var(--panel)]/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-[1900px] items-center gap-3 px-4 py-3 md:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-[var(--brand)] text-xs font-bold tracking-wide text-white">
-              ERIS
-            </div>
-            <div className="min-w-0 leading-tight">
-              <div className="truncate text-sm font-semibold">Emergency Response Information System</div>
-              <div className="truncate text-xs text-muted">Caltrans | Geotechnical Services</div>
-            </div>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-[var(--brand)] text-xs font-bold tracking-wide text-white">ERIS</div>
+            <div className="min-w-0 leading-tight"><div className="truncate text-sm font-semibold">Emergency Response Information System</div><div className="truncate text-xs text-muted">Caltrans | Geotechnical Services</div></div>
           </div>
-
           <div className="ml-auto flex items-center gap-3">
-            <div className="hidden text-right md:block">
-              <div className="max-w-64 truncate text-sm font-medium">{displayName}</div>
-              <div className="text-xs text-muted">{me?.roles?.join(" · ") || "ERIS user"}</div>
-            </div>
-
-            <button
-              type="button"
-              onClick={logout}
-              className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]"
-            >
-              Sign out
-            </button>
+            <div className="hidden text-right md:block"><div className="max-w-64 truncate text-sm font-medium">{displayName}</div><div className="text-xs text-muted">{me?.roles?.join(" · ") || "ERIS user"}</div></div>
+            <button type="button" onClick={logout} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Sign out</button>
           </div>
         </div>
       </header>
 
-      <div
-        className={cn(
-          "mx-auto flex w-full max-w-[1900px] flex-1 flex-col px-4 md:px-6 lg:flex-row",
-          workspace
-            ? "gap-3 py-3 lg:min-h-0 lg:gap-4"
-            : "gap-4 py-6 lg:gap-6"
-        )}
-      >
-        <aside className="lg:hidden">
-          <div className="product-card p-3">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>
-            <SidebarNavigation />
-          </div>
-        </aside>
-
-        <aside
-          className={cn(
-            "hidden shrink-0 transition-[width] duration-200 ease-out lg:block",
-            navExpanded ? "w-64" : "w-16"
-          )}
-        >
+      <div className={cn("mx-auto flex w-full max-w-[1900px] flex-1 flex-col px-4 md:px-6 lg:flex-row", workspace ? "gap-3 py-3 lg:min-h-0 lg:gap-4" : "gap-4 py-6 lg:gap-6")}>
+        <aside className="lg:hidden"><div className="product-card p-3"><div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div><SidebarNavigation /></div></aside>
+        <aside className={cn("hidden shrink-0 transition-[width] duration-200 ease-out lg:block", navExpanded ? "w-64" : "w-16")}>
           <div className="product-card sticky top-[82px] p-2">
             <div className={cn("mb-3 flex items-center", navExpanded ? "justify-between px-1" : "justify-center")}>
-              {navExpanded && (
-                <div className="px-2 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>
-              )}
-              <button
-                type="button"
-                aria-label={navExpanded ? "Collapse navigation" : "Expand navigation"}
-                aria-expanded={navExpanded}
-                title={navExpanded ? "Collapse navigation" : "Expand navigation"}
-                onClick={() => setNavExpanded((expanded) => !expanded)}
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel)] text-sm font-semibold text-muted hover:bg-[var(--panel-soft)] hover:text-[var(--ink)]"
-              >
-                {navExpanded ? "‹" : "›"}
-              </button>
+              {navExpanded && <div className="px-2 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>}
+              <button type="button" aria-label={navExpanded ? "Collapse navigation" : "Expand navigation"} aria-expanded={navExpanded} title={navExpanded ? "Collapse navigation" : "Expand navigation"} onClick={() => setNavExpanded((expanded) => !expanded)} className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel)] text-sm font-semibold text-muted hover:bg-[var(--panel-soft)] hover:text-[var(--ink)]">{navExpanded ? "‹" : "›"}</button>
             </div>
-
             <SidebarNavigation collapsed={!navExpanded} />
           </div>
         </aside>
-
         <main className={cn("min-w-0 flex-1", workspace ? "lg:flex lg:min-h-0 lg:flex-col" : "")}>
-          <div className={workspace ? "mb-2 shrink-0" : "mb-4"}>
-            <h1 className={workspace ? "text-lg font-semibold" : "text-xl font-semibold"}>{title}</h1>
-            <p className="mt-1 max-w-4xl text-sm text-muted">{description}</p>
-          </div>
+          <div className={workspace ? "mb-2 shrink-0" : "mb-4"}><h1 className={workspace ? "text-lg font-semibold" : "text-xl font-semibold"}>{title}</h1><p className="mt-1 max-w-4xl text-sm text-muted">{description}</p></div>
           <div className={cn("product-card overflow-hidden", workspace ? "lg:min-h-0 lg:flex-1" : "min-h-full")}>{children}</div>
         </main>
       </div>
 
-      {!workspace ? (
-        <footer className="mt-auto border-t border-[var(--line)] bg-[color:var(--panel)]/70">
-          <div className="mx-auto w-full max-w-[1900px] px-4 py-4 text-xs text-muted md:px-6">
-            © {new Date().getFullYear()} Caltrans | ERIS (Internal)
-          </div>
-        </footer>
-      ) : null}
+      {!workspace ? <footer className="mt-auto border-t border-[var(--line)] bg-[color:var(--panel)]/70"><div className="mx-auto w-full max-w-[1900px] px-4 py-4 text-xs text-muted md:px-6">© {new Date().getFullYear()} Caltrans | ERIS (Internal)</div></footer> : null}
     </div>
   );
 }

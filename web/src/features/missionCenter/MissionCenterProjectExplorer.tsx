@@ -5,8 +5,9 @@ import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import type { IncidentClassification, IncidentClassificationQueryResponse } from "../incidents/incidentClassification";
 import { classificationLabel, classificationStateLabel } from "../incidents/incidentClassification";
-import type { ProjectDetailResponse, ProjectStatus, ProjectSummary } from "../projects/projectTypes";
-import { projectLocationLabel, projectStatusLabel } from "../projects/projectTypes";
+import type { EventGroupDetailResponse, EventGroupStatus, EventGroupSummary } from "../eventGroups/eventGroupTypes";
+import { eventGroupLocationLabel, eventGroupStatusLabel } from "../eventGroups/eventGroupTypes";
+import type { ProjectDetailResponse, ProjectSummary } from "../projects/projectTypes";
 import AppShell from "../../ui/AppShell";
 import { formatCoordinate } from "../../utils/precision";
 import { isOperationalUser } from "../../utils/roleModel";
@@ -15,7 +16,6 @@ import {
   projectSearchMatch,
   type MissionCenterIncidentGis,
   type MissionCenterMode,
-  type MissionCenterProjectPage,
 } from "./missionCenterGisModel";
 
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -25,6 +25,54 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
 });
+
+type MissionCenterEventGroupPage = {
+  items: EventGroupSummary[];
+  has_more: boolean;
+  next_cursor: number | null;
+};
+
+function groupToMapProject(group: EventGroupSummary): ProjectSummary {
+  return {
+    ...group,
+    project_uuid: group.event_group_key,
+  };
+}
+
+function detailToMapProject(detail: EventGroupDetailResponse): ProjectDetailResponse {
+  return {
+    project: groupToMapProject(detail.event_group),
+    incidents: detail.incidents.map((incident) => ({
+      id: incident.id,
+      project_id: incident.event_group_id,
+      title: incident.title,
+      incident_type: incident.incident_type,
+      status: incident.status,
+      current_stage: incident.current_stage,
+      latitude: incident.latitude,
+      longitude: incident.longitude,
+      district: incident.district,
+      county: incident.county,
+      route: incident.route,
+      post_mile: incident.post_mile,
+      first_observed_at: incident.first_observed_at,
+      created_at: incident.created_at,
+      updated_at: incident.updated_at,
+    })),
+    events: detail.events.map((event) => ({
+      id: event.id,
+      project_id: event.event_group_id,
+      incident_id: event.incident_id,
+      actor_user_id: event.actor_user_id,
+      actor_name: event.actor_name,
+      actor_email: event.actor_email,
+      event_type: event.event_type,
+      notes: event.notes,
+      metadata: event.metadata,
+      created_at: event.created_at,
+    })),
+  };
+}
 
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return "—";
@@ -46,15 +94,15 @@ function StatusPill({ label, tone = "neutral" }: { label: string; tone?: "neutra
 export default function MissionCenterProjectExplorer() {
   const navigate = useNavigate();
   const { me } = useAuth();
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [projectDetail, setProjectDetail] = useState<ProjectDetailResponse | null>(null);
+  const [eventGroups, setEventGroups] = useState<EventGroupSummary[]>([]);
+  const [selectedEventGroupId, setSelectedEventGroupId] = useState<number | null>(null);
+  const [eventGroupDetail, setEventGroupDetail] = useState<EventGroupDetailResponse | null>(null);
   const [classifications, setClassifications] = useState<Record<number, IncidentClassification>>({});
   const [selectedIncidentId, setSelectedIncidentId] = useState<number | null>(null);
   const [incidentGis, setIncidentGis] = useState<MissionCenterIncidentGis | null>(null);
-  const [projectSearch, setProjectSearch] = useState("");
-  const [projectStatus, setProjectStatus] = useState<"ALL" | ProjectStatus>("ALL");
-  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [eventGroupSearch, setEventGroupSearch] = useState("");
+  const [eventGroupStatus, setEventGroupStatus] = useState<"ALL" | EventGroupStatus>("ALL");
+  const [loadingGroups, setLoadingGroups] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingEvidence, setLoadingEvidence] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,41 +110,41 @@ export default function MissionCenterProjectExplorer() {
 
   const mode: MissionCenterMode = selectedIncidentId != null && incidentGis
     ? "INCIDENT"
-    : selectedProjectId != null && projectDetail
+    : selectedEventGroupId != null && eventGroupDetail
       ? "PROJECT"
       : "PROJECTS";
 
-  const loadProjects = useCallback(async () => {
+  const loadEventGroups = useCallback(async () => {
     if (!isOperationalUser(me?.roles)) return;
-    setLoadingProjects(true);
+    setLoadingGroups(true);
     setError(null);
     try {
-      const all: ProjectSummary[] = [];
+      const all: EventGroupSummary[] = [];
       let cursor: number | null = null;
       for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
         const query = new URLSearchParams({ limit: "1000" });
         if (cursor != null) query.set("after_id", String(cursor));
-        const page = await api<MissionCenterProjectPage>(`/mission-center/projects?${query.toString()}`);
+        const page = await api<MissionCenterEventGroupPage>(`/mission-center/event-groups?${query.toString()}`);
         all.push(...(page.items ?? []));
         if (!page.has_more || page.next_cursor == null) break;
-        if (page.next_cursor === cursor) throw new Error("Project map pagination did not advance.");
+        if (page.next_cursor === cursor) throw new Error("Event Group map pagination did not advance.");
         cursor = page.next_cursor;
       }
-      setProjects(all);
+      setEventGroups(all);
       setLastUpdatedAt(new Date());
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load statewide Project GIS data.");
+      setError(e?.message ?? "Failed to load statewide Event Group GIS data.");
     } finally {
-      setLoadingProjects(false);
+      setLoadingGroups(false);
     }
   }, [me?.roles]);
 
-  const loadProject = useCallback(async (projectId: number) => {
+  const loadEventGroup = useCallback(async (eventGroupId: number) => {
     setLoadingDetail(true);
     setError(null);
     try {
-      const detail = await api<ProjectDetailResponse>(`/projects/${projectId}`);
-      setProjectDetail(detail);
+      const detail = await api<EventGroupDetailResponse>(`/event-groups/${eventGroupId}`);
+      setEventGroupDetail(detail);
       const ids = detail.incidents.map((incident) => incident.id);
       if (ids.length > 0) {
         const response = await api<IncidentClassificationQueryResponse>("/incident-classifications/query", {
@@ -108,21 +156,21 @@ export default function MissionCenterProjectExplorer() {
         setClassifications({});
       }
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load Project details.");
-      setProjectDetail(null);
+      setError(e?.message ?? "Failed to load Event Group details.");
+      setEventGroupDetail(null);
     } finally {
       setLoadingDetail(false);
     }
   }, []);
 
-  const selectProject = useCallback((projectId: number) => {
-    setSelectedProjectId(projectId);
+  const selectEventGroup = useCallback((eventGroupId: number) => {
+    setSelectedEventGroupId(eventGroupId);
     setSelectedIncidentId(null);
     setIncidentGis(null);
-    setProjectDetail(null);
+    setEventGroupDetail(null);
     setClassifications({});
-    loadProject(projectId).catch(() => {});
-  }, [loadProject]);
+    loadEventGroup(eventGroupId).catch(() => {});
+  }, [loadEventGroup]);
 
   const selectIncident = useCallback(async (incidentId: number) => {
     setSelectedIncidentId(incidentId);
@@ -140,36 +188,45 @@ export default function MissionCenterProjectExplorer() {
   }, []);
 
   useEffect(() => {
-    loadProjects();
-    const timer = window.setInterval(() => loadProjects().catch(() => {}), 60_000);
+    loadEventGroups();
+    const timer = window.setInterval(() => loadEventGroups().catch(() => {}), 60_000);
     return () => window.clearInterval(timer);
-  }, [loadProjects]);
+  }, [loadEventGroups]);
 
-  const visibleProjects = useMemo(
-    () => projects.filter((project) => (projectStatus === "ALL" || project.status === projectStatus) && projectSearchMatch(project, projectSearch)),
-    [projectSearch, projectStatus, projects],
+  const mapProjects = useMemo(() => eventGroups.map(groupToMapProject), [eventGroups]);
+  const visibleMapProjects = useMemo(
+    () => mapProjects.filter((group) => (
+      (eventGroupStatus === "ALL" || group.status === eventGroupStatus)
+      && projectSearchMatch(group, eventGroupSearch)
+    )),
+    [eventGroupSearch, eventGroupStatus, mapProjects],
   );
+  const visibleGroups = useMemo(() => {
+    const visibleIds = new Set(visibleMapProjects.map((group) => group.id));
+    return eventGroups.filter((group) => visibleIds.has(group.id));
+  }, [eventGroups, visibleMapProjects]);
 
   const statewideSummary = useMemo(() => ({
-    projects: projects.length,
-    openProjects: projects.filter((project) => project.status === "OPEN").length,
-    incidents: projects.reduce((total, project) => total + project.incident_count, 0),
-    activeIncidents: projects.reduce((total, project) => total + project.open_incident_count, 0),
-  }), [projects]);
+    groups: eventGroups.length,
+    openGroups: eventGroups.filter((group) => group.status === "OPEN").length,
+    incidents: eventGroups.reduce((total, group) => total + group.incident_count, 0),
+    activeIncidents: eventGroups.reduce((total, group) => total + group.open_incident_count, 0),
+  }), [eventGroups]);
 
-  const selectedProject = projectDetail?.project ?? projects.find((project) => project.id === selectedProjectId) ?? null;
-  const selectedIncident = projectDetail?.incidents.find((incident) => incident.id === selectedIncidentId) ?? null;
+  const selectedEventGroup = eventGroupDetail?.event_group ?? eventGroups.find((group) => group.id === selectedEventGroupId) ?? null;
+  const selectedIncident = eventGroupDetail?.incidents.find((incident) => incident.id === selectedIncidentId) ?? null;
   const selectedClassification = selectedIncidentId != null ? classifications[selectedIncidentId] : undefined;
+  const mapDetail = useMemo(() => eventGroupDetail ? detailToMapProject(eventGroupDetail) : null, [eventGroupDetail]);
 
-  function backToProjects() {
-    setSelectedProjectId(null);
-    setProjectDetail(null);
+  function backToEventGroups() {
+    setSelectedEventGroupId(null);
+    setEventGroupDetail(null);
     setClassifications({});
     setSelectedIncidentId(null);
     setIncidentGis(null);
   }
 
-  function backToProject() {
+  function backToEventGroup() {
     setSelectedIncidentId(null);
     setIncidentGis(null);
   }
@@ -179,7 +236,7 @@ export default function MissionCenterProjectExplorer() {
       <AppShell title="Mission Center">
         <div className="p-6">
           <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-5 text-sm text-muted">
-            Mission Center Project GIS is available to ERIS operational engineering and coordination roles. Maintenance reporting accounts remain scoped to their own reports.
+            Mission Center Event Group GIS is available to ERIS operational engineering and coordination roles. Maintenance reporting accounts remain scoped to their own reports.
           </div>
         </div>
       </AppShell>
@@ -191,24 +248,24 @@ export default function MissionCenterProjectExplorer() {
       <div className="flex h-full flex-col gap-4 p-4 md:p-5">
         <div className="flex flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <div className="text-sm font-semibold">California Project GIS</div>
+            <div className="text-sm font-semibold">California Event Group GIS</div>
             <div className="mt-1 max-w-4xl text-sm text-muted">
-              Explore ERIS geographically: select a Project statewide, drill into its Incidents, then inspect saved field geometry and photo/camera evidence for an Incident.
+              Explore ERIS geographically: select an Event Group statewide, inspect the independent Incidents associated with it, then drill into saved field geometry and photo/camera evidence for an Incident.
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            <span>{lastUpdatedAt ? `Project map updated ${dateTimeFormatter.format(lastUpdatedAt)}` : "Project map not refreshed yet"}</span>
-            <button type="button" onClick={() => loadProjects()} disabled={loadingProjects} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium text-[var(--ink)] hover:bg-[var(--panel-soft)] disabled:opacity-50">
-              {loadingProjects ? "Refreshing…" : "Refresh statewide map"}
+            <span>{lastUpdatedAt ? `Event Group map updated ${dateTimeFormatter.format(lastUpdatedAt)}` : "Event Group map not refreshed yet"}</span>
+            <button type="button" onClick={() => loadEventGroups()} disabled={loadingGroups} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium text-[var(--ink)] hover:bg-[var(--panel-soft)] disabled:opacity-50">
+              {loadingGroups ? "Refreshing…" : "Refresh statewide map"}
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           {[
-            ["Projects", statewideSummary.projects, "Statewide records"],
-            ["Open Projects", statewideSummary.openProjects, "Active Project containers"],
-            ["Incidents", statewideSummary.incidents, "Across all Projects"],
+            ["Event Groups", statewideSummary.groups, "Statewide grouping contexts"],
+            ["Open Event Groups", statewideSummary.openGroups, "Available for association"],
+            ["Incidents", statewideSummary.incidents, "Independent historical records"],
             ["Active Incidents", statewideSummary.activeIncidents, "Not resolved"],
           ].map(([label, value, hint]) => (
             <div key={String(label)} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
@@ -224,13 +281,13 @@ export default function MissionCenterProjectExplorer() {
         <div className="grid min-h-[680px] gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(340px,0.8fr)]">
           <MissionCenterProjectGisMap
             mode={mode}
-            projects={visibleProjects}
-            selectedProjectId={selectedProjectId}
-            projectDetail={projectDetail}
+            projects={visibleMapProjects}
+            selectedProjectId={selectedEventGroupId}
+            projectDetail={mapDetail}
             selectedIncidentId={selectedIncidentId}
             incidentGis={incidentGis}
             classifications={classifications}
-            onSelectProject={selectProject}
+            onSelectProject={selectEventGroup}
             onSelectIncident={(incidentId) => { selectIncident(incidentId).catch(() => {}); }}
             height={680}
           />
@@ -239,12 +296,12 @@ export default function MissionCenterProjectExplorer() {
             {mode === "PROJECTS" ? (
               <div className="flex h-full flex-col">
                 <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted">Statewide Project search</div>
-                  <div className="mt-1 text-lg font-semibold">Select a Project</div>
-                  <p className="mt-1 text-sm text-muted">Click a map marker or search the Project directory below.</p>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted">Statewide Event Group search</div>
+                  <div className="mt-1 text-lg font-semibold">Select an Event Group</div>
+                  <p className="mt-1 text-sm text-muted">Click a map marker or search the Event Group directory below.</p>
                   <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto] xl:grid-cols-1 2xl:grid-cols-[1fr_auto]">
-                    <input value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Project, county, route, post mile…" className="min-w-0 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
-                    <select value={projectStatus} onChange={(event) => setProjectStatus(event.target.value as "ALL" | ProjectStatus)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
+                    <input value={eventGroupSearch} onChange={(event) => setEventGroupSearch(event.target.value)} placeholder="Event Group, county, route, post mile…" className="min-w-0 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+                    <select value={eventGroupStatus} onChange={(event) => setEventGroupStatus(event.target.value as "ALL" | EventGroupStatus)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
                       <option value="ALL">All statuses</option>
                       <option value="OPEN">Open</option>
                       <option value="CLOSED">Closed</option>
@@ -253,13 +310,13 @@ export default function MissionCenterProjectExplorer() {
                   </div>
                 </div>
                 <div className="flex-1 overflow-auto p-3">
-                  <div className="mb-2 text-xs text-muted">{visibleProjects.length.toLocaleString()} Project{visibleProjects.length === 1 ? "" : "s"} shown on map</div>
+                  <div className="mb-2 text-xs text-muted">{visibleGroups.length.toLocaleString()} Event Group{visibleGroups.length === 1 ? "" : "s"} shown on map</div>
                   <div className="space-y-2">
-                    {visibleProjects.length === 0 ? <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">{loadingProjects ? "Loading Projects…" : "No Projects match the current filters."}</div> : visibleProjects.map((project) => (
-                      <button key={project.id} type="button" onClick={() => selectProject(project.id)} className="block w-full rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 text-left hover:border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] hover:bg-[var(--panel-soft)]">
-                        <div className="flex items-start justify-between gap-2"><div className="font-semibold leading-snug">{project.title}</div><StatusPill label={projectStatusLabel(project.status)} tone={project.status === "OPEN" ? "good" : "neutral"} /></div>
-                        <div className="mt-1 text-xs text-muted">Project #{project.id} · {projectLocationLabel(project)}</div>
-                        <div className="mt-2 text-xs text-muted">{project.incident_count} Incident{project.incident_count === 1 ? "" : "s"} · {project.open_incident_count} active</div>
+                    {visibleGroups.length === 0 ? <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">{loadingGroups ? "Loading Event Groups…" : "No Event Groups match the current filters."}</div> : visibleGroups.map((group) => (
+                      <button key={group.id} type="button" onClick={() => selectEventGroup(group.id)} className="block w-full rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 text-left hover:border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] hover:bg-[var(--panel-soft)]">
+                        <div className="flex items-start justify-between gap-2"><div className="font-semibold leading-snug">{group.title}</div><StatusPill label={eventGroupStatusLabel(group.status)} tone={group.status === "OPEN" ? "good" : "neutral"} /></div>
+                        <div className="mt-1 text-xs text-muted">Event Group #{group.id} · {eventGroupLocationLabel(group)}</div>
+                        <div className="mt-2 text-xs text-muted">{group.incident_count} associated Incident{group.incident_count === 1 ? "" : "s"} · {group.open_incident_count} active</div>
                       </button>
                     ))}
                   </div>
@@ -267,29 +324,30 @@ export default function MissionCenterProjectExplorer() {
               </div>
             ) : null}
 
-            {mode === "PROJECT" && selectedProject ? (
+            {mode === "PROJECT" && selectedEventGroup ? (
               <div className="flex h-full flex-col">
                 <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] p-4">
-                  <button type="button" onClick={backToProjects} className="mb-3 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)]">← All California Projects</button>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted">Selected Project</div>
-                  <div className="mt-1 text-lg font-semibold leading-snug">{selectedProject.title}</div>
-                  <div className="mt-1 text-sm text-muted">Project #{selectedProject.id} · {projectLocationLabel(selectedProject)}</div>
-                  <div className="mt-3 flex flex-wrap gap-2"><StatusPill label={projectStatusLabel(selectedProject.status)} tone={selectedProject.status === "OPEN" ? "good" : "neutral"} /><StatusPill label={`${selectedProject.incident_count} incidents`} /><StatusPill label={`${selectedProject.open_incident_count} active`} tone={selectedProject.open_incident_count > 0 ? "bad" : "good"} /></div>
-                  {selectedProject.description ? <p className="mt-3 text-sm text-muted">{selectedProject.description}</p> : null}
-                  <button type="button" onClick={() => navigate(`/projects/${selectedProject.id}`)} className="mt-4 w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-semibold hover:bg-[var(--panel-soft)]">Open full Project workspace</button>
+                  <button type="button" onClick={backToEventGroups} className="mb-3 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)]">← All California Event Groups</button>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted">Selected Event Group</div>
+                  <div className="mt-1 text-lg font-semibold leading-snug">{selectedEventGroup.title}</div>
+                  <div className="mt-1 text-sm text-muted">Event Group #{selectedEventGroup.id} · {eventGroupLocationLabel(selectedEventGroup)}</div>
+                  <div className="mt-3 flex flex-wrap gap-2"><StatusPill label={eventGroupStatusLabel(selectedEventGroup.status)} tone={selectedEventGroup.status === "OPEN" ? "good" : "neutral"} /><StatusPill label={`${selectedEventGroup.incident_count} incidents`} /><StatusPill label={`${selectedEventGroup.open_incident_count} active`} tone={selectedEventGroup.open_incident_count > 0 ? "bad" : "good"} /></div>
+                  {selectedEventGroup.description ? <p className="mt-3 text-sm text-muted">{selectedEventGroup.description}</p> : null}
+                  <div className="mt-3 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs text-muted">This is shared context only. Each associated Incident keeps its own identity and history.</div>
+                  <button type="button" onClick={() => navigate(`/event-groups/${selectedEventGroup.id}`)} className="mt-4 w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-semibold hover:bg-[var(--panel-soft)]">Open full Event Group workspace</button>
                 </div>
                 <div className="flex-1 overflow-auto p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Project Incidents</div>
-                  {loadingDetail ? <div className="text-sm text-muted">Loading Project Incidents…</div> : projectDetail?.incidents.length ? <div className="space-y-2">{projectDetail.incidents.map((incident) => {
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Associated Incidents</div>
+                  {loadingDetail ? <div className="text-sm text-muted">Loading associated Incidents…</div> : eventGroupDetail?.incidents.length ? <div className="space-y-2">{eventGroupDetail.incidents.map((incident) => {
                     const classification = classifications[incident.id];
                     return (
                       <button key={incident.id} type="button" onClick={() => { selectIncident(incident.id).catch(() => {}); }} className="block w-full rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 text-left hover:border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] hover:bg-[var(--panel-soft)]">
                         <div className="flex items-start justify-between gap-2"><div className="font-semibold">#{incident.id} {incident.title || "Incident"}</div><StatusPill label={incident.status === "RESOLVED" ? "Resolved" : incident.status === "IN_PROGRESS" ? "In progress" : "New"} tone={incident.status === "RESOLVED" ? "good" : "bad"} /></div>
-                        <div className="mt-1 text-xs text-muted">{projectLocationLabel({ district: incident.district, county: incident.county, route: incident.route, post_mile: incident.post_mile })}</div>
-                        <div className="mt-2 text-xs font-medium">{classificationLabel(classification)}</div>
+                        <div className="mt-1 text-xs text-muted">{eventGroupLocationLabel({ district: incident.district, county: incident.county, route: incident.route, post_mile: incident.post_mile })}</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><span className="font-medium">{classificationLabel(classification)}</span>{incident.is_permanent ? <span className="font-semibold text-[var(--good)]">Permanent Incident</span> : <span className="font-semibold text-[var(--brand)]">Provisional</span>}</div>
                       </button>
                     );
-                  })}</div> : <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">No Incidents are associated with this Project.</div>}
+                  })}</div> : <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">No Incidents are associated with this Event Group.</div>}
                 </div>
               </div>
             ) : null}
@@ -297,10 +355,10 @@ export default function MissionCenterProjectExplorer() {
             {mode === "INCIDENT" && selectedIncident && incidentGis ? (
               <div className="flex h-full flex-col">
                 <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] p-4">
-                  <button type="button" onClick={backToProject} className="mb-3 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)]">← Project Incidents</button>
+                  <button type="button" onClick={backToEventGroup} className="mb-3 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)]">← Event Group Incidents</button>
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted">Incident GIS Evidence</div>
                   <div className="mt-1 text-lg font-semibold leading-snug">#{selectedIncident.id} {selectedIncident.title || "Incident"}</div>
-                  <div className="mt-2 flex flex-wrap gap-2"><StatusPill label={selectedIncident.status === "RESOLVED" ? "Resolved" : selectedIncident.status === "IN_PROGRESS" ? "In progress" : "New"} tone={selectedIncident.status === "RESOLVED" ? "good" : "bad"} /><StatusPill label={classificationLabel(selectedClassification)} tone={selectedClassification?.confirmed ? "good" : "neutral"} /></div>
+                  <div className="mt-2 flex flex-wrap gap-2"><StatusPill label={selectedIncident.status === "RESOLVED" ? "Resolved" : selectedIncident.status === "IN_PROGRESS" ? "In progress" : "New"} tone={selectedIncident.status === "RESOLVED" ? "good" : "bad"} /><StatusPill label={classificationLabel(selectedClassification)} tone={selectedClassification?.confirmed ? "good" : "neutral"} />{selectedIncident.is_permanent ? <StatusPill label="Permanent Incident" tone="good" /> : <StatusPill label="Provisional" tone="brand" />}</div>
                   {classificationStateLabel(selectedClassification) ? <div className="mt-2 text-xs text-muted">{classificationStateLabel(selectedClassification)}</div> : null}
                 </div>
 
@@ -324,7 +382,7 @@ export default function MissionCenterProjectExplorer() {
 
                   <div className="mt-5 flex flex-wrap gap-2">
                     {incidentGis.incident.linked_submission_id ? <button type="button" onClick={() => navigate(`/submissions/${incidentGis.incident.linked_submission_id}`)} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95">Open technical submission</button> : null}
-                    {selectedProject ? <button type="button" onClick={() => navigate(`/projects/${selectedProject.id}`)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-semibold hover:bg-[var(--panel-soft)]">Open Project</button> : null}
+                    {selectedEventGroup ? <button type="button" onClick={() => navigate(`/event-groups/${selectedEventGroup.id}`)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-semibold hover:bg-[var(--panel-soft)]">Open Event Group</button> : null}
                   </div>
 
                   <div className="mt-5 border-t border-[var(--line)] pt-4">

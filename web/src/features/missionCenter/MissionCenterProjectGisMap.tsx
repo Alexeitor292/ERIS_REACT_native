@@ -143,8 +143,8 @@ export default function MissionCenterProjectGisMap({
     if (apiKey) esriConfig.apiKey = String(apiKey);
     if (!divRef.current) return;
 
-    const projectLayer = new GraphicsLayer({ title: "Projects" });
-    const incidentLayer = new GraphicsLayer({ title: "Project incidents" });
+    const projectLayer = new GraphicsLayer({ title: "Event Groups" });
+    const incidentLayer = new GraphicsLayer({ title: "Event Group incidents" });
     const geometryLayer = new GraphicsLayer({ title: "Saved incident geometry" });
     const directionLayer = new GraphicsLayer({ title: "Camera directions" });
     const photoLayer = new GraphicsLayer({ title: "Field photos" });
@@ -233,8 +233,8 @@ export default function MissionCenterProjectGisMap({
           outline: { color: selected ? [255, 255, 255, 1] : [15, 23, 42, 0.9], width: selected ? 3 : 1.5 },
         } as any,
         popupTemplate: {
-          title: "Project #{projectId} · {title}",
-          content: "<strong>Status:</strong> {status}<br/><strong>Location:</strong> {location}<br/><strong>Incidents:</strong> {incidents}<br/><strong>Active:</strong> {active}<br/><br/>Click the marker to drill into this Project.",
+          title: "Event Group #{projectId} · {title}",
+          content: "<strong>Status:</strong> {status}<br/><strong>Location:</strong> {location}<br/><strong>Incidents:</strong> {incidents}<br/><strong>Active:</strong> {active}<br/><br/>Click the marker to inspect this Event Group.",
         } as any,
       });
     });
@@ -353,9 +353,9 @@ export default function MissionCenterProjectGisMap({
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
-      <div ref={divRef} style={{ height }} aria-label="Mission Center Project and Incident GIS explorer" />
+      <div ref={divRef} style={{ height }} aria-label="Mission Center Event Group and Incident GIS explorer" />
       <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs text-muted">
-        {mode === "PROJECTS" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-blue-600" /> Project</span><span>Marker size reflects active Incident activity.</span></> : null}
+        {mode === "PROJECTS" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-blue-600" /> Event Group</span><span>Marker size reflects active Incident activity.</span></> : null}
         {mode === "PROJECT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rotate-45 rounded-[2px] bg-red-600" /> Active Incident</span><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-slate-500" /> Resolved Incident</span></> : null}
         {mode === "INCIDENT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-cyan-500" /> Field photo</span><span className="inline-flex items-center gap-2"><span className="h-0.5 w-6 bg-cyan-500" /> Camera direction</span><span className="inline-flex items-center gap-2"><span className="h-3 w-5 border-2 border-blue-600 bg-blue-500/15" /> Saved geometry</span></> : null}
       </div>
