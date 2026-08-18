@@ -28,7 +28,7 @@ import {
 
 type SceneState = "loading" | "ready" | "error";
 type BasemapMode = "satellite" | "topo-vector";
-type WorkspacePanel = "details" | "points" | "settings";
+type WorkspacePanel = "profile" | "details" | "points" | "settings";
 
 const WGS84 = SpatialReference.WGS84;
 const CALIFORNIA_CENTER: [number, number] = [-119.4179, 36.7783];
@@ -74,7 +74,7 @@ export default function TerrainCrossSectionWorkspace() {
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("satellite");
   const [sceneScale, setSceneScale] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<WorkspacePanel | null>(null);
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
 
   drawingRef.current = drawing;
 
@@ -109,6 +109,20 @@ export default function TerrainCrossSectionWorkspace() {
       attributes: { __cross_section_hover: true },
     }));
   }, [profile]);
+
+  useEffect(() => {
+    if (!focusMode) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFocusMode(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [focusMode]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -190,7 +204,7 @@ export default function TerrainCrossSectionWorkspace() {
         setProfile(null);
         setActualSpacingM(null);
         setProfileError(null);
-        setProfileOpen(false);
+        setActivePanel(null);
       });
 
       setSceneState("ready");
@@ -313,7 +327,6 @@ export default function TerrainCrossSectionWorkspace() {
     setActualSpacingM(null);
     setProfileError(null);
     setActivePanel(null);
-    setProfileOpen(false);
     setDrawing(true);
   }
 
@@ -323,7 +336,6 @@ export default function TerrainCrossSectionWorkspace() {
     setActualSpacingM(null);
     setProfileError(null);
     setActivePanel(null);
-    setProfileOpen(false);
     setDrawing(true);
   }
 
@@ -333,7 +345,7 @@ export default function TerrainCrossSectionWorkspace() {
     setProfile(null);
     setActualSpacingM(null);
     setProfileError(null);
-    setProfileOpen(false);
+    setActivePanel(null);
   }
 
   function clearAll() {
@@ -344,18 +356,10 @@ export default function TerrainCrossSectionWorkspace() {
     setActualSpacingM(null);
     setProfileError(null);
     setActivePanel(null);
-    setProfileOpen(false);
   }
 
   function togglePanel(panel: WorkspacePanel) {
-    setProfileOpen(false);
     setActivePanel((current) => current === panel ? null : panel);
-  }
-
-  function toggleProfile() {
-    if (!profile) return;
-    setActivePanel(null);
-    setProfileOpen((open) => !open);
   }
 
   async function buildProfile(spacingOverride?: number) {
@@ -395,8 +399,7 @@ export default function TerrainCrossSectionWorkspace() {
       const nextProfile = profileFromPath(path, elevation.noDataValue);
       if (!nextProfile) throw new Error("No usable DEM elevation samples were returned for this path.");
       setProfile(nextProfile);
-      setActivePanel(null);
-      setProfileOpen(true);
+      setActivePanel("profile");
 
       const profileLine = new Polyline({
         hasZ: true,
@@ -409,7 +412,7 @@ export default function TerrainCrossSectionWorkspace() {
       }
     } catch (error: any) {
       setProfile(null);
-      setProfileOpen(false);
+      setActivePanel(null);
       setProfileError(error?.message ?? "Failed to sample ArcGIS terrain elevation.");
     } finally {
       setProfileBusy(false);
@@ -423,9 +426,30 @@ export default function TerrainCrossSectionWorkspace() {
   }));
 
   const displayedDistanceM = profile?.stats.total_distance_m ?? draftDistanceM;
+  const panelWide = activePanel === "profile";
+  const panelTitle = activePanel === "profile"
+    ? "Elevation profile"
+    : activePanel === "details"
+      ? "Cross-section statistics"
+      : activePanel === "points"
+        ? "Control points"
+        : "Cross-section setup";
+  const panelSubtitle = activePanel === "profile"
+    ? profile
+      ? `${formatHorizontalDistance(profile.stats.total_distance_m, metric)} · ${profile.stats.sample_count.toLocaleString()} DEM samples`
+      : "Build a profile to view the elevation graph"
+    : activePanel === "details"
+      ? "DEM profile measurements"
+      : activePanel === "points"
+        ? `${controlPoints.length} selected point${controlPoints.length === 1 ? "" : "s"}`
+        : "Sampling and map display";
 
   return (
-    <div className="relative h-full min-h-[620px] overflow-hidden bg-[#0f172a]">
+    <div
+      className={`relative overflow-hidden bg-[#0f172a] ${focusMode
+        ? "fixed inset-0 z-[100] h-screen min-h-0 w-screen"
+        : "h-full min-h-[620px]"}`}
+    >
       <div ref={containerRef} className="absolute inset-0" />
 
       <div className="pointer-events-none absolute left-14 top-3 z-30 max-w-[calc(100%-360px)]">
@@ -496,6 +520,17 @@ export default function TerrainCrossSectionWorkspace() {
               Metric
             </button>
           </div>
+
+          <div className="mx-1 h-5 w-px bg-white/20" />
+
+          <button
+            type="button"
+            onClick={() => setFocusMode((current) => !current)}
+            className="rounded-lg px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10"
+            title={focusMode ? "Return to the ERIS shell" : "Hide the ERIS shell and use the full viewport"}
+          >
+            {focusMode ? "Exit full screen" : "Full screen"}
+          </button>
         </div>
       </div>
 
@@ -507,39 +542,60 @@ export default function TerrainCrossSectionWorkspace() {
       ) : null}
 
       <div className="absolute right-3 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-white/20 bg-slate-950/75 p-1.5 text-white shadow-lg backdrop-blur-md">
+        {profile ? <MapPanelButton label="Profile" active={activePanel === "profile"} onClick={() => togglePanel("profile")} /> : null}
         <MapPanelButton label="Stats" active={activePanel === "details"} onClick={() => togglePanel("details")} />
         <MapPanelButton label={`Points ${controlPoints.length}`} active={activePanel === "points"} onClick={() => togglePanel("points")} />
         <MapPanelButton label="Setup" active={activePanel === "settings"} onClick={() => togglePanel("settings")} />
       </div>
 
       <aside
-        className={`absolute bottom-20 right-16 top-20 z-30 w-[min(360px,calc(100%-5rem))] overflow-y-auto rounded-xl border border-[var(--line)] bg-[color:var(--panel)]/96 text-[var(--ink)] shadow-2xl backdrop-blur-md transition-all duration-200 ${activePanel ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-5 opacity-0"}`}
+        className={`absolute bottom-3 right-20 top-16 z-30 overflow-y-auto rounded-xl border border-[var(--line)] bg-[color:var(--panel)]/97 text-[var(--ink)] shadow-2xl backdrop-blur-md transition-[width,transform,opacity] duration-200 ${panelWide
+          ? "w-[min(620px,calc(100%-6rem))]"
+          : "w-[min(360px,calc(100%-6rem))]"} ${activePanel
+          ? "translate-x-0 opacity-100"
+          : "pointer-events-none translate-x-5 opacity-0"}`}
         aria-hidden={!activePanel}
       >
         {activePanel ? (
           <>
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--line)] bg-[color:var(--panel)]/95 px-4 py-3 backdrop-blur-md">
-              <div>
-                <div className="text-sm font-semibold">
-                  {activePanel === "details" ? "Cross-section statistics" : activePanel === "points" ? "Control points" : "Cross-section setup"}
-                </div>
-                <div className="mt-0.5 text-[11px] text-muted">
-                  {activePanel === "details"
-                    ? "DEM profile measurements"
-                    : activePanel === "points"
-                      ? `${controlPoints.length} selected point${controlPoints.length === 1 ? "" : "s"}`
-                      : "Sampling and map display"}
-                </div>
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--line)] bg-[color:var(--panel)]/96 px-4 py-3 backdrop-blur-md">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{panelTitle}</div>
+                <div className="mt-0.5 truncate text-[11px] text-muted">{panelSubtitle}</div>
               </div>
               <button
                 type="button"
                 onClick={() => setActivePanel(null)}
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel-soft)] text-sm font-semibold hover:bg-[var(--panel)]"
+                className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--panel-soft)] text-sm font-semibold hover:bg-[var(--panel)]"
                 aria-label="Close panel"
               >
                 ×
               </button>
             </div>
+
+            {activePanel === "profile" && profile ? (
+              <div>
+                <div className="grid grid-cols-3 gap-px border-b border-[var(--line)] bg-[var(--line)]">
+                  <DrawerMetric label="Path" value={formatHorizontalDistance(profile.stats.total_distance_m, metric)} />
+                  <DrawerMetric label="Samples" value={profile.stats.sample_count.toLocaleString()} />
+                  <DrawerMetric label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
+                </div>
+                <div className="p-3">
+                  <CrossSectionProfileChart
+                    profile={profile}
+                    controlDistances={controlDistances}
+                    metric={metric}
+                    onHoverSample={showHoverSample}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-px border-t border-[var(--line)] bg-[var(--line)]">
+                  <DrawerMetric label="Minimum" value={formatElevation(profile.stats.min_elevation_m, metric)} />
+                  <DrawerMetric label="Maximum" value={formatElevation(profile.stats.max_elevation_m, metric)} />
+                  <DrawerMetric label="Gain" value={formatElevation(profile.stats.elevation_gain_m, metric)} />
+                  <DrawerMetric label="Loss" value={formatElevation(profile.stats.elevation_loss_m, metric)} />
+                </div>
+              </div>
+            ) : null}
 
             {activePanel === "details" ? (
               <div className="grid grid-cols-2 gap-px bg-[var(--line)]">
@@ -643,21 +699,16 @@ export default function TerrainCrossSectionWorkspace() {
         ))}
       </div>
 
-      {!profileOpen ? <SceneDualScaleBar scale={sceneScale} /> : null}
+      <SceneDualScaleBar scale={sceneScale} />
 
       {profile ? (
         <button
           type="button"
-          onClick={toggleProfile}
-          className={`absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-xl border border-white/20 bg-slate-950/80 px-4 py-2.5 text-left text-white shadow-lg backdrop-blur-md transition-opacity ${profileOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}
+          onClick={() => togglePanel("profile")}
+          className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white shadow backdrop-blur-sm"
         >
-          <div className="flex items-center gap-4 text-xs">
-            <span className="font-semibold text-white">Profile ↑</span>
-            <span><strong>{formatHorizontalDistance(profile.stats.total_distance_m, metric)}</strong> path</span>
-            <span><strong>{profile.stats.sample_count.toLocaleString()}</strong> samples</span>
-            <span><strong>{actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`}</strong> spacing</span>
-            <span className="hidden xl:inline"><strong>{formatElevation(profile.stats.elevation_range_m, metric)}</strong> range</span>
-          </div>
+          <span className="font-semibold">Profile</span>
+          <span className="ml-2 text-white/75">{formatHorizontalDistance(profile.stats.total_distance_m, metric)} · {profile.stats.sample_count.toLocaleString()} samples</span>
         </button>
       ) : controlPoints.length >= 2 && !drawing ? (
         <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur-sm">
@@ -665,32 +716,10 @@ export default function TerrainCrossSectionWorkspace() {
         </div>
       ) : null}
 
-      {profile && profileOpen ? (
-        <section className="absolute inset-x-0 bottom-0 z-40 h-[44%] min-h-[330px] max-h-[470px] overflow-y-auto border-t border-[var(--line)] bg-[color:var(--panel)]/98 text-[var(--ink)] shadow-2xl backdrop-blur-md">
-          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-[var(--line)] bg-[color:var(--panel)]/96 px-4 py-2.5 backdrop-blur-md">
-            <button
-              type="button"
-              onClick={toggleProfile}
-              className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--panel)]"
-            >
-              ↓ Profile
-            </button>
-            <CompactStat label="Path" value={formatHorizontalDistance(profile.stats.total_distance_m, metric)} />
-            <CompactStat label="Samples" value={profile.stats.sample_count.toLocaleString()} />
-            <CompactStat label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
-            <CompactStat label="Min" value={formatElevation(profile.stats.min_elevation_m, metric)} />
-            <CompactStat label="Max" value={formatElevation(profile.stats.max_elevation_m, metric)} />
-            <CompactStat label="Gain / loss" value={`${formatElevation(profile.stats.elevation_gain_m, metric)} / ${formatElevation(profile.stats.elevation_loss_m, metric)}`} />
-          </div>
-          <div className="p-3">
-            <CrossSectionProfileChart
-              profile={profile}
-              controlDistances={controlDistances}
-              metric={metric}
-              onHoverSample={showHoverSample}
-            />
-          </div>
-        </section>
+      {focusMode ? (
+        <div className="pointer-events-none absolute bottom-14 left-3 z-20 rounded-md bg-black/45 px-2.5 py-1.5 text-[10px] text-white/70 backdrop-blur-sm">
+          Terrain full screen · Esc to exit
+        </div>
       ) : null}
 
       {profileError ? (
@@ -741,15 +770,6 @@ function DrawerMetric({ label, value }: { label: string; value: string }) {
     <div className="bg-[var(--panel)] p-3">
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">{label}</div>
       <div className="mt-1 text-sm font-semibold tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function CompactStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline gap-1.5 text-xs">
-      <span className="text-muted">{label}</span>
-      <span className="font-semibold tabular-nums">{value}</span>
     </div>
   );
 }
