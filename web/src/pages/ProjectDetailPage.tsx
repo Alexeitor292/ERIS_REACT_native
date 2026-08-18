@@ -49,13 +49,13 @@ export default function ProjectDetailPage() {
     try {
       const nextDetail = await api<ProjectDetailResponse>(`/projects/${projectId}`);
       setDetail(nextDetail);
-      const classificationResults = await Promise.all(
-        nextDetail.incidents.map(async (incident) => {
-          const classification = await api<IncidentClassification>(`/incidents/${incident.id}/classification`);
-          return [incident.id, classification] as const;
-        })
+      const classificationResponse = await api<{ items: IncidentClassification[] }>("/incident-classifications/query", {
+        method: "POST",
+        body: JSON.stringify({ incident_ids: nextDetail.incidents.map((incident) => incident.id) }),
+      });
+      setClassifications(
+        Object.fromEntries((classificationResponse.items ?? []).map((classification) => [classification.incident_id, classification]))
       );
-      setClassifications(Object.fromEntries(classificationResults));
     } catch (e: any) {
       setError(e?.message ?? "Failed to load Project.");
     } finally {
