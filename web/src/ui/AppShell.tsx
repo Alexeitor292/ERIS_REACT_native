@@ -22,7 +22,7 @@ function pageDescription(pathname: string) {
   }
 
   const descriptions: Array<[string, string]> = [
-    ["/mission-center", "Operational overview of active incidents, assessments, and field activity."],
+    ["/mission-center", "Explore California Projects, Incidents, saved geometry, and mapped field-photo evidence through ArcGIS."],
     ["/projects", "Manage operational Projects and the Incidents grouped under each response area."],
     ["/incidents", "Manage emergency events and coordinate the field records associated with them."],
     ["/assessments", "Review geotechnical assessments and supporting field information."],
@@ -89,7 +89,7 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <div className="space-y-5">
       <NavGroup label="Operations" collapsed={collapsed}>
-        <NavItem to="/mission-center" label="Mission Center" collapsed={collapsed} />
+        {operational ? <NavItem to="/mission-center" label="Mission Center" collapsed={collapsed} /> : null}
         {operational ? <NavItem to="/projects" label="Projects" collapsed={collapsed} /> : null}
         <NavItem to="/incidents" label="Incidents" collapsed={collapsed} />
         <NavItem to="/assessments" label="Assessments" collapsed={collapsed} />
