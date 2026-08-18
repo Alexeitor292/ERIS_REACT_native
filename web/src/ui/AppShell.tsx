@@ -195,7 +195,7 @@ export default function AppShell({ title, children }: { title: string; children:
             <h1 className="text-xl font-semibold">{title}</h1>
             <p className="mt-1 max-w-4xl text-sm text-muted">{description}</p>
           </div>
-          <div className="product-card h-full overflow-hidden">{children}</div>
+          <div className="product-card min-h-full overflow-hidden">{children}</div>
         </main>
       </div>
 

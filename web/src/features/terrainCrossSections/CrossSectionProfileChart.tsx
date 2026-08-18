@@ -94,7 +94,7 @@ export default function CrossSectionProfileChart({
       <div className="overflow-x-auto">
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className="min-w-[720px] w-full select-none"
+          className="min-w-[520px] w-full select-none"
           role="img"
           aria-label="Elevation profile along the selected cross-section path"
           onPointerMove={updateHover}
