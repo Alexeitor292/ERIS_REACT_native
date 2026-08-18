@@ -45,6 +45,25 @@ export type ProjectSummary = {
   updated_at: string;
 };
 
+export type ProjectEvent = {
+  id: number;
+  project_id: number;
+  incident_id: number | null;
+  actor_user_id: number | null;
+  actor_name: string | null;
+  actor_email: string | null;
+  event_type: string;
+  notes: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type ProjectDetailResponse = {
+  project: ProjectSummary;
+  incidents: ProjectIncidentSummary[];
+  events: ProjectEvent[];
+};
+
 export type NearbyProject = ProjectSummary & {
   nearest_distance_m: number;
   incidents: ProjectIncidentSummary[];
@@ -72,7 +91,7 @@ export type ProjectAssociationResponse = {
 
 export function milesFromMeters(meters: number): string {
   const miles = meters / 1609.344;
-  if (miles < 0.1) return `${Math.round(meters)} ft away`;
+  if (miles < 160.9344) return `${Math.round(meters * 3.28084)} ft away`;
   return `${miles.toFixed(miles < 10 ? 1 : 0)} mi away`;
 }
 
@@ -84,4 +103,10 @@ export function projectLocationLabel(project: Pick<ProjectSummary, "district" | 
     project.post_mile ? `PM ${project.post_mile}` : null,
   ].filter(Boolean);
   return parts.join(" · ") || "Location not recorded";
+}
+
+export function projectStatusLabel(status: ProjectStatus): string {
+  if (status === "CLOSED") return "Closed";
+  if (status === "ARCHIVED") return "Archived";
+  return "Open";
 }
