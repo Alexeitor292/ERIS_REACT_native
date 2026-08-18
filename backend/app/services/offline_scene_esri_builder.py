@@ -1,10 +1,10 @@
 """High-fidelity ERIS mobile package builder.
 
 Wraps the existing USGS/ERIS builder rather than replacing its analytical data.
-The resulting package remains `eristerrain`, so MinIO/catalog/download/integrity
-and all existing context layers keep their contract.  One additional immutable
-asset, `esri-terrain.tpkx`, is embedded and declared as the preferred rendering
-surface for native ArcGIS Runtime.
+The resulting package remains an ERIS terrain bundle, so MinIO/catalog/download/
+integrity and all existing context layers keep their contract. One additional
+immutable asset, `esri-terrain.tpkx`, is embedded and declared as the preferred
+rendering surface for native ArcGIS Runtime.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from .offline_scene_esri_elevation import (
 
 RENDER_SURFACE_ESRI = "esri_tiled_elevation"
 ERIS_ESRI_FORMAT_VERSION = 3
+PACKAGE_FORMAT_ESRI = "eristerrain_esri"
 
 
 class EsriOfflineTerrainBuilder:
@@ -38,7 +39,10 @@ class EsriOfflineTerrainBuilder:
     this migration's fidelity requirement.
     """
 
-    package_format = "eristerrain"
+    # A distinct catalog format lets the mobile native bridge route new packages
+    # to ArcGIS SceneView while legacy `eristerrain` downloads remain readable.
+    # Both formats intentionally use the .eristerrain local/container extension.
+    package_format = PACKAGE_FORMAT_ESRI
 
     def __init__(self, base=None):
         self.base = base or get_builder()
@@ -88,6 +92,7 @@ class EsriOfflineTerrainBuilder:
                 ERIS_ESRI_FORMAT_VERSION,
                 int(manifest.get("format_version", 0) or 0),
             )
+            manifest["package_format"] = PACKAGE_FORMAT_ESRI
             manifest["render_surface"] = {
                 "type": RENDER_SURFACE_ESRI,
                 "file": ESRI_TERRAIN_FILE,
@@ -100,8 +105,8 @@ class EsriOfflineTerrainBuilder:
             files["esri_elevation"] = ESRI_TERRAIN_FILE
 
             # Keep every legacy asset byte-for-byte and replace only manifest.json.
-            # STORED is intentional: the mobile extractor is deterministic and does
-            # not require a general-purpose ZIP decompressor.
+            # STORED is intentional: native extraction of the Terrain3D sidecar can
+            # copy its payload byte-for-byte without a decompressor.
             with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zout:
                 zout.writestr(
                     "manifest.json",
@@ -123,6 +128,8 @@ class EsriOfflineTerrainBuilder:
                 manifest = json.loads(zf.read("manifest.json"))
                 render = manifest.get("render_surface") or {}
                 layer = (manifest.get("context_layers") or {}).get("esri_elevation") or {}
+                if manifest.get("package_format") != PACKAGE_FORMAT_ESRI:
+                    return False, "package format does not identify Esri tiled terrain"
                 if render.get("type") != RENDER_SURFACE_ESRI:
                     return False, "package does not select Esri tiled elevation as render surface"
                 if render.get("file") != ESRI_TERRAIN_FILE:
@@ -145,10 +152,16 @@ class EsriOfflineTerrainBuilder:
         source: dict,
         job_id: int | None = None,
     ) -> dict:
-        # Reuse the mature immutable MinIO + catalog + cancellation transaction.
-        return self.base.upload_and_register(
-            db, ctx, package_bytes, source, job_id=job_id
-        )
+        # Reuse the mature immutable MinIO + catalog + cancellation transaction,
+        # but publish the distinct format so the mobile bridge selects SceneView.
+        previous_format = self.base.package_format
+        self.base.package_format = self.package_format
+        try:
+            return self.base.upload_and_register(
+                db, ctx, package_bytes, source, job_id=job_id
+            )
+        finally:
+            self.base.package_format = previous_format
 
 
 def get_esri_builder() -> EsriOfflineTerrainBuilder:
