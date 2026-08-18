@@ -22,6 +22,8 @@ const IOS_FILES = [
   "ArcGisPhotoMapViewController.m",
   "ArcGisTerrainSceneViewController.h",
   "ArcGisTerrainSceneViewController.m",
+  "ArcGisEristerrainSceneViewController.h",
+  "ArcGisEristerrainSceneViewController.m",
   "ErisTerrainSceneViewController.h",
   "ErisTerrainSceneViewController.m",
   "ErisRoadSliceSceneViewController.h",
@@ -96,9 +98,47 @@ function withArcGisIosSources(config) {
   return next;
 }
 
+// ArcGisModule.m is also a source template shared by existing builds. Patch only
+// the generated iOS copy after the source-file mod runs so legacy `eristerrain`
+// keeps using ErisTerrainSceneViewController, real `.mspk` keeps its existing
+// path, and only the new `eristerrain_esri` catalog format uses SceneView+TPKX.
+function withEsriTerrainPackageRouting(config) {
+  return withDangerousMod(config, [
+    "ios",
+    async (modConfig) => {
+      const root = modConfig.modRequest.platformProjectRoot;
+      const candidates = [];
+      const walk = (dir, depth = 0) => {
+        if (depth > 3 || !fs.existsSync(dir)) return;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const p = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(p, depth + 1);
+          else if (entry.name === "ArcGisModule.m") candidates.push(p);
+        }
+      };
+      walk(root);
+      for (const file of candidates) {
+        let src = fs.readFileSync(file, "utf8");
+        if (!src.includes('#import "ArcGisEristerrainSceneViewController.h"')) {
+          src = src.replace(
+            '#import "ErisTerrainSceneViewController.h"',
+            '#import "ErisTerrainSceneViewController.h"\n#import "ArcGisEristerrainSceneViewController.h"'
+          );
+        }
+        const oldRoute = `if ([format isEqualToString:@"mspk"]) {\n      vc = [[ArcGisTerrainSceneViewController alloc] init];\n    } else {\n      vc = [[ErisTerrainSceneViewController alloc] init];\n    }`;
+        const newRoute = `if ([format isEqualToString:@"mspk"]) {\n      vc = [[ArcGisTerrainSceneViewController alloc] init];\n    } else if ([format isEqualToString:@"eristerrain_esri"]) {\n      vc = [[ArcGisEristerrainSceneViewController alloc] init];\n    } else {\n      vc = [[ErisTerrainSceneViewController alloc] init];\n    }`;
+        if (src.includes(oldRoute)) src = src.replace(oldRoute, newRoute);
+        fs.writeFileSync(file, src, "utf8");
+      }
+      return modConfig;
+    },
+  ]);
+}
+
 module.exports = function withArcGisIos(config) {
   let next = withArcGisIosPod(config);
   next = withArcGisIosSources(next);
+  next = withEsriTerrainPackageRouting(next);
   return next;
 };
 
