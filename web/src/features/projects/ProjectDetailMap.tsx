@@ -9,8 +9,9 @@ import Home from "@arcgis/core/widgets/Home";
 import Compass from "@arcgis/core/widgets/Compass";
 import ScaleBar from "@arcgis/core/widgets/ScaleBar";
 
-import type { IncidentClassification, ProjectIncidentSummary, ProjectSummary } from "./projectTypes";
-import { classificationLabel } from "./projectTypes";
+import type { IncidentClassification } from "../incidents/incidentClassification";
+import { classificationLabel } from "../incidents/incidentClassification";
+import type { ProjectIncidentSummary, ProjectSummary } from "./projectTypes";
 
 type Props = {
   project: ProjectSummary;
