@@ -1,6 +1,6 @@
 """Esri Terrain 3D offline elevation export for ERIS mobile packages.
 
-The connected Web UI uses ArcGIS World Elevation.  For mobile, ERIS exports the
+The connected Web UI uses ArcGIS World Elevation. For mobile, ERIS exports the
 corresponding export-enabled Terrain3D service into a CompactV2/LERC tile package
 (`.tpkx`) and embeds that immutable file inside the normal ERIS offline bundle.
 
@@ -66,6 +66,30 @@ def _request_json(session: requests.Session, url: str, *, params: dict, timeout_
     return data
 
 
+def _try_request_json(
+    session: requests.Session,
+    urls: list[str],
+    *,
+    params: dict,
+    timeout_s: int,
+) -> tuple[dict, str]:
+    """Try the documented ArcGIS Online/Enterprise job URL variants.
+
+    Esri deployments expose exportTiles async jobs either directly under
+    `<service>/jobs/<id>` or under `<service>/exportTiles/jobs/<id>`. The first
+    successful JSON resource wins; errors are retained only for the final message.
+    """
+    errors: list[str] = []
+    for url in urls:
+        try:
+            return _request_json(session, url, params=params, timeout_s=timeout_s), url
+        except EsriTerrainExportError as exc:
+            errors.append(str(exc))
+    raise EsriTerrainExportError(
+        "Could not resolve the Terrain3D export job resource: " + " | ".join(errors[-2:])
+    )
+
+
 def _available_levels(service_info: dict) -> list[int]:
     tile_info = service_info.get("tileInfo")
     lods = tile_info.get("lods") if isinstance(tile_info, dict) else None
@@ -109,15 +133,66 @@ def _aoi(bounds: dict) -> str:
     )
 
 
-def _result_url(session: requests.Session, service_url: str, job_id: str, job: dict, *, token: str, timeout_s: int) -> str:
+def _job_urls(service_url: str, job_id: str) -> list[str]:
+    root = service_url.rstrip("/")
+    return [
+        f"{root}/jobs/{job_id}",
+        f"{root}/exportTiles/jobs/{job_id}",
+    ]
+
+
+def _extract_inline_output_url(job: dict) -> str | None:
+    for key in ("outputUrl", "outputURL", "url", "URL", "href"):
+        value = job.get(key)
+        if isinstance(value, str) and value:
+            return value
+    results = job.get("results")
+    if isinstance(results, dict):
+        for value in results.values():
+            if isinstance(value, dict):
+                for key in ("value", "outputUrl", "url", "URL", "href"):
+                    candidate = value.get(key)
+                    if isinstance(candidate, str) and candidate:
+                        return candidate
+    return None
+
+
+def _result_url(
+    session: requests.Session,
+    service_url: str,
+    job_id: str,
+    job: dict,
+    *,
+    token: str,
+    timeout_s: int,
+    resolved_job_url: str | None,
+) -> str:
+    inline = _extract_inline_output_url(job)
+    if inline:
+        return inline
+
     results = job.get("results") if isinstance(job, dict) else None
     out = results.get("out_service_url") if isinstance(results, dict) else None
     param_url = out.get("paramUrl") if isinstance(out, dict) else None
     if not isinstance(param_url, str) or not param_url:
         param_url = "results/out_service_url"
-    result = _request_json(
+
+    bases: list[str] = []
+    if resolved_job_url:
+        bases.append(resolved_job_url.rstrip("/"))
+    bases.extend(u.rstrip("/") for u in _job_urls(service_url, job_id))
+    # Preserve order while de-duplicating.
+    seen: set[str] = set()
+    urls: list[str] = []
+    for base in bases:
+        candidate = f"{base}/{param_url.lstrip('/')}"
+        if candidate not in seen:
+            seen.add(candidate)
+            urls.append(candidate)
+
+    result, _ = _try_request_json(
         session,
-        f"{service_url.rstrip('/')}/jobs/{job_id}/{param_url.lstrip('/')}",
+        urls,
         params={"f": "json", "token": token},
         timeout_s=timeout_s,
     )
@@ -129,6 +204,9 @@ def _result_url(session: requests.Session, service_url: str, job_id: str, job: d
             candidate = value.get(key)
             if isinstance(candidate, str) and candidate:
                 return candidate
+    inline = _extract_inline_output_url(result)
+    if inline:
+        return inline
     raise EsriTerrainExportError("Esri Terrain3D export completed without a downloadable tile package URL")
 
 
@@ -191,10 +269,11 @@ def export_terrain_tpkx(
 
     deadline = time.monotonic() + max(30, int(max_wait_s))
     job: dict = submit
+    resolved_job_url: str | None = None
     while time.monotonic() < deadline:
-        job = _request_json(
+        job, resolved_job_url = _try_request_json(
             session,
-            f"{service_url}/jobs/{job_id}",
+            _job_urls(service_url, job_id),
             params={"f": "json", "token": token},
             timeout_s=timeout_s,
         )
@@ -213,7 +292,15 @@ def export_terrain_tpkx(
     else:
         raise EsriTerrainExportError("Timed out waiting for Esri Terrain3D offline tile export")
 
-    download_url = _result_url(session, service_url, job_id, job, token=token, timeout_s=timeout_s)
+    download_url = _result_url(
+        session,
+        service_url,
+        job_id,
+        job,
+        token=token,
+        timeout_s=timeout_s,
+        resolved_job_url=resolved_job_url,
+    )
     # Result URLs can be relative on Enterprise deployments. Resolve against the
     # service root without ever persisting a credential-bearing URL.
     if not download_url.lower().startswith(("http://", "https://")):
