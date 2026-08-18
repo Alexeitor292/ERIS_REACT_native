@@ -1,13 +1,13 @@
 """Detach legacy one-Incident placeholders from provisional coordinator review.
 
-Revision ID: 20260818_event_group_provisional_cleanup
+Revision ID: 20260818_event_group_cleanup
 Revises: 20260818_event_group_domain
 Create Date: 2026-08-18
 """
 
 from alembic import op
 
-revision = "20260818_event_group_provisional_cleanup"
+revision = "20260818_event_group_cleanup"
 down_revision = "20260818_event_group_domain"
 branch_labels = None
 depends_on = None
