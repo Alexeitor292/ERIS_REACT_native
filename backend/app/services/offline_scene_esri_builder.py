@@ -46,9 +46,6 @@ class EsriOfflineTerrainBuilder:
     package_format = PACKAGE_FORMAT_ESRI
 
     def __init__(self, base=None):
-        # get_builder() returns a fresh builder instance for every job. This wrapper
-        # therefore owns the instance and may safely set its package_format only
-        # during registration without cross-job shared-state leakage.
         self.base = base or get_builder()
 
     def prepare_source_data(self, ctx: dict, progress=None) -> dict:
@@ -137,7 +134,25 @@ class EsriOfflineTerrainBuilder:
                     zout.writestr(info.filename, zin.read(info.filename))
                 zout.writestr(ESRI_TERRAIN_FILE, bytes(terrain_bytes))
                 zout.writestr(ESRI_IMAGERY_FILE, bytes(imagery_bytes))
-        return out.getvalue()
+
+        data = out.getvalue()
+        max_bytes = int(settings.OFFLINE_SCENE_MAX_PACKAGE_MB) * 1024 * 1024
+        if len(data) > max_bytes:
+            raise OfflineSceneBuildError(
+                f"High-fidelity Esri offline package is {len(data) / (1024 * 1024):.1f} MB, "
+                f"exceeding the configured {settings.OFFLINE_SCENE_MAX_PACKAGE_MB} MB limit. "
+                "Generate a smaller offline area rather than silently dropping high-detail LODs."
+            )
+
+        # The catalog's basemap source must describe what the v3 native viewer
+        # actually displays, not the legacy hillshade retained for compatibility.
+        source["basemap_meta"] = {
+            "provider": "esri",
+            "source_label": "Esri World Imagery (offline tile cache)",
+            "has_imagery": True,
+            "has_hillshade": True,
+        }
+        return data
 
     def validate_package(self, package_bytes: bytes) -> tuple[bool, str | None]:
         ok, reason = self.base.validate_package(package_bytes)
