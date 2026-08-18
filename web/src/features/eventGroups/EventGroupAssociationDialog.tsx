@@ -133,7 +133,13 @@ export default function EventGroupAssociationDialog({
   }
 
   return (
-    <ModalDialog titleId="event-group-association-title" descriptionId="event-group-association-description" busy={busy} onClose={onClose} panelClassName="max-w-5xl">
+    <ModalDialog
+      titleId="event-group-association-title"
+      descriptionId="event-group-association-description"
+      busy={busy}
+      onClose={onClose}
+      panelClassName="w-full max-w-5xl rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5 shadow-2xl"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Coordinator review</div>
