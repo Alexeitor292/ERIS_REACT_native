@@ -1,0 +1,45 @@
+name: Temporary terrain cross-section CI patch
+
+on:
+  push:
+    branches:
+      - feature/web-terrain-cross-sections
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/web-terrain-cross-sections
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact guarded edits
+        run: python3 scripts/_patch_web_cross_section_ci.py
+      - name: Install Web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Web unit tests
+        working-directory: web
+        run: npm test
+      - name: Web TypeScript
+        working-directory: web
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: Web production build
+        working-directory: web
+        run: npm run build
+      - name: Commit verified patch
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/features/terrainCrossSections/TerrainCrossSectionWorkspace.tsx .github/workflows/ci.yml
+          git commit -m 'fix(web): finalize terrain cross-section CI contract'
+          git push origin HEAD:feature/web-terrain-cross-sections
