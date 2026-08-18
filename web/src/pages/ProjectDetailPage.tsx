@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import type { IncidentClassification, IncidentClassificationQueryResponse } from "../features/incidents/incidentClassification";
 import { classificationLabel } from "../features/incidents/incidentClassification";
 import ProjectDetailMap from "../features/projects/ProjectDetailMap";
+import ProjectManagementPanel from "../features/projects/ProjectManagementPanel";
 import type { ProjectDetailResponse } from "../features/projects/projectTypes";
 import { projectLocationLabel, projectStatusLabel } from "../features/projects/projectTypes";
 import AppShell from "../ui/AppShell";
+import { canTriage } from "../utils/roleModel";
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
@@ -33,6 +36,7 @@ function ClassificationCell({ classification }: { classification: IncidentClassi
 }
 
 export default function ProjectDetailPage() {
+  const { me } = useAuth();
   const params = useParams();
   const navigate = useNavigate();
   const projectId = Number(params.id);
@@ -100,6 +104,8 @@ export default function ProjectDetailPage() {
               <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted">Created</div><div className="mt-1 text-sm font-semibold">{formatDate(detail.project.created_at)}</div><div className="mt-1 text-xs text-muted">Project #{detail.project.id}</div></div>
               <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted">Latest incident activity</div><div className="mt-1 text-sm font-semibold">{formatDate(detail.project.latest_incident_activity_at)}</div></div>
             </div>
+
+            {canTriage(me?.roles) ? <ProjectManagementPanel project={detail.project} onChanged={load} /> : null}
 
             <ProjectDetailMap project={detail.project} incidents={detail.incidents} classifications={classifications} />
 

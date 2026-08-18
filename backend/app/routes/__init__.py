@@ -7,14 +7,16 @@ from . import photo_map as _photo_map
 _photo_map._quality_gated_capture = _capture_policy
 _install_media_ingest()
 
-# Project is the operational parent of Incident. Compose the Project and
-# assessment-derived classification APIs into the already-mounted incident
-# router so the large legacy app/main.py module does not need more direct
-# dependencies. Import Incident first because both workflows reuse its
-# scope/authority helpers.
+# Project is the operational parent of Incident. Compose the Project,
+# Project lifecycle, and assessment-derived classification APIs into the
+# already-mounted incident router so the large legacy app/main.py module does
+# not need more direct dependencies. Import Incident/Project first because the
+# additive routers reuse their scope/serialization helpers.
 from . import incidents as _incidents  # noqa: E402
 from . import projects as _projects  # noqa: E402
+from . import project_lifecycle as _project_lifecycle  # noqa: E402
 from . import incident_classification as _incident_classification  # noqa: E402
 
 _incidents.router.include_router(_projects.router)
+_incidents.router.include_router(_project_lifecycle.router)
 _incidents.router.include_router(_incident_classification.router)
