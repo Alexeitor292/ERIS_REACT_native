@@ -1,0 +1,45 @@
+name: Temporary terrain cross-section usability patch
+
+on:
+  push:
+    branches:
+      - feature/web-terrain-cross-section-usability
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/web-terrain-cross-section-usability
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact guarded edits
+        run: python3 scripts/_patch_terrain_cross_section_usability.py
+      - name: Install Web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Web unit tests
+        working-directory: web
+        run: npm test
+      - name: Web TypeScript
+        working-directory: web
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: Web production build
+        working-directory: web
+        run: npm run build
+      - name: Commit verified usability patch
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/ui/AppShell.tsx web/src/features/terrainCrossSections/TerrainCrossSectionWorkspace.tsx web/src/features/terrainCrossSections/CrossSectionProfileChart.tsx
+          git commit -m 'fix(web): keep terrain map visible during profile analysis'
+          git push origin HEAD:feature/web-terrain-cross-section-usability
