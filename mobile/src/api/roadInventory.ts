@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiFetchBytes } from "./client";
 
 export type RoadInventoryManifest = {
   version_id: number;
@@ -41,12 +41,7 @@ export async function getRoadInventoryPackage(
 }
 
 export async function downloadRoadInventoryPackage(
-  downloadUrl: string,
+  token: string,
 ): Promise<Uint8Array> {
-  const res = await fetch(downloadUrl);
-  if (!res.ok) {
-    throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-  }
-  const buffer = await res.arrayBuffer();
-  return new Uint8Array(buffer);
+  return apiFetchBytes("/road-inventory/mobile-package/download", { token });
 }
