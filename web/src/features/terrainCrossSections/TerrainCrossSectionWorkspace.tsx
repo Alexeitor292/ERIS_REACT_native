@@ -14,6 +14,7 @@ import Search from "@arcgis/core/widgets/Search";
 import * as geodeticDensifyOperator from "@arcgis/core/geometry/operators/geodeticDensifyOperator";
 
 import CrossSectionProfileChart from "./CrossSectionProfileChart";
+import SceneDualScaleBar from "./SceneDualScaleBar";
 import {
   adaptiveSampleSpacingMeters,
   controlPointDistances,
@@ -70,6 +71,7 @@ export default function TerrainCrossSectionWorkspace() {
   const [actualSpacingM, setActualSpacingM] = useState<number | null>(null);
   const [metric, setMetric] = useState(false);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("satellite");
+  const [sceneScale, setSceneScale] = useState<number | null>(null);
 
   drawingRef.current = drawing;
 
@@ -150,6 +152,7 @@ export default function TerrainCrossSectionWorkspace() {
     let search: Search | null = null;
     let home: Home | null = null;
     let compass: Compass | null = null;
+    let scaleHandle: { remove: () => void } | null = null;
 
     view.when(async () => {
       if (disposed) return;
@@ -162,6 +165,9 @@ export default function TerrainCrossSectionWorkspace() {
       view.ui.add(search, "top-right");
       view.ui.add(home, "top-left");
       view.ui.add(compass, "top-left");
+      const updateScale = (value: number) => setSceneScale(Number.isFinite(value) && value > 0 ? value : null);
+      updateScale(Number(view.scale));
+      scaleHandle = view.watch("scale", (value) => updateScale(Number(value)));
 
       clickHandle = view.on("click", (event) => {
         if (!drawingRef.current) return;
@@ -193,6 +199,8 @@ export default function TerrainCrossSectionWorkspace() {
     return () => {
       disposed = true;
       clickHandle?.remove();
+      scaleHandle?.remove();
+      setSceneScale(null);
       if (search) view.ui.remove(search);
       if (home) view.ui.remove(home);
       if (compass) view.ui.remove(compass);
@@ -390,7 +398,7 @@ export default function TerrainCrossSectionWorkspace() {
   }));
 
   return (
-    <div className="flex h-full min-h-[760px] flex-col gap-4 p-4 md:p-5">
+    <div className="flex min-h-[760px] flex-col gap-4 p-4 md:p-5">
       <div className="flex flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <div className="text-sm font-semibold">ArcGIS DEM cross-section workspace</div>
@@ -406,8 +414,8 @@ export default function TerrainCrossSectionWorkspace() {
         </div>
       </div>
 
-      <div className="grid min-h-[560px] flex-1 gap-4 xl:grid-cols-[minmax(0,1.75fr)_380px]">
-        <div className="relative min-h-[560px] overflow-hidden rounded-xl border border-[var(--line)] bg-[#0f172a]">
+      <div className="grid flex-1 items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(520px,0.85fr)]">
+        <div className="relative min-h-[560px] overflow-hidden rounded-xl border border-[var(--line)] bg-[#0f172a] xl:sticky xl:top-[82px] xl:h-[calc(100vh-110px)] xl:max-h-[780px]">
           <div ref={containerRef} className="absolute inset-0" />
 
           <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[min(90%,520px)] rounded-lg bg-black/60 px-3 py-2 text-white backdrop-blur-sm">
@@ -426,6 +434,8 @@ export default function TerrainCrossSectionWorkspace() {
               <button key={mode} type="button" onClick={() => setBasemapMode(mode)} className={`px-3 py-2 ${basemapMode === mode ? "bg-white/20 font-semibold" : "hover:bg-white/10"}`}>{mode === "satellite" ? "Imagery" : "Topographic"}</button>
             ))}
           </div>
+
+          <SceneDualScaleBar scale={sceneScale} />
 
           {sceneState === "loading" ? (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0f172a]/80 text-sm text-white">Loading ArcGIS 3D terrain…</div>
@@ -464,7 +474,28 @@ export default function TerrainCrossSectionWorkspace() {
             {profileError ? <div role="alert" className="mt-3 rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-xs text-[var(--bad)]">{profileError}</div> : null}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
+          <div className="grid grid-cols-2 gap-3 2xl:grid-cols-3">
+            <MetricCard label="Path distance" value={formatHorizontalDistance(profile?.stats.total_distance_m ?? draftDistanceM, metric)} />
+            <MetricCard label="DEM samples" value={profile ? profile.stats.sample_count.toLocaleString() : "—"} />
+            <MetricCard label="Actual spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
+            <MetricCard label="Min elevation" value={profile ? formatElevation(profile.stats.min_elevation_m, metric) : "—"} />
+            <MetricCard label="Max elevation" value={profile ? formatElevation(profile.stats.max_elevation_m, metric) : "—"} />
+            <MetricCard label="Elevation range" value={profile ? formatElevation(profile.stats.elevation_range_m, metric) : "—"} />
+          </div>
+
+          {profile ? (
+            <>
+              <CrossSectionProfileChart profile={profile} controlDistances={controlDistances} metric={metric} onHoverSample={showHoverSample} />
+              <div className="grid grid-cols-2 gap-3">
+                <MetricCard label="Cumulative gain" value={formatElevation(profile.stats.elevation_gain_m, metric)} />
+                <MetricCard label="Cumulative loss" value={formatElevation(profile.stats.elevation_loss_m, metric)} />
+                <MetricCard label="Start elevation" value={formatElevation(profile.samples[0].elevation_m, metric)} />
+                <MetricCard label="End elevation" value={formatElevation(profile.samples[profile.samples.length - 1].elevation_m, metric)} />
+              </div>
+            </>
+          ) : null}
+
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">Selected control points</div>
               <div className="text-xs font-semibold tabular-nums text-muted">{controlPoints.length} point{controlPoints.length === 1 ? "" : "s"}</div>
@@ -486,26 +517,6 @@ export default function TerrainCrossSectionWorkspace() {
         </aside>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <MetricCard label="Path distance" value={formatHorizontalDistance(profile?.stats.total_distance_m ?? draftDistanceM, metric)} />
-        <MetricCard label="DEM samples" value={profile ? profile.stats.sample_count.toLocaleString() : "—"} />
-        <MetricCard label="Actual spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
-        <MetricCard label="Min elevation" value={profile ? formatElevation(profile.stats.min_elevation_m, metric) : "—"} />
-        <MetricCard label="Max elevation" value={profile ? formatElevation(profile.stats.max_elevation_m, metric) : "—"} />
-        <MetricCard label="Elevation range" value={profile ? formatElevation(profile.stats.elevation_range_m, metric) : "—"} />
-      </div>
-
-      {profile ? (
-        <>
-          <CrossSectionProfileChart profile={profile} controlDistances={controlDistances} metric={metric} onHoverSample={showHoverSample} />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Cumulative gain" value={formatElevation(profile.stats.elevation_gain_m, metric)} />
-            <MetricCard label="Cumulative loss" value={formatElevation(profile.stats.elevation_loss_m, metric)} />
-            <MetricCard label="Start elevation" value={formatElevation(profile.samples[0].elevation_m, metric)} />
-            <MetricCard label="End elevation" value={formatElevation(profile.samples[profile.samples.length - 1].elevation_m, metric)} />
-          </div>
-        </>
-      ) : null}
     </div>
   );
 }
