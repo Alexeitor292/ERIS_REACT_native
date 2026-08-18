@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { api } from "../api/client";
+import type { IncidentClassification, IncidentClassificationQueryResponse } from "../features/incidents/incidentClassification";
+import { classificationLabel } from "../features/incidents/incidentClassification";
 import ProjectDetailMap from "../features/projects/ProjectDetailMap";
-import type { IncidentClassification, ProjectDetailResponse } from "../features/projects/projectTypes";
-import { classificationLabel, projectLocationLabel, projectStatusLabel } from "../features/projects/projectTypes";
+import type { ProjectDetailResponse } from "../features/projects/projectTypes";
+import { projectLocationLabel, projectStatusLabel } from "../features/projects/projectTypes";
 import AppShell from "../ui/AppShell";
 
 function formatDate(value: string | null | undefined): string {
@@ -49,7 +51,7 @@ export default function ProjectDetailPage() {
     try {
       const nextDetail = await api<ProjectDetailResponse>(`/projects/${projectId}`);
       setDetail(nextDetail);
-      const classificationResponse = await api<{ items: IncidentClassification[] }>("/incident-classifications/query", {
+      const classificationResponse = await api<IncidentClassificationQueryResponse>("/incident-classifications/query", {
         method: "POST",
         body: JSON.stringify({ incident_ids: nextDetail.incidents.map((incident) => incident.id) }),
       });
