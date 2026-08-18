@@ -23,6 +23,7 @@ function pageDescription(pathname: string) {
 
   const descriptions: Array<[string, string]> = [
     ["/mission-center", "Explore California Projects, Incidents, saved geometry, and mapped field-photo evidence through ArcGIS."],
+    ["/gis/terrain-cross-sections", "Create multi-point terrain cross sections directly on the ArcGIS DEM without an Incident or Submission."],
     ["/projects", "Manage operational Projects and the Incidents grouped under each response area."],
     ["/incidents", "Manage emergency events and coordinate the field records associated with them."],
     ["/assessments", "Review geotechnical assessments and supporting field information."],
@@ -95,6 +96,12 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
         <NavItem to="/assessments" label="Assessments" collapsed={collapsed} />
         <NavItem to="/submissions" label="Submissions" collapsed={collapsed} />
       </NavGroup>
+
+      {operational ? (
+        <NavGroup label="GIS Tools" collapsed={collapsed}>
+          <NavItem to="/gis/terrain-cross-sections" label="Terrain Cross Sections" collapsed={collapsed} />
+        </NavGroup>
+      ) : null}
 
       {me?.roles?.includes("ADMIN") && (
         <NavGroup label="Administration" collapsed={collapsed}>
