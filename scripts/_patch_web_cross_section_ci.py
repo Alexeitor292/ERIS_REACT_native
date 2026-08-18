@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# Follow-up push intentionally triggers the temporary branch-only verifier now
+# that the workflow definition already exists on this branch.
 workspace = Path("web/src/features/terrainCrossSections/TerrainCrossSectionWorkspace.tsx")
 text = workspace.read_text(encoding="utf-8")
 old = '      view.goTo(profileLine.extent.expand(1.25), { animate: true }).catch(() => {});\n'
