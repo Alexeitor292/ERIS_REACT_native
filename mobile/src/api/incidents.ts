@@ -20,6 +20,11 @@ export type RoadInventoryIncidentContext = {
 
 export type Incident = {
   id: number;
+  event_group_id?: number | null;
+  incident_key?: string | null;
+  is_permanent?: boolean;
+  approved_at?: string | null;
+  approved_by_user_id?: number | null;
   title: string | null;
   incident_type: string | null;
   description: string | null;
@@ -154,10 +159,7 @@ export type IncidentLocationLinkPayload = {
 
 export type IncidentAttachmentKind = "PHOTO" | "VIDEO" | "DOC" | "SKETCH";
 
-export async function listIncidents(
-  token: string,
-  opts: { status?: IncidentStatus; unclaimedOnly?: boolean; limit?: number; scope?: "mobile" | "all" } = {}
-) {
+export async function listIncidents(token: string, opts: { status?: IncidentStatus; unclaimedOnly?: boolean; limit?: number; scope?: "mobile" | "all" } = {}) {
   const q = new URLSearchParams();
   if (opts.status) q.set("status", opts.status);
   if (opts.unclaimedOnly) q.set("unclaimed_only", "true");
@@ -172,37 +174,21 @@ export async function missionCenterFeed(token: string) {
 }
 
 export async function createIncident(token: string, payload: IncidentCreatePayload) {
-  return apiFetch<{ incident: Incident }>("/incidents", {
-    method: "POST",
-    token,
-    body: payload,
-  });
+  return apiFetch<{ incident: Incident }>("/incidents", { method: "POST", token, body: payload });
 }
 
-export async function uploadIncidentAttachment(
-  token: string,
-  incidentId: number | string,
-  file: { uri: string; name: string; type: string },
-  opts?: { kind?: IncidentAttachmentKind }
-) {
+export async function uploadIncidentAttachment(token: string, incidentId: number | string, file: { uri: string; name: string; type: string }, opts?: { kind?: IncidentAttachmentKind }) {
   const preparedFile = await prepareUploadFile(file);
   const params = new URLSearchParams();
   if (opts?.kind) params.set("kind", opts.kind);
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  const baseCandidates = [getApiBaseUrl(), ...getApiBaseCandidates()]
-    .map((u) => u.replace(/\/+$/, ""))
-    .filter((u, idx, arr) => arr.indexOf(u) === idx);
-
+  const baseCandidates = [getApiBaseUrl(), ...getApiBaseCandidates()].map((u) => u.replace(/\/+$/, "")).filter((u, idx, arr) => arr.indexOf(u) === idx);
   let lastError = "Network request failed";
   for (const base of baseCandidates) {
     const formData = new FormData();
     formData.append("file", preparedFile as any);
     try {
-      const response = await fetch(`${base}/incidents/${incidentId}/attachments${suffix}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
+      const response = await fetch(`${base}/incidents/${incidentId}/attachments${suffix}`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
       if (response.ok) return response.json();
       lastError = `${response.status} ${await response.text().catch(() => "")}`;
     } catch (err: any) {
@@ -213,131 +199,56 @@ export async function uploadIncidentAttachment(
 }
 
 export async function updateIncident(token: string, incidentId: number, payload: IncidentCreatePayload) {
-  return apiFetch<{ incident: Incident }>(`/incidents/${incidentId}`, {
-    method: "PATCH",
-    token,
-    body: payload,
-  });
+  return apiFetch<{ incident: Incident }>(`/incidents/${incidentId}`, { method: "PATCH", token, body: payload });
 }
 
 export async function getIncidentLocationCandidates(token: string, incidentId: number, limit = 8) {
-  return apiFetch<{ incident_id: number; location_id: number | null; location_match_status: string | null; items: IncidentLocationCandidate[] }>(
-    `/incidents/${incidentId}/location-candidates?limit=${limit}`,
-    { token }
-  );
+  return apiFetch<{ incident_id: number; location_id: number | null; location_match_status: string | null; items: IncidentLocationCandidate[] }>(`/incidents/${incidentId}/location-candidates?limit=${limit}`, { token });
 }
 
-export async function linkIncidentLocation(
-  token: string,
-  incidentId: number,
-  payload: IncidentLocationLinkPayload
-) {
-  return apiFetch<{ incident_id: number; location_id: number; location_match_status: string }>(
-    `/incidents/${incidentId}/location-link`,
-    {
-      method: "POST",
-      token,
-      body: payload,
-    }
-  );
+export async function linkIncidentLocation(token: string, incidentId: number, payload: IncidentLocationLinkPayload) {
+  return apiFetch<{ incident_id: number; location_id: number; location_match_status: string }>(`/incidents/${incidentId}/location-link`, { method: "POST", token, body: payload });
 }
 
 export async function getIncidentLocationTimeline(token: string, locationId: number, limit = 20) {
-  return apiFetch<IncidentLocationTimeline>(`/incident-locations/${locationId}/timeline?limit=${limit}`, {
-    token,
-  });
+  return apiFetch<IncidentLocationTimeline>(`/incident-locations/${locationId}/timeline?limit=${limit}`, { token });
 }
 
 export async function claimIncident(token: string, incidentId: number) {
-  return apiFetch<{ incident_id: number; linked_submission_id: number }>(`/incidents/${incidentId}/claim`, {
-    method: "POST",
-    token,
-  });
+  return apiFetch<{ incident_id: number; linked_submission_id: number }>(`/incidents/${incidentId}/claim`, { method: "POST", token });
 }
 
 export async function assignIncident(token: string, incidentId: number, assigneeUserId: number) {
-  return apiFetch<{ incident_id: number; linked_submission_id: number }>(`/incidents/${incidentId}/assign`, {
-    method: "POST",
-    token,
-    body: { assignee_user_id: assigneeUserId },
-  });
+  return apiFetch<{ incident_id: number; linked_submission_id: number }>(`/incidents/${incidentId}/assign`, { method: "POST", token, body: { assignee_user_id: assigneeUserId } });
 }
 
 export async function forwardIncidentByCoordinator(token: string, incidentId: number, comment?: string | null) {
-  return apiFetch<{ incident_id: number; current_stage: IncidentStage; office_code: string | null; linked_submission_id: number | null }>(
-    `/incidents/${incidentId}/coordinator/forward`,
-    {
-      method: "POST",
-      token,
-      body: { comment: comment ?? null },
-    }
+  return apiFetch<{ incident: Incident; event_group: unknown; created_event_group: boolean; current_stage: IncidentStage; office_code: string | null; linked_submission_id: number | null }>(
+    `/incidents/${incidentId}/coordinator/approve`,
+    { method: "POST", token, body: { comment: comment ?? null } },
   );
 }
 
-export async function requestIncidentRevisionByCoordinator(
-  token: string,
-  incidentId: number,
-  comment?: string | null,
-  revisionFields: string[] = []
-) {
-  return apiFetch<{ incident_id: number; location_match_status: string }>(
-    `/incidents/${incidentId}/coordinator/request-revision`,
-    {
-      method: "POST",
-      token,
-      body: { comment: comment ?? null, revision_fields: revisionFields },
-    }
-  );
+export async function requestIncidentRevisionByCoordinator(token: string, incidentId: number, comment?: string | null, revisionFields: string[] = []) {
+  return apiFetch<{ incident_id: number; location_match_status: string }>(`/incidents/${incidentId}/coordinator/request-revision`, { method: "POST", token, body: { comment: comment ?? null, revision_fields: revisionFields } });
 }
 
-export async function assignIncidentToBranchChief(
-  token: string,
-  incidentId: number,
-  branchChiefUserId: number
-) {
-  return apiFetch<{ incident_id: number; current_stage: IncidentStage }>(
-    `/incidents/${incidentId}/office-chief/assign-branch`,
-    {
-      method: "POST",
-      token,
-      body: { branch_chief_user_id: branchChiefUserId },
-    }
-  );
+export async function assignIncidentToBranchChief(token: string, incidentId: number, branchChiefUserId: number) {
+  return apiFetch<{ incident_id: number; current_stage: IncidentStage }>(`/incidents/${incidentId}/office-chief/assign-branch`, { method: "POST", token, body: { branch_chief_user_id: branchChiefUserId } });
 }
 
 export async function getOfficeChiefBranchOptions(token: string, incidentId: number) {
-  return apiFetch<{ incident_id: number; office_code: string | null; items: RoutingUserOption[] }>(
-    `/incidents/${incidentId}/office-chief/branch-options`,
-    { token }
-  );
+  return apiFetch<{ incident_id: number; office_code: string | null; items: RoutingUserOption[] }>(`/incidents/${incidentId}/office-chief/branch-options`, { token });
 }
 
-export async function assignIncidentToEngineer(
-  token: string,
-  incidentId: number,
-  engineerUserId: number
-) {
-  return apiFetch<{ incident_id: number; linked_submission_id: number }>(
-    `/incidents/${incidentId}/branch-chief/assign-engineer`,
-    {
-      method: "POST",
-      token,
-      body: { engineer_user_id: engineerUserId },
-    }
-  );
+export async function assignIncidentToEngineer(token: string, incidentId: number, engineerUserId: number) {
+  return apiFetch<{ incident_id: number; linked_submission_id: number }>(`/incidents/${incidentId}/branch-chief/assign-engineer`, { method: "POST", token, body: { engineer_user_id: engineerUserId } });
 }
 
 export async function unassignIncident(token: string, incidentId: number) {
-  return apiFetch<{ incident_id: number; status: IncidentStatus }>(`/incidents/${incidentId}/unassign`, {
-    method: "POST",
-    token,
-  });
+  return apiFetch<{ incident_id: number; status: IncidentStatus }>(`/incidents/${incidentId}/unassign`, { method: "POST", token });
 }
 
 export async function resolveIncident(token: string, incidentId: number, comment?: string | null) {
-  return apiFetch<{ incident_id: number; status: IncidentStatus }>(`/incidents/${incidentId}/resolve`, {
-    method: "POST",
-    token,
-    body: { comment: comment ?? null },
-  });
+  return apiFetch<{ incident_id: number; status: IncidentStatus }>(`/incidents/${incidentId}/resolve`, { method: "POST", token, body: { comment: comment ?? null } });
 }
