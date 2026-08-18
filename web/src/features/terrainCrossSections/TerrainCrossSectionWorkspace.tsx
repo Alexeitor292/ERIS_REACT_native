@@ -36,18 +36,15 @@ function pointKey(point: CrossSectionControlPoint) {
   return `${point.longitude.toFixed(7)}:${point.latitude.toFixed(7)}`;
 }
 
-function nearestSampleElevation(
-  profile: CrossSectionProfile | null,
-  controlDistance: number,
-): number | null {
+function nearestSampleElevation(profile: CrossSectionProfile | null, controlDistance: number): number | null {
   if (!profile?.samples.length) return null;
   let best = profile.samples[0];
-  let delta = Math.abs(best.distance_m - controlDistance);
+  let bestDelta = Math.abs(best.distance_m - controlDistance);
   for (const sample of profile.samples) {
-    const next = Math.abs(sample.distance_m - controlDistance);
-    if (next < delta) {
+    const delta = Math.abs(sample.distance_m - controlDistance);
+    if (delta < bestDelta) {
       best = sample;
-      delta = next;
+      bestDelta = delta;
     }
   }
   return best.elevation_m;
@@ -108,8 +105,6 @@ export default function TerrainCrossSectionWorkspace() {
     }));
   }, [profile]);
 
-  // Create one durable statewide SceneView. Cross-section state changes only
-  // rebuild GraphicsLayers; they never recreate the camera or ArcGIS ground.
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -220,8 +215,6 @@ export default function TerrainCrossSectionWorkspace() {
     if (basemap) map.basemap = basemap;
   }, [basemapMode]);
 
-  // Rebuild clicked points and the in-progress polyline without touching the
-  // SceneView. Exact control points remain visible even after DEM densification.
   useEffect(() => {
     const layer = controlLayerRef.current;
     if (!layer) return;
@@ -274,8 +267,6 @@ export default function TerrainCrossSectionWorkspace() {
     });
   }, [controlPoints, drawing]);
 
-  // Render the sampled profile itself as an absolute-height polyline so the
-  // engineer can see the queried DEM path laid directly over the terrain.
   useEffect(() => {
     const layer = profileLayerRef.current;
     if (!layer) return;
@@ -380,7 +371,10 @@ export default function TerrainCrossSectionWorkspace() {
         paths: [nextProfile.samples.map((sample) => [sample.longitude, sample.latitude, sample.elevation_m])],
         spatialReference: WGS84,
       });
-      view.goTo(profileLine.extent.expand(1.25), { animate: true }).catch(() => {});
+      const profileExtent = profileLine.extent;
+      if (profileExtent) {
+        view.goTo(profileExtent.expand(1.25), { animate: true }).catch(() => {});
+      }
     } catch (error: any) {
       setProfile(null);
       setProfileError(error?.message ?? "Failed to sample ArcGIS terrain elevation.");
