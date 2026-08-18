@@ -1,6 +1,7 @@
 #import "ArcGisEristerrainSceneViewController.h"
 
 #import <ArcGIS/ArcGIS.h>
+#import <math.h>
 #import "ArcGisSketchStore.h"
 
 static uint16_t ErisU16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
@@ -68,7 +69,7 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
   NSUInteger n = archive.length;
   if (n < 22) return nil;
 
-  NSInteger min = (NSInteger)MAX((NSUInteger)0, n > 65557 ? n - 65557 : 0);
+  NSInteger min = (NSInteger)(n > 65557 ? n - 65557 : 0);
   NSInteger eocd = -1;
   for (NSInteger i = (NSInteger)n - 22; i >= min; i--) {
     if (ErisU32(b + i) == 0x06054b50) { eocd = i; break; }
@@ -153,7 +154,8 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
   AGSSpatialReference *wgs = [AGSSpatialReference WGS84];
   if (isfinite(self.incidentLat) && isfinite(self.incidentLon)) {
     AGSPoint *p = [AGSPoint pointWithX:self.incidentLon y:self.incidentLat spatialReference:wgs];
-    AGSSimpleMarkerSceneSymbol *s = [AGSSimpleMarkerSceneSymbol simpleMarkerSceneSymbolWithStyle:AGSSimpleMarkerSceneSymbolStyleSphere color:UIColor.systemRedColor height:10 width:10 depth:10 anchorPosition:AGSSymbolAnchorPositionBottom];
+    AGSSimpleMarkerSymbol *s = [AGSSimpleMarkerSymbol simpleMarkerSymbolWithStyle:AGSSimpleMarkerSymbolStyleCircle color:UIColor.systemRedColor size:14];
+    s.outline = [AGSSimpleLineSymbol simpleLineSymbolWithStyle:AGSSimpleLineSymbolStyleSolid color:UIColor.whiteColor width:2];
     [self.overlay.graphics addObject:[AGSGraphic graphicWithGeometry:p symbol:s attributes:nil]];
   }
   NSNumber *bearing = [self.payload[@"roadBearingDeg"] isKindOfClass:NSNumber.class] ? self.payload[@"roadBearingDeg"] : nil;
@@ -172,7 +174,7 @@ static uint32_t ErisU32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1] << 8)
 - (void)resetCamera {
   if (!isfinite(self.incidentLat) || !isfinite(self.incidentLon)) return;
   AGSPoint *target = [AGSPoint pointWithX:self.incidentLon y:self.incidentLat spatialReference:[AGSSpatialReference WGS84]];
-  AGSCamera *camera = [AGSCamera cameraLookingAtPoint:target distance:1800 heading:0 pitch:65 roll:0];
+  AGSCamera *camera = [AGSCamera cameraWithLookAtPoint:target distance:1800 heading:0 pitch:65 roll:0];
   [self.sceneView setViewpointCamera:camera duration:0.35 completion:nil];
 }
 
