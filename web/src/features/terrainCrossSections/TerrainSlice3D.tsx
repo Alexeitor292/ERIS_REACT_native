@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import Map from "@arcgis/core/Map";
+import MapView from "@arcgis/core/views/MapView";
 import SceneView from "@arcgis/core/views/SceneView";
 import Graphic from "@arcgis/core/Graphic";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Mesh from "@arcgis/core/geometry/Mesh";
+import MeshTexture from "@arcgis/core/geometry/support/MeshTexture";
 import Multipoint from "@arcgis/core/geometry/Multipoint";
+import Extent from "@arcgis/core/geometry/Extent";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
+import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 
 import {
   formatElevation,
@@ -20,12 +24,53 @@ import {
 
 const WGS84 = SpatialReference.WGS84;
 const DEFAULT_WIDTH_M = 100;
+const WEB_MERCATOR_RADIUS_M = 6_378_137;
+
+type SliceSurfaceMode = "satellite" | "topographic" | "bare";
+
+type SliceTexture = {
+  image: ImageData;
+  extent: { xmin: number; ymin: number; xmax: number; ymax: number };
+};
 
 function vertexIndex(row: number, column: number, columns: number) {
   return row * columns + column;
 }
 
-function buildTerrainMesh(data: TerrainSliceData) {
+function webMercatorXY(longitude: number, latitude: number) {
+  const lonRad = longitude * Math.PI / 180;
+  const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, latitude));
+  const latRad = clampedLat * Math.PI / 180;
+  return {
+    x: WEB_MERCATOR_RADIUS_M * lonRad,
+    y: WEB_MERCATOR_RADIUS_M * Math.log(Math.tan(Math.PI / 4 + latRad / 2)),
+  };
+}
+
+function buildTextureUv(data: TerrainSliceData, texture: SliceTexture | null) {
+  const uv: number[] = [];
+  const extent = texture?.extent;
+
+  for (let copy = 0; copy < 2; copy += 1) {
+    for (const point of data.points) {
+      if (!extent) {
+        uv.push(0, 0);
+        continue;
+      }
+      const projected = webMercatorXY(point.longitude, point.latitude);
+      const width = Math.max(1, extent.xmax - extent.xmin);
+      const height = Math.max(1, extent.ymax - extent.ymin);
+      uv.push(
+        Math.max(0, Math.min(1, (projected.x - extent.xmin) / width)),
+        Math.max(0, Math.min(1, (projected.y - extent.ymin) / height)),
+      );
+    }
+  }
+
+  return uv;
+}
+
+function buildTerrainMesh(data: TerrainSliceData, texture: SliceTexture | null) {
   const topCount = data.rows * data.columns;
   const position: number[] = [];
 
@@ -78,13 +123,23 @@ function buildTerrainMesh(data: TerrainSliceData) {
     );
   }
 
+  const topMaterial = texture
+    ? {
+        color: [255, 255, 255, 1],
+        colorTexture: new MeshTexture({ data: texture.image }),
+      }
+    : { color: [146, 168, 125, 1] };
+
   return new Mesh({
     spatialReference: WGS84,
-    vertexAttributes: { position },
+    vertexAttributes: {
+      position,
+      uv: buildTextureUv(data, texture),
+    },
     components: [
       {
         faces: topFaces,
-        material: { color: [146, 168, 125, 1] },
+        material: topMaterial,
         shading: "smooth",
       },
       {
@@ -101,11 +156,101 @@ function buildTerrainMesh(data: TerrainSliceData) {
   });
 }
 
-function TerrainSliceScene({ data }: { data: TerrainSliceData }) {
+async function renderBasemapTexture(data: TerrainSliceData, mode: Exclude<SliceSurfaceMode, "bare">): Promise<SliceTexture> {
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.position = "fixed";
+  host.style.left = "-12000px";
+  host.style.top = "0";
+  host.style.width = "1024px";
+  host.style.height = "768px";
+  host.style.pointerEvents = "none";
+  document.body.appendChild(host);
+
+  const map = new Map({ basemap: mode === "satellite" ? "satellite" : "topo-vector" });
+  const view = new MapView({ container: host, map });
+
+  try {
+    const longitudes = data.points.map((point) => point.longitude);
+    const latitudes = data.points.map((point) => point.latitude);
+    const xmin = Math.min(...longitudes);
+    const xmax = Math.max(...longitudes);
+    const ymin = Math.min(...latitudes);
+    const ymax = Math.max(...latitudes);
+    const lonPad = Math.max((xmax - xmin) * 0.04, 0.00005);
+    const latPad = Math.max((ymax - ymin) * 0.04, 0.00005);
+
+    await view.when();
+    await view.goTo(new Extent({
+      xmin: xmin - lonPad,
+      ymin: ymin - latPad,
+      xmax: xmax + lonPad,
+      ymax: ymax + latPad,
+      spatialReference: WGS84,
+    }), { animate: false });
+    await reactiveUtils.whenOnce(() => !view.updating);
+
+    const screenshot = await view.takeScreenshot({ width: 1024, height: 768 });
+    const extent = view.extent;
+    if (!extent) throw new Error("ArcGIS basemap texture extent was unavailable.");
+
+    return {
+      image: screenshot.data,
+      extent: {
+        xmin: extent.xmin,
+        ymin: extent.ymin,
+        xmax: extent.xmax,
+        ymax: extent.ymax,
+      },
+    };
+  } finally {
+    view.destroy();
+    host.remove();
+  }
+}
+
+function TerrainSliceScene({
+  data,
+  surfaceMode,
+}: {
+  data: TerrainSliceData;
+  surfaceMode: SliceSurfaceMode;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const requestIdRef = useRef(0);
+  const [texture, setTexture] = useState<SliceTexture | null>(null);
+  const [textureBusy, setTextureBusy] = useState(surfaceMode !== "bare");
+  const [textureError, setTextureError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const requestId = ++requestIdRef.current;
+    setTextureError(null);
+
+    if (surfaceMode === "bare") {
+      setTexture(null);
+      setTextureBusy(false);
+      return;
+    }
+
+    setTexture(null);
+    setTextureBusy(true);
+    void renderBasemapTexture(data, surfaceMode)
+      .then((nextTexture) => {
+        if (requestId !== requestIdRef.current) return;
+        setTexture(nextTexture);
+      })
+      .catch((reason: unknown) => {
+        if (requestId !== requestIdRef.current) return;
+        setTextureError(reason instanceof Error ? reason.message : "Failed to render the ArcGIS basemap texture.");
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) setTextureBusy(false);
+      });
+  }, [data, surfaceMode]);
 
   useEffect(() => {
     if (!containerRef.current) return;
+    if (surfaceMode !== "bare" && !texture && !textureError) return;
 
     const layer = new GraphicsLayer({ title: "Terrain slice" });
     const map = new Map({ layers: [layer] });
@@ -120,7 +265,7 @@ function TerrainSliceScene({ data }: { data: TerrainSliceData }) {
       } as never,
     });
 
-    const mesh = buildTerrainMesh(data);
+    const mesh = buildTerrainMesh(data, texture);
     layer.add(new Graphic({
       geometry: mesh,
       symbol: {
@@ -148,13 +293,33 @@ function TerrainSliceScene({ data }: { data: TerrainSliceData }) {
       disposed = true;
       view.destroy();
     };
-  }, [data]);
+  }, [data, surfaceMode, texture, textureError]);
+
+  const surfaceLabel = surfaceMode === "satellite"
+    ? "Satellite imagery"
+    : surfaceMode === "topographic"
+      ? "Topographic"
+      : "Bare DEM";
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-slate-950">
+    <div className="relative overflow-hidden rounded-lg border border-[var(--line)] bg-slate-950">
       <div ref={containerRef} className="h-[430px] w-full" aria-label="Interactive 3D terrain slice" />
+
+      {textureBusy ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/75 text-sm text-white/80 backdrop-blur-sm">
+          Draping {surfaceLabel.toLowerCase()} onto the DEM…
+        </div>
+      ) : null}
+
+      {textureError ? (
+        <div className="absolute left-3 right-3 top-3 rounded-lg border border-amber-300/40 bg-amber-950/85 px-3 py-2 text-xs text-amber-50 shadow-lg backdrop-blur-sm">
+          {textureError} Showing the bare DEM surface instead.
+        </div>
+      ) : null}
+
       <div className="border-t border-white/10 bg-slate-950 px-3 py-2 text-[11px] text-white/65">
-        Drag to orbit · Scroll to zoom · Terrain surface is shown at 1× vertical scale
+        Drag to orbit · Scroll to zoom · 1× vertical scale · Surface: {surfaceLabel}
+        {surfaceMode !== "bare" ? " · ArcGIS basemap content © Esri and contributors" : ""}
       </div>
     </div>
   );
@@ -170,6 +335,7 @@ export default function TerrainSlice3D({
   const queryMapRef = useRef<Map | null>(null);
   const requestIdRef = useRef(0);
   const [widthM, setWidthM] = useState(DEFAULT_WIDTH_M);
+  const [surfaceMode, setSurfaceMode] = useState<SliceSurfaceMode>("satellite");
   const [data, setData] = useState<TerrainSliceData | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -252,6 +418,31 @@ export default function TerrainSlice3D({
             </button>
           ))}
         </div>
+
+        <div className="mt-4 border-t border-[var(--line)] pt-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Surface layer</div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {([
+              ["satellite", "Satellite"],
+              ["topographic", "Topographic"],
+              ["bare", "Bare DEM"],
+            ] as Array<[SliceSurfaceMode, string]>).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setSurfaceMode(mode)}
+                className={`rounded-md border px-2.5 py-2 text-xs font-semibold ${surfaceMode === mode
+                  ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]"
+                  : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 text-[11px] leading-5 text-muted">
+            Imagery and topographic cartography are rendered from ArcGIS and draped directly onto the sampled 3D DEM surface. Cut faces and the base remain visually distinct.
+          </div>
+        </div>
       </div>
 
       {busy ? (
@@ -268,7 +459,7 @@ export default function TerrainSlice3D({
 
       {!busy && data ? (
         <>
-          <TerrainSliceScene data={data} />
+          <TerrainSliceScene data={data} surfaceMode={surfaceMode} />
           <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--line)] sm:grid-cols-4">
             <SliceStat label="Highest terrain" value={formatElevation(data.max_elevation_m, metric)} />
             <SliceStat label="Lowest terrain" value={formatElevation(data.min_elevation_m, metric)} />
