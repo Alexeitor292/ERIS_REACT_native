@@ -1,3 +1,4 @@
+import inspect
 import os
 import re
 import sys
@@ -5,7 +6,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 from starlette.testclient import TestClient
 
 # JWT_SECRET has no default in Settings; set a fallback for CI/no-DB runs.
@@ -46,6 +47,72 @@ def package_reference_fixture(monkeypatch):
         "longitude": -121.2,
     }
     monkeypatch.setattr(packages, "fetch_postmile_reference_points", lambda: [point])
+
+
+_LEGACY_PERMANENT_INCIDENT_CLEANUP_MODULES = {
+    "tests.test_elevation_profile",
+    "tests.test_offline_scene",
+    "tests.test_offline_scene_generation",
+    "tests.test_road_inventory",
+    "tests.test_terrain_grid",
+}
+
+
+def _called_from_legacy_permanent_incident_test() -> bool:
+    """Return True only for direct SQL issued by legacy DB test modules.
+
+    The Event Group migration intentionally makes coordinator-approved Incidents
+    permanent. Several older integration tests still use a hard DELETE as their
+    fixture teardown. Rewriting only those direct test cleanup statements keeps
+    the production trigger fully exercised while allowing their surrounding
+    cleanup transactions (notably offline-scene job cleanup) to commit.
+
+    FastAPI request handling runs in worker threads and therefore does not inherit
+    the direct test call stack. Event Group identity tests are intentionally not in
+    this compatibility set, so their hard-delete refusal coverage remains real.
+    """
+    frame = inspect.currentframe()
+    try:
+        while frame is not None:
+            module_name = str(frame.f_globals.get("__name__") or "")
+            if module_name in _LEGACY_PERMANENT_INCIDENT_CLEANUP_MODULES:
+                return True
+            frame = frame.f_back
+        return False
+    finally:
+        del frame
+
+
+def _install_permanent_incident_test_cleanup_adapter() -> None:
+    """Retire legacy test Incidents instead of violating permanent identity.
+
+    This is test-harness behavior only. The database trigger is not weakened and
+    production code still receives the real hard-delete rejection.
+    """
+    from app.db import engine
+
+    if getattr(engine, "_eris_permanent_incident_test_cleanup_adapter", False):
+        return
+
+    delete_incident = re.compile(
+        r"^\s*DELETE\s+FROM\s+incidents\s+WHERE\s+id\s*=",
+        flags=re.IGNORECASE,
+    )
+
+    def rewrite_legacy_cleanup(conn, cursor, statement, parameters, context, executemany):
+        del conn, cursor, context, executemany
+        if delete_incident.match(statement) and _called_from_legacy_permanent_incident_test():
+            statement = re.sub(
+                r"^\s*DELETE\s+FROM\s+incidents",
+                "UPDATE incidents SET status = 'RESOLVED'",
+                statement,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        return statement, parameters
+
+    event.listen(engine, "before_cursor_execute", rewrite_legacy_cleanup, retval=True)
+    setattr(engine, "_eris_permanent_incident_test_cleanup_adapter", True)
 
 
 def _ensure_test_project(incident_id: int) -> None:
@@ -189,6 +256,7 @@ def client_db():
     MinIO is not required; startup warns and continues in dev mode.
     Run only with: pytest -m db
     """
+    _install_permanent_incident_test_cleanup_adapter()
     from app.main import app
     with TestClient(app) as c:
         _install_project_aware_db_client(c)
