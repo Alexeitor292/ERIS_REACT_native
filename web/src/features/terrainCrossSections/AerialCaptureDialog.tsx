@@ -13,6 +13,7 @@ import type { CrossSectionControlPoint } from "./terrainCrossSectionModel";
 
 const WGS84 = SpatialReference.WGS84;
 const CAPTURE_MARGIN_PX = 40;
+const FEET_PER_METER = 3.280839895;
 
 type CaptureRatio = "1:1" | "16:9" | "9:16";
 
@@ -126,18 +127,8 @@ function drawNorthArrow(ctx: CanvasRenderingContext2D, width: number) {
   ctx.restore();
 }
 
-function formatScaleLabel(meters: number, metric: boolean) {
-  if (metric) {
-    return meters >= 1000
-      ? `${(meters / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} km`
-      : `${Math.round(meters).toLocaleString()} m`;
-  }
-
-  const feet = meters * 3.280839895;
-  if (feet >= 5280) {
-    return `${(feet / 5280).toLocaleString(undefined, { maximumFractionDigits: 2 })} mi`;
-  }
-  return `${Math.round(feet).toLocaleString()} ft`;
+function formatScaleLabel(meters: number) {
+  return `${Math.round(meters * FEET_PER_METER).toLocaleString()} ft`;
 }
 
 function drawScaleBar(
@@ -145,10 +136,9 @@ function drawScaleBar(
   view: MapView,
   width: number,
   height: number,
-  metric: boolean,
 ) {
   const targetPx = Math.min(300, width * 0.27);
-  const sampleY = Math.max(20, height - CAPTURE_MARGIN_PX - 58);
+  const sampleY = Math.max(20, height - CAPTURE_MARGIN_PX - 68);
   const sampleX = CAPTURE_MARGIN_PX + 22;
   const a = view.toMap({ x: sampleX, y: sampleY });
   const b = view.toMap({ x: sampleX + targetPx, y: sampleY });
@@ -167,27 +157,14 @@ function drawScaleBar(
   );
   if (!Number.isFinite(targetMeters) || targetMeters <= 0) return;
 
-  let barMeters: number;
-  let label: string;
-
-  if (metric) {
-    barMeters = niceFloor(targetMeters);
-    label = formatScaleLabel(barMeters, true);
-  } else {
-    const targetFeet = targetMeters * 3.280839895;
-    if (targetFeet >= 5280) {
-      const miles = niceFloor(targetFeet / 5280);
-      barMeters = miles * 1609.344;
-    } else {
-      const feet = niceFloor(targetFeet);
-      barMeters = feet / 3.280839895;
-    }
-    label = formatScaleLabel(barMeters, false);
-  }
+  const targetFeet = targetMeters * FEET_PER_METER;
+  const barFeet = niceFloor(targetFeet);
+  const barMeters = barFeet / FEET_PER_METER;
+  const label = formatScaleLabel(barMeters);
 
   const barPx = Math.max(48, targetPx * (barMeters / targetMeters));
   const panelWidth = barPx + 44;
-  const panelHeight = 74;
+  const panelHeight = 96;
   const x = CAPTURE_MARGIN_PX;
   const y = height - CAPTURE_MARGIN_PX - panelHeight;
 
@@ -200,7 +177,18 @@ function drawScaleBar(
   ctx.stroke();
 
   const lineX = x + 22;
-  const lineY = y + 43;
+  const lineY = y + 72;
+
+  ctx.fillStyle = "#475569";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = "700 14px system-ui, sans-serif";
+  ctx.fillText("Scale", lineX, y + 18);
+
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "700 20px system-ui, sans-serif";
+  ctx.fillText(label, lineX, y + 42);
+
   ctx.strokeStyle = "#0f172a";
   ctx.lineWidth = 5;
   ctx.beginPath();
@@ -211,12 +199,6 @@ function drawScaleBar(
   ctx.moveTo(lineX + barPx, lineY - 9);
   ctx.lineTo(lineX + barPx, lineY + 9);
   ctx.stroke();
-
-  ctx.fillStyle = "#0f172a";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = "700 20px system-ui, sans-serif";
-  ctx.fillText(label, lineX, y + 19);
   ctx.restore();
 }
 
@@ -243,15 +225,14 @@ function canvasBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
-      else reject(new Error("The browser could not create the PNG image."));
-    }, "image/png");
+      else reject(new Error("The browser could not create the JPEG image."));
+    }, "image/jpeg", 0.95);
   });
 }
 
 async function buildAerialCapture(
   points: CrossSectionControlPoint[],
   ratio: CaptureRatio,
-  metric: boolean,
 ) {
   const preset = CAPTURE_PRESETS[ratio];
   const host = document.createElement("div");
@@ -328,7 +309,8 @@ async function buildAerialCapture(
     view.rotation = 0;
     await reactiveUtils.whenOnce(() => !view.updating);
 
-    // Give imagery tiles one final frame to paint after the view reports settled.
+    // Keep ArcGIS's intermediate screenshot lossless before composing overlays;
+    // the final exported browser artifact is encoded as JPEG below.
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 
     const screenshot = await view.takeScreenshot({
@@ -345,7 +327,7 @@ async function buildAerialCapture(
 
     ctx.putImageData(screenshot.data, 0, 0);
     drawNorthArrow(ctx, preset.width);
-    drawScaleBar(ctx, view, preset.width, preset.height, metric);
+    drawScaleBar(ctx, view, preset.width, preset.height);
     drawAttribution(ctx, preset.width, preset.height);
 
     return canvasBlob(canvas);
@@ -357,11 +339,9 @@ async function buildAerialCapture(
 
 export default function AerialCaptureDialog({
   points,
-  metric,
   onClose,
 }: {
   points: CrossSectionControlPoint[];
-  metric: boolean;
   onClose: () => void;
 }) {
   const [ratio, setRatio] = useState<CaptureRatio>("1:1");
@@ -389,7 +369,7 @@ export default function AerialCaptureDialog({
       return null;
     });
 
-    void buildAerialCapture(points, ratio, metric)
+    void buildAerialCapture(points, ratio)
       .then((nextBlob) => {
         if (cancelled || generation !== generationRef.current) return;
         objectUrl = URL.createObjectURL(nextBlob);
@@ -408,19 +388,19 @@ export default function AerialCaptureDialog({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [pointsSignature, ratio, metric]);
+  }, [pointsSignature, ratio]);
 
   function download() {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `eris-cross-section-aerial-${ratio.replace(":", "x")}.png`;
+    anchor.download = `eris-cross-section-aerial-${ratio.replace(":", "x")}.jpg`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    setNotice("PNG downloaded.");
+    setNotice("JPEG downloaded.");
   }
 
   async function copyToClipboard() {
@@ -429,12 +409,12 @@ export default function AerialCaptureDialog({
     setNotice(null);
     try {
       if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-        throw new Error("This browser does not support copying PNG images to the clipboard.");
+        throw new Error("This browser does not support copying JPEG images to the clipboard.");
       }
       await navigator.clipboard.write([
-        new ClipboardItem({ "image/png": blob }),
+        new ClipboardItem({ "image/jpeg": blob }),
       ]);
-      setNotice("Image copied to clipboard.");
+      setNotice("JPEG copied to clipboard.");
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : "The browser blocked clipboard image access.");
     }
@@ -485,7 +465,7 @@ export default function AerialCaptureDialog({
               ))}
             </div>
             <div className="mt-2 text-xs text-muted">
-              {preset.width.toLocaleString()} × {preset.height.toLocaleString()} PNG · {preset.label}
+              {preset.width.toLocaleString()} × {preset.height.toLocaleString()} JPEG · {preset.label}
             </div>
           </div>
 
@@ -496,7 +476,8 @@ export default function AerialCaptureDialog({
               <div>✓ Top-down aerial imagery</div>
               <div>✓ P1–P{points.length} labels and cross-section line</div>
               <div>✓ North indicator</div>
-              <div>✓ Reference scale ({metric ? "metric" : "US units"})</div>
+              <div>✓ Scale in feet</div>
+              <div>✓ JPEG export</div>
             </div>
           </div>
 
@@ -519,7 +500,7 @@ export default function AerialCaptureDialog({
               disabled={!blob || busy}
               className="rounded-lg bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-40"
             >
-              Copy image to clipboard
+              Copy JPEG to clipboard
             </button>
             <button
               type="button"
@@ -527,7 +508,7 @@ export default function AerialCaptureDialog({
               disabled={!blob || busy}
               className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5 text-sm font-semibold hover:bg-[var(--panel)] disabled:opacity-40"
             >
-              Download PNG
+              Download JPEG
             </button>
           </div>
 
