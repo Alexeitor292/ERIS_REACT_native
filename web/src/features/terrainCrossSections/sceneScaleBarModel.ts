@@ -11,7 +11,6 @@ export type DualScaleBar = {
 const CSS_DPI = 96;
 const METERS_PER_INCH = 0.0254;
 const FEET_PER_METER = 3.280839895;
-const FEET_PER_MILE = 5280;
 
 function niceFloor(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -45,16 +44,8 @@ export function dualScaleBarForSceneScale(scale: number | null | undefined, targ
 
   const feetPerPixel = metersPerPixel * FEET_PER_METER;
   const maxFeet = feetPerPixel * targetWidthPx;
-  let imperialFeet: number;
-  let imperialLabel: string;
-  if (maxFeet >= FEET_PER_MILE) {
-    const miles = niceFloor(maxFeet / FEET_PER_MILE);
-    imperialFeet = miles * FEET_PER_MILE;
-    imperialLabel = `${formatNumber(miles)} mi`;
-  } else {
-    imperialFeet = niceFloor(maxFeet);
-    imperialLabel = `${formatNumber(imperialFeet)} ft`;
-  }
+  const imperialFeet = niceFloor(maxFeet);
+  const imperialLabel = `${formatNumber(imperialFeet)} ft`;
 
   return {
     metric: { widthPx: metricWidthPx, label: metricLabel },
