@@ -659,7 +659,13 @@ export default function TerrainCrossSectionWorkspace() {
                   </>
                 ) : (
                   <div className="p-3">
-                    <TerrainSlice3D profile={profile} metric={metric} />
+                    <TerrainSlice3D
+                      profile={profile}
+                      metric={metric}
+                      controlPoints={controlPoints}
+                      basemapMode={basemapMode}
+                      sceneScale={sceneScale}
+                    />
                   </div>
                 )}
               </div>
