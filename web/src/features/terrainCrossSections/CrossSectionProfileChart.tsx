@@ -76,22 +76,31 @@ export default function CrossSectionProfileChart({
 
   return (
     <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
-      <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold">DEM cross-section profile</div>
-          <div className="mt-0.5 text-xs text-muted">Move across the profile to identify the corresponding sampled terrain point in the 3D scene.</div>
-        </div>
-        {hovered ? (
-          <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-right text-xs tabular-nums">
-            <div className="font-semibold">{formatHorizontalDistance(hovered.distance_m, metric)}</div>
-            <div className="text-muted">Elevation {formatElevation(hovered.elevation_m, metric)}</div>
-            <div className="text-muted">{hovered.latitude.toFixed(6)}, {hovered.longitude.toFixed(6)}</div>
-            {hovered.grade_percent != null ? <div className="text-muted">Segment grade {hovered.grade_percent.toFixed(1)}%</div> : null}
-          </div>
-        ) : null}
+      <div>
+        <div className="text-sm font-semibold">DEM cross-section profile</div>
+        <div className="mt-0.5 text-xs text-muted">Move across the profile to identify the corresponding sampled terrain point in the 3D scene.</div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--line)] sm:grid-cols-4" aria-live="polite">
+        <HoverField
+          label="Distance"
+          value={hovered ? formatHorizontalDistance(hovered.distance_m, metric) : "—"}
+        />
+        <HoverField
+          label="Elevation"
+          value={hovered ? formatElevation(hovered.elevation_m, metric) : "—"}
+        />
+        <HoverField
+          label="Coordinates"
+          value={hovered ? `${hovered.latitude.toFixed(6)}, ${hovered.longitude.toFixed(6)}` : "—"}
+        />
+        <HoverField
+          label="Segment grade"
+          value={hovered?.grade_percent != null ? `${hovered.grade_percent.toFixed(1)}%` : "—"}
+        />
+      </div>
+
+      <div className="mt-3 overflow-x-auto">
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           className="min-w-[520px] w-full select-none"
@@ -155,6 +164,15 @@ export default function CrossSectionProfileChart({
           </text>
         </svg>
       </div>
+    </div>
+  );
+}
+
+function HoverField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex h-[58px] min-w-0 flex-col justify-center bg-[var(--panel-soft)] px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">{label}</div>
+      <div className="mt-1 truncate text-xs font-semibold tabular-nums text-[var(--ink)]" title={value}>{value}</div>
     </div>
   );
 }
