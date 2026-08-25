@@ -6,9 +6,8 @@ export default function SceneDualScaleBar({ scale }: { scale: number | null }) {
 
   return (
     <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-white shadow-lg backdrop-blur-sm" aria-label="Map scale reference">
-      <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/65">Scale at scene center</div>
-      <ScaleLine width={model.metric.widthPx} label={model.metric.label} />
-      <div className="mt-1.5"><ScaleLine width={model.imperial.widthPx} label={model.imperial.label} /></div>
+      <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/65">Scale</div>
+      <ScaleLine width={model.imperial.widthPx} label={model.imperial.label} />
     </div>
   );
 }
