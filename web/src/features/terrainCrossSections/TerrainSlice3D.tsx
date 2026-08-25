@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import SceneView from "@arcgis/core/views/SceneView";
@@ -7,13 +7,16 @@ import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Mesh from "@arcgis/core/geometry/Mesh";
 import MeshTexture from "@arcgis/core/geometry/support/MeshTexture";
 import Multipoint from "@arcgis/core/geometry/Multipoint";
+import Point from "@arcgis/core/geometry/Point";
 import Extent from "@arcgis/core/geometry/Extent";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 
 import {
+  controlPointDistances,
   formatElevation,
   formatHorizontalDistance,
+  type CrossSectionControlPoint,
   type CrossSectionProfile,
 } from "./terrainCrossSectionModel";
 import {
@@ -26,11 +29,20 @@ const WGS84 = SpatialReference.WGS84;
 const DEFAULT_WIDTH_M = 100;
 const WEB_MERCATOR_RADIUS_M = 6_378_137;
 
-type SliceSurfaceMode = "satellite" | "topographic" | "bare";
+type MainBasemapMode = "satellite" | "topo-vector";
+type SliceSurfaceMode = MainBasemapMode | "bare";
+type SliceSurfaceOverride = "follow-map" | "bare";
 
 type SliceTexture = {
   image: ImageData;
   extent: { xmin: number; ymin: number; xmax: number; ymax: number };
+};
+
+type SliceControlPoint = {
+  longitude: number;
+  latitude: number;
+  elevation_m: number;
+  label: string;
 };
 
 function vertexIndex(row: number, column: number, columns: number) {
@@ -156,7 +168,40 @@ function buildTerrainMesh(data: TerrainSliceData, texture: SliceTexture | null) 
   });
 }
 
-async function renderBasemapTexture(data: TerrainSliceData, mode: Exclude<SliceSurfaceMode, "bare">): Promise<SliceTexture> {
+function controlPointsOnProfile(
+  profile: CrossSectionProfile,
+  controlPoints: CrossSectionControlPoint[],
+): SliceControlPoint[] {
+  if (!profile.samples.length || !controlPoints.length) return [];
+  const distances = controlPointDistances(controlPoints);
+
+  return controlPoints.map((point, index) => {
+    const targetDistance = distances[index] ?? 0;
+    let nearest = profile.samples[0];
+    let nearestDelta = Math.abs(nearest.distance_m - targetDistance);
+
+    for (const sample of profile.samples) {
+      const delta = Math.abs(sample.distance_m - targetDistance);
+      if (delta < nearestDelta) {
+        nearest = sample;
+        nearestDelta = delta;
+      }
+    }
+
+    return {
+      longitude: point.longitude,
+      latitude: point.latitude,
+      elevation_m: nearest.elevation_m,
+      label: `P${index + 1}`,
+    };
+  });
+}
+
+async function renderBasemapTexture(
+  data: TerrainSliceData,
+  basemapMode: MainBasemapMode,
+  referenceScale: number | null,
+): Promise<SliceTexture> {
   const host = document.createElement("div");
   host.setAttribute("aria-hidden", "true");
   host.style.position = "fixed";
@@ -167,7 +212,11 @@ async function renderBasemapTexture(data: TerrainSliceData, mode: Exclude<SliceS
   host.style.pointerEvents = "none";
   document.body.appendChild(host);
 
-  const map = new Map({ basemap: mode === "satellite" ? "satellite" : "topo-vector" });
+  // Use the exact same ArcGIS basemap id as the main cross-section SceneView.
+  // The texture view is 2D only because it is used to produce a georeferenced
+  // raster for the cut mesh; the source basemap and effective display scale are
+  // intentionally kept in sync with the main map.
+  const map = new Map({ basemap: basemapMode });
   const view = new MapView({ container: host, map });
 
   try {
@@ -188,6 +237,21 @@ async function renderBasemapTexture(data: TerrainSliceData, mode: Exclude<SliceS
       ymax: ymax + latPad,
       spatialReference: WGS84,
     }), { animate: false });
+
+    // Vector basemap content is scale dependent. Preserve the minimum scale
+    // needed to contain the whole slice, but when the main map is farther out,
+    // use that same scale so both views request/render the same cartographic LOD.
+    const fitScale = Number(view.scale);
+    const requestedScale = Number(referenceScale);
+    if (
+      Number.isFinite(requestedScale)
+      && requestedScale > 0
+      && Number.isFinite(fitScale)
+      && requestedScale > fitScale
+    ) {
+      view.scale = requestedScale;
+    }
+
     await reactiveUtils.whenOnce(() => !view.updating);
 
     const screenshot = await view.takeScreenshot({ width: 1024, height: 768 });
@@ -212,11 +276,18 @@ async function renderBasemapTexture(data: TerrainSliceData, mode: Exclude<SliceS
 function TerrainSliceScene({
   data,
   surfaceMode,
+  referenceScale,
+  controlPoints,
+  showControlPoints,
 }: {
   data: TerrainSliceData;
   surfaceMode: SliceSurfaceMode;
+  referenceScale: number | null;
+  controlPoints: SliceControlPoint[];
+  showControlPoints: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const controlLayerRef = useRef<GraphicsLayer | null>(null);
   const requestIdRef = useRef(0);
   const [texture, setTexture] = useState<SliceTexture | null>(null);
   const [textureBusy, setTextureBusy] = useState(surfaceMode !== "bare");
@@ -234,7 +305,7 @@ function TerrainSliceScene({
 
     setTexture(null);
     setTextureBusy(true);
-    void renderBasemapTexture(data, surfaceMode)
+    void renderBasemapTexture(data, surfaceMode, referenceScale)
       .then((nextTexture) => {
         if (requestId !== requestIdRef.current) return;
         setTexture(nextTexture);
@@ -246,14 +317,21 @@ function TerrainSliceScene({
       .finally(() => {
         if (requestId === requestIdRef.current) setTextureBusy(false);
       });
-  }, [data, surfaceMode]);
+  }, [data, surfaceMode, referenceScale]);
 
   useEffect(() => {
     if (!containerRef.current) return;
     if (surfaceMode !== "bare" && !texture && !textureError) return;
 
-    const layer = new GraphicsLayer({ title: "Terrain slice" });
-    const map = new Map({ layers: [layer] });
+    const terrainLayer = new GraphicsLayer({ title: "Terrain slice" });
+    const controlLayer = new GraphicsLayer({
+      title: "Cross-section control points",
+      visible: showControlPoints,
+    });
+    (controlLayer as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "absolute-height" };
+    controlLayerRef.current = controlLayer;
+
+    const map = new Map({ layers: [terrainLayer, controlLayer] });
     const view = new SceneView({
       container: containerRef.current,
       map,
@@ -266,7 +344,7 @@ function TerrainSliceScene({
     });
 
     const mesh = buildTerrainMesh(data, texture);
-    layer.add(new Graphic({
+    terrainLayer.add(new Graphic({
       geometry: mesh,
       symbol: {
         type: "mesh-3d",
@@ -278,6 +356,38 @@ function TerrainSliceScene({
         ],
       } as never,
     }));
+
+    for (const controlPoint of controlPoints) {
+      const markerPoint = new Point({
+        longitude: controlPoint.longitude,
+        latitude: controlPoint.latitude,
+        z: controlPoint.elevation_m + 3,
+        spatialReference: WGS84,
+      });
+      controlLayer.add(new Graphic({
+        geometry: markerPoint,
+        symbol: {
+          type: "simple-marker",
+          style: "circle",
+          color: [37, 99, 235, 1],
+          size: 10,
+          outline: { color: [255, 255, 255, 1], width: 1.5 },
+        } as never,
+        attributes: { point_label: controlPoint.label },
+      }));
+      controlLayer.add(new Graphic({
+        geometry: markerPoint,
+        symbol: {
+          type: "text",
+          text: controlPoint.label,
+          color: [255, 255, 255, 1],
+          haloColor: [15, 23, 42, 0.95],
+          haloSize: 2,
+          yoffset: 16,
+          font: { size: 10, weight: "bold" },
+        } as never,
+      }));
+    }
 
     let disposed = false;
     view.when(() => {
@@ -291,15 +401,23 @@ function TerrainSliceScene({
 
     return () => {
       disposed = true;
+      controlLayerRef.current = null;
       view.destroy();
     };
-  }, [data, surfaceMode, texture, textureError]);
+  }, [data, surfaceMode, texture, textureError, controlPoints]);
+
+  useEffect(() => {
+    if (controlLayerRef.current) controlLayerRef.current.visible = showControlPoints;
+  }, [showControlPoints]);
 
   const surfaceLabel = surfaceMode === "satellite"
     ? "Satellite imagery"
-    : surfaceMode === "topographic"
+    : surfaceMode === "topo-vector"
       ? "Topographic"
       : "Bare DEM";
+  const renderedSurfaceLabel = textureError && surfaceMode !== "bare"
+    ? "Bare DEM (basemap unavailable)"
+    : surfaceLabel;
 
   return (
     <div className="relative overflow-hidden rounded-lg border border-[var(--line)] bg-slate-950">
@@ -318,8 +436,9 @@ function TerrainSliceScene({
       ) : null}
 
       <div className="border-t border-white/10 bg-slate-950 px-3 py-2 text-[11px] text-white/65">
-        Drag to orbit · Scroll to zoom · 1× vertical scale · Surface: {surfaceLabel}
-        {surfaceMode !== "bare" ? " · ArcGIS basemap content © Esri and contributors" : ""}
+        Drag to orbit · Scroll to zoom · 1× vertical scale · Surface: {renderedSurfaceLabel}
+        {surfaceMode !== "bare" && !textureError ? " · ArcGIS basemap content © Esri and contributors" : ""}
+        {showControlPoints && controlPoints.length ? ` · ${controlPoints.length} control point${controlPoints.length === 1 ? "" : "s"} visible` : ""}
       </div>
     </div>
   );
@@ -328,17 +447,31 @@ function TerrainSliceScene({
 export default function TerrainSlice3D({
   profile,
   metric,
+  controlPoints,
+  basemapMode,
+  sceneScale,
 }: {
   profile: CrossSectionProfile;
   metric: boolean;
+  controlPoints: CrossSectionControlPoint[];
+  basemapMode: MainBasemapMode;
+  sceneScale: number | null;
 }) {
   const queryMapRef = useRef<Map | null>(null);
   const requestIdRef = useRef(0);
   const [widthM, setWidthM] = useState(DEFAULT_WIDTH_M);
-  const [surfaceMode, setSurfaceMode] = useState<SliceSurfaceMode>("satellite");
+  const [surfaceOverride, setSurfaceOverride] = useState<SliceSurfaceOverride>("follow-map");
+  const [showControlPoints, setShowControlPoints] = useState(true);
   const [data, setData] = useState<TerrainSliceData | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const surfaceMode: SliceSurfaceMode = surfaceOverride === "bare" ? "bare" : basemapMode;
+  const surfaceLabel = basemapMode === "satellite" ? "Imagery" : "Topographic";
+  const sliceControlPoints = useMemo(
+    () => controlPointsOnProfile(profile, controlPoints),
+    [profile, controlPoints],
+  );
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
@@ -421,27 +554,48 @@ export default function TerrainSlice3D({
 
         <div className="mt-4 border-t border-[var(--line)] pt-3">
           <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Surface layer</div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            {([
-              ["satellite", "Satellite"],
-              ["topographic", "Topographic"],
-              ["bare", "Bare DEM"],
-            ] as Array<[SliceSurfaceMode, string]>).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setSurfaceMode(mode)}
-                className={`rounded-md border px-2.5 py-2 text-xs font-semibold ${surfaceMode === mode
-                  ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]"
-                  : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setSurfaceOverride("follow-map")}
+              className={`rounded-md border px-2.5 py-2 text-xs font-semibold ${surfaceOverride === "follow-map"
+                ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]"
+                : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}
+            >
+              Match map · {surfaceLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSurfaceOverride("bare")}
+              className={`rounded-md border px-2.5 py-2 text-xs font-semibold ${surfaceOverride === "bare"
+                ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]"
+                : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}
+            >
+              Bare DEM
+            </button>
           </div>
           <div className="mt-2 text-[11px] leading-5 text-muted">
-            Imagery and topographic cartography are rendered from ArcGIS and draped directly onto the sampled 3D DEM surface. Cut faces and the base remain visually distinct.
+            Textured mode follows the active ArcGIS basemap and effective display scale from the main cross-section map. Bare DEM is an explicit diagnostic override.
           </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-4 border-t border-[var(--line)] pt-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Control points</div>
+            <div className="mt-1 text-[11px] leading-5 text-muted">
+              Show the same P1–P{Math.max(1, controlPoints.length)} points used by the main cross-section map.
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-pressed={showControlPoints}
+            onClick={() => setShowControlPoints((current) => !current)}
+            className={`shrink-0 rounded-md border px-3 py-2 text-xs font-semibold ${showControlPoints
+              ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]"
+              : "border-[var(--line)] bg-[var(--panel)] text-muted hover:bg-[var(--panel-soft)]"}`}
+          >
+            {showControlPoints ? "Hide" : "Show"}
+          </button>
         </div>
       </div>
 
@@ -459,7 +613,13 @@ export default function TerrainSlice3D({
 
       {!busy && data ? (
         <>
-          <TerrainSliceScene data={data} surfaceMode={surfaceMode} />
+          <TerrainSliceScene
+            data={data}
+            surfaceMode={surfaceMode}
+            referenceScale={sceneScale}
+            controlPoints={sliceControlPoints}
+            showControlPoints={showControlPoints}
+          />
           <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--line)] sm:grid-cols-4">
             <SliceStat label="Highest terrain" value={formatElevation(data.max_elevation_m, metric)} />
             <SliceStat label="Lowest terrain" value={formatElevation(data.min_elevation_m, metric)} />
