@@ -44,6 +44,9 @@ type ProfileView = "profile" | "slice";
 const WGS84 = SpatialReference.WGS84;
 const CALIFORNIA_CENTER: [number, number] = [-119.4179, 36.7783];
 const MAX_RENDER_SAMPLES = 1800;
+// The sampled profile and its hover marker must share the exact same world-space Z.
+// In a close, tilted SceneView, even a one-metre mismatch can project many pixels apart.
+const PROFILE_RENDER_OFFSET_M = 1;
 
 function pointKey(point: CrossSectionControlPoint) {
   return `${point.longitude.toFixed(7)}:${point.latitude.toFixed(7)}`;
@@ -131,7 +134,7 @@ export default function TerrainCrossSectionWorkspace() {
       geometry: new Point({
         longitude: sample.longitude,
         latitude: sample.latitude,
-        z: sample.elevation_m + 2,
+        z: sample.elevation_m + PROFILE_RENDER_OFFSET_M,
         spatialReference: WGS84,
       }),
       symbol: {
@@ -384,7 +387,7 @@ export default function TerrainCrossSectionWorkspace() {
     layer.add(new Graphic({
       geometry: new Polyline({
         hasZ: true,
-        paths: [profile.samples.map((sample) => [sample.longitude, sample.latitude, sample.elevation_m + 1])],
+        paths: [profile.samples.map((sample) => [sample.longitude, sample.latitude, sample.elevation_m + PROFILE_RENDER_OFFSET_M])],
         spatialReference: WGS84,
       }),
       symbol: {
