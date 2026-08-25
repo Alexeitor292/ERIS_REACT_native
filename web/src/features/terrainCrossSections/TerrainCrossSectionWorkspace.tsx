@@ -58,6 +58,7 @@ function nearestSampleElevation(profile: CrossSectionProfile | null, controlDist
 }
 
 export default function TerrainCrossSectionWorkspace() {
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<SceneView | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -120,11 +121,28 @@ export default function TerrainCrossSectionWorkspace() {
   }, [profile]);
 
   useEffect(() => {
+    const syncFullscreenState = () => {
+      const workspace = workspaceRef.current;
+      if (!workspace) return;
+      if (document.fullscreenElement === workspace) {
+        setFocusMode(true);
+      } else if (document.fullscreenElement == null) {
+        setFocusMode(false);
+      }
+    };
+
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
+
+  useEffect(() => {
     if (!focusMode) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFocusMode(false);
+      if (event.key === "Escape" && document.fullscreenElement !== workspaceRef.current) {
+        setFocusMode(false);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
@@ -132,6 +150,36 @@ export default function TerrainCrossSectionWorkspace() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [focusMode]);
+
+  async function toggleFullScreen() {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+
+    if (focusMode && document.fullscreenElement !== workspace) {
+      setFocusMode(false);
+      return;
+    }
+
+    if (document.fullscreenElement === workspace) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+
+    if (document.fullscreenEnabled && typeof workspace.requestFullscreen === "function") {
+      try {
+        await workspace.requestFullscreen();
+        return;
+      } catch {
+        // Fall back to the existing viewport takeover if browser fullscreen is blocked.
+      }
+    }
+
+    setFocusMode(true);
+  }
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -472,8 +520,9 @@ export default function TerrainCrossSectionWorkspace() {
 
   return (
     <div
+      ref={workspaceRef}
       className={`relative overflow-hidden bg-[#0f172a] ${focusMode
-        ? "fixed inset-0 z-[100] h-screen min-h-0 w-screen"
+        ? "fixed inset-0 z-[100] h-[100dvh] min-h-0 w-screen"
         : "h-full min-h-[620px]"}`}
     >
       <div ref={containerRef} className="absolute inset-0" />
@@ -569,9 +618,10 @@ export default function TerrainCrossSectionWorkspace() {
 
           <button
             type="button"
-            onClick={() => setFocusMode((current) => !current)}
+            onClick={() => void toggleFullScreen()}
+            aria-pressed={focusMode}
             className="rounded-lg px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10"
-            title={focusMode ? "Return to the ERIS shell" : "Hide the ERIS shell and use the full viewport"}
+            title={focusMode ? "Exit the full-screen terrain workspace" : "Expand the terrain workspace and keep all tools available"}
           >
             {focusMode ? "Exit full screen" : "Full screen"}
           </button>
@@ -803,7 +853,7 @@ export default function TerrainCrossSectionWorkspace() {
 
       {focusMode ? (
         <div className="pointer-events-none absolute bottom-14 left-3 z-20 rounded-md bg-black/45 px-2.5 py-1.5 text-[10px] text-white/70 backdrop-blur-sm">
-          Terrain full screen · Esc to exit
+          Terrain workspace full screen · all tools remain available · Esc to exit
         </div>
       ) : null}
 
