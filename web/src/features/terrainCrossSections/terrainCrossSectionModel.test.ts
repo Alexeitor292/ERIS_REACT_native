@@ -103,8 +103,8 @@ test("profile discards no-data elevation vertices", () => {
   assert.equal(profile.stats.elevation_range_m, 20);
 });
 
-test("formatters support Caltrans customary and metric displays", () => {
-  assert.match(formatHorizontalDistance(1609.344, false), /mi$/);
+test("customary terrain display remains in feet while metric helpers remain available", () => {
+  assert.equal(formatHorizontalDistance(1609.344, false), "5,280 ft");
   assert.equal(formatHorizontalDistance(1500, true), "1.50 km");
   assert.match(formatElevation(100, false), /ft$/);
   assert.equal(formatElevation(100, true), "100.0 m");
