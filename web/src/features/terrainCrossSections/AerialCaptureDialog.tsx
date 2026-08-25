@@ -14,7 +14,7 @@ import type { CrossSectionControlPoint } from "./terrainCrossSectionModel";
 const WGS84 = SpatialReference.WGS84;
 const CAPTURE_MARGIN_PX = 40;
 
-type CaptureRatio = "1:1" | "9:16";
+type CaptureRatio = "1:1" | "16:9" | "9:16";
 
 type CapturePreset = {
   width: number;
@@ -24,6 +24,7 @@ type CapturePreset = {
 
 const CAPTURE_PRESETS: Record<CaptureRatio, CapturePreset> = {
   "1:1": { width: 1400, height: 1400, label: "1:1 square" },
+  "16:9": { width: 1920, height: 1080, label: "16:9 landscape" },
   "9:16": { width: 1080, height: 1920, label: "9:16 portrait" },
 };
 
@@ -469,8 +470,8 @@ export default function AerialCaptureDialog({
 
           <div className="mt-5">
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Format</div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {(["1:1", "9:16"] as CaptureRatio[]).map((value) => (
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {(["1:1", "16:9", "9:16"] as CaptureRatio[]).map((value) => (
                 <button
                   key={value}
                   type="button"
