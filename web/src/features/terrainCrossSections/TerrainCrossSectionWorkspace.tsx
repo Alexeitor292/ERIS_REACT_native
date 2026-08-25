@@ -104,7 +104,6 @@ export default function TerrainCrossSectionWorkspace() {
   const [preferredSpacingM, setPreferredSpacingM] = useState(1);
   const [actualSpacingM, setActualSpacingM] = useState<number | null>(null);
   const [demResolutionMode, setDemResolutionMode] = useState<DemResolutionMode>("best-available");
-  const [metric, setMetric] = useState(false);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("satellite");
   const [sceneScale, setSceneScale] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<WorkspacePanel | null>(null);
@@ -539,8 +538,8 @@ export default function TerrainCrossSectionWorkspace() {
   const panelSubtitle = activePanel === "profile"
     ? profile
       ? profileView === "slice"
-        ? `3D DEM slice along ${formatHorizontalDistance(profile.stats.total_distance_m, metric)} of selected terrain`
-        : `${formatHorizontalDistance(profile.stats.total_distance_m, metric)} · ${profile.stats.sample_count.toLocaleString()} samples · ${formatDemResolution(profile.dem)} DEM`
+        ? `3D DEM slice along ${formatHorizontalDistance(profile.stats.total_distance_m, false)} of selected terrain`
+        : `${formatHorizontalDistance(profile.stats.total_distance_m, false)} · ${profile.stats.sample_count.toLocaleString()} samples · ${formatDemResolution(profile.dem)} DEM`
       : "Build a profile to inspect terrain elevation"
     : activePanel === "details"
       ? "DEM profile measurements and source resolution"
@@ -627,25 +626,6 @@ export default function TerrainCrossSectionWorkspace() {
 
           <div className="mx-1 h-5 w-px bg-white/20" />
 
-          <div className="inline-flex overflow-hidden rounded-lg border border-white/20 text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => setMetric(false)}
-              className={`px-2.5 py-2 ${!metric ? "bg-white text-slate-900" : "text-white/80 hover:bg-white/10"}`}
-            >
-              US
-            </button>
-            <button
-              type="button"
-              onClick={() => setMetric(true)}
-              className={`px-2.5 py-2 ${metric ? "bg-white text-slate-900" : "text-white/80 hover:bg-white/10"}`}
-            >
-              Metric
-            </button>
-          </div>
-
-          <div className="mx-1 h-5 w-px bg-white/20" />
-
           <button
             type="button"
             onClick={() => void toggleFullScreen()}
@@ -726,7 +706,7 @@ export default function TerrainCrossSectionWorkspace() {
                 </div>
 
                 <div className="grid grid-cols-4 gap-px border-b border-[var(--line)] bg-[var(--line)]">
-                  <DrawerMetric label="Path" value={formatHorizontalDistance(profile.stats.total_distance_m, metric)} />
+                  <DrawerMetric label="Path" value={formatHorizontalDistance(profile.stats.total_distance_m, false)} />
                   <DrawerMetric label="Samples" value={profile.stats.sample_count.toLocaleString()} />
                   <DrawerMetric label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
                   <DrawerMetric label="Source DEM" value={formatDemResolution(profile.dem)} />
@@ -748,22 +728,21 @@ export default function TerrainCrossSectionWorkspace() {
                       <CrossSectionProfileChart
                         profile={profile}
                         controlDistances={controlDistances}
-                        metric={metric}
                         onHoverSample={showHoverSample}
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-px border-t border-[var(--line)] bg-[var(--line)]">
-                      <DrawerMetric label="Minimum" value={formatElevation(profile.stats.min_elevation_m, metric)} />
-                      <DrawerMetric label="Maximum" value={formatElevation(profile.stats.max_elevation_m, metric)} />
-                      <DrawerMetric label="Gain" value={formatElevation(profile.stats.elevation_gain_m, metric)} />
-                      <DrawerMetric label="Loss" value={formatElevation(profile.stats.elevation_loss_m, metric)} />
+                      <DrawerMetric label="Minimum" value={formatElevation(profile.stats.min_elevation_m, false)} />
+                      <DrawerMetric label="Maximum" value={formatElevation(profile.stats.max_elevation_m, false)} />
+                      <DrawerMetric label="Gain" value={formatElevation(profile.stats.elevation_gain_m, false)} />
+                      <DrawerMetric label="Loss" value={formatElevation(profile.stats.elevation_loss_m, false)} />
                     </div>
                   </>
                 ) : (
                   <div className="p-3">
                     <TerrainSlice3D
                       profile={profile}
-                      metric={metric}
+                      metric={false}
                       controlPoints={controlPoints}
                       basemapMode={basemapMode}
                       sceneScale={sceneScale}
@@ -775,19 +754,19 @@ export default function TerrainCrossSectionWorkspace() {
 
             {activePanel === "details" ? (
               <div className="grid grid-cols-2 gap-px bg-[var(--line)]">
-                <DrawerMetric label="Path" value={formatHorizontalDistance(displayedDistanceM, metric)} />
+                <DrawerMetric label="Path" value={formatHorizontalDistance(displayedDistanceM, false)} />
                 <DrawerMetric label="Samples" value={profile ? profile.stats.sample_count.toLocaleString() : "—"} />
                 <DrawerMetric label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
                 <DrawerMetric label="DEM mode" value={profile ? demResolutionModeLabel(profile.dem?.requested_mode ?? demResolutionMode) : demResolutionModeLabel(demResolutionMode)} />
                 <DrawerMetric label="Source DEM" value={profile ? formatDemResolution(profile.dem) : "—"} />
                 <DrawerMetric label="Resolution samples" value={profile?.dem ? profile.dem.resolution_sample_count.toLocaleString() : "—"} />
-                <DrawerMetric label="Elevation range" value={profile ? formatElevation(profile.stats.elevation_range_m, metric) : "—"} />
-                <DrawerMetric label="Minimum" value={profile ? formatElevation(profile.stats.min_elevation_m, metric) : "—"} />
-                <DrawerMetric label="Maximum" value={profile ? formatElevation(profile.stats.max_elevation_m, metric) : "—"} />
-                <DrawerMetric label="Gain" value={profile ? formatElevation(profile.stats.elevation_gain_m, metric) : "—"} />
-                <DrawerMetric label="Loss" value={profile ? formatElevation(profile.stats.elevation_loss_m, metric) : "—"} />
-                <DrawerMetric label="Start" value={profile ? formatElevation(profile.samples[0].elevation_m, metric) : "—"} />
-                <DrawerMetric label="End" value={profile ? formatElevation(profile.samples[profile.samples.length - 1].elevation_m, metric) : "—"} />
+                <DrawerMetric label="Elevation range" value={profile ? formatElevation(profile.stats.elevation_range_m, false) : "—"} />
+                <DrawerMetric label="Minimum" value={profile ? formatElevation(profile.stats.min_elevation_m, false) : "—"} />
+                <DrawerMetric label="Maximum" value={profile ? formatElevation(profile.stats.max_elevation_m, false) : "—"} />
+                <DrawerMetric label="Gain" value={profile ? formatElevation(profile.stats.elevation_gain_m, false) : "—"} />
+                <DrawerMetric label="Loss" value={profile ? formatElevation(profile.stats.elevation_loss_m, false) : "—"} />
+                <DrawerMetric label="Start" value={profile ? formatElevation(profile.samples[0].elevation_m, false) : "—"} />
+                <DrawerMetric label="End" value={profile ? formatElevation(profile.samples[profile.samples.length - 1].elevation_m, false) : "—"} />
               </div>
             ) : null}
 
@@ -800,11 +779,11 @@ export default function TerrainCrossSectionWorkspace() {
                     <div key={pointKey(point)} className="border-b border-[var(--line)] px-4 py-3 last:border-b-0">
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-sm font-semibold">P{index + 1}</div>
-                        <div className="text-xs font-semibold tabular-nums text-[var(--brand)]">{formatHorizontalDistance(distance, metric)}</div>
+                        <div className="text-xs font-semibold tabular-nums text-[var(--brand)]">{formatHorizontalDistance(distance, false)}</div>
                       </div>
                       <div className="mt-1 text-xs tabular-nums text-muted">{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</div>
                       <div className="mt-1 text-xs text-muted">
-                        Elevation <span className="font-medium text-[var(--ink)]">{elevation == null ? "Sample profile to resolve" : formatElevation(elevation, metric)}</span>
+                        Elevation <span className="font-medium text-[var(--ink)]">{elevation == null ? "Sample profile to resolve" : formatElevation(elevation, false)}</span>
                       </div>
                     </div>
                   ))
@@ -891,7 +870,7 @@ export default function TerrainCrossSectionWorkspace() {
                 </div>
 
                 <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-xs leading-5 text-muted">
-                  Elevations come from ArcGIS World Elevation. Resolution describes horizontal DEM cell size, not vertical accuracy. Saved profile snapshots retain the requested mode and actual returned DEM resolution metadata.
+                  Terrain distances and elevations are displayed in feet. DEM source resolution and profile sample spacing remain in meters because those values describe the source grid and sampling interval.
                 </div>
               </div>
             ) : null}
@@ -921,11 +900,11 @@ export default function TerrainCrossSectionWorkspace() {
           className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white shadow backdrop-blur-sm"
         >
           <span className="font-semibold">Elevation analysis</span>
-          <span className="ml-2 text-white/75">Profile + 3D slice · {formatHorizontalDistance(profile.stats.total_distance_m, metric)} · {formatDemResolution(profile.dem)} DEM</span>
+          <span className="ml-2 text-white/75">Profile + 3D slice · {formatHorizontalDistance(profile.stats.total_distance_m, false)} · {formatDemResolution(profile.dem)} DEM</span>
         </button>
       ) : controlPoints.length >= 2 && !drawing ? (
         <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur-sm">
-          {formatHorizontalDistance(draftDistanceM, metric)} path selected · Build profile to sample the DEM
+          {formatHorizontalDistance(draftDistanceM, false)} path selected · Build profile to sample the DEM
         </div>
       ) : null}
 
@@ -969,7 +948,6 @@ export default function TerrainCrossSectionWorkspace() {
       {captureDialogOpen ? (
         <AerialCaptureDialog
           points={controlPoints}
-          metric={metric}
           onClose={() => setCaptureDialogOpen(false)}
         />
       ) : null}
