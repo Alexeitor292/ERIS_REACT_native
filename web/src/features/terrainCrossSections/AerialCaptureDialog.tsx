@@ -152,12 +152,17 @@ function drawScaleBar(
   const a = view.toMap({ x: sampleX, y: sampleY });
   const b = view.toMap({ x: sampleX + targetPx, y: sampleY });
 
-  if (!a || !b || !Number.isFinite(a.latitude) || !Number.isFinite(a.longitude)
-    || !Number.isFinite(b.latitude) || !Number.isFinite(b.longitude)) return;
+  if (!a || !b) return;
+  const aLatitude = Number(a.latitude);
+  const aLongitude = Number(a.longitude);
+  const bLatitude = Number(b.latitude);
+  const bLongitude = Number(b.longitude);
+  if (!Number.isFinite(aLatitude) || !Number.isFinite(aLongitude)
+    || !Number.isFinite(bLatitude) || !Number.isFinite(bLongitude)) return;
 
   const targetMeters = distanceMeters(
-    { latitude: a.latitude, longitude: a.longitude },
-    { latitude: b.latitude, longitude: b.longitude },
+    { latitude: aLatitude, longitude: aLongitude },
+    { latitude: bLatitude, longitude: bLongitude },
   );
   if (!Number.isFinite(targetMeters) || targetMeters <= 0) return;
 
