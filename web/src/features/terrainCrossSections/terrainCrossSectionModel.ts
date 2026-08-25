@@ -237,8 +237,7 @@ export function formatHorizontalDistance(valueM: number, metric: boolean): strin
   if (metric) {
     return valueM >= 1000 ? `${(valueM / 1000).toFixed(2)} km` : `${Math.round(valueM)} m`;
   }
-  const feet = feetFromMeters(valueM);
-  return valueM >= 1609.344 ? `${milesFromMeters(valueM).toFixed(2)} mi` : `${Math.round(feet).toLocaleString()} ft`;
+  return `${Math.round(feetFromMeters(valueM)).toLocaleString()} ft`;
 }
 
 export function formatElevation(valueM: number, metric: boolean): string {
