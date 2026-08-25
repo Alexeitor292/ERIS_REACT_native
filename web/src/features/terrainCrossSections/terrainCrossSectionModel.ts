@@ -22,9 +22,22 @@ export type CrossSectionStats = {
   sample_count: number;
 };
 
+export type DemResolutionMode = "best-available" | "auto" | "target-1m" | "target-3m" | "target-10m";
+
+export type CrossSectionDemMetadata = {
+  source: "ARCGIS_WORLD_ELEVATION";
+  requested_mode: DemResolutionMode;
+  requested_resolution_m: number | null;
+  actual_min_resolution_m: number | null;
+  actual_max_resolution_m: number | null;
+  resolution_sample_count: number;
+  mixed_resolution: boolean;
+};
+
 export type CrossSectionProfile = {
   samples: CrossSectionSample[];
   stats: CrossSectionStats;
+  dem?: CrossSectionDemMetadata;
 };
 
 const EARTH_RADIUS_M = 6_371_008.8;
@@ -78,9 +91,76 @@ export function adaptiveSampleSpacingMeters(
   return Math.ceil(raw / 100) * 100;
 }
 
+export function demResolutionQueryValue(mode: DemResolutionMode): "finest-contiguous" | "auto" | number {
+  switch (mode) {
+    case "best-available":
+      return "finest-contiguous";
+    case "target-1m":
+      return 1;
+    case "target-3m":
+      return 3;
+    case "target-10m":
+      return 10;
+    case "auto":
+    default:
+      return "auto";
+  }
+}
+
+export function demResolutionModeLabel(mode: DemResolutionMode): string {
+  switch (mode) {
+    case "best-available":
+      return "Best available";
+    case "target-1m":
+      return "Target 1 m";
+    case "target-3m":
+      return "Target 3 m";
+    case "target-10m":
+      return "Target 10 m";
+    case "auto":
+    default:
+      return "Automatic";
+  }
+}
+
+export function requestedDemResolutionMeters(mode: DemResolutionMode): number | null {
+  const value = demResolutionQueryValue(mode);
+  return typeof value === "number" ? value : null;
+}
+
+export function summarizeDemResolution(
+  sampleInfo: Array<{ demResolution?: number | null }> | null | undefined,
+  mode: DemResolutionMode,
+): CrossSectionDemMetadata {
+  const resolutions = (sampleInfo ?? [])
+    .map((sample) => Number(sample?.demResolution))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const min = resolutions.length ? Math.min(...resolutions) : null;
+  const max = resolutions.length ? Math.max(...resolutions) : null;
+  const mixed = min != null && max != null && Math.abs(max - min) > 0.01;
+
+  return {
+    source: "ARCGIS_WORLD_ELEVATION",
+    requested_mode: mode,
+    requested_resolution_m: requestedDemResolutionMeters(mode),
+    actual_min_resolution_m: min,
+    actual_max_resolution_m: max,
+    resolution_sample_count: resolutions.length,
+    mixed_resolution: mixed,
+  };
+}
+
+export function formatDemResolution(metadata: CrossSectionDemMetadata | null | undefined): string {
+  if (!metadata || metadata.actual_min_resolution_m == null || metadata.actual_max_resolution_m == null) return "Unavailable";
+  const format = (value: number) => value < 10 ? `${value.toFixed(2)} m` : `${value.toFixed(1)} m`;
+  if (!metadata.mixed_resolution) return format(metadata.actual_min_resolution_m);
+  return `${format(metadata.actual_min_resolution_m)}–${format(metadata.actual_max_resolution_m)}`;
+}
+
 export function profileFromPath(
   path: number[][],
   noDataValue?: number | null,
+  dem?: CrossSectionDemMetadata,
 ): CrossSectionProfile | null {
   if (!Array.isArray(path) || path.length < 2) return null;
 
@@ -141,6 +221,7 @@ export function profileFromPath(
       elevation_loss_m: loss,
       sample_count: samples.length,
     },
+    ...(dem ? { dem } : {}),
   };
 }
 
