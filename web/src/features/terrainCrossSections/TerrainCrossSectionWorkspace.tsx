@@ -14,6 +14,7 @@ import Search from "@arcgis/core/widgets/Search";
 import * as geodeticDensifyOperator from "@arcgis/core/geometry/operators/geodeticDensifyOperator";
 
 import type { SavedCrossSectionDetail } from "../../api/terrainCrossSections";
+import AerialCaptureDialog from "./AerialCaptureDialog";
 import CrossSectionProfileChart from "./CrossSectionProfileChart";
 import CrossSectionSaveDialog from "./CrossSectionSaveDialog";
 import SceneDualScaleBar from "./SceneDualScaleBar";
@@ -81,6 +82,7 @@ export default function TerrainCrossSectionWorkspace() {
   const [focusMode, setFocusMode] = useState(false);
   const [profileView, setProfileView] = useState<ProfileView>("profile");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [captureDialogOpen, setCaptureDialogOpen] = useState(false);
   const [savedCrossSection, setSavedCrossSection] = useState<SavedCrossSectionDetail | null>(null);
 
   drawingRef.current = drawing;
@@ -527,6 +529,15 @@ export default function TerrainCrossSectionWorkspace() {
 
           <button
             type="button"
+            onClick={() => setCaptureDialogOpen(true)}
+            disabled={controlPoints.length < 2 || profileBusy}
+            className="rounded-lg border border-sky-300/40 bg-sky-500/15 px-3 py-2 text-xs font-semibold text-sky-50 hover:bg-sky-500/25 disabled:opacity-35"
+          >
+            Capture
+          </button>
+
+          <button
+            type="button"
             onClick={clearAll}
             disabled={controlPoints.length === 0 || profileBusy}
             className="rounded-lg px-2.5 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/15 disabled:opacity-35"
@@ -824,6 +835,14 @@ export default function TerrainCrossSectionWorkspace() {
           currentSaved={savedCrossSection}
           onClose={() => setSaveDialogOpen(false)}
           onSaved={setSavedCrossSection}
+        />
+      ) : null}
+
+      {captureDialogOpen ? (
+        <AerialCaptureDialog
+          points={controlPoints}
+          metric={metric}
+          onClose={() => setCaptureDialogOpen(false)}
         />
       ) : null}
     </div>
