@@ -132,8 +132,8 @@ function featureString(graphic: Graphic, field: string): string | null {
   return value == null || value === "" ? null : String(value);
 }
 
-function objectIdBatches(objectIds: number[]): number[][] {
-  const batches: number[][] = [];
+function objectIdBatches(objectIds: Array<string | number>): Array<Array<string | number>> {
+  const batches: Array<Array<string | number>> = [];
   for (let start = 0; start < objectIds.length; start += DEM_COVERAGE_QUERY_BATCH_SIZE) {
     batches.push(objectIds.slice(start, start + DEM_COVERAGE_QUERY_BATCH_SIZE));
   }
