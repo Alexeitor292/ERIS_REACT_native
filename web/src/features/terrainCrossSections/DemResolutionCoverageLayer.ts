@@ -1,8 +1,8 @@
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GroupLayer from "@arcgis/core/layers/GroupLayer";
 import Graphic from "@arcgis/core/Graphic";
-import type Geometry from "@arcgis/core/geometry/Geometry";
 import Point from "@arcgis/core/geometry/Point";
+import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import * as intersectsOperator from "@arcgis/core/geometry/operators/intersectsOperator";
@@ -35,7 +35,7 @@ const DEM_COVERAGE_OUT_FIELDS = [
 ];
 
 type CoverageFeature = {
-  geometry: Geometry;
+  geometry: Polygon;
   pixelSizeM: number;
   source: string | null;
   productName: string | null;
@@ -143,9 +143,9 @@ async function queryCoverageFeaturesAlongLine(group: GroupLayer, line: Polyline)
 
   return featureSets.flatMap((features) => features.flatMap((feature) => {
     const pixelSizeM = featurePixelSize(feature);
-    if (pixelSizeM == null || !feature.geometry) return [];
+    if (pixelSizeM == null || feature.geometry?.type !== "polygon") return [];
     return [{
-      geometry: feature.geometry,
+      geometry: feature.geometry as Polygon,
       pixelSizeM,
       source: featureString(feature, "Source"),
       productName: featureString(feature, "ProductName"),
