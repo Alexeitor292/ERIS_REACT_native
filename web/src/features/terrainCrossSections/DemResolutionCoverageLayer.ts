@@ -19,6 +19,10 @@ export const WORLD_ELEVATION_DATA_EXTENTS_URL =
   "https://elevation.arcgis.com/arcgis/rest/services/WorldElevation/DataExtents/MapServer";
 
 const DEM_COVERAGE_REFRESH_MINUTES = 60;
+// The live Data Extents FeatureLayers currently advertise maxRecordCount=1000. Querying IDs
+// first and then fetching smaller batches prevents a long ERIS transect from silently losing
+// source footprints at the transfer limit.
+const DEM_COVERAGE_QUERY_BATCH_SIZE = 500;
 const DEM_COVERAGE_OUT_FIELDS = [
   "OBJECTID",
   "PixelSize",
@@ -128,18 +132,43 @@ function featureString(graphic: Graphic, field: string): string | null {
   return value == null || value === "" ? null : String(value);
 }
 
-async function queryCoverageFeaturesAlongLine(group: GroupLayer, line: Polyline): Promise<CoverageFeature[]> {
-  const layers = group.layers.toArray().filter((layer): layer is FeatureLayer => layer instanceof FeatureLayer);
-  const featureSets = await Promise.all(layers.map(async (layer) => {
+function objectIdBatches(objectIds: number[]): number[][] {
+  const batches: number[][] = [];
+  for (let start = 0; start < objectIds.length; start += DEM_COVERAGE_QUERY_BATCH_SIZE) {
+    batches.push(objectIds.slice(start, start + DEM_COVERAGE_QUERY_BATCH_SIZE));
+  }
+  return batches;
+}
+
+async function queryLayerCoverageFeaturesAlongLine(layer: FeatureLayer, line: Polyline): Promise<Graphic[]> {
+  // queryObjectIds returns every matching ID even when a normal queryFeatures call would exceed
+  // the service's maxRecordCount. createQuery also carries the layer definitionExpression, so
+  // the truthful 2–6 m PixelSize split is preserved here exactly as it is on the map.
+  const idQuery = layer.createQuery();
+  idQuery.geometry = line;
+  idQuery.spatialRelationship = "intersects";
+  const objectIds = await layer.queryObjectIds(idQuery);
+  if (objectIds.length === 0) return [];
+
+  const featureSets = await Promise.all(objectIdBatches(objectIds).map(async (batch) => {
     const query = layer.createQuery();
-    query.geometry = line;
-    query.spatialRelationship = "intersects";
+    query.objectIds = batch;
     query.returnGeometry = true;
     query.outFields = [...DEM_COVERAGE_OUT_FIELDS];
     query.outSpatialReference = SpatialReference.WGS84;
     const result = await layer.queryFeatures(query);
+    if (result.exceededTransferLimit) {
+      throw new Error(`Esri DEM coverage query remained truncated for ${layer.title}.`);
+    }
     return result.features;
   }));
+
+  return featureSets.flat();
+}
+
+async function queryCoverageFeaturesAlongLine(group: GroupLayer, line: Polyline): Promise<CoverageFeature[]> {
+  const layers = group.layers.toArray().filter((layer): layer is FeatureLayer => layer instanceof FeatureLayer);
+  const featureSets = await Promise.all(layers.map((layer) => queryLayerCoverageFeaturesAlongLine(layer, line)));
 
   return featureSets.flatMap((features) => features.flatMap((feature) => {
     const pixelSizeM = featurePixelSize(feature);
