@@ -20,6 +20,7 @@ import CrossSectionSaveDialog from "./CrossSectionSaveDialog";
 import {
   createDemResolutionCoverageLayer,
   refreshDemResolutionCoverageLayer,
+  summarizeDemCoverageAlongProfile,
 } from "./DemResolutionCoverageLayer";
 import { DEM_COVERAGE_LEGEND } from "./demResolutionCoverageModel";
 import SceneDualScaleBar from "./SceneDualScaleBar";
@@ -32,9 +33,11 @@ import {
   formatDemResolution,
   formatElevation,
   formatHorizontalDistance,
+  formatTerrainSamplingResolution,
   pathLengthMeters,
   profileFromPath,
   summarizeDemResolution,
+  withDemSourceCoverage,
   type CrossSectionControlPoint,
   type CrossSectionDemMetadata,
   type CrossSectionProfile,
@@ -72,21 +75,23 @@ function nearestSampleElevation(profile: CrossSectionProfile | null, controlDist
 }
 
 function demQualityNote(metadata: CrossSectionDemMetadata | null | undefined) {
-  if (!metadata || metadata.actual_min_resolution_m == null || metadata.actual_max_resolution_m == null) {
-    return "ArcGIS did not return DEM resolution metadata for this profile.";
+  if (!metadata) return "No DEM provenance metadata is available for this profile.";
+
+  const sourceCoverage = metadata.source_coverage;
+  const sourceResolution = formatDemResolution(metadata);
+  const terrainSampling = formatTerrainSamplingResolution(metadata);
+
+  if (!sourceCoverage || sourceCoverage.min_pixel_size_m == null || sourceCoverage.max_pixel_size_m == null) {
+    return `Esri source-footprint coverage could not be resolved for this profile. Terrain3D sampling resolution was ${terrainSampling}; that value is not native source DEM cell size.`;
   }
-  if (metadata.actual_min_resolution_m < 1) {
-    return metadata.mixed_resolution
-      ? "Sub-meter terrain is present on part of this profile; other sections use coarser source DEM data."
-      : "Sub-meter source DEM is available across this profile.";
-  }
-  if (metadata.requested_resolution_m != null && metadata.actual_min_resolution_m > metadata.requested_resolution_m + 0.05) {
-    return `The ${metadata.requested_resolution_m.toLocaleString()} m target was requested, but the closest available source DEM is ${formatDemResolution(metadata)}.`;
-  }
-  if (metadata.mixed_resolution) {
-    return "ArcGIS used multiple source DEM resolutions along this profile; the range shown is the actual returned resolution metadata.";
-  }
-  return "The displayed DEM resolution is the actual source resolution reported by ArcGIS, not the profile vertex spacing.";
+
+  const coverage = sourceCoverage.covered_sample_count === sourceCoverage.total_sample_count
+    ? "all sampled profile coordinates"
+    : `${sourceCoverage.covered_sample_count.toLocaleString()} of ${sourceCoverage.total_sample_count.toLocaleString()} sampled profile coordinates`;
+
+  return sourceCoverage.mixed_resolution
+    ? `Esri's Data Extents catalog resolves multiple native source pixel sizes (${sourceResolution}) across ${coverage}. Terrain3D sampled the elevation surface at ${terrainSampling}; sampling resolution is reported separately and is not source accuracy or native cell size.`
+    : `Esri's Data Extents catalog resolves ${sourceResolution} native source coverage across ${coverage}. Terrain3D sampled the elevation surface at ${terrainSampling}; sampling resolution is reported separately and is not source accuracy or native cell size.`;
 }
 
 export default function TerrainCrossSectionWorkspace() {
@@ -510,9 +515,23 @@ export default function TerrainCrossSectionWorkspace() {
       });
       const sampled = elevation.geometry as Polyline;
       const path = sampled.paths?.[0] ?? [];
-      const dem = summarizeDemResolution(elevation.sampleInfo, requestedDemMode);
-      const nextProfile = profileFromPath(path, elevation.noDataValue, dem);
+      const terrainSampling = summarizeDemResolution(elevation.sampleInfo, requestedDemMode);
+      let nextProfile = profileFromPath(path, elevation.noDataValue, terrainSampling);
       if (!nextProfile) throw new Error("No usable DEM elevation samples were returned for this path.");
+
+      const coverageLayer = demCoverageLayerRef.current;
+      if (coverageLayer) {
+        try {
+          const sourceCoverage = await summarizeDemCoverageAlongProfile(coverageLayer, nextProfile.samples);
+          nextProfile = {
+            ...nextProfile,
+            dem: withDemSourceCoverage(terrainSampling, sourceCoverage),
+          };
+        } catch (coverageError) {
+          console.warn("Unable to resolve Esri DEM source-footprint coverage for profile", coverageError);
+        }
+      }
+
       setProfile(nextProfile);
       setProfileView("profile");
       setActivePanel("profile");
@@ -561,13 +580,13 @@ export default function TerrainCrossSectionWorkspace() {
     ? profile
       ? profileView === "slice"
         ? `3D DEM slice along ${formatHorizontalDistance(profile.stats.total_distance_m, false)} of selected terrain`
-        : `${formatHorizontalDistance(profile.stats.total_distance_m, false)} · ${profile.stats.sample_count.toLocaleString()} samples · ${formatDemResolution(profile.dem)} DEM`
+        : `${formatHorizontalDistance(profile.stats.total_distance_m, false)} · ${profile.stats.sample_count.toLocaleString()} samples · ${formatDemResolution(profile.dem)} source coverage`
       : "Build a profile to inspect terrain elevation"
     : activePanel === "details"
-      ? "DEM profile measurements and source resolution"
+      ? "DEM profile measurements, source coverage, and Terrain3D sampling"
       : activePanel === "points"
         ? `${controlPoints.length} selected point${controlPoints.length === 1 ? "" : "s"}`
-        : "Sampling, DEM quality, and map display";
+        : "Sampling, DEM source coverage, and map display";
 
   return (
     <div
@@ -654,7 +673,7 @@ export default function TerrainCrossSectionWorkspace() {
             aria-pressed={demCoverageVisible}
             disabled={sceneState !== "ready"}
             className={`rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50 ${demCoverageVisible ? "bg-white text-slate-900" : "text-white/90 hover:bg-white/10"}`}
-            title="Show live Esri World Elevation source-resolution footprints"
+            title="Show the finest cataloged Esri source-resolution footprint at each location"
           >
             DEM coverage
           </button>
@@ -742,7 +761,7 @@ export default function TerrainCrossSectionWorkspace() {
                   <DrawerMetric label="Path" value={formatHorizontalDistance(profile.stats.total_distance_m, false)} />
                   <DrawerMetric label="Samples" value={profile.stats.sample_count.toLocaleString()} />
                   <DrawerMetric label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
-                  <DrawerMetric label="Source DEM" value={formatDemResolution(profile.dem)} />
+                  <DrawerMetric label="Source coverage" value={formatDemResolution(profile.dem)} />
                 </div>
 
                 <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-3 text-xs leading-5 text-muted">
@@ -750,9 +769,10 @@ export default function TerrainCrossSectionWorkspace() {
                     ArcGIS World Elevation · {demResolutionModeLabel(profile.dem?.requested_mode ?? demResolutionMode)}
                   </div>
                   <div className="mt-1">{demQualityNote(profile.dem)}</div>
-                  {profile.dem?.resolution_sample_count ? (
-                    <div className="mt-1 text-[11px]">Resolution metadata returned for {profile.dem.resolution_sample_count.toLocaleString()} sampled coordinate{profile.dem.resolution_sample_count === 1 ? "" : "s"}.</div>
-                  ) : null}
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                    <div>Source footprint: <span className="font-semibold text-[var(--ink)]">{formatDemResolution(profile.dem)}</span></div>
+                    <div>Terrain3D sampling: <span className="font-semibold text-[var(--ink)]">{formatTerrainSamplingResolution(profile.dem)}</span></div>
+                  </div>
                 </div>
 
                 {profileView === "profile" ? (
@@ -790,9 +810,11 @@ export default function TerrainCrossSectionWorkspace() {
                 <DrawerMetric label="Path" value={formatHorizontalDistance(displayedDistanceM, false)} />
                 <DrawerMetric label="Samples" value={profile ? profile.stats.sample_count.toLocaleString() : "—"} />
                 <DrawerMetric label="Spacing" value={actualSpacingM == null ? "—" : `${actualSpacingM.toLocaleString()} m`} />
-                <DrawerMetric label="DEM mode" value={profile ? demResolutionModeLabel(profile.dem?.requested_mode ?? demResolutionMode) : demResolutionModeLabel(demResolutionMode)} />
-                <DrawerMetric label="Source DEM" value={profile ? formatDemResolution(profile.dem) : "—"} />
-                <DrawerMetric label="Resolution samples" value={profile?.dem ? profile.dem.resolution_sample_count.toLocaleString() : "—"} />
+                <DrawerMetric label="DEM request" value={profile ? demResolutionModeLabel(profile.dem?.requested_mode ?? demResolutionMode) : demResolutionModeLabel(demResolutionMode)} />
+                <DrawerMetric label="Source coverage" value={profile ? formatDemResolution(profile.dem) : "—"} />
+                <DrawerMetric label="Terrain3D sampling" value={profile ? formatTerrainSamplingResolution(profile.dem) : "—"} />
+                <DrawerMetric label="Coverage samples" value={profile?.dem?.source_coverage ? `${profile.dem.source_coverage.covered_sample_count.toLocaleString()} / ${profile.dem.source_coverage.total_sample_count.toLocaleString()}` : "—"} />
+                <DrawerMetric label="Terrain metadata" value={profile?.dem ? profile.dem.resolution_sample_count.toLocaleString() : "—"} />
                 <DrawerMetric label="Elevation range" value={profile ? formatElevation(profile.stats.elevation_range_m, false) : "—"} />
                 <DrawerMetric label="Minimum" value={profile ? formatElevation(profile.stats.min_elevation_m, false) : "—"} />
                 <DrawerMetric label="Maximum" value={profile ? formatElevation(profile.stats.max_elevation_m, false) : "—"} />
@@ -851,7 +873,7 @@ export default function TerrainCrossSectionWorkspace() {
                 </div>
 
                 <div>
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted">Elevation source resolution</div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted">Terrain3D elevation query</div>
                   <select
                     value={demResolutionMode}
                     onChange={(event) => {
@@ -862,22 +884,26 @@ export default function TerrainCrossSectionWorkspace() {
                     disabled={profileBusy}
                     className="w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
                   >
-                    <option value="best-available">Best available — finest consistent DEM</option>
-                    <option value="auto">Automatic — may mix DEM resolutions</option>
-                    <option value="target-1m">Target 1 m</option>
-                    <option value="target-3m">Target 3 m</option>
-                    <option value="target-10m">Target 10 m</option>
+                    <option value="best-available">Best available — finest contiguous sampling</option>
+                    <option value="auto">Automatic — may mix sampling resolutions</option>
+                    <option value="target-1m">Target 1 m sampling</option>
+                    <option value="target-3m">Target 3 m sampling</option>
+                    <option value="target-10m">Target 10 m sampling</option>
                   </select>
                   <div className="mt-2 text-xs leading-5 text-muted">
-                    Best available requests ArcGIS&apos;s finest contiguous source across the complete cross section and can use sub-meter data where the World Elevation service actually provides it. Numeric targets request the closest available source resolution; ERIS reports what ArcGIS actually returned.
+                    This controls the ArcGIS Terrain3D elevation query. The returned Terrain3D sampling resolution can reflect a cached terrain level of detail and is not used as proof of native DEM cell size. ERIS resolves source coverage separately from the same live Data Extents PixelSize footprints used by the map overlay.
                   </div>
                   {profile ? (
-                    <div className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-xs leading-5">
+                    <div className="mt-3 space-y-2 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-xs leading-5">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted">Actual source DEM</span>
+                        <span className="text-muted">Source footprint resolution</span>
                         <span className="font-semibold tabular-nums text-[var(--ink)]">{formatDemResolution(profile.dem)}</span>
                       </div>
-                      <div className="mt-1 text-muted">{demQualityNote(profile.dem)}</div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted">Terrain3D sampling resolution</span>
+                        <span className="font-semibold tabular-nums text-[var(--ink)]">{formatTerrainSamplingResolution(profile.dem)}</span>
+                      </div>
+                      <div className="pt-1 text-muted">{demQualityNote(profile.dem)}</div>
                     </div>
                   ) : null}
                 </div>
@@ -903,7 +929,7 @@ export default function TerrainCrossSectionWorkspace() {
                 </div>
 
                 <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-xs leading-5 text-muted">
-                  Terrain distances and elevations are displayed in feet. DEM source resolution and profile sample spacing remain in meters because those values describe the source grid and sampling interval.
+                  Terrain distances and elevations are displayed in feet. Profile interval, source pixel size, and Terrain3D sampling resolution remain in meters because those values describe sampling and raster grids.
                 </div>
               </div>
             ) : null}
@@ -939,7 +965,7 @@ export default function TerrainCrossSectionWorkspace() {
             ))}
           </div>
           <div className="mt-2 border-t border-white/15 pt-2 text-[9px] leading-4 text-white/70">
-            Coverage shows Esri source footprints. Actual profile DEM resolution is confirmed when the profile is sampled.
+            Color = finest cataloged Esri PixelSize footprint at that location. Profile source coverage uses the same footprints. Terrain3D sampling resolution is reported separately.
           </div>
         </div>
       ) : null}
@@ -953,7 +979,7 @@ export default function TerrainCrossSectionWorkspace() {
           className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white shadow backdrop-blur-sm"
         >
           <span className="font-semibold">Elevation analysis</span>
-          <span className="ml-2 text-white/75">Profile + 3D slice · {formatHorizontalDistance(profile.stats.total_distance_m, false)} · {formatDemResolution(profile.dem)} DEM</span>
+          <span className="ml-2 text-white/75">Profile + 3D slice · {formatHorizontalDistance(profile.stats.total_distance_m, false)} · {formatDemResolution(profile.dem)} source coverage</span>
         </button>
       ) : controlPoints.length >= 2 && !drawing ? (
         <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur-sm">

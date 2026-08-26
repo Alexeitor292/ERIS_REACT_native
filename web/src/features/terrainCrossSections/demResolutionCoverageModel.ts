@@ -21,6 +21,23 @@ export type DemCoverageClass = {
   sources: readonly DemCoverageSource[];
 };
 
+export type DemCoverageDatasetSummary = {
+  pixel_size_m: number;
+  source: string | null;
+  product_name: string | null;
+  dataset_id: string | null;
+  sample_count: number;
+};
+
+export type DemCoverageProfileSummary = {
+  min_pixel_size_m: number | null;
+  max_pixel_size_m: number | null;
+  covered_sample_count: number;
+  total_sample_count: number;
+  mixed_resolution: boolean;
+  datasets: DemCoverageDatasetSummary[];
+};
+
 export const DEM_COVERAGE_CLASSES: readonly DemCoverageClass[] = [
   {
     id: "lte-1m",
@@ -45,7 +62,7 @@ export const DEM_COVERAGE_CLASSES: readonly DemCoverageClass[] = [
   },
   {
     id: "10m",
-    label: "10 m",
+    label: "≈ 10 m",
     cssColor: "#6366f1",
     rgb: [99, 102, 241],
     sources: [{ layerId: 3, sourceLabel: "10 m" }],
@@ -95,9 +112,10 @@ export function demCoverageClassForPixelSize(pixelSizeM: number): DemCoverageCla
   if (pixelSizeM <= 1) return "lte-1m";
   if (pixelSizeM < 5) return "gt-1-lt-5m";
   if (pixelSizeM < 10) return "gte-5-lt-10m";
-  if (pixelSizeM === 10) return "10m";
-  if (pixelSizeM >= 25 && pixelSizeM <= 30) return "25-30m";
-  if (pixelSizeM >= 50 && pixelSizeM <= 90) return "50-90m";
+  // The service's nominal 10 m bucket contains native cell sizes such as ~10.3 m.
+  if (pixelSizeM < 25) return "10m";
+  if (pixelSizeM <= 30) return "25-30m";
+  if (pixelSizeM <= 90) return "50-90m";
   if (pixelSizeM >= 150) return "gte-150m";
   return null;
 }

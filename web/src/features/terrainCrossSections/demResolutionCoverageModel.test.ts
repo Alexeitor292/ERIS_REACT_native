@@ -13,6 +13,8 @@ test("DEM coverage class boundaries are mutually exclusive", () => {
   assert.equal(demCoverageClassForPixelSize(5), "gte-5-lt-10m");
   assert.equal(demCoverageClassForPixelSize(9.99), "gte-5-lt-10m");
   assert.equal(demCoverageClassForPixelSize(10), "10m");
+  assert.equal(demCoverageClassForPixelSize(10.30736), "10m");
+  assert.equal(demCoverageClassForPixelSize(24.99), "10m");
   assert.equal(demCoverageClassForPixelSize(25), "25-30m");
   assert.equal(demCoverageClassForPixelSize(30), "25-30m");
   assert.equal(demCoverageClassForPixelSize(50), "50-90m");
