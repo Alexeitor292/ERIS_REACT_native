@@ -1,3 +1,5 @@
+import type { DemCoverageProfileSummary } from "./demResolutionCoverageModel";
+
 export type CrossSectionControlPoint = {
   longitude: number;
   latitude: number;
@@ -28,10 +30,17 @@ export type CrossSectionDemMetadata = {
   source: "ARCGIS_WORLD_ELEVATION";
   requested_mode: DemResolutionMode;
   requested_resolution_m: number | null;
+  // ArcGIS queryElevation().sampleInfo.demResolution is the resolution at which Terrain3D was
+  // sampled. It can be a cached tile LOD (for example ~2.388657 m) and is NOT, by itself, proof
+  // of the native source raster cell size.
   actual_min_resolution_m: number | null;
   actual_max_resolution_m: number | null;
   resolution_sample_count: number;
   mixed_resolution: boolean;
+  // Native/source coverage comes from Esri World Elevation Data Extents PixelSize footprints.
+  // These are resolved per profile coordinate with finer footprints winning over overlapping
+  // coarse fallback datasets, matching the coverage overlay semantics.
+  source_coverage?: DemCoverageProfileSummary;
 };
 
 export type CrossSectionProfile = {
@@ -150,11 +159,39 @@ export function summarizeDemResolution(
   };
 }
 
-export function formatDemResolution(metadata: CrossSectionDemMetadata | null | undefined): string {
-  if (!metadata || metadata.actual_min_resolution_m == null || metadata.actual_max_resolution_m == null) return "Unavailable";
+export function withDemSourceCoverage(
+  metadata: CrossSectionDemMetadata,
+  sourceCoverage: DemCoverageProfileSummary,
+): CrossSectionDemMetadata {
+  return { ...metadata, source_coverage: sourceCoverage };
+}
+
+function formatResolutionRange(min: number | null, max: number | null, mixed: boolean): string {
+  if (min == null || max == null) return "Unavailable";
   const format = (value: number) => value < 10 ? `${value.toFixed(2)} m` : `${value.toFixed(1)} m`;
-  if (!metadata.mixed_resolution) return format(metadata.actual_min_resolution_m);
-  return `${format(metadata.actual_min_resolution_m)}–${format(metadata.actual_max_resolution_m)}`;
+  if (!mixed) return format(min);
+  return `${format(min)}–${format(max)}`;
+}
+
+/** Native/source raster resolution from Data Extents PixelSize, not Terrain3D cache LOD. */
+export function formatDemResolution(metadata: CrossSectionDemMetadata | null | undefined): string {
+  const coverage = metadata?.source_coverage;
+  if (!coverage) return "Unavailable";
+  return formatResolutionRange(
+    coverage.min_pixel_size_m,
+    coverage.max_pixel_size_m,
+    coverage.mixed_resolution,
+  );
+}
+
+/** Resolution of the Terrain3D samples actually queried; may reflect a cached tile LOD. */
+export function formatTerrainSamplingResolution(metadata: CrossSectionDemMetadata | null | undefined): string {
+  if (!metadata) return "Unavailable";
+  return formatResolutionRange(
+    metadata.actual_min_resolution_m,
+    metadata.actual_max_resolution_m,
+    metadata.mixed_resolution,
+  );
 }
 
 export function profileFromPath(

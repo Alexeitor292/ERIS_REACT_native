@@ -9,9 +9,11 @@ import {
   formatDemResolution,
   formatElevation,
   formatHorizontalDistance,
+  formatTerrainSamplingResolution,
   pathLengthMeters,
   profileFromPath,
   summarizeDemResolution,
+  withDemSourceCoverage,
 } from "./terrainCrossSectionModel.ts";
 
 test("adaptive sampling never imposes a path-length cap", () => {
@@ -32,28 +34,50 @@ test("DEM resolution modes map to ArcGIS elevation query values", () => {
   assert.equal(demResolutionModeLabel("best-available"), "Best available");
 });
 
-test("DEM resolution metadata truthfully reports actual ArcGIS sample resolution", () => {
-  const uniform = summarizeDemResolution([
-    { demResolution: 1 },
-    { demResolution: 1 },
-    { demResolution: -1 },
-  ], "target-1m");
-  assert.equal(uniform.requested_resolution_m, 1);
-  assert.equal(uniform.actual_min_resolution_m, 1);
-  assert.equal(uniform.actual_max_resolution_m, 1);
-  assert.equal(uniform.resolution_sample_count, 2);
-  assert.equal(uniform.mixed_resolution, false);
-  assert.equal(formatDemResolution(uniform), "1.00 m");
+test("Terrain3D sample resolution is not mislabeled as native source DEM resolution", () => {
+  const sampled = summarizeDemResolution([
+    { demResolution: 2.388657133974685 },
+    { demResolution: 2.388657133974685 },
+  ], "best-available");
 
-  const mixed = summarizeDemResolution([
-    { demResolution: 0.5 },
-    { demResolution: 1 },
-    { demResolution: 9.56 },
+  assert.equal(formatTerrainSamplingResolution(sampled), "2.39 m");
+  assert.equal(formatDemResolution(sampled), "Unavailable");
+
+  const withCoverage = withDemSourceCoverage(sampled, {
+    min_pixel_size_m: 10.30736,
+    max_pixel_size_m: 10.30736,
+    covered_sample_count: 2,
+    total_sample_count: 2,
+    mixed_resolution: false,
+    datasets: [{
+      pixel_size_m: 10.30736,
+      source: "USGS",
+      product_name: "NED_1r3_arcsec",
+      dataset_id: "NED13",
+      sample_count: 2,
+    }],
+  });
+
+  assert.equal(formatDemResolution(withCoverage), "10.3 m");
+  assert.equal(formatTerrainSamplingResolution(withCoverage), "2.39 m");
+});
+
+test("DEM source coverage truthfully reports a mixed native-resolution path", () => {
+  const sampled = summarizeDemResolution([
+    { demResolution: 2.388657133974685 },
+    { demResolution: 2.388657133974685 },
   ], "auto");
-  assert.equal(mixed.actual_min_resolution_m, 0.5);
-  assert.equal(mixed.actual_max_resolution_m, 9.56);
-  assert.equal(mixed.mixed_resolution, true);
-  assert.equal(formatDemResolution(mixed), "0.50 m–9.56 m");
+  const metadata = withDemSourceCoverage(sampled, {
+    min_pixel_size_m: 0.5,
+    max_pixel_size_m: 10.30736,
+    covered_sample_count: 2,
+    total_sample_count: 2,
+    mixed_resolution: true,
+    datasets: [],
+  });
+
+  assert.equal(formatDemResolution(metadata), "0.50 m–10.3 m");
+  assert.equal(formatTerrainSamplingResolution(metadata), "2.39 m");
 });
 
 test("control point distances accumulate along a multi-vertex path", () => {
