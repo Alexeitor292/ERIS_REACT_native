@@ -17,6 +17,11 @@ import type { SavedCrossSectionDetail } from "../../api/terrainCrossSections";
 import AerialCaptureDialog from "./AerialCaptureDialog";
 import CrossSectionProfileChart from "./CrossSectionProfileChart";
 import CrossSectionSaveDialog from "./CrossSectionSaveDialog";
+import {
+  createDemResolutionCoverageLayer,
+  refreshDemResolutionCoverageLayer,
+} from "./DemResolutionCoverageLayer";
+import { DEM_COVERAGE_LEGEND } from "./demResolutionCoverageModel";
 import SceneDualScaleBar from "./SceneDualScaleBar";
 import TerrainSlice3D from "./TerrainSlice3D";
 import {
@@ -89,6 +94,7 @@ export default function TerrainCrossSectionWorkspace() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<SceneView | null>(null);
   const mapRef = useRef<Map | null>(null);
+  const demCoverageLayerRef = useRef<ReturnType<typeof createDemResolutionCoverageLayer> | null>(null);
   const controlLayerRef = useRef<GraphicsLayer | null>(null);
   const profileLayerRef = useRef<GraphicsLayer | null>(null);
   const hoverLayerRef = useRef<GraphicsLayer | null>(null);
@@ -104,6 +110,7 @@ export default function TerrainCrossSectionWorkspace() {
   const [preferredSpacingM, setPreferredSpacingM] = useState(1);
   const [actualSpacingM, setActualSpacingM] = useState<number | null>(null);
   const [demResolutionMode, setDemResolutionMode] = useState<DemResolutionMode>("best-available");
+  const [demCoverageVisible, setDemCoverageVisible] = useState(false);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("satellite");
   const [sceneScale, setSceneScale] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<WorkspacePanel | null>(null);
@@ -218,6 +225,7 @@ export default function TerrainCrossSectionWorkspace() {
     setSceneState("loading");
     setSceneError(null);
 
+    const demCoverageLayer = createDemResolutionCoverageLayer();
     const controlLayer = new GraphicsLayer({ title: "Cross-section control points" });
     const profileLayer = new GraphicsLayer({ title: "DEM cross-section profile" });
     const hoverLayer = new GraphicsLayer({ title: "Cross-section cursor" });
@@ -225,6 +233,7 @@ export default function TerrainCrossSectionWorkspace() {
     (profileLayer as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "absolute-height" };
     (hoverLayer as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "absolute-height" };
 
+    demCoverageLayerRef.current = demCoverageLayer;
     controlLayerRef.current = controlLayer;
     profileLayerRef.current = profileLayer;
     hoverLayerRef.current = hoverLayer;
@@ -232,7 +241,7 @@ export default function TerrainCrossSectionWorkspace() {
     const map = new Map({
       basemap: "satellite",
       ground: "world-elevation",
-      layers: [controlLayer, profileLayer, hoverLayer],
+      layers: [demCoverageLayer, controlLayer, profileLayer, hoverLayer],
     });
     mapRef.current = map;
 
@@ -310,6 +319,7 @@ export default function TerrainCrossSectionWorkspace() {
       search?.destroy();
       home?.destroy();
       compass?.destroy();
+      demCoverageLayerRef.current = null;
       controlLayerRef.current = null;
       profileLayerRef.current = null;
       hoverLayerRef.current = null;
@@ -451,6 +461,18 @@ export default function TerrainCrossSectionWorkspace() {
 
   function togglePanel(panel: WorkspacePanel) {
     setActivePanel((current) => current === panel ? null : panel);
+  }
+
+  function toggleDemCoverage() {
+    setDemCoverageVisible((current) => {
+      const next = !current;
+      const layer = demCoverageLayerRef.current;
+      if (layer) {
+        layer.visible = next;
+        if (next) refreshDemResolutionCoverageLayer(layer);
+      }
+      return next;
+    });
   }
 
   async function buildProfile(spacingOverride?: number, demResolutionOverride?: DemResolutionMode) {
@@ -625,6 +647,17 @@ export default function TerrainCrossSectionWorkspace() {
           </button>
 
           <div className="mx-1 h-5 w-px bg-white/20" />
+
+          <button
+            type="button"
+            onClick={toggleDemCoverage}
+            aria-pressed={demCoverageVisible}
+            disabled={sceneState !== "ready"}
+            className={`rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50 ${demCoverageVisible ? "bg-white text-slate-900" : "text-white/90 hover:bg-white/10"}`}
+            title="Show live Esri World Elevation source-resolution footprints"
+          >
+            DEM coverage
+          </button>
 
           <button
             type="button"
@@ -891,6 +924,26 @@ export default function TerrainCrossSectionWorkspace() {
         ))}
       </div>
 
+      {demCoverageVisible ? (
+        <div className="pointer-events-none absolute bottom-14 left-3 z-20 w-64 rounded-lg border border-white/20 bg-slate-950/85 p-3 text-white shadow-lg backdrop-blur-md">
+          <div className="text-xs font-semibold">DEM source coverage</div>
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {DEM_COVERAGE_LEGEND.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 text-[10px]">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-[2px] border border-white/30"
+                  style={{ backgroundColor: item.cssColor }}
+                />
+                <span>{item.label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 border-t border-white/15 pt-2 text-[9px] leading-4 text-white/70">
+            Coverage shows Esri source footprints. Actual profile DEM resolution is confirmed when the profile is sampled.
+          </div>
+        </div>
+      ) : null}
+
       <SceneDualScaleBar scale={sceneScale} />
 
       {profile ? (
@@ -909,7 +962,7 @@ export default function TerrainCrossSectionWorkspace() {
       ) : null}
 
       {focusMode ? (
-        <div className="pointer-events-none absolute bottom-14 left-3 z-20 rounded-md bg-black/45 px-2.5 py-1.5 text-[10px] text-white/70 backdrop-blur-sm">
+        <div className={`pointer-events-none absolute bottom-14 z-20 rounded-md bg-black/45 px-2.5 py-1.5 text-[10px] text-white/70 backdrop-blur-sm ${demCoverageVisible ? "left-[17.5rem]" : "left-3"}`}>
           Terrain workspace full screen · all tools remain available · Esc to exit
         </div>
       ) : null}
