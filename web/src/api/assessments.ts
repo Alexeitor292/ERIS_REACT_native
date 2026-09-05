@@ -23,7 +23,10 @@ export type Assessment = {
   id: number;
   assessment_uuid: string;
   incident_id: number;
+  /** Latest / primary technical submission (kept for compatibility). */
   submission_id: number | null;
+  /** Every technical submission attached to this assessment, oldest first. */
+  submission_ids: number[];
   district: string | null;
   office_code: string | null;
   office_override_reason: string | null;
@@ -101,11 +104,13 @@ export function listAssessments(params: {
   state?: AssessmentState;
   office_code?: string;
   queue?: AssessmentQueue;
+  limit?: number;
 } = {}): Promise<{ items: Assessment[] }> {
   const q = new URLSearchParams();
   if (params.state) q.set("state", params.state);
   if (params.office_code) q.set("office_code", params.office_code);
   if (params.queue) q.set("queue", params.queue);
+  if (params.limit) q.set("limit", String(params.limit));
   const suffix = q.toString() ? `?${q.toString()}` : "";
   return api<{ items: Assessment[] }>(`/assessments${suffix}`);
 }
@@ -153,12 +158,21 @@ export function branchOptions(
 export function delegateBranch(
   assessmentId: number,
   branch_chief_user_id: number,
-  notes?: string
+  notes?: string,
+  engineer_user_id?: number | null
 ): Promise<{ assessment: Assessment }> {
   return api(`/assessments/${assessmentId}/delegate-branch`, {
     method: "POST",
-    body: JSON.stringify({ branch_chief_user_id, notes }),
+    body: JSON.stringify({ branch_chief_user_id, notes, engineer_user_id: engineer_user_id ?? null }),
   });
+}
+
+/** Engineer: add a supplemental DRAFT technical submission pre-filled from the incident. */
+export function createAssessmentSubmission(
+  assessmentId: number,
+  notes?: string
+): Promise<{ assessment: Assessment; submission_id: number }> {
+  return api(`/assessments/${assessmentId}/submissions`, { method: "POST", body: JSON.stringify({ notes }) });
 }
 
 export function assignEngineer(

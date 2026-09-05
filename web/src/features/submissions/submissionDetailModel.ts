@@ -132,80 +132,22 @@ export const DISTRIBUTION_ICON_SRC: Record<string, string> = {
 };
 
 export const LANES_CLOSED_OPTIONS = Array.from({ length: 4 }, (_, index) => String(index + 1));
-export const DASHBOARD_LAYOUT_KEY = "eris_submission_layout_v1";
-export const DASHBOARD_LAYOUT_PROFILES_KEY = "eris_submission_layout_profiles_v1";
 
-export const DASHBOARD_DEFAULT_ORDER = [
-  "report_header",
-  "location",
-  "distribution",
-  "highway_status",
-  "incident_type",
-  "material",
-  "pavement_ground_status",
-  "vegetation_on_slope",
-  "water_drainage",
-  "water_content",
-  "measurements",
-] as const;
-
-export type DashboardCardId = (typeof DASHBOARD_DEFAULT_ORDER)[number];
-export type DashboardCardLayout = { width: number; height: number };
-export type DashboardCardPosition = { x: number; y: number };
-export type DashboardLayoutState = {
-  order: DashboardCardId[];
-  sizes: Record<DashboardCardId, DashboardCardLayout>;
-  positions: Partial<Record<DashboardCardId, DashboardCardPosition>>;
-};
-
-export const DASHBOARD_MIN_CARD_WIDTH = 320;
-export const DASHBOARD_MAX_CARD_WIDTH = 1600;
-export const DASHBOARD_MIN_CARD_HEIGHT = 150;
-export const DASHBOARD_MAX_CARD_HEIGHT = 980;
-export const DASHBOARD_LAYOUT_GAP = 12;
-export const DASHBOARD_TIDY_SNAP = 8;
-
-export const DASHBOARD_DEFAULT_SIZES: Record<DashboardCardId, DashboardCardLayout> = {
-  report_header: { width: 1052, height: 300 },
-  location: { width: 520, height: 300 },
-  distribution: { width: 520, height: 250 },
-  highway_status: { width: 520, height: 250 },
-  incident_type: { width: 520, height: 250 },
-  material: { width: 520, height: 250 },
-  pavement_ground_status: { width: 520, height: 360 },
-  vegetation_on_slope: { width: 520, height: 260 },
-  water_drainage: { width: 520, height: 470 },
-  water_content: { width: 520, height: 250 },
-  measurements: { width: 520, height: 470 },
-};
-
-export const DASHBOARD_DEFAULT_POSITIONS: Partial<Record<DashboardCardId, DashboardCardPosition>> = {
-  report_header: { x: 12, y: 12 },
-  location: { x: 1076, y: 12 },
-  incident_type: { x: 12, y: 324 },
-  distribution: { x: 544, y: 324 },
-  highway_status: { x: 1076, y: 324 },
-  material: { x: 12, y: 586 },
-  water_content: { x: 544, y: 586 },
-  pavement_ground_status: { x: 1076, y: 586 },
-  vegetation_on_slope: { x: 12, y: 848 },
-  measurements: { x: 544, y: 848 },
-  water_drainage: { x: 1076, y: 958 },
-};
-
-export const DASHBOARD_CARD_TITLES: Record<DashboardCardId, string> = {
-  report_header: "Report Header",
-  location: "Location",
-  distribution: "Distribution",
-  highway_status: "Highway Status",
-  incident_type: "Incident Type",
-  material: "Material",
-  pavement_ground_status: "Pavement / Ground Status",
-  vegetation_on_slope: "Vegetation on Slope",
-  water_drainage: "Water / Drainage",
-  water_content: "Water Content",
-  measurements: "Measurements",
-};
+// Canvas layout constants/types now live in the dependency-free layout model (v2);
+// re-exported here so existing imports keep working.
+export {
+  DASHBOARD_CARD_TITLES,
+  DASHBOARD_DEFAULT_ORDER,
+  DASHBOARD_DEFAULT_SIZES,
+  DASHBOARD_LAYOUT_GAP,
+  DASHBOARD_MAX_CARD_HEIGHT,
+  DASHBOARD_MAX_CARD_WIDTH,
+  DASHBOARD_MIN_CARD_HEIGHT,
+  DASHBOARD_MIN_CARD_WIDTH,
+  type DashboardCardId,
+  type DashboardCardLayout,
+  type DashboardCardPosition,
+} from "./submissionLayoutModel";
 
 export const INCIDENT_TYPE_CODE_BY_FORM_KEY: Record<string, string> = {
   failure_rock_fall: "ROCK_FALL",
@@ -305,67 +247,4 @@ export function serializeDistrictContacts(contacts: DistrictContact[]) {
     phone: contact.phone.trim(),
     cell_phone: contact.cell_phone.trim(),
   })));
-}
-
-export function reorderCards(order: DashboardCardId[], dragId: DashboardCardId, overId: DashboardCardId): DashboardCardId[] {
-  if (dragId === overId) return [...order];
-  const next = order.filter((id) => id !== dragId);
-  const overIndex = next.indexOf(overId);
-  if (overIndex < 0) next.push(dragId);
-  else next.splice(overIndex, 0, dragId);
-  return next;
-}
-
-export function buildDefaultDashboardLayout(): DashboardLayoutState {
-  return {
-    order: [...DASHBOARD_DEFAULT_ORDER],
-    sizes: { ...DASHBOARD_DEFAULT_SIZES },
-    positions: { ...DASHBOARD_DEFAULT_POSITIONS },
-  };
-}
-
-export function normalizeDashboardLayout(raw: Partial<DashboardLayoutState> | null | undefined): DashboardLayoutState {
-  const base = buildDefaultDashboardLayout();
-  if (!raw) return base;
-
-  const order = Array.isArray(raw.order)
-    ? raw.order.filter((value): value is DashboardCardId => DASHBOARD_DEFAULT_ORDER.includes(value as DashboardCardId))
-    : [];
-  const mergedOrder = [
-    ...order,
-    ...DASHBOARD_DEFAULT_ORDER.filter((id) => !order.includes(id)),
-  ] as DashboardCardId[];
-
-  const sizes: Record<DashboardCardId, DashboardCardLayout> = { ...base.sizes };
-  for (const id of DASHBOARD_DEFAULT_ORDER) {
-    const next = (raw.sizes as any)?.[id];
-    if (!next) continue;
-
-    const legacyCol = Number(next.colSpan);
-    const legacyRow = Number(next.rowSpan);
-    if (!Number.isNaN(legacyCol) || !Number.isNaN(legacyRow)) {
-      sizes[id] = {
-        width: Math.min(DASHBOARD_MAX_CARD_WIDTH, Math.max(DASHBOARD_MIN_CARD_WIDTH, Math.round(((Number.isNaN(legacyCol) ? 6 : legacyCol) / 12) * 1400))),
-        height: Math.min(DASHBOARD_MAX_CARD_HEIGHT, Math.max(DASHBOARD_MIN_CARD_HEIGHT, Math.round((Number.isNaN(legacyRow) ? 1 : legacyRow) * 170))),
-      };
-      continue;
-    }
-
-    sizes[id] = {
-      width: Math.min(DASHBOARD_MAX_CARD_WIDTH, Math.max(DASHBOARD_MIN_CARD_WIDTH, Number(next.width) || base.sizes[id].width)),
-      height: Math.min(DASHBOARD_MAX_CARD_HEIGHT, Math.max(DASHBOARD_MIN_CARD_HEIGHT, Number(next.height) || base.sizes[id].height)),
-    };
-  }
-
-  const positions: Partial<Record<DashboardCardId, DashboardCardPosition>> = { ...base.positions };
-  for (const id of DASHBOARD_DEFAULT_ORDER) {
-    const next = (raw as any).positions?.[id];
-    if (!next) continue;
-    const x = Number(next.x);
-    const y = Number(next.y);
-    if (Number.isNaN(x) || Number.isNaN(y)) continue;
-    positions[id] = { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) };
-  }
-
-  return { order: mergedOrder, sizes, positions };
 }

@@ -103,3 +103,20 @@ Routing/admin for incident ownership:
 ## Dev API (only when `ENV=dev`)
 
 - `POST /dev/seed-test-submission`
+
+## Assessment APIs (`/assessments/*`, operational roles)
+
+- `GET /assessments` (`state`, `office_code`, `queue=office_chief|branch_chief|engineer|reviewer`) — every item carries `submission_id` (latest technical form) and `submission_ids[]` (all attached forms, oldest first)
+- `GET /assessments/{assessment_id}`
+- `GET /incidents/{incident_id}/assessment`
+- `POST /incidents/{incident_id}/triage` (coordinator)
+- `GET /assessments/{assessment_id}/branch-options`
+- `POST /assessments/{assessment_id}/delegate-branch` (office chief; optional `engineer_user_id` assigns the engineer at delegation and moves the assessment straight to `DRAFT`)
+- `POST /assessments/{assessment_id}/assign-engineer` (branch chief)
+- `POST /assessments/{assessment_id}/submissions` (assigned engineer; creates a supplemental DRAFT technical submission pre-filled from the incident and attaches it via `assessment_submissions`)
+- `POST /assessments/{assessment_id}/assignments` / `DELETE /assessments/{assessment_id}/assignments/{assignment_id}`
+- `POST /assessments/{assessment_id}/submit` (requires at least one attached technical submission)
+- `POST /assessments/{assessment_id}/review`
+- `POST /assessments/{assessment_id}/finalize`
+
+`GET /submissions/{submission_id}` additionally returns `context` (`incident_id`, `incident_title`, `event_group_id`, `assessment_id`, `assessment_state`) when the technical form belongs to an incident workflow.

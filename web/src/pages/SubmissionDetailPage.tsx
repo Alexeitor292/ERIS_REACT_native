@@ -1,31 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Link, useParams } from "react-router-dom";
+import { GripVertical, LayoutGrid, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
-import { getToken } from "../auth/token";
-import { appConfig } from "../config";
-import SubmissionArcGisMap from "../components/SubmissionArcGisMap";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
 import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
 import SubmissionMeasurementContext from "../features/submissions/SubmissionMeasurementContext";
-import { R, Section } from "../features/submissions/SubmissionDetailPrimitives";
+import SubmissionLocationHero from "../features/submissions/SubmissionLocationHero";
+import SubmissionLibrary from "../features/submissions/SubmissionLibrary";
+import SubmissionSectionAttachmentsDialog, { SectionAttachmentsButton } from "../features/submissions/SubmissionSectionAttachmentsDialog";
+import { useAttachmentUrlResolver } from "../features/submissions/SubmissionAttachmentTiles";
+import { R, SubmissionDetailCard, SubmissionDetailCardGrid } from "../features/submissions/SubmissionDetailPrimitives";
+import { getSubmissionPhotoEvidence, type PhotoMapResponse } from "../features/submissions/photoEvidenceApi";
+import { buildLibraryItems, CARD_SECTION_KEYS, itemsForSectionKeys, NOTES_SECTION_KEYS } from "../features/submissions/submissionAttachmentModel";
+import { useSubmissionDashboardLayout, type ResizeMode } from "../features/submissions/useSubmissionDashboardLayout";
 import {
   boolToTri,
-  buildDefaultDashboardLayout,
   DASHBOARD_CARD_TITLES,
-  DASHBOARD_DEFAULT_ORDER,
-  DASHBOARD_DEFAULT_SIZES,
-  DASHBOARD_LAYOUT_GAP,
-  DASHBOARD_LAYOUT_KEY,
-  DASHBOARD_LAYOUT_PROFILES_KEY,
-  DASHBOARD_MAX_CARD_HEIGHT,
-  DASHBOARD_MAX_CARD_WIDTH,
-  DASHBOARD_MIN_CARD_HEIGHT,
-  DASHBOARD_MIN_CARD_WIDTH,
-  DASHBOARD_TIDY_SNAP,
   DISTRIBUTION_ICON_SRC,
   districtContactRaw,
   EMPTY_SUBMISSION_DRAFT as EMPTY,
@@ -38,19 +32,15 @@ import {
   nullablePercent as np,
   nullableText as nt,
   normalizeCounty,
-  normalizeDashboardLayout,
   normalizeDistrictValue,
   parseDistrictContacts,
   parseStatePlaneFeetValue,
   pointFromLatLon,
-  reorderCards,
   serializeDistrictContacts,
   textValue as t,
   triToBool,
   tryExtractRoute,
   type DashboardCardId,
-  type DashboardCardPosition,
-  type DashboardLayoutState,
   type DistrictContact,
   type IncidentTypeOption,
   type SubmissionDraft as Draft,
@@ -66,6 +56,72 @@ import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 
+const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
+const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
+const chip = "rounded-full border px-2.5 py-1 text-xs";
+const ynChip = (active: boolean) => (active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]");
+const toolbarButton = "inline-flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-1.5 text-xs font-medium hover:brightness-95 disabled:opacity-60";
+
+const NOTES_FIELDS: Array<{ key: keyof typeof NOTES_SECTION_KEYS; label: string; rows: number }> = [
+  { key: "observations_notes", label: "Observations", rows: 3 },
+  { key: "record_of_event_notes", label: "Record of Event", rows: 2 },
+  { key: "maintenance_history_notes", label: "Maintenance History", rows: 2 },
+  { key: "geotechnical_assessment_notes", label: "Geotechnical Assessment", rows: 2 },
+  { key: "recommendations_notes", label: "Recommendations", rows: 2 },
+  { key: "sketchpad_notes", label: "Sketchpad", rows: 2 },
+];
+
+type CanvasCardProps = {
+  id: DashboardCardId;
+  style: CSSProperties;
+  dragging: boolean;
+  formDisabled: boolean;
+  attachmentCount: number;
+  onOpenAttachments: () => void;
+  onDragStart: (id: DashboardCardId, event: ReactMouseEvent) => void;
+  onResizeStart: (id: DashboardCardId, mode: ResizeMode, event: ReactMouseEvent) => void;
+  /** Rendered outside the disabled fieldset (read-only tools such as the 3D scene). */
+  tools?: ReactNode;
+  children: ReactNode;
+};
+
+function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpenAttachments, onDragStart, onResizeStart, tools, children }: CanvasCardProps) {
+  return (
+    <div
+      data-card-id={id}
+      style={style}
+      className={`flex flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] ${dragging ? "opacity-40 shadow-2xl" : ""}`}
+    >
+      <div
+        onMouseDown={(event) => onDragStart(id, event)}
+        className="flex shrink-0 cursor-grab select-none items-center justify-between gap-2 px-3 pb-2 pt-3 active:cursor-grabbing"
+        title="Drag to move this card"
+      >
+        <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">
+          <GripVertical size={14} strokeWidth={1.9} aria-hidden className="shrink-0 text-muted" />
+          <span className="truncate">{DASHBOARD_CARD_TITLES[id]}</span>
+        </div>
+        <SectionAttachmentsButton count={attachmentCount} onClick={onOpenAttachments} />
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+        {tools}
+        <fieldset disabled={formDisabled} className="contents min-w-0">
+          {children}
+        </fieldset>
+      </div>
+      <div data-no-drag className="absolute bottom-0 right-3 top-10 w-1.5 cursor-ew-resize" onMouseDown={(event) => onResizeStart(id, "right", event)} aria-hidden />
+      <div data-no-drag className="absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize" onMouseDown={(event) => onResizeStart(id, "bottom", event)} aria-hidden />
+      <div
+        data-no-drag
+        className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize rounded-tl border-l border-t border-[var(--line)] bg-[var(--panel-soft)]"
+        onMouseDown={(event) => onResizeStart(id, "bottomRight", event)}
+        title="Resize"
+        aria-hidden
+      />
+    </div>
+  );
+}
+
 export default function SubmissionDetailPage() {
   const { id } = useParams();
   const sid = Number(id);
@@ -76,7 +132,6 @@ export default function SubmissionDetailPage() {
   const [lookups, setLookups] = useState<GisaLookups | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [downloading, setDownloading] = useState<number | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [submitNote, setSubmitNote] = useState("");
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -96,36 +151,13 @@ export default function SubmissionDetailPage() {
   const [northingInput, setNorthingInput] = useState("");
   const [eastingInput, setEastingInput] = useState("");
   const [statePlaneInputError, setStatePlaneInputError] = useState<string | null>(null);
-  const [layoutMode, setLayoutMode] = useState(false);
-  const layoutCanvasRef = useRef<HTMLDivElement | null>(null);
-  const [layoutCanvasHeight, setLayoutCanvasHeight] = useState(720);
-  const [selectedCardId, setSelectedCardId] = useState<DashboardCardId | null>(null);
-  const [dragState, setDragState] = useState<{
-    id: DashboardCardId;
-    startX: number;
-    startY: number;
-    cardX: number;
-    cardY: number;
-    x: number;
-    y: number;
-    active: boolean;
-    overId: DashboardCardId | null;
-  } | null>(null);
-  const [resizeState, setResizeState] = useState<{
-    id: DashboardCardId;
-    mode: "right" | "left" | "bottom" | "bottomRight" | "bottomLeft";
-    startX: number;
-    startY: number;
-    startWidth: number;
-    startHeight: number;
-    startCardX: number;
-    startCardY: number;
-  } | null>(null);
-  const [activeLayoutProfile, setActiveLayoutProfile] = useState("Default");
-  const [layoutProfiles, setLayoutProfiles] = useState<Record<string, DashboardLayoutState>>({
-    Default: buildDefaultDashboardLayout(),
-  });
-  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayoutState>(() => buildDefaultDashboardLayout());
+  const [photoMap, setPhotoMap] = useState<PhotoMapResponse | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [sectionDialog, setSectionDialog] = useState<{ title: string; keys: readonly string[] } | null>(null);
+
+  const canvas = useSubmissionDashboardLayout();
+
   const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
   const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
   const canAct = canReview && data?.submission.status === "SUBMITTED";
@@ -191,81 +223,7 @@ export default function SubmissionDetailPage() {
     setNorthingInput(formatCaliforniaStatePlaneFeet(northing));
     setEastingInput(formatCaliforniaStatePlaneFeet(easting));
     setStatePlaneInputError(null);
-  }, [draft.county, eastingInput, northingInput, statePlaneZone]);
-
-  useEffect(() => {
-    try {
-      const baseProfiles: Record<string, DashboardLayoutState> = {
-        Default: buildDefaultDashboardLayout(),
-      };
-      const rawProfiles = localStorage.getItem(DASHBOARD_LAYOUT_PROFILES_KEY);
-      if (rawProfiles) {
-        const parsedProfiles = JSON.parse(rawProfiles) as {
-          active?: string;
-          profiles?: Record<string, Partial<DashboardLayoutState>>;
-        };
-        const mergedProfiles: Record<string, DashboardLayoutState> = { ...baseProfiles };
-        for (const [name, profile] of Object.entries(parsedProfiles.profiles ?? {})) {
-          mergedProfiles[name] = normalizeDashboardLayout(profile);
-        }
-        const active = parsedProfiles.active && mergedProfiles[parsedProfiles.active]
-          ? parsedProfiles.active
-          : "Default";
-        setLayoutProfiles(mergedProfiles);
-        setActiveLayoutProfile(active);
-        setDashboardLayout(mergedProfiles[active]);
-        return;
-      }
-
-      const rawLegacy = localStorage.getItem(DASHBOARD_LAYOUT_KEY);
-      if (rawLegacy) {
-        const parsedLegacy = JSON.parse(rawLegacy) as Partial<DashboardLayoutState>;
-        const legacyLayout = normalizeDashboardLayout(parsedLegacy);
-        const mergedProfiles: Record<string, DashboardLayoutState> = {
-          ...baseProfiles,
-          "My Layout": legacyLayout,
-        };
-        setLayoutProfiles(mergedProfiles);
-        setActiveLayoutProfile("My Layout");
-        setDashboardLayout(legacyLayout);
-      } else {
-        setLayoutProfiles(baseProfiles);
-        setActiveLayoutProfile("Default");
-        setDashboardLayout(baseProfiles.Default);
-      }
-    } catch {
-      // ignore malformed saved layout
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(DASHBOARD_LAYOUT_KEY, JSON.stringify(dashboardLayout));
-    } catch {
-      // ignore
-    }
-  }, [dashboardLayout]);
-  useEffect(() => {
-    setLayoutProfiles((prev) => ({ ...prev, [activeLayoutProfile]: dashboardLayout }));
-  }, [dashboardLayout, activeLayoutProfile]);
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        DASHBOARD_LAYOUT_PROFILES_KEY,
-        JSON.stringify({
-          active: activeLayoutProfile,
-          profiles: layoutProfiles,
-        })
-      );
-    } catch {
-      // ignore
-    }
-  }, [layoutProfiles, activeLayoutProfile]);
-  useEffect(() => {
-    if (!layoutMode) {
-      setSelectedCardId(null);
-    }
-  }, [layoutMode]);
+  }, [draft.county, eastingInput, northingInput]);
 
   function soilPercentValidationMessage(): string | null {
     if (draft.material_soil !== "YES") return null;
@@ -276,10 +234,10 @@ export default function SubmissionDetailPage() {
       ["est_gravel_pct", "Gravel"],
     ];
     let total = 0;
-    for (const [key, label] of fields) {
+    for (const [key, name] of fields) {
       const raw = String(draft[key] ?? "").trim();
       const value = raw ? Number(raw) : 0;
-      if (Number.isNaN(value)) return `${label} percentage must be numeric.`;
+      if (Number.isNaN(value)) return `${name} percentage must be numeric.`;
       total += value;
     }
     const delta = total - 100;
@@ -287,6 +245,19 @@ export default function SubmissionDetailPage() {
     const dir = delta > 0 ? "over" : "under";
     return `Material Soil percentages must total 100%. Current total is ${total.toFixed(2)}% (${dir} by ${Math.abs(delta).toFixed(2)}%).`;
   }
+
+  const loadPhotoMap = useCallback(async () => {
+    if (invalid) return;
+    setPhotoLoading(true);
+    setPhotoError(null);
+    try {
+      setPhotoMap(await getSubmissionPhotoEvidence(sid));
+    } catch (e: any) {
+      setPhotoError(e?.message ?? "Failed to load photo evidence.");
+    } finally {
+      setPhotoLoading(false);
+    }
+  }, [invalid, sid]);
 
   async function load() {
     setBusy(true); setErr(null);
@@ -350,6 +321,7 @@ export default function SubmissionDetailPage() {
         setShareCandidates([]);
         setSharedWith([]);
       }
+      void loadPhotoMap();
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
     } finally {
@@ -421,17 +393,6 @@ export default function SubmissionDetailPage() {
     } catch (e: any) {
       setErr(e?.message ?? "Unshare failed");
       setBusy(false);
-    }
-  }
-  async function openDownloadUrl(id: number) {
-    setDownloading(id);
-    try {
-      const data = await api<{ download_url: string }>(`/attachments/${id}/download-url`);
-      window.open(data.download_url, "_blank", "noopener,noreferrer");
-    } catch (e: any) {
-      setErr(e?.message ?? "Download failed");
-    } finally {
-      setDownloading(null);
     }
   }
 
@@ -529,11 +490,6 @@ export default function SubmissionDetailPage() {
 
   useEffect(() => { if (!invalid) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sid]);
 
-  const box = "rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3";
-  const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
-  const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
-  const chip = "rounded-full border px-2.5 py-1 text-xs";
-  const ynChip = (active: boolean) => (active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]");
   const drainageKeys = ["drainage_clogged_inlet", "drainage_compromised_drains", "drainage_surface_runoff", "drainage_torrent_surge_flood"] as const;
   const baseWaterKeys = ["water_dry", "water_moist", "water_wet", "water_flowing"] as const;
   const materialRockSelected = draft.material_rock === "YES";
@@ -550,308 +506,7 @@ export default function SubmissionDetailPage() {
   );
   const countyOptions = draft.district ? countiesForDistrict(draft.district) : CALIFORNIA_COUNTIES;
   const routeOptions = routesForDistrictCounty(draft.district, draft.county);
-  const visibleCardIds: DashboardCardId[] = [...DASHBOARD_DEFAULT_ORDER];
-  const previewOrder = dragState?.active && dragState.overId
-    ? reorderCards(dashboardLayout.order, dragState.id, dragState.overId)
-    : dashboardLayout.order;
-  const orderedVisibleCardIds: DashboardCardId[] = [
-    ...previewOrder.filter((id) => visibleCardIds.includes(id)),
-    ...visibleCardIds.filter((id) => !previewOrder.includes(id)),
-  ];
-  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-  const tidyLayoutPositions = (
-    layout: DashboardLayoutState,
-    ids: DashboardCardId[],
-    canvasWidth: number
-  ): DashboardLayoutState => {
-    const placed: Array<{ id: DashboardCardId; x: number; y: number; w: number; h: number }> = [];
-    const nextPositions: Partial<Record<DashboardCardId, DashboardCardPosition>> = { ...layout.positions };
-    const sorted = [...ids].sort((a, b) => {
-      const pa = layout.positions[a] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
-      const pb = layout.positions[b] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
-      return pa.y - pb.y || pa.x - pb.x;
-    });
 
-    const overlaps = (x: number, y: number, w: number, h: number) =>
-      placed.some((p) => x < p.x + p.w && x + w > p.x && y < p.y + p.h && y + h > p.y);
-
-    for (const id of sorted) {
-      const size = layout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
-      const width = Math.min(size.width, Math.max(DASHBOARD_MIN_CARD_WIDTH, canvasWidth - DASHBOARD_LAYOUT_GAP * 2));
-      const height = size.height;
-      const base = layout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
-      let x = Math.round(base.x / DASHBOARD_TIDY_SNAP) * DASHBOARD_TIDY_SNAP;
-      let y = Math.round(base.y / DASHBOARD_TIDY_SNAP) * DASHBOARD_TIDY_SNAP;
-      x = clamp(x, DASHBOARD_LAYOUT_GAP, Math.max(DASHBOARD_LAYOUT_GAP, canvasWidth - width - DASHBOARD_LAYOUT_GAP));
-      y = Math.max(DASHBOARD_LAYOUT_GAP, y);
-
-      let safety = 0;
-      while (overlaps(x, y, width, height) && safety < 3000) {
-        if (x + width + DASHBOARD_LAYOUT_GAP <= canvasWidth - DASHBOARD_LAYOUT_GAP) {
-          x += DASHBOARD_LAYOUT_GAP;
-        } else {
-          x = DASHBOARD_LAYOUT_GAP;
-          y += DASHBOARD_LAYOUT_GAP;
-        }
-        safety += 1;
-      }
-
-      nextPositions[id] = { x, y };
-      placed.push({ id, x, y, w: width, h: height });
-    }
-
-    return { ...layout, positions: nextPositions };
-  };
-  const layoutProfileNames = Object.keys(layoutProfiles);
-  const loadLayoutProfile = (name: string) => {
-    const selected = layoutProfiles[name];
-    if (!selected) return;
-    const normalized = normalizeDashboardLayout(selected);
-    setActiveLayoutProfile(name);
-    setDashboardLayout(normalized);
-  };
-  const saveCurrentLayoutAsProfile = () => {
-    const input = window.prompt("Save layout as (profile name):", activeLayoutProfile === "Default" ? "My Layout" : activeLayoutProfile);
-    const name = (input ?? "").trim();
-    if (!name) return;
-    setLayoutProfiles((prev) => ({ ...prev, [name]: normalizeDashboardLayout(dashboardLayout) }));
-    setActiveLayoutProfile(name);
-  };
-  const deleteActiveLayoutProfile = () => {
-    if (activeLayoutProfile === "Default") return;
-    const ok = window.confirm(`Delete layout profile "${activeLayoutProfile}"?`);
-    if (!ok) return;
-    setLayoutProfiles((prev) => {
-      const next = { ...prev };
-      delete next[activeLayoutProfile];
-      return next;
-    });
-    setActiveLayoutProfile("Default");
-    setDashboardLayout(buildDefaultDashboardLayout());
-  };
-
-  useEffect(() => {
-    const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
-    setDashboardLayout((prev) => {
-      let x = DASHBOARD_LAYOUT_GAP;
-      let y = DASHBOARD_LAYOUT_GAP;
-      let rowHeight = 0;
-      let changed = false;
-      const nextPositions: Partial<Record<DashboardCardId, DashboardCardPosition>> = { ...prev.positions };
-      for (const id of orderedVisibleCardIds) {
-        if (nextPositions[id]) continue;
-        const cardSize = prev.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
-        const cardWidth = Math.min(cardSize.width, canvasWidth - DASHBOARD_LAYOUT_GAP * 2);
-        if (x + cardWidth > canvasWidth - DASHBOARD_LAYOUT_GAP && x > DASHBOARD_LAYOUT_GAP) {
-          x = DASHBOARD_LAYOUT_GAP;
-          y += rowHeight + DASHBOARD_LAYOUT_GAP;
-          rowHeight = 0;
-        }
-        nextPositions[id] = { x, y };
-        x += cardWidth + DASHBOARD_LAYOUT_GAP;
-        rowHeight = Math.max(rowHeight, cardSize.height);
-        changed = true;
-      }
-      if (!changed) return prev;
-      return { ...prev, positions: nextPositions };
-    });
-  }, [orderedVisibleCardIds]);
-
-  useEffect(() => {
-    let bottom = 620;
-    for (const id of orderedVisibleCardIds) {
-      const p = dashboardLayout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
-      const s = dashboardLayout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
-      bottom = Math.max(bottom, p.y + s.height + DASHBOARD_LAYOUT_GAP);
-    }
-    setLayoutCanvasHeight(bottom);
-  }, [orderedVisibleCardIds, dashboardLayout.positions, dashboardLayout.sizes]);
-
-  const startDragCard = (id: DashboardCardId, e: React.MouseEvent) => {
-    if (!layoutMode || e.button !== 0) return;
-    e.preventDefault();
-    const p = dashboardLayout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
-    setDragState({
-      id,
-      startX: e.clientX,
-      startY: e.clientY,
-      cardX: p.x,
-      cardY: p.y,
-      x: e.clientX,
-      y: e.clientY,
-      active: false,
-      overId: null,
-    });
-  };
-  const startResizeCard = (id: DashboardCardId, mode: "right" | "left" | "bottom" | "bottomRight" | "bottomLeft", e: React.MouseEvent) => {
-    if (!layoutMode || e.button !== 0) return;
-    e.preventDefault();
-    const cur = dashboardLayout.sizes[id] ?? DASHBOARD_DEFAULT_SIZES[id];
-    const p = dashboardLayout.positions[id] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
-    setResizeState({
-      id,
-      mode,
-      startX: e.clientX,
-      startY: e.clientY,
-      startWidth: cur.width,
-      startHeight: cur.height,
-      startCardX: p.x,
-      startCardY: p.y,
-    });
-  };
-
-  useEffect(() => {
-    if (!layoutMode) return;
-    const overlapsOtherCards = (
-      targetId: DashboardCardId,
-      targetX: number,
-      targetY: number,
-      targetW: number,
-      targetH: number,
-      layout: DashboardLayoutState
-    ) => {
-      for (const otherId of orderedVisibleCardIds) {
-        if (otherId === targetId) continue;
-        const op = layout.positions[otherId] ?? { x: DASHBOARD_LAYOUT_GAP, y: DASHBOARD_LAYOUT_GAP };
-        const os = layout.sizes[otherId] ?? DASHBOARD_DEFAULT_SIZES[otherId];
-        const intersects =
-          targetX < op.x + os.width &&
-          targetX + targetW > op.x &&
-          targetY < op.y + os.height &&
-          targetY + targetH > op.y;
-        if (intersects) return true;
-      }
-      return false;
-    };
-
-    const onMove = (e: MouseEvent) => {
-      if (resizeState) {
-        const dx = e.clientX - resizeState.startX;
-        const dy = e.clientY - resizeState.startY;
-        const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
-        setDashboardLayout((prev) => {
-          const startX = resizeState.startCardX;
-          const startY = resizeState.startCardY;
-          const startW = resizeState.startWidth;
-          const startH = resizeState.startHeight;
-          let nextX = startX;
-          let nextW = startW;
-          const startRight = startX + startW;
-
-          if (resizeState.mode === "left" || resizeState.mode === "bottomLeft") {
-            nextX = Math.round(clamp(startX + dx, 0, startRight - DASHBOARD_MIN_CARD_WIDTH));
-            nextW = Math.round(clamp(startRight - nextX, DASHBOARD_MIN_CARD_WIDTH, DASHBOARD_MAX_CARD_WIDTH));
-            nextX = Math.min(nextX, Math.max(0, canvasWidth - nextW));
-          } else if (resizeState.mode !== "bottom") {
-            nextW = Math.round(clamp(startW + dx, DASHBOARD_MIN_CARD_WIDTH, Math.min(DASHBOARD_MAX_CARD_WIDTH, canvasWidth - startX)));
-          }
-
-          const nextH = Math.round(clamp(
-            resizeState.mode === "left" || resizeState.mode === "right" ? startH : startH + dy,
-            DASHBOARD_MIN_CARD_HEIGHT,
-            DASHBOARD_MAX_CARD_HEIGHT
-          ));
-
-          if (overlapsOtherCards(resizeState.id, nextX, startY, nextW, nextH, prev)) {
-            return prev;
-          }
-
-          return {
-            ...prev,
-            sizes: {
-              ...prev.sizes,
-              [resizeState.id]: { width: nextW, height: nextH },
-            },
-            positions: {
-              ...prev.positions,
-              [resizeState.id]: { x: nextX, y: startY },
-            },
-          };
-        });
-        return;
-      }
-      if (dragState) {
-        const moved = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > 6;
-        const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
-        const size = dashboardLayout.sizes[dragState.id] ?? DASHBOARD_DEFAULT_SIZES[dragState.id];
-        const nextX = Math.round(clamp(dragState.cardX + (e.clientX - dragState.startX), 0, Math.max(0, canvasWidth - size.width)));
-        const nextY = Math.max(0, Math.round(dragState.cardY + (e.clientY - dragState.startY)));
-        setDashboardLayout((prev) => {
-          if (overlapsOtherCards(dragState.id, nextX, nextY, size.width, size.height, prev)) {
-            return prev;
-          }
-          return {
-            ...prev,
-            positions: {
-              ...prev.positions,
-              [dragState.id]: { x: nextX, y: nextY },
-            },
-          };
-        });
-        setDragState((prev) => prev ? ({
-          ...prev,
-          x: e.clientX,
-          y: e.clientY,
-          active: prev.active || moved,
-          overId: null,
-        }) : prev);
-      }
-    };
-    const onUp = () => {
-      setDragState(null);
-      setResizeState(null);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [layoutMode, dragState, resizeState, dashboardLayout.sizes, orderedVisibleCardIds]);
-
-  const cardFrameProps = (id: DashboardCardId) => {
-    const isGhostTarget = dragState?.active && dragState.overId === id && dragState.id !== id;
-    const isDragging = dragState?.active && dragState.id === id;
-    const isSelected = selectedCardId === id;
-    const onCardMouseDown = (e: React.MouseEvent) => {
-      if (!layoutMode || e.button !== 0) return;
-      const target = e.target as HTMLElement;
-      if (target.closest("[data-layout-resize]")) return;
-      if (!isSelected) {
-        setSelectedCardId(id);
-        return;
-      }
-      const interactive = target.closest("input, select, textarea, button, a, label, summary");
-      if (interactive) return;
-      startDragCard(id, e);
-    };
-    return {
-      "data-card-id": id,
-      className: `${box} relative overflow-auto ${layoutMode ? "pt-8" : ""} ${layoutMode && isSelected ? "ring-4 ring-[color:color-mix(in_oklab,var(--brand)_68%,transparent)] shadow-[0_0_0_2px_color-mix(in_oklab,var(--panel)_70%,transparent)]" : ""} ${layoutMode && isSelected ? "cursor-grab active:cursor-grabbing" : ""} ${isDragging ? "opacity-35" : ""} ${isGhostTarget ? "ring-2 ring-[var(--brand)]" : ""}`,
-      onMouseDown: onCardMouseDown,
-      style: {
-        position: "absolute",
-        left: `${dashboardLayout.positions[id]?.x ?? DASHBOARD_LAYOUT_GAP}px`,
-        top: `${dashboardLayout.positions[id]?.y ?? DASHBOARD_LAYOUT_GAP}px`,
-        width: `${dashboardLayout.sizes[id]?.width ?? DASHBOARD_DEFAULT_SIZES[id].width}px`,
-        height: `${dashboardLayout.sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height}px`,
-        zIndex: isSelected ? 20 : 1,
-      } as CSSProperties,
-    };
-  };
-  const layoutTools = (id: DashboardCardId) =>
-    layoutMode && selectedCardId === id ? (
-      <>
-        <div className="pointer-events-none absolute left-2 right-2 top-2 z-[2] h-6 rounded border border-dashed border-[var(--line)] bg-[var(--panel)]/70 px-2 text-[10px] leading-6 text-muted">
-          Selected: drag anywhere in this card
-        </div>
-        <div data-layout-resize className="absolute bottom-0 right-0 top-0 z-[3] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "right", e)} />
-        <div data-layout-resize className="absolute bottom-0 left-0 top-0 z-[3] w-2 cursor-ew-resize" onMouseDown={(e) => startResizeCard(id, "left", e)} />
-        <div data-layout-resize className="absolute bottom-0 left-0 right-0 z-[3] h-2 cursor-ns-resize" onMouseDown={(e) => startResizeCard(id, "bottom", e)} />
-        <div data-layout-resize className="absolute bottom-0 right-0 z-[4] h-4 w-4 cursor-nwse-resize bg-[var(--panel)]/85" onMouseDown={(e) => startResizeCard(id, "bottomRight", e)} />
-        <div data-layout-resize className="absolute bottom-0 left-0 z-[4] h-4 w-4 cursor-nesw-resize bg-[var(--panel)]/85" onMouseDown={(e) => startResizeCard(id, "bottomLeft", e)} />
-      </>
-    ) : null;
   const contactDisplayName = (contact: DistrictContact, idx: number) => {
     const full = `${contact.first_name} ${contact.last_name}`.trim();
     return full || `Contact ${idx + 1}`;
@@ -1046,640 +701,635 @@ export default function SubmissionDetailPage() {
     draft.failure_scoured_toe,
     draft.failure_washout,
   ]);
+
+  // Attachments: library items (with section tags) + short-lived access URLs.
+  const libraryItems = useMemo(() => buildLibraryItems(data?.attachments ?? []), [data?.attachments]);
+  const seedUrls = useMemo(() => {
+    const urls = new Map<number, string>();
+    for (const photo of photoMap?.photos ?? []) {
+      if (photo.download_url) urls.set(photo.attachment_id, photo.download_url);
+    }
+    return urls;
+  }, [photoMap]);
+  const resolver = useAttachmentUrlResolver(seedUrls);
+  const sectionCount = (keys: readonly string[] | undefined) => (keys ? itemsForSectionKeys(libraryItems, keys).length : 0);
+  const sectionDialogItems = sectionDialog ? itemsForSectionKeys(libraryItems, sectionDialog.keys) : [];
+  const openSectionAttachments = (title: string, keys: readonly string[] | undefined) => {
+    if (keys) setSectionDialog({ title, keys });
+  };
+
+  const cardProps = (cardId: DashboardCardId) => ({
+    id: cardId,
+    style: canvas.cardStyle(cardId),
+    dragging: canvas.draggingId === cardId,
+    formDisabled: !canEdit,
+    attachmentCount: sectionCount(CARD_SECTION_KEYS[cardId]),
+    onOpenAttachments: () => openSectionAttachments(DASHBOARD_CARD_TITLES[cardId], CARD_SECTION_KEYS[cardId]),
+    onDragStart: canvas.startDrag,
+    onResizeStart: canvas.startResize,
+  });
+
+  const descriptor = data
+    ? buildSubmissionDisplayTitle({
+        id: data.submission.id,
+        created_at: data.submission.created_at,
+        district: data.gisa?.district,
+        county: data.gisa?.county,
+        route: data.gisa?.route,
+        post_mile: data.gisa?.post_mile,
+      })
+    : `Submission ${sid}`;
+
+  const statePlaneHero = statePlaneCoordinates
+    ? {
+        zone: String(statePlaneCoordinates.zone),
+        units: statePlaneCoordinates.units,
+        northing: northingInput,
+        easting: eastingInput,
+        error: statePlaneInputError,
+        onNorthingChange: (value: string) => {
+          setNorthingInput(value);
+          if (statePlaneInputError) setStatePlaneInputError(null);
+        },
+        onEastingChange: (value: string) => {
+          setEastingInput(value);
+          if (statePlaneInputError) setStatePlaneInputError(null);
+        },
+        onApply: applyStatePlaneInputs,
+      }
+    : null;
+
+  const canvasToolbar = (
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet</div>
+        <span className="rounded-full border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-0.5 text-[11px] font-medium text-muted">
+          {canvas.custom ? "Custom layout" : "Auto-fit layout"}
+        </span>
+        <span className="hidden text-[11px] text-muted md:inline">Drag a card by its header · resize from the edges</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {canvas.custom ? (
+          <button type="button" onClick={canvas.tidy} className={toolbarButton} title="Return to the auto-fit flow, keeping this reading order">
+            <LayoutGrid size={13} strokeWidth={2} aria-hidden />
+            Tidy layout
+          </button>
+        ) : null}
+        <button type="button" onClick={canvas.reset} className={toolbarButton} title="Restore default sizes and auto-fit flow">
+          <RotateCcw size={13} strokeWidth={2} aria-hidden />
+          Reset layout
+        </button>
+        <button
+          type="button"
+          onClick={() => canvas.setFullscreen(!canvas.fullscreen)}
+          className={toolbarButton}
+          aria-pressed={canvas.fullscreen}
+          title={canvas.fullscreen ? "Exit full screen (Esc)" : "Show the GISA sheet full screen"}
+        >
+          {canvas.fullscreen ? <Minimize2 size={13} strokeWidth={2} aria-hidden /> : <Maximize2 size={13} strokeWidth={2} aria-hidden />}
+          {canvas.fullscreen ? "Exit full screen" : "Full screen"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const canvasCards = data ? (
+    <div ref={canvas.containerRef} className={`min-w-0 overflow-x-auto ${canvas.fullscreen ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
+      <div style={canvas.canvasStyle} className="rounded-md">
+        <CanvasCard {...cardProps("report_header")}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+            <div>
+              <label className={label}>Report Date (YYYY-MM-DD)</label>
+              <input className={input} value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
+            </div>
+            <div>
+              <label className={label}>Date Incident Reported</label>
+              <input className={input} value={draft.date_incident_reported} onChange={(e)=>setDraft((d)=>({...d,date_incident_reported:e.target.value}))} />
+            </div>
+            <div>
+              <label className={label}>District</label>
+              <select
+                className={input}
+                value={draft.district}
+                onChange={(e) =>
+                  setDraft((d) => {
+                    const district = e.target.value;
+                    const nextCountyOptions = countiesForDistrict(district);
+                    const county = nextCountyOptions.includes(d.county) ? d.county : "";
+                    const nextRouteOptions = routesForDistrictCounty(district, county);
+                    const route = nextRouteOptions.includes(d.route) ? d.route : "";
+                    return { ...d, district, county, route };
+                  })
+                }
+              >
+                <option value="">Select district</option>
+                {CALTRANS_DISTRICTS.map((d) => <option key={d} value={d}>{`District ${d}`}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>County</label>
+              <select
+                className={input}
+                value={draft.county}
+                onChange={(e) =>
+                  setDraft((d) => {
+                    const county = e.target.value;
+                    const routeChoices = routesForDistrictCounty(d.district, county);
+                    const route = routeChoices.includes(d.route) ? d.route : "";
+                    return { ...d, county, route };
+                  })
+                }
+                disabled={!draft.district}
+              >
+                <option value="">Select county</option>
+                {countyOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>Highway (Route)</label>
+              <select
+                className={input}
+                value={draft.route}
+                onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))}
+                disabled={!draft.district || !draft.county}
+              >
+                <option value="">Select route</option>
+                {routeOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>Post Mile</label>
+              <input className={input} value={draft.post_mile} onChange={(e)=>setDraft((d)=>({...d,post_mile:e.target.value}))} onBlur={()=>setDraft((d)=>({...d,post_mile: normalizePostMileInput(d.post_mile)}))} />
+            </div>
+            <div>
+              <label className={label}>EA</label>
+              <input className={input} value={draft.ea} onChange={(e)=>setDraft((d)=>({...d,ea:e.target.value}))} />
+            </div>
+            <div>
+              <label className={label}>Project ID</label>
+              <input className={input} value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
+            </div>
+            <div className="col-span-full">
+              <label className={label}>District Contacts</label>
+              {districtContacts.length === 0 ? (
+                <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
+                  No district contacts added yet.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {districtContacts.map((contact, idx) => {
+                    const isOpen = !!openDistrictContactIds[contact.id];
+                    return (
+                      <div key={contact.id} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between rounded px-1 py-1 text-left hover:bg-[var(--panel)]"
+                          onClick={() => toggleDistrictContact(contact.id)}
+                        >
+                          <span className="text-sm font-medium">{contactDisplayName(contact, idx)}</span>
+                          <span className="text-xs text-muted">{isOpen ? "v" : ">"}</span>
+                        </button>
+                        {isOpen ? (
+                          <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+                            <div><label className={label}>First Name</label><input className={input} value={contact.first_name} onChange={(e) => updateDistrictContact(contact.id, "first_name", e.target.value)} disabled={!canEdit} /></div>
+                            <div><label className={label}>Last Name</label><input className={input} value={contact.last_name} onChange={(e) => updateDistrictContact(contact.id, "last_name", e.target.value)} disabled={!canEdit} /></div>
+                            <div><label className={label}>S Number</label><input className={input} value={contact.s_number} onChange={(e) => updateDistrictContact(contact.id, "s_number", e.target.value)} disabled={!canEdit} /></div>
+                            <div><label className={label}>Phone</label><input className={input} value={contact.phone} onChange={(e) => updateDistrictContact(contact.id, "phone", e.target.value)} disabled={!canEdit} /></div>
+                            <div><label className={label}>Cell Phone</label><input className={input} value={contact.cell_phone} onChange={(e) => updateDistrictContact(contact.id, "cell_phone", e.target.value)} disabled={!canEdit} /></div>
+                            {canEdit ? (
+                              <div className="col-span-full">
+                                <button
+                                  type="button"
+                                  className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs text-[var(--bad)]"
+                                  onClick={() => removeDistrictContact(contact.id)}
+                                >
+                                  Remove Contact
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {draft.district_contact.trim() && districtContacts.length === 0 ? (
+                <details className="mt-2 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">
+                    Raw Contact Data
+                  </summary>
+                  <textarea
+                    className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-2 text-xs font-mono"
+                    rows={5}
+                    value={draft.district_contact}
+                    onChange={(e) => setDraft((d) => ({ ...d, district_contact: e.target.value }))}
+                    disabled={!canEdit}
+                  />
+                </details>
+              ) : null}
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={addDistrictContact}
+                  disabled={!canEdit}
+                  className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60"
+                >
+                  Add District Contact
+                </button>
+              </div>
+            </div>
+          </div>
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("distribution")}>
+          <label className={label}>Distribution</label>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {(lookups?.distribution ?? []).map((x) => {
+              const active = draft.distribution_code === x.code;
+              return (
+                <button
+                  key={x.code}
+                  type="button"
+                  onClick={() => setDraft((d) => ({ ...d, distribution_code: active ? "" : x.code }))}
+                  className={`inline-flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]"}`}
+                >
+                  <img src={DISTRIBUTION_ICON_SRC[x.code] ?? ""} alt="" aria-hidden className="h-10 w-10 object-contain" />
+                  <span>{x.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("highway_status")}>
+          <div className="mb-3">
+            <label className={label}>Cause Of Highway Status</label>
+            <input
+              type="text"
+              className={input}
+              value={draft.highway_status_cause}
+              onChange={(e) => setDraft((d) => ({ ...d, highway_status_cause: e.target.value }))}
+              disabled={!canEdit}
+              placeholder="Describe the cause before choosing a highway status"
+            />
+          </div>
+          {showHighwayStatusOptions ? (
+            <>
+              <label className={label}>Highway Status</label>
+              <div className="mb-2 flex flex-wrap gap-2">
+                {(lookups?.highway_status ?? []).map((x) => {
+                  const active = draft.highway_status_code === x.code;
+                  return (
+                    <button key={x.code} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))} className={`${chip} ${ynChip(active)}`}>
+                      {x.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+                {highwayLanesClosedSelected ? (
+                  <div>
+                    <label className={label}>Lane(s) Closed Count</label>
+                    <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
+                      <option value="">Select lanes closed</option>
+                      {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                ) : null}
+                {openHighwayTrafficSelected ? (
+                  <div>
+                    <label className={label}>Open Highway Traffic Lanes</label>
+                    <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-muted">Enter the cause above to reveal the highway status options.</div>
+          )}
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("incident_type")}>
+          <div className="grid grid-cols-2 gap-2">
+            {INCIDENT_TYPE_OPTIONS.map((option) => (
+              <button
+                key={option.code}
+                type="button"
+                onClick={() => toggleIncidentType(option)}
+                className={`${chip} text-left ${ynChip(inc.includes(option.code) || (!!option.key && draft[option.key] === "YES"))}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-3">
+            <label className={label}>Incident Type Description</label>
+            <textarea
+              className={`${input} min-h-24`}
+              value={draft.incident_type_description}
+              onChange={(e) => setDraft((d) => ({ ...d, incident_type_description: e.target.value }))}
+              disabled={!canEdit}
+            />
+          </div>
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("material")}>
+          <div className="mb-2 flex gap-2">
+            <button type="button" onClick={() => selectMaterialPrimary("material_rock")} className={`${chip} ${ynChip(materialRockSelected)}`}>Rock</button>
+            <button type="button" onClick={() => selectMaterialPrimary("material_soil")} className={`${chip} ${ynChip(materialSoilSelected)}`}>Soil</button>
+          </div>
+          {materialRockSelected ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              <button type="button" onClick={() => selectRockSubtype("material_bedding")} className={`${chip} ${ynChip(draft.material_bedding === "YES")}`}>Bedding</button>
+              <button type="button" onClick={() => selectRockSubtype("material_joints")} className={`${chip} ${ynChip(draft.material_joints === "YES")}`}>Joints</button>
+              <button type="button" onClick={() => selectRockSubtype("material_fractures")} className={`${chip} ${ynChip(draft.material_fractures === "YES")}`}>Fractures</button>
+            </div>
+          ) : null}
+          {materialSoilSelected ? (
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+              <div><label className={label}>Clay Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_clay_pct} onChange={(e)=>setDraft((d)=>({...d,est_clay_pct:e.target.value}))} /></div>
+              <div><label className={label}>Silt Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_silt_pct} onChange={(e)=>setDraft((d)=>({...d,est_silt_pct:e.target.value}))} /></div>
+              <div><label className={label}>Sand Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_sand_pct} onChange={(e)=>setDraft((d)=>({...d,est_sand_pct:e.target.value}))} /></div>
+              <div><label className={label}>Gravel Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_gravel_pct} onChange={(e)=>setDraft((d)=>({...d,est_gravel_pct:e.target.value}))} /></div>
+            </div>
+          ) : null}
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("pavement_ground_status")}>
+          <label className={label}>Pavement/Ground Cracks</label>
+          <div className="mb-2 flex gap-2">
+            {(["YES", "NO"] as const).map((c) => (
+              <button key={`crack-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, pavement_ground_cracks: c }))} className={`${chip} ${ynChip(draft.pavement_ground_cracks === c)}`}>
+                {c}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+            {draft.pavement_ground_cracks === "YES" ? (
+              <>
+                <div><label className={label}>Length (feet)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} /></div>
+                <div><label className={label}>Horizontal Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} /></div>
+                <div><label className={label}>Vertical Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} /></div>
+                <div><label className={label}>Depth of Crack (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} /></div>
+              </>
+            ) : null}
+            <div><label className={label}>Settlement (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} /></div>
+            <div><label className={label}>Bulge (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} /></div>
+          </div>
+          <label className={`${label} mt-2`}>Indented by Rocks</label>
+          <div className="flex gap-2">
+            {(["YES", "NO"] as const).map((c) => (
+              <button key={`rock-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, indented_by_rocks: c }))} className={`${chip} ${ynChip(draft.indented_by_rocks === c)}`}>
+                {c}
+              </button>
+            ))}
+          </div>
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("vegetation_on_slope")}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+            <div><label className={label}>Trees Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
+            <div><label className={label}>Bushes/Shrubs Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
+            <div className="col-span-full"><label className={label}>Groundcover Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
+          </div>
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("water_drainage")}>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, text]) => (
+              <button key={key} type="button" onClick={() => selectSingleDrainage(key as typeof drainageKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {[["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"], ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"], ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"]].map(([imp, may, text]) => (
+              <div key={text} className="grid grid-cols-[auto_auto_1fr] items-center gap-2">
+                <button type="button" onClick={() => setImpactSelection(imp as any, may as any, "IMPACTED")} className={`${chip} ${ynChip(draft[imp] === "YES")}`}>Impacted</button>
+                <button type="button" onClick={() => setImpactSelection(imp as any, may as any, "MAYBE")} className={`${chip} ${ynChip(draft[may] === "YES")}`}>Maybe</button>
+                <span className="text-sm">{text}</span>
+              </div>
+            ))}
+            <div><label className={label}>Adjacent Utilities Notes</label><input className={input} value={draft.impact_adj_utilities} onChange={(e)=>setDraft((d)=>({...d,impact_adj_utilities:e.target.value}))} /></div>
+            <div><label className={label}>Adjacent Properties Notes</label><input className={input} value={draft.impact_adj_properties} onChange={(e)=>setDraft((d)=>({...d,impact_adj_properties:e.target.value}))} /></div>
+            <div><label className={label}>Adjacent Structures Notes</label><input className={input} value={draft.impact_adj_structure} onChange={(e)=>setDraft((d)=>({...d,impact_adj_structure:e.target.value}))} /></div>
+          </div>
+        </CanvasCard>
+
+        <CanvasCard {...cardProps("water_content")}>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"]].map(([key, text]) => (
+              <button key={key} type="button" onClick={() => selectBaseWaterContent(key as typeof baseWaterKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
+            ))}
+          </div>
+          {waterFlowingSelected ? (
+            <div className="mb-2 flex gap-2">
+              <button type="button" onClick={() => selectFlowingSubtype("water_seep")} className={`${chip} ${ynChip(draft.water_seep === "YES")}`}>Seep</button>
+              <button type="button" onClick={() => selectFlowingSubtype("water_spring")} className={`${chip} ${ynChip(draft.water_spring === "YES")}`}>Spring</button>
+            </div>
+          ) : null}
+        </CanvasCard>
+
+        <CanvasCard
+          {...cardProps("measurements")}
+          tools={
+            <SubmissionMeasurementContext
+              submissionId={data.submission.id}
+              gisa={data.gisa}
+              onReload={load}
+            />
+          }
+        >
+          <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+            <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
+          </div>
+          <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+            <div><label className={label}>Slope Height, ft (H)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} /></div>
+            <div><label className={label}>Original Slope, deg (alpha)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} /></div>
+            <div><label className={label}>Landslide Width, ft (Wd)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} /></div>
+            <div><label className={label}>Landslide Length, ft (Ld)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_length_ft:e.target.value}))} /></div>
+            <div><label className={label}>Main Scarp Height, ft (Hs)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_main_scarp_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_main_scarp_height_ft:e.target.value}))} /></div>
+            <div><label className={label}>Landslide Slope, deg (beta)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_slope_deg:e.target.value}))} /></div>
+            <div><label className={label}>Length of Roadway Encroached, ft (Lr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} /></div>
+            <div><label className={label}>Width of Roadway Encroached, ft (Wr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} /></div>
+          </div>
+        </CanvasCard>
+      </div>
+      {canvas.draggingId && canvas.dragPointer ? (
+        <div
+          className="pointer-events-none fixed z-50 rounded-md border border-[var(--line)] bg-[var(--panel)]/95 px-2 py-1 text-xs shadow-lg"
+          style={{ left: canvas.dragPointer.x + 14, top: canvas.dragPointer.y + 14 }}
+        >
+          Moving: {DASHBOARD_CARD_TITLES[canvas.draggingId]}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
   return (
-    <AppShell title={invalid ? "Submission" : (data ? buildSubmissionDisplayTitle({
-      id: data.submission.id,
-      created_at: data.submission.created_at,
-      district: data.gisa?.district,
-      county: data.gisa?.county,
-      route: data.gisa?.route,
-      post_mile: data.gisa?.post_mile,
-    }) : `Submission ${sid}`)}>
-      <div className="p-4">
+    <AppShell title={invalid ? "Submission" : descriptor}>
+      <div className="space-y-4 p-4">
         <SubmissionDetailHeader
           status={data?.submission?.status}
+          descriptor={data ? descriptor : undefined}
+          ownerLabel={data ? (me?.id === data.submission.created_by_user_id ? "you" : `user #${data.submission.created_by_user_id}`) : undefined}
+          context={data?.context ?? null}
           invalid={invalid}
           busy={busy}
           canAct={canAct}
+          canEdit={canEdit}
           canDelete={canDeleteSubmission}
+          submitLabel={data?.submission.status === "REJECTED" ? "Resubmit for review" : "Submit for review"}
           onRefresh={load}
+          onSaveDraft={saveDraft}
+          onSubmitDraft={submitDraft}
           onApprove={() => review("APPROVE")}
           onReject={() => review("REJECT")}
           onDelete={onDeleteSubmission}
         />
 
-        {err && <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{err}</div>}
-        {invalid && <div className="mt-4 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">Invalid submission id.</div>}
-        {!invalid && !data && <div className="mt-4 text-sm text-muted">{busy ? "Loading..." : "No data."}</div>}
+        {data?.submission.status === "REJECTED" && data.submission.review_comment ? (
+          <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]"><b>Returned for correction:</b> {data.submission.review_comment}</div>
+        ) : null}
+        {data && canEdit ? (
+          <div className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_8%,transparent)] px-3 py-2 text-sm">
+            <b>You are completing this technical submission.</b>{" "}
+            {data.context?.assessment_id != null ? (
+              <>It belongs to <Link to={`/assessments/${data.context.assessment_id}`} className="font-medium text-[var(--brand)] hover:underline">assessment #{data.context.assessment_id}</Link> for <Link to={`/incidents/${data.context.incident_id}`} className="font-medium text-[var(--brand)] hover:underline">incident #{data.context.incident_id}</Link>. </>
+            ) : data.context?.incident_id != null ? (
+              <>It belongs to <Link to={`/incidents/${data.context.incident_id}`} className="font-medium text-[var(--brand)] hover:underline">incident #{data.context.incident_id}</Link>. </>
+            ) : null}
+            Fill out the GISA form below — every field stays editable until you submit it for review.
+          </div>
+        ) : null}
+
+        {err && <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{err}</div>}
+        {invalid && <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">Invalid submission id.</div>}
+        {!invalid && !data && <div className="text-sm text-muted">{busy ? "Loading..." : "No data."}</div>}
 
         {!invalid && data && (
-          <div className="mt-4 space-y-3">
-            <section className="pt-1">
-                <fieldset disabled={!canEdit} className="contents">
-                <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Location And ERIS Map</div>
-                    <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "Use GPS Autofill"}</button>
-                  </div>
-                  <SubmissionArcGisMap
-                    geojson={geom}
-                    location={{ latitude: draft.latitude ? Number(draft.latitude) : null, longitude: draft.longitude ? Number(draft.longitude) : null }}
-                    height={300}
-                    editable={canEdit}
-                    onGeometryChange={onMapGeometryChange}
-                  />
-                  {geoSaveMessage ? (
-                    <div className={`mt-2 text-xs ${geoSaveState === "error" ? "text-red-700" : "text-muted"}`}>
-                      {geoSaveMessage}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="mt-3 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">GISA Sheet Layout</div>
-                    <div className="flex items-center gap-2 flex-wrap justify-end">
-                      <select
-                        className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
-                        value={activeLayoutProfile}
-                        onChange={(e) => loadLayoutProfile(e.target.value)}
-                      >
-                        {layoutProfileNames.map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={saveCurrentLayoutAsProfile}
-                        className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
-                      >
-                        Save As
-                      </button>
-                      {activeLayoutProfile !== "Default" ? (
-                        <button
-                          type="button"
-                          onClick={deleteActiveLayoutProfile}
-                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs text-red-700"
-                        >
-                          Delete
-                        </button>
-                      ) : null}
-                      {layoutMode ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedCardId(null);
-                            const defaultLayout = buildDefaultDashboardLayout();
-                            setDashboardLayout(defaultLayout);
-                          }}
-                          className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
-                        >
-                          Reset Layout
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (layoutMode) {
-                            const canvasWidth = Math.max(720, layoutCanvasRef.current?.clientWidth ?? 1400);
-                            setDashboardLayout((prev) => tidyLayoutPositions(prev, orderedVisibleCardIds, canvasWidth));
-                            setSelectedCardId(null);
-                            setLayoutMode(false);
-                            return;
-                          }
-                          setLayoutMode(true);
-                        }}
-                        className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs"
-                      >
-                        {layoutMode ? "Done Layout" : "Customize Layout"}
-                      </button>
-                    </div>
-                  </div>
-                  {layoutMode ? (
-                    <div className="mb-2 text-xs text-muted">Click a container to select it, then drag anywhere inside to move. Resize handles appear only on the selected container.</div>
-                  ) : null}
-                  <div
-                    ref={layoutCanvasRef}
-                    className={layoutMode
-                      ? "relative min-h-[620px] rounded-md border border-dashed border-[var(--line)]/70 bg-[color:color-mix(in_oklab,var(--panel-soft)_65%,transparent)]"
-                      : "relative min-h-[620px] rounded-md"}
-                    style={{ height: `${layoutCanvasHeight}px` }}
-                  >
-                    <div {...cardFrameProps("report_header")}>
-                      {layoutTools("report_header")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Report Header</div>
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                        <div>
-                          <label className={label}>Report Date (YYYY-MM-DD)</label>
-                          <input className={input} value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
-                        </div>
-                        <div>
-                          <label className={label}>Date Incident Reported</label>
-                          <input className={input} value={draft.date_incident_reported} onChange={(e)=>setDraft((d)=>({...d,date_incident_reported:e.target.value}))} />
-                        </div>
-                        <div>
-                          <label className={label}>District</label>
-                          <select
-                            className={input}
-                            value={draft.district}
-                            onChange={(e) =>
-                              setDraft((d) => {
-                                const district = e.target.value;
-                                const nextCountyOptions = countiesForDistrict(district);
-                                const county = nextCountyOptions.includes(d.county) ? d.county : "";
-                                const nextRouteOptions = routesForDistrictCounty(district, county);
-                                const route = nextRouteOptions.includes(d.route) ? d.route : "";
-                                return { ...d, district, county, route };
-                              })
-                            }
-                          >
-                            <option value="">Select district</option>
-                            {CALTRANS_DISTRICTS.map((d) => <option key={d} value={d}>{`District ${d}`}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className={label}>County</label>
-                          <select
-                            className={input}
-                            value={draft.county}
-                            onChange={(e) =>
-                              setDraft((d) => {
-                                const county = e.target.value;
-                                const routeChoices = routesForDistrictCounty(d.district, county);
-                                const route = routeChoices.includes(d.route) ? d.route : "";
-                                return { ...d, county, route };
-                              })
-                            }
-                            disabled={!draft.district}
-                          >
-                            <option value="">Select county</option>
-                            {countyOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className={label}>Highway (Route)</label>
-                          <select
-                            className={input}
-                            value={draft.route}
-                            onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))}
-                            disabled={!draft.district || !draft.county}
-                          >
-                            <option value="">Select route</option>
-                            {routeOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className={label}>Post Mile</label>
-                          <input className={input} value={draft.post_mile} onChange={(e)=>setDraft((d)=>({...d,post_mile:e.target.value}))} onBlur={()=>setDraft((d)=>({...d,post_mile: normalizePostMileInput(d.post_mile)}))} />
-                        </div>
-                        <div>
-                          <label className={label}>EA</label>
-                          <input className={input} value={draft.ea} onChange={(e)=>setDraft((d)=>({...d,ea:e.target.value}))} />
-                        </div>
-                        <div>
-                          <label className={label}>Project ID</label>
-                          <input className={input} value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
-                        </div>
-                        <div className="col-span-full">
-                          <label className={label}>District Contacts</label>
-                          {districtContacts.length === 0 ? (
-                            <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
-                              No district contacts added yet.
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              {districtContacts.map((contact, idx) => {
-                                const isOpen = !!openDistrictContactIds[contact.id];
-                                return (
-                                  <div key={contact.id} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
-                                    <button
-                                      type="button"
-                                      className="flex w-full items-center justify-between rounded px-1 py-1 text-left hover:bg-[var(--panel)]"
-                                      onClick={() => toggleDistrictContact(contact.id)}
-                                    >
-                                      <span className="text-sm font-medium">{contactDisplayName(contact, idx)}</span>
-                                      <span className="text-xs text-muted">{isOpen ? "v" : ">"}</span>
-                                    </button>
-                                    {isOpen ? (
-                                      <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                                        <div><label className={label}>First Name</label><input className={input} value={contact.first_name} onChange={(e) => updateDistrictContact(contact.id, "first_name", e.target.value)} disabled={!canEdit} /></div>
-                                        <div><label className={label}>Last Name</label><input className={input} value={contact.last_name} onChange={(e) => updateDistrictContact(contact.id, "last_name", e.target.value)} disabled={!canEdit} /></div>
-                                        <div><label className={label}>S Number</label><input className={input} value={contact.s_number} onChange={(e) => updateDistrictContact(contact.id, "s_number", e.target.value)} disabled={!canEdit} /></div>
-                                        <div><label className={label}>Phone</label><input className={input} value={contact.phone} onChange={(e) => updateDistrictContact(contact.id, "phone", e.target.value)} disabled={!canEdit} /></div>
-                                        <div><label className={label}>Cell Phone</label><input className={input} value={contact.cell_phone} onChange={(e) => updateDistrictContact(contact.id, "cell_phone", e.target.value)} disabled={!canEdit} /></div>
-                                        {canEdit ? (
-                                          <div className="col-span-full">
-                                            <button
-                                              type="button"
-                                              className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs text-red-700"
-                                              onClick={() => removeDistrictContact(contact.id)}
-                                            >
-                                              Remove Contact
-                                            </button>
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {draft.district_contact.trim() && districtContacts.length === 0 ? (
-                            <details className="mt-2 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
-                              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">
-                                Raw Contact Data
-                              </summary>
-                              <textarea
-                                className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-2 text-xs font-mono"
-                                rows={5}
-                                value={draft.district_contact}
-                                onChange={(e) => setDraft((d) => ({ ...d, district_contact: e.target.value }))}
-                                disabled={!canEdit}
-                              />
-                            </details>
-                          ) : null}
-                          <div className="mt-2">
-                            <button
-                              type="button"
-                              onClick={addDistrictContact}
-                              disabled={!canEdit}
-                              className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60"
-                            >
-                              Add District Contact
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div {...cardFrameProps("location")}>
-                      {layoutTools("location")}
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Location</div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button onClick={autofillFromGps} disabled={busy || geoBusy} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60">{geoBusy ? "Detecting..." : "GPS Autofill"}</button>
-                          <button
-                            type="button"
-                            onClick={() => setShowNorthingEasting((prev) => !prev)}
-                            disabled={!statePlaneCoordinates}
-                            className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60"
-                          >
-                            {showNorthingEasting ? "Hide N/E" : "Show N/E"}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className={label}>Latitude</label>
-                          <input type="number" step="0.000001" inputMode="decimal" className={input} value={draft.latitude} onChange={(e)=>setDraft((d)=>({...d,latitude:e.target.value}))} onBlur={()=>setDraft((d)=>({...d,latitude: formatCoordinate(d.latitude)}))} />
-                        </div>
-                        <div>
-                          <label className={label}>Longitude</label>
-                          <input type="number" step="0.000001" inputMode="decimal" className={input} value={draft.longitude} onChange={(e)=>setDraft((d)=>({...d,longitude:e.target.value}))} onBlur={()=>setDraft((d)=>({...d,longitude: formatCoordinate(d.longitude)}))} />
-                        </div>
-                      </div>
-                      {showNorthingEasting && statePlaneCoordinates ? (
-                        <div className="mt-2 rounded-md border border-[var(--line)]/70 bg-[var(--panel)] p-2">
-                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
-                            CCS83 Zone {statePlaneCoordinates.zone} · {statePlaneCoordinates.units}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className={label}>Northing</label>
-                                <input
-                                  type="number"
-                                  step="0.001"
-                                  inputMode="decimal"
-                                  className={input}
-                                  value={northingInput}
-                                  onChange={(e) => {
-                                    setNorthingInput(e.target.value);
-                                    if (statePlaneInputError) setStatePlaneInputError(null);
-                                  }}
-                                  onBlur={applyStatePlaneInputs}
-                                  disabled={!canEdit}
-                                />
-                            </div>
-                            <div>
-                              <label className={label}>Easting</label>
-                                <input
-                                  type="number"
-                                  step="0.001"
-                                  inputMode="decimal"
-                                  className={input}
-                                  value={eastingInput}
-                                  onChange={(e) => {
-                                    setEastingInput(e.target.value);
-                                    if (statePlaneInputError) setStatePlaneInputError(null);
-                                  }}
-                                  onBlur={applyStatePlaneInputs}
-                                  disabled={!canEdit}
-                                />
-                            </div>
-                          </div>
-                          {statePlaneInputError ? (
-                            <div className="mt-2 text-xs text-[var(--bad)]">{statePlaneInputError}</div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div {...cardFrameProps("distribution")}>
-                      {layoutTools("distribution")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Distribution</div>
-                      <label className={label}>Distribution</label>
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {(lookups?.distribution ?? []).map((x) => {
-                          const active = draft.distribution_code === x.code;
-                          return (
-                            <button
-                              key={x.code}
-                              type="button"
-                              onClick={() => setDraft((d) => ({ ...d, distribution_code: active ? "" : x.code }))}
-                              className={`inline-flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]"}`}
-                            >
-                              <img src={DISTRIBUTION_ICON_SRC[x.code] ?? ""} alt="" aria-hidden className="h-10 w-10 object-contain" />
-                              <span>{x.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div {...cardFrameProps("highway_status")}>
-                      {layoutTools("highway_status")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Highway Status</div>
-                      <div className="mb-3">
-                        <label className={label}>Cause Of Highway Status</label>
-                        <input
-                          type="text"
-                          className={input}
-                          value={draft.highway_status_cause}
-                          onChange={(e) => setDraft((d) => ({ ...d, highway_status_cause: e.target.value }))}
-                          disabled={!canEdit}
-                          placeholder="Describe the cause before choosing a highway status"
-                        />
-                      </div>
-                      {showHighwayStatusOptions ? (
-                        <>
-                          <label className={label}>Highway Status</label>
-                          <div className="mb-2 flex flex-wrap gap-2">
-                            {(lookups?.highway_status ?? []).map((x) => {
-                              const active = draft.highway_status_code === x.code;
-                              return (
-                                <button key={x.code} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))} className={`${chip} ${ynChip(active)}`}>
-                                  {x.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                            {highwayLanesClosedSelected ? (
-                              <div>
-                                <label className={label}>Lane(s) Closed Count</label>
-                                <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
-                                  <option value="">Select lanes closed</option>
-                                  {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
-                                </select>
-                              </div>
-                            ) : null}
-                            {openHighwayTrafficSelected ? (
-                              <div>
-                                <label className={label}>Open Highway Traffic Lanes</label>
-                                <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
-                              </div>
-                            ) : null}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-xs text-muted">Enter the cause above to reveal the highway status options.</div>
-                      )}
-                    </div>
-
-                    <div {...cardFrameProps("incident_type")}>
-                      {layoutTools("incident_type")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Incident Type</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {INCIDENT_TYPE_OPTIONS.map((option) => (
-                          <button
-                            key={option.code}
-                            type="button"
-                            onClick={() => toggleIncidentType(option)}
-                            className={`${chip} text-left ${ynChip(inc.includes(option.code) || (!!option.key && draft[option.key] === "YES"))}`}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="mt-3">
-                        <label className={label}>Incident Type Description</label>
-                        <textarea
-                          className={`${input} min-h-24`}
-                          value={draft.incident_type_description}
-                          onChange={(e) => setDraft((d) => ({ ...d, incident_type_description: e.target.value }))}
-                          disabled={!canEdit}
-                        />
-                      </div>
-                    </div>
-
-                    <div {...cardFrameProps("material")}>
-                      {layoutTools("material")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Material</div>
-                      <div className="mb-2 flex gap-2">
-                        <button type="button" onClick={() => selectMaterialPrimary("material_rock")} className={`${chip} ${ynChip(materialRockSelected)}`}>Rock</button>
-                        <button type="button" onClick={() => selectMaterialPrimary("material_soil")} className={`${chip} ${ynChip(materialSoilSelected)}`}>Soil</button>
-                      </div>
-                      {materialRockSelected ? (
-                        <div className="mb-2 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => selectRockSubtype("material_bedding")} className={`${chip} ${ynChip(draft.material_bedding === "YES")}`}>Bedding</button>
-                          <button type="button" onClick={() => selectRockSubtype("material_joints")} className={`${chip} ${ynChip(draft.material_joints === "YES")}`}>Joints</button>
-                          <button type="button" onClick={() => selectRockSubtype("material_fractures")} className={`${chip} ${ynChip(draft.material_fractures === "YES")}`}>Fractures</button>
-                        </div>
-                      ) : null}
-                      {materialSoilSelected ? (
-                        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                          <div><label className={label}>Clay Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_clay_pct} onChange={(e)=>setDraft((d)=>({...d,est_clay_pct:e.target.value}))} /></div>
-                          <div><label className={label}>Silt Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_silt_pct} onChange={(e)=>setDraft((d)=>({...d,est_silt_pct:e.target.value}))} /></div>
-                          <div><label className={label}>Sand Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_sand_pct} onChange={(e)=>setDraft((d)=>({...d,est_sand_pct:e.target.value}))} /></div>
-                          <div><label className={label}>Gravel Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_gravel_pct} onChange={(e)=>setDraft((d)=>({...d,est_gravel_pct:e.target.value}))} /></div>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div {...cardFrameProps("pavement_ground_status")}>
-                      {layoutTools("pavement_ground_status")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Pavement / Ground Status</div>
-                      <label className={label}>Pavement/Ground Cracks</label>
-                      <div className="mb-2 flex gap-2">
-                        {(["YES", "NO"] as const).map((c) => (
-                          <button key={`crack-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, pavement_ground_cracks: c }))} className={`${chip} ${ynChip(draft.pavement_ground_cracks === c)}`}>
-                            {c}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                        {draft.pavement_ground_cracks === "YES" ? (
-                          <>
-                            <div><label className={label}>Length (feet)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} /></div>
-                            <div><label className={label}>Horizontal Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} /></div>
-                            <div><label className={label}>Vertical Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} /></div>
-                            <div><label className={label}>Depth of Crack (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} /></div>
-                          </>
-                        ) : null}
-                        <div><label className={label}>Settlement (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} /></div>
-                        <div><label className={label}>Bulge (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} /></div>
-                      </div>
-                      <label className={`${label} mt-2`}>Indented by Rocks</label>
-                      <div className="flex gap-2">
-                        {(["YES", "NO"] as const).map((c) => (
-                          <button key={`rock-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, indented_by_rocks: c }))} className={`${chip} ${ynChip(draft.indented_by_rocks === c)}`}>
-                            {c}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div {...cardFrameProps("vegetation_on_slope")}>
-                      {layoutTools("vegetation_on_slope")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Vegetation on Slope</div>
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                        <div><label className={label}>Trees Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
-                        <div><label className={label}>Bushes/Shrubs Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
-                        <div className="col-span-full"><label className={label}>Groundcover Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
-                      </div>
-                    </div>
-
-                    <div {...cardFrameProps("water_drainage")}>
-                      {layoutTools("water_drainage")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water / Drainage</div>
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, text]) => (
-                          <button key={key} type="button" onClick={() => selectSingleDrainage(key as typeof drainageKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
-                        ))}
-                      </div>
-                      <div className="grid grid-cols-1 gap-2">
-                        {[["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"], ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"], ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"]].map(([imp, may, text]) => (
-                          <div key={text} className="grid grid-cols-[auto_auto_1fr] items-center gap-2">
-                            <button type="button" onClick={() => setImpactSelection(imp as any, may as any, "IMPACTED")} className={`${chip} ${ynChip(draft[imp] === "YES")}`}>Impacted</button>
-                            <button type="button" onClick={() => setImpactSelection(imp as any, may as any, "MAYBE")} className={`${chip} ${ynChip(draft[may] === "YES")}`}>Maybe</button>
-                            <span className="text-sm">{text}</span>
-                          </div>
-                        ))}
-                        <div><label className={label}>Adjacent Utilities Notes</label><input className={input} value={draft.impact_adj_utilities} onChange={(e)=>setDraft((d)=>({...d,impact_adj_utilities:e.target.value}))} /></div>
-                        <div><label className={label}>Adjacent Properties Notes</label><input className={input} value={draft.impact_adj_properties} onChange={(e)=>setDraft((d)=>({...d,impact_adj_properties:e.target.value}))} /></div>
-                        <div><label className={label}>Adjacent Structures Notes</label><input className={input} value={draft.impact_adj_structure} onChange={(e)=>setDraft((d)=>({...d,impact_adj_structure:e.target.value}))} /></div>
-                      </div>
-                    </div>
-
-                    <div {...cardFrameProps("water_content")}>
-                      {layoutTools("water_content")}
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Water Content</div>
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"]].map(([key, text]) => (
-                          <button key={key} type="button" onClick={() => selectBaseWaterContent(key as typeof baseWaterKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
-                        ))}
-                      </div>
-                      {waterFlowingSelected ? (
-                        <div className="mb-2 flex gap-2">
-                          <button type="button" onClick={() => selectFlowingSubtype("water_seep")} className={`${chip} ${ynChip(draft.water_seep === "YES")}`}>Seep</button>
-                          <button type="button" onClick={() => selectFlowingSubtype("water_spring")} className={`${chip} ${ynChip(draft.water_spring === "YES")}`}>Spring</button>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div {...cardFrameProps("measurements")}>
-                        {layoutTools("measurements")}
-                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Measurements</div>
-                        <SubmissionMeasurementContext
-                          submissionId={data.submission.id}
-                          gisa={data.gisa}
-                          onReload={load}
-                        />
-                        <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
-                          <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
-                        </div>
-                        <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                          <div><label className={label}>Slope Height, ft (H)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} /></div>
-                          <div><label className={label}>Original Slope, deg (alpha)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} /></div>
-                          <div><label className={label}>Landslide Width, ft (Wd)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} /></div>
-                          <div><label className={label}>Landslide Length, ft (Ld)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_length_ft:e.target.value}))} /></div>
-                          <div><label className={label}>Main Scarp Height, ft (Hs)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_main_scarp_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_main_scarp_height_ft:e.target.value}))} /></div>
-                          <div><label className={label}>Landslide Slope, deg (beta)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_slope_deg:e.target.value}))} /></div>
-                          <div><label className={label}>Length of Roadway Encroached, ft (Lr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} /></div>
-                          <div><label className={label}>Width of Roadway Encroached, ft (Wr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} /></div>
-                        </div>
-                    </div>
-                  </div>
-                  {layoutMode && dragState?.active ? (
-                    <div
-                      className="pointer-events-none fixed z-50 rounded-md border border-[var(--line)] bg-[var(--panel)]/95 px-2 py-1 text-xs shadow-lg"
-                      style={{ left: dragState.x + 14, top: dragState.y + 14 }}
-                    >
-                      Moving: {DASHBOARD_CARD_TITLES[dragState.id]}
-                    </div>
-                  ) : null}
-                </div>
-                <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={3} placeholder="Observations" value={draft.observations_notes} onChange={(e)=>setDraft((d)=>({...d,observations_notes:e.target.value}))} />
-                <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Record of Event Notes" value={draft.record_of_event_notes} onChange={(e)=>setDraft((d)=>({...d,record_of_event_notes:e.target.value}))} />
-                <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Maintenance History Notes" value={draft.maintenance_history_notes} onChange={(e)=>setDraft((d)=>({...d,maintenance_history_notes:e.target.value}))} />
-                <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Geotechnical Assessment Notes" value={draft.geotechnical_assessment_notes} onChange={(e)=>setDraft((d)=>({...d,geotechnical_assessment_notes:e.target.value}))} />
-                <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Recommendations Notes" value={draft.recommendations_notes} onChange={(e)=>setDraft((d)=>({...d,recommendations_notes:e.target.value}))} />
-                <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Sketchpad Notes" value={draft.sketchpad_notes} onChange={(e)=>setDraft((d)=>({...d,sketchpad_notes:e.target.value}))} />
-                <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-mono" rows={4} placeholder='Geometry JSON {"type":"Point","coordinates":[...]} ' value={draft.geometry_json} onChange={(e)=>setDraft((d)=>({...d,geometry_json:e.target.value}))} />
-                <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2">
-                  <div><div className="text-xs font-semibold uppercase text-muted">Immediate</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.immediate??[]).map((x)=><button key={x.code} type="button" onClick={()=>setImm((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${imm.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
-                  <div><div className="text-xs font-semibold uppercase text-muted">Follow-Up</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.follow_up??[]).map((x)=><button key={x.code} type="button" onClick={()=>setFol((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${fol.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
-                </div>
-                </fieldset>
-                {canEdit ? (
-                  <>
-                    <textarea className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" rows={2} placeholder="Submit comment (optional)" value={submitNote} onChange={(e)=>setSubmitNote(e.target.value)} />
-                    <div className="mt-2 flex gap-2"><button onClick={saveDraft} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:opacity-60">Save Draft</button><button onClick={submitDraft} disabled={busy} className="rounded-md bg-[var(--good)] px-3 py-2 text-sm text-white disabled:opacity-60">{data.submission.status === "REJECTED" ? "Resubmit for Review" : "Submit for Review"}</button></div>
-                  </>
-                ) : null}
-              </section>
-
-            <Section title="Summary" open>
-              <R l="Descriptor" v={buildSubmissionDisplayTitle({
-                id: data.submission.id,
-                created_at: data.submission.created_at,
-                district: data.gisa?.district,
-                county: data.gisa?.county,
-                route: data.gisa?.route,
-                post_mile: data.gisa?.post_mile,
-              })} />
-              <R l="Created" v={data.submission.created_at} />
-              <R l="Updated" v={data.submission.updated_at} />
-              <R l="Submitted" v={data.submission.submitted_at} />
-              <R l="Reviewed" v={data.submission.reviewed_at} />
-              <R l="Status" v={data.submission.status} />
-            </Section>
-
-            <SubmissionReviewerSupport
-              reviewNote={reviewNote}
-              canReview={canReview}
+          <>
+            <SubmissionLocationHero
+              submissionId={data.submission.id}
+              gisa={data.gisa}
+              canEdit={canEdit}
               busy={busy}
-              attachments={data.attachments}
-              workflowEvents={data.workflow_events}
-              downloadingAttachmentId={downloading}
-              onReviewNoteChange={setReviewNote}
-              onOpenAttachment={openDownloadUrl}
+              latitude={draft.latitude}
+              longitude={draft.longitude}
+              onLatitudeChange={(value) => setDraft((d) => ({ ...d, latitude: value }))}
+              onLongitudeChange={(value) => setDraft((d) => ({ ...d, longitude: value }))}
+              onCoordinateBlur={(field) => setDraft((d) => ({ ...d, [field]: formatCoordinate(d[field]) }))}
+              geoBusy={geoBusy}
+              onAutofillFromGps={autofillFromGps}
+              statePlane={statePlaneHero}
+              showStatePlane={showNorthingEasting}
+              onToggleStatePlane={() => setShowNorthingEasting((prev) => !prev)}
+              geojson={geom}
+              onGeometryChange={onMapGeometryChange}
+              geoSaveState={geoSaveState}
+              geoSaveMessage={geoSaveMessage}
+              photoMap={photoMap}
+              photoLoading={photoLoading}
+              photoError={photoError}
             />
 
-            {canManageSharing ? (
-              <SubmissionAccessSharing
-                query={shareQuery}
-                availableUsers={shareCandidates}
-                sharedWith={sharedWith}
+            {canvas.fullscreen ? (
+              <div className="fixed inset-0 z-40 flex flex-col bg-[var(--bg)] p-3" role="dialog" aria-modal="true" aria-label="GISA sheet full screen">
+                {canvasToolbar}
+                {canvasCards}
+              </div>
+            ) : (
+              <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+                {canvasToolbar}
+                {canvasCards}
+              </section>
+            )}
+
+            <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Notes and actions</div>
+              <fieldset disabled={!canEdit} className="contents">
+                <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))]">
+                  {NOTES_FIELDS.map((field) => {
+                    const keys = NOTES_SECTION_KEYS[field.key];
+                    const count = sectionCount(keys);
+                    return (
+                      <div key={field.key} className="min-w-0">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <label className={`${label} mb-0`} htmlFor={`notes-${field.key}`}>{field.label}</label>
+                          <SectionAttachmentsButton count={count} onClick={() => openSectionAttachments(field.label, keys)} />
+                        </div>
+                        <textarea
+                          id={`notes-${field.key}`}
+                          className={input}
+                          rows={field.rows}
+                          value={draft[field.key]}
+                          onChange={(e) => setDraft((d) => ({ ...d, [field.key]: e.target.value }))}
+                        />
+                      </div>
+                    );
+                  })}
+                  <div className="min-w-0">
+                    <label className={label} htmlFor="notes-geometry-json">Geometry JSON</label>
+                    <textarea id="notes-geometry-json" className={`${input} font-mono text-xs`} rows={4} placeholder='{"type":"Point","coordinates":[...]}' value={draft.geometry_json} onChange={(e)=>setDraft((d)=>({...d,geometry_json:e.target.value}))} />
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+                  <div><div className={label}>Immediate actions</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.immediate??[]).map((x)=><button key={x.code} type="button" onClick={()=>setImm((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${imm.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
+                  <div><div className={label}>Follow-up actions</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.follow_up??[]).map((x)=><button key={x.code} type="button" onClick={()=>setFol((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${fol.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
+                </div>
+              </fieldset>
+              {canEdit ? (
+                <div className="mt-3 border-t border-[var(--line)] pt-3">
+                  <label className={label} htmlFor="submit-comment">Submit comment (optional)</label>
+                  <textarea id="submit-comment" className={input} rows={2} placeholder="Included with the submission when you submit for review from the header" value={submitNote} onChange={(e)=>setSubmitNote(e.target.value)} />
+                </div>
+              ) : null}
+            </section>
+
+            <SubmissionLibrary attachments={data.attachments} resolver={resolver} />
+
+            <SubmissionDetailCardGrid>
+              <SubmissionDetailCard title="Summary" subtitle="Record identity and lifecycle timestamps.">
+                <R l="Descriptor" v={descriptor} />
+                <R l="Submission ID" v={data.submission.id} />
+                <R l="Created" v={data.submission.created_at} />
+                <R l="Updated" v={data.submission.updated_at} />
+                <R l="Submitted" v={data.submission.submitted_at} />
+                <R l="Reviewed" v={data.submission.reviewed_at} />
+                <R l="Status" v={data.submission.status} />
+              </SubmissionDetailCard>
+
+              <SubmissionReviewerSupport
+                reviewNote={reviewNote}
+                canReview={canReview}
                 busy={busy}
-                onQueryChange={setShareQuery}
-                onGrant={addShare}
-                onRevoke={removeShare}
+                workflowEvents={data.workflow_events}
+                onReviewNoteChange={setReviewNote}
               />
-            ) : null}
-          </div>
+
+              {canManageSharing ? (
+                <SubmissionAccessSharing
+                  query={shareQuery}
+                  availableUsers={shareCandidates}
+                  sharedWith={sharedWith}
+                  busy={busy}
+                  onQueryChange={setShareQuery}
+                  onGrant={addShare}
+                  onRevoke={removeShare}
+                />
+              ) : null}
+            </SubmissionDetailCardGrid>
+          </>
         )}
       </div>
+
+      {sectionDialog ? (
+        <SubmissionSectionAttachmentsDialog
+          sectionTitle={sectionDialog.title}
+          items={sectionDialogItems}
+          resolver={resolver}
+          onClose={() => setSectionDialog(null)}
+        />
+      ) : null}
     </AppShell>
   );
 }

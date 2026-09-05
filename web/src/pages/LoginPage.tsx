@@ -25,7 +25,7 @@ export default function LoginPage() {
   }, []);
 
   if (isInitializing && token) return <AuthGateLoading />;
-  if (!isInitializing && token) return <Navigate to="/mission-center" replace />;
+  if (!isInitializing && token) return <Navigate to="/my-work" replace />;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +39,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       await login(normalizedEmail, password);
-      navigate("/mission-center", { replace: true });
+      navigate("/my-work", { replace: true });
     } catch (e: any) {
       setError(e?.message ?? "Sign in failed. Verify your credentials and try again.");
     } finally {

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test src/components/terrainScene.test.ts src/components/caltransHighwaysLayer.test.ts src/features/submissions/submissionReviewerSupport.test.ts src/features/submissions/submissionAccessSharing.test.ts src/features/submissions/submissionMeasurementContext.test.ts src/features/missionCenter/missionCenterGisModel.test.ts src/features/terrainCrossSections/terrainCrossSectionModel.test.ts src/features/terrainCrossSections/demResolutionCoverageModel.test.ts src/features/terrainCrossSections/terrainSliceModel.test.ts"
+    "test": "node --experimental-strip-types --test src/components/terrainScene.test.ts src/components/caltransHighwaysLayer.test.ts src/components/photoEvidenceGraphics.test.ts src/features/submissions/submissionReviewerSupport.test.ts src/features/submissions/submissionAccessSharing.test.ts src/features/submissions/submissionAttachmentModel.test.ts src/features/submissions/submissionLayoutModel.test.ts src/features/assessments/assessmentModel.test.ts src/features/missionCenter/missionCenterGisModel.test.ts src/features/terrainCrossSections/terrainCrossSectionModel.test.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@arcgis/core": "^4.33.0",
+    "lucide-react": "^1.41.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.13.0"

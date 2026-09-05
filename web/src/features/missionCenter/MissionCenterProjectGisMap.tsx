@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import esriConfig from "@arcgis/core/config";
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
@@ -17,6 +17,8 @@ import BasemapGallery from "@arcgis/core/widgets/BasemapGallery";
 import LayerList from "@arcgis/core/widgets/LayerList";
 import Expand from "@arcgis/core/widgets/Expand";
 
+import { basemapForTheme, useThemeBasemap } from "../../components/mapTheme";
+import { headingWedgeRing, PHOTO_HEADING_WEDGE_FILL_ALPHA, themeColor, withAlpha } from "../../components/photoEvidenceGraphics";
 import type { IncidentClassification } from "../incidents/incidentClassification";
 import { classificationLabel } from "../incidents/incidentClassification";
 import type { ProjectDetailResponse, ProjectSummary } from "../projects/projectTypes";
@@ -31,6 +33,11 @@ const CALIFORNIA_EXTENT = new Extent({
   spatialReference: { wkid: 4326 },
 });
 
+export type MissionCenterMapHandle = {
+  /** Center on a mapped photo and open its popup. Returns false when the photo is not on the map. */
+  focusPhoto: (attachmentId: number) => boolean;
+};
+
 type Props = {
   mode: MissionCenterMode;
   projects: ProjectSummary[];
@@ -41,7 +48,7 @@ type Props = {
   classifications: Record<number, IncidentClassification>;
   onSelectProject: (projectId: number) => void;
   onSelectIncident: (incidentId: number) => void;
-  height?: number;
+  height?: number | string;
 };
 
 function escapeHtml(value: unknown): string {
@@ -70,19 +77,9 @@ function geoJsonToGraphics(geometry: Record<string, unknown> | null): Graphic[] 
   const type = String(geometry.type ?? "");
   const coordinates = geometry.coordinates as any;
   const symbol = {
-    polygon: {
-      type: "simple-fill",
-      color: [30, 96, 255, 0.14],
-      outline: { color: [30, 96, 255, 0.95], width: 2.5 },
-    },
+    polygon: { type: "simple-fill", color: [30, 96, 255, 0.14], outline: { color: [30, 96, 255, 0.95], width: 2.5 } },
     line: { type: "simple-line", color: [30, 96, 255, 0.95], width: 3 },
-    point: {
-      type: "simple-marker",
-      style: "circle",
-      size: 10,
-      color: [30, 96, 255, 0.95],
-      outline: { color: [255, 255, 255, 1], width: 2 },
-    },
+    point: { type: "simple-marker", style: "circle", size: 10, color: [30, 96, 255, 0.95], outline: { color: [255, 255, 255, 1], width: 2 } },
   } as const;
 
   if (type === "Polygon" && Array.isArray(coordinates)) {
@@ -110,7 +107,12 @@ function geoJsonToGraphics(geometry: Record<string, unknown> | null): Graphic[] 
   return [];
 }
 
-export default function MissionCenterProjectGisMap({
+/**
+ * Three-level GIS drill: statewide Event Groups → a group's incidents → one incident's
+ * saved geometry and field photos with camera-heading wedges. Theme-aware basemap and
+ * an imperative `focusPhoto` so the evidence list can drive the map.
+ */
+const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(function MissionCenterProjectGisMap({
   mode,
   projects,
   selectedProjectId,
@@ -121,7 +123,7 @@ export default function MissionCenterProjectGisMap({
   onSelectProject,
   onSelectIncident,
   height = 650,
-}: Props) {
+}, ref) {
   const divRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<MapView | null>(null);
   const projectLayerRef = useRef<GraphicsLayer | null>(null);
@@ -132,21 +134,39 @@ export default function MissionCenterProjectGisMap({
   const onSelectProjectRef = useRef(onSelectProject);
   const onSelectIncidentRef = useRef(onSelectIncident);
   const modeRef = useRef(mode);
+  const apiKey = String((import.meta as any)?.env?.VITE_ARCGIS_API_KEY ?? "");
 
   useEffect(() => { onSelectProjectRef.current = onSelectProject; }, [onSelectProject]);
   useEffect(() => { onSelectIncidentRef.current = onSelectIncident; }, [onSelectIncident]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
+  useThemeBasemap(viewRef, !!apiKey);
+
+  useImperativeHandle(ref, () => ({
+    focusPhoto(attachmentId: number) {
+      const view = viewRef.current;
+      const layer = photoLayerRef.current;
+      if (!view || !layer) return false;
+      const graphic = layer.graphics.find((item) => Number(item.attributes?.photoId) === attachmentId);
+      if (!graphic) return false;
+      view.goTo({ target: graphic.geometry, zoom: Math.max(view.zoom, 17) }).catch(() => {});
+      try {
+        view.openPopup({ features: [graphic], location: graphic.geometry as any });
+      } catch {
+        // Popup is a convenience; centering already happened.
+      }
+      return true;
+    },
+  }), []);
 
   useEffect(() => {
     esriConfig.assetsPath = "/assets";
-    const apiKey = (import.meta as any)?.env?.VITE_ARCGIS_API_KEY;
-    if (apiKey) esriConfig.apiKey = String(apiKey);
+    if (apiKey) esriConfig.apiKey = apiKey;
     if (!divRef.current) return;
 
     const projectLayer = new GraphicsLayer({ title: "Event Groups" });
     const incidentLayer = new GraphicsLayer({ title: "Event Group incidents" });
     const geometryLayer = new GraphicsLayer({ title: "Saved incident geometry" });
-    const directionLayer = new GraphicsLayer({ title: "Camera directions" });
+    const directionLayer = new GraphicsLayer({ title: "Camera headings" });
     const photoLayer = new GraphicsLayer({ title: "Field photos" });
     projectLayerRef.current = projectLayer;
     incidentLayerRef.current = incidentLayer;
@@ -154,7 +174,7 @@ export default function MissionCenterProjectGisMap({
     directionLayerRef.current = directionLayer;
     photoLayerRef.current = photoLayer;
 
-    const map = new Map({ basemap: apiKey ? "hybrid" : "osm", layers: [projectLayer, incidentLayer, geometryLayer, directionLayer, photoLayer] });
+    const map = new Map({ basemap: basemapForTheme(!!apiKey), layers: [projectLayer, incidentLayer, geometryLayer, directionLayer, photoLayer] });
     const view = new MapView({
       container: divRef.current,
       map,
@@ -204,7 +224,7 @@ export default function MissionCenterProjectGisMap({
       directionLayerRef.current = null;
       photoLayerRef.current = null;
     };
-  }, []);
+  }, [apiKey]);
 
   useEffect(() => {
     const layer = projectLayerRef.current;
@@ -301,41 +321,40 @@ export default function MissionCenterProjectGisMap({
 
     const geometryGraphics = geoJsonToGraphics(incidentGis.geometry);
     geometryLayer.addMany(geometryGraphics);
+    const accent = themeColor("--accent", [23, 180, 173]);
 
     for (const photo of incidentGis.photos) {
       if (photo.latitude == null || photo.longitude == null) continue;
       const popupImage = photo.mime_type.toLowerCase().startsWith("image/")
         ? `<div style="margin-top:8px"><img src="${escapeHtml(photo.download_url)}" alt="${escapeHtml(photo.file_name)}" style="display:block;max-width:320px;max-height:220px;object-fit:contain;border-radius:6px" /></div>`
         : "";
-      photoLayer.add(new Graphic({
-        geometry: new Point({ longitude: photo.longitude, latitude: photo.latitude, spatialReference: { wkid: 4326 } }),
-        attributes: { photoId: photo.attachment_id, fileName: photo.file_name },
-        symbol: {
-          type: "simple-marker",
-          style: "circle",
-          size: 11,
-          color: [6, 182, 212, 0.98],
-          outline: { color: [255, 255, 255, 1], width: 2 },
-        } as any,
-        popupTemplate: {
-          title: escapeHtml(photo.file_name),
-          content: `<strong>Field photo</strong><br/>${photo.captured_at ? `Captured: ${escapeHtml(photo.captured_at)}<br/>` : ""}${photo.camera_heading_deg != null ? `Camera heading: ${photo.camera_heading_deg.toFixed(1)}°<br/>` : ""}${popupImage}<div style="margin-top:8px"><a href="${escapeHtml(photo.download_url)}" target="_blank" rel="noreferrer">Open original</a></div>`,
-        } as any,
-      }));
+      const popupTemplate = {
+        title: escapeHtml(photo.file_name),
+        content: `<strong>Field photo</strong><br/>${photo.captured_at ? `Captured: ${escapeHtml(photo.captured_at)}<br/>` : ""}${photo.camera_heading_deg != null ? `Camera heading: ${photo.camera_heading_deg.toFixed(1)}°<br/>` : ""}${popupImage}<div style="margin-top:8px"><a href="${escapeHtml(photo.download_url)}" target="_blank" rel="noreferrer">Open original</a></div>`,
+      } as any;
 
       if (photo.camera_heading_deg != null) {
-        const end = cameraDirectionEndpoint(photo.latitude, photo.longitude, photo.camera_heading_deg, 75);
+        // Camera-heading wedge (same geometry as the submission evidence map).
         directionLayer.add(new Graphic({
-          geometry: new Polyline({ paths: [[[photo.longitude, photo.latitude], [end.longitude, end.latitude]]], spatialReference: { wkid: 4326 } }),
-          attributes: { photoId: photo.attachment_id },
-          symbol: { type: "simple-line", color: [6, 182, 212, 0.9], width: 2.5 } as any,
+          geometry: new Polygon({ rings: [headingWedgeRing(photo.latitude, photo.longitude, photo.camera_heading_deg)], spatialReference: { wkid: 4326 } }),
+          attributes: { photoId: photo.attachment_id, wedge: true },
+          symbol: { type: "simple-fill", color: withAlpha(accent, PHOTO_HEADING_WEDGE_FILL_ALPHA), outline: { color: withAlpha(accent, 0.85), width: 1 } } as any,
+          popupTemplate,
         }));
+        const end = cameraDirectionEndpoint(photo.latitude, photo.longitude, photo.camera_heading_deg, 60);
         directionLayer.add(new Graphic({
           geometry: new Point({ longitude: end.longitude, latitude: end.latitude, spatialReference: { wkid: 4326 } }),
           attributes: { photoId: photo.attachment_id },
-          symbol: { type: "simple-marker", style: "triangle", size: 9, angle: photo.camera_heading_deg, color: [6, 182, 212, 0.95], outline: { color: [255, 255, 255, 1], width: 1 } } as any,
+          symbol: { type: "simple-marker", style: "triangle", size: 9, angle: photo.camera_heading_deg, color: withAlpha(accent, 0.95), outline: { color: [255, 255, 255, 1], width: 1 } } as any,
         }));
       }
+
+      photoLayer.add(new Graphic({
+        geometry: new Point({ longitude: photo.longitude, latitude: photo.latitude, spatialReference: { wkid: 4326 } }),
+        attributes: { photoId: photo.attachment_id, fileName: photo.file_name },
+        symbol: { type: "simple-marker", style: "circle", size: 11, color: withAlpha(accent, 0.98), outline: { color: [255, 255, 255, 1], width: 2 } } as any,
+        popupTemplate,
+      }));
     }
 
     const allGraphics = [
@@ -352,13 +371,15 @@ export default function MissionCenterProjectGisMap({
   }, [incidentGis, mode]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
+    <div className="map-stack-guard overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
       <div ref={divRef} style={{ height }} aria-label="Mission Center Event Group and Incident GIS explorer" />
-      <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs text-muted">
-        {mode === "PROJECTS" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-blue-600" /> Event Group</span><span>Marker size reflects active Incident activity.</span></> : null}
-        {mode === "PROJECT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rotate-45 rounded-[2px] bg-red-600" /> Active Incident</span><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-slate-500" /> Resolved Incident</span></> : null}
-        {mode === "INCIDENT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-cyan-500" /> Field photo</span><span className="inline-flex items-center gap-2"><span className="h-0.5 w-6 bg-cyan-500" /> Camera direction</span><span className="inline-flex items-center gap-2"><span className="h-3 w-5 border-2 border-blue-600 bg-blue-500/15" /> Saved geometry</span></> : null}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs text-muted">
+        {mode === "PROJECTS" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[rgb(30,96,255)]" /> Event Group</span><span>Marker size reflects active Incident activity.</span></> : null}
+        {mode === "PROJECT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rotate-45 rounded-[2px] bg-[rgb(211,47,47)]" /> Active Incident</span><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[rgb(100,116,139)]" /> Resolved Incident</span></> : null}
+        {mode === "INCIDENT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[var(--accent)]" /> Field photo</span><span className="inline-flex items-center gap-2"><span className="inline-block h-3 w-4 rounded-r-full bg-[var(--accent)] opacity-40" /> Camera heading</span><span className="inline-flex items-center gap-2"><span className="h-3 w-5 border-2 border-[rgb(30,96,255)] bg-[rgba(30,96,255,0.15)]" /> Saved geometry</span></> : null}
       </div>
     </div>
   );
-}
+});
+
+export default MissionCenterProjectGisMap;

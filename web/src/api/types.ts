@@ -36,6 +36,8 @@ export type Attachment = {
   uploaded_at: string | null;
   kind: string;
   sort_order: number;
+  /** GISA form section the mobile app tagged this file with (attachment_links.section_key). */
+  section_key?: string | null;
 };
 
 export type WorkflowEvent = {
@@ -199,6 +201,16 @@ export type SubmissionDetail = {
   photos: Attachment[];
   attachments: Attachment[];
   workflow_events: WorkflowEvent[];
+  /** Incident / assessment / Event Group this technical form belongs to (null for standalone forms). */
+  context?: SubmissionWorkflowContext | null;
+};
+
+export type SubmissionWorkflowContext = {
+  incident_id: number;
+  incident_title: string | null;
+  event_group_id: number | null;
+  assessment_id: number | null;
+  assessment_state: string | null;
 };
 
 export type RoadInventoryIncidentContext = {
@@ -248,6 +260,10 @@ export type Incident = {
   post_mile: string | null;
   office_code: string | null;
   current_stage: IncidentStage;
+  /** Event Group the incident was accepted into (null until coordinator approval). */
+  event_group_id?: number | null;
+  /** Permanent identity minted at coordinator approval (null while awaiting intake). */
+  incident_key?: string | null;
   status: IncidentStatus;
   reporter_user_id: number;
   created_at: string;

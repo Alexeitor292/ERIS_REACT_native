@@ -26,27 +26,46 @@ export function SubmissionDetailRow({ label, value }: { label: string; value: un
   );
 }
 
-export function SubmissionDisclosureSection({
+/**
+ * Always-open detail card. Replaces the collapsed `<details>` sections so review
+ * context (summary, reviewer note, workflow history, access sharing) is visible at
+ * a glance in the responsive card grid.
+ */
+export function SubmissionDetailCard({
   title,
+  subtitle,
+  actions,
   children,
-  open = false,
+  className = "",
+  bodyClassName = "",
 }: {
-  title: string;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
-  open?: boolean;
+  className?: string;
+  bodyClassName?: string;
 }) {
   return (
-    <details className="border-t border-[var(--line)]/60 py-3" open={open}>
-      <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted">
-        {title}
-      </summary>
-      <div className="mt-3">{children}</div>
-    </details>
+    <section className={`flex min-w-0 flex-col rounded-xl border border-[var(--line)] bg-[var(--panel)] ${className}`}>
+      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--line)]/70 px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">{title}</div>
+          {subtitle ? <div className="mt-0.5 text-xs text-muted">{subtitle}</div> : null}
+        </div>
+        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+      </header>
+      <div className={`min-w-0 flex-1 px-4 py-3 ${bodyClassName}`}>{children}</div>
+    </section>
   );
 }
 
-// Compatibility aliases keep the first extraction behavior-preserving while the
-// page is decomposed in small, independently testable slices.
+/** Responsive grid used for the review context cards under the GISA form. */
+export function SubmissionDetailCardGrid({ children }: { children: ReactNode }) {
+  return <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr))]">{children}</div>;
+}
+
+// Compatibility aliases keep older call sites working while the page is decomposed.
 export function S({ s }: { s: string }) {
   return <SubmissionStatusBadge status={s} />;
 }
@@ -55,6 +74,6 @@ export function R({ l, v }: { l: string; v: unknown }) {
   return <SubmissionDetailRow label={l} value={v} />;
 }
 
-export function Section({ title, children, open = false }: { title: string; children: ReactNode; open?: boolean }) {
-  return <SubmissionDisclosureSection title={title} open={open}>{children}</SubmissionDisclosureSection>;
+export function Section({ title, children }: { title: string; children: ReactNode; open?: boolean }) {
+  return <SubmissionDetailCard title={title}>{children}</SubmissionDetailCard>;
 }

@@ -12,19 +12,28 @@ import MissionCenterPage from "./pages/MissionCenterPage";
 import EventGroupsPage from "./pages/EventGroupsPage";
 import EventGroupDetailPage from "./pages/EventGroupDetailPage";
 import TerrainCrossSectionsPage from "./pages/TerrainCrossSectionsPage";
+import MyWorkPage from "./features/myWork/MyWorkPage";
 import NotFoundPage from "./pages/NotFoundPage";
-import { AuthProvider } from "./auth/AuthContext";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import RoleRoute from "./auth/RoleRoute";
-import { OPERATIONAL_ROLE_NAMES } from "./utils/roleModel";
+import { hasWorkQueue, OPERATIONAL_ROLE_NAMES } from "./utils/roleModel";
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Navigate to="/submissions" replace />} />
+          <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/my-work"
+            element={
+              <ProtectedRoute>
+                <MyWorkPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/submissions"
             element={
@@ -35,6 +44,14 @@ export default function App() {
           />
           <Route
             path="/incidents"
+            element={
+              <ProtectedRoute>
+                <IncidentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/incidents/:id"
             element={
               <ProtectedRoute>
                 <IncidentsPage />
@@ -62,13 +79,37 @@ export default function App() {
           <Route
             path="/assessments"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <AssessmentsPage />
-              </ProtectedRoute>
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/assessments/:id"
+            element={
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
+                <AssessmentsPage />
+              </RoleRoute>
             }
           />
           <Route
             path="/mission-center"
+            element={
+              <ProtectedRoute>
+                <MissionCenterPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mission-center/:gid"
+            element={
+              <ProtectedRoute>
+                <MissionCenterPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mission-center/:gid/:iid"
             element={
               <ProtectedRoute>
                 <MissionCenterPage />
@@ -128,6 +169,12 @@ export default function App() {
       </BrowserRouter>
     </AuthProvider>
   );
+}
+
+/** Roles with a work queue land on My Work; maintenance reporters land on their incidents. */
+function HomeRedirect() {
+  const { me } = useAuth();
+  return <Navigate to={hasWorkQueue(me?.roles) ? "/my-work" : "/incidents"} replace />;
 }
 
 function LegacyProjectRedirect() {

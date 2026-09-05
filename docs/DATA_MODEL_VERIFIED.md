@@ -31,6 +31,13 @@ Source: `database/init/010_schema.sql` (baseline) + Alembic migrations in
 - `incident_notifications`
 - `incident_submission_links`
 
+## Assessment Domain
+
+- `assessments` (one per incident; `submission_id` = latest technical form)
+- `assessment_submissions` (join: every technical submission attached to an assessment — migration `20260904_assessment_subs`)
+- `assessment_assignments`
+- `assessment_events`
+
 ## GISA Domain
 
 - `submission_gisa` (wide denormalized paper-form field model)
