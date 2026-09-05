@@ -107,8 +107,16 @@ body {
  * Stacking-context guard: any map container must isolate so map internals never paint
  * over app overlays, modals, or toasts. ArcGIS views create their own contexts, but the
  * explicit rule keeps embedded/third-party map DOM from escaping its card.
+ *
+ * `.esri-view` only gets `isolation` — never `position`/`z-index`. ArcGIS adds that class
+ * to the app's own container div, and the SceneView containers are laid out with
+ * `absolute inset-0`; forcing them to `position: relative` collapses them to zero height
+ * and the 3D terrain scenes never finish loading.
  */
-.esri-view,
+.esri-view {
+  isolation: isolate;
+}
+
 .map-stack-guard {
   position: relative;
   isolation: isolate;
