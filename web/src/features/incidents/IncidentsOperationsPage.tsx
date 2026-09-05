@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
+import { listAssessments, type Assessment } from "../../api/assessments";
 import { api } from "../../api/client";
-import { triageIncident } from "../../api/assessments";
-import type { AdminUser, Incident, IncidentStatus } from "../../api/types";
+import type { Incident, IncidentStatus } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
-import { WorkflowTreeModal } from "../../components/WorkflowTree";
 import AppShell from "../../ui/AppShell";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileValue, normalizeRouteValue } from "../../utils/precision";
-import { canTriage } from "../../utils/roleModel";
+import { canReportIncident, isOperationalUser } from "../../utils/roleModel";
+import { AssessmentStateBadge } from "../assessments/AssessmentDetailPanel";
+import { submissionIdsOf } from "../assessments/assessmentModel";
+import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
 import IncidentCreatePanel from "./IncidentCreatePanel";
 import type { IncidentClassification, IncidentClassificationQueryResponse } from "./incidentClassification";
 import { classificationLabel, classificationStateLabel } from "./incidentClassification";
-import {
-  IncidentResolveDialog,
-  IncidentTriageDialog,
-  type ResolveDialogState,
-  type TriageDialogState,
-} from "./IncidentDecisionDialogs";
 import {
   EMPTY_INCIDENT_FORM,
   incidentStatusBadgeClass,
@@ -29,7 +25,7 @@ import {
 
 function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${incidentStatusBadgeClass(status)}`}>
+    <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${incidentStatusBadgeClass(status)}`}>
       {incidentStatusLabel(status)}
     </span>
   );
@@ -45,52 +41,52 @@ function IncidentClassificationText({ classification }: { classification: Incide
   );
 }
 
+type Tab = "records" | "intake";
+
+/**
+ * Incidents: read-only record view.
+ *   "Incident records"  — reports accepted into ERIS (coordinator-approved).
+ *   "Awaiting intake"   — field reports not yet part of the record (triage pending).
+ * Triage, routing, and assignment actions live in My Work. Filing a new report is
+ * intake, not workflow, so reporting roles keep the "New incident" panel.
+ */
 export default function IncidentsOperationsPage() {
   const { me } = useAuth();
-  const navigate = useNavigate();
+  const params = useParams();
+  const highlightId = params.id ? Number(params.id) : null;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const isAdmin = !!me?.roles?.includes("ADMIN");
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
+  const operational = isOperationalUser(me?.roles);
 
   const [items, setItems] = useState<Incident[]>([]);
   const [classifications, setClassifications] = useState<Record<number, IncidentClassification>>({});
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [assignByIncidentId, setAssignByIncidentId] = useState<Record<number, string>>({});
+  const [assessmentsByIncident, setAssessmentsByIncident] = useState<Record<number, Assessment>>({});
+  const [tab, setTab] = useState<Tab>("records");
   const [statusFilter, setStatusFilter] = useState<"ALL" | IncidentStatus>("ALL");
   const [unclaimedOnly, setUnclaimedOnly] = useState(false);
+  const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState<IncidentCreateForm>(EMPTY_INCIDENT_FORM);
   const [pendingFiles, setPendingFiles] = useState<PendingIncidentUpload[]>([]);
-  const [workflowIncidentId, setWorkflowIncidentId] = useState<number | null>(null);
   const [createPanelOpen, setCreatePanelOpen] = useState(false);
-  const [triageDialog, setTriageDialog] = useState<TriageDialogState | null>(null);
-  const [resolveDialog, setResolveDialog] = useState<ResolveDialogState | null>(null);
 
   async function load() {
     setBusy(true);
     setError(null);
     try {
-      const query = new URLSearchParams();
-      if (statusFilter !== "ALL") query.set("status", statusFilter);
-      if (unclaimedOnly) query.set("unclaimed_only", "true");
-      const suffix = query.toString() ? `?${query.toString()}` : "";
-      const response = await api<{ items: Incident[] }>(`/incidents${suffix}`);
+      const response = await api<{ items: Incident[] }>("/incidents?limit=1000");
       const nextItems = response.items ?? [];
-
-      const [classificationResponse, usersResponse] = await Promise.all([
-        api<IncidentClassificationQueryResponse>("/incident-classifications/query", {
-          method: "POST",
-          body: JSON.stringify({ incident_ids: nextItems.map((incident) => incident.id) }),
-        }),
-        isAdmin ? api<{ items: AdminUser[] }>("/admin/users") : Promise.resolve(null),
+      const [classificationResponse, assessmentResponse] = await Promise.all([
+        nextItems.length
+          ? api<IncidentClassificationQueryResponse>("/incident-classifications/query", { method: "POST", body: JSON.stringify({ incident_ids: nextItems.map((incident) => incident.id) }) })
+          : Promise.resolve({ items: [] } as IncidentClassificationQueryResponse),
+        operational ? listAssessments({ limit: 1000 }).catch(() => ({ items: [] as Assessment[] })) : Promise.resolve({ items: [] as Assessment[] }),
       ]);
-
       setItems(nextItems);
-      setClassifications(
-        Object.fromEntries((classificationResponse.items ?? []).map((classification) => [classification.incident_id, classification]))
-      );
-      if (usersResponse) setUsers(usersResponse.items ?? []);
+      setClassifications(Object.fromEntries((classificationResponse.items ?? []).map((classification) => [classification.incident_id, classification])));
+      setAssessmentsByIncident(Object.fromEntries((assessmentResponse.items ?? []).map((assessment) => [assessment.incident_id, assessment])));
     } catch (e: any) {
       setError(e?.message ?? "Failed to load incidents.");
     } finally {
@@ -99,21 +95,43 @@ export default function IncidentsOperationsPage() {
   }
 
   useEffect(() => {
-    load();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, unclaimedOnly]);
+  }, []);
 
-  const assignableUsers = useMemo(
-    () => users.filter((user) => user.is_active && (user.roles.includes("FIELD_WORKER") || user.roles.includes("ADMIN"))),
-    [users]
-  );
+  // Deep link: /incidents/:id highlights and scrolls to the row (switching tab if needed).
+  useEffect(() => {
+    if (highlightId == null) return;
+    const target = items.find((incident) => incident.id === highlightId);
+    if (!target) return;
+    setTab(target.current_stage === "COORDINATOR_REVIEW" ? "intake" : "records");
+    const timer = window.setTimeout(() => {
+      rowRefs.current[highlightId]?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [highlightId, items]);
+
+  const intakeCount = useMemo(() => items.filter((incident) => incident.current_stage === "COORDINATOR_REVIEW").length, [items]);
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return items.filter((incident) => {
+      const intake = incident.current_stage === "COORDINATOR_REVIEW";
+      if (tab === "intake" ? !intake : intake) return false;
+      if (statusFilter !== "ALL" && incident.status !== statusFilter) return false;
+      if (unclaimedOnly && incident.assignment) return false;
+      if (!needle) return true;
+      return [incident.id, incident.title, incident.description, incident.district, incident.county, incident.route, incident.post_mile]
+        .filter((value) => value != null)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [items, query, statusFilter, tab, unclaimedOnly]);
 
   function addPendingFiles(files: FileList | null) {
     if (!files?.length) return;
-    const next = Array.from(files).map((file) => ({
-      file,
-      kind: inferIncidentAttachmentKind(file.name, file.type),
-    }));
+    const next = Array.from(files).map((file) => ({ file, kind: inferIncidentAttachmentKind(file.name, file.type) }));
     setPendingFiles((previous) => [...previous, ...next]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -130,12 +148,9 @@ export default function IncidentsOperationsPage() {
     for (const pending of pendingFiles) {
       const formData = new FormData();
       formData.append("file", pending.file, pending.file.name);
-      const query = new URLSearchParams({ kind: pending.kind }).toString();
+      const suffix = new URLSearchParams({ kind: pending.kind }).toString();
       try {
-        await api(`/incidents/${incidentId}/attachments?${query}`, {
-          method: "POST",
-          body: formData,
-        });
+        await api(`/incidents/${incidentId}/attachments?${suffix}`, { method: "POST", body: formData });
       } catch (e: any) {
         failures.push(`${pending.file.name}: ${e?.message ?? "Upload failed"}`);
       }
@@ -145,20 +160,11 @@ export default function IncidentsOperationsPage() {
 
   async function createIncident() {
     setNotice(null);
-    if (!form.title.trim()) {
-      setError("Incident title is required.");
-      return;
-    }
-    if (!form.first_observed_at.trim()) {
-      setError("First observed date/time is required.");
-      return;
-    }
+    if (!form.title.trim()) { setError("Incident title is required."); return; }
+    if (!form.first_observed_at.trim()) { setError("First observed date/time is required."); return; }
     const latitude = normalizeCoordinateValue(form.latitude);
     const longitude = normalizeCoordinateValue(form.longitude);
-    if (latitude == null || longitude == null) {
-      setError("Latitude and longitude must be valid numbers.");
-      return;
-    }
+    if (latitude == null || longitude == null) { setError("Latitude and longitude must be valid numbers."); return; }
 
     setBusy(true);
     setError(null);
@@ -182,15 +188,14 @@ export default function IncidentsOperationsPage() {
       const uploadFailures = await uploadPendingIncidentFiles(created.incident.id);
       resetCreateIncidentForm();
       await load();
+      setTab("intake");
       if (selectedFileCount > 0) {
         const uploadedCount = selectedFileCount - uploadFailures.length;
-        setNotice(
-          uploadFailures.length
-            ? `Incident created. ${uploadedCount} of ${selectedFileCount} files uploaded. ${uploadFailures.slice(0, 2).join(" ")}`
-            : `Incident created with ${selectedFileCount} attached file${selectedFileCount === 1 ? "" : "s"}.`
-        );
+        setNotice(uploadFailures.length
+          ? `Incident reported. ${uploadedCount} of ${selectedFileCount} files uploaded. ${uploadFailures.slice(0, 2).join(" ")}`
+          : `Incident reported with ${selectedFileCount} attached file${selectedFileCount === 1 ? "" : "s"}. It is awaiting coordinator intake.`);
       } else {
-        setNotice("Incident created.");
+        setNotice("Incident reported. It is awaiting coordinator intake.");
       }
     } catch (e: any) {
       setError(e?.message ?? "Failed to create incident.");
@@ -199,93 +204,44 @@ export default function IncidentsOperationsPage() {
     }
   }
 
-  async function assignIncident(incidentId: number) {
-    const assignee = Number(assignByIncidentId[incidentId]);
-    if (!assignee) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await api<{ linked_submission_id: number }>(`/incidents/${incidentId}/assign`, {
-        method: "POST",
-        body: JSON.stringify({ assignee_user_id: assignee }),
-      });
-      await load();
-      if (response.linked_submission_id) navigate(`/submissions/${response.linked_submission_id}`);
-    } catch (e: any) {
-      setError(e?.message ?? "Assign failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function unassignIncident(incidentId: number) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api(`/incidents/${incidentId}/unassign`, { method: "POST" });
-      await load();
-    } catch (e: any) {
-      setError(e?.message ?? "Unassign failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmResolveIncident() {
-    if (!resolveDialog) return;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      await api(`/incidents/${resolveDialog.incidentId}/resolve`, {
-        method: "POST",
-        body: JSON.stringify({ comment: resolveDialog.comment.trim() || null }),
-      });
-      setNotice(`Incident #${resolveDialog.incidentId} resolved.`);
-      setResolveDialog(null);
-      await load();
-    } catch (e: any) {
-      setError(e?.message ?? "Resolve failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmTriageIncident() {
-    if (!triageDialog) return;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      await triageIncident(triageDialog.incidentId, {
-        disposition: triageDialog.disposition,
-        notes: triageDialog.notes.trim() || undefined,
-      });
-      setNotice(`Triage recorded for incident #${triageDialog.incidentId}.`);
-      setTriageDialog(null);
-      await load();
-    } catch (e: any) {
-      setError(e?.message ?? "Triage failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const tabButton = (key: Tab, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(key)}
+      className={`whitespace-nowrap px-4 py-2 text-sm font-semibold ${key === "intake" ? "border-l border-[var(--line)]" : ""} ${tab === key ? "bg-[var(--brand)] text-white" : "bg-[var(--panel)] text-[var(--ink)] hover:bg-[var(--panel-soft)]"}`}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <AppShell title="Incidents">
-      <div className="flex h-full flex-col gap-4 p-4 md:p-5">
-        <div className="flex flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-sm font-semibold">Incident operations</div>
-            <div className="mt-1 text-sm text-muted">Create, triage, assign, and resolve emergency incidents without leaving ERIS.</div>
+      <div className="grid gap-4 p-4 md:p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-[var(--line)]">
+            {tabButton("records", `Incident records (${items.length - intakeCount})`)}
+            {tabButton("intake", `Awaiting intake (${intakeCount})`)}
           </div>
-          <button
-            type="button"
-            onClick={() => setCreatePanelOpen((open) => !open)}
-            className="self-start rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95 md:self-auto"
-          >
-            {createPanelOpen ? "Close new incident" : "New incident"}
-          </button>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, county, route, or description" className="min-w-[220px] flex-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "ALL" | IncidentStatus)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
+            <option value="ALL">All statuses</option>
+            <option value="NEW">New</option>
+            <option value="IN_PROGRESS">In progress</option>
+            <option value="RESOLVED">Resolved</option>
+          </select>
+          <label className="inline-flex items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
+            <input type="checkbox" checked={unclaimedOnly} onChange={(event) => setUnclaimedOnly(event.target.checked)} />
+            Unclaimed only
+          </label>
+          <span className="text-xs text-muted">{visible.length} of {items.length} incidents</span>
+          <div className="ml-auto flex gap-2">
+            {canReportIncident(me?.roles) ? (
+              <button type="button" onClick={() => setCreatePanelOpen((open) => !open)} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95">
+                {createPanelOpen ? "Close report" : "New incident"}
+              </button>
+            ) : null}
+            <button type="button" onClick={load} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{busy ? "Refreshing…" : "Refresh"}</button>
+          </div>
         </div>
 
         {createPanelOpen ? (
@@ -302,147 +258,73 @@ export default function IncidentsOperationsPage() {
           />
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as "ALL" | IncidentStatus)}
-            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
-          >
-            <option value="ALL">All statuses</option>
-            <option value="NEW">New</option>
-            <option value="IN_PROGRESS">In progress</option>
-            <option value="RESOLVED">Resolved</option>
-          </select>
-          <label className="inline-flex items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
-            <input type="checkbox" checked={unclaimedOnly} onChange={(event) => setUnclaimedOnly(event.target.checked)} />
-            Unclaimed only
-          </label>
-          <button
-            type="button"
-            onClick={load}
-            disabled={busy}
-            className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50"
-          >
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+        {tab === "intake" ? (
+          <div className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_8%,transparent)] px-3 py-2 text-sm">
+            <b>These field reports are not yet part of the ERIS incident record.</b> They were reported from the field and are waiting for a Maintenance Coordinator to review them, decide their Event Group, and accept them into the system — done from the coordinator's <Link to="/my-work" className="font-medium text-[var(--brand)] hover:underline">My Work</Link> queue.
+          </div>
+        ) : (
+          <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
+            Read-only record view. Triage, routing, and assignment actions live in <Link to="/my-work" className="font-medium text-[var(--brand)] hover:underline">My Work</Link>, gated by your role.
+          </div>
+        )}
 
-        {error ? (
-          <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div>
-        ) : null}
-        {notice ? (
-          <div className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div>
-        ) : null}
+        {error ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
+        {notice ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div> : null}
 
-        <div className="flex-1 overflow-auto rounded-xl border border-[var(--line)] bg-[var(--panel)]">
+        <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--panel)]">
           <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b border-[var(--line)] bg-[var(--panel-soft)] text-left text-xs font-semibold uppercase tracking-wide text-muted">
+              <tr className="border-b border-[var(--line)] bg-[var(--panel-soft)] text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
                 <th className="px-3 py-3">ID</th>
                 <th className="px-3 py-3">Incident</th>
                 <th className="px-3 py-3">Location</th>
                 <th className="px-3 py-3">Status</th>
                 <th className="px-3 py-3">Assignment</th>
-                <th className="px-3 py-3">Linked Submission</th>
-                <th className="px-3 py-3 text-right">Actions</th>
+                <th className="px-3 py-3">Assessment / Submission</th>
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-8 text-sm text-muted" colSpan={7}>{busy ? "Loading incidents…" : "No incidents match the current filters."}</td>
-                </tr>
-              ) : (
-                items.map((incident) => (
-                  <tr key={incident.id} className="border-b border-[var(--line)]/60 align-top last:border-b-0 hover:bg-[var(--panel-soft)]">
+              {visible.length === 0 ? (
+                <tr><td className="px-3 py-8 text-center text-sm text-muted" colSpan={6}>{busy ? "Loading incidents…" : "No incidents match the current filters."}</td></tr>
+              ) : visible.map((incident) => {
+                const assessment = assessmentsByIncident[incident.id];
+                const submissionIds = assessment ? submissionIdsOf(assessment) : (incident.linked_submission_id ? [incident.linked_submission_id] : []);
+                const highlighted = highlightId === incident.id;
+                return (
+                  <tr
+                    key={incident.id}
+                    ref={(element) => { rowRefs.current[incident.id] = element; }}
+                    className="border-b border-[var(--line)]/60 align-top last:border-b-0"
+                    style={highlighted ? { background: "color-mix(in oklab, var(--brand) 7%, var(--panel))", boxShadow: "inset 3px 0 0 var(--brand)" } : undefined}
+                  >
                     <td className="px-3 py-3 text-sm font-semibold tabular-nums">#{incident.id}</td>
                     <td className="px-3 py-3 text-sm">
                       <div className="font-semibold">{incident.title || `Incident #${incident.id}`}</div>
                       <IncidentClassificationText classification={classifications[incident.id]} />
+                      {incident.event_group_id != null ? <div className="mt-1 text-[11px]"><Link to={`/event-groups/${incident.event_group_id}`} className="text-[var(--brand)] hover:underline">Event Group #{incident.event_group_id}</Link></div> : null}
                     </td>
-                    <td className="px-3 py-3 text-sm text-muted tabular-nums">{formatCoordinate(incident.latitude)}, {formatCoordinate(incident.longitude)}</td>
+                    <td className="px-3 py-3 text-sm text-muted">
+                      <div className="tabular-nums">{formatCoordinate(incident.latitude)}, {formatCoordinate(incident.longitude)}</div>
+                      <div className="mt-0.5 text-xs">{eventGroupLocationLabel(incident)}</div>
+                      {incident.event_group_id != null ? <div className="mt-1 text-xs"><Link to={`/mission-center/${incident.event_group_id}/${incident.id}`} className="text-[var(--brand)] hover:underline">View on map</Link></div> : null}
+                    </td>
                     <td className="px-3 py-3 text-sm"><IncidentStatusBadge status={incident.status} /></td>
                     <td className="px-3 py-3 text-sm text-muted">{incident.assignment ? incident.assignment.assignee_name || incident.assignment.assignee_email : "Unassigned"}</td>
                     <td className="px-3 py-3 text-sm">
-                      {incident.linked_submission_id ? (
-                        <button type="button" onClick={() => navigate(`/submissions/${incident.linked_submission_id}`)} className="font-semibold text-[var(--brand)] hover:underline">#{incident.linked_submission_id}</button>
-                      ) : (
-                        <span className="text-muted">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      <div className="inline-flex flex-wrap justify-end gap-1.5">
-                        <button type="button" onClick={() => setWorkflowIncidentId(incident.id)} className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs font-semibold hover:bg-[var(--panel-soft)]">Workflow</button>
-                        {canTriage(me?.roles) && incident.current_stage === "COORDINATOR_REVIEW" ? (
-                          <button
-                            type="button"
-                            onClick={() => setTriageDialog({ incidentId: incident.id, disposition: "ASSESSMENT_REQUIRED", notes: "" })}
-                            className="rounded border border-[color:color-mix(in_oklab,var(--brand)_48%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] px-2 py-1 text-xs font-semibold text-[var(--brand)] hover:brightness-95"
-                          >
-                            Triage
-                          </button>
-                        ) : null}
-                        {isAdmin ? (
-                          <>
-                            <select
-                              value={assignByIncidentId[incident.id] ?? ""}
-                              onChange={(event) => setAssignByIncidentId((previous) => ({ ...previous, [incident.id]: event.target.value }))}
-                              className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs"
-                            >
-                              <option value="">Assign user…</option>
-                              {assignableUsers.map((user) => <option key={user.id} value={String(user.id)}>{user.full_name}</option>)}
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => assignIncident(incident.id)}
-                              disabled={!assignByIncidentId[incident.id] || busy}
-                              className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs font-medium hover:bg-[var(--panel-soft)] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Assign
-                            </button>
-                            {incident.assignment ? (
-                              <button type="button" onClick={() => unassignIncident(incident.id)} disabled={busy} className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Unassign</button>
-                            ) : null}
-                          </>
-                        ) : null}
-                        {incident.status !== "RESOLVED" ? (
-                          <button
-                            type="button"
-                            onClick={() => setResolveDialog({ incidentId: incident.id, comment: "" })}
-                            className="rounded border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_9%,transparent)] px-2 py-1 text-xs font-semibold text-[var(--good)] hover:brightness-95"
-                          >
-                            Resolve
-                          </button>
-                        ) : null}
-                      </div>
+                      {assessment ? (
+                        <div className="flex flex-wrap items-center gap-1.5"><Link to={`/assessments/${assessment.id}`} className="font-semibold text-[var(--brand)] hover:underline">AS #{assessment.id}</Link><AssessmentStateBadge state={assessment.state} mini /></div>
+                      ) : <span className="text-muted">No assessment</span>}
+                      {submissionIds.length ? (
+                        <div className="mt-1 flex flex-wrap gap-2 text-xs">{submissionIds.map((submissionId) => <Link key={submissionId} to={`/submissions/${submissionId}`} className="text-[var(--brand)] hover:underline">Sub #{submissionId}</Link>)}</div>
+                      ) : null}
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
-
-      {workflowIncidentId != null ? <WorkflowTreeModal incidentId={workflowIncidentId} onClose={() => setWorkflowIncidentId(null)} /> : null}
-      {triageDialog ? (
-        <IncidentTriageDialog
-          state={triageDialog}
-          busy={busy}
-          onChange={setTriageDialog}
-          onClose={() => setTriageDialog(null)}
-          onConfirm={confirmTriageIncident}
-        />
-      ) : null}
-      {resolveDialog ? (
-        <IncidentResolveDialog
-          state={resolveDialog}
-          busy={busy}
-          onChange={setResolveDialog}
-          onClose={() => setResolveDialog(null)}
-          onConfirm={confirmResolveIncident}
-        />
-      ) : null}
     </AppShell>
   );
 }

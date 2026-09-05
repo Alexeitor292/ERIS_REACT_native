@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import type { SubmissionPermissionGrant, SubmissionPermissionUser } from "../../api/types";
-import { Section } from "./SubmissionDetailPrimitives";
+import { SubmissionDetailCard } from "./SubmissionDetailPrimitives";
 import { filterShareCandidates, shareUserLabel } from "./submissionAccessSharingModel";
 
 export default function SubmissionAccessSharing({
@@ -28,17 +28,16 @@ export default function SubmissionAccessSharing({
   const searching = query.trim().length > 0;
 
   return (
-    <Section title="Access Sharing">
-      <p className="mb-3 text-sm text-muted">
-        Grant read access to this submission without changing ownership or edit permissions.
-      </p>
-
+    <SubmissionDetailCard
+      title="Access Sharing"
+      subtitle="Grant read access to this submission without changing ownership or edit permissions."
+    >
       <label className="block">
         <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Find a user</span>
         <input
           type="search"
           autoComplete="off"
-          className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]"
+          className="w-full rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]"
           placeholder="Search by name or email"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
@@ -101,6 +100,6 @@ export default function SubmissionAccessSharing({
           ))}
         </div>
       )}
-    </Section>
+    </SubmissionDetailCard>
   );
 }

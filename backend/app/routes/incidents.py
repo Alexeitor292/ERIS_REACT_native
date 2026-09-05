@@ -663,7 +663,7 @@ def _incident_with_assignment(db: Session, incident_id: int):
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.road_inventory_dataset_version_id, i.road_inventory_segment_id,
               i.road_inventory_snapshot_json, i.road_inventory_match_method, i.road_inventory_checked_at,
-              i.office_code, i.current_stage,
+              i.office_code, i.current_stage, i.event_group_id, i.incident_key,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,
               i.triage_disposition, i.triage_decided_by_user_id, i.triage_decided_at,
@@ -786,6 +786,8 @@ def _serialize_incident(row: dict) -> dict:
         "post_mile": row["post_mile"],
         "office_code": row["office_code"],
         "current_stage": row["current_stage"],
+        "event_group_id": int(row["event_group_id"]) if row.get("event_group_id") is not None else None,
+        "incident_key": row.get("incident_key"),
         "status": row["status"],
         "reporter_user_id": int(row["reporter_user_id"]),
         "created_at": row["created_at"],
@@ -893,6 +895,31 @@ def _ensure_linked_submission(
         )
         return int(existing)
 
+    return _create_linked_submission(
+        db=db,
+        incident_row=incident_row,
+        assignee_user_id=assignee_user_id,
+        actor_user_id=actor_user_id,
+    )
+
+
+
+def _create_linked_submission(
+    *,
+    db: Session,
+    incident_row: dict,
+    assignee_user_id: int,
+    actor_user_id: int,
+    link_incident: bool = True,
+) -> int:
+    """Create a DRAFT technical submission pre-filled from an incident.
+
+    ``link_incident`` records the incident's primary ``incident_submission_links``
+    row (one per incident). Supplemental submissions created for an assessment
+    pass ``link_incident=False`` and are linked through ``assessment_submissions``
+    instead, so an assessment can carry several technical forms.
+    """
+    ri_dvid = incident_row.get("road_inventory_dataset_version_id")
     title = f"Incident #{int(incident_row['id'])}: {incident_row['title']}"
     db.execute(
         text(
@@ -990,15 +1017,16 @@ def _ensure_linked_submission(
         },
     )
 
-    db.execute(
-        text(
-            """
-            INSERT INTO incident_submission_links (incident_id, submission_id, linked_by_user_id)
-            VALUES (:iid, :sid, :uid)
-            """
-        ),
-        {"iid": int(incident_row["id"]), "sid": submission_id, "uid": actor_user_id},
-    )
+    if link_incident:
+        db.execute(
+            text(
+                """
+                INSERT INTO incident_submission_links (incident_id, submission_id, linked_by_user_id)
+                VALUES (:iid, :sid, :uid)
+                """
+            ),
+            {"iid": int(incident_row["id"]), "sid": submission_id, "uid": actor_user_id},
+        )
     reporter_uid = int(incident_row["reporter_user_id"])
     if reporter_uid != assignee_user_id:
         db.execute(
@@ -1565,7 +1593,7 @@ def list_incidents(
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.road_inventory_dataset_version_id, i.road_inventory_segment_id,
               i.road_inventory_snapshot_json, i.road_inventory_match_method, i.road_inventory_checked_at,
-              i.office_code, i.current_stage,
+              i.office_code, i.current_stage, i.event_group_id, i.incident_key,
               i.status, i.reporter_user_id, i.created_at, i.updated_at,
               i.resolved_at, i.resolved_by_user_id, i.resolution_comment,
               i.triage_disposition, i.triage_decided_by_user_id, i.triage_decided_at,

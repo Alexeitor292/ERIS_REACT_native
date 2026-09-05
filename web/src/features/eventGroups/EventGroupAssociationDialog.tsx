@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../../api/client";
 import ModalDialog from "../../ui/ModalDialog";
-import type { EventGroupIncidentSummary, EventGroupSummary } from "./eventGroupTypes";
+import EventGroupTriageMap from "./EventGroupTriageMap";
+import type { EventGroupDetailResponse, EventGroupIncidentSummary, EventGroupSummary } from "./eventGroupTypes";
 import { eventGroupLocationLabel } from "./eventGroupTypes";
 
 const MILES_TO_METERS = 1609.344;
@@ -46,6 +47,14 @@ function generatedTitle(incident: EventGroupIncidentSummary | undefined): string
   return parts.length ? `${parts.join(" · ")} Event Group` : `Incident #${incident.id} Event Group`;
 }
 
+const inputClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal normal-case text-[var(--ink)] outline-none focus:ring-2 focus:ring-[var(--brand)]";
+
+/**
+ * Step 1 of coordinator triage: confirm the Event Group context. Nearby open groups
+ * are listed by distance beside a map that shows the new report, the groups, and
+ * the selected group's existing incidents. "Starts its own event" creates a new
+ * Event Group. The decision is saved before the disposition step.
+ */
 export default function EventGroupAssociationDialog({
   incidentId,
   onClose,
@@ -57,9 +66,10 @@ export default function EventGroupAssociationDialog({
 }) {
   const [context, setContext] = useState<ContextResponse | null>(null);
   const [groups, setGroups] = useState<NearbyEventGroup[]>([]);
-  const [radiusMiles, setRadiusMiles] = useState(5);
+  const [radiusMiles, setRadiusMiles] = useState(25);
   const [mode, setMode] = useState<"EXISTING" | "CREATE_NEW">("EXISTING");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedIncidents, setSelectedIncidents] = useState<EventGroupIncidentSummary[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
@@ -95,14 +105,28 @@ export default function EventGroupAssociationDialog({
   }
 
   useEffect(() => {
-    load(5);
+    load(25);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incidentId]);
+
+  // Preview the selected group's existing incidents on the map.
+  useEffect(() => {
+    if (selectedId == null || mode !== "EXISTING") { setSelectedIncidents([]); return; }
+    let cancelled = false;
+    api<EventGroupDetailResponse>(`/event-groups/${selectedId}`)
+      .then((detail) => { if (!cancelled) setSelectedIncidents(detail.incidents ?? []); })
+      .catch(() => { if (!cancelled) setSelectedIncidents([]); });
+    return () => { cancelled = true; };
+  }, [mode, selectedId]);
 
   const selected = useMemo(
     () => groups.find((group) => group.id === selectedId) ?? (context?.event_group?.id === selectedId ? context.event_group : null),
     [context?.event_group, groups, selectedId],
   );
+  const mapGroups = useMemo<EventGroupSummary[]>(() => {
+    if (context?.event_group && !groups.some((group) => group.id === context.event_group!.id)) return [context.event_group, ...groups];
+    return groups;
+  }, [context?.event_group, groups]);
 
   async function associate() {
     if (!context?.can_change_association) return;
@@ -117,12 +141,7 @@ export default function EventGroupAssociationDialog({
         method: "POST",
         body: JSON.stringify(mode === "EXISTING"
           ? { mode, event_group_id: selectedId, notes: notes.trim() || null }
-          : {
-              mode,
-              title: title.trim() || null,
-              description: description.trim() || null,
-              notes: notes.trim() || null,
-            }),
+          : { mode, title: title.trim() || null, description: description.trim() || null, notes: notes.trim() || null }),
       });
       await load(radiusMiles);
     } catch (e: any) {
@@ -132,70 +151,90 @@ export default function EventGroupAssociationDialog({
     }
   }
 
+  const incident = context?.incident ?? null;
+  const decisionSaved = !!context?.event_group;
+
   return (
     <ModalDialog
       titleId="event-group-association-title"
       descriptionId="event-group-association-description"
       busy={busy}
       onClose={onClose}
-      panelClassName="w-full max-w-5xl rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5 shadow-2xl"
+      panelClassName="flex max-h-[92vh] w-full max-w-6xl flex-col rounded-xl border border-[var(--line)] bg-[var(--panel)] shadow-2xl"
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 border-b border-[var(--line)] px-5 py-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Coordinator review</div>
-          <h2 id="event-group-association-title" className="mt-1 text-xl font-semibold">Event Group for Incident #{incidentId}</h2>
-          <p id="event-group-association-description" className="mt-1 max-w-3xl text-sm text-muted">An Event Group is shared context, not a parent record. This Incident keeps its own identity and history regardless of which Event Group is selected.</p>
+          <h2 id="event-group-association-title" className="text-base font-semibold">Event Group review — incident #{incidentId}</h2>
+          <p id="event-group-association-description" className="mt-1 max-w-3xl text-[13px] text-muted">Confirm shared-event context before triage. Accepting the report records the Event Group decision and enters the incident into ERIS.</p>
         </div>
-        <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] px-3 py-2 text-sm font-medium">Close</button>
+        <button type="button" onClick={onClose} disabled={busy} aria-label="Close dialog" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-sm font-semibold hover:bg-[var(--panel-soft)] disabled:opacity-50">×</button>
       </div>
 
-      {error ? <div className="mt-4 rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {error ? <div className="mb-4 rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
 
-      {!context ? <div className="py-12 text-center text-sm text-muted">Loading Event Group context…</div> : (
-        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)]">
-          <div>
-            <div className="flex items-center justify-between gap-3">
-              <div><div className="text-sm font-semibold">Nearby Event Groups</div><div className="text-xs text-muted">Open groups ranked by the closest associated Incident.</div></div>
-              <select value={radiusMiles} onChange={(event) => { const next = Number(event.target.value); setRadiusMiles(next); void load(next); }} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1.5 text-xs">
-                <option value={5}>5 miles</option><option value={10}>10 miles</option><option value={25}>25 miles</option><option value={50}>50 miles</option>
-              </select>
+        {!context ? <div className="py-12 text-center text-sm text-muted">Loading Event Group context…</div> : (
+          <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.4fr)]">
+            <div className="grid content-start gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">Nearby open Event Groups</div>
+                <select value={radiusMiles} onChange={(event) => { const next = Number(event.target.value); setRadiusMiles(next); void load(next); }} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1.5 text-xs">
+                  <option value={5}>5 miles</option><option value={10}>10 miles</option><option value={25}>25 miles</option><option value={50}>50 miles</option>
+                </select>
+              </div>
+              <div className="grid max-h-[52vh] content-start gap-2 overflow-auto pr-1">
+                <label className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 ${mode === "CREATE_NEW" ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]" : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}>
+                  <input type="radio" name="event-group-decision" checked={mode === "CREATE_NEW"} onChange={() => setMode("CREATE_NEW")} className="mt-0.5" />
+                  <span><span className="block text-sm font-semibold">Starts its own event</span><span className="mt-0.5 block text-xs text-muted">No existing Event Group covers this occurrence — ERIS creates a new one.</span></span>
+                </label>
+                {groups.length === 0 ? <div className="rounded-lg border border-dashed border-[var(--line)] p-4 text-sm text-muted">No open Event Groups within {radiusMiles} miles.</div> : groups.map((group) => {
+                  const active = mode === "EXISTING" && selectedId === group.id;
+                  return (
+                    <label key={group.id} className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 ${active ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]" : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}>
+                      <input type="radio" name="event-group-decision" checked={active} onChange={() => { setMode("EXISTING"); setSelectedId(group.id); }} className="mt-0.5" />
+                      <span className="min-w-0"><span className="block text-sm font-semibold">{group.title}</span><span className="mt-0.5 block text-xs text-muted">#{group.id} · {eventGroupLocationLabel(group)} · {group.incident_count} incident{group.incident_count === 1 ? "" : "s"} · {distanceLabel(group.nearest_distance_m)}</span></span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {mode === "CREATE_NEW" ? (
+                <div className="grid gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3">
+                  <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">Event Group title<input value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass} /></label>
+                  <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} className={inputClass} /></label>
+                </div>
+              ) : null}
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">Coordinator note<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} className={inputClass} /></label>
+              <button type="button" onClick={associate} disabled={busy || !context.can_change_association || (mode === "EXISTING" && !selectedId)} className="rounded-md border border-[var(--brand)] px-3 py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))] disabled:opacity-50">
+                {busy ? "Saving…" : mode === "CREATE_NEW" ? "Create Event Group and record decision" : "Record decision · use selected Event Group"}
+              </button>
+              {decisionSaved ? <div className="text-xs text-[var(--good)]">Decision recorded: {context.event_group!.title}</div> : <div className="text-xs text-muted">Record the decision to continue to triage.</div>}
             </div>
-            <div className="mt-3 max-h-[420px] space-y-2 overflow-auto pr-1">
-              {groups.length === 0 ? <div className="rounded-lg border border-dashed border-[var(--line)] p-5 text-sm text-muted">No open Event Groups found nearby. ERIS can create a new one for this Incident.</div> : groups.map((group) => (
-                <button key={group.id} type="button" onClick={() => { setMode("EXISTING"); setSelectedId(group.id); }} className={`w-full rounded-lg border p-3 text-left ${mode === "EXISTING" && selectedId === group.id ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_10%,var(--panel))]" : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}>
-                  <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-semibold">{group.title}</div><div className="mt-1 text-xs text-muted">{eventGroupLocationLabel(group)}</div></div><div className="text-xs font-semibold text-[var(--brand)]">{distanceLabel(group.nearest_distance_m)}</div></div>
-                  <div className="mt-2 text-xs text-muted">{group.incident_count} associated Incident{group.incident_count === 1 ? "" : "s"} · {group.open_incident_count} active</div>
-                </button>
-              ))}
+
+            <div className="min-w-0">
+              <EventGroupTriageMap
+                incident={incident ? { id: incident.id, latitude: incident.latitude, longitude: incident.longitude, title: incident.title } : null}
+                groups={mapGroups}
+                selectedGroupId={mode === "EXISTING" ? selectedId : null}
+                selectedIncidents={selectedIncidents}
+                onSelectGroup={(groupId) => { setMode("EXISTING"); setSelectedId(groupId); }}
+                height={380}
+              />
+              {selected && mode === "EXISTING" ? (
+                <div className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-sm">
+                  <div className="font-semibold">{selected.title}</div>
+                  <div className="mt-0.5 text-xs text-muted">{eventGroupLocationLabel(selected)} · {selected.incident_count} incident{selected.incident_count === 1 ? "" : "s"} · {selected.open_incident_count} active</div>
+                  {selected.description ? <p className="mt-1.5 text-xs text-muted">{selected.description}</p> : null}
+                </div>
+              ) : null}
             </div>
           </div>
+        )}
+      </div>
 
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-4">
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--panel)] p-1">
-              <button type="button" onClick={() => setMode("EXISTING")} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode === "EXISTING" ? "bg-[var(--panel-soft)]" : "text-muted"}`}>Existing group</button>
-              <button type="button" onClick={() => setMode("CREATE_NEW")} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode === "CREATE_NEW" ? "bg-[var(--panel-soft)]" : "text-muted"}`}>New group</button>
-            </div>
-
-            {mode === "EXISTING" ? (
-              <div className="mt-4 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3">
-                {selected ? <><div className="text-sm font-semibold">{selected.title}</div><div className="mt-1 text-xs text-muted">{eventGroupLocationLabel(selected)}</div></> : <div className="text-sm text-muted">Select an Event Group from the list.</div>}
-              </div>
-            ) : (
-              <div className="mt-4 grid gap-3">
-                <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">Event Group title<input value={title} onChange={(event) => setTitle(event.target.value)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal normal-case text-[var(--ink)]" /></label>
-                <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal normal-case text-[var(--ink)]" /></label>
-              </div>
-            )}
-
-            <label className="mt-3 grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">Coordinator note<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal normal-case text-[var(--ink)]" /></label>
-            <button type="button" onClick={associate} disabled={busy || !context.can_change_association || (mode === "EXISTING" && !selectedId)} className="mt-4 w-full rounded-md bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : mode === "CREATE_NEW" ? "Create Event Group and associate" : "Use selected Event Group"}</button>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
-        <div className="text-sm text-muted">{context?.event_group ? `Selected: ${context.event_group.title}` : "If no existing group applies, create a new Event Group."}</div>
-        <button type="button" onClick={() => onContinueToTriage(incidentId)} disabled={!context?.event_group || busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Continue to triage</button>
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--line)] px-5 py-3">
+        <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
+        <button type="button" onClick={() => onContinueToTriage(incidentId)} disabled={!decisionSaved || busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">Continue to triage</button>
       </div>
     </ModalDialog>
   );

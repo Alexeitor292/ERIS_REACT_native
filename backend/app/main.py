@@ -2141,6 +2141,34 @@ def get_submission(
 
     photo_items = [dict(a) for a in attachments if str(a["kind"]).upper() == "PHOTO"]
 
+    # Workflow context: the incident this technical form belongs to, its
+    # assessment, and the incident's Event Group — so the web detail view can
+    # cross-link without extra round trips. A submission is attached either as
+    # the incident's primary link or as a supplemental assessment submission.
+    context_row = db.execute(text("""
+        SELECT i.id AS incident_id, i.event_group_id, i.title AS incident_title,
+               a.id AS assessment_id, a.state AS assessment_state
+        FROM (
+            SELECT incident_id FROM incident_submission_links WHERE submission_id = :sid
+            UNION
+            SELECT a2.incident_id FROM assessment_submissions s
+            JOIN assessments a2 ON a2.id = s.assessment_id
+            WHERE s.submission_id = :sid
+        ) link
+        JOIN incidents i ON i.id = link.incident_id
+        LEFT JOIN assessments a ON a.incident_id = i.id
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+    context = None
+    if context_row:
+        context = {
+            "incident_id": int(context_row["incident_id"]),
+            "incident_title": context_row["incident_title"],
+            "event_group_id": int(context_row["event_group_id"]) if context_row["event_group_id"] is not None else None,
+            "assessment_id": int(context_row["assessment_id"]) if context_row["assessment_id"] is not None else None,
+            "assessment_state": context_row["assessment_state"],
+        }
+
     return {
         "submission": {
             **dict(sub),
@@ -2153,6 +2181,7 @@ def get_submission(
         "photos": photo_items,
         "attachments": [dict(a) for a in attachments],
         "workflow_events": [dict(e) for e in events],
+        "context": context,
     }
 
 

@@ -59,6 +59,24 @@ export function canAssignReviewer(roles: string[] | undefined): boolean {
   return isAdmin(roles) || hasRole(roles, "GEOTECH_OFFICE_CHIEF") || hasRole(roles, "GEOTECH_BRANCH_CHIEF");
 }
 
+export function isEngineer(roles: string[] | undefined): boolean {
+  return isAdmin(roles) || hasRole(roles, "GEOTECH_ENGINEER");
+}
+
+export function canFinalize(roles: string[] | undefined): boolean {
+  return canDelegateBranch(roles);
+}
+
+/** Roles that can have workflow steps waiting on them (My Work). */
+export function hasWorkQueue(roles: string[] | undefined): boolean {
+  return isOperationalUser(roles);
+}
+
+/** Roles allowed to file a new incident report from the web. */
+export function canReportIncident(roles: string[] | undefined): boolean {
+  return isAdmin(roles) || hasRole(roles, "MAINTENANCE_FIELD_WORKER") || hasRole(roles, "GEOTECH_ENGINEER");
+}
+
 // Human-readable assessment state label + badge color class.
 export function assessmentStateLabel(state: string): string {
   return (

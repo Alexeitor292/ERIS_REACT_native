@@ -46,6 +46,7 @@ from ..roles import (
 from ..schemas.common import (
     AssessmentAssignEngineerRequest,
     AssessmentAssignmentRequest,
+    AssessmentCreateSubmissionRequest,
     AssessmentDelegateBranchRequest,
     AssessmentFinalizeRequest,
     AssessmentReviewRequest,
@@ -82,12 +83,23 @@ ASSESSMENT_STATES = {
 # ---------------------------------------------------------------------------
 
 
-def _serialize_assessment(row: dict) -> dict:
+def _serialize_assessment(row: dict, submission_ids: list[int] | None = None) -> dict:
+    """Serialize an assessment row.
+
+    ``submission_id`` stays the latest/primary technical submission for backward
+    compatibility; ``submission_ids`` lists every technical submission attached
+    to the assessment (oldest first). Callers that already loaded the join rows
+    pass them in; otherwise the single legacy id is echoed.
+    """
+    primary = int(row["submission_id"]) if row.get("submission_id") is not None else None
+    if submission_ids is None:
+        submission_ids = [primary] if primary is not None else []
     return {
         "id": int(row["id"]),
         "assessment_uuid": row["assessment_uuid"],
         "incident_id": int(row["incident_id"]),
-        "submission_id": int(row["submission_id"]) if row.get("submission_id") is not None else None,
+        "submission_id": primary,
+        "submission_ids": list(submission_ids),
         "district": row.get("district"),
         "office_code": row.get("office_code"),
         "office_override_reason": row.get("office_override_reason"),
@@ -132,6 +144,64 @@ def _get_assessment_for_incident(db: Session, incident_id: int) -> dict | None:
         {"iid": incident_id},
     ).mappings().first()
     return dict(row) if row else None
+
+
+def _submission_ids_map(db: Session, assessment_ids: list[int]) -> dict[int, list[int]]:
+    """Batch-load every technical submission attached to the given assessments
+    (``assessment_submissions``), oldest first. Missing keys mean "none"."""
+    out: dict[int, list[int]] = {int(aid): [] for aid in assessment_ids}
+    if not out:
+        return out
+    params = {f"aid_{index}": aid for index, aid in enumerate(out)}
+    placeholders = ", ".join(f":aid_{index}" for index in range(len(out)))
+    rows = db.execute(
+        text(
+            f"""
+            SELECT assessment_id, submission_id
+            FROM assessment_submissions
+            WHERE assessment_id IN ({placeholders})
+            ORDER BY assessment_id ASC, id ASC
+            """
+        ),
+        params,
+    ).mappings().all()
+    for row in rows:
+        out.setdefault(int(row["assessment_id"]), []).append(int(row["submission_id"]))
+    return out
+
+
+def _submission_ids_for(db: Session, assessment: dict) -> list[int]:
+    ids = _submission_ids_map(db, [int(assessment["id"])]).get(int(assessment["id"]), [])
+    primary = assessment.get("submission_id")
+    if primary is not None and int(primary) not in ids:
+        ids.append(int(primary))
+    return ids
+
+
+def _assessment_payload(db: Session, assessment_id: int) -> dict:
+    assessment = _get_assessment(db, assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    return _serialize_assessment(assessment, _submission_ids_for(db, assessment))
+
+
+def _link_assessment_submission(db: Session, *, assessment_id: int, submission_id: int, actor_user_id: int) -> None:
+    """Attach a technical submission to an assessment (idempotent) and point the
+    legacy ``assessments.submission_id`` at the newest attached submission."""
+    db.execute(
+        text(
+            """
+            INSERT INTO assessment_submissions (assessment_id, submission_id, created_by_user_id)
+            VALUES (:aid, :sid, :actor)
+            ON DUPLICATE KEY UPDATE assessment_id = VALUES(assessment_id)
+            """
+        ),
+        {"aid": assessment_id, "sid": submission_id, "actor": actor_user_id},
+    )
+    db.execute(
+        text("UPDATE assessments SET submission_id = :sid, updated_at = NOW() WHERE id = :aid"),
+        {"sid": submission_id, "aid": assessment_id},
+    )
 
 
 def _record_event(
@@ -553,7 +623,7 @@ def _triage_assessment_required(
         notes=notes,
         metadata={"office_code": office_code, "override": bool(override_reason)},
     )
-    return {"assessment": _serialize_assessment(_get_assessment(db, assessment_id))}
+    return {"assessment": _assessment_payload(db, assessment_id)}
 
 
 def _triage_no_assessment(db: Session, incident: dict, actor_id: int, notes: str | None) -> dict:
@@ -774,7 +844,16 @@ def list_assessments(
         ),
         params,
     ).mappings().all()
-    return {"items": [_serialize_assessment(dict(r)) for r in rows], "requested_by_user_id": int(user["id"])}
+    items = [dict(r) for r in rows]
+    ids_map = _submission_ids_map(db, [int(item["id"]) for item in items])
+    serialized = []
+    for item in items:
+        ids = ids_map.get(int(item["id"]), [])
+        primary = item.get("submission_id")
+        if primary is not None and int(primary) not in ids:
+            ids = [*ids, int(primary)]
+        serialized.append(_serialize_assessment(item, ids))
+    return {"items": serialized, "requested_by_user_id": int(user["id"])}
 
 
 def _scope_office(user: dict, where: list[str], params: dict) -> None:
@@ -801,7 +880,7 @@ def get_assessment(
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
     return {
-        "assessment": _serialize_assessment(assessment),
+        "assessment": _serialize_assessment(assessment, _submission_ids_for(db, assessment)),
         "assignments": _active_assignments(db, assessment_id),
         "events": _assessment_events(db, assessment_id, int(assessment["incident_id"])),
     }
@@ -820,7 +899,7 @@ def get_assessment_for_incident(
         raise HTTPException(status_code=404, detail="No assessment for this incident")
     assessment_id = int(assessment["id"])
     return {
-        "assessment": _serialize_assessment(assessment),
+        "assessment": _serialize_assessment(assessment, _submission_ids_for(db, assessment)),
         "assignments": _active_assignments(db, assessment_id),
         "events": _assessment_events(db, assessment_id, incident_id),
     }
@@ -875,6 +954,7 @@ def delegate_branch(
         raise HTTPException(status_code=400, detail="Selected user is not a branch chief for this office")
 
     try:
+        notes = (payload.notes or "").strip() or None
         db.execute(
             text(
                 """
@@ -922,10 +1002,21 @@ def delegate_branch(
             event_type="OFFICE_DELEGATED",
             from_state=assessment["state"],
             to_state="PENDING_ENGINEER_ASSIGNMENT",
-            notes=(payload.notes or "").strip() or None,
+            notes=notes,
         )
+        if payload.engineer_user_id is not None:
+            # Office chief assigned the engineer at delegation time: the
+            # assessment skips the branch-chief queue and goes straight to DRAFT.
+            delegated = _get_assessment(db, assessment_id) or assessment
+            _perform_engineer_assignment(
+                db,
+                assessment=delegated,
+                engineer_user_id=int(payload.engineer_user_id),
+                actor_user_id=int(user["id"]),
+                notes=notes,
+            )
         db.commit()
-        return {"assessment": _serialize_assessment(_get_assessment(db, assessment_id))}
+        return {"assessment": _assessment_payload(db, assessment_id)}
     except HTTPException:
         db.rollback()
         raise
@@ -937,6 +1028,93 @@ def delegate_branch(
 # ---------------------------------------------------------------------------
 # Branch chief: assign / reassign engineer
 # ---------------------------------------------------------------------------
+
+
+def _perform_engineer_assignment(
+    db: Session,
+    *,
+    assessment: dict,
+    engineer_user_id: int,
+    actor_user_id: int,
+    notes: str | None,
+) -> int | None:
+    """Assign (or reassign) the engineer on an assessment.
+
+    Reuses the legacy engineer-assignment flow: it sets the ENGINEER stage
+    assignment, advances the incident, and creates/links the primary GISA draft
+    (the technical assessment form). Offline draft behaviour is preserved. The
+    linked draft is also attached to the assessment's submission list. Returns
+    the linked submission id. Caller commits.
+    """
+    assessment_id = int(assessment["id"])
+    incident_id = int(assessment["incident_id"])
+    result = incidents_routes._assign_incident(
+        db=db,
+        incident_id=incident_id,
+        assignee_user_id=engineer_user_id,
+        assigned_by_user_id=actor_user_id,
+        mode="ASSIGN",
+    )
+    linked_submission_id = result.get("linked_submission_id")
+    prior_state = assessment["state"]
+    db.execute(
+        text(
+            """
+            UPDATE assessments
+            SET assigned_engineer_user_id = :eng,
+                submission_id = COALESCE(:sub, submission_id),
+                state = CASE WHEN state IN ('PENDING_OFFICE_DELEGATION','PENDING_ENGINEER_ASSIGNMENT')
+                             THEN 'DRAFT' ELSE state END,
+                engineer_assigned_at = NOW(),
+                updated_at = NOW()
+            WHERE id = :aid
+            """
+        ),
+        {"eng": engineer_user_id, "sub": linked_submission_id, "aid": assessment_id},
+    )
+    if linked_submission_id is not None:
+        db.execute(
+            text(
+                """
+                INSERT INTO assessment_submissions (assessment_id, submission_id, created_by_user_id)
+                VALUES (:aid, :sid, :actor)
+                ON DUPLICATE KEY UPDATE assessment_id = VALUES(assessment_id)
+                """
+            ),
+            {"aid": assessment_id, "sid": int(linked_submission_id), "actor": actor_user_id},
+        )
+    # Mirror the engineer into the assessment-level assignment table.
+    db.execute(
+        text(
+            """
+            UPDATE assessment_assignments SET is_active = 0, updated_at = NOW()
+            WHERE assessment_id = :aid AND assignment_role = 'ENGINEER' AND is_active = 1
+            """
+        ),
+        {"aid": assessment_id},
+    )
+    db.execute(
+        text(
+            """
+            INSERT INTO assessment_assignments (assessment_id, user_id, assignment_role, assigned_by_user_id, notes)
+            VALUES (:aid, :uid, 'ENGINEER', :by, :notes)
+            """
+        ),
+        {"aid": assessment_id, "uid": engineer_user_id, "by": actor_user_id, "notes": notes},
+    )
+    incidents_routes._notify_coordinator_engineer_assigned(db=db, incident_id=incident_id)
+    _record_event(
+        db,
+        incident_id=incident_id,
+        assessment_id=assessment_id,
+        actor_user_id=actor_user_id,
+        event_type="ENGINEER_ASSIGNED",
+        from_state=prior_state,
+        to_state="DRAFT",
+        notes=notes,
+        metadata={"engineer_user_id": engineer_user_id, "submission_id": linked_submission_id},
+    )
+    return int(linked_submission_id) if linked_submission_id is not None else None
 
 
 @router.post("/assessments/{assessment_id}/assign-engineer")
@@ -953,69 +1131,17 @@ def assign_engineer(
         raise HTTPException(status_code=409, detail=f"Cannot assign engineer from state {assessment['state']}")
     office_code = assessment.get("office_code")
     incidents_routes._ensure_incident_office_access(user, office_code)
-    incident_id = int(assessment["incident_id"])
 
     try:
-        # Reuse the legacy engineer-assignment flow: it sets the ENGINEER stage
-        # assignment, advances the incident, and creates/links the GISA draft
-        # (the technical assessment form). Offline draft behaviour is preserved.
-        result = incidents_routes._assign_incident(
-            db=db,
-            incident_id=incident_id,
-            assignee_user_id=int(payload.engineer_user_id),
-            assigned_by_user_id=int(user["id"]),
-            mode="ASSIGN",
-        )
-        linked_submission_id = result.get("linked_submission_id")
-        prior_state = assessment["state"]
-        db.execute(
-            text(
-                """
-                UPDATE assessments
-                SET assigned_engineer_user_id = :eng,
-                    submission_id = COALESCE(:sub, submission_id),
-                    state = CASE WHEN state IN ('PENDING_OFFICE_DELEGATION','PENDING_ENGINEER_ASSIGNMENT')
-                                 THEN 'DRAFT' ELSE state END,
-                    engineer_assigned_at = NOW(),
-                    updated_at = NOW()
-                WHERE id = :aid
-                """
-            ),
-            {"eng": int(payload.engineer_user_id), "sub": linked_submission_id, "aid": assessment_id},
-        )
-        # Mirror the engineer into the assessment-level assignment table.
-        db.execute(
-            text(
-                """
-                UPDATE assessment_assignments SET is_active = 0, updated_at = NOW()
-                WHERE assessment_id = :aid AND assignment_role = 'ENGINEER' AND is_active = 1
-                """
-            ),
-            {"aid": assessment_id},
-        )
-        db.execute(
-            text(
-                """
-                INSERT INTO assessment_assignments (assessment_id, user_id, assignment_role, assigned_by_user_id, notes)
-                VALUES (:aid, :uid, 'ENGINEER', :by, :notes)
-                """
-            ),
-            {"aid": assessment_id, "uid": int(payload.engineer_user_id), "by": int(user["id"]), "notes": (payload.notes or "").strip() or None},
-        )
-        incidents_routes._notify_coordinator_engineer_assigned(db=db, incident_id=incident_id)
-        _record_event(
+        _perform_engineer_assignment(
             db,
-            incident_id=incident_id,
-            assessment_id=assessment_id,
+            assessment=assessment,
+            engineer_user_id=int(payload.engineer_user_id),
             actor_user_id=int(user["id"]),
-            event_type="ENGINEER_ASSIGNED",
-            from_state=prior_state,
-            to_state="DRAFT",
             notes=(payload.notes or "").strip() or None,
-            metadata={"engineer_user_id": int(payload.engineer_user_id), "submission_id": linked_submission_id},
         )
         db.commit()
-        return {"assessment": _serialize_assessment(_get_assessment(db, assessment_id))}
+        return {"assessment": _assessment_payload(db, assessment_id)}
     except HTTPException:
         db.rollback()
         raise
@@ -1127,6 +1253,81 @@ def remove_assignment(
 
 
 # ---------------------------------------------------------------------------
+# Engineer: supplemental technical submissions
+# ---------------------------------------------------------------------------
+
+
+@router.post("/assessments/{assessment_id}/submissions")
+def create_assessment_submission(
+    payload: AssessmentCreateSubmissionRequest,
+    assessment_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(ENGINEER_ROLES)),
+):
+    """Create another DRAFT technical submission for this assessment.
+
+    The draft is pre-filled from the incident (district / county / route /
+    post mile / coordinates) and owned by the assigned engineer. The incident's
+    primary ``incident_submission_links`` row is left untouched; the new form is
+    attached through ``assessment_submissions`` and becomes the latest draft.
+    """
+    assessment = _get_assessment(db, assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    if not is_admin(user) and (
+        assessment.get("assigned_engineer_user_id") is None
+        or int(assessment["assigned_engineer_user_id"]) != int(user["id"])
+    ):
+        raise HTTPException(status_code=403, detail="Only the assigned engineer can add technical submissions")
+    if assessment["state"] not in {"DRAFT", "REVISION_REQUESTED"}:
+        raise HTTPException(status_code=409, detail=f"Cannot add a technical submission in state {assessment['state']}")
+
+    incident_id = int(assessment["incident_id"])
+    incident = incidents_routes._incident_with_assignment(db, incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    owner_id = (
+        int(assessment["assigned_engineer_user_id"])
+        if assessment.get("assigned_engineer_user_id") is not None
+        else int(user["id"])
+    )
+    notes = (payload.notes or "").strip() or None
+    try:
+        has_primary_link = db.execute(
+            text("SELECT 1 FROM incident_submission_links WHERE incident_id = :iid LIMIT 1"),
+            {"iid": incident_id},
+        ).scalar()
+        submission_id = incidents_routes._create_linked_submission(
+            db=db,
+            incident_row=dict(incident),
+            assignee_user_id=owner_id,
+            actor_user_id=int(user["id"]),
+            link_incident=not bool(has_primary_link),
+        )
+        _link_assessment_submission(
+            db, assessment_id=assessment_id, submission_id=submission_id, actor_user_id=int(user["id"])
+        )
+        _record_event(
+            db,
+            incident_id=incident_id,
+            assessment_id=assessment_id,
+            actor_user_id=int(user["id"]),
+            event_type="SUBMISSION_CREATED",
+            notes=notes or f"Draft technical submission #{submission_id} created.",
+            metadata={"submission_id": submission_id},
+        )
+        db.commit()
+        return {"assessment": _assessment_payload(db, assessment_id), "submission_id": submission_id}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Engineer: submit / resubmit for review
 # ---------------------------------------------------------------------------
 
@@ -1149,6 +1350,11 @@ def submit_assessment(
         raise HTTPException(status_code=403, detail="Only the assigned engineer can submit this assessment")
     if assessment["state"] not in {"DRAFT", "REVISION_REQUESTED"}:
         raise HTTPException(status_code=409, detail=f"Cannot submit from state {assessment['state']}")
+    if not _submission_ids_for(db, assessment):
+        raise HTTPException(
+            status_code=409,
+            detail="Attach at least one technical submission before submitting the assessment for review",
+        )
 
     db.execute(
         text(
@@ -1171,7 +1377,7 @@ def submit_assessment(
         notes=(payload.notes or "").strip() or None,
     )
     db.commit()
-    return {"assessment": _serialize_assessment(_get_assessment(db, assessment_id))}
+    return {"assessment": _assessment_payload(db, assessment_id)}
 
 
 # ---------------------------------------------------------------------------
@@ -1234,7 +1440,7 @@ def review_assessment(
         )
         next_state = "REVISION_REQUESTED"
     db.commit()
-    return {"assessment": _serialize_assessment(_get_assessment(db, assessment_id)), "state": next_state}
+    return {"assessment": _assessment_payload(db, assessment_id), "state": next_state}
 
 
 # ---------------------------------------------------------------------------
@@ -1270,4 +1476,4 @@ def finalize_assessment(
         notes=(payload.notes or "").strip() or None,
     )
     db.commit()
-    return {"assessment": _serialize_assessment(_get_assessment(db, assessment_id))}
+    return {"assessment": _assessment_payload(db, assessment_id)}

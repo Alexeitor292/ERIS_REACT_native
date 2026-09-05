@@ -488,3 +488,82 @@ class TestLegacyCompatibility:
         )
         assert patch.status_code == 200
         assert patch.json()["gisa"]["district"] == "04"
+
+
+# ---------------------------------------------------------------------------
+# Multiple technical submissions per assessment (assessment_submissions)
+# ---------------------------------------------------------------------------
+
+
+class TestMultipleSubmissions:
+    def test_engineer_adds_supplemental_submission(self, client_db, tokens, ids):
+        # Fresh lifecycle up to DRAFT so this test does not depend on module state.
+        incident_id = _create_incident(client_db, tokens["admin"], district="04", county="Marin", route="1")
+        triage = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={"disposition": "ASSESSMENT_REQUIRED"},
+            headers=_auth(tokens["admin"]),
+        )
+        assert triage.status_code == 200, triage.text
+        aid = triage.json()["assessment"]["id"]
+        assert triage.json()["assessment"]["submission_ids"] == []
+
+        # Office chief delegates AND assigns the engineer in one step -> DRAFT.
+        delegated = client_db.post(
+            f"/assessments/{aid}/delegate-branch",
+            json={"branch_chief_user_id": ids["branchchief"], "engineer_user_id": ids["engineer"], "notes": "fast path"},
+            headers=_auth(tokens["officechief"]),
+        )
+        assert delegated.status_code == 200, delegated.text
+        body = delegated.json()["assessment"]
+        assert body["state"] == "DRAFT"
+        assert body["assigned_engineer_user_id"] == ids["engineer"]
+        assert body["submission_id"] is not None
+        assert body["submission_ids"] == [body["submission_id"]]
+        primary = body["submission_id"]
+
+        # Only the assigned engineer may add a supplemental form.
+        denied = client_db.post(
+            f"/assessments/{aid}/submissions", json={}, headers=_auth(tokens["branchchief"])
+        )
+        assert denied.status_code in (401, 403)
+
+        added = client_db.post(
+            f"/assessments/{aid}/submissions",
+            json={"notes": "Supplemental survey"},
+            headers=_auth(tokens["engineer"]),
+        )
+        assert added.status_code == 200, added.text
+        supplemental = added.json()["submission_id"]
+        assert supplemental != primary
+        assessment = added.json()["assessment"]
+        assert assessment["submission_ids"] == [primary, supplemental]
+        assert assessment["submission_id"] == supplemental, "latest draft becomes the primary pointer"
+
+        # The supplemental draft is pre-filled from the incident and editable by the engineer.
+        detail = client_db.get(f"/submissions/{supplemental}", headers=_auth(tokens["engineer"]))
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["gisa"]["district"] == "04"
+        assert detail.json()["context"]["incident_id"] == incident_id
+        assert detail.json()["context"]["assessment_id"] == aid
+        patch = client_db.patch(
+            f"/submissions/{supplemental}/gisa",
+            json={"observations_notes": "Supplemental notes"},
+            headers=_auth(tokens["engineer"]),
+        )
+        assert patch.status_code == 200, patch.text
+
+        # Both forms are visible on the assessment detail and in the list.
+        listed = client_db.get("/assessments", headers=_auth(tokens["reviewer"]))
+        assert listed.status_code == 200
+        row = next(item for item in listed.json()["items"] if item["id"] == aid)
+        assert row["submission_ids"] == [primary, supplemental]
+
+        events = client_db.get(f"/assessments/{aid}", headers=_auth(tokens["reviewer"])).json()["events"]
+        assert "SUBMISSION_CREATED" in {e["event_type"] for e in events}
+
+        submitted = client_db.post(
+            f"/assessments/{aid}/submit", json={"notes": "both forms ready"}, headers=_auth(tokens["engineer"])
+        )
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["assessment"]["state"] == "SUBMITTED"

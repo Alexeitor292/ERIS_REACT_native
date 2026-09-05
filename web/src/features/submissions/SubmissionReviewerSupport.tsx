@@ -1,101 +1,41 @@
-import type { Attachment, WorkflowEvent } from "../../api/types";
-import { Section } from "./SubmissionDetailPrimitives";
-import {
-  attachmentActionLabel,
-  attachmentTypeLabel,
-  formatFileSize,
-  formatWorkflowTimestamp,
-  workflowEventLabel,
-  workflowTransitionLabel,
-} from "./submissionReviewerSupportModel";
+import type { WorkflowEvent } from "../../api/types";
+import { SubmissionDetailCard } from "./SubmissionDetailPrimitives";
+import { formatWorkflowTimestamp, workflowEventLabel, workflowTransitionLabel } from "./submissionReviewerSupportModel";
 
+/**
+ * Reviewer Note and Workflow History cards. Both render always-open inside the review
+ * context grid; the old attachments table is replaced by the Submission library.
+ */
 export default function SubmissionReviewerSupport({
   reviewNote,
   canReview,
   busy,
-  attachments,
   workflowEvents,
-  downloadingAttachmentId,
   onReviewNoteChange,
-  onOpenAttachment,
 }: {
   reviewNote: string;
   canReview: boolean;
   busy: boolean;
-  attachments: Attachment[];
   workflowEvents: WorkflowEvent[];
-  downloadingAttachmentId: number | null;
   onReviewNoteChange: (value: string) => void;
-  onOpenAttachment: (attachmentId: number) => void;
 }) {
   return (
     <>
-      <Section title="Reviewer Note" open>
+      <SubmissionDetailCard title="Reviewer Note" subtitle={canReview ? "Recorded with the approval or return decision." : "Read-only for your current role."}>
         <label className="block">
           <span className="sr-only">Reviewer note</span>
           <textarea
             value={reviewNote}
             onChange={(event) => onReviewNoteChange(event.target.value)}
-            rows={3}
+            rows={4}
             disabled={busy || !canReview}
             placeholder={canReview ? "Add context for the approval or return decision." : "No reviewer note recorded."}
-            className="w-full rounded border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
           />
         </label>
-        {!canReview ? (
-          <p className="mt-2 text-xs text-muted">Reviewer notes are read-only for your current role.</p>
-        ) : null}
-      </Section>
+      </SubmissionDetailCard>
 
-      <Section title={`Attachments (${attachments.length})`}>
-        {attachments.length === 0 ? (
-          <div className="text-sm text-muted">No attachments are associated with this submission.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b border-[var(--line)] text-left text-xs font-semibold uppercase tracking-wide text-muted">
-                  <th scope="col" className="px-2 py-2">ID</th>
-                  <th scope="col" className="px-2 py-2">File</th>
-                  <th scope="col" className="px-2 py-2">Type</th>
-                  <th scope="col" className="px-2 py-2">Size</th>
-                  <th scope="col" className="px-2 py-2 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attachments.map((attachment) => {
-                  const opening = downloadingAttachmentId === attachment.id;
-                  return (
-                    <tr key={attachment.id} className="border-b border-[var(--line)]/50 last:border-b-0">
-                      <td className="px-2 py-2 text-sm tabular-nums">{attachment.id}</td>
-                      <td className="px-2 py-2 text-sm font-medium">{attachment.file_name}</td>
-                      <td className="px-2 py-2 text-sm">
-                        <div>{attachmentTypeLabel(attachment)}</div>
-                        <div className="text-xs text-muted">{attachment.mime_type || "Unknown MIME type"}</div>
-                      </td>
-                      <td className="px-2 py-2 text-sm tabular-nums" title={`${attachment.file_size_bytes.toLocaleString()} bytes`}>
-                        {formatFileSize(attachment.file_size_bytes)}
-                      </td>
-                      <td className="px-2 py-2 text-right text-sm">
-                        <button
-                          type="button"
-                          onClick={() => onOpenAttachment(attachment.id)}
-                          disabled={opening}
-                          className="rounded border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--panel-soft)] disabled:opacity-60"
-                        >
-                          {opening ? "Opening…" : attachmentActionLabel(attachment)}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
-
-      <Section title={`Workflow History (${workflowEvents.length})`}>
+      <SubmissionDetailCard title={`Workflow History (${workflowEvents.length})`} subtitle="Every status transition recorded for this submission.">
         {workflowEvents.length === 0 ? (
           <div className="text-sm text-muted">No workflow events have been recorded.</div>
         ) : (
@@ -127,7 +67,7 @@ export default function SubmissionReviewerSupport({
             })}
           </ol>
         )}
-      </Section>
+      </SubmissionDetailCard>
     </>
   );
 }

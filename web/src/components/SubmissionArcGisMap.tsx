@@ -22,8 +22,16 @@ import Measurement from "@arcgis/core/widgets/Measurement";
 import CoordinateConversion from "@arcgis/core/widgets/CoordinateConversion";
 import Sketch from "@arcgis/core/widgets/Sketch";
 import Expand from "@arcgis/core/widgets/Expand";
+import { Maximize2, X } from "lucide-react";
 import { appConfig } from "../config";
 import { caltransHighwaysLayerConfig } from "./caltransHighwaysLayer";
+import type { PhotoEvidence } from "../features/submissions/photoEvidenceApi";
+import {
+  headingWedgeRing,
+  PHOTO_HEADING_WEDGE_FILL_ALPHA,
+  themeColor,
+  withAlpha,
+} from "./photoEvidenceGraphics";
 
 // Optional ONLINE Caltrans freeway/expressway context layer. OPT-IN: when
 // VITE_CALTRANS_HIGHWAYS_URL is unset the config helper returns null and NO layer is
@@ -39,6 +47,8 @@ function createCaltransHighwaysLayer(): FeatureLayer | null {
 type Props = {
   geojson: any | null; // GeoJSON geometry object
   location?: { latitude: number | null; longitude: number | null } | null;
+  /** Mapped field photos (from the photo-evidence endpoint) drawn with camera-heading wedges. */
+  photoEvidence?: PhotoEvidence[] | null;
   height?: number;
   editable?: boolean;
   onGeometryChange?: (geometry: any | null) => void;
@@ -79,9 +89,27 @@ function toGeoJsonGeometry(rawGeometry: any): any | null {
   }
 }
 
+function escapeHtml(value: unknown) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
+}
+
+function photoPopupContent(photo: PhotoEvidence) {
+  const rows: string[] = [];
+  if (photo.captured_at) rows.push(`<div><b>Captured:</b> ${escapeHtml(photo.captured_at)}</div>`);
+  rows.push(`<div><b>Camera heading:</b> ${photo.camera_heading_deg != null ? `${photo.camera_heading_deg.toFixed(1)}°` : "not usable"}</div>`);
+  if (photo.horizontal_accuracy_m != null) rows.push(`<div><b>Accuracy:</b> ${escapeHtml(photo.horizontal_accuracy_m.toFixed(1))} m</div>`);
+  if (photo.section_key) rows.push(`<div><b>Section:</b> ${escapeHtml(photo.section_key)}</div>`);
+  const isImage = String(photo.mime_type || "").toLowerCase().startsWith("image/");
+  const thumb = isImage && photo.download_url
+    ? `<img src="${escapeHtml(photo.download_url)}" alt="" style="max-width:100%;max-height:220px;border-radius:8px;display:block;margin-bottom:8px" />`
+    : "";
+  return `${thumb}<div style="font-size:12px;line-height:1.5">${rows.join("")}</div>`;
+}
+
 export default function SubmissionArcGisMap({
   geojson,
   location = null,
+  photoEvidence = null,
   height = 320,
   editable = false,
   onGeometryChange,
@@ -89,6 +117,7 @@ export default function SubmissionArcGisMap({
   const divRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<MapView | null>(null);
   const layerRef = useRef<GraphicsLayer | null>(null);
+  const photoLayerRef = useRef<GraphicsLayer | null>(null);
   const autoCenteredRef = useRef(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -99,15 +128,18 @@ export default function SubmissionArcGisMap({
 
     const graphicsLayer = new GraphicsLayer({ title: "Submission overlays" });
     layerRef.current = graphicsLayer;
+    const photoLayer = new GraphicsLayer({ title: "Field photo evidence" });
+    photoLayerRef.current = photoLayer;
 
     // Optional Caltrans highways layer sits BELOW the submission overlays so drawn/loaded
     // geometry always stays on top. It appears in the Layers + Legend widgets (off until
-    // toggled). Null when no URL is configured.
+    // toggled). Null when no URL is configured. Photo evidence sits on top of everything
+    // so photo markers stay clickable over drawn polygons.
     const caltransLayer = createCaltransHighwaysLayer();
 
     const map = new Map({
       basemap: "hybrid",
-      layers: caltransLayer ? [caltransLayer, graphicsLayer] : [graphicsLayer],
+      layers: caltransLayer ? [caltransLayer, graphicsLayer, photoLayer] : [graphicsLayer, photoLayer],
     });
 
     const view = new MapView({
@@ -221,10 +253,18 @@ export default function SubmissionArcGisMap({
     return () => {
       subscriptions.forEach((sub) => sub.remove());
       layerRef.current = null;
+      photoLayerRef.current = null;
       viewRef.current = null;
       view.destroy();
     };
   }, [editable, onGeometryChange]);
+
+  const contentExtent = useCallback(() => {
+    const overlays = layerRef.current?.fullExtent ?? null;
+    const photos = photoLayerRef.current?.fullExtent ?? null;
+    if (overlays && photos) return overlays.clone().union(photos);
+    return overlays ?? photos;
+  }, []);
 
   const goToRecordedLocation = useCallback(() => {
     const view = viewRef.current;
@@ -244,11 +284,11 @@ export default function SubmissionArcGisMap({
         .catch(() => {});
       return;
     }
-    const ext = layerRef.current?.fullExtent;
+    const ext = contentExtent();
     if (ext) {
       view.goTo(ext.expand(1.35)).catch(() => {});
     }
-  }, [location]);
+  }, [location, contentExtent]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -422,6 +462,7 @@ export default function SubmissionArcGisMap({
         const locationGraphic = new Graphic({
           geometry: locationPoint,
           attributes: { __location_marker: true },
+          popupTemplate: { title: "Submission location", content: "Recorded submission point." } as any,
           symbol: {
             type: "simple-marker",
             color: [37, 99, 235, 0.95],
@@ -433,7 +474,7 @@ export default function SubmissionArcGisMap({
       }
     }
 
-    const extent = graphicsLayer.fullExtent;
+    const extent = contentExtent();
     if (extent) {
       view.goTo(extent.expand(1.35)).catch(() => {});
     } else if (
@@ -445,7 +486,66 @@ export default function SubmissionArcGisMap({
     ) {
       view.goTo({ center: [location.longitude, location.latitude], zoom: 16 }).catch(() => {});
     }
-  }, [geojson, location]);
+  }, [geojson, location, contentExtent]);
+
+  // Field photo evidence: a marker per mapped photo plus a camera-heading wedge when the
+  // heading passed the backend quality gate (camera_heading_deg non-null).
+  useEffect(() => {
+    const view = viewRef.current;
+    const photoLayer = photoLayerRef.current;
+    if (!view || !photoLayer) return;
+
+    photoLayer.removeAll();
+    const photos = (photoEvidence ?? []).filter(
+      (photo) => typeof photo.latitude === "number" && typeof photo.longitude === "number",
+    );
+    if (photos.length === 0) return;
+
+    const accent = themeColor("--accent", [23, 180, 173]);
+
+    for (const photo of photos) {
+      const latitude = photo.latitude as number;
+      const longitude = photo.longitude as number;
+      const popupTemplate = { title: photo.file_name, content: photoPopupContent(photo) } as any;
+
+      if (photo.camera_heading_deg != null) {
+        const wedge = new Polygon({
+          rings: [headingWedgeRing(latitude, longitude, photo.camera_heading_deg)],
+          spatialReference: SpatialReference.WGS84,
+        });
+        photoLayer.add(
+          new Graphic({
+            geometry: wedge,
+            attributes: { __photo_heading: true, attachment_id: photo.attachment_id },
+            popupTemplate,
+            symbol: {
+              type: "simple-fill",
+              color: withAlpha(accent, PHOTO_HEADING_WEDGE_FILL_ALPHA),
+              outline: { width: 1, color: withAlpha(accent, 0.85) },
+            } as any,
+          }),
+        );
+      }
+
+      photoLayer.add(
+        new Graphic({
+          geometry: new Point({ latitude, longitude, spatialReference: SpatialReference.WGS84 }),
+          attributes: { __photo_marker: true, attachment_id: photo.attachment_id },
+          popupTemplate,
+          symbol: {
+            type: "simple-marker",
+            style: "circle",
+            color: withAlpha(accent, 0.95),
+            size: 9,
+            outline: { color: [255, 255, 255, 1], width: 1.5 },
+          } as any,
+        }),
+      );
+    }
+
+    const extent = contentExtent();
+    if (extent) view.goTo(extent.expand(1.35)).catch(() => {});
+  }, [photoEvidence, contentExtent]);
 
   useEffect(() => {
     if (autoCenteredRef.current) return;
@@ -474,22 +574,28 @@ export default function SubmissionArcGisMap({
     if (!expanded) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpanded(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = prev;
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, [expanded]);
 
-  const mapHeight = expanded ? "min(88vh, 900px)" : height;
+  // "Expand map" opens a modal at roughly two thirds of the viewport height.
+  const mapHeight = expanded ? "66vh" : height;
 
   return (
-    <div className={expanded ? "fixed inset-0 z-50 flex items-center justify-center p-3" : "relative"}>
+    <div className={expanded ? "fixed inset-0 z-50 flex items-center justify-center p-3" : "map-stack-guard"}>
       {expanded ? (
         <button
           type="button"
           onClick={() => setExpanded(false)}
           className="absolute inset-0"
           style={{
-            backgroundColor: "rgba(15, 23, 42, 0.16)",
+            backgroundColor: "rgba(15, 23, 42, 0.32)",
             backdropFilter: "blur(10px) saturate(125%)",
             WebkitBackdropFilter: "blur(10px) saturate(125%)",
           }}
@@ -499,20 +605,25 @@ export default function SubmissionArcGisMap({
 
       <div
         className={expanded ? "relative z-10 w-[min(96vw,1400px)] rounded-xl border border-[var(--line)] p-2 shadow-2xl" : "relative"}
-        style={expanded ? { backgroundColor: "color-mix(in oklab, var(--panel) 84%, transparent)" } : undefined}
+        style={expanded ? { backgroundColor: "color-mix(in oklab, var(--panel) 92%, transparent)" } : undefined}
+        role={expanded ? "dialog" : undefined}
+        aria-modal={expanded ? true : undefined}
+        aria-label={expanded ? "Expanded submission map" : undefined}
       >
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           className={expanded
-            ? "absolute -right-3 -top-3 z-20 h-8 w-8 rounded-full border border-[var(--line)] bg-[var(--panel)] text-sm font-semibold leading-none shadow-lg hover:brightness-95"
-            : "absolute -right-3 -top-3 z-20 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs shadow-lg hover:brightness-95"}
+            ? "absolute -right-3 -top-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--panel)] shadow-lg hover:brightness-95"
+            : "absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs font-semibold shadow-lg hover:brightness-95"}
           title={expanded ? "Close expanded map" : "Expand map"}
+          aria-label={expanded ? "Close expanded map" : "Expand map"}
         >
-          {expanded ? "X" : "Expand"}
+          {expanded ? <X size={16} strokeWidth={2} aria-hidden /> : <><Maximize2 size={13} strokeWidth={2} aria-hidden />Expand map</>}
         </button>
         <div
           ref={divRef}
+          className="map-stack-guard"
           style={{ width: "100%", height: mapHeight, borderRadius: expanded ? 10 : 12, overflow: "hidden" }}
         />
       </div>

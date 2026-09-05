@@ -134,8 +134,13 @@ def _classification_batch(*, db: Session, user: dict, incident_ids: list[int]) -
             FROM incidents i
             LEFT JOIN assessments a ON a.incident_id = i.id
             LEFT JOIN submission_gisa_incident_types it
-              ON it.submission_id = a.submission_id
-             AND a.state IN ('SUBMITTED', 'APPROVED', 'FINALIZED')
+              ON a.state IN ('SUBMITTED', 'APPROVED', 'FINALIZED')
+             AND (
+               it.submission_id = a.submission_id
+               OR it.submission_id IN (
+                 SELECT s.submission_id FROM assessment_submissions s WHERE s.assessment_id = a.id
+               )
+             )
             WHERE i.id IN ({placeholders}){scope_sql}
             ORDER BY i.id ASC, it.incident_type_code ASC
             """
@@ -149,7 +154,8 @@ def _classification_batch(*, db: Session, user: dict, incident_ids: list[int]) -
         incident_id = int(row["incident_id"])
         entry = grouped.setdefault(incident_id, {"row": row, "codes": []})
         code = row.get("incident_type_code")
-        if code is not None:
+        # Several technical submissions may record the same type; keep one.
+        if code is not None and str(code) not in entry["codes"]:
             entry["codes"].append(str(code))
 
     if set(grouped) != set(ordered_ids):

@@ -272,6 +272,15 @@ class IncidentTriageRequest(BaseModel):
 
 class AssessmentDelegateBranchRequest(BaseModel):
     branch_chief_user_id: int = Field(..., ge=1)
+    # Optional: the office chief may assign the engineer at delegation time,
+    # which moves the assessment straight to DRAFT (skips the branch queue).
+    engineer_user_id: int | None = Field(default=None, ge=1)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class AssessmentCreateSubmissionRequest(BaseModel):
+    """Engineer request for an additional technical submission on an assessment."""
+
     notes: str | None = Field(default=None, max_length=1000)
 
 
