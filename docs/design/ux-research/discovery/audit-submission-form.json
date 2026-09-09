@@ -1,0 +1,649 @@
+{
+ "area": "Submission detail: header, location hero, GISA card canvas, notes, measurements/3D terrain",
+ "heuristicIssues": [
+  {
+   "severity": 4,
+   "heuristic": "Flexibility and efficiency of use / Aesthetic and minimalist design",
+   "screen": "GISA sheet card canvas",
+   "issue": "The checklist form is rendered on an absolutely positioned pixel canvas of fixed 520px-wide cards with mouse-only drag/resize. On any container narrower than ~545px (every phone) the right third of every card is clipped behind a horizontal scroll, and the layout tooling (Custom/Auto-fit pill, Tidy, Reset, Full screen, localStorage persistence) has nothing to do with filling in a GISA sheet.",
+   "evidence": "web/src/features/submissions/submissionLayoutModel.ts:69 (DASHBOARD_CARD_WIDTH = 520), :93-96 (columns = floor((w-12)/532)); web/src/features/submissions/useSubmissionDashboardLayout.ts:136 (effectiveWidth floor 344px), :275-279 (position:absolute, px width/height), :250-251 (mousemove/mouseup only); web/src/pages/SubmissionDetailPage.tsx:96,112-120 (onMouseDown handlers, aria-hidden handles), :762-794 (toolbar), :797 (overflow-x-auto container)",
+   "recommendation": "Replace the canvas with a responsive CSS grid of section cards (repeat(auto-fit, minmax(320px,1fr)), auto heights). Keep the dashboard mode, if at all, only for pointer:fine devices with container >= 1076px."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Recognition rather than recall",
+   "screen": "Header + Notes panel + Review cards",
+   "issue": "The decision inputs are far from the actions that consume them: the engineer's Submit comment is the last field of the Notes panel and the Reviewer Note sits in the bottom card grid, while Submit / Approve / Return for correction are in the page header. A reviewer can approve without ever seeing the note field; the placeholder even explains the disconnect.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:1280-1285 (submit comment, placeholder 'when you submit for review from the header'), :1301-1307 (reviewer note), :373,375 (submitNote/reviewNote consumed by header actions); web/src/features/submissions/SubmissionDetailHeader.tsx:126-142",
+   "recommendation": "Open a small decision dialog from Submit / Approve / Return that contains the comment textarea and the confirm button; drop the bottom-of-page fields."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom / Visibility of system status",
+   "screen": "Header",
+   "issue": "Refresh calls load(), which rebuilds the draft from the server and silently discards unsaved edits; there is no dirty indicator, no beforeunload guard and no 'Saved' confirmation after Save draft. The only busy signal is the Refresh button relabelling to 'Working…'.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:262-330 (load overwrites draft state), :366 (saveDraft has no success feedback), :1182 (onRefresh={load}); web/src/features/submissions/SubmissionDetailHeader.tsx:124",
+   "recommendation": "Track a dirty flag (draft !== loaded snapshot); confirm before Refresh when dirty; add beforeunload; show a transient 'Draft saved HH:MM' status next to the actions."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Error prevention / User control and freedom",
+   "screen": "Location hero map",
+   "issue": "Completing any Sketch shape deletes every previously drawn geometry from the layer and immediately PATCHes the new geometry to the server; the removal happens outside the Sketch undo stack, so an accidental click with the polygon tool permanently replaces a carefully drawn area with no confirmation and no undo.",
+   "evidence": "web/src/components/SubmissionArcGisMap.tsx:224-232 (create -> remove all other graphics -> onGeometryChange), :199 (creationMode 'update'); web/src/pages/SubmissionDetailPage.tsx:399-424 (PATCH on every change)",
+   "recommendation": "Keep the previous graphic until the user confirms 'Replace existing geometry?', or support multi-geometry; make geometry part of the draft and save it with Save draft, with an explicit Undo."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards / Visibility of system status",
+   "screen": "Location hero map",
+   "issue": "The hero builds a new `location` object on every render, and the map effect keyed on it clears and redraws all overlays and calls view.goTo(extent) each time. Because the page re-renders on every keystroke in any field, the 2D map snaps back to the content extent (and flickers its graphics) while the user is typing or has panned/zoomed elsewhere. The 3D scene explicitly guards against this pattern, so the 2D map is inconsistent with it.",
+   "evidence": "web/src/features/submissions/SubmissionLocationHero.tsx:96-99 (new object each render); web/src/components/SubmissionArcGisMap.tsx:293-299 (removeAll), :477-479 (goTo on every run), :489 (deps include location); contrast web/src/components/InteractiveTerrainScene.tsx:90-99,204-208 (anchorKey pattern)",
+   "recommendation": "useMemo the location on the numeric lat/lon (or pass primitives), and only goTo when the coordinates or geometry actually change (compare a stable key). Verify in the browser: pan the map, then type in Observations."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards / Match between system and the real world",
+   "screen": "Location hero + Report Header card",
+   "issue": "Location facts are shown in three vocabularies: raw stored codes with tooltip apologies in the hero tiles ('2-digit district code', 'Caltrans county code', '3-digit route'), human labels ('District 3', county name) in the Report Header selects, and the compact descriptor in the h1. Worse, the hero shows STORED gisa values while the Report Header edits the DRAFT, so after changing the district the hero keeps the old code until Save draft with no explanation.",
+   "evidence": "web/src/features/submissions/SubmissionLocationHero.tsx:135-138 (gisa?.district etc. with title hints) vs web/src/pages/SubmissionDetailPage.tsx:811-858 (draft.district/county/route), :826 ('District N'), :845 (county name); :732-741 (descriptor)",
+   "recommendation": "Move District/County/Route/Post mile editing into the hero (single source: draft) with human labels, and delete the stored-value tiles."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Help users recognize, diagnose, and recover from errors / Error prevention",
+   "screen": "Header error banner + Material card + Notes panel",
+   "issue": "All validation surfaces in a single banner under the header, far from the offending field: soil percentages must total 100% but are checked only when Submit is pressed; lat/lon, numeric and percent parsing errors are thrown from persistDraft; malformed Geometry JSON throws a raw 'Geometry JSON must be object'. Inputs have no inline validation and no aria-invalid.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:228-247 (soil check), :367-372 (only on submit), :335-338 (JSON parse), :1205 (single banner); web/src/features/submissions/submissionDetailModel.ts:96-116 (throwing parsers); vegetation min/max attributes exist only at :1092-1094",
+   "recommendation": "Validate per field on blur with inline messages; show a live 'Total: 95% (5% short)' line under the soil inputs; keep the banner only for server errors and link it to the first invalid field."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "Highway Status card + Notes panel",
+   "issue": "Invisible cross-panel dependency: the 'Open Highway Traffic Lanes' input appears in the Highway Status card only when the OPEN_HIGHWAY_TRAFFIC chip is selected among Immediate/Follow-up actions in the Notes panel, ~1500px lower; and the highway-status chips are hidden until a cause is typed, so a reviewer scanning the sheet cannot tell whether the status is empty or hidden.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:499 (openHighwayTrafficSelected from imm/fol), :1000-1004 (conditional input), :500-506,977-1010 (options hidden until cause), :1276-1277 (action chips)",
+   "recommendation": "Always show the status chips (disabled with helper text if a cause is required); show the lanes-open input whenever a lanes-closed status is chosen, or move the action chips next to Highway Status."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards",
+   "screen": "Whole page",
+   "issue": "Three persistence models coexist on one form: map sketches PATCH immediately, 'Sample terrain' POSTs and reloads the whole page immediately (from any role, including read-only viewers, because it renders outside the disabled fieldset), while every other field waits for Save draft. Users cannot predict what is saved.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:399-424 (geometry autosave), :332-364 (explicit save), :83-84,107 (tools slot outside fieldset); web/src/features/submissions/SubmissionMeasurementContext.tsx:39-53,67-74 (POST terrain-grid then onReload)",
+   "recommendation": "Pick one model. Either autosave everything with a visible 'Saving… / Saved' status, or make geometry and terrain sampling part of the draft; gate Sample terrain on canEdit and explain what it does."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Recognition rather than recall / Aesthetic and minimalist design",
+   "screen": "Measurements card",
+   "issue": "The card titled 'Measurements' opens with a 460px 3D scene; the reference diagram and the eight inputs the card exists for sit ~700px down inside an internal scroll. The default card height (980px) is also the maximum card height, so the user cannot enlarge the card to see scene + diagram + inputs together.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:106 (overflow-auto body), :1132-1155 (scene first, diagram, inputs); web/src/features/submissions/submissionLayoutModel.ts:25 (MAX 980), :39 (default 980); web/src/features/submissions/SubmissionMeasurementContext.tsx:83 (460px); web/src/components/InteractiveTerrainScene.tsx:72",
+   "recommendation": "Split: Measurements = diagram + inputs (auto height); 3D terrain becomes its own collapsed section ('Show 3D terrain') mounted on demand."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards (accessibility)",
+   "screen": "All canvas cards + Notes action chips + header",
+   "issue": "Most field labels are <label> without htmlFor/id, so inputs are unnamed for assistive tech; every toggle chip is a plain <button> whose selected state is colour-only (no aria-pressed, no glyph); the contact accordion uses '>'/'v' text with no aria-expanded; the '•••' button has aria-expanded but no menu role, Escape or outside-click dismissal; drag/resize handles are aria-hidden with no keyboard path.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:59 (label class), :802-870,1051-1054,1071-1078,1092-1094,1112-1114,1146-1153 (no htmlFor), :61-62 (chip/ynChip colour only), :984,1020,1039-1046,1063,1101,1107-1108,1121,1276-1277 (chips), :884-891 (accordion), :112-120 (aria-hidden handles); web/src/features/submissions/SubmissionDetailHeader.tsx:146-156",
+   "recommendation": "Generate id/htmlFor from the field key; add aria-pressed and a check icon to chips; use aria-expanded on the accordion; implement the overflow as role=menu with Escape/outside-click; drop the drag handles or give them a keyboard 'Move up/down' equivalent."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards / Error prevention",
+   "screen": "Report Header card",
+   "issue": "Report Date and Date Incident Reported are free-text inputs labelled '(YYYY-MM-DD)'; on phones this opens the full keyboard, and any format is accepted until the server rejects it.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:802-808; docs/GISA_DATA_DICTIONARY.md:35,42 (DATE columns)",
+   "recommendation": "Use type=\"date\" (value already ISO) and drop the format hint from the label."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Location hero map",
+   "issue": "Eleven ArcGIS widgets (Home, Locate, Compass, ScaleBar, Search, Basemap gallery, Layers, Legend, Measurement, Coordinate conversion, Sketch) plus a custom 'Expand map' button on a 360px map; the custom button is absolutely positioned at right-2 top-2, exactly where the ArcGIS top-right Expand stack (Search/Basemap/Layers/Legend) is placed.",
+   "evidence": "web/src/components/SubmissionArcGisMap.tsx:152-214 (widgets), :183-192 (ui positions), :613-623 (custom button right-2 top-2); web/src/features/submissions/SubmissionLocationHero.tsx:259 (height 360)",
+   "recommendation": "Default to Home, Locate, Sketch (when editable) and Expand; put Search/Basemap/Layers/Legend/Measure/Coordinates behind one 'Map tools' Expand; register the Expand button through view.ui.add so it never overlaps."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Match between system and the real world",
+   "screen": "Header, 3D scene, map popup, Summary",
+   "issue": "Raw identifiers and codes are shown to end users: 'owner user #N', 'Submission #N' as the scene label, the raw section_key (e.g. water_drainage) in the photo popup, raw ISO timestamps in Summary, and the descriptor is repeated in the h1, the header meta line and Summary.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:1174 (user #N), :1292-1298 (Summary rows); web/src/features/submissions/SubmissionMeasurementContext.tsx:99 (Submission #N); web/src/components/SubmissionArcGisMap.tsx:101 (section_key); web/src/features/submissions/SubmissionDetailHeader.tsx:105 (descriptor repeated)",
+   "recommendation": "Show owner display name; pass the descriptor as the scene label; map section_key through the section label table; format timestamps; show the descriptor once (h1)."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Error prevention / Visibility of system status",
+   "screen": "Location hero (GPS autofill)",
+   "issue": "GPS autofill calls the public ArcGIS geocoder directly from the browser and guesses the route from ANY 1-3 digit number in the address text, then silently overwrites county, district and route in the draft. On failure the only message is a generic banner even though lat/lon were already changed.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:461-485; web/src/features/submissions/submissionDetailModel.ts:194-197 (fallback regex \\b(\\d{1,3})\\b)",
+   "recommendation": "Only fill lat/lon; propose county/district/route as a dismissible suggestion ('Set to Sacramento / District 3 / 50?'); drop the bare-number route fallback."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Help and documentation",
+   "screen": "Location hero, header, canvas toolbar",
+   "issue": "Key explanations live only in title tooltips: the stored-value formats, why 'Show N/E' is disabled ('Select a county…'), the heading-count in the photo button, drag/resize hints, Tidy/Reset semantics. None are visible on touch or to screen readers.",
+   "evidence": "web/src/features/submissions/SubmissionLocationHero.tsx:125,135-138; web/src/features/submissions/SubmissionDetailHeader.tsx:119; web/src/pages/SubmissionDetailPage.tsx:98,118,773,778,787",
+   "recommendation": "Replace with visible helper text or aria-describedby; disable-with-reason pattern ('Show N/E — pick a county first')."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status / Aesthetic and minimalist design",
+   "screen": "Measurements card (3D terrain)",
+   "issue": "A qualityProfile 'high' SceneView is mounted for every visitor and role on page load, with two identical spinners (Suspense chunk + scene) and 9-10px control text plus 8px attribution; the sample-terrain button is 10px. Reviewers who only need the checklist pay the load cost.",
+   "evidence": "web/src/components/InteractiveTerrainScene.tsx:161 (qualityProfile high), :409 (8px), :420,427,436,444 (10px), :531,542 (9px), :487-495 (second spinner); web/src/features/submissions/SubmissionMeasurementContext.tsx:63,71 (10px), :79-91 (first spinner)",
+   "recommendation": "Mount the scene on demand behind a 'Load 3D terrain' button with a static preview; raise control text to 11-12px with 32px targets; use qualityProfile 'medium' below lg."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "Whole page (read-only viewers)",
+   "issue": "Read-only users (any role that reaches the page; APPROVED/SUBMITTED for engineers) see chips styled as buttons inside a disabled fieldset with only an opacity change, while layout tools, Sample terrain and map widgets remain active; nothing says 'read only' or why.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:108,725 (fieldset disabled), :762-794 (tools always shown), :83-84,107 (tools slot outside fieldset)",
+   "recommendation": "Show a read-only banner with the reason ('Submitted — awaiting review' / 'Your role can view only'), render values as text rather than disabled controls, hide layout tools."
+  },
+  {
+   "severity": 2,
+   "heuristic": "User control and freedom / Consistency and standards",
+   "screen": "Header (Delete)",
+   "issue": "Delete uses window.confirm and a hard window.location redirect, breaking SPA navigation; the overflow menu closes on selection only.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:428-438; web/src/features/submissions/SubmissionDetailHeader.tsx:146-156",
+   "recommendation": "Use the app's dialog primitive with the descriptor in the copy and navigate() after success."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Whole page",
+   "issue": "Three independent full-screen implementations (canvas fixed inset-0 z-40 role=dialog; 2D map fixed z-50 custom modal; 3D scene Fullscreen API + CSS fallback) each with its own Escape handler and body-overflow lock, and none traps or restores focus. The scene fallback (z-50) can open above the canvas dialog (z-40) that contains it.",
+   "evidence": "web/src/features/submissions/useSubmissionDashboardLayout.ts:122-134; web/src/pages/SubmissionDetailPage.tsx:1236; web/src/components/SubmissionArcGisMap.tsx:573-604; web/src/components/InteractiveTerrainScene.tsx:319-379",
+   "recommendation": "One Modal/Fullscreen primitive with focus trap, focus return, Escape and scroll lock; stack via a single z-index scale."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Notes panel",
+   "issue": "A raw Geometry JSON textarea (font-mono, placeholder '{\"type\":\"Point\",…}') is exposed to field users as a peer of the narrative notes, duplicating the map sketch; six narrative textareas are 2 rows tall for long-form geotechnical text.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:1270-1273, :65-72 (rows 2-3)",
+   "recommendation": "Move Geometry JSON behind an 'Advanced' disclosure (read-only unless ADMIN); give narrative fields rows=5 with auto-grow."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Visibility of system status",
+   "screen": "Header + Location hero",
+   "issue": "Photo evidence is fetched twice on load with two independent loading states ('Checking evidence…' in the header, 'Loading photo evidence…' in the hero) and the counts are shown three times (header pill, header button, hero legend).",
+   "evidence": "web/src/features/submissions/SubmissionDetailHeader.tsx:57-75,100-104; web/src/pages/SubmissionDetailPage.tsx:249-260,324; web/src/features/submissions/SubmissionLocationHero.tsx:224-249",
+   "recommendation": "Fetch once in the page and pass summary down; keep the header button label and the hero legend, drop the pill."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Match between system and the real world",
+   "screen": "Water / Drainage card + Material card",
+   "issue": "The Water/Drainage card mixes drainage condition (dictionary section K) with adjacent-impact assessment (section L); the Material card omits dictionary fields (material_pavement_type, boulder/debris percentages); the Distribution icon gets src='' (broken image) when a lookup code has no mapping.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:1098-1116, :957; docs/GISA_DATA_DICTIONARY.md:103,113-117,136-155; web/src/features/submissions/submissionDetailModel.ts:125-132",
+   "recommendation": "Split into 'Drainage' and 'Adjacent impacts' cards; render the icon only when mapped; decide explicitly which dictionary fields the web form should expose."
+  }
+ ],
+ "responsiveIssues": [
+  {
+   "screen": "GISA sheet card canvas",
+   "viewport": "phone",
+   "issue": "Every card is 520px wide inside a ~319px container (375 - 2x16 page padding - 2x12 section padding), so ~200px of each card (second input column, attachment button, chips) is clipped and only reachable by side-scrolling the canvas; the Full screen dialog has the same problem.",
+   "evidence": "web/src/features/submissions/submissionLayoutModel.ts:69,103,145; web/src/features/submissions/useSubmissionDashboardLayout.ts:136,275-279,287-295; web/src/pages/SubmissionDetailPage.tsx:797,1170,1236,1241",
+   "fix": "Below lg (or container < 1076px) bypass the canvas entirely: render the same cards as a normal block flow (width:100%, height:auto, no absolute positioning) and hide the toolbar."
+  },
+  {
+   "screen": "GISA sheet card canvas",
+   "viewport": "all",
+   "issue": "Fixed pixel card heights with overflow-auto bodies create nested scroll regions (page > card > SceneView), which trap touch scrolling; Measurements (980px) is taller than a 768px-high tablet-landscape viewport.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:106; web/src/features/submissions/submissionLayoutModel.ts:28-40; web/src/components/InteractiveTerrainScene.tsx:402-403",
+   "fix": "Auto card heights (no inner scroll) in the block-flow layout; cap the scene at min(460px, 55vh); on coarse pointers require a tap-to-interact overlay before the SceneView captures gestures."
+  },
+  {
+   "screen": "Header action cluster",
+   "viewport": "phone",
+   "issue": "Photo evidence + Refresh + Save draft + Submit + ••• (or Return + Approve) wrap to 2-3 rows at 375px and push the form below the fold; all buttons are px-3 py-2 text-sm (~36px), below the 44px touch minimum.",
+   "evidence": "web/src/features/submissions/SubmissionDetailHeader.tsx:26,117-158 (flex-wrap only, no breakpoints)",
+   "fix": "Below md: keep only the primary action in the header and move Save draft / Return / Delete into the ••• menu; or render a sticky bottom action bar; set min-h-11 on controls under @media (pointer: coarse)."
+  },
+  {
+   "screen": "Header action cluster",
+   "viewport": "tablet",
+   "issue": "With the sidebar present, SUBMITTED + ADMIN shows six controls (Photo evidence, Refresh, Return, Approve, •••) and wraps under the status line at 768px.",
+   "evidence": "web/src/features/submissions/SubmissionDetailHeader.tsx:83,117",
+   "fix": "Same as phone: collapse secondary actions into the overflow menu below lg."
+  },
+  {
+   "screen": "Location hero map",
+   "viewport": "phone",
+   "issue": "360px-tall map with eleven widgets on a ~343px-wide canvas; the custom Expand button at right-2 top-2 overlaps the ArcGIS top-right Expand stack, and Sketch/Measure/Coordinates crowd the bottom-right corner; the hero buttons are text-xs py-1.5 (~30px) and the Expand button px-2 py-1 (~26px).",
+   "evidence": "web/src/components/SubmissionArcGisMap.tsx:183-192,214,613-623; web/src/features/submissions/SubmissionLocationHero.tsx:114,124,259",
+   "fix": "Below md load only Home, Locate and Sketch and register the Expand control via view.ui.add('top-right'); height = clamp(240px, 45vh, 360px); 44px min targets."
+  },
+  {
+   "screen": "Location hero stored-value tiles",
+   "viewport": "phone",
+   "issue": "grid-cols-2 at all widths gives ~150px tiles; values truncate with a title-only overflow that touch cannot reveal.",
+   "evidence": "web/src/features/submissions/SubmissionLocationHero.tsx:49-51,134",
+   "fix": "Remove truncate and allow wrapping, or stack to one column below sm (grid-cols-1 sm:grid-cols-2). Preferably delete the tiles (see structural changes)."
+  },
+  {
+   "screen": "Location hero",
+   "viewport": "tablet",
+   "issue": "Below lg the fields stack above the map, so at 768px the map is full width but still only 360px tall; the only way to get a useful map is the 66vh modal.",
+   "evidence": "web/src/features/submissions/SubmissionLocationHero.tsx:132 (lg: two columns), :259; web/src/components/SubmissionArcGisMap.tsx:588,607",
+   "fix": "Use md: for the two-column split and make map height responsive (e.g. md:h-[420px], lg:h-[480px]) via a CSS class instead of a fixed height prop."
+  },
+  {
+   "screen": "GISA sheet card canvas",
+   "viewport": "tablet",
+   "issue": "At 768-1024px the canvas is one 520px column with 180-450px dead space to the right; the Report Header cannot span two columns so its 300px height forces internal scrolling for District Contacts; the 'Drag a card by its header · resize from the edges' hint becomes visible at md (768px) on devices that have no mouse.",
+   "evidence": "web/src/features/submissions/submissionLayoutModel.ts:29,93-104,128-130; web/src/pages/SubmissionDetailPage.tsx:769 (hidden md:inline)",
+   "fix": "Fluid columns (minmax(320px,1fr)) so one column fills the width; gate the hint and the drag/resize affordances on @media (hover:hover) and (pointer:fine)."
+  },
+  {
+   "screen": "GISA sheet card canvas",
+   "viewport": "tablet",
+   "issue": "Drag and resize are mouse-only (onMouseDown/mousemove) with 6px-wide handles; on touch the cursor-grab header and the Tidy/Reset/Full screen tools do nothing useful.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:96-97,112-113 (w-1.5/h-1.5 handles); web/src/features/submissions/useSubmissionDashboardLayout.ts:154-194,250-251",
+   "fix": "Remove drag/resize (structural change), or at minimum use Pointer Events and hide the handles/toolbar on coarse pointers."
+  },
+  {
+   "screen": "GISA sheet card canvas",
+   "viewport": "desktop",
+   "issue": "Two columns need a container >= 1076px; at 1440px with the app sidebar and page padding the container is roughly 1140px, so 110% browser zoom or a slightly wider sidebar drops the whole sheet to one 520px column with ~600px of dead space. The skyline flow with a 980px Measurements card also leaves a tall empty gap in the other column.",
+   "evidence": "web/src/features/submissions/submissionLayoutModel.ts:93-96,117-152; web/src/pages/SubmissionDetailPage.tsx:1170 (p-4), :1241 (p-3)",
+   "fix": "Fluid grid columns; make the Measurements card short (move the scene out) so column heights balance."
+  },
+  {
+   "screen": "Measurements card (3D scene)",
+   "viewport": "phone",
+   "issue": "Scene controls are 9-10px text buttons (~20px tall), the attribution is 8px, and the right-hand control column sits in the clipped part of the 520px card at 375px.",
+   "evidence": "web/src/components/InteractiveTerrainScene.tsx:406-450,459-485,531,542; web/src/features/submissions/SubmissionMeasurementContext.tsx:63,71",
+   "fix": "text-xs minimum, 32-44px targets, collapse the four overlay chips into one 'Layers' toggle below md; keep Full screen as the primary touch path."
+  },
+  {
+   "screen": "Measurements card (3D scene)",
+   "viewport": "tablet",
+   "issue": "iPadOS Safari does not expose the Fullscreen API for arbitrary elements, so the CSS fallback (fixed inset-0 z-50 + body overflow:hidden) is used; body overflow locking is unreliable on iOS and the page behind can still rubber-band.",
+   "evidence": "web/src/components/InteractiveTerrainScene.tsx:319-344,370-377",
+   "fix": "Use the shared modal primitive with position:fixed body lock (or overscroll-behavior: contain on the scene) and a visible Close button >= 44px."
+  },
+  {
+   "screen": "Report Header card",
+   "viewport": "phone",
+   "issue": "Free-text date fields bring up the full keyboard; the auto-fit minmax(220px,1fr) grid becomes one column so the card's 300px height shows only ~3 fields before internal scrolling.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:800-808; web/src/features/submissions/submissionLayoutModel.ts:29",
+   "fix": "type=\"date\"; auto height in block flow."
+  },
+  {
+   "screen": "Notes and actions panel",
+   "viewport": "phone",
+   "issue": "Layout works (single column) but action chips are px-2 py-1 text-xs (~26px) and 2-row textareas are cramped with the soft keyboard open.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:66-71,1250,1276-1277",
+   "fix": "min-h-10 chips on coarse pointers; rows=4 with field-sizing:content / auto-grow."
+  },
+  {
+   "screen": "Notes and actions panel",
+   "viewport": "desktop",
+   "issue": "auto-fit minmax(320px,1fr) yields 3-4 very wide, 2-row textareas at 1440px; long narrative reads badly.",
+   "evidence": "web/src/pages/SubmissionDetailPage.tsx:1250",
+   "fix": "Cap at two columns (max 2 x 1fr) or minmax(420px,1fr) and increase rows."
+  },
+  {
+   "screen": "Header overflow menu and hover affordances",
+   "viewport": "all",
+   "issue": "Hover-only cues: title tooltips on tiles/buttons, cursor-grab/resize cursors, hover:bg states; the ••• dropdown has no outside-click or Escape close, so on touch it stays open over the status line.",
+   "evidence": "web/src/features/submissions/SubmissionDetailHeader.tsx:119,145-156; web/src/features/submissions/SubmissionLocationHero.tsx:125,135-138; web/src/pages/SubmissionDetailPage.tsx:98,118",
+   "fix": "Visible helper text; menu component with outside-click/Escape; no information in title attributes only."
+  }
+ ],
+ "dataDensity": [
+  {
+   "screen": "Header",
+   "element": "Back link (Assessment #N / Submissions)",
+   "verdict": "keep",
+   "reason": "Only breadcrumb; resolves to the parent assessment (SubmissionDetailHeader.tsx:77-88)."
+  },
+  {
+   "screen": "Header",
+   "element": "Status badge",
+   "verdict": "keep",
+   "reason": "Drives which actions exist; first thing both roles need."
+  },
+  {
+   "screen": "Header",
+   "element": "Status caption prose ('Ready for reviewer decision' etc.)",
+   "verdict": "demote",
+   "reason": "Restates the badge; fold into a read-only/edit-mode banner shown once (SubmissionDetailHeader.tsx:91-99)."
+  },
+  {
+   "screen": "Header",
+   "element": "'N unmapped' pill",
+   "verdict": "demote",
+   "reason": "Useful to reviewers but duplicates the button label and hero legend; keep in the photo button label only (SubmissionDetailHeader.tsx:100-104)."
+  },
+  {
+   "screen": "Header",
+   "element": "'· descriptor · owner user #N' meta line",
+   "verdict": "remove",
+   "reason": "Descriptor is the h1 40px above; owner should be a name in Summary, not an id (SubmissionDetailHeader.tsx:105; SubmissionDetailPage.tsx:1174)."
+  },
+  {
+   "screen": "Header",
+   "element": "Incident #N chip / View on map",
+   "verdict": "keep",
+   "reason": "Context links to the operational record and Mission Center (SubmissionDetailHeader.tsx:106-113)."
+  },
+  {
+   "screen": "Header",
+   "element": "Photo evidence button with counts",
+   "verdict": "keep",
+   "reason": "Evidence coverage is a review prerequisite (SubmissionDetailHeader.tsx:119-121)."
+  },
+  {
+   "screen": "Header",
+   "element": "Refresh button",
+   "verdict": "demote",
+   "reason": "Rarely needed and dangerous while dirty; move into ••• with a dirty-state guard (SubmissionDetailHeader.tsx:124)."
+  },
+  {
+   "screen": "Header",
+   "element": "Save draft / Submit / Approve / Return / •••",
+   "verdict": "keep",
+   "reason": "Primary actions; collapse secondaries into the menu below lg."
+  },
+  {
+   "screen": "Page banners",
+   "element": "'Returned for correction: <comment>'",
+   "verdict": "keep",
+   "reason": "The reason the engineer must act (SubmissionDetailPage.tsx:1190-1192)."
+  },
+  {
+   "screen": "Page banners",
+   "element": "Edit-mode banner 'You are completing this technical submission…'",
+   "verdict": "demote",
+   "reason": "Repeats header links in prose; shrink to one line or show once per session (SubmissionDetailPage.tsx:1193-1203)."
+  },
+  {
+   "screen": "Page banners",
+   "element": "Single error banner",
+   "verdict": "progressive",
+   "reason": "Keep for server errors; field validation moves inline (SubmissionDetailPage.tsx:1205)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Stored District/County/Route/Post mile tiles",
+   "verdict": "remove",
+   "reason": "Raw codes duplicating the editable Report Header selects and the h1; replace with the editable selects (SubmissionLocationHero.tsx:135-138)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Latitude / Longitude inputs",
+   "verdict": "keep",
+   "reason": "Primary location fields; add range validation (SubmissionLocationHero.tsx:141-170)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "CCS83 Northing/Easting block",
+   "verdict": "progressive",
+   "reason": "Already behind Show N/E; keep on demand (SubmissionLocationHero.tsx:172-208)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Use GPS autofill",
+   "verdict": "keep",
+   "reason": "Fast path for field engineers; make suggestions confirmable (SubmissionDetailPage.tsx:445-489)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Geometry save status line",
+   "verdict": "keep",
+   "reason": "Only feedback that a sketch persisted; becomes the page-level save status once persistence is unified (SubmissionLocationHero.tsx:211-215)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Mapped evidence legend with counts",
+   "verdict": "keep",
+   "reason": "Explains the map symbols with live counts; the one place the counts belong (SubmissionLocationHero.tsx:229-249)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "'Photo evidence details' link",
+   "verdict": "remove",
+   "reason": "Duplicate of the header button (SubmissionLocationHero.tsx:220-222)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "ArcGIS map with submission point, geometry, photo markers/wedges",
+   "verdict": "keep",
+   "reason": "Core visual for verifying the point and drawing the affected area."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Search, Basemap gallery, Layers, Legend, Measurement, Coordinate conversion widgets",
+   "verdict": "progressive",
+   "reason": "Power-user tools; one 'Map tools' expand or only in the expanded modal (SubmissionArcGisMap.tsx:164-192)."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Home, Locate, Compass, ScaleBar, Sketch",
+   "verdict": "keep",
+   "reason": "Needed to orient and draw; Compass could be dropped on 2D north-up maps."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Expand map button / modal",
+   "verdict": "keep",
+   "reason": "The only way to get a usable map area on tablets; fix its position."
+  },
+  {
+   "screen": "Location hero",
+   "element": "Photo popup: thumbnail, captured, heading, accuracy, section",
+   "verdict": "keep",
+   "reason": "Answers 'what is this marker'; use the section label, not the key (SubmissionArcGisMap.tsx:96-107)."
+  },
+  {
+   "screen": "GISA canvas toolbar",
+   "element": "'Custom layout / Auto-fit layout' pill and drag hint",
+   "verdict": "remove",
+   "reason": "Layout mode is irrelevant to filling the sheet (SubmissionDetailPage.tsx:766-769)."
+  },
+  {
+   "screen": "GISA canvas toolbar",
+   "element": "Tidy layout / Reset layout",
+   "verdict": "remove",
+   "reason": "Exist only to undo the drag/resize feature; go away with it (SubmissionDetailPage.tsx:772-781)."
+  },
+  {
+   "screen": "GISA canvas toolbar",
+   "element": "Full screen",
+   "verdict": "demote",
+   "reason": "Marginal once cards have auto heights; keep for the 3D scene only (SubmissionDetailPage.tsx:782-791)."
+  },
+  {
+   "screen": "Card headers",
+   "element": "Grip icon",
+   "verdict": "remove",
+   "reason": "Mouse-only affordance (SubmissionDetailPage.tsx:101)."
+  },
+  {
+   "screen": "Card headers",
+   "element": "'Open attachments (n)' button",
+   "verdict": "keep",
+   "reason": "Ties mobile-captured evidence to the section; the reviewer's main evidence path (SubmissionDetailPage.tsx:104)."
+  },
+  {
+   "screen": "Report Header card",
+   "element": "Report Date, Date Incident Reported, District, County, Route, Post Mile",
+   "verdict": "keep",
+   "reason": "Record identity (dictionary section A); District/County/Route/PM should live in the hero to remove the duplicate."
+  },
+  {
+   "screen": "Report Header card",
+   "element": "EA, Project ID",
+   "verdict": "demote",
+   "reason": "Administrative identifiers rarely known in the field; secondary row or 'Project references' disclosure (SubmissionDetailPage.tsx:864-871)."
+  },
+  {
+   "screen": "Report Header card",
+   "element": "District Contacts accordion",
+   "verdict": "progressive",
+   "reason": "Collapsed by default is right; show a one-line summary (name · phone) per contact (SubmissionDetailPage.tsx:872-915)."
+  },
+  {
+   "screen": "Report Header card",
+   "element": "'Raw Contact Data' JSON textarea",
+   "verdict": "remove",
+   "reason": "Debug fallback for unparseable text; show a 'Legacy contact text' read-only note instead (SubmissionDetailPage.tsx:917-930)."
+  },
+  {
+   "screen": "Distribution card",
+   "element": "Six pictogram buttons",
+   "verdict": "keep",
+   "reason": "Matches how geologists recognise movement type; the best-sized targets on the page (SubmissionDetailPage.tsx:945-963)."
+  },
+  {
+   "screen": "Highway Status card",
+   "element": "Cause text, status chips, lanes closed/open counts",
+   "verdict": "keep",
+   "reason": "Operational core; show chips always, reveal counts by status (SubmissionDetailPage.tsx:965-1011)."
+  },
+  {
+   "screen": "Incident Type card",
+   "element": "13 chips + description",
+   "verdict": "keep",
+   "reason": "Dictionary section E plus code-only types; multi-select is correct."
+  },
+  {
+   "screen": "Material card",
+   "element": "Rock/Soil, subtypes, four soil percentages",
+   "verdict": "keep",
+   "reason": "Conditional reveal is good; add live total (SubmissionDetailPage.tsx:1037-1057)."
+  },
+  {
+   "screen": "Pavement / Ground card",
+   "element": "Cracks YES/NO, crack dimensions, settlement, bulge, indented by rocks",
+   "verdict": "keep",
+   "reason": "Section D; conditional reveal already keeps it short."
+  },
+  {
+   "screen": "Vegetation card",
+   "element": "Three coverage percentages",
+   "verdict": "keep",
+   "reason": "Section J; small card, could merge with Water Content to save a card."
+  },
+  {
+   "screen": "Water / Drainage card",
+   "element": "Drainage chips",
+   "verdict": "keep",
+   "reason": "Section K."
+  },
+  {
+   "screen": "Water / Drainage card",
+   "element": "Impacted/Maybe x Utilities/Properties/Structures + three notes",
+   "verdict": "demote",
+   "reason": "Section L is a separate assessment; own card 'Adjacent impacts' after Highway Status (SubmissionDetailPage.tsx:1104-1115)."
+  },
+  {
+   "screen": "Water Content card",
+   "element": "Dry/Moist/Wet/Flowing + Seep/Spring",
+   "verdict": "keep",
+   "reason": "Section I; consider merging into the Material row."
+  },
+  {
+   "screen": "Measurements card",
+   "element": "3D terrain scene + Sample terrain + samples date",
+   "verdict": "progressive",
+   "reason": "Context, not data entry; load on demand as its own section, gated on canEdit for sampling (SubmissionMeasurementContext.tsx:57-106)."
+  },
+  {
+   "screen": "Measurements card",
+   "element": "Scene overlay chips, basemap toggle, Reset view, Full screen",
+   "verdict": "progressive",
+   "reason": "Keep Full screen and Reset visible; put basemap and overlay toggles in one small menu (InteractiveTerrainScene.tsx:414-485)."
+  },
+  {
+   "screen": "Measurements card",
+   "element": "Landslide reference diagram",
+   "verdict": "keep",
+   "reason": "Key for the eight symbols; belongs next to the inputs (SubmissionDetailPage.tsx:1142-1144)."
+  },
+  {
+   "screen": "Measurements card",
+   "element": "Eight measurement inputs",
+   "verdict": "keep",
+   "reason": "Section M; the card's reason to exist."
+  },
+  {
+   "screen": "Notes panel",
+   "element": "Observations, Record of Event, Geotechnical Assessment, Recommendations",
+   "verdict": "keep",
+   "reason": "Core narrative; give them room (rows 5+)."
+  },
+  {
+   "screen": "Notes panel",
+   "element": "Maintenance History, Sketchpad textareas",
+   "verdict": "demote",
+   "reason": "Secondary; Sketchpad as text conflicts with the mobile sketch attachments (SubmissionDetailPage.tsx:68,71)."
+  },
+  {
+   "screen": "Notes panel",
+   "element": "Geometry JSON textarea",
+   "verdict": "progressive",
+   "reason": "Advanced/debug; behind a disclosure, read-only for non-admins (SubmissionDetailPage.tsx:1270-1273)."
+  },
+  {
+   "screen": "Notes panel",
+   "element": "Immediate / Follow-up action chips",
+   "verdict": "keep",
+   "reason": "Required record of actions; move next to Highway Status because of the OPEN_HIGHWAY_TRAFFIC dependency."
+  },
+  {
+   "screen": "Notes panel",
+   "element": "Submit comment textarea",
+   "verdict": "demote",
+   "reason": "Belongs in the Submit confirmation dialog (SubmissionDetailPage.tsx:1280-1285)."
+  },
+  {
+   "screen": "Review cards",
+   "element": "Summary rows (Descriptor, ID, Created, Updated, Submitted, Reviewed, Status)",
+   "verdict": "demote",
+   "reason": "Descriptor/Status are repeats; keep ID and formatted timestamps in a compact 'Record' footer (SubmissionDetailPage.tsx:1291-1299)."
+  },
+  {
+   "screen": "Review cards",
+   "element": "Reviewer Note textarea",
+   "verdict": "demote",
+   "reason": "Belongs in the Approve/Return dialog; show the recorded note read-only afterwards (SubmissionDetailPage.tsx:1301-1307)."
+  }
+ ],
+ "quickWins": [
+  "Memoize the hero's `location` on the numeric lat/lon (SubmissionLocationHero.tsx:96-99) and only call view.goTo when the coordinate/geometry key changes (SubmissionArcGisMap.tsx:477-479) so the map stops re-centring on every keystroke.",
+  "Move the Submit comment and Reviewer Note into small confirmation dialogs opened by Submit / Approve / Return; delete the bottom-of-page textareas (SubmissionDetailPage.tsx:1280-1285,1301-1307).",
+  "Add a dirty flag, confirm before Refresh when dirty, add beforeunload, and show 'Draft saved HH:MM' after Save draft (SubmissionDetailPage.tsx:262-330,366,1182).",
+  "Generate id/htmlFor for every canvas label from the field key and add aria-pressed plus a check glyph to chip buttons (SubmissionDetailPage.tsx:59-62,802-870,984-1121,1276-1277).",
+  "Switch Report Date and Date Incident Reported to type=\"date\" (SubmissionDetailPage.tsx:802-808).",
+  "Show a live 'Total 95% (5% under)' line under the soil inputs and validate lat/lon ranges on blur instead of only in the header banner (SubmissionDetailPage.tsx:228-247,1050-1055; SubmissionLocationHero.tsx:144-169).",
+  "Hide the drag hint, grip icon, resize handles and Tidy/Reset on @media (pointer: coarse); gate the md:inline hint on (hover:hover) (SubmissionDetailPage.tsx:101,112-120,769-781).",
+  "Below md load only Home, Locate and Sketch on the 2D map and register the Expand button via view.ui.add so it no longer overlaps the top-right widget stack (SubmissionArcGisMap.tsx:183-214,613-623).",
+  "Raise 3D scene control text to text-xs and 32px targets; drop one of the two identical spinners (InteractiveTerrainScene.tsx:420-447,531-542; SubmissionMeasurementContext.tsx:79-91).",
+  "Render 'Sample terrain' only when canEdit and add one line of visible help ('Samples USGS 3DEP elevation around the point for the road-bearing and extent overlays') (SubmissionMeasurementContext.tsx:67-74).",
+  "Replace raw ids: owner display name instead of 'user #N', descriptor instead of 'Submission #N' in the scene, section label instead of section_key in the map popup, formatted timestamps in Summary (SubmissionDetailPage.tsx:1174,1294-1297; SubmissionMeasurementContext.tsx:99; SubmissionArcGisMap.tsx:101).",
+  "Remove the '· descriptor · owner' meta line and the 'Photo evidence details' duplicate link; fetch photo evidence once in the page and pass the summary to the header (SubmissionDetailHeader.tsx:57-75,105; SubmissionLocationHero.tsx:220-222).",
+  "Put the Geometry JSON textarea behind an 'Advanced' <details>, read-only unless ADMIN (SubmissionDetailPage.tsx:1270-1273).",
+  "Give the ••• menu role=menu with Escape and outside-click close; replace window.confirm + window.location with the app dialog and navigate() (SubmissionDetailHeader.tsx:146-156; SubmissionDetailPage.tsx:428-438).",
+  "Guard the Distribution icon so src='' never renders (SubmissionDetailPage.tsx:957)."
+ ],
+ "structuralChanges": [
+  "Retire the absolute-positioned dashboard canvas (submissionLayoutModel.ts, useSubmissionDashboardLayout.ts) in favour of a responsive section grid: repeat(auto-fit, minmax(320px,1fr)) with auto heights, a sticky section nav (A Header, B Location, C Status, … M Measurements, N Notes) and per-section completeness badges so reviewers can scan the sheet without scrolling nested regions.",
+  "Split 'Measurements' into two sections: 'Measurements' (diagram + eight inputs) and an optional '3D terrain' section that mounts the SceneView on demand ('Load 3D terrain') with a static preview; keep the ?section=terrain deep link pointing at the new section.",
+  "Single location model: the hero edits the draft District/County/Route/Post mile (human labels, cascading selects) alongside lat/lon and the map; remove the stored-code tiles and the duplicate selects from the Report Header card; the h1 descriptor is derived from the same draft.",
+  "Unify persistence: geometry sketches and terrain samples become part of the draft saved by Save draft (or everything autosaves with a global 'Saving… / Saved' indicator); one dirty-state model with beforeunload and a guarded Refresh.",
+  "Decision flow: a sticky action bar (header on desktop, bottom bar on phone) with one primary action per state; Submit / Approve / Return open a dialog that holds the comment, a completeness summary (unmapped photos, missing sections) and the confirm button.",
+  "One Modal/Fullscreen primitive (focus trap, focus return, Escape, scroll lock, single z-index scale) shared by the expanded 2D map, the 3D scene fallback and the section attachments dialog; delete the three bespoke implementations.",
+  "Reorganise cards to the data dictionary sections: separate 'Adjacent impacts' (L) from 'Drainage' (K), move Immediate/Follow-up actions beside Highway Status (their only dependency), merge Water Content and Vegetation into a compact 'Site conditions' card, and decide whether pavement type and boulder/debris percentages (dictionary G/H) should be exposed on the web form."
+ ]
+}

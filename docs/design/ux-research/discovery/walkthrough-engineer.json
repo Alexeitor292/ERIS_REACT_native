@@ -1,0 +1,268 @@
+{
+ "persona": "GeoTech Engineer (roles FIELD_WORKER / GEOTECH_ENGINEER), first day on the ERIS web app, no training. Knows the job: site visit, GISA technical form with measurements and photos, submit for review, revision loops, DEM cross sections. Works on a 13-inch laptop in the office and an iPad (landscape 1024px / portrait 768px) in the field.",
+ "tasks": [
+  {
+   "task": "Open the assessment assigned to me and fill out the GISA technical form for the incident, including photos and measurements, then submit it for review",
+   "steps": [
+    "Sign in; every role lands on /my-work (web/src/pages/LoginPage.tsx:42).",
+    "My Work rail lists my items as 'Assessment #12 / Incident #34 · Office NORTH · D07', badge 'Draft', 'Waiting on Assigned Engineer', 'No technical submissions attached'; the first card is auto-selected (MyWorkPage.tsx:88; AssessmentDetailPanel.tsx:434-444).",
+    "Read the 'Next step — Waiting on Engineer · <me>: Complete the technical submission, then submit the assessment for review.' card; click 'Create draft technical submission' (or 'Fill out submission #N' if one is already linked) (AssessmentDetailPanel.tsx:263-291).",
+    "Land on /submissions/:id: header '← Assessment #12', badge 'DRAFT', 'Editable field record', buttons 'Photo evidence', 'Refresh', 'Save draft', 'Submit for review', '•••' (SubmissionDetailHeader.tsx:85-157); blue banner 'You are completing this technical submission… Fill out the GISA form below' (SubmissionDetailPage.tsx:1193-1203).",
+    "In 'Location and ERIS map' confirm the pre-filled District/County/Route/Post mile tiles, adjust Latitude/Longitude or drop the point on the 360px map (SubmissionLocationHero.tsx:132-263).",
+    "Work through the 'GISA Sheet' canvas of 11 drag/resize cards: Report Header, Distribution, Highway Status, Incident Type, Material, Pavement / Ground Status, Vegetation on Slope, Water / Drainage, Water Content, Measurements (submissionLayoutModel.ts:42-54; SubmissionDetailPage.tsx:796-1156).",
+    "In the Measurements card, look past the '3D terrain' scene and 'Sample terrain' button to the landslide reference image and enter H, alpha, Wd, Ld, Hs, beta, Lr, Wr in feet/degrees (SubmissionDetailPage.tsx:1132-1155; SubmissionMeasurementContext.tsx:58-75).",
+    "Try to add site photos: 'Submission library' says 'No files are attached to this submission yet.' and there is no upload control anywhere on the page (SubmissionLibrary.tsx:65; no type=\"file\" input in web/src/features/submissions). Give up and note that photos must come from the iPad app 'Gallery' step.",
+    "Scroll to 'Notes and actions': fill Observations / Record of Event / Maintenance History / Geotechnical Assessment / Recommendations / Sketchpad, skip 'Geometry JSON', toggle Immediate / Follow-up action chips, type a 'Submit comment (optional)' (SubmissionDetailPage.tsx:1247-1286).",
+    "Scroll back to the top; click 'Save draft', then 'Submit for review' in the header (SubmissionDetailHeader.tsx:128-129). Badge becomes 'SUBMITTED · Ready for reviewer decision' and the form locks.",
+    "Realise nothing changed on the assessment: click '← Assessment #12' (goes to the read-only /assessments/12 record), click 'This step is yours — act on it in My Work', then click the second 'Submit for review' on the assessment panel (SubmissionDetailHeader.tsx:78-79; AssessmentDetailPanel.tsx:269,319)."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Header identity",
+     "problem": "The header prints my raw role code 'FIELD_WORKER' (AppShell.tsx:157). In the Caltrans job vocabulary a 'field worker' is the maintenance reporter, not the geotechnical engineer.",
+     "severity": 2,
+     "whyConfusing": "Jargon/label wording: the newcomer wonders whether they were provisioned with the wrong role before they even start."
+    },
+    {
+     "step": "My Work rail",
+     "problem": "Rail cards identify work as 'Assessment #12 / Incident #34 · Office NORTH · D07' with no route, post mile, county or incident title; non-selected cards say 'Waiting on Assigned Engineer' generically (AssessmentDetailPanel.tsx:434-437; MyWorkPage.tsx:163).",
+     "severity": 2,
+     "whyConfusing": "Engineers think in Route/PM and slide names, not database ids; they cannot tell which card is the site they visited yesterday, or whether 'Assigned Engineer' means them."
+    },
+    {
+     "step": "Next step card",
+     "problem": "The action is labelled 'Create draft technical submission' / 'Fill out submission #N' while the hint below says 'All GISA forms attached to this assessment's incident' (AssessmentDetailPanel.tsx:288, 336). Three names — technical submission, submission, GISA form — for the one thing the engineer calls 'the GISA'.",
+     "severity": 3,
+     "whyConfusing": "Jargon: 'submission' reads like 'submitting' (sending it off); the newcomer hesitates because they have not filled anything in yet."
+    },
+    {
+     "step": "Opening the submission",
+     "problem": "canEdit is true only for the literal roles FIELD_WORKER or ADMIN (SubmissionDetailPage.tsx:162). An engineer provisioned with the canonical GEOTECH_ENGINEER role sees every card in a disabled fieldset, no 'Save draft' / 'Submit for review' buttons, and no explanation — while My Work just told them to fill it out.",
+     "severity": 4,
+     "whyConfusing": "Unclear status / silent gate: the page looks like a read-only record; nothing says 'you cannot edit because…'. roleModel.isEngineer accepts both names (roleModel.ts:12,62-64) but this page does not use it."
+    },
+    {
+     "step": "GISA Sheet canvas",
+     "problem": "The form is a draggable, resizable dashboard: 'Drag a card by its header · resize from the edges', 'Auto-fit layout' / 'Custom layout' pill, 'Tidy layout', 'Reset layout' (SubmissionDetailPage.tsx:762-794). Card bodies scroll internally inside a fixed height (line 106) inside the page scroll; a mis-click on a header drags a card and flips the layout to 'Custom', persisted in localStorage for every submission (useSubmissionDashboardLayout.ts:83-116).",
+     "severity": 3,
+     "whyConfusing": "Too much data / wrong affordance: a first-day user wants a form in a fixed reading order; layout management is a distraction and nested scroll hides fields such as District Contacts at the bottom of Report Header."
+    },
+    {
+     "step": "Filling the form",
+     "problem": "No required-field markers, no per-card completion state, no validation before 'Submit for review' except the soil-percentage total, whose error appears in the page-top banner far from the Material card (SubmissionDetailPage.tsx:228-247, 367-372, 1205).",
+     "severity": 3,
+     "whyConfusing": "Unclear next action: the newcomer cannot tell what the reviewer will expect or whether the form is 'done'; a blank form submits successfully."
+    },
+    {
+     "step": "Highway Status card",
+     "problem": "The status chips are hidden until text is typed into 'Cause Of Highway Status'; the only hint is 'Enter the cause above to reveal the highway status options.' (SubmissionDetailPage.tsx:974, 1009).",
+     "severity": 2,
+     "whyConfusing": "Hidden entry point: the job habit is to pick 'Lanes closed' first and describe why second; the card appears broken/empty."
+    },
+    {
+     "step": "Measurements card",
+     "problem": "The card opens with a 460px '3D terrain' scene and a 'Sample terrain' / 'Refresh terrain samples' button above the eight measurement inputs (SubmissionMeasurementContext.tsx:58-101; SubmissionDetailPage.tsx:1132-1155).",
+     "severity": 2,
+     "whyConfusing": "Label wording: 'Sample terrain' sounds like it will fill in slope height / angle for me; it actually pulls a USGS grid for the scene overlay and the fields stay empty."
+    },
+    {
+     "step": "Adding photos",
+     "problem": "There is no way to upload photos, videos or documents from the web submission page. 'Submission library' is display-only ('No files are attached to this submission yet.'), the section dialog says files are 'tagged to this section by the field form', and the header 'Photo evidence' button is a read-only report (SubmissionLibrary.tsx:65; SubmissionSectionAttachmentsDialog.tsx:46; SubmissionDetailHeader.tsx:119-121).",
+     "severity": 4,
+     "whyConfusing": "Hidden entry point / blocked: 'Photo evidence' reads like an action; nothing tells the engineer that photos only enter through the iPad app's Gallery step."
+    },
+    {
+     "step": "Notes and actions",
+     "problem": "A raw 'Geometry JSON' textarea with placeholder '{\"type\":\"Point\",\"coordinates\":[...]}' sits among the engineering notes (SubmissionDetailPage.tsx:1271-1272).",
+     "severity": 2,
+     "whyConfusing": "Jargon: a developer field exposed to an engineer; they wonder if it is required."
+    },
+    {
+     "step": "Saving",
+     "problem": "No autosave, no dirty indicator, no leave-page warning; 'Refresh' sits between 'Photo evidence' and 'Save draft' and silently reloads the record, discarding unsaved edits (SubmissionDetailPage.tsx:262-330, 1182; SubmissionDetailHeader.tsx:124-129). Map geometry, by contrast, saves instantly (SubmissionDetailPage.tsx:399-424).",
+     "severity": 3,
+     "whyConfusing": "Unclear status: two save behaviours on one page; the newcomer cannot tell what is persisted."
+    },
+    {
+     "step": "Submit comment",
+     "problem": "The 'Submit comment (optional)' box is at the bottom of 'Notes and actions' with placeholder 'Included with the submission when you submit for review from the header', while the button it feeds is at the top of the page (SubmissionDetailPage.tsx:1282-1283).",
+     "severity": 2,
+     "whyConfusing": "Split control: the newcomer either misses the comment or hunts for a submit button next to it."
+    },
+    {
+     "step": "Submit for review",
+     "problem": "Two different 'Submit for review' buttons: the submission header (POST /submissions/:id/submit) and the My Work assessment panel (POST /assessments/:id/submit). Pressing the first locks the form ('SUBMITTED · Ready for reviewer decision') but the assessment stays DRAFT; the back link goes to the read-only Assessments record, which then points to My Work for the second submit (SubmissionDetailHeader.tsx:78-79,129; AssessmentDetailPanel.tsx:269,319; backend/app/routes/assessments.py:1351).",
+     "severity": 4,
+     "whyConfusing": "Unclear next action: the engineer believes they are finished after the first submit; the reviewer never sees the assessment in their queue."
+    },
+    {
+     "step": "Status vocabulary",
+     "problem": "The submission badge prints the raw enum 'DRAFT' / 'SUBMITTED' (SubmissionDetailPrimitives.tsx:15) while the assessment uses 'Draft' / 'Submitted for review' (assessmentModel.ts:54-60); the Summary card repeats 'Status: SUBMITTED' (SubmissionDetailPage.tsx:1298).",
+     "severity": 2,
+     "whyConfusing": "Two status systems side by side make it unclear whether 'SUBMITTED' on the form and 'Draft' on the assessment describe the same object."
+    },
+    {
+     "step": "iPad",
+     "problem": "Card drag/resize handlers are mouse-only (onMouseDown; SubmissionDetailPage.tsx:96,112-117), the GISA canvas scrolls horizontally when narrower than its cards (line 797), the 360px ArcGIS map and 460px 3D scene capture touch gestures, and at 768px portrait the full navigation card is stacked above the page (AppShell.tsx:164).",
+     "severity": 3,
+     "whyConfusing": "The device the persona actually carries to the site gets the least usable version of the form."
+    }
+   ],
+   "estimatedClicks": 60,
+   "verdict": "blocked"
+  },
+  {
+   "task": "Return to a submission that was sent back for correction, understand what the reviewer wants, fix it and resubmit",
+   "steps": [
+    "Sign in → My Work. If the reviewer used the assessment-level 'Request revision', the rail card shows a red 'Revision requested' badge and the panel shows the red 'Next step — Waiting on Engineer · <me>: Address the reviewer's comments, update the submission, and resubmit.' (assessmentModel.ts:83-84; AssessmentDetailPanel.tsx:254-265).",
+    "Look for the reviewer's comments: they are not in the Next step card. Scroll past 'Technical submissions' and 'Assignments' to the fourth card 'Assessment history', find the 'Revision Requested' event and read its notes box — often just the auto-filled text 'Revision requested.' (AssessmentDetailPanel.tsx:323, 390-401).",
+    "Click 'Fill out submission #N' (AssessmentDetailPanel.tsx:277) to open the form.",
+    "Discover the submission still reads 'SUBMITTED · Ready for reviewer decision', every field is disabled and there are no Save/Submit buttons, because the assessment-level revision never changed the submission status (backend/app/routes/assessments.py:1424-1441 updates only the assessments table; SubmissionDetailPage.tsx:162 requires DRAFT or REJECTED).",
+    "Fallback: go back to My Work and click 'Add another draft submission', which creates an empty second GISA form that must be re-entered from scratch (AssessmentDetailPanel.tsx:283-288).",
+    "Alternative branch — the reviewer used 'Return for correction' on the submission page: the submission becomes REJECTED and shows a red banner 'Returned for correction: <comment>' plus 'Save draft' and 'Resubmit for review' (SubmissionDetailPage.tsx:1181, 1190-1192; SubmissionDetailHeader.tsx:96), but the assessment stays SUBMITTED so it does not appear in the engineer's My Work queue at all (MyWorkPage.tsx:54-55).",
+    "In that branch, find it by browsing Operations › Assessments, filtering to 'Submitted for review', opening the assessment, scrolling to the 'Technical submissions' table and clicking 'Open' on the row whose badge says 'REJECTED' (AssessmentWorkspacePage.tsx:105-108; AssessmentDetailPanel.tsx:342-358).",
+    "Edit the fields, read the 'Reviewer Note' card (read-only, bottom of page) and 'Workflow History' ('Event REJECTED · Actor user #7') for context (SubmissionReviewerSupport.tsx:24-35, 50-53), click 'Save draft' then 'Resubmit for review'.",
+    "Return to My Work and, if the assessment is in 'Revision requested', press the assessment-level 'Submit for review' again (AssessmentDetailPanel.tsx:319)."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Finding the reviewer's request",
+     "problem": "The red Next step card says 'Address the reviewer's comments' but does not show them; the notes live in the 'Assessment history' card, fourth from the top inside a 420px scroll box (AssessmentDetailPanel.tsx:265, 390-401). If the reviewer left the box empty the note is the placeholder 'Revision requested.' (line 323).",
+     "severity": 4,
+     "whyConfusing": "Unclear next action: the persona's stated need is 'the reviewer's notes front and centre'; instead they must know that 'history' is where feedback lives."
+    },
+    {
+     "step": "Opening the returned form",
+     "problem": "Assessment-level 'Request revision' flips the assessment to REVISION_REQUESTED but leaves the submission SUBMITTED, so the form is locked ('SUBMITTED · Ready for reviewer decision') and the 'Returned for correction' banner never appears (backend/app/routes/assessments.py:1424-1441; SubmissionDetailPage.tsx:162, 1190).",
+     "severity": 4,
+     "whyConfusing": "Contradictory status across two screens: My Work says 'fix it', the form says 'waiting for the reviewer'. The only way forward is a brand-new empty submission."
+    },
+    {
+     "step": "Submission-level return not in My Work",
+     "problem": "When the reviewer uses 'Return for correction' on /submissions/:id, the submission becomes REJECTED but the assessment stays SUBMITTED; the engineer's queue only lists DRAFT / REVISION_REQUESTED assessments (MyWorkPage.tsx:54), so the returned form is invisible on the inbox and there is no notification.",
+     "severity": 4,
+     "whyConfusing": "Hidden entry point: 'Nothing needs your attention' (MyWorkPage.tsx:132) while a correction is waiting; discovery requires browsing the read-only Assessments record view and reading a table badge."
+    },
+    {
+     "step": "Reading who returned it",
+     "problem": "Workflow History prints 'Event REJECTED · Actor user #7' and the submissions table shows 'User #7' (SubmissionReviewerSupport.tsx:52; AssessmentDetailPanel.tsx:354); the Reviewer Note card is at the very bottom of the page under the library.",
+     "severity": 2,
+     "whyConfusing": "Raw ids instead of names; the engineer cannot tell whether to walk over to the branch chief or the office chief."
+    },
+    {
+     "step": "Understanding what changed",
+     "problem": "Nothing marks which fields the reviewer objected to and there is no diff against the previous version; 'REJECTED' as a label reads as a final rejection rather than 'returned for correction' (SubmissionDetailPrimitives.tsx:7-8,15).",
+     "severity": 3,
+     "whyConfusing": "Emotional and informational mismatch: the job term is 'returned for correction'; the badge says the work was rejected."
+    },
+    {
+     "step": "Resubmitting",
+     "problem": "'Resubmit for review' on the form (SubmissionDetailPage.tsx:1181) does not advance the assessment; a second 'Submit for review' in My Work is still needed, reachable only via '← Assessment #N' → 'act on it in My Work' (SubmissionDetailHeader.tsx:78-79; AssessmentDetailPanel.tsx:269).",
+     "severity": 3,
+     "whyConfusing": "Same two-level submit as task 1; the newcomer has no signal that the loop is not closed."
+    }
+   ],
+   "estimatedClicks": 12,
+   "verdict": "blocked"
+  },
+  {
+   "task": "Look at the 3D terrain around the site and create a terrain cross section",
+   "steps": [
+    "On the submission page scroll to the Measurements card: a '3D terrain' scene centred on the submission point loads ('Loading 3D terrain & imagery…'), with 'Sample terrain', 'Reset camera to the incident' and 'Full screen' (SubmissionMeasurementContext.tsx:58-101; InteractiveTerrainScene.tsx:437-445). Orbit around the slide.",
+    "Look for a cross-section tool in that scene — there is none (grep for cross/profile in InteractiveTerrainScene.tsx finds nothing).",
+    "Open the sidebar 'GIS Tools › Terrain Cross Sections' (AppShell.tsx:90-92). The page shows 'Loading ArcGIS 3D terrain…' then a dark full-height scene of the whole of California (TerrainCrossSectionWorkspace.tsx:253-262, 1002-1004).",
+    "Find the site: the only locator is the ArcGIS Search widget top-right (line 277-280), so switch tabs, copy the latitude/longitude from the submission hero, paste them into Search, zoom and tilt.",
+    "Toolbar top-left: click '+ New'; hint 'Click terrain to place P1' appears (lines 602-609, 698-703). Tap P1 on the crest, P2 mid-slope, P3 at the toe; the button now reads 'Finish & profile' (line 637).",
+    "Click 'Finish & profile' → 'Sampling…' → the 'Elevation analysis' drawer slides in (720px) with tabs 'Elevation Profile' / '3D Terrain Slice', metrics Path / Samples / Spacing / Source coverage, and a DEM provenance paragraph (lines 737-805).",
+    "Optionally open the right-rail 'Setup' to change 'Profile sample spacing' (1 m … 50 m) or 'Terrain3D elevation query' (lines 849-909).",
+    "Click 'Save' → dialog 'Save cross section — Choose the Project this cross section belongs to.'; the Project select is empty for a new user, so click '+ Create Project', type Project number / Project title / District, 'Create and select', name the section, 'Save to Project' (CrossSectionSaveDialog.tsx:134-185).",
+    "Click 'Capture' → 'Aerial capture' dialog with 1:1 / 16:9 / 9:16 presets, 'Copy JPEG to clipboard' / 'Download JPEG' and the note 'Capture files stay in the browser. ERIS does not upload them or save them to the database.' (AerialCaptureDialog.tsx:436-517)."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Choosing where to start",
+     "problem": "Two separate 3D terrain experiences: the submission's Measurements card scene (view only) and GIS Tools › Terrain Cross Sections (draw only). Neither links to the other and the submission scene has no cross-section control (SubmissionMeasurementContext.tsx:58-101; AppShell.tsx:90-92).",
+     "severity": 3,
+     "whyConfusing": "Hidden entry point: the engineer is already looking at the site in 3D and expects to draw the section there."
+    },
+    {
+     "step": "Opening the workspace",
+     "problem": "The workspace opens on all of California (camera z 1,650,000 m) with no incident, assessment or coordinates carried over; there is no 'open at this site' link from the submission or assessment (TerrainCrossSectionWorkspace.tsx:253-262; no route param handling).",
+     "severity": 4,
+     "whyConfusing": "Lost context: the newcomer must hand-carry lat/lon between tabs; the Search widget is an address geocoder and does not understand 'Route 1 PM 12.3'."
+    },
+    {
+     "step": "Toolbar discovery",
+     "problem": "Nine unlabeled-by-purpose buttons in one translucent bar: '+ New', 'Undo', 'Build profile', 'Save', 'Capture', 'Clear', 'DEM coverage', 'Full screen' (lines 600-690); 'Build profile' is disabled with no reason until two points exist; the only instruction is the transient 'Click terrain to place P1' hint (698-703).",
+     "severity": 2,
+     "whyConfusing": "Unclear next action: '+ New' does not say new what; 'Profile' is the tool's word for the engineer's 'cross section'."
+    },
+    {
+     "step": "Reading the result",
+     "problem": "The drawer leads with DEM provenance prose: 'Esri's Data Extents catalog resolves … native source coverage across … Terrain3D sampled the elevation surface at …; sampling resolution is reported separately and is not source accuracy or native cell size.' plus metrics 'Source coverage', 'Terrain3D sampling', 'Coverage samples', 'Terrain metadata' (lines 77-95, 760-776, 808-825).",
+     "severity": 2,
+     "whyConfusing": "Too much data / jargon: the engineer wants min/max elevation, slope angle and length; the slope angle of the section is not computed at all."
+    },
+    {
+     "step": "Saving",
+     "problem": "Saving requires a 'Project' ('Choose the Project this cross section belongs to.', '+ Create Project' with Project number / title / District) — a container that exists nowhere else in the engineer's ERIS vocabulary (Incident, Event Group, Assessment, Submission) and is not linked to any of them (CrossSectionSaveDialog.tsx:135-165).",
+     "severity": 4,
+     "whyConfusing": "Mental-model gap: the engineer expects the section to attach to the assessment/submission they are writing; instead they invent a project number."
+    },
+    {
+     "step": "Re-opening later",
+     "problem": "There is no list of saved cross sections and no 'Open' action in the toolbar; savedCrossSection is only set after saving in the current session (lines 126, 646, 691-695). Saved sections are not shown on the submission's 3D scene either.",
+     "severity": 3,
+     "whyConfusing": "Unclear status: after 'Saved to <project>' disappears, the work seems to vanish; the engineer cannot show the reviewer the section from the submission."
+    },
+    {
+     "step": "Capture",
+     "problem": "Aerial capture only copies/downloads a JPEG ('ERIS does not upload them or save them to the database', AerialCaptureDialog.tsx:516) and the web submission has no upload, so the figure cannot enter the GISA record from the web at all.",
+     "severity": 3,
+     "whyConfusing": "Dead end: the natural next step (put the figure in the report) is impossible."
+    },
+    {
+     "step": "iPad",
+     "problem": "Toolbar is capped at calc(100%-360px) and wraps into several rows over the map at 768-1024px (line 600); the 720px drawer 'w-[min(720px,calc(100%-6rem))]' covers most of the scene (713-717); buttons are text-xs py-2 (~32px); the SceneView captures all touch so the AppShell page cannot be scrolled; element fullscreen is unsupported on iPadOS Safari so 'Full screen' falls back to focus mode (193-221).",
+     "severity": 3,
+     "whyConfusing": "Precise point placement on a tilted 3D scene with a finger, while panels hide the terrain, makes the field device impractical for this task."
+    }
+   ],
+   "estimatedClicks": 18,
+   "verdict": "confusing"
+  }
+ ],
+ "firstDayConfusions": [
+  "\"Which of these is the GISA?\" — the same form is called 'technical submission', 'submission', 'GISA form' and 'GISA Sheet' across My Work, the Assessments record and the form page (AssessmentDetailPanel.tsx:288,336; SubmissionDetailPage.tsx:765), and 'Submissions' has no nav entry (AppShell.tsx:66-67).",
+  "\"I already clicked Submit for review — why is it still Draft?\" — two independent submit buttons on two screens (SubmissionDetailHeader.tsx:129 vs AssessmentDetailPanel.tsx:319) with no cue that both are required.",
+  "\"Where do I add my photos?\" — no upload exists on the web form; 'Photo evidence' is a report, the library is read-only, and nothing says photos come from the iPad app (SubmissionLibrary.tsx:65; SubmissionDetailHeader.tsx:119).",
+  "\"Why is the form locked when My Work says fix it?\" — assessment REVISION_REQUESTED leaves the submission SUBMITTED; submission REJECTED leaves the assessment SUBMITTED and drops it from My Work (assessments.py:1424-1441; SubmissionDetailPage.tsx:162; MyWorkPage.tsx:54).",
+  "\"What does the reviewer actually want?\" — comments are buried in 'Assessment history' (4th card) or the bottom 'Reviewer Note' card, attributed to 'User #7' (AssessmentDetailPanel.tsx:390-401; SubmissionReviewerSupport.tsx:52).",
+  "\"Why does the header call me FIELD_WORKER?\" — raw role code that means 'maintenance reporter' in the job vocabulary (AppShell.tsx:157).",
+  "\"Why can I drag the form around?\" — dashboard drag/resize/'Custom layout' controls on a data-entry form, with nested scrolling inside cards (SubmissionDetailPage.tsx:762-794, 106).",
+  "\"What is a Project?\" — the cross-section save dialog demands a Project number/title that has no relation to the incident or assessment (CrossSectionSaveDialog.tsx:135-165).",
+  "\"Where is my site?\" — the Terrain Cross Sections tool opens on all of California and carries no incident coordinates (TerrainCrossSectionWorkspace.tsx:253-262).",
+  "\"Is it saved?\" — form fields need an explicit 'Save draft' while the map geometry autosaves; 'Refresh' silently discards edits (SubmissionDetailPage.tsx:262-330, 399-424)."
+ ],
+ "mentalModelGaps": [
+  "Job: one GISA report per site visit that moves Draft → Submitted → Returned → Approved. Software: two parallel state machines — assessment (DRAFT/SUBMITTED/REVISION_REQUESTED/APPROVED/FINALIZED) and submission (DRAFT/SUBMITTED/REJECTED/APPROVED) — that are advanced by different buttons on different pages and never synchronise (assessmentModel.ts:9-17; SubmissionDetailPrimitives.tsx:3-15; assessments.py:1424-1441).",
+  "Job: the engineer 'is the geotech'. Software: the editing gate keys on the legacy string FIELD_WORKER and review on REVIEWER (SubmissionDetailPage.tsx:161-162) instead of the canonical role model and the assessment-level assignment (roleModel.ts:12; assessmentModel.ts:121-124).",
+  "Job: photos, measurements, sketch and cross section are parts of one report. Software: photos live only in the mobile app, cross sections in a separate 'Project' store, aerial captures in the browser's downloads, and the GISA form on the web — with no links between them (SubmissionLibrary.tsx; CrossSectionSaveDialog.tsx:113-116; AerialCaptureDialog.tsx:516).",
+  "Job: the site is identified by Route / PM / county and a slide name. Software: work items are identified by 'Assessment #12 / Incident #34 · Office NORTH · D07' and 'Submission #9' (AssessmentDetailPanel.tsx:434).",
+  "Job: a returned report comes back with red-lined comments. Software: 'Revision requested' with the comments in an audit-history list, no field-level markers, and the label 'REJECTED' on the form (AssessmentDetailPanel.tsx:390-401; SubmissionDetailPrimitives.tsx:7).",
+  "Job: a cross section is drawn on the slope you are looking at and yields slope angle, height and length. Software: 'Build profile' in a statewide scene yields DEM provenance metrics ('Source coverage', 'Terrain3D sampling', 'Coverage samples') and no slope angle (TerrainCrossSectionWorkspace.tsx:760-825).",
+  "Job: the form has a fixed order that matches the paper GISA. Software: a free-form dashboard whose card positions are user-arranged and remembered per browser (useSubmissionDashboardLayout.ts:83-116)."
+ ],
+ "topFixes": [
+  "Collapse the double submit: make the form header's 'Submit for review' advance the assessment (or hide the form-level submit when the submission is linked to an assessment) and, on the server, keep submission status and assessment state in lock-step for REQUEST_REVISION / Return for correction so the engineer's My Work queue always shows returned work (SubmissionDetailHeader.tsx:129; AssessmentDetailPanel.tsx:319; assessments.py:1424-1441; MyWorkPage.tsx:54).",
+  "Replace the literal role checks in SubmissionDetailPage.tsx:161-163 with isEngineer()/assessmentPermissions() so canonical GEOTECH_ENGINEER users and assessment-assigned reviewers get the right controls, and show an inline reason whenever the form is read-only.",
+  "Put the reviewer's comments in the red 'Next step' card and at the top of the returned form, attributed by name and date, and rename the submission badge 'REJECTED' to 'Returned for correction' (AssessmentDetailPanel.tsx:254-265; SubmissionDetailPage.tsx:1190; SubmissionDetailPrimitives.tsx:7,15).",
+  "Add a photo/video/document upload to the web Submission library (and per-section 'Add' next to 'Open attachments'), or, failing that, a clear banner stating photos are captured in the ERIS mobile app Gallery step (SubmissionLibrary.tsx; SubmissionSectionAttachmentsDialog.tsx:8-21).",
+  "Give the form a fixed reading order by default: hide drag/resize/'Custom layout' behind an 'Arrange' toggle, let cards grow to content instead of scrolling internally, add required markers and a per-card completion count, and surface validation next to the offending card (SubmissionDetailPage.tsx:88-123, 762-794, 1205).",
+  "Link the cross-section tool to the record: open Terrain Cross Sections from the submission/assessment at the incident coordinates (e.g. /gis/terrain-cross-sections?submission=9), save sections against the assessment/incident instead of an unrelated 'Project', list saved sections in the toolbar, and attach the aerial capture to the submission (TerrainCrossSectionWorkspace.tsx:253-262; CrossSectionSaveDialog.tsx:135-165; AerialCaptureDialog.tsx:516).",
+  "Show route / post mile / county and the incident title on My Work rail cards, and humanise role codes in the header (AssessmentDetailPanel.tsx:434; AppShell.tsx:157).",
+  "Add autosave or a dirty-state indicator with a leave-page guard, and move 'Refresh' away from 'Save draft'; move the submit comment next to the submit action (SubmissionDetailPage.tsx:262-330, 1282-1283; SubmissionDetailHeader.tsx:124-129).",
+  "Unify names: use 'GISA form' (or 'technical submission') consistently across My Work, Assessments and the form page, and give the form page a My Work back link rather than the read-only Assessments record (AssessmentDetailPanel.tsx:288,336; SubmissionDetailHeader.tsx:78-79).",
+  "For the iPad: make card interactions touch-safe (pointer events, no accidental drag), give the map/scene an explicit 'lock' so the page can scroll, and size toolbar buttons to 44px in the terrain workspace (SubmissionDetailPage.tsx:96,112-117; TerrainCrossSectionWorkspace.tsx:600-690)."
+ ]
+}

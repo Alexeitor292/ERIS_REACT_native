@@ -1,0 +1,281 @@
+{
+ "judge": "Engineering lead who owns the codebase",
+ "lens": "What does this cost and what breaks? I read web/src/App.tsx, web/src/ui/AppShell.tsx, web/src/utils/roleModel.ts, web/src/features/**, web/src/api/**, web/src/index.css, backend/app/routes/incidents.py, backend/app/routes/assessments.py, backend/app/routes/mission_center_*.py and .github/workflows/ci.yml before scoring. Four facts about the codebase drove most of the cost differences. (1) There is no data-fetching library and no state library: package.json has react 19, react-router-dom 7.13, @arcgis/core 4.33, lucide-react and nothing else, so every list is a hand-rolled useState/useEffect over api<T>() and MyWorkPage.tsx:52-61 already fires six parallel limit:1000 fetches. (2) There is no component-test harness at all: the only tests are node --experimental-strip-types --test over pure .ts model modules, and CI (.github/workflows/ci.yml:183-203) runs just two of the twelve test files plus tsc and vite build, so any behaviour that is not pushed into a pure module is verified by hand across 4 widths x 3 themes x 7 roles. (3) There is no feature-flag mechanism - only build-time VITE_ env vars in web/src/config.ts - yet three of the four proposals lean on 'ship behind a flag' as their rollback plan. (4) The API shapes constrain the designs harder than any of the proposals except one admits: web/src/api/assessments.ts Assessment carries district and office_code but no title, no lat/lon and no county/route/post_mile, and backend list_incidents (incidents.py:1556) accepts only status/unclaimed_only/scope/limit while list_assessments (assessments.py:783) accepts only state/office_code/queue/limit - no district, route, search, sort, pagination or totals anywhere. I weighted implementation cost and fit hardest within the given weight table, and let it decide the recommendation where totals were close.",
+ "criteria": [
+  {
+   "name": "Learnability from zero",
+   "weight": 30
+  },
+  {
+   "name": "Data minimalism per page",
+   "weight": 20
+  },
+  {
+   "name": "Phone + tablet + desktop layout quality",
+   "weight": 20
+  },
+  {
+   "name": "Implementation cost and fit with the current codebase",
+   "weight": 15
+  },
+  {
+   "name": "Workflow / domain correctness",
+   "weight": 10
+  },
+  {
+   "name": "Accessibility",
+   "weight": 5
+  }
+ ],
+ "scores": [
+  {
+   "proposal": "task-first",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 9,
+     "reason": "It attacks the exact thing every first-day walkthrough failed on - 'what is waiting on me and what do I press' - with a role-sectioned Inbox, one Next-step banner and one primary button per object page, and five named hand-off flows with no pre-selected answers; it loses a point because the newcomer must still learn that Incident, Event Group, Assessment and Technical form are four different pages."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 9,
+     "reason": "Twenty-two screens each carry an explicit essential/secondary/hidden split with a stated reason per hidden item, and the hidden lists map one-for-one onto the brief's REMOVE/DEMOTE verdicts (duplicate rail counts, 'New report' and 'Awaiting triage' pills, six-decimal coordinates, 'User #id', ID columns)."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 9,
+     "reason": "Four width classes each get a designed composition rather than a shrink, content starts at ~112px on phones against the measured 700px baseline, and it is the only proposal that specifies both the three-region desktop technical form and a phone fallback for terrain; the deduction is that its custom 480/600/840/1200/1440 scale conflicts with the direction-neutral responsive spec's stock Tailwind bands."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 6,
+     "reason": "Its reuse claims all check out against the code and record URLs survive, but it is the largest bill in the set (64 days, 26 components, 5 new route-backed flows) and its Phase 0 redefines Tailwind's breakpoint tokens, silently changing the meaning of all 136 existing sm:/md:/lg:/xl: utilities in one atomic release."
+    },
+    {
+     "criterion": "Workflow / domain correctness",
+     "score": 10,
+     "reason": "It reads ERIS correctly as a hand-off machine, keeps every backend object and state transition, separates reviewer-as-assignment from the legacy REVIEWER role, keeps Finalize distinct from Close incident, handles CONSULTED, and flags the double state machine as backend change #1 with a documented interim rather than papering over it."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 9,
+     "reason": "44px on coarse pointers, no nested scroll below 840px, aria-current on rows, a single live-region toast channel, initial focus on Cancel for irreversible actions, error summaries, a fixed Help slot for SC 3.2.6, and a Phase 5 sweep that re-runs the live measurement script against the baseline."
+    }
+   ],
+   "weightedTotal": 8.65,
+   "strengths": [
+    "The Inbox + Next-step-banner + named-flow model is the most direct answer to the measured first-day failures: the branch chief's blocked 'add a reviewer' task (reviewer control kept in the row overflow in every pre-final state), the coordinator's reports that vanish from My Work ('Done recently' with the outcome), the engineer's reviewer note buried four cards deep (quoted on the Inbox row), and the reviewer/admin firehose ('Assigned to me' default with an explicit 'All queues' chip).",
+    "Record URLs are preserved and the five hand-offs become sub-routes of the object they act on (/assessments/:id/delegate), so guided flows are pages on phones and dialogs on desktops from one implementation, and every deep link, bookmark and mobile link keeps working.",
+    "Every reuse claim is accurate against the code I read: assessmentModel.ts already exports waitingOn/assessmentPermissions/ASSESSMENT_PIPELINE with tests, ModalDialog.tsx already implements the focus trap, scroll lock and data-dialog-initial-focus that FlowPage/ConfirmSheet need, MissionCenterProjectGisMap.tsx already runs one MapView across three modes with refs, and WorkflowTree.tsx plus api/workflowTree.ts are written but unmounted and can be lit up for free.",
+    "It is honest about its dependencies: backend #1 (single review decision) is named as load-bearing with a stated interim, and the effort estimate carries a caveat that the technical-form phase is the one most likely to grow."
+   ],
+   "fatalFlaws": [],
+   "stealThese": [
+    "The Next-step banner as one shared component driven by a status vocabulary module: plain status, named owner ('Waiting on you' / 'Waiting on Ana Ruiz, Engineer'), one consequence sentence, one primary button, everything else in a '...' menu. It is pure derivation over assessmentModel.waitingOn + assessmentPermissions + incident stage, so it is testable with the existing node --test convention.",
+    "Route-backed guided flows (/incidents/:id/triage, /assessments/:id/delegate) rather than dialogs. This is the single cheapest structural idea in the set: one FlowPage container renders as a full page below 840px and as a dialog above, and Back/refresh/share all work because the step is in the URL.",
+    "The Inbox 'Waiting on others' and 'Done recently (7 days)' sections with the outcome spelled out ('Accepted - sent to North GeoTech Office'), which fixes the coordinator's and chief's 'the item just vanished' complaint with data the assessment_events feed already carries.",
+    "Naming the primary button after the outcome rather than the verb ('Accept and send to GeoTech', 'Delegate the Route 1 PM 12.3 assessment to Maria Lopez?'), and never offering a default disposition or a pre-checked nearest Event Group.",
+    "The engineer picker carrying office, branch and open-assessment count sorted by load, backed by backend change #5 on the existing assignment-options payload."
+   ],
+   "evidence": [
+    "C:\\ERIS-worktrees\\eris-design-system\\web\\src\\features\\assessments\\assessmentModel.ts exports waitingOn, assessmentPermissions, isActionable, ASSESSMENT_PIPELINE and pipelineIndex, with assessmentModel.test.ts alongside - the proposal's NextStepBanner/StatusPill derivations sit on already-tested pure logic.",
+    "C:\\ERIS-worktrees\\eris-design-system\\web\\src\\ui\\ModalDialog.tsx implements focus trap, focus return, scroll lock and a data-dialog-initial-focus hook, so ConfirmSheet/FlowPage genuinely wrap rather than reimplement dialog a11y.",
+    "Counted 136 responsive utility usages in web/src (sm 24, md 55, lg 34, xl 23) - the blast radius of the Phase 0 breakpoint-token redefinition the proposal flags as its own top risk.",
+    "web/src/components/WorkflowTree.tsx and web/src/api/workflowTree.ts have no importers anywhere in src; brief-core.md records the same ('WorkflowTreeModal/WorkflowTreeView and getWorkflowTree are never mounted'), confirming the ProgressRail is a mount, not a build.",
+    "brief-core.md first-day walkthroughs: branch chief 'Add a reviewer' verdict blocked because reviewer management renders only in My Work mode and the item leaves that queue on engineer assignment (AssessmentDetailPanel.tsx:191); engineer 'Return to a submission sent back' verdict blocked by the two state machines.",
+    "AppShell is mounted per page at 17 sites across features/ and pages/, so the layout-route conversion in Phase 0 is mechanical but touches every page component."
+   ]
+  },
+  {
+   "proposal": "case-file",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 9,
+     "reason": "It is the only direction that removes the data model from the navigation: Home / Incidents / Map with Assessment, Technical form, Evidence, Site and History as tabs of one incident directly dissolves the 'four plausible homes for the status of an incident' and 'three ids per case' findings, and its chief journeys are the shortest in the set at 1-4 taps."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 9,
+     "reason": "'Only what this page decides', at most five facts per card and one card grammar reused by Home, Incidents, Map list and the Event page make tabs a clean disclosure mechanism; the Overview tab is the one place where banner plus progress rail plus three summary cards plus a returned quote is more than one decision needs."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 8,
+     "reason": "Four size classes, cards below 840px, drill-in, sheets, one map per screen and content at ~104px on phones, plus the safest breakpoint approach in the set (new tokens added alongside legacy sm/md/lg/xl); the deduction is that the phone case file stacks an 88px sticky header, a horizontally scrolling tab strip and a sticky bottom action bar around a small content well."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 6,
+     "reason": "Middle cost with an accurate reuse map and it turns /incidents/:id from a highlighted table row into a real record page at no URL cost, but /assessments/:id and /submissions/:id cannot be statically redirected into /incidents/:iid/... - each needs an async resolver fetch - and until GET /incidents/{id}/case exists every object open is 6-8 parallel calls on what is now the universal entry point."
+    },
+    {
+     "criterion": "Workflow / domain correctness",
+     "score": 9,
+     "reason": "Backend objects become tabs with the state machine untouched, reviewer-as-assignment respected, Finalize kept distinct from Resolve and requested_fields flagged as backend; the strain is that the Assessment, not the Incident, is the work product, so an office chief scanning a caseload and an engineer holding two technical forms both navigate through an incident-shaped container."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 8,
+     "reason": "It explicitly wraps the existing ModalDialog rather than reimplementing focus management, and covers 44px targets, aria-current, error summaries and reflow at 320px; the horizontal tab strip and the four fixed chrome bands on the phone case file are the weak spots."
+    }
+   ],
+   "weightedTotal": 8.3,
+   "strengths": [
+    "It gives the sharpest diagnosis in the set - 'a newcomer has to learn the data model before they can work' - and the fix follows from it exactly, without renaming a single backend field or changing a transition.",
+    "The four-facts-in-the-same-order rule (status, holder, next step, your move) applied identically to Home cards, list cards and the case-file banner is the cheapest learnability mechanism proposed by anyone: one card component, one status module, used in five places.",
+    "It converts /incidents/:id from today's highlighted table row into a real record page and mounts the already-written WorkflowTreeView/getWorkflowTree as the progress rail, capturing dead code that has real value.",
+    "Its backend list is the shortest of the four (8 items, 2 marked optional) and each is justified by a specific measured failure rather than a general wish.",
+    "Its risk list is the most self-aware about integration cost: it names the aggregation problem, the redirect table and the ArcGIS layout sensitivity before I had to."
+   ],
+   "fatalFlaws": [],
+   "stealThese": [
+    "The single incident record page at the existing /incidents/:id route with Report / Evidence / Site / History as tabs and the workflow tree mounted as the progress rail. Even in a direction that keeps Assessments as a destination, this is the missing page - today /incidents/:id renders the list with a scrollIntoView highlight.",
+    "The merged timeline: one chronological list fusing incident workflow_events, assessment_events and submission workflow events, humanised, with notes quoted in full and filter chips (All / Decisions / Assignments / Form / Reporter). Today those three histories live in three cards on three pages.",
+    "The admin 'System health' strip on Home (districts without a coordinator routing, reports unassigned over N days, assessments under review with no reviewer, road-inventory package not generated since publish). It surfaces the exact silent failure mode brief-core names at incidents.py:1198-1218 and costs one query.",
+    "'Consequence before commit, receipt after' as a stated rule, with Cancel receiving initial focus on Finalize / Resolve / Remove.",
+    "The Map screen plotting incidents by default rather than Event Groups - this is the correct fix for the coordinator's blocked 'find every open incident on I-80 in my district' task, and it is better scoped here than in map-first because it stays a destination instead of becoming the shell."
+   ],
+   "evidence": [
+    "web/src/App.tsx:53-60 routes both /incidents and /incidents/:id to the same IncidentsPage, so there is no incident record page today - the case file's central premise is filling a real hole, not replacing a working page.",
+    "web/src/features/assessments/AssessmentDetailPanel.tsx:178 fetches /incidents/{incident_id} for the heading alone, one request per selected assessment - the same N+1 the case file's aggregated loader multiplies until GET /incidents/{id}/case exists.",
+    "web/src/App.tsx:180-183 LegacyProjectRedirect is a synchronous <Navigate> because /projects/:id maps to /event-groups/:id by the same id; /assessments/:id -> /incidents/:iid/assessment has no such identity, so it needs an async resolver and a new failure mode on every legacy deep link.",
+    "No feature-flag mechanism exists (web/src/config.ts exposes only VITE_ build-time vars), so 'run a side-by-side week with the old My Work behind a flag' and 'keep the old page reachable read-only behind a flag' are unbudgeted work.",
+    "backend list_assessments (backend/app/routes/assessments.py:783-808) accepts only state, office_code, queue and limit - the case file's scope chips and stage filters need the same server work every other proposal needs.",
+    "brief-core.md vocabulary table records five numbered objects and three parallel status vocabularies ('Very high' confusion risk), which is the finding this direction is built on."
+   ]
+  },
+  {
+   "proposal": "progressive",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 7,
+     "reason": "It fixes nearly every measured first-day failure - grouped role queues with 'Recently handled', plain status plus next step from waitingOn(), the reviewer note on the card, Add reviewer in any state, merged triage with no defaults, confirm sheets, humanised roles, a Help panel - but it deliberately keeps the five destinations and four record pages that the walkthroughs named as the cause of 'four plausible homes for the status of an incident', so a coordinator still chooses between Incidents, Assessments, Event Groups and Map to look a case up."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 9,
+     "reason": "'One job per page, one primary action per state' with role-scoped rendering (not disabled controls), column priorities, a three-tier disclosure rule and a drop list that matches the brief's REMOVE/DEMOTE verdicts item for item; it is as disciplined as task-first over fewer screens."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 8,
+     "reason": "Bottom bar / 64px rail / sidebar, one ResponsiveList that flips cards to priority-column tables, ListDetail drill-in below lg, form sections, Map|List and terrain bottom bars all land the measured targets, and keeping stock Tailwind breakpoints means it adopts the responsive spec with no reconciliation; it re-tiers existing pages rather than designing a composition per width class, and it keeps a drawer alongside the phone bottom bar."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 9,
+     "reason": "Every route survives (two folded with redirects), stock breakpoints keep all 136 existing responsive utilities meaning what they mean, only two backend items are genuinely blocking and one of those is nearly free because list_assessments already accepts office_code, and its reuse claims check out line by line - it is the only plan whose first three phases can ship with essentially no backend work, and it says so honestly ('still loads up to 1000 rows; the count strip must say of loaded')."
+    },
+    {
+     "criterion": "Workflow / domain correctness",
+     "score": 9,
+     "reason": "No renames, no state-machine change, reviewer-as-assignment handled, and it is the only proposal that notices two real operational hazards: reviewers holding only the legacy REVIEWER role will see an empty queue and need copy for it, and every label change must be mirrored into notification templates and the mobile app or the redesign creates a *new* web-vs-mobile vocabulary split."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 8,
+     "reason": "Coarse-pointer minimums in index.css, a density setting, --header-h measured by ResizeObserver instead of the magic top-[82px], live regions, aria-current, chip contrast checked across all three themes and keyboard equivalents for map tasks; slightly less per-screen specificity than task-first."
+    }
+   ],
+   "weightedTotal": 8.15,
+   "strengths": [
+    "By far the best cost and risk profile: 49 days of mostly layout and component extraction on preserved routes, objects, permissions and data flow, with each page convertible independently after a single global Phase 0 shell change.",
+    "Zero deep-link risk. It keeps /my-work, /incidents, /incidents/:id, /event-groups(/:id), /assessments(/:id), /submissions/:id, /mission-center, /gis/terrain-cross-sections, /admin/* and /settings, folding only the /submissions worklist and /submissions/:id/photo-evidence with redirects - so bookmarks, emailed links and the mobile app's deep links are untouched.",
+    "It keeps stock Tailwind breakpoints, which is the correct call: it is the only proposal whose responsive scale matches the direction-neutral responsive spec, so the spec can be adopted verbatim rather than reconciled.",
+    "The most accurate reuse map in the set. DASHBOARD_CARD_TITLES becomes the section list, the existing card bodies move into section components in block flow, the existing Save-draft call becomes the debounced autosave, assessmentModel's tested permissions keep gating actions, and getWorkflowTree/WorkflowTree label maps get mounted.",
+    "It is the only plan that treats the label change as a cross-client problem rather than a web problem, which is the difference between fixing the vocabulary split and doubling it."
+   ],
+   "fatalFlaws": [],
+   "stealThese": [
+    "The migration constraint set, whichever backbone wins: keep every route, keep stock Tailwind breakpoints, put the only global change in Phase 0, and state the honest interim for every unshipped backend dependency ('of loaded' on counts) instead of blocking a phase on it.",
+    "statusLabel() as one pure module covering incident status, stage, location_match_status, triage disposition, assessment state, submission status, event-group status and workflow node status, including nextStep copy - one module, testable with the existing node --test convention, deleting the duplicated assessmentStateLabel in roleModel.ts and the three hand-rolled badge components.",
+    "ResponsiveList: one row model plus P1/P2/P3 column priorities rendering as cards below md and a table from md, used by Incidents, Assessments, Event Groups, Users, Versions and Import history. Six current tables collapse into one component.",
+    "--header-h measured with a ResizeObserver, replacing the sticky top-[82px] magic number in AppShell.tsx:166.",
+    "The autosave conflict guard: an updated_at precondition on PATCH with a 'Newer changes exist - reload' notice, because the same Submission is editable from the mobile app's offline queue. No other proposal noticed that autosave on web creates a write conflict with the field app.",
+    "The reviewer-identity warning: My Work must query assignments for the viewer, or a user carrying only the legacy REVIEWER role sees an empty queue and no explanation."
+   ],
+   "evidence": [
+    "package.json shows no react-query/swr/zustand/redux, and MyWorkPage.tsx:52-61 fires up to six listAssessments({limit:1000}) calls plus /incidents?limit=1000 - progressive is the only plan that keeps working within that pattern instead of assuming a server-filtered read model it has not budgeted.",
+    ".github/workflows/ci.yml:183-203 runs only terrainScene.test.ts and caltransHighwaysLayer.test.ts plus tsc and vite build; there is no DOM/component harness, so a plan that concentrates behaviour in pure modules and keeps component structure conventional carries the least unverifiable risk.",
+    "backend/app/routes/assessments.py:807 already accepts office_code, so the office-scoped APPROVED finalize list - one of only two blocking backend items - is close to free.",
+    "web/src/pages/SubmissionDetailPage.tsx is 1,335 lines with canEdit keyed on literal 'FIELD_WORKER'/'ADMIN' strings at line 162 (why a canonical GEOTECH_ENGINEER sees a read-only page); progressive names fixing canEdit/canAct via roleModel + assessment permissions as part of Phase 3 rather than leaving it implicit.",
+    "brief-core.md coordinator walkthrough 'Choosing where to look': four Operations entries all plausibly hold 'the status of an incident' (AppShell.tsx:84-87) - the finding progressive chooses not to fix, which is the reason for its learnability score.",
+    "Counted 136 sm:/md:/lg:/xl: usages across web/src that keep their meaning under progressive and change meaning under task-first and map-first."
+   ]
+  },
+  {
+   "proposal": "map-first",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 6,
+     "reason": "'Learn three things in the first minute' is a real promise for the two personas whose job is geographic, but for the other five the map is a detour, and the layer chips reintroduce exactly the three concepts newcomers cannot tell apart (Incidents / Event Groups / Assessments) with a spatial metaphor layered on top; its own engineer form journey costs 29 taps against 16-24 elsewhere."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 8,
+     "reason": "Per-panel essential lists are disciplined and 'hide what the database needs' is well applied, but the hub carries layer chips, scope chips, status, search, count, list and panel simultaneously, and a map that always plots records irrelevant to the current decision is itself a permanent density cost no disclosure rule removes."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 9,
+     "reason": "The strongest 'always looks good everywhere' story because there is only one composition to get right: viewport-locked at every width, exactly one scrolling region, container-query panels written once for 360/440/full, three sheet detents, phone content at 56px - though a nonmodal draggable sheet over a live MapView on iPad Safari is the hardest thing in this whole set to make feel right, with no library to lean on."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 3,
+     "reason": "Its core surface is blocked by data shapes it does not flag, its reporter home would 403 today, its Phase 1 is a 15-day indivisible cut-over that deletes six pages the day it ships with no fallback and no flag mechanism in this repo, and it concentrates nearly all new behaviour in the one region that the existing node --test harness can never cover."
+    },
+    {
+     "criterion": "Workflow / domain correctness",
+     "score": 7,
+     "reason": "Sound on the state machine, assignment-based review authority, office/personal scoping and the double-approval fix, but it recasts 'waiting on me' as a filter over a spatial index rather than a queue over a hand-off chain, moves the engineer's whole working day off the primary surface and back, and gets the reporter's authority scope wrong."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 8,
+     "reason": "Genuinely serious - keyboard detent changes, inert map at the full detent, a list equivalent for every map interaction, a table view as the accessible fallback, 44px targets and 3:1 non-text contrast for pins - but it volunteers for the hardest a11y surface available by making a draggable nonmodal sheet over a live map the primary navigation, and its own risk list concedes this."
+    }
+   ],
+   "weightedTotal": 6.75,
+   "strengths": [
+    "The single-surface argument is real and its responsive consequences are the cleanest in the set: one viewport-locked composition, one scroll region, one selection state in the URL (?layer=&id=), and panels written once with container queries so the same incident panel works at 360px in a sheet and 440px docked.",
+    "It correctly identifies that the My Work vs Assessments split (identical layouts, one 'act', one 'browse') is a defect rather than a feature, and dissolving it into one place where you read and act is right regardless of which backbone wins.",
+    "Its reuse claim about MissionCenterProjectGisMap is accurate and well observed: that file already creates one MapView with five GraphicsLayers and drives three modes off refs with clean teardown, so it genuinely is the right foundation for a layered hub.",
+    "It keeps every legacy route working through redirects rather than breaking bookmarks, and it thinks about the migration story for habituated users.",
+    "Its drop list is the most decisive in the set and mostly correct - the stacked nav card, the act-vs-browse split, the seven-column tables, the drag canvas, refresh buttons that discard edits, auto-mounted 3D."
+   ],
+   "fatalFlaws": [
+    "The Assessments layer - the home screen for four of seven roles (office chief, branch chief, engineer, reviewer) - cannot be drawn with today's API. web/src/api/assessments.ts Assessment has district and office_code but no latitude, longitude, title, county, route or post_mile, and backend list_assessments returns no incident join. So there are no coordinates to plot and no site line to lead the row with. The proposal's own interim ('ship with client-side filtering over the existing 1000-row fetches') means fetching up to 1000 assessments and up to 1000 incidents and joining them in the browser on every app open, on an iPad, before anyone sees their queue. The entire navigation model is downstream of backend change #1.",
+    "The maintenance reporter's home (/map?layer=incidents&mine=1 labelled 'My reports') returns 403 today and the fix is not in the backend list. backend/app/routes/mission_center_event_groups.py:20 and mission_center_gis.py:168 both require OPERATIONAL_ROLES, and MissionCenterProjectExplorer.tsx:225 renders an access notice for non-operational users. Every other proposal correctly gives reporters a non-map home; this one puts the least privileged persona on a surface the server refuses them.",
+    "Phase 1 is a 15-day, all-or-nothing cut-over. The moment /my-work, /incidents, /event-groups, /assessments, /mission-center and the submissions worklist redirect to /map, six working pages are gone with nothing to fall back to, and this repo has no feature-flag mechanism (only build-time VITE_ vars in web/src/config.ts) with which to stage or roll back. It is the only proposal in the set that cannot be shipped incrementally, in a plan whose stated purpose includes shipping incrementally.",
+    "It makes ArcGIS a hard dependency of the entire application. Every deep link, every record read and every reviewer approval now boots a MapView first; a WebGL failure, an expired VITE_ARCGIS_API_KEY or an iPad memory eviction degrades from 'the map is broken' to 'the app is unusable'. Nothing in the plan defines what a user sees when the map does not initialise, beyond a table view that shares the same hub."
+   ],
+   "stealThese": [
+    "'Waiting on me' as a filter chip with a count that lives in the same place as the records, rather than a separate My Work page - even if the map does not win, collapsing act-and-browse into one surface per object type is the right call and the reason both My Work and Assessments exist today.",
+    "Popup-first map selection: the first tap opens a preview with an explicit 'Open' button instead of navigating inside the ArcGIS click handler. That single change fixes the dead-popup defect at MissionCenterProjectGisMap.tsx and makes markers usable with a finger.",
+    "Never call view.goTo on a poll tick - only on level or filter change - which fixes the measured viewport reset every 60s and on every search keystroke.",
+    "Writing the detail panel once with Tailwind v4 container queries so the same component renders correctly at 360px in a sheet, 440px docked and full width on a phone. This is the cheapest way to avoid three copies of every panel and Tailwind v4 gives it for free.",
+    "'Recently handled by me' as a group inside the list rather than a separate history page.",
+    "Making the terrain cross-section save target the assessment (with the legacy Project container demoted to 'Save to a folder instead'), which removes the engineer's invented-project confusion without deleting the backend entity."
+   ],
+   "evidence": [
+    "web/src/api/assessments.ts:22-45 - the Assessment type carries district and office_code only; no coordinates, no title, no county/route/post_mile. web/src/api/types.ts:243-273 shows Incident holds latitude, longitude and D/C/R/PM. Plotting an assessments layer therefore requires a join that no endpoint performs.",
+    "backend/app/routes/mission_center_event_groups.py:20 (require_roles(sorted(OPERATIONAL_ROLES))) and backend/app/routes/mission_center_gis.py:168 (MISSION_CENTER_ROLES), plus web/src/features/missionCenter/MissionCenterProjectExplorer.tsx:133,225 - a maintenance reporter cannot load any mission-center feed today.",
+    "web/src/features/missionCenter/MissionCenterProjectGisMap.tsx:161-263 confirms the single-MapView, five-GraphicsLayer, ref-driven mode architecture the proposal claims to reuse - the reuse claim is sound even though the product decision on top of it is not.",
+    "web/src/config.ts exposes only VITE_ build-time variables; there is no runtime flag store, so an all-or-nothing Phase 1 cut-over has no staged rollout or rollback path.",
+    ".github/workflows/ci.yml:200 runs two pure-model test files; nothing in this repo can test a layer-switching map hub, a three-detent drag sheet or URL-driven selection, and the proposal concentrates its entire product in that untestable region.",
+    "Its own referenceJourneys put the engineer's core task (fill and submit the technical form on an iPad) at 29 taps versus 16 for task-first, 19 for case-file and 24 for progressive - the heaviest user pays the most for the map metaphor."
+   ]
+  }
+ ],
+ "ranking": [
+  "task-first",
+  "case-file",
+  "progressive",
+  "map-first"
+ ],
+ "recommendation": "Build on task-first as the backbone, execute it under progressive's migration rules, and take one page from case-file and two mechanics from map-first.\n\nWhy task-first wins the backbone. The measured failures are hand-off failures, not browsing failures: a branch chief who cannot add a reviewer because the control lives only in My Work and the item leaves that queue on assignment; a coordinator whose triaged reports vanish and whose sent-back reports still read 'New' in red; an engineer whose reviewer note sits four cards deep while the form is locked; a reviewer/admin drowning in every SUBMITTED assessment in the state. Task-first's Inbox + one Next-step banner + named route-backed flows is a direct answer to each, it keeps every backend object and transition, and its record URLs survive. It also scores highest with the given weights (8.65).\n\nWhat I will not buy from it. Two of its costs are avoidable and I would cut them in Phase 0. First, do not redefine Tailwind's breakpoint tokens (480/600/840/1200/1440). That silently changes the meaning of 136 existing sm:/md:/lg:/xl: utilities in one atomic release, for no user-visible gain, and it puts the plan out of step with the responsive spec, which is written against stock 640/768/1024/1280/1536. Adopt the spec's bands as they are, as progressive and case-file effectively do. Second, do not treat any of the ten backend items as gating. Only two actually block Phase 1: the single review/submit decision that keeps the assessment and its submission in step, and office-scoping of the APPROVED finalize list (nearly free - list_assessments already takes office_code). Everything else - server search, district/route filters, cursor pagination and totals, actor and reporter names, web attachment upload, cross-sections attached to an assessment - ships later with progressive's honest interim: keep the existing limit:1000 fetches and label counts 'of loaded'.\n\nWhat to merge in. From case-file, take the real incident record page at /incidents/:id. Today that route renders the list with a scrollIntoView highlight; there is no incident page at all. Build it with Report / Evidence / Site / History tabs, mount the already-written WorkflowTreeView and getWorkflowTree as the progress rail, and merge incident, assessment and submission events into one humanised timeline with notes quoted in full. Take its admin System-health strip too - it surfaces the unassigned-routing failure mode from incidents.py:1198-1218 for the price of one query. Do not take its route grammar: /assessments/:id and /submissions/:id cannot be statically redirected under /incidents/:iid and would need an async resolver on every legacy and mobile deep link. From map-first, take exactly two mechanics into the Map destination: popup-first selection with an explicit Open button, and never calling view.goTo on a poll tick. Take its container-query panel technique as well - Tailwind v4 gives it for free and it means one detail panel instead of three. Plot incidents by default rather than Event Groups, which is case-file's framing and the actual fix for the coordinator's blocked 'find every open incident on I-80 in my district'. From progressive, take statusLabel() as one pure module and ResponsiveList as one component; both collapse duplicated code the audits already flagged, and both are testable under the existing node --test convention, which matters because CI runs no DOM tests at all.\n\nSequencing so nothing is a big bang. Phase 0 (~9 days) is the only global change: AppShell as a layout route with bottom bar / rail / sidebar, roleLabel(), one HomeRedirect, the status vocabulary module, and the primitives (Button, StatusPill, NextStepBanner, FlowPage/ConfirmSheet, BottomSheet, ListDetail, ResponsiveList, Toast). Add one thing none of the four budgeted: a minimal runtime feature flag read from /auth/me metadata, because three of the four rollback plans assume a flag mechanism this repo does not have. After that, every phase is independently shippable because the routes never move - Inbox and assessment flows, then triage plus the incident page plus intake, then the technical form (the one genuinely risky phase, and the one to protect with the flag and a field-by-field parity checklist against the GISA data dictionary), then Map and Terrain, then Admin and the accessibility sweep.\n\nOn the numbers: I would plan against 60-70 days, not 49-64. Every estimate in the set omits the same three things - building the flag mechanism, the manual QA matrix implied by having no component test harness (4 widths x 3 themes x 7 roles), and the cross-client label work progressive alone noticed, where every renamed status must be mirrored into notification templates and the mobile app or the redesign creates a second vocabulary split instead of closing the first."
+}

@@ -1,0 +1,535 @@
+{
+ "area": "App shell, navigation, login, settings, theming",
+ "heuristicIssues": [
+  {
+   "severity": 4,
+   "heuristic": "Flexibility and efficiency of use / Aesthetic and minimalist design",
+   "screen": "App shell (phone and tablet portrait)",
+   "issue": "Below lg the entire role-filtered navigation renders as a card stacked above the page content on every page, so the page title and primary content start below the fold; there is no drawer, hamburger or collapse on small screens.",
+   "evidence": "web/src/ui/AppShell.tsx:164 (<aside className=\"lg:hidden\"> renders full <SidebarNavigation />) and :165 (sidebar only at lg:block); an ADMIN sees 5 section captions + 9 links (AppShell.tsx:79-102) before <h1> at :184.",
+   "recommendation": "Replace the stacked aside with a header hamburger that opens a slide-in drawer (reuse SidebarNavigation inside ModalDialog or a fixed inset-y-0 panel), and keep a compact horizontal scrollable tab strip for the current section. Sidebar should appear at md (768px) in collapsed icon mode."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards",
+   "screen": "Login / Not Found / RoleRoute / HomeRedirect",
+   "issue": "Four competing 'home' destinations: '/' is role-aware, Login always sends to /my-work, Not Found sends to /mission-center, RoleRoute denial sends to /submissions. Maintenance-only users are routed to pages that show empty states or refusals.",
+   "evidence": "web/src/App.tsx:175-178 (HomeRedirect role-aware); web/src/pages/LoginPage.tsx:28,42 (/my-work); web/src/pages/NotFoundPage.tsx:20-21 (/mission-center); web/src/auth/RoleRoute.tsx:19 (/submissions). Nav hides Mission Center from non-operational roles at AppShell.tsx:84.",
+   "recommendation": "Navigate to '/' from Login, Not Found and RoleRoute so HomeRedirect is the single source of truth; label the Not Found CTA 'Go to my home'."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status / Help users recognize, diagnose, and recover from errors",
+   "screen": "RoleRoute",
+   "issue": "An under-privileged user opening a gated URL (e.g. a shared /event-groups/:id link) is silently redirected to /submissions with no message explaining the denial; /submissions has no nav item so they cannot tell where they are.",
+   "evidence": "web/src/auth/RoleRoute.tsx:18-19 (Navigate with no state); web/src/ui/AppShell.tsx:66-67 (submissions intentionally without nav entry).",
+   "recommendation": "Redirect to '/' with state { denied: pathname } and render a dismissible 'You do not have access to <path>' banner in AppShell, or render an in-place 403 card inside AppShell."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "Login / auth guards / session expiry",
+   "issue": "Deep links are lost on re-authentication: guards redirect to /login without the original location, expiry does a full window.location reload, and Login always navigates to /my-work.",
+   "evidence": "web/src/auth/ProtectedRoute.tsx:14 and web/src/auth/RoleRoute.tsx:15-16 (no state/from); web/src/auth/AuthContext.tsx:59-61 (window.location.href = '/login'); web/src/pages/LoginPage.tsx:42.",
+   "recommendation": "Pass state={{ from: location }} in the guards, store the pathname in sessionStorage next to eris_session_expired on expiry, and have Login navigate(from ?? '/')."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Match between system and the real world",
+   "screen": "App shell header",
+   "issue": "Raw role enum codes (e.g. 'GEOTECH_OFFICE_CHIEF · ADMIN') are shown verbatim as the user's identity line; there is no shared human-readable role label.",
+   "evidence": "web/src/ui/AppShell.tsx:157 (me?.roles?.join(' · ')); web/src/utils/roleModel.ts:80-93 has assessmentStateLabel but no roleLabel.",
+   "recommendation": "Add roleLabel() to roleModel.ts mapping CANONICAL keys and aliases to 'Geotech Office Chief', 'Administrator', etc., and use it in the header and in Admin Users."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "App shell header (phone)",
+   "issue": "On phones the shell shows no signed-in identity at all (name/roles hidden below md) and no theme control (hidden below sm); the only visible header controls are truncated product name and Sign out.",
+   "evidence": "web/src/ui/AppShell.tsx:146 ('hidden ... sm:flex') and :157 ('hidden text-right md:block').",
+   "recommendation": "Replace the name/roles block and Sign out with an avatar/initials menu button (always visible) that opens a popover with name, role labels, theme choice, Settings link and Sign out."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards / Match between system and the real world",
+   "screen": "Settings",
+   "issue": "The 'Account' nav section leads to a page containing only a colour picker; no name, email, roles or password change, which is what 'Account' implies.",
+   "evidence": "web/src/ui/AppShell.tsx:102 (section label 'Account') vs web/src/pages/SettingsPage.tsx:26-72 (Appearance + 'About these settings' only).",
+   "recommendation": "Either rename the section to 'Preferences' or add an 'Account' section on Settings showing full_name, email and humanised roles from GET /auth/me."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Error prevention / Recognition rather than recall",
+   "screen": "Not Found (signed in)",
+   "issue": "Signed-in users see the 404 outside AppShell with no header, navigation or Sign out, so the fastest recovery (the sidebar) is unavailable; the secondary CTA points at /submissions which has no nav entry.",
+   "evidence": "web/src/pages/NotFoundPage.tsx:8-32 (own <main>, no AppShell); :23-27 ('Open submissions').",
+   "recommendation": "When token is present, wrap the 404 card in <AppShell title=\"Page not found\"> and replace the CTAs with 'Go to my home' (to '/') and a browser-back button."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Help users recognize, diagnose, and recover from errors",
+   "screen": "Session validation gate",
+   "issue": "A transient network/5xx failure on GET /auth/me clears the token and drops the user at /login with no notice, so a flaky field connection looks like a forced sign-out and the deep link is lost.",
+   "evidence": "web/src/auth/AuthContext.tsx:83-91 (catch clears token; no eris_session_expired flag).",
+   "recommendation": "Only clear the token on 401/403; on network errors keep the token and show a retry state in AuthGateLoading ('Cannot reach ERIS. Retry')."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "App shell sidebar (desktop)",
+   "issue": "Sidebar collapse state resets to expanded on every navigation because each page mounts its own AppShell with local useState; the toggle appears not to work.",
+   "evidence": "web/src/ui/AppShell.tsx:131-134 (useState(true) inside AppShell); every page mounts <AppShell> (e.g. web/src/pages/SettingsPage.tsx:26).",
+   "recommendation": "Store navExpanded in UiSettingsContext (persisted under eris.ui.settings.v1) or convert AppShell to a React Router layout route with <Outlet />."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "App shell header vs Settings",
+   "issue": "Theme names differ between the header select (Light / Dark / Coastal) and Settings (Caltrans Light / Dark / Coastal Teal); the option list is defined twice.",
+   "evidence": "web/src/ui/AppShell.tsx:125-129 vs web/src/pages/SettingsPage.tsx:4-20.",
+   "recommendation": "Export THEMES (id, label, description) from UiSettingsContext.tsx and consume it in both places."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status / Accessibility",
+   "screen": "Login",
+   "issue": "Error and expiry banners are plain divs with no role='alert'/aria-live, inputs lack aria-invalid/aria-describedby, and disabling the inputs during submit drops keyboard focus.",
+   "evidence": "web/src/pages/LoginPage.tsx:89-99 (no role), :110 and :123 (disabled={busy} on inputs).",
+   "recommendation": "Add role='alert' to the error div and role='status' to the notice; keep inputs enabled (readOnly at most) and disable only the button."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards / Accessibility",
+   "screen": "App shell sidebar",
+   "issue": "Assessments is highlighted while on /submissions/* through alsoActive, but NavLink only sets aria-current on the real match, so visual and screen-reader location disagree.",
+   "evidence": "web/src/ui/AppShell.tsx:32,40 (extraActive only affects className); :87 (alsoActive: ['/submissions']).",
+   "recommendation": "Pass aria-current={extraActive ? 'page' : undefined} on the NavLink when extraActive is true."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Accessibility / Flexibility and efficiency of use",
+   "screen": "App shell",
+   "issue": "No skip-to-content link; on phone a keyboard or switch user must tab through every nav item on every page before reaching the content. Nav links, Sign out and the toggle rely on browser default focus outlines while inputs use a brand ring.",
+   "evidence": "web/src/ui/AppShell.tsx:137-190 (no skip link); :38-43, :152, :158, :175 (no focus-visible classes) vs web/src/pages/LoginPage.tsx:111 (custom ring).",
+   "recommendation": "Add an sr-only focus:not-sr-only 'Skip to content' link targeting <main id=\"main\">, and a shared focus-visible:ring-2 ring-[var(--brand)] utility on all shell controls."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Settings",
+   "issue": "Mutually exclusive theme choice is modelled as three aria-pressed buttons instead of a radiogroup, and there is no 'match system' option; default is light regardless of prefers-color-scheme.",
+   "evidence": "web/src/pages/SettingsPage.tsx:40-44 (aria-pressed); web/src/ui/UiSettingsContext.tsx:26-29 (falls back to 'light').",
+   "recommendation": "Use role='radiogroup' with role='radio'/aria-checked (or native radio inputs), and add a 'System' option that resolves via matchMedia('(prefers-color-scheme: dark)')."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Dark theme (all screens)",
+   "issue": "No color-scheme: dark declaration, so native <select> popups, checkboxes and scrollbars stay light in the dark theme, including the header theme select itself.",
+   "evidence": "web/src/index.css:26-41 (dark tokens, no color-scheme); web/src/ui/AppShell.tsx:148-155 (native select).",
+   "recommendation": "Add color-scheme: dark to :root[data-theme=\"dark\"] and color-scheme: light to the other two in index.css."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Recognition rather than recall",
+   "screen": "App shell header",
+   "issue": "Logo and product name are not a link and there are no breadcrumbs, so there is no 'home' affordance in the shell; users depend entirely on the nav list.",
+   "evidence": "web/src/ui/AppShell.tsx:141-144 (plain <img> + <div>); :184 (h1 only).",
+   "recommendation": "Wrap the logo/product name in <Link to=\"/\" aria-label=\"ERIS home\"> and let pages pass an optional breadcrumb/back prop rendered next to the h1."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Error prevention",
+   "screen": "Modal dialog primitive",
+   "issue": "Backdrop closes on mousedown rather than click, so an accidental touch outside a wide panel on a phone discards in-progress input; the default panel has no max-height or overflow, so tall dialogs push their buttons off-screen.",
+   "evidence": "web/src/ui/ModalDialog.tsx:108-110,113 (onMouseDown on overlay); :26 (panel default has no max-h/overflow).",
+   "recommendation": "Close only when mousedown and mouseup both target the overlay; add max-h-[calc(100dvh-2rem)] overflow-y-auto to the default panel and let consumers opt out."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Accessibility",
+   "screen": "Modal dialog primitive",
+   "issue": "Background content is not made inert or aria-hidden while a dialog is open; aria-modal alone leaves the page reachable by virtual-cursor navigation. No standard title bar or close button, so every consumer invents its own.",
+   "evidence": "web/src/ui/ModalDialog.tsx:112-126 (no inert on #root siblings; props are titleId/descriptionId only, :19-35).",
+   "recommendation": "Render the dialog through a portal and set inert on #root while open; add optional title and onClose header with an X button to the primitive."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status / Accessibility",
+   "screen": "Session validation gate",
+   "issue": "The loading card has no role='status'/aria-live or aria-busy, and the pulsing bar is a plain div, so assistive tech receives nothing while the app blocks.",
+   "evidence": "web/src/auth/AuthGateLoading.tsx:3-12.",
+   "recommendation": "Add role='status' aria-live='polite' on the section and role='progressbar' aria-valuetext='Validating session' on the bar."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Login (desktop)",
+   "issue": "The product name appears three times, 'Caltrans · Geotechnical Services' twice, and the internal-use statement twice on one screen; a marketing paragraph describes features to users who already use the tool.",
+   "evidence": "web/src/pages/LoginPage.tsx:60-64,69-73,81,86,133-135.",
+   "recommendation": "Keep the h1, one eyebrow, one policy line and the help text; delete the feature paragraph and footer line."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Consistency and standards",
+   "screen": "Login / Not Found / Auth gate vs App shell",
+   "issue": "Two brand marks (SVG logo in the header, text 'ERIS' tile at three sizes on the standalone screens) and two separators ('|' vs '·').",
+   "evidence": "web/src/ui/AppShell.tsx:142-143; web/src/pages/LoginPage.tsx:56-58,60,80; web/src/pages/NotFoundPage.tsx:12; web/src/auth/AuthGateLoading.tsx:6.",
+   "recommendation": "Create a <BrandMark size> component using /eris-logo.svg and one eyebrow string constant."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Settings / App shell footer",
+   "issue": "'About these settings' explains features the page does not have, and the footer copyright repeats on every non-workspace page but vanishes in workspace mode.",
+   "evidence": "web/src/pages/SettingsPage.tsx:65-70; web/src/ui/AppShell.tsx:189.",
+   "recommendation": "Remove the About section; move the copyright line into Settings or the identity popover and drop the footer entirely."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Consistency and standards",
+   "screen": "All screens (typography)",
+   "issue": "body declares 'Sora', 'Manrope' but no font is loaded, so the app renders in Segoe UI on Windows and the intended type never ships.",
+   "evidence": "web/src/index.css:68.",
+   "recommendation": "Either self-host Sora via @font-face or change the stack to the system font that is actually rendered."
+  }
+ ],
+ "responsiveIssues": [
+  {
+   "screen": "App shell",
+   "viewport": "phone",
+   "issue": "Full navigation card (5 captions + up to 9 links, ~430px) stacks above the page title on every page; content begins below the 812px fold after header (~66px) + gutters.",
+   "evidence": "web/src/ui/AppShell.tsx:163-164 (flex-col, aside lg:hidden) and :184-185.",
+   "fix": "Header hamburger that opens a drawer (fixed inset-y-0 left-0 w-72, z-30, focus-trapped) containing SidebarNavigation; remove the stacked aside."
+  },
+  {
+   "screen": "App shell",
+   "viewport": "tablet",
+   "issue": "768-1023px (iPad portrait) still gets the stacked-nav phone layout because the sidebar only appears at lg; at 1024px (iPad landscape) the 256px sidebar leaves ~696px for content, tight for pages with lg:grid-cols-5 cards or wide tables.",
+   "evidence": "web/src/ui/AppShell.tsx:165 (hidden ... lg:block), w-64; :163 px-6 gap-6.",
+   "fix": "Show the sidebar from md in collapsed icon mode (w-16) by default and expanded only at xl; persist the user's choice."
+  },
+  {
+   "screen": "App shell header",
+   "viewport": "phone",
+   "issue": "'Emergency Response Information System' (text-sm) truncates to roughly 'Emergency Response Inf…' beside the 36px logo and the Sign out button; identity and theme controls are hidden entirely.",
+   "evidence": "web/src/ui/AppShell.tsx:143 (truncate), :146 (sm:flex), :157 (md:block).",
+   "fix": "Show 'ERIS' as the header word below md (hide the long name with hidden md:block) and move identity/theme/sign-out into an always-visible avatar menu."
+  },
+  {
+   "screen": "App shell",
+   "viewport": "all",
+   "issue": "Touch targets under 44px: nav items px-3 py-2 text-sm (~36px), Sign out py-2 (~38px), theme select py-1.5 (~30px), collapse toggle 32px.",
+   "evidence": "web/src/ui/AppShell.tsx:39, :152, :158, :175.",
+   "fix": "Use min-h-11 on nav links and header buttons at coarse pointers (e.g. [@media(pointer:coarse)]:min-h-11) and h-10 for the toggle."
+  },
+  {
+   "screen": "App shell sidebar",
+   "viewport": "desktop",
+   "issue": "sticky top-[82px] is a magic number tied to the current header height; if the header wraps or padding changes the sidebar overlaps or gaps.",
+   "evidence": "web/src/ui/AppShell.tsx:166.",
+   "fix": "Measure the header with a ref/ResizeObserver into a --header-h CSS variable and use top-[var(--header-h)], or make the header a fixed h-16 and use top-16."
+  },
+  {
+   "screen": "App shell (workspace mode)",
+   "viewport": "phone",
+   "issue": "workspace=true only locks the viewport at lg (lg:h-screen lg:overflow-hidden); on phone the map page still has the stacked nav above a map that then needs its own height, so the map sits below the fold.",
+   "evidence": "web/src/ui/AppShell.tsx:138, :163, :183-185.",
+   "fix": "In workspace mode apply the drawer nav and give <main> a min-h-[calc(100dvh-var(--header-h))] so the map fills the first screen."
+  },
+  {
+   "screen": "Login",
+   "viewport": "phone",
+   "issue": "Card forced to min-h-[620px] inside min-h-[calc(100vh-4rem)] so the short form floats in whitespace; with the soft keyboard open (viewport ~400px) the submit button and help text sit below the fold; no autofocus on email.",
+   "evidence": "web/src/pages/LoginPage.tsx:52, :77 (min-h-[620px]); :104-113 (no autoFocus).",
+   "fix": "Remove min-h-[620px] below lg (lg:min-h-[620px]), use min-h-[100dvh] on the wrapper, add autoFocus to the email input."
+  },
+  {
+   "screen": "Login",
+   "viewport": "tablet",
+   "issue": "768-1023: single column, the max-w-6xl card spans the width while the form is capped at max-w-md, leaving wide empty margins and hiding all brand copy until 1024px.",
+   "evidence": "web/src/pages/LoginPage.tsx:53-54 (lg:grid-cols, hidden lg:flex), :78 (max-w-md).",
+   "fix": "Cap the card at max-w-md below lg (max-w-md lg:max-w-6xl) so the form card is proportionate."
+  },
+  {
+   "screen": "Settings",
+   "viewport": "tablet",
+   "issue": "Three theme cards side by side from md inside ~700px content: each ~215px so descriptions wrap to 3 lines and the 12px selection dot is the only state cue besides border.",
+   "evidence": "web/src/pages/SettingsPage.tsx:36 (md:grid-cols-3), :53-56.",
+   "fix": "Use grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 and add a small palette swatch strip per card."
+  },
+  {
+   "screen": "Not Found",
+   "viewport": "phone",
+   "issue": "Two CTA buttons wrap to two rows and are ~40px tall; card min-h forces a near-full-screen page for one paragraph.",
+   "evidence": "web/src/pages/NotFoundPage.tsx:10 (min-h-[calc(100vh-4rem)]), :19-27 (flex-wrap, py-2.5).",
+   "fix": "Stack CTAs full-width below sm (flex-col sm:flex-row, w-full sm:w-auto) with min-h-11."
+  },
+  {
+   "screen": "Modal dialog primitive",
+   "viewport": "phone",
+   "issue": "Default panel has no max-height/overflow; overlay p-4 with a centred panel means a tall consumer (e.g. WorkflowTree max-w-[1400px]) or the on-screen keyboard pushes actions off-screen; mousedown backdrop dismiss is easy to trigger with a thumb.",
+   "evidence": "web/src/ui/ModalDialog.tsx:25-26, :108-113.",
+   "fix": "Default panel: max-h-[calc(100dvh-2rem)] overflow-y-auto flex flex-col; on <sm switch overlay to items-end and panel to rounded-t-xl full-width sheet; dismiss on click, not mousedown."
+  },
+  {
+   "screen": "App shell sidebar (collapsed)",
+   "viewport": "desktop",
+   "issue": "Collapsed nav labels are exposed only via title tooltip, a hover-only affordance with no touch equivalent on touch laptops.",
+   "evidence": "web/src/ui/AppShell.tsx:45-46, :49.",
+   "fix": "Auto-expand the sidebar on hover/focus-within (peer/group) or show a floating label on focus; keep aria-label."
+  }
+ ],
+ "dataDensity": [
+  {
+   "screen": "App shell header",
+   "element": "ERIS logo image",
+   "verdict": "keep",
+   "reason": "Orientation anchor; must become a link to '/' to earn its place (AppShell.tsx:142)."
+  },
+  {
+   "screen": "App shell header",
+   "element": "Product name 'Emergency Response Information System'",
+   "verdict": "demote",
+   "reason": "Truncates below md; show 'ERIS' on small screens and the full name only at md+ (AppShell.tsx:143)."
+  },
+  {
+   "screen": "App shell header",
+   "element": "Subtitle 'Caltrans | Geotechnical Services'",
+   "verdict": "remove",
+   "reason": "Organisational tagline on every page adds nothing to any navigation or work task (AppShell.tsx:143)."
+  },
+  {
+   "screen": "App shell header",
+   "element": "Theme <select>",
+   "verdict": "progressive",
+   "reason": "Rarely changed; belongs inside the identity/avatar menu, not in the persistent header (AppShell.tsx:146-156)."
+  },
+  {
+   "screen": "App shell header",
+   "element": "Display name",
+   "verdict": "keep",
+   "reason": "Identity confirmation matters in a multi-role system, but it must be visible on phone too (AppShell.tsx:157)."
+  },
+  {
+   "screen": "App shell header",
+   "element": "Raw role codes",
+   "verdict": "demote",
+   "reason": "Useful once humanised; show a single primary role label in the header and the full list in the avatar popover (AppShell.tsx:157)."
+  },
+  {
+   "screen": "App shell header",
+   "element": "'ERIS user' fallback",
+   "verdict": "remove",
+   "reason": "Placeholder text conveys nothing; render nothing when roles are empty (AppShell.tsx:157)."
+  },
+  {
+   "screen": "App shell header",
+   "element": "Sign out button",
+   "verdict": "demote",
+   "reason": "Needed but low-frequency; move into the avatar menu so it stops competing with the brand for header space (AppShell.tsx:158)."
+  },
+  {
+   "screen": "App shell navigation",
+   "element": "'Navigation' caption (mobile and desktop)",
+   "verdict": "remove",
+   "reason": "Redundant label above an obviously navigational list (AppShell.tsx:164,168)."
+  },
+  {
+   "screen": "App shell navigation",
+   "element": "Section labels (Workspace, Operations, GIS Tools, Administration, Account)",
+   "verdict": "keep",
+   "reason": "Group wayfinding that mirrors the IA; collapse to sr-only when the sidebar is collapsed already works (AppShell.tsx:57)."
+  },
+  {
+   "screen": "App shell navigation",
+   "element": "Nav items with icons",
+   "verdict": "keep",
+   "reason": "Primary navigation, role-filtered (AppShell.tsx:79-102)."
+  },
+  {
+   "screen": "App shell navigation",
+   "element": "Active highlight",
+   "verdict": "keep",
+   "reason": "Only 'you are here' signal since there are no breadcrumbs (AppShell.tsx:40-41)."
+  },
+  {
+   "screen": "App shell navigation",
+   "element": "Collapsed-mode hairline separators",
+   "verdict": "keep",
+   "reason": "Cheap grouping cue when captions are hidden (AppShell.tsx:113)."
+  },
+  {
+   "screen": "App shell navigation",
+   "element": "Collapse / Expand toggle",
+   "verdict": "keep",
+   "reason": "Reclaims 192px for map and table pages; needs persistence to be trustworthy (AppShell.tsx:169-178)."
+  },
+  {
+   "screen": "App shell content",
+   "element": "Page title h1",
+   "verdict": "keep",
+   "reason": "Only page-level heading; extend with an optional breadcrumb/back slot (AppShell.tsx:184)."
+  },
+  {
+   "screen": "App shell footer",
+   "element": "Copyright footer",
+   "verdict": "remove",
+   "reason": "Legal boilerplate repeated on every page and inconsistent (absent in workspace mode); keep it on Login only (AppShell.tsx:189)."
+  },
+  {
+   "screen": "Login",
+   "element": "Brand tile 'ERIS'",
+   "verdict": "keep",
+   "reason": "Confirms the user is on the right internal system; unify with the SVG logo (LoginPage.tsx:56-58,80)."
+  },
+  {
+   "screen": "Login",
+   "element": "Eyebrow 'Caltrans · Geotechnical Services' (x2)",
+   "verdict": "demote",
+   "reason": "Show once, on whichever panel is visible (LoginPage.tsx:60,81)."
+  },
+  {
+   "screen": "Login",
+   "element": "H1 product name (lg only)",
+   "verdict": "keep",
+   "reason": "Names the system once at desktop (LoginPage.tsx:61)."
+  },
+  {
+   "screen": "Login",
+   "element": "Feature marketing paragraph",
+   "verdict": "remove",
+   "reason": "Internal users do not need a feature list to sign in (LoginPage.tsx:62-64)."
+  },
+  {
+   "screen": "Login",
+   "element": "'Internal Caltrans system' policy card",
+   "verdict": "keep",
+   "reason": "One policy statement is appropriate on an internal sign-in screen (LoginPage.tsx:69-72)."
+  },
+  {
+   "screen": "Login",
+   "element": "Footer line 'Emergency Response Information System · Internal use'",
+   "verdict": "remove",
+   "reason": "Third repetition of the product name (LoginPage.tsx:73)."
+  },
+  {
+   "screen": "Login",
+   "element": "H2 'Sign in to ERIS'",
+   "verdict": "keep",
+   "reason": "Names the task (LoginPage.tsx:85)."
+  },
+  {
+   "screen": "Login",
+   "element": "'Use your authorized ERIS account to continue.'",
+   "verdict": "remove",
+   "reason": "Restates the heading (LoginPage.tsx:86)."
+  },
+  {
+   "screen": "Login",
+   "element": "Session-expired notice",
+   "verdict": "keep",
+   "reason": "Explains the forced sign-out; needs role='status' (LoginPage.tsx:89-93)."
+  },
+  {
+   "screen": "Login",
+   "element": "Error banner",
+   "verdict": "keep",
+   "reason": "Only failure feedback; needs role='alert' (LoginPage.tsx:95-99)."
+  },
+  {
+   "screen": "Login",
+   "element": "Email and password fields, submit",
+   "verdict": "keep",
+   "reason": "The task itself; add show/hide password (LoginPage.tsx:102-130)."
+  },
+  {
+   "screen": "Login",
+   "element": "Help text (contact administrator)",
+   "verdict": "keep",
+   "reason": "Only recovery path since there is no self-service reset (LoginPage.tsx:133-135)."
+  },
+  {
+   "screen": "Session validation gate",
+   "element": "Brand tile + 'Validating ERIS session' + explanatory line + bar",
+   "verdict": "demote",
+   "reason": "Sub-second state; keep the status line and bar, drop the explanatory sentence and give the region role='status' (AuthGateLoading.tsx:6-11)."
+  },
+  {
+   "screen": "Settings",
+   "element": "Appearance heading + scope sentence",
+   "verdict": "keep",
+   "reason": "Explains browser-local scope once, which prevents 'why did my theme change on another PC' confusion (SettingsPage.tsx:30-33)."
+  },
+  {
+   "screen": "Settings",
+   "element": "Three theme cards",
+   "verdict": "keep",
+   "reason": "The actual control; convert to a radiogroup and add 'System' (SettingsPage.tsx:36-62)."
+  },
+  {
+   "screen": "Settings",
+   "element": "'About these settings' section",
+   "verdict": "remove",
+   "reason": "Describes absent functionality (SettingsPage.tsx:65-70)."
+  },
+  {
+   "screen": "Settings",
+   "element": "Account details (name, email, roles) - currently absent",
+   "verdict": "progressive",
+   "reason": "Add a read-only Account section so the 'Account' nav label is honest (AppShell.tsx:102)."
+  },
+  {
+   "screen": "Not Found",
+   "element": "Brand tile, eyebrow, H1",
+   "verdict": "keep",
+   "reason": "Names the error plainly (NotFoundPage.tsx:12-14)."
+  },
+  {
+   "screen": "Not Found",
+   "element": "Explanatory paragraph",
+   "verdict": "demote",
+   "reason": "Shorten to one sentence; the buttons carry recovery (NotFoundPage.tsx:15-17)."
+  },
+  {
+   "screen": "Not Found",
+   "element": "'Go to Mission Center' CTA",
+   "verdict": "keep",
+   "reason": "Needed, but retarget to '/' and relabel 'Go to my home' (NotFoundPage.tsx:20-22)."
+  },
+  {
+   "screen": "Not Found",
+   "element": "'Open submissions' CTA",
+   "verdict": "remove",
+   "reason": "Points at a route deliberately absent from navigation (NotFoundPage.tsx:23-27; AppShell.tsx:66-67)."
+  },
+  {
+   "screen": "Modal dialog primitive",
+   "element": "Backdrop overlay",
+   "verdict": "keep",
+   "reason": "Focus and context isolation; change dismissal to click (ModalDialog.tsx:113)."
+  }
+ ],
+ "quickWins": [
+  "Route Login success/already-authenticated, Not Found primary CTA and RoleRoute denial to '/' so HomeRedirect is the only home definition (LoginPage.tsx:28,42; NotFoundPage.tsx:20; RoleRoute.tsx:19).",
+  "Add roleLabel() to web/src/utils/roleModel.ts and use it in AppShell.tsx:157 instead of raw enum codes.",
+  "Move navExpanded into UiSettingsContext (persist in eris.ui.settings.v1) so the sidebar collapse survives navigation (AppShell.tsx:134).",
+  "Export a single THEMES list from UiSettingsContext.tsx and consume it in AppShell.tsx:125-129 and SettingsPage.tsx:4-20; add color-scheme: dark/light per theme in index.css:9-58.",
+  "Wrap the header logo/product name in <Link to=\"/\">, add a skip-to-content link, and add aria-current='page' when extraActive is true (AppShell.tsx:32,40-46,141-144).",
+  "Login: role='alert' on the error, role='status' on the notice, autoFocus on email, keep inputs enabled during submit, add a show/hide password toggle (LoginPage.tsx:89-130).",
+  "Pass state={{ from: location }} from ProtectedRoute/RoleRoute and navigate back to it after sign-in (ProtectedRoute.tsx:14; RoleRoute.tsx:15-16; LoginPage.tsx:42).",
+  "AuthContext: only clear the token on 401/403 from /auth/me; show a retry state in AuthGateLoading for network failures, and give the gate role='status' (AuthContext.tsx:83-91; AuthGateLoading.tsx:3-12).",
+  "ModalDialog defaults: max-h-[calc(100dvh-2rem)] overflow-y-auto on the panel and click-based backdrop dismissal (ModalDialog.tsx:25-26,108-113).",
+  "Delete the 'About these settings' section, the 'Navigation' captions, the header subtitle, the Login feature paragraph and footer line, and the 'Open submissions' 404 CTA.",
+  "Render Not Found inside AppShell when a token is present (NotFoundPage.tsx:8-32).",
+  "Add focus-visible ring classes and min-h-11 touch sizing to nav links, Sign out, theme select and the collapse toggle (AppShell.tsx:39,152,158,175)."
+ ],
+ "structuralChanges": [
+  "Convert AppShell into a React Router layout route (<Route element={<AppShell/>}> with <Outlet/>) so header/sidebar persist across navigation and can host shared state: collapse preference, access-denied banner, toasts, unsaved-changes guard. Pages supply title/breadcrumb via a small context or route handle instead of mounting their own shell (17 call sites).",
+  "Adopt a three-tier navigation model: phone (<md) header hamburger + slide-in drawer reusing SidebarNavigation; tablet (md-xl) collapsed 64px icon rail by default; desktop (xl+) expanded 256px sidebar. Remove the stacked nav card (AppShell.tsx:164) and the lg-only sidebar (AppShell.tsx:165).",
+  "Replace the header's name/roles/theme/sign-out cluster with a single avatar (initials) menu button that opens a popover containing display name, humanised roles, theme radio (incl. System), link to Settings and Sign out; the popover is the same on every viewport.",
+  "Make Settings honest to its 'Account' label: add a read-only Account section (name, email, roles from GET /auth/me) above Appearance, or rename the nav section to 'Preferences'.",
+  "Centralise session/redirect handling: one onSessionExpired path (AuthContext + api client) that stores the interrupted pathname and uses router navigation instead of window.location.href, and a single '/' HomeRedirect used by Login, Not Found and RoleRoute; RoleRoute renders an in-shell 403 card instead of a silent redirect.",
+  "Introduce shared primitives referenced by every screen in this area: <BrandMark>, <Button variant>, <Alert tone role>, and an extended ModalDialog with title bar, close button, inert background and a bottom-sheet variant below sm; retire unused .btn-brand/.surface-soft and the vestigial --space-scale/data-density code (index.css:4,79,87-104; UiSettingsContext.tsx:33)."
+ ]
+}

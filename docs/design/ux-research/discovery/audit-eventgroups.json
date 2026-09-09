@@ -1,0 +1,556 @@
+{
+ "area": "Event Groups list/detail plus legacy Projects pages",
+ "heuristicIssues": [
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "Event Groups list",
+   "issue": "The list silently truncates at 500 groups and the toolbar summary ('N groups · N incidents · N active') is computed only over the loaded page, so counts and the worklist can both be wrong with no indication.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:38 (limit: \"500\"), :55-59 (summary reduces over items), :72 (rendered as fact); no pagination or total in the response type",
+   "recommendation": "Return total_count from /event-groups and render 'Showing 500 of 1,240' with Load more / pagination; otherwise drop the summary or label it 'on this page'."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "Event Groups list",
+   "issue": "Filter and search state live only in React state, so Back from a detail page, refresh, or sharing a link loses the worklist context; the detail's '← Event Groups' link always lands on the default OPEN view.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:29-30 (useState for status/search), :38 (URLSearchParams built but not pushed to the router); web/src/pages/EventGroupDetailPage.tsx:77 (Link to=\"/event-groups\" with no query)",
+   "recommendation": "Mirror status and q into the URL with useSearchParams and have the detail back link use navigate(-1) or preserve the last list query."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Help users recognize, diagnose, and recover from errors",
+   "screen": "Event Groups list",
+   "issue": "A search inside the default OPEN scope that matches only a closed/archived group shows 'No Event Groups match the current filters.' with no hint that widening the status filter would find it; first-day users conclude the group does not exist.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:29 (default \"OPEN\"), :38-39 (status and q sent together), :83 (empty-state copy)",
+   "recommendation": "When q is non-empty and items are empty and status !== 'ALL', render 'No open Event Groups match \"x\". Search all Event Groups' as an inline button that sets status to ALL."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Flexibility and efficiency of use",
+   "screen": "Event Groups list",
+   "issue": "No column sorting; 'Last activity' and 'Incidents' are the triage cues but the table is served in API order with no way to surface the most recent or busiest groups.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:80 (static th cells), :84 (items.map in response order)",
+   "recommendation": "Add client-side sort on Last activity (default desc) and Incidents; make the th a button with aria-sort."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Event Groups list",
+   "issue": "The 'Open Event Group' chip duplicates the title link in the same row and costs a sixth column; the status badge is redundant in three of four filter modes.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:86 (title Link) and :91 (second Link to the same route); :66-71 vs :89 (badge repeats the selected filter)",
+   "recommendation": "Remove the Action column and make the whole row clickable via the title link; show the Status column only when status === 'ALL'."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Accessibility / Recognition rather than recall",
+   "screen": "Event Groups list",
+   "issue": "Search input and status select have no label or aria-label (placeholder only), and the load-error banner has no role=alert, unlike the integrity banner on the detail page.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:65-66 (no label/aria-label), :76 (error div without role) vs web/src/pages/EventGroupDetailPage.tsx:102 (role=\"alert\")",
+   "recommendation": "Add aria-label=\"Search Event Groups\" and aria-label=\"Status filter\"; add role=\"alert\" to the error banner in both pages."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Event Groups list",
+   "issue": "Title links are body-ink coloured with a hover-only colour change, so nothing marks them as links on touch devices; the row hover highlight is likewise hover-only.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:85 (hover:bg only), :86 (text-[var(--ink)] with hover:text-[var(--brand)])",
+   "recommendation": "Style row titles as links (brand colour or underline on the title) and add a trailing chevron icon so the tap target is recognisable without hover."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Match between system and the real world",
+   "screen": "Event Groups list",
+   "issue": "Location label uses undefined abbreviations 'D7 · Los Angeles · R101 · PM 12.3'; 'R' for route is not a Caltrans convention (routes are normally 'SR-101' / 'US-101' / 'I-5') and 'Open' (group) vs 'active' (incidents) vs 'Last activity' mix three vocabularies in one row.",
+   "evidence": "web/src/features/eventGroups/eventGroupTypes.ts:73-76 (D/R/PM prefixes); web/src/pages/EventGroupsPage.tsx:72,88-90",
+   "recommendation": "Render 'District 7 · Los Angeles · Route 101 · PM 12.3' (or the real route designator when available) and use one word, 'open', for both groups and incidents."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "Event Group detail",
+   "issue": "The page fetches the whole assessments list (limit 1000) in parallel just to build incident→assessment chips; render waits for both, failures are swallowed to an empty list, and incidents whose assessment falls outside the first 1000 silently lose their Assessment/Submission chips with no indication.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:52-57 (Promise.all with listAssessments({limit:1000}).catch(() => items: [])), :115-116, :130-131",
+   "recommendation": "Have /event-groups/:id return assessment_id and submission_ids per incident, or query assessments by incident_ids; if the lookup fails, show a small 'Assessment links unavailable' notice instead of hiding the chips."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "Event Group detail",
+   "issue": "The record is read-only: coordinators can no longer close, reopen or edit an Event Group from its own page, although the legacy Project detail exposed exactly these actions with inline confirmation. A closed group also shows no closed_at / closed-by even though the API returns them.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:76-80 (only back/map/refresh); web/src/ui/AppShell.tsx:66 (IA comment 'read-only records'); web/src/features/projects/ProjectManagementPanel.tsx:97-124 (legacy Close/Reopen/Edit); web/src/features/eventGroups/eventGroupTypes.ts:46-47 (closed_at, closed_by_user_id unused)",
+   "recommendation": "If lifecycle actions live elsewhere (My Work), add a 'Manage in My Work' link in the toolbar for canTriage roles; otherwise port ProjectManagementPanel to eventGroups. Show 'Closed <date> by <name>' in the header dl when status is CLOSED."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Event Group detail",
+   "issue": "Two different targets for the same object on one page: the incidents-table title links to /incidents/:id while the history 'Incident #N' link goes to the Mission Center map.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:121 (to=`/incidents/${incident.id}`) vs :145 (to=`/mission-center/${group.id}/${event.incident_id}`)",
+   "recommendation": "Make history incident links go to /incidents/:id and offer the map via the same 'Map' chip used in the table."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Recognition rather than recall",
+   "screen": "Event Group detail",
+   "issue": "Cross-link chips are labelled only by numeric ids ('Assessment #12', 'Submission #34', 'Submission #35'); a busy incident yields a cluster of numbers with no state or date, so the user cannot tell which one is current.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:130-131",
+   "recommendation": "Label chips with state and count ('Assessment · Approved', 'Submissions (3)') and collapse multiple submissions behind one chip that opens the assessment."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Error prevention / Match between system and the real world",
+   "screen": "Event Group detail",
+   "issue": "incidentStatusText maps every status other than RESOLVED / IN_PROGRESS to 'New', so any other backend status (e.g. CLOSED, CANCELLED) is mislabeled; the stage is a title-cased raw enum.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:24-27 (three-way ternary defaulting to \"New\"), :126",
+   "recommendation": "Use the shared incident status/stage label helpers used by the Incidents page and fall back to eventLabel(status) instead of 'New'."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Recognition rather than recall",
+   "screen": "Event Group detail",
+   "issue": "No breadcrumb and the shell h1 is the bare group title, so the record type is only inferable from the '#id' sub-line and the sidebar highlight; on tablet/phone the sidebar highlight is inside the stacked Navigation card.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:74 (title={group?.title ...}), :90 ('Event Group #id · location')",
+   "recommendation": "Render 'Event Groups / <title>' as a breadcrumb above the header card or pass an eyebrow 'Event Group' to AppShell."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Help users recognize, diagnose, and recover from errors",
+   "screen": "Event Group detail",
+   "issue": "The data-integrity alert tells users to 'report it to an administrator' but offers no action (no copy-id, no mailto, no link), and the load-error banner lacks role=alert while the integrity banner has it.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:82 (error div without role), :101-105 (alert with instruction only)",
+   "recommendation": "Add role=\"alert\" to the load error; add a 'Copy report details' button that copies group id + incident ids, or link to the admin contact."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Consistency and standards",
+   "screen": "Event Group detail",
+   "issue": "History is newest-first but unlabeled as such; 'Last activity' in the header shows '—' when latest_incident_activity_at is null while the list falls back to updated_at, so the same group can show a date in the list and '—' in the detail.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:145 (slice().reverse()), :95 (no ?? updated_at) vs web/src/pages/EventGroupsPage.tsx:90 (?? group.updated_at)",
+   "recommendation": "Use the same fallback in both places and add 'Newest first' to the history header."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Consistency and standards",
+   "screen": "Event Group detail",
+   "issue": "The broken-row tint uses an inline style with a hard-coded color-mix rather than a token class, and EventGroupStatusBadge is exported from a page module and imported by another page.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:119 (style={{ background: \"color-mix(...)\" }}), :10 (import from \"./EventGroupsPage\")",
+   "recommendation": "Move EventGroupStatusBadge and a `row-danger` utility into web/src/features/eventGroups/ or web/src/ui/."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards",
+   "screen": "Legacy Projects list / Project detail / management panel / association dialog (unrouted)",
+   "issue": "Six legacy Project files are dead code: nothing routed imports ProjectsPage, ProjectDetailPage, ProjectManagementPanel or ProjectAssociationDialog, and /projects and /projects/:id redirect to Event Groups. They already diverge from the live pages (toLocaleString dates with seconds, a second StatusBadge, button-based navigation, 'Route N' vs 'RN' titles), so they will mislead the next developer and drift further.",
+   "evidence": "web/src/App.tsx:77-78,182 (redirects); grep: ProjectManagementPanel imported only by web/src/pages/ProjectDetailPage.tsx:9; ProjectsPage/ProjectDetailPage/ProjectAssociationDialog imported by no file; web/src/pages/ProjectsPage.tsx:9-22,106 vs web/src/pages/EventGroupsPage.tsx:9-24,86",
+   "recommendation": "Delete the six legacy files (keep projectTypes.ts until Mission Center is renamed) after porting the two features the live page lacks: the lifecycle panel and the inline map."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "Legacy Project detail (unrouted)",
+   "issue": "'Open in Incidents' navigates to the /incidents list, not /incidents/:id, so the chosen incident is lost; row titles are plain text with no link at all.",
+   "evidence": "web/src/pages/ProjectDetailPage.tsx:125 (navigate(\"/incidents\")), :121 (div, no Link)",
+   "recommendation": "If any of this is ported, link the title to /incidents/:id as the live page already does (EventGroupDetailPage.tsx:121)."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Legacy Project management panel (unrouted)",
+   "issue": "Semantic colour inversion: 'Close Project' and 'Confirm closure' are painted with --good (green), while the reversible 'Reopen' is brand blue; closing is the more consequential action but reads as the safe/positive one. The 'Project title is required.' branch is unreachable because Save is disabled when the title is empty.",
+   "evidence": "web/src/features/projects/ProjectManagementPanel.tsx:107,172 (bg/text --good on close), :29-32 vs :151 (disabled={busy || !title.trim()})",
+   "recommendation": "When porting: use a neutral/secondary style for Close and reserve --good for confirmations of success; keep the disabled guard and drop the dead validation branch."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Accessibility / Error prevention",
+   "screen": "Legacy Project association dialog (unmounted)",
+   "issue": "Modal has role=dialog and aria-modal but no focus trap, no initial focus and no Escape-to-close, so keyboard users tab into the page behind it. It also shows a static 'Classification: Unclassified / Set after field assessment' card identical for every incident and coordinates to 6 decimals.",
+   "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:135-136 (no onKeyDown/focus management), :166-170 (hard-coded text), :164 (toFixed(6))",
+   "recommendation": "Check that the live EventGroupAssociationDialog does not repeat these; if it does, add a focus trap (or <dialog>), Escape handler, drop the static card and round coordinates to 4-5 decimals."
+  }
+ ],
+ "responsiveIssues": [
+  {
+   "screen": "Event Groups list",
+   "viewport": "phone",
+   "issue": "Six-column table cannot fit 375px; it scrolls horizontally inside the panel with no sticky first column, so the title is off-screen while the user reads Incidents/Last activity or reaches the Action chip.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:78 (overflow-x-auto wrapper), :79 (w-full table, no min-w or sticky), :80 (six th)",
+   "fix": "Below md render each group as a card (title + status badge line, location line, 'N incidents · N open · last activity' line, whole card is the Link); keep the table from md up, or add `sticky left-0 bg-[var(--panel)]` to the first td/th and drop the Action column."
+  },
+  {
+   "screen": "Event Groups list",
+   "viewport": "phone",
+   "issue": "Toolbar wraps into three or four rows (search full width because of min-w-[280px] flex-1, then select, summary text, Refresh), pushing the table below the fold after the stacked mobile Navigation card.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:64-74 (flex-wrap toolbar, min-w-[280px]); web/src/ui/AppShell.tsx:164 (aside lg:hidden nav card above content)",
+   "fix": "Make the toolbar `grid grid-cols-[1fr_auto] md:flex`: search spans full width on row one, select + Refresh on row two; move the summary into the table header caption. Ask AppShell for a collapsed/disclosure mobile nav."
+  },
+  {
+   "screen": "Event Groups list",
+   "viewport": "phone",
+   "issue": "'Open Event Group' chip is text-[11px] px-2 py-1 (~22px tall) — far below a 44px touch target — and the title link is only hover-differentiated.",
+   "evidence": "web/src/pages/EventGroupsPage.tsx:91 (chip classes), :86 (hover:text only)",
+   "fix": "Remove the chip and make the entire row a link target with min-h-[44px] rows; if a chip is kept, use `min-h-[44px] px-3` on touch (`@media (pointer: coarse)`)."
+  },
+  {
+   "screen": "Event Groups list",
+   "viewport": "tablet",
+   "issue": "At 768 and 1024 the sidebar is still the stacked Navigation card (lg breakpoint is 1024, so 1024 landscape is exactly at the switch; 768 portrait shows the card), consuming roughly 300px above the toolbar; the table fits but title and location cells wrap to 2–3 lines.",
+   "evidence": "web/src/ui/AppShell.tsx:163-164 (lg:flex-row, aside lg:hidden); web/src/pages/EventGroupsPage.tsx:87 (no min width on Location)",
+   "fix": "Collapse the mobile Navigation card into a disclosure/drawer below lg; add `min-w-[10rem]` to the Location column and hide the Status column below lg unless filter is ALL."
+  },
+  {
+   "screen": "Event Groups list",
+   "viewport": "desktop",
+   "issue": "At 1440 the table stretches to the full content width (max-w-[1900px] shell minus 256px sidebar) so six columns are separated by large whitespace and the eye must travel ~1100px from title to Action; the summary is xs muted text easily missed.",
+   "evidence": "web/src/ui/AppShell.tsx:163 (max-w-[1900px]); web/src/pages/EventGroupsPage.tsx:79 (w-full), :72 (text-xs text-muted)",
+   "fix": "Cap the list panel at `max-w-[1200px]` or give columns explicit widths (title 40%, location 25%); promote the summary to three small stat tiles (as ProjectsPage did) or a caption row above the table."
+  },
+  {
+   "screen": "Event Group detail",
+   "viewport": "phone",
+   "issue": "Four-column incidents table with `whitespace-nowrap` on Status ('In progress · Awaiting Assessment') and on the Links cell forces horizontal scroll; the incident title scrolls out of view while tapping a cluster of ~22px chips.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:110 (overflow-x-auto), :126-127 (whitespace-nowrap on both cells), :128-131 (inline-flex flex-wrap chips text-[11px] px-2 py-1)",
+   "fix": "Below md render incidents as stacked cards: title link, location, status line, then a row of full-height (min-h-[40px]) link buttons; remove whitespace-nowrap from Status at all widths."
+  },
+  {
+   "screen": "Event Group detail",
+   "viewport": "phone",
+   "issue": "Toolbar has three items ('← Event Groups', 'View on Mission Center map', Refresh ml-auto) that wrap into two rows; the header dl is `shrink-0` so a long title pushes the three facts below the title block rather than compressing.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:76-80 (flex-wrap, ml-auto), :92 (grid shrink-0 grid-cols-[auto_auto])",
+   "fix": "Shorten the map link to 'Map' with an icon on small screens, and let the dl become a single-row `flex flex-wrap gap-x-4` below md."
+  },
+  {
+   "screen": "Event Group detail",
+   "viewport": "phone",
+   "issue": "History is a nested scroll region (max-h-[520px] overflow-auto) inside the page scroll — a second scroll container on touch that traps the finger when the list is long.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:144",
+   "fix": "Apply the max-height only from xl (`xl:max-h-[520px] xl:overflow-auto`); on smaller screens render the full list or a 'Show all N events' disclosure after the first five."
+  },
+  {
+   "screen": "Event Group detail",
+   "viewport": "tablet",
+   "issue": "Between 768 and 1279 the incidents table and history stack (grid is xl-only), so the history sits below a potentially long incidents table with no jump link; at 768 portrait the stacked sidebar card also pushes the record header ~300px down.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:107 (xl:grid-cols-[...]); web/src/ui/AppShell.tsx:164",
+   "fix": "Switch the two-column grid on at lg (`lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.8fr)]`) and add a 'History' tab or anchor link in the incidents header for smaller widths."
+  },
+  {
+   "screen": "Event Group detail",
+   "viewport": "desktop",
+   "issue": "At 1440 the layout works, but the header dl uses text-[13px] and the table 11px chips, so the record reads small on a 1440×900 display with lots of empty panel width.",
+   "evidence": "web/src/pages/EventGroupDetailPage.tsx:92 (text-[13px]), :129-131 (text-[11px])",
+   "fix": "Use text-sm for the dl and chips at lg+ and give the Links column a fixed `w-[260px]` so chips do not reflow with each row."
+  },
+  {
+   "screen": "Legacy Project detail (unrouted)",
+   "viewport": "phone",
+   "issue": "The ArcGIS MapView is fixed at 420px inside a scrolling page and captures touch pan/pinch — a scroll trap occupying half the 812px viewport; the five stacked cards above it push the incidents table two screens down.",
+   "evidence": "web/src/pages/ProjectDetailPage.tsx:93-106 (five cards md:grid-cols-2 xl:grid-cols-5), :110 (ProjectDetailMap); web/src/features/projects/ProjectDetailMap.tsx:24,107 (height 420 inline style, per inventory)",
+   "fix": "If the map is ported to Event Group detail: wrap it in a collapsed 'Show map' disclosure below md, cap it at `h-[40vh]` and set ArcGIS `view.navigation.browserTouchPanEnabled = false` until the user taps the map."
+  },
+  {
+   "screen": "Legacy Project detail (unrouted)",
+   "viewport": "tablet",
+   "issue": "md:grid-cols-2 with five cards leaves an orphan card on a third row because the col-span-2 on the Project card applies only at xl.",
+   "evidence": "web/src/pages/ProjectDetailPage.tsx:93-94 (md:grid-cols-2 xl:grid-cols-5, xl:col-span-2)",
+   "fix": "Not worth fixing in dead code; the live page's single header card (EventGroupDetailPage.tsx:86-99) is the right pattern."
+  },
+  {
+   "screen": "Legacy Project association dialog (unmounted)",
+   "viewport": "phone",
+   "issue": "Inside a 94vh dialog the 520px ArcGIS map fills ~65% of the viewport and captures touch; the primary 'Associate' button sits three to four screens down after four stacked context cards, the map and a 288px nested-scrolling list; three nested scroll regions compete.",
+   "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:136 (max-h-[94vh]), :148 (overflow-auto body), :155-157 (xl-only two-column, md:grid-cols-4 cards), :212 (max-h-72 overflow-auto list); ProjectAssociationMap.tsx:28,196 (520px per inventory)",
+   "fix": "Verify the live EventGroupAssociationDialog and, if it shares this layout, make the map `h-[45vh] md:h-[520px]`, put the mode toggle + primary button in the sticky footer on small screens, and reorder to list → decision → map on phones."
+  },
+  {
+   "screen": "Legacy Project association dialog (unmounted)",
+   "viewport": "tablet",
+   "issue": "At 768 and 1024 the dialog is still single-column (xl breakpoint) so map and list are stacked with long vertical scrolling to reach the decision card.",
+   "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:155 (xl:grid-cols-[minmax(0,1.7fr)_minmax(360px,0.8fr)])",
+   "fix": "Start the two-column layout at lg with `lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)]`."
+  }
+ ],
+ "dataDensity": [
+  {
+   "screen": "Event Groups list",
+   "element": "Search box",
+   "verdict": "keep",
+   "reason": "Primary finding mechanism for the list's first task (EventGroupsPage.tsx:65); needs a visible/aria label."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Status filter select",
+   "verdict": "keep",
+   "reason": "Scopes the worklist; default OPEN is right for an operational worklist (EventGroupsPage.tsx:66-71)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Summary line 'N groups · N incidents · N active'",
+   "verdict": "demote",
+   "reason": "Useful triage context but misleading while limit=500 truncates; move to a caption row above the table with the total count, or drop until totals are real (EventGroupsPage.tsx:55-59,72)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Refresh button",
+   "verdict": "demote",
+   "reason": "The list already reloads on every filter/search change; keep as an icon button at the end of the toolbar (EventGroupsPage.tsx:49-53,73)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Error banner",
+   "verdict": "keep",
+   "reason": "Only path to learn the load failed; add role=alert (EventGroupsPage.tsx:76)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Column: Event Group title",
+   "verdict": "keep",
+   "reason": "Only human-readable key and the row's navigation target (EventGroupsPage.tsx:86)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Sub-line 'Event Group #id'",
+   "verdict": "keep",
+   "reason": "Other screens reference groups as 'Event Group #N', so it is the cross-reference key users will search with (EventGroupsPage.tsx:86)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Column: Location",
+   "verdict": "keep",
+   "reason": "Spatial identity is how field staff recognise a group; expand the abbreviations (EventGroupsPage.tsx:87; eventGroupTypes.ts:71-79)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Column: Incidents 'N total · N active'",
+   "verdict": "keep",
+   "reason": "Core volume/liveness triage signal (EventGroupsPage.tsx:88)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Column: Status badge",
+   "verdict": "progressive",
+   "reason": "Redundant with the filter in OPEN/CLOSED/ARCHIVED modes; show the column only when status === 'ALL' (EventGroupsPage.tsx:89)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Column: Last activity",
+   "verdict": "keep",
+   "reason": "Recency is the main worklist ordering cue; make it sortable (EventGroupsPage.tsx:90)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Column: 'Open Event Group' chip",
+   "verdict": "remove",
+   "reason": "Duplicates the title link in the same row and forces a sixth column that breaks phone layout (EventGroupsPage.tsx:91)."
+  },
+  {
+   "screen": "Event Groups list",
+   "element": "Loading / empty row text",
+   "verdict": "keep",
+   "reason": "Distinguishes loading from empty; extend the empty copy with a 'search all statuses' escape (EventGroupsPage.tsx:83)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Toolbar '← Event Groups'",
+   "verdict": "keep",
+   "reason": "Primary way back; should preserve list filters (EventGroupDetailPage.tsx:77)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Toolbar 'View on Mission Center map'",
+   "verdict": "keep",
+   "reason": "Spatial context is a main reason to open a group and the page has no inline map (EventGroupDetailPage.tsx:78)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Toolbar Refresh",
+   "verdict": "demote",
+   "reason": "Rarely needed on a record page; icon button is enough (EventGroupDetailPage.tsx:79)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Header title + status badge",
+   "verdict": "keep",
+   "reason": "Identity and lifecycle state (EventGroupDetailPage.tsx:89)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Header 'Event Group #id · location'",
+   "verdict": "keep",
+   "reason": "Cross-reference key plus spatial identity (EventGroupDetailPage.tsx:90)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Header dl: Incidents",
+   "verdict": "keep",
+   "reason": "Volume and live workload (EventGroupDetailPage.tsx:93)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Header dl: Created",
+   "verdict": "demote",
+   "reason": "Provenance only; move into the history panel header or keep as the last dl row (EventGroupDetailPage.tsx:94)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Header dl: Last activity",
+   "verdict": "keep",
+   "reason": "Recency; align the null fallback with the list (EventGroupDetailPage.tsx:95)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Header: closed_at / closed by (not shown)",
+   "verdict": "progressive",
+   "reason": "Show only when status is CLOSED; the data is already in the response (eventGroupTypes.ts:46-47)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Header description paragraph",
+   "verdict": "keep",
+   "reason": "Optional narrative correctly hidden when empty (EventGroupDetailPage.tsx:98)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Data integrity alert",
+   "verdict": "keep",
+   "reason": "Rare but serious; needs an action, not just an instruction (EventGroupDetailPage.tsx:101-105)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Incidents table: title link + Observed date",
+   "verdict": "keep",
+   "reason": "Identity and ordering cue for each grouped incident (EventGroupDetailPage.tsx:121-122)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Incidents table: 'Missing permanent incident key' flag",
+   "verdict": "keep",
+   "reason": "Per-row echo of the integrity alert; only appears in the error case (EventGroupDetailPage.tsx:123)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Incidents table: Location",
+   "verdict": "keep",
+   "reason": "Incidents in one group sit at different post miles; needed to tell them apart (EventGroupDetailPage.tsx:125)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Incidents table: Status · Stage",
+   "verdict": "keep",
+   "reason": "Tells the user which incidents still need work; fix the 'New' default (EventGroupDetailPage.tsx:126)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Incidents table: 'Map' chip",
+   "verdict": "keep",
+   "reason": "Per-incident spatial context is the group's raison d'être (EventGroupDetailPage.tsx:129)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Incidents table: 'Assessment #N' chip",
+   "verdict": "demote",
+   "reason": "Useful drill-down but should carry state ('Assessment · Approved') rather than a bare id (EventGroupDetailPage.tsx:130)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "Incidents table: 'Submission #N' chips",
+   "verdict": "progressive",
+   "reason": "A busy incident yields a row of numeric chips; collapse to 'Submissions (N)' that expands or opens the assessment (EventGroupDetailPage.tsx:131)."
+  },
+  {
+   "screen": "Event Group detail",
+   "element": "History list (type, date · actor, incident link, notes)",
+   "verdict": "keep",
+   "reason": "Audit trail is one of the three primary tasks; keep bounded and newest-first with a label (EventGroupDetailPage.tsx:145)."
+  },
+  {
+   "screen": "Legacy Projects list (unrouted)",
+   "element": "Intro banner 'Project operations'",
+   "verdict": "remove",
+   "reason": "Dead code; but its one-sentence concept definition is worth porting as a tooltip/eyebrow on Event Groups (ProjectsPage.tsx:62-66)."
+  },
+  {
+   "screen": "Legacy Projects list (unrouted)",
+   "element": "KPI cards",
+   "verdict": "demote",
+   "reason": "Dead code; the pattern (three stat tiles) is a better home for the Event Groups summary than xs inline text (ProjectsPage.tsx:70-74)."
+  },
+  {
+   "screen": "Legacy Project detail (unrouted)",
+   "element": "Five summary cards",
+   "verdict": "remove",
+   "reason": "Dead code; the live single header card is denser and reads better (ProjectDetailPage.tsx:93-106)."
+  },
+  {
+   "screen": "Legacy Project detail (unrouted)",
+   "element": "ProjectManagementPanel (Edit / Close / Reopen)",
+   "verdict": "progressive",
+   "reason": "Dead code, but the only lifecycle UI in this area; port it to Event Group detail for canTriage roles behind a 'Manage' disclosure (ProjectDetailPage.tsx:108; ProjectManagementPanel.tsx:97-124)."
+  },
+  {
+   "screen": "Legacy Project detail (unrouted)",
+   "element": "ProjectDetailMap (420px inline map)",
+   "verdict": "progressive",
+   "reason": "Dead code; if spatial context is needed on the record page, port it as an on-demand 'Show map' section rather than an always-on 420px block (ProjectDetailPage.tsx:110)."
+  },
+  {
+   "screen": "Legacy Project detail (unrouted)",
+   "element": "Classification column with provenance copy",
+   "verdict": "progressive",
+   "reason": "Dead code; classification provenance is useful but belongs on the incident/assessment record, not the group table (ProjectDetailPage.tsx:25-36,123)."
+  },
+  {
+   "screen": "Legacy Project detail (unrouted)",
+   "element": "Raw status enum column",
+   "verdict": "remove",
+   "reason": "Shows IN_PROGRESS verbatim; the live page humanises it (ProjectDetailPage.tsx:124)."
+  },
+  {
+   "screen": "Legacy Project association dialog (unmounted)",
+   "element": "Context card 'Coordinates' to 6 decimals",
+   "verdict": "remove",
+   "reason": "Sub-10cm precision is not actionable for a coordinator; the map shows the point (ProjectAssociationDialog.tsx:162-165)."
+  },
+  {
+   "screen": "Legacy Project association dialog (unmounted)",
+   "element": "Context card 'Classification: Unclassified'",
+   "verdict": "remove",
+   "reason": "Static text identical for every incident (ProjectAssociationDialog.tsx:166-170)."
+  },
+  {
+   "screen": "Legacy Project association dialog (unmounted)",
+   "element": "Header Close button",
+   "verdict": "remove",
+   "reason": "Duplicates the sticky-footer Close (ProjectAssociationDialog.tsx:145 vs :301)."
+  },
+  {
+   "screen": "Legacy Project association dialog (unmounted)",
+   "element": "Nearby list + radius select, mode toggle, selected summary, primary button",
+   "verdict": "keep",
+   "reason": "The decision surface; carry the state-driven button labels into the live EventGroupAssociationDialog if not already there (ProjectAssociationDialog.tsx:189-289)."
+  }
+ ],
+ "quickWins": [
+  "Remove the 'Open Event Group' Action column and make the title link the row target; show the Status column only when the filter is 'All' (EventGroupsPage.tsx:80,89,91).",
+  "Add role=\"alert\" to both load-error banners and aria-labels to the search input and status select (EventGroupsPage.tsx:65-66,76; EventGroupDetailPage.tsx:82).",
+  "Extend the empty state: when a search returns nothing under OPEN/CLOSED/ARCHIVED, render 'Search all Event Groups' as an inline button that sets status to ALL (EventGroupsPage.tsx:83).",
+  "Persist status and q in the URL via useSearchParams so Back/refresh/share keep the worklist; have '← Event Groups' return to that URL (EventGroupsPage.tsx:29-30; EventGroupDetailPage.tsx:77).",
+  "Add client-side sort on Last activity (default newest first) and Incidents with aria-sort on the header cells (EventGroupsPage.tsx:80,84).",
+  "Expand location abbreviations to 'District 7 · Los Angeles · Route 101 · PM 12.3' in eventGroupLocationLabel (eventGroupTypes.ts:73-76) — one helper, used everywhere.",
+  "Point the history 'Incident #N' link at /incidents/:id and reuse the 'Map' chip for the map target (EventGroupDetailPage.tsx:145).",
+  "Replace the incidentStatusText three-way ternary with the shared incident status/stage helpers so unknown statuses are not labelled 'New' (EventGroupDetailPage.tsx:24-27).",
+  "Show 'Closed <date> by <name>' in the header dl when status is CLOSED using closed_at/closed_by_user_id (EventGroupDetailPage.tsx:92-96; eventGroupTypes.ts:46-47).",
+  "Move the history max-height to xl only (`xl:max-h-[520px] xl:overflow-auto`) and label the panel 'Newest first' (EventGroupDetailPage.tsx:144).",
+  "Remove whitespace-nowrap from the Status cell and set a fixed width on the Links column (EventGroupDetailPage.tsx:126-127).",
+  "Move EventGroupStatusBadge and formatDate into web/src/features/eventGroups/ (or web/src/ui/) and delete the duplicated copies (EventGroupsPage.tsx:9-24; EventGroupDetailPage.tsx:10-18).",
+  "Delete the six unrouted legacy files (ProjectsPage.tsx, ProjectDetailPage.tsx, ProjectManagementPanel.tsx, ProjectAssociationDialog.tsx, ProjectAssociationMap.tsx, ProjectDetailMap.tsx) once the lifecycle panel is ported; App.tsx:77-78 redirects already cover old bookmarks."
+ ],
+ "structuralChanges": [
+  "Responsive list: render Event Groups as stacked cards below md (title + badge, location, 'N incidents · N open · last activity') and as a five-column sortable table from md up, with a caption row carrying real totals from a paginated /event-groups (total_count, cursor) instead of limit=500.",
+  "Give Event Group detail a lifecycle surface for canTriage roles: port ProjectManagementPanel to features/eventGroups as a collapsed 'Manage Event Group' section (Edit details, Close with active-incident guard, Reopen, optional note), or add a clear 'Manage in My Work' entry if that is the intended home; today the record is read-only with no pointer to where actions live (EventGroupDetailPage.tsx:76-80; AppShell.tsx:66).",
+  "Move incident→assessment/submission links server-side: have /event-groups/:id return assessment_id, assessment_status and submission_ids per incident so the page stops downloading up to 1000 assessments and can label chips by state (EventGroupDetailPage.tsx:52-57,130-131).",
+  "Add a breadcrumb/eyebrow pattern to AppShell for record pages ('Event Groups / <title>') and make the mobile Navigation aside a collapsed drawer so record headers are visible above the fold on phone and tablet portrait (AppShell.tsx:164; EventGroupDetailPage.tsx:74).",
+  "Reorganise detail below xl: two-column at lg with an incidents/history tab strip below lg, incidents rendered as cards on phones with 40px link buttons in place of 11px chips (EventGroupDetailPage.tsx:107-148).",
+  "Consolidate the Project/Event Group duplication: delete projectTypes.ts helpers in favour of eventGroupTypes.ts once MissionCenterProjectExplorer/MissionCenterProjectGisMap are renamed, and introduce shared Button, Badge and DataTable primitives in web/src/ui so the five hand-rolled button variants and three status badges in this area collapse to one each."
+ ]
+}

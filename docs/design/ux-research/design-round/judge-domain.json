@@ -1,0 +1,300 @@
+{
+ "judge": "Caltrans operations and geotech domain expert",
+ "lens": "Does the design match how the work really flows (field report -> coordinator triage -> office chief delegation -> branch chief assignment -> engineer GISA submission -> review -> finalize), the authority model, the data each role truly needs, and the minimalism goal without hiding something a role must see?",
+ "criteria": [
+  {
+   "name": "Learnability from zero",
+   "weight": 30
+  },
+  {
+   "name": "Data minimalism per page",
+   "weight": 20
+  },
+  {
+   "name": "Phone + tablet + desktop layout quality",
+   "weight": 20
+  },
+  {
+   "name": "Implementation cost and fit with the current codebase",
+   "weight": 15
+  },
+  {
+   "name": "Workflow and domain correctness",
+   "weight": 10
+  },
+  {
+   "name": "Accessibility",
+   "weight": 5
+  }
+ ],
+ "scores": [
+  {
+   "proposal": "case-file",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 9,
+     "reason": "Three destinations (Home / Incidents / Map) plus one role-aware page per incident removes the need to learn the five-object data model before working, while Home is still a verb-labelled queue with the primary action on the card, so a newcomer learns 'what needs me' and 'everything about this slide is here' and nothing else."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 9,
+     "reason": "Tabs are used as the minimalism device (each tab carries only the data its decision needs, Assessment tab is people and routing while Form tab is the technical form), the hidden lists are specific and code-anchored, and I could not find a persona must-see that was cut."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 9,
+     "reason": "Designed compositions per size class (bottom bar / 64px rail / 240px sidebar; drill-in below 840, two panes above; case tabs on one row from medium), phone content at ~104px, 1200px content cap, maps one per screen and never inside a scrolling card."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 7,
+     "reason": "56 days with heavy reuse (ModalDialog wrapped rather than reimplemented, submissionDetailModel and caltransLookups kept, assessmentPermissions reused), but it needs a new GET /incidents/{id}/case aggregate or 6-8 parallel calls and a redirect table that must resolve assessment/submission ids back to an incident id."
+    },
+    {
+     "criterion": "Workflow and domain correctness",
+     "score": 9,
+     "reason": "The 9-step progress rail with terminal dispositions, the merged incident+assessment+form timeline, the 'Provisional - not yet accepted' treatment of incident_key, office-scoped finalize, assignment-scoped reviewer queue and the explicit Finalize-does-not-Resolve copy are all faithful to the state machine; the one bend is routing assessment-shaped portfolio questions ('where is my office stuck') through an incident-shaped list."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 9,
+     "reason": "24px floor with 44px under pointer:coarse, aria-current='step' on the progress rail, live regions, reflow at 320px, no nested max-h scroll regions, the .esri-view rule respected, and the ActionSheet explicitly wraps the existing focus-trap primitive instead of reimplementing it."
+    }
+   ],
+   "weightedTotal": 8.7,
+   "strengths": [
+    "Answers the exact question every persona asks in the walkthroughs ('what is happening with this incident and what do I do next') with one object, one page and one card grammar: status, holder, next step, your move.",
+    "Kills the 'four plausible homes for the status of an incident' problem the coordinator and branch-chief walkthroughs both failed on (brief-core S2 'Choosing where to look'): Mission Center, Event Groups, Assessments and Submissions stop being destinations without any backend object being renamed.",
+    "The merged timeline plus the progress rail is the audit artifact the domain actually wants and nobody has today - WorkflowTreeView and getWorkflowTree are dead code in the repo (web/src/components/WorkflowTree.tsx, api/workflowTree.ts) and this is the first design that mounts them where a person needs them.",
+    "Fixes the three authority bugs the brief found: office-scoped 'To sign off' (no 403 on finalize), reviewer queue limited to active REVIEWER/APPROVER assignments with CONSULTED shown as 'For your information', and admin Home defaulting to 'Assigned to me' with an opt-in 'act as any role'.",
+    "'Reviewer needed (N)' on the branch chief's Home and Add reviewer available from the Assessment tab in any pre-final state directly repairs the blocked walkthrough where reviewer management vanished the moment an engineer was assigned.",
+    "Admin System-health strip surfaces the two silent failure modes named in brief-core (district with no DISTRICT_COORDINATOR routing row, mobile package not regenerated after publish)."
+   ],
+   "fatalFlaws": [
+    "'Assessment' and 'Form' as sibling tabs re-create the app's highest-rated vocabulary confusion (brief-core rates Assessment / Submission / GISA / Draft all 'High') inside the record; the subtitle 'who is handling it' helps, but a first-day engineer told to 'complete the assessment' can plausibly open the wrong tab and conclude the form is missing.",
+    "Seven tabs per record (Overview, Report, Assessment, Form, Evidence, Site, History) on a horizontally scrolling strip at phone width relocates rather than removes an IA of seven items; if the strip does not make tabs 5-7 discoverable, Site and History become the new dead zone."
+   ],
+   "stealThese": [
+    "The four-fact card grammar (plain status, named holder, next step, the viewer's one action) used identically on Home, list rows, map previews and the record header.",
+    "The merged, filterable, humanised timeline with notes quoted in full, replacing the assessment history card, the submission workflow history card and the Event Group history.",
+    "The 9-step progress rail with terminal dispositions rendered as their own end state ('Closed at intake - no assessment needed') and aria-current='step'.",
+    "'Provisional - not yet accepted' before the key is minted, and 'ERIS number' as the human name for incident_key - the brief says the permanent key is never explained anywhere today.",
+    "Reviewer Approve / Return buttons enabled only after the form has been opened once in the session - a domain-appropriate guard against rubber-stamping a GISA.",
+    "The admin System-health strip (districts without a coordinator, items stuck over N days, assessments under review with no reviewer, package not generated since publish).",
+    "ActionSheet wrapping the existing ui/ModalDialog focus trap rather than reimplementing focus management."
+   ],
+   "evidence": [
+    "brief-core first-day walkthroughs: coordinator S2 'Choosing where to look' (four Operations entries all plausibly hold incident status) and branch chief S2 same failure; AppShell.tsx:84-87.",
+    "brief-core vocabulary table: Assessment, Submission, GISA, Draft, Event Group / Project and Status vs Stage vs State are all rated High or Very high confusion.",
+    "brief-core office chief walkthrough: APPROVED list is statewide (MyWorkPage.tsx:56 calls listAssessments({state:'APPROVED'}) with no office scope) and finalize 403s on other offices' items - verified in web/src/features/myWork/MyWorkPage.tsx.",
+    "brief-core branch chief walkthrough task 2 verdict 'blocked': reviewer management only rendered in mode='work' and the item leaves the queue on engineer assignment; verified assessmentPermissions.addReviewer allows any state !== 'FINALIZED' (web/src/features/assessments/assessmentModel.ts), so the fix needs no backend change.",
+    "web/src/components/WorkflowTree.tsx and web/src/api/workflowTree.ts exist and are imported by nothing - the progress rail is buildable from data already served.",
+    "brief-core: FINALIZED does not auto-resolve the incident (docs/incident-workflow-tree.md:179-183) - the proposal's 'Finalize (sign off)' plus 'Mark resolved' keeps the two steps and the open policy intact."
+   ]
+  },
+  {
+   "proposal": "task-first",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 9,
+     "reason": "'Every role lands on an Inbox, every object page opens with one banner and one button, every hand-off is a named 2-3 step flow with no defaults and a stated consequence' is the single most teachable rule set of the four, and the newcomer never has to know the object model to take the next step; it loses a fraction because Records still presents Incidents, Event Groups and Assessments as three segments to learn."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 9,
+     "reason": "Every one of the 22 screens carries an explicit essential / secondary / hidden list driven by the decision made there (coordinator rows get photos, reporter and road-inventory match; chief rows get place, age and roster workload; reviewer gets the whole form read-only), and nothing a persona must see is cut."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 9,
+     "reason": "Four window-size compositions with bottom bar / 72px rail / 240px sidebar, list-detail becoming drill-in at 840, maps capped at 45vh with an Expand control, no nested scroll below 840, and an explicit screens-tall budget per screen type used as an acceptance criterion."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 6,
+     "reason": "Highest effort of the four (64 days), Phase 0 re-keys every existing lg:/xl: class by redefining Tailwind breakpoints to 480/600/840/1200/1440 (its own top-listed risk, and it conflicts with spec-responsive which keeps Tailwind's 640/768/1024/1280/1536), and it adds five new route-backed flows plus ten backend items on top of a full form rewrite."
+    },
+    {
+     "criterion": "Workflow and domain correctness",
+     "score": 10,
+     "reason": "The most faithful reading of the hand-off chain and the authority model: it names the delegate-with-engineer consequence ('this skips branch-chief assignment; the branch chief is still notified', which is what backend assessments.py actually does), separates the reporter loop from the engineer loop, handles Reviewer vs Approver vs Consulted, scopes both the finalize list and the reviewer queue, and flags every backend need with a reason without touching a state or a field name."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 9,
+     "reason": "Complete and specific: names on all controls, live regions for toasts and banners, focus trap and restore in flows and sheets, aria-current/aria-pressed instead of colour alone, error summaries linked to fields, 44px under pointer:coarse, three-theme contrast check and keyboard list equivalents for every map task."
+    }
+   ],
+   "weightedTotal": 8.65,
+   "strengths": [
+    "It attacks the failures where they actually are: brief-core's walkthroughs are dominated by hand-off defects (no confirmation, items vanish, next step buried, two Submit buttons, two Approve buttons, admin firehose, 403 on finalize), and the five guided flows plus the DecisionSheet address each one by name.",
+    "'One banner, one button' derived from the existing waitingOn() and assessmentPermissions is a rule a first-day user can hold in their head on every page, and it removes the 'Actions for this step are performed from My Work' dead end.",
+    "The statusLanguage table is the most complete code-to-label-to-next-step mapping produced by any proposal (19 rows including 'Finalized - incident open', 'Closed - duplicate of another report' and 'No one assigned yet'), and vocabularyChanges maps each label 1:1 to a backend code as the constraint requires.",
+    "Hand-off flows carry the decision data the domain needs and today lacks: engineer and branch-chief pickers with office, branch and open-assessment workload; the delegator's note quoted on the branch chief's row; the reviewer's note quoted on the engineer's row.",
+    "'Waiting on others' and 'Done recently (7 days)' with an outcome sentence fixes the coordinator's real complaint that triaged reports vanish and sent-back reports masquerade as new.",
+    "Backend changes are enumerated with reasons and none renames a field or alters a transition, exactly as the constraint demands."
+   ],
+   "fatalFlaws": [
+    "No role-blocking flaw. The nearest thing to one is a build risk: redefining the Tailwind breakpoint tokens in Phase 0 changes the meaning of every existing md:/lg:/xl: class in a 19k-line front end at once, and if the page-by-page check pass slips, the first release regresses layouts on pages that have not been rewritten yet.",
+    "Records keeps three segments (Incidents | Event Groups | Assessments), so the newcomer still meets three of the five numbered objects as browsable things; that is honest to the backend but it leaves the object-count tax the brief rates as the highest confusion largely unpaid."
+   ],
+   "stealThese": [
+    "Guided hand-offs as sub-routes of their object (/assessments/:id/delegate, /incidents/:id/triage) so the same flow renders as a full page on a phone and a dialog on a desktop, with Back and deep links working identically.",
+    "Confirmation copy that names the person and the consequence plus a toast that names where the item went ('Delegated to Maria Lopez - engineer Ana Ruiz'), and the explicit 'naming an engineer skips branch-chief assignment' helper.",
+    "The delegate/assign/add-reviewer people picker: name, role title, office/branch, open-assessment count, sorted by load, with a Reviewer / Approver / Consulted radio carrying one-line meanings.",
+    "The whole statusLanguage and vocabularyChanges tables as the single label source for pills, banners, map popups, emails and empty states.",
+    "The screens-tall and tap-target budget used as a measurable acceptance criterion per screen type (Inbox <= 1.5 screens, object page <= 3, form hub <= 2, 0 targets under 44px on coarse pointers).",
+    "'Submit for review' is never disabled: pressing it opens a completeness sheet listing the missing sections with links (USWDS guidance, and it removes the unexplained disabled buttons the walkthroughs hit).",
+    "Admin Inbox defaulting to 'Assigned to me' with an 'All queues' chip and a routing-gap banner for districts with no coordinator."
+   ],
+   "evidence": [
+    "brief-core walkthroughs: office chief 'Pressing Delegate - single click, no confirmation, no success notice, the panel jumps to a different assessment' (AssessmentDetailPanel.tsx:208-220; MyWorkPage.tsx:88).",
+    "brief-core engineer walkthrough: two 'Submit for review' buttons (SubmissionDetailHeader.tsx:129 vs AssessmentDetailPanel.tsx:319) and two approvals with different outcomes - the DecisionSheet plus backend change #1 is the only complete fix any proposal offers.",
+    "brief-core coordinator walkthrough: nearest Event Group pre-checked (EventGroupAssociationDialog.tsx:92-94) and disposition defaulting to 'Assessment required' (TriageWorkItem.tsx:75) - the flow removes both defaults.",
+    "brief-core: 'naming an engineer silently bypasses the branch chief' (backend assessments.py:1008-1018); task-first is the only proposal that states this consequence in the UI.",
+    "Live measurements: /my-work mainContentStartsAtPx 700 on both phone and iPad portrait; the four-destination bottom bar / rail / sidebar model brings it to ~112px.",
+    "web/src/utils/roleModel.ts CANONICAL aliases confirm FIELD_WORKER means the engineer and MAINTENANCE means the reporter, which is why the roleLabel() work is load-bearing and not cosmetic."
+   ]
+  },
+  {
+   "proposal": "progressive",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 7,
+     "reason": "It delivers most of the copy-level learnability wins (one plain label per state with a next-step sentence from waitingOn(), teaching empty states, no pre-selected triage answers, quoted reviewer notes, a consistent Help slot, humanised roles) but it deliberately preserves the five-destination, object-per-page IA that first-day coordinators and branch chiefs failed to navigate, so the newcomer still has to learn Incident vs Event Group vs Assessment vs Technical form as four separate places."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 8,
+     "reason": "Every screen gets a concrete essential / secondary / hidden cut that closely tracks spec-data's verdicts, but keeping the most surfaces of the four means the same facts recur across more pages (assessment state appears as a P3 column on Incidents, on the Assessments list, on the assessment detail and as a link on the incident record)."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 9,
+     "reason": "The only proposal whose breakpoints are exactly spec-responsive's bands (Tailwind 768/1024/1280/1536), with one ResponsiveList (P1/P2/P3 to cards below md), one ListDetail scaffold (two panes from lg, drill-in below), workspace routes locked to calc(100dvh - header) and coarse-pointer sizing rules - predictable and complete without inventing tokens."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 10,
+     "reason": "49 days, no route changes, no object or state changes, no new aggregate endpoint required, existing breakpoints preserved, and a component-by-component reuse map onto files that already exist (assessmentModel, incidentUiModel, useNavSections, ModalDialog, submissionDetailModel); it is the only plan that can land phase by phase without a redirect table or a feature-flagged IA swap."
+    },
+    {
+     "criterion": "Workflow and domain correctness",
+     "score": 8,
+     "reason": "Conservative and safe on authority (assessmentPermissions reused unchanged, reviewer availability restored at any non-final state, office-scoped finalize, admin firehose made opt-in, Finalize vs Close spelled out, and the canEdit literal-string bug fixed to use isEngineer/assessmentPermissions), but it keeps the incident record as a read-only page that tells the user to act somewhere else."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 9,
+     "reason": "Concrete and complete: 24px floor with 44px on coarse pointers, 12px text floor, no hover-only affordances, no nested scroll below 1280, safe-area handling, reflow at 320px, aria-current/aria-sort, and it explicitly restates the never-position-.esri-view rule."
+    }
+   ],
+   "weightedTotal": 8.25,
+   "strengths": [
+    "By far the best cost and risk profile: 49 days of layout and component work with zero backend renames, zero route churn and zero deep-link breakage, which matters because mobile deep links and email links point at today's URLs.",
+    "Two shared components (ResponsiveList and ListDetail) fix six pages at once, which is the highest leverage per day of any plan here.",
+    "It is the only proposal that names the real field hazard of adding web autosave on top of the mobile offline draft queue and proposes a concrete guard (updated_at precondition plus a 'Newer changes exist - reload' notice).",
+    "It calls out the literal role-string gate that silently blocks canonical engineers today (SubmissionDetailPage canEdit checks for 'FIELD_WORKER' or 'ADMIN') and routes it through roleModel plus assessmentPermissions.",
+    "Its backend list is disciplined: every item is 'FLAGGED' with a reason, and it states outright that no field, state, role or disposition is renamed - the cleanest compliance with the stated constraint.",
+    "Grouped My Work sections with ages, 'Recently handled', 'Waiting on reporter' and an opt-in admin 'All queues' fix the queue-level domain defects without a new IA."
+   ],
+   "fatalFlaws": [
+    "The incident record explicitly keeps 'Workflow actions' hidden with the rationale that actions stay in My Work; that preserves the exact dead end the branch-chief and coordinator walkthroughs failed on ('Open incident record' leads somewhere read-only, and My Work may not contain the item), and it is inconsistent with the same proposal's assessment detail, which does carry actions.",
+    "Keeping five destinations plus More per role means the coordinator's S2 failure ('four Operations entries all plausibly hold the status of an incident') is relabelled rather than solved; against the owner's first goal - usable from zero - this is the plan that changes the least about why a newcomer is lost."
+   ],
+   "stealThese": [
+    "Keep Tailwind's existing breakpoints (which are spec-responsive's own bands) instead of inventing 600/840/1200 tokens; this removes the single largest Phase-0 regression risk from whichever backbone wins.",
+    "ResponsiveList with declared column priorities (P1 always, P2 from lg, P3 from xl, card list below md) and the ListDetail scaffold as two shared primitives, replacing the copy-pasted rail+detail grid in MyWorkPage and AssessmentWorkspacePage.",
+    "The autosave conflict guard between web autosave and the mobile offline draft queue.",
+    "Fixing canEdit / canAct / canReview to use roleModel and assessmentPermissions instead of literal role strings - a one-file change that unblocks canonically provisioned engineers and assignment-based reviewers.",
+    "The 'FLAGGED, not renamed' backend list format with a reason per item.",
+    "Density toggle bound to pointer type (48px coarse / 40px fine / 32px fine-only) persisted in the existing UiSettingsContext.",
+    "Its six-phase plan shape and per-component 'reusesToday' mapping, which is the most executable migration document of the four."
+   ],
+   "evidence": [
+    "Verified in the repo: web/src/pages/SubmissionDetailPage.tsx canEdit tests roles for 'FIELD_WORKER' or 'ADMIN' literally, and canReview tests 'REVIEWER' or 'ADMIN' - the engineer walkthrough's S4 'Opening the submission' blocker.",
+    "Verified: web/src/features/myWork/MyWorkPage.tsx composes six queues with limit:1000 and adds a state:'SUBMITTED' fetch for admins - the firehose this proposal makes opt-in.",
+    "spec-responsive breakpoints are phone 0 / sm 640 / md 768 / lg 1024 / xl 1280 / 2xl 1536, matching this proposal exactly and diverging from the other three.",
+    "brief-core branch chief walkthrough S3 'Record view dead end': the panel says actions are performed from My Work but My Work will not contain a DRAFT assessment for a branch chief (AssessmentDetailPanel.tsx:270; MyWorkPage.tsx:53-55) - the flaw this proposal keeps for incidents.",
+    "brief-core app-shell audit S4: below lg the whole navigation renders as a card above content on every page (AppShell.tsx:164), measured at 700px on phone and iPad portrait - fixed here for ~7 days of work.",
+    "web/src totals about 19,200 lines with SubmissionDetailPage at 1,335 and TerrainCrossSectionWorkspace at 1,065, which makes the 49-day estimate plausible for layout-scoped work."
+   ]
+  },
+  {
+   "proposal": "map-first",
+   "perCriterion": [
+    {
+     "criterion": "Learnability from zero",
+     "score": 6,
+     "reason": "'Learn the map, the layer chips and the Waiting-on-me count' is a genuinely small first minute, but four of the six personas (office chief, branch chief, reviewer, admin) do desk hand-off work with no geographic component, and turning their queue into a filter chip on a map makes the first question - what is waiting on me and what do I press - something you discover rather than something you land on."
+    },
+    {
+     "criterion": "Data minimalism per page",
+     "score": 9,
+     "reason": "The most rigorous 'one fact once' discipline of the four, with per-panel essential/secondary/hidden lists and the longest, most precise deliberatelyDropped list; the one overshoot is demoting the incident context (photos, description excerpt, coordinator triage notes) behind an 'About the incident' disclosure on the assessment panel, which is exactly the context brief-core says an office chief must see to delegate."
+    },
+    {
+     "criterion": "Phone + tablet + desktop layout quality",
+     "score": 7,
+     "reason": "Outstanding primitives (container-query PanelFrame reused at 360/440/full, three-detent sheet, one scroll region per screen state, docked popups, 44px map controls) but the phone composition makes a map the home screen for queue work, which contradicts the research brief's own pattern ('list-first with map as secondary tab' for phone-width task queues) and Esri's mobile-dashboard guidance, and an always-mounted MapView is a real cost on older iPads."
+    },
+    {
+     "criterion": "Implementation cost and fit with the current codebase",
+     "score": 5,
+     "reason": "61 days that rebuild the entire information architecture on a map hub, delete every list page in favour of a sub-view, redirect all legacy routes, and depend on new server-side district/office/bbox filters and per-state counts (backend change 1) before the hub is usable at statewide volumes - the highest structural risk per day of the four."
+    },
+    {
+     "criterion": "Workflow and domain correctness",
+     "score": 7,
+     "reason": "Inside the panels the authority model is handled correctly (assignment-scoped reviewer queue, office-scoped chiefs, Add reviewer in any non-final state, one review decision driving both records, Finalize versus Close incident stated), but the organizing premise - place is the primary axis for every role - only matches two personas, and running the coordinator's triage decision inside a 440px docked panel is thin for a decision that needs photos, reporter, road-inventory match, candidate list and four consequences."
+    },
+    {
+     "criterion": "Accessibility",
+     "score": 8,
+     "reason": "It confronts the hard case honestly (arrow-key detent changes, a visible 'Expand list' equivalent, inert map at full detent, a table view as the conforming equivalent, list equivalent for every map interaction per W3C accessible-maps guidance), but a draggable nonmodal sheet over a live map as the primary surface on phones and iPad portrait is the highest-risk AA pattern proposed here."
+    }
+   ],
+   "weightedTotal": 6.85,
+   "strengths": [
+    "For the two personas whose work really is geographic it is the best answer here: the coordinator's 'find every open incident on I-80 in my district' goes from blocked to two taps, and the engineer keeps the site in view while writing the form.",
+    "Selection as a single URL state (?layer=&id=) so pin, row and panel always agree, Back closes the panel instead of losing the filter, and every legacy route redirects into it - the cleanest state model of the four.",
+    "It fixes the measured Mission Center defects precisely: no viewport reset on the 60s poll or on keystrokes, popup-first selection with an explicit Open action instead of navigate-on-click, clustering only above district scale, and a legend showing only visible operational symbols.",
+    "The container-query PanelFrame is the best single engineering idea in the set: one incident panel component that works at 360px in a sheet, 440px docked and full width on a phone.",
+    "Its statusLanguage includes the 'No coordinator assigned for this district' case, which is the silent failure mode brief-core flags at incidents.py:1198-1218.",
+    "Evidence mode (numbered photo markers with camera-heading wedges synced to the list, with a reviewer trust summary) is the most useful rendering of photo telemetry proposed."
+   ],
+   "fatalFlaws": [
+    "Every role's home is a map route, so there is no non-map fallback home: on an older iPad, a locked-down browser, or any WebGL or ArcGIS init failure, an office chief, reviewer or admin has no working landing page at all, and the table view is a sub-view of the same route rather than an independent destination.",
+    "The coordinator's triage - the one decision the whole workflow depends on - runs inside the 440px docked panel on desktop and the 360px panel on iPad landscape; brief-core says that decision needs reporter photos, reporter identity, incident type, the road-inventory match card and the candidate Event Groups, and that will not fit without scroll-hunting on the primary desk device.",
+    "Deleting the Assessments and Incidents list pages means the office chief's portfolio question is answered by toggling a filter off on a map; the only layout where list-map sync is usable today is 1440px wide (measured), so on a 13-inch laptop this trades a working list for a cramped three-region map."
+   ],
+   "stealThese": [
+    "Container-query PanelFrame so one record panel component serves the sheet, the docked panel and the full-width phone page.",
+    "Popup-first map selection (first tap previews with an explicit Open button) plus scale-dependent clustering and no goTo on poll ticks - all three are direct fixes to measured Mission Center defects.",
+    "'Exactly one scroll region per screen state' as a hard rule, with the map and SceneView never inside a scrolling container.",
+    "Evidence mode: numbered photo markers with heading wedges bidirectionally synced to the photo list, plus the reviewer trust summary ('12 photos, 11 mapped, 1 corrected - check positions against the affected area').",
+    "Route-normalised search with result-shaped suggestions ('Route 80 (I-80) in District 3 - 14 open incidents') so 80 / 080 / I-80 / R080 all resolve.",
+    "'Recently handled by me' as a first-class group so nothing ever vanishes after an action.",
+    "'Filter list to map area' as an explicit opt-in toggle with a 'Showing 14 of 87 in view' caption, rather than silently dropping rows when the user pans."
+   ],
+   "evidence": [
+    "brief-core live measurements: /mission-center map and list are only side by side at 1440 (map 697px, list 340px); on iPad portrait the map starts at 890px and the list at 1644px - the split-view case this proposal is built on barely exists today.",
+    "brief-research map track: 'List-first with map as secondary tab' is the recommended pattern for phone-width task queues, and Esri's mobile-dashboard guidance says a phone view should have at most one map with one operational layer.",
+    "brief-core personas: office chief, branch chief and reviewer must-see lists contain queues, rosters, notes and form content; none of them contains a map as the primary surface.",
+    "brief-core office chief walkthrough S3 'Deciding whom to delegate to': the panel gives no incident context inline and the chief must leave to get it - this proposal puts that context behind an 'About the incident' disclosure in a 440px panel.",
+    "brief-research 3D/WebGL findings: Scene and Map views on iPads are memory-sensitive and require capability gating - mounting a MapView in the layout route on every app open raises that cost for every role on every route.",
+    "Verified: web/src/features/missionCenter/MissionCenterProjectGisMap.tsx already runs one MapView across all three modes, so the reuse claim is real even though the IA consequence is heavy."
+   ]
+  }
+ ],
+ "ranking": [
+  "case-file",
+  "task-first",
+  "progressive",
+  "map-first"
+ ],
+ "recommendation": "Build on the case-file backbone and merge task-first's hand-off machinery into it; take progressive's cost discipline as the build method and map-first's map and panel engineering for the two surfaces that are genuinely geographic. Backbone: three destinations (Home, Incidents, Map, plus Admin) and one role-aware case file per incident, because the brief's own vocabulary table rates the five-object model as the highest-risk confusion and both the coordinator and branch-chief walkthroughs failed at 'which of these four pages holds the status of an incident'. Case-file removes that question without renaming a single backend object; the Assessment, Submission, Event Group and cross-section records survive as tabs and cards, and the merged timeline plus the 9-step progress rail finally mount the workflow-tree data that is dead code today. Merge in from task-first, which is a near-tie and stronger on the hand-offs: the guided flows as sub-routes of their object (/incidents/:id/triage, /incidents/:id/assessment/delegate) so each renders as a page on a phone and a dialog on a desktop; the 'one banner, one button' NextStepBanner derived from waitingOn() plus assessmentPermissions with the reviewer's note quoted in the banner; the full statusLanguage and vocabularyChanges tables as the single label source for pills, banners, map popups, emails and empty states; the people pickers carrying office, branch and open-assessment workload with a Reviewer / Approver / Consulted radio; the explicit 'naming an engineer skips branch-chief assignment, the branch chief is still notified' helper, which is the only place any proposal tells the truth about what the backend does; and the screens-tall and tap-target budgets as measurable acceptance criteria. Merge in from progressive: keep Tailwind's existing breakpoints, which are also spec-responsive's bands, instead of inventing 600/840/1200 tokens - that alone removes the largest Phase-0 regression risk from a 19k-line front end; adopt ResponsiveList (P1/P2/P3 to cards below md) and the ListDetail scaffold as the two shared primitives; adopt its per-component reusesToday mapping and its FLAGGED-not-renamed backend list; and take its autosave-versus-mobile-offline-draft conflict guard, which no one else noticed. Merge in from map-first, scoped to the Map destination, the case file's Site tab and Evidence: the container-query PanelFrame, popup-first selection with an explicit Open action, no goTo on poll ticks, scale-dependent clustering, one-scroll-region discipline, the numbered photo markers with heading wedges synced to the list, and route-normalised search suggestions. Two corrections to the winning backbone before it is built. First, rename or re-frame the sibling tabs: 'Assessment' and 'Form' are the app's worst vocabulary collision, so label them by their job ('Routing and people' and 'Technical form') and keep the tab count at five or six on phones by folding Report into Overview and Site into Evidence where the record has no geometry. Second, give the chiefs back an assessment-shaped view of their office: case-file routes 'where is my office stuck' through an incident list, which is a real bend, so keep a saved Incidents view scoped to my office with per-assessment-state count chips and a 'longest in this step' sort, sourced from the existing office_code filter on list_assessments. Do not adopt map-first as a backbone: for four of six personas the work is role-and-authority shaped, not place shaped, and making a map route the only home leaves an office chief, reviewer or admin with no landing page when WebGL or ArcGIS fails. Its ideas are worth more than its architecture. Finally, one backend item is load-bearing for every direction and should be scheduled first: make POST /assessments/{id}/submit and /review drive the linked submission status in the same transaction. Until that lands, the engineer is told to fix a form that is locked and the reviewer sees two Approve buttons with different outcomes, and no amount of UI work fixes it."
+}

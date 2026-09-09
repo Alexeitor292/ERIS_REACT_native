@@ -1,0 +1,1299 @@
+{
+ "area": "Submission detail: header, location hero, GISA card canvas, notes, measurements/3D terrain",
+ "screens": [
+  {
+   "name": "Submission detail page frame and action header",
+   "route": "/submissions/:id",
+   "purpose": "Command bar for one GISA technical submission: status, provenance links, and the role-appropriate lifecycle actions (save/submit, approve/return, delete).",
+   "roles": [
+    "Route is wrapped in ProtectedRoute, not RoleRoute, so ANY authenticated user can open it (web/src/App.tsx:135-142; web/src/auth/ProtectedRoute.tsx:10-16)",
+    "Edit (Save draft / Submit): roles include raw string FIELD_WORKER or ADMIN AND status DRAFT or REJECTED (web/src/pages/SubmissionDetailPage.tsx:162)",
+    "Review (Approve / Return): roles include REVIEWER or ADMIN AND status SUBMITTED (SubmissionDetailPage.tsx:161,163)",
+    "Delete: ADMIN, or DRAFT owned by the current user (SubmissionDetailPage.tsx:165-168)",
+    "Access sharing card: server flag submission.can_manage_permissions (SubmissionDetailPage.tsx:164)"
+   ],
+   "primaryTasks": [
+    "Engineer: complete the GISA form and submit (or resubmit) it for review",
+    "Reviewer: approve the submission or return it for correction with a note",
+    "Anyone: orient (status, parent assessment/incident) and jump to photo evidence"
+   ],
+   "dataShown": [
+    {
+     "label": "Page h1 title = descriptor 'DD-County-Route-PM - MM/DD/YY HH:MM'",
+     "necessity": "essential",
+     "note": "Record identity; built from stored district/county/route/post_mile + created_at.",
+     "source": "web/src/ui/AppShell.tsx:184; web/src/utils/submissionLabel.ts:33-41; SubmissionDetailPage.tsx:732-741,1169"
+    },
+    {
+     "label": "Back link 'Assessment #N' or 'Submissions'",
+     "necessity": "essential",
+     "note": "Only breadcrumb on the page; resolves to the parent assessment when context.assessment_id exists.",
+     "source": "web/src/features/submissions/SubmissionDetailHeader.tsx:78-88"
+    },
+    {
+     "label": "Status badge (DRAFT/SUBMITTED/APPROVED/REJECTED)",
+     "necessity": "essential",
+     "note": "Drives which actions appear.",
+     "source": "SubmissionDetailHeader.tsx:90; web/src/features/submissions/SubmissionDetailPrimitives.tsx:3-18"
+    },
+    {
+     "label": "Status caption ('Ready for reviewer decision', 'Editable field record', 'Returned for correction and resubmission', 'Review complete')",
+     "necessity": "secondary",
+     "note": "Prose restatement of the badge; helpful for new users, redundant for regulars.",
+     "source": "SubmissionDetailHeader.tsx:91-99"
+    },
+    {
+     "label": "'N unmapped' red pill",
+     "necessity": "essential",
+     "note": "Flags photos without geotags; a reviewer needs this before approving.",
+     "source": "SubmissionDetailHeader.tsx:100-104"
+    },
+    {
+     "label": "'· descriptor · owner you / user #N' meta line",
+     "necessity": "noise",
+     "note": "Descriptor repeats the h1 directly above; owner is a raw user id rather than a name.",
+     "source": "SubmissionDetailHeader.tsx:105; SubmissionDetailPage.tsx:1174"
+    },
+    {
+     "label": "'Incident #N' chip link",
+     "necessity": "essential",
+     "note": "Context link to the operational record.",
+     "source": "SubmissionDetailHeader.tsx:106-110"
+    },
+    {
+     "label": "'View on map' link (Mission Center)",
+     "necessity": "secondary",
+     "note": "Only when event_group_id and incident_id are both present.",
+     "source": "SubmissionDetailHeader.tsx:111-113"
+    },
+    {
+     "label": "Photo evidence button label 'N photos · M mapped' / 'Checking evidence…' / 'Photo evidence'",
+     "necessity": "essential",
+     "note": "Evidence coverage at a glance; heading count is hidden in a hover-only title attribute.",
+     "source": "SubmissionDetailHeader.tsx:71-75,119-121"
+    },
+    {
+     "label": "Refresh button label 'Working…' while busy",
+     "necessity": "secondary",
+     "note": "Only busy indicator on the page.",
+     "source": "SubmissionDetailHeader.tsx:124"
+    },
+    {
+     "label": "'Returned for correction: <review_comment>' banner",
+     "necessity": "essential",
+     "note": "Shown only when status is REJECTED; the reason the engineer must act.",
+     "source": "SubmissionDetailPage.tsx:1190-1192"
+    },
+    {
+     "label": "Edit-mode banner 'You are completing this technical submission. It belongs to assessment #… for incident #… Fill out the GISA form below…'",
+     "necessity": "secondary",
+     "note": "Repeats the header's assessment/incident links in prose; useful once, then clutter.",
+     "source": "SubmissionDetailPage.tsx:1193-1203"
+    },
+    {
+     "label": "Error banner (load/save/submit/review/share/delete/GPS/soil-percent errors)",
+     "necessity": "essential",
+     "note": "Single error channel for the whole page, including validation errors raised by cards far below.",
+     "source": "SubmissionDetailPage.tsx:1205,228-247,366-375"
+    },
+    {
+     "label": "'Invalid submission id.' / 'Loading...' / 'No data.'",
+     "necessity": "essential",
+     "note": "Plain-text page states; no skeleton.",
+     "source": "SubmissionDetailPage.tsx:1206-1207"
+    }
+   ],
+   "actions": [
+    {
+     "label": "← Assessment #N / Submissions (back link)",
+     "who": "all",
+     "where": "header top-left"
+    },
+    {
+     "label": "Photo evidence (link to /submissions/:id/photo-evidence)",
+     "who": "all",
+     "where": "header action row, first"
+    },
+    {
+     "label": "Refresh",
+     "who": "all",
+     "where": "header action row",
+     "note": "Calls load(), which overwrites the draft state with server data and discards unsaved edits without warning (SubmissionDetailPage.tsx:282-307,1182)."
+    },
+    {
+     "label": "Save draft",
+     "who": "canEdit (FIELD_WORKER/ADMIN on DRAFT/REJECTED)",
+     "where": "header action row",
+     "note": "persistDraft then reload; no success toast (SubmissionDetailPage.tsx:366)."
+    },
+    {
+     "label": "Submit for review / Resubmit for review (primary brand button)",
+     "who": "canEdit",
+     "where": "header action row",
+     "note": "Runs soil-percent validation first; the submit comment textarea lives at the bottom of the Notes panel (SubmissionDetailPage.tsx:367-374,1181,1282-1284)."
+    },
+    {
+     "label": "Return for correction (red outline)",
+     "who": "canAct (REVIEWER/ADMIN on SUBMITTED)",
+     "where": "header action row",
+     "note": "Uses the Reviewer Note textarea at the bottom of the page as the comment (SubmissionDetailPage.tsx:375,1301-1307)."
+    },
+    {
+     "label": "Approve submission (primary brand button)",
+     "who": "canAct",
+     "where": "header action row"
+    },
+    {
+     "label": "••• → Delete submission",
+     "who": "canDelete (ADMIN or DRAFT owner)",
+     "where": "header overflow menu",
+     "note": "window.confirm then hard redirect via window.location.href='/submissions' (SubmissionDetailPage.tsx:426-443)."
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "/assessments/:id technical-forms list (backTo resolves to the assessment) — SubmissionDetailHeader.tsx:78",
+     "/submissions worklist (route exists: web/src/App.tsx:38-41)",
+     "Incident and Mission Center pages that link to a submission",
+     "Deep link /submissions/:id?section=terrain scrolls to the 3D terrain block — web/src/features/submissions/SubmissionMeasurementContext.tsx:28-37",
+     "Sidebar: no Submissions nav item; 'Assessments' is highlighted for /submissions/* — web/src/ui/AppShell.tsx:66-67,87"
+    ],
+    "exits": [
+     "Back link → /assessments/:id or /submissions (SubmissionDetailHeader.tsx:78-88)",
+     "Incident #N chip → /incidents/:id (SubmissionDetailHeader.tsx:106-110)",
+     "View on map → /mission-center/:gid/:iid (SubmissionDetailHeader.tsx:111-113)",
+     "Photo evidence → /submissions/:id/photo-evidence (SubmissionDetailHeader.tsx:119; SubmissionLocationHero.tsx:220-222)",
+     "Edit banner links → /assessments/:id and /incidents/:id (SubmissionDetailPage.tsx:1196-1200)",
+     "Delete → full page navigation to /submissions (SubmissionDetailPage.tsx:438)"
+    ]
+   },
+   "responsive": {
+    "layout": "Single column page (space-y-4 p-4) inside AppShell; header is a flex-wrap row with a flex-wrap action cluster on the right; no Tailwind breakpoint classes in the header itself.",
+    "breakpointsUsed": [
+     "none in SubmissionDetailHeader.tsx (flex-wrap only: lines 83, 89, 117)",
+     "AppShell sidebar collapse handled elsewhere"
+    ],
+    "phoneRisks": [
+     "Action cluster wraps to 2–3 rows at 375px (Photo evidence + Refresh + Save draft + Submit + •••), pushing the form below the fold (SubmissionDetailHeader.tsx:117-158)",
+     "Buttons are px-3 py-2 text-sm (~36px tall), below the 44px touch minimum (SubmissionDetailHeader.tsx:26)",
+     "Photo-heading count is only in a title tooltip, invisible on touch (SubmissionDetailHeader.tsx:119)"
+    ],
+    "tabletRisks": [
+     "Fits on one row at 768px only when no review actions are present; SUBMITTED + ADMIN shows 6 controls and wraps"
+    ],
+    "desktopNotes": [
+     "Reads well; the primary action is visually distinct (brand fill) from secondary bordered buttons",
+     "Overflow menu is absolutely positioned right-0 top-11 min-w-52, no outside-click or Escape close (SubmissionDetailHeader.tsx:145-156)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Role gating uses the raw string 'FIELD_WORKER' instead of the canonical GEOTECH_ENGINEER alias set from roleModel, so a user carrying only GEOTECH_ENGINEER gets a read-only form; likewise 'REVIEWER' is hard-coded rather than derived from the role model.",
+     "evidence": "SubmissionDetailPage.tsx:161-162 vs web/src/utils/roleModel.ts:12,27-30",
+     "severity": "major"
+    },
+    {
+     "issue": "The submit comment (engineer) and the reviewer note (reviewer) are typed at the bottom of a very long page, while the Submit / Approve / Return buttons that consume them sit in the header; users can act without ever seeing the comment field.",
+     "evidence": "SubmissionDetailPage.tsx:1282-1284 (placeholder even says 'when you submit for review from the header'), 1301-1307; SubmissionDetailHeader.tsx:126-142",
+     "severity": "major"
+    },
+    {
+     "issue": "Refresh silently discards unsaved edits; there is no dirty-state indicator, no beforeunload guard, and no 'saved' confirmation.",
+     "evidence": "SubmissionDetailPage.tsx:262-330 (load overwrites draft), 366, 1182",
+     "severity": "major"
+    },
+    {
+     "issue": "Descriptor is rendered twice within ~40px (page h1 and header meta line), and owner is shown as 'user #N'.",
+     "evidence": "AppShell.tsx:184; SubmissionDetailHeader.tsx:105; SubmissionDetailPage.tsx:1174",
+     "severity": "minor"
+    },
+    {
+     "issue": "Photo evidence is fetched twice on load (header and page), producing two independent loading states for the same numbers.",
+     "evidence": "SubmissionDetailHeader.tsx:57-69; SubmissionDetailPage.tsx:249-260,324",
+     "severity": "minor"
+    },
+    {
+     "issue": "Delete relies on window.confirm and a hard window.location redirect, breaking SPA navigation and any in-flight state.",
+     "evidence": "SubmissionDetailPage.tsx:428-438",
+     "severity": "minor"
+    },
+    {
+     "issue": "All validation and API errors surface in one banner under the header, far from the offending card (e.g. soil percentages in the Material card).",
+     "evidence": "SubmissionDetailPage.tsx:228-247,368-372,1205",
+     "severity": "major"
+    },
+    {
+     "issue": "'•••' menu has aria-expanded but no role=menu, no Escape, and no outside-click dismissal.",
+     "evidence": "SubmissionDetailHeader.tsx:146-156",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Status-aware captions and a 'Resubmit for review' label when the record was returned (SubmissionDetailHeader.tsx:91-99; SubmissionDetailPage.tsx:1181)",
+    "Back link resolves to the parent assessment rather than a generic list (SubmissionDetailHeader.tsx:77-79)",
+    "Destructive delete is tucked into an overflow menu and styled red; primary CTA uses the brand fill so hierarchy is clear (SubmissionDetailHeader.tsx:129,138,151)",
+    "REJECTED reason is surfaced as a banner right under the header (SubmissionDetailPage.tsx:1190-1192)"
+   ]
+  },
+  {
+   "name": "Location and ERIS map hero",
+   "route": "/submissions/:id (section 'Location and ERIS map')",
+   "purpose": "Show where the incident is (stored D/C/R/PM plus coordinates) and let the engineer fix the point, draw the affected geometry, and see mapped photo evidence on an ArcGIS map.",
+   "roles": [
+    "Visible to every user who reaches the page",
+    "Latitude/Longitude, Northing/Easting, GPS autofill and map Sketch tools only when canEdit (SubmissionLocationHero.tsx:109-119,153,167,189,203; SubmissionArcGisMap.tsx:194-249)"
+   ],
+   "primaryTasks": [
+    "Verify or set the incident coordinates",
+    "Draw or adjust the affected-area geometry on the map",
+    "Check photo geotag coverage before review"
+   ],
+   "dataShown": [
+    {
+     "label": "Stored District / County / Route / Post mile tiles",
+     "necessity": "secondary",
+     "note": "Shown verbatim as backend-normalised codes (tooltips admit '2-digit district code', 'Caltrans county code', '3-digit route'); duplicates the editable Report Header selects and the h1 descriptor in a third vocabulary.",
+     "source": "SubmissionLocationHero.tsx:135-138 vs SubmissionDetailPage.tsx:826,845"
+    },
+    {
+     "label": "Latitude / Longitude inputs",
+     "necessity": "essential",
+     "note": "Primary location fields; type=number, step 0.000001, inputMode decimal.",
+     "source": "SubmissionLocationHero.tsx:141-170"
+    },
+    {
+     "label": "'CCS83 Zone N · US survey ft' + Northing / Easting inputs",
+     "necessity": "secondary",
+     "note": "Already progressively disclosed behind Show N/E; applied on blur.",
+     "source": "SubmissionLocationHero.tsx:172-208; SubmissionDetailPage.tsx:170-226"
+    },
+    {
+     "label": "State plane conversion error",
+     "necessity": "essential",
+     "note": "Inline, next to the fields that caused it.",
+     "source": "SubmissionLocationHero.tsx:207"
+    },
+    {
+     "label": "Geometry save status ('Saving map geometry...', 'Map geometry saved.', 'Map geometry cleared.', error)",
+     "necessity": "essential",
+     "note": "role=status; only feedback that the sketch autosaved.",
+     "source": "SubmissionLocationHero.tsx:211-215; SubmissionDetailPage.tsx:409-420"
+    },
+    {
+     "label": "Mapped evidence legend: submission point, N mapped, N with heading, N unmapped",
+     "necessity": "secondary",
+     "note": "Third display of the same counts (header pill + header button + here).",
+     "source": "SubmissionLocationHero.tsx:229-249"
+    },
+    {
+     "label": "'Photo evidence details' link",
+     "necessity": "secondary",
+     "note": "Duplicate of the header link.",
+     "source": "SubmissionLocationHero.tsx:220-222"
+    },
+    {
+     "label": "Photo loading / error text",
+     "necessity": "essential",
+     "note": "State for the legend block.",
+     "source": "SubmissionLocationHero.tsx:224-227"
+    },
+    {
+     "label": "Map: hybrid basemap, blue submission point, red polygon / blue line / point geometry, teal photo markers with camera-heading wedges",
+     "necessity": "essential",
+     "note": "The core visual; fixed 360px tall.",
+     "source": "SubmissionArcGisMap.tsx:140-150,347-409,453-475,506-544; SubmissionLocationHero.tsx:255-262"
+    },
+    {
+     "label": "Photo popup: thumbnail, Captured, Camera heading, Accuracy, Section (raw section_key)",
+     "necessity": "secondary",
+     "note": "Section shows the raw key like 'water_drainage' instead of the label.",
+     "source": "SubmissionArcGisMap.tsx:96-107"
+    },
+    {
+     "label": "ArcGIS widget chrome: Home, Locate, Compass, ScaleBar, Search, Basemap gallery, Layers, Legend, Measurement, Coordinate conversion, Sketch",
+     "necessity": "secondary",
+     "note": "Eleven widgets on a 360px map; most are power-user tools.",
+     "source": "SubmissionArcGisMap.tsx:152-214"
+    },
+    {
+     "label": "'Expand map' button / expanded modal (66vh)",
+     "necessity": "secondary",
+     "note": "Custom overlay with blur backdrop.",
+     "source": "SubmissionArcGisMap.tsx:587-629"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Use GPS autofill / Detecting…",
+     "who": "canEdit",
+     "where": "hero header right",
+     "note": "Browser geolocation then a direct browser fetch to geocode.arcgis.com; overwrites county/district/route guesses (SubmissionDetailPage.tsx:445-489)."
+    },
+    {
+     "label": "Show N/E / Hide N/E",
+     "who": "all (disabled until a county is selected)",
+     "where": "hero header right",
+     "note": "Tooltip-only explanation when disabled (SubmissionLocationHero.tsx:120-128)."
+    },
+    {
+     "label": "Edit Latitude / Longitude (formatCoordinate on blur)",
+     "who": "canEdit",
+     "where": "left column"
+    },
+    {
+     "label": "Edit Northing / Easting (converted on blur)",
+     "who": "canEdit",
+     "where": "left column, N/E block"
+    },
+    {
+     "label": "Photo evidence details (link)",
+     "who": "all",
+     "where": "Mapped evidence block"
+    },
+    {
+     "label": "Expand map / Close expanded map (Esc)",
+     "who": "all",
+     "where": "map top-right overlay"
+    },
+    {
+     "label": "ArcGIS widgets (search, basemap, layers, legend, measure, coordinates, locate, home, compass)",
+     "who": "all",
+     "where": "map corners"
+    },
+    {
+     "label": "Sketch: draw point/polyline/polygon/rectangle/circle, update, delete",
+     "who": "canEdit",
+     "where": "map bottom-right Expand",
+     "note": "Each completed sketch immediately PATCHes geometry_json to the server (SubmissionDetailPage.tsx:399-424)."
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Rendered second on the page, directly under the header/banners (SubmissionDetailPage.tsx:1211-1233)"
+    ],
+    "exits": [
+     "Photo evidence details → /submissions/:id/photo-evidence (SubmissionLocationHero.tsx:220)"
+    ]
+   },
+   "responsive": {
+    "layout": "grid gap-4, two columns from lg: [minmax(280px,380px)] fields + [minmax(0,1fr)] map; below lg the fields stack above the map. Inner value/coord grids are grid-cols-2 at all widths. Map height is a fixed 360px prop.",
+    "breakpointsUsed": [
+     "lg:grid-cols-[minmax(280px,380px)_minmax(0,1fr)] (SubmissionLocationHero.tsx:132)",
+     "md:p-4 (SubmissionLocationHero.tsx:102)",
+     "no sm/xl/2xl"
+    ],
+    "phoneRisks": [
+     "360px-tall map with 11 ArcGIS widgets plus the custom 'Expand map' button at right-2 top-2 overlapping the ArcGIS top-right Expand stack (SubmissionArcGisMap.tsx:183-192 vs 613-618)",
+     "grid-cols-2 stored-value tiles at 375px give ~150px cells; values truncate with title-only overflow (SubmissionLocationHero.tsx:49-51,134)",
+     "Hero buttons are text-xs py-1.5 (~30px) and the Expand-map button px-2 py-1 (~26px): below touch minimum (SubmissionLocationHero.tsx:114,124; SubmissionArcGisMap.tsx:618)",
+     "Sketching on touch works in ArcGIS but the Sketch Expand icon competes with Measurement and Coordinates in the bottom-right corner"
+    ],
+    "tabletRisks": [
+     "At 768–1023px the fields stack over the map, so the map is full width but still only 360px tall; the expanded modal (min(96vw,1400px), 66vh) is the only way to get a useful map area (SubmissionArcGisMap.tsx:588,607)"
+    ],
+    "desktopNotes": [
+     "Left column capped at 380px; map takes the remainder (SubmissionLocationHero.tsx:132)",
+     "Expanded map is a custom fixed z-50 modal with body scroll lock and Escape (SubmissionArcGisMap.tsx:573-585,591-604)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Three vocabularies for the same location facts on one screen: raw codes in the hero ('03', county code, '050'), 'District 3' + county name in the Report Header selects, and the compact descriptor in the h1.",
+     "evidence": "SubmissionLocationHero.tsx:135-138; SubmissionDetailPage.tsx:826,845; submissionLabel.ts:33-41",
+     "severity": "major"
+    },
+    {
+     "issue": "Hero shows the STORED gisa values while the Report Header edits the DRAFT; after changing district in the card the hero keeps the old value until Save draft, with no explanation of the difference.",
+     "evidence": "SubmissionLocationHero.tsx:135-138 (gisa?.district) vs SubmissionDetailPage.tsx:811-827 (draft.district)",
+     "severity": "major"
+    },
+    {
+     "issue": "Mixed persistence model: map geometry autosaves on every sketch completion, while every other field waits for Save draft; the same geometry is also editable as raw JSON in the Notes panel.",
+     "evidence": "SubmissionDetailPage.tsx:399-424 vs 332-364; 1271-1273",
+     "severity": "major"
+    },
+    {
+     "issue": "Eleven ArcGIS widgets plus a custom Expand button on a 360px map; the custom button overlaps the widget stack and the map is chrome-heavy on small screens.",
+     "evidence": "SubmissionArcGisMap.tsx:152-214,613-623; SubmissionLocationHero.tsx:259",
+     "severity": "major"
+    },
+    {
+     "issue": "GPS autofill calls the public ArcGIS geocoder directly from the browser and guesses the route from any 1–3 digit number in the address text, silently overwriting county/district/route.",
+     "evidence": "SubmissionDetailPage.tsx:463-482; submissionDetailModel.ts:194-197",
+     "severity": "major"
+    },
+    {
+     "issue": "Photo popup exposes the raw section_key (e.g. 'water_drainage') instead of the section label used everywhere else.",
+     "evidence": "SubmissionArcGisMap.tsx:101 vs submissionAttachmentModel.ts:19-37",
+     "severity": "minor"
+    },
+    {
+     "issue": "Evidence counts appear three times (header pill, header button, hero legend) and are fetched twice.",
+     "evidence": "SubmissionDetailHeader.tsx:74,102; SubmissionLocationHero.tsx:237-247",
+     "severity": "minor"
+    },
+    {
+     "issue": "Latitude/Longitude have no min/max or inline validation; bad values only fail on Save with a header-level error.",
+     "evidence": "SubmissionLocationHero.tsx:144-169; submissionDetailModel.ts:96-101",
+     "severity": "minor"
+    },
+    {
+     "issue": "Stored-value tiles explain their format only via title tooltips, invisible on touch.",
+     "evidence": "SubmissionLocationHero.tsx:135-138",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "State Plane N/E is hidden behind a toggle and auto-derives from lat/lon (SubmissionLocationHero.tsx:120-128,172-208)",
+    "Legend swatches match the actual map symbols and include live counts (SubmissionLocationHero.tsx:229-249)",
+    "Geometry autosave has role=status feedback and error colouring (SubmissionLocationHero.tsx:211-215)",
+    "Inputs have htmlFor labels, type=number and inputMode=decimal (SubmissionLocationHero.tsx:143-169)",
+    "Camera-heading wedges are drawn only when the backend quality gate kept the heading, so the map never invents orientation (SubmissionArcGisMap.tsx:491-528)",
+    "Optional Caltrans highways layer is opt-in by env and sits under the overlays (SubmissionArcGisMap.tsx:36-45,134-143)"
+   ]
+  },
+  {
+   "name": "GISA sheet card canvas",
+   "route": "/submissions/:id (section 'GISA Sheet')",
+   "purpose": "Data-entry surface for the GISA checklist organised as ten draggable, resizable, absolutely positioned cards (Report Header, Distribution, Highway Status, Incident Type, Material, Pavement/Ground Status, Vegetation on Slope, Water/Drainage, Water Content, Measurements).",
+   "roles": [
+    "All users see the cards; inputs are wrapped in <fieldset disabled> unless canEdit (SubmissionDetailPage.tsx:108,725)",
+    "Layout tools (drag, resize, Tidy, Reset, Full screen) are available to every role, including read-only viewers (SubmissionDetailPage.tsx:762-794)"
+   ],
+   "primaryTasks": [
+    "Fill in or verify the GISA checklist values section by section",
+    "Open the attachments the field crew tagged to a section",
+    "Reviewer: scan the sheet for completeness"
+   ],
+   "dataShown": [
+    {
+     "label": "Toolbar: 'GISA Sheet' title, 'Custom layout' / 'Auto-fit layout' pill, hint 'Drag a card by its header · resize from the edges' (md+)",
+     "necessity": "noise",
+     "note": "Layout-mode state is irrelevant to the field task; the hint describes mouse-only interactions.",
+     "source": "SubmissionDetailPage.tsx:762-770"
+    },
+    {
+     "label": "Card header: grip icon + uppercase title + 'Open attachments (n)' (only when n>0)",
+     "necessity": "essential",
+     "note": "Attachment count links mobile-captured evidence to the section.",
+     "source": "SubmissionDetailPage.tsx:95-105; SubmissionSectionAttachmentsDialog.tsx:8-20; submissionAttachmentModel.ts:39-49"
+    },
+    {
+     "label": "Report Header: Report Date (YYYY-MM-DD) and Date Incident Reported as free text",
+     "necessity": "essential",
+     "note": "Plain text inputs, not type=date.",
+     "source": "SubmissionDetailPage.tsx:801-808"
+    },
+    {
+     "label": "Report Header: District select ('District N'), County select, Highway (Route) select, Post Mile",
+     "necessity": "essential",
+     "note": "Cascading lookups; county disabled until district, route until county.",
+     "source": "SubmissionDetailPage.tsx:809-863"
+    },
+    {
+     "label": "Report Header: EA, Project ID",
+     "necessity": "secondary",
+     "note": "Administrative identifiers rarely needed in the field.",
+     "source": "SubmissionDetailPage.tsx:864-871"
+    },
+    {
+     "label": "Report Header: District Contacts accordion (First Name, Last Name, S Number, Phone, Cell Phone per contact) + 'No district contacts added yet.'",
+     "necessity": "secondary",
+     "note": "Stored as a JSON string in district_contact TEXT.",
+     "source": "SubmissionDetailPage.tsx:872-915; submissionDetailModel.ts:217-250; docs/GISA_DATA_DICTIONARY.md:43"
+    },
+    {
+     "label": "Report Header: 'Raw Contact Data' <details> with a JSON textarea",
+     "necessity": "noise",
+     "note": "Debug fallback shown when the stored text is not parseable JSON.",
+     "source": "SubmissionDetailPage.tsx:917-930"
+    },
+    {
+     "label": "Distribution: six icon buttons (40px PNG + label) from /gisa/lookups",
+     "necessity": "essential",
+     "note": "Single-select distribution_code.",
+     "source": "SubmissionDetailPage.tsx:945-963; submissionDetailModel.ts:125-132"
+    },
+    {
+     "label": "Highway Status: 'Cause Of Highway Status' text; status chips, 'Lane(s) Closed Count' select 1–4, 'Open Highway Traffic Lanes' number; hint 'Enter the cause above to reveal the highway status options.'",
+     "necessity": "essential",
+     "note": "Status chips are hidden until a cause is typed; the lanes-open input appears only when an action chip in the Notes panel is selected.",
+     "source": "SubmissionDetailPage.tsx:965-1011,498-506"
+    },
+    {
+     "label": "Incident Type: 13 chips (Rock Fall … Heaving) + Incident Type Description textarea",
+     "necessity": "essential",
+     "note": "Ten chips map to failure_* booleans, three to code-only rows.",
+     "source": "SubmissionDetailPage.tsx:1013-1035; submissionDetailModel.ts:167-181"
+    },
+    {
+     "label": "Material: Rock / Soil; Bedding / Joints / Fractures (Rock); Clay / Silt / Sand / Gravel Est % (Soil)",
+     "necessity": "essential",
+     "note": "Percentages must total 100, validated only on Submit.",
+     "source": "SubmissionDetailPage.tsx:1037-1057,228-247"
+    },
+    {
+     "label": "Pavement / Ground Status: Cracks YES/NO; Length (feet), Horizontal Disp, Vertical Disp, Depth of Crack (inches) when YES; Settlement; Bulge; Indented by Rocks YES/NO",
+     "necessity": "essential",
+     "note": "Crack dimensions cleared automatically when NO.",
+     "source": "SubmissionDetailPage.tsx:1059-1088,673-683"
+    },
+    {
+     "label": "Vegetation on Slope: Trees / Bushes-Shrubs / Groundcover Coverage %",
+     "necessity": "essential",
+     "note": "0–100 enforced on save.",
+     "source": "SubmissionDetailPage.tsx:1090-1096; submissionDetailModel.ts:110-116"
+    },
+    {
+     "label": "Water / Drainage: Clogged Inlet, Compromised Drains, Surface Runoff, Torrent/Surge/Flood (single-select); Impacted / Maybe × Adjacent Utilities / Properties / Structures; three notes inputs",
+     "necessity": "essential",
+     "note": "Card is titled Water/Drainage but half its content is adjacent-impact assessment.",
+     "source": "SubmissionDetailPage.tsx:1098-1116"
+    },
+    {
+     "label": "Water Content: Dry / Moist / Wet / Flowing; Seep / Spring when Flowing",
+     "necessity": "essential",
+     "note": "Single-select with subtype.",
+     "source": "SubmissionDetailPage.tsx:1118-1130"
+    },
+    {
+     "label": "Drag ghost tooltip 'Moving: <card title>'",
+     "necessity": "secondary",
+     "note": "Follows the pointer during drag.",
+     "source": "SubmissionDetailPage.tsx:1157-1164"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Tidy layout",
+     "who": "all (only in custom layout)",
+     "where": "canvas toolbar right"
+    },
+    {
+     "label": "Reset layout",
+     "who": "all",
+     "where": "canvas toolbar right"
+    },
+    {
+     "label": "Full screen / Exit full screen (Esc)",
+     "who": "all",
+     "where": "canvas toolbar right",
+     "note": "Renders the canvas in a fixed inset-0 z-40 role=dialog (SubmissionDetailPage.tsx:1235-1239)."
+    },
+    {
+     "label": "Drag card by header (mouse only, 5px threshold)",
+     "who": "all",
+     "where": "each card header",
+     "note": "onMouseDown only; no pointer/touch events (SubmissionDetailPage.tsx:95-99; useSubmissionDashboardLayout.ts:154-174,250-251)."
+    },
+    {
+     "label": "Resize card: right edge (6px), bottom edge (6px), bottom-right corner (16px)",
+     "who": "all",
+     "where": "card edges",
+     "note": "aria-hidden, mouse only (SubmissionDetailPage.tsx:112-120)."
+    },
+    {
+     "label": "Open attachments (n) → section attachments modal",
+     "who": "all",
+     "where": "card header right"
+    },
+    {
+     "label": "Chips / inputs / selects per card",
+     "who": "canEdit",
+     "where": "card bodies"
+    },
+    {
+     "label": "Add District Contact / Remove Contact / expand-collapse contact",
+     "who": "canEdit (toggle: all)",
+     "where": "Report Header card"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Third block on the page, under the Location hero (SubmissionDetailPage.tsx:1235-1245)"
+    ],
+    "exits": [
+     "Full-screen dialog exits with Esc or the toolbar button (useSubmissionDashboardLayout.ts:122-134)",
+     "Section attachment modal (SubmissionSectionAttachmentsDialog.tsx:23-57)"
+    ]
+   },
+   "responsive": {
+    "layout": "Absolutely positioned pixel canvas. Cards are a fixed 520px wide (report header 1052px when two columns fit); auto-fit column count = floor((containerWidth-12)/532), so one column below ~1076px. Card heights are fixed pixels (250–980) with overflow-auto bodies. The canvas container is min-w-0 overflow-x-auto.",
+    "breakpointsUsed": [
+     "md:inline for the drag hint only (SubmissionDetailPage.tsx:769)",
+     "no Tailwind grid breakpoints; layout is computed in JS (submissionLayoutModel.ts:69-70,93-96,117-152; useSubmissionDashboardLayout.ts:136-150,287-295)",
+     "inner field grids: grid-cols-[repeat(auto-fit,minmax(220px,1fr))] (SubmissionDetailPage.tsx:800,893,990,1050,1068,1091,1145)"
+    ],
+    "phoneRisks": [
+     "Every card is 520px wide on a 375px viewport: the right ~145px of each card (attachment button, second input column) is clipped until the user side-scrolls the canvas (submissionLayoutModel.ts:69; useSubmissionDashboardLayout.ts:287-295; SubmissionDetailPage.tsx:797)",
+     "Fixed card heights with inner overflow-auto create nested scroll regions inside the page scroll; touch scrolling gets trapped inside cards (SubmissionDetailPage.tsx:106; submissionLayoutModel.ts:28-40)",
+     "Drag/resize are mouse-only; the toolbar still shows Tidy/Reset/Full screen and the cursor-grab header, which do nothing useful on touch (useSubmissionDashboardLayout.ts:154-194)",
+     "Chips are text-xs px-2.5 py-1 (~26px tall) and icon buttons in Distribution are the only comfortably sized targets (SubmissionDetailPage.tsx:61,955)",
+     "Free-text date inputs bring up the full keyboard instead of a date picker (SubmissionDetailPage.tsx:803,807)"
+    ],
+    "tabletRisks": [
+     "At 768–1024px the canvas is one 520px column with ~250–500px of dead space to the right; the report header cannot span two columns so its 300px height forces internal scrolling for district contacts (submissionLayoutModel.ts:29,93-104)",
+     "Resize handles are 6px wide hover targets, effectively unusable with a finger (SubmissionDetailPage.tsx:112-113)"
+    ],
+    "desktopNotes": [
+     "Two columns from ~1076px container width, three from ~1608px; skyline flow packs cards by height (submissionLayoutModel.ts:117-152)",
+     "Custom layouts persist per browser in localStorage under eris_submission_layout_v2 (useSubmissionDashboardLayout.ts:110-120; submissionLayoutModel.ts:68)",
+     "Transitions of 160ms on left/top/width/height when not dragging (useSubmissionDashboardLayout.ts:281)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Fixed 520px card width on an absolute canvas means horizontal scrolling and clipped inputs on any viewport narrower than ~545px; the form is effectively unusable on a phone.",
+     "evidence": "submissionLayoutModel.ts:69; useSubmissionDashboardLayout.ts:287-295; SubmissionDetailPage.tsx:797",
+     "severity": "blocker"
+    },
+    {
+     "issue": "Draggable/resizable dashboard tooling (Tidy, Reset, Full screen, custom layout pill, localStorage persistence) adds cognitive load to what is a checklist form, and none of it works on touch.",
+     "evidence": "SubmissionDetailPage.tsx:762-794,95-120; useSubmissionDashboardLayout.ts:154-256",
+     "severity": "major"
+    },
+    {
+     "issue": "Fixed card heights force nested scrolling: Measurements defaults to 980px holding a 460px 3D scene + diagram + 8 inputs; Report Header is 300px with an expanding contacts accordion.",
+     "evidence": "submissionLayoutModel.ts:29,39; SubmissionDetailPage.tsx:106,872-941,1132-1155",
+     "severity": "major"
+    },
+    {
+     "issue": "Report Date and Date Incident Reported are free-text 'YYYY-MM-DD' inputs rather than type=date.",
+     "evidence": "SubmissionDetailPage.tsx:802-807",
+     "severity": "major"
+    },
+    {
+     "issue": "Invisible cross-panel dependency: 'Open Highway Traffic Lanes' appears only when the OPEN_HIGHWAY_TRAFFIC chip in the Notes panel (far below) is selected; highway status chips appear only after typing a cause.",
+     "evidence": "SubmissionDetailPage.tsx:499-506,977-1010,1276-1277",
+     "severity": "major"
+    },
+    {
+     "issue": "Toggle chips convey selected state by colour only (brand border/text vs line), with no aria-pressed and no check glyph.",
+     "evidence": "SubmissionDetailPage.tsx:61-62,984,1020,1039-1046,1063,1101,1107-1108,1121",
+     "severity": "major"
+    },
+    {
+     "issue": "Most card labels are <label> elements without htmlFor, so inputs are unlabeled for assistive tech.",
+     "evidence": "SubmissionDetailPage.tsx:59,802-870,1051-1054,1071-1078,1092-1094,1112-1114,1146-1153",
+     "severity": "major"
+    },
+    {
+     "issue": "Material soil percentages must total 100% but this is checked only when Submit is pressed, and the error appears in the header banner rather than on the card.",
+     "evidence": "SubmissionDetailPage.tsx:228-247,368-372,1205",
+     "severity": "major"
+    },
+    {
+     "issue": "Contact accordion uses '>' / 'v' text as disclosure glyphs with no aria-expanded; 'Raw Contact Data' exposes a JSON textarea to end users.",
+     "evidence": "SubmissionDetailPage.tsx:884-891,917-930",
+     "severity": "minor"
+    },
+    {
+     "issue": "Read-only viewers still see chips styled as buttons; the disabled fieldset only dims them, giving no explicit 'read only' cue.",
+     "evidence": "SubmissionDetailPage.tsx:108,725",
+     "severity": "minor"
+    },
+    {
+     "issue": "Distribution icon <img> gets src='' when a lookup code has no icon mapping, producing a broken image.",
+     "evidence": "SubmissionDetailPage.tsx:957; submissionDetailModel.ts:125-132",
+     "severity": "minor"
+    },
+    {
+     "issue": "Water/Drainage card mixes drainage condition with adjacent-impact assessment (utilities/properties/structures), which the data dictionary treats as separate sections K and L.",
+     "evidence": "SubmissionDetailPage.tsx:1098-1116; docs/GISA_DATA_DICTIONARY.md:136-155",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Card sections mirror the paper GISA sheet and the data dictionary sections A–M (submissionLayoutModel.ts:42-54; docs/GISA_DATA_DICTIONARY.md:32-168)",
+    "Conditional reveal keeps cards short: Cracks→dimensions, Rock→subtypes, Soil→percentages, Flowing→Seep/Spring, Lanes closed→count (SubmissionDetailPage.tsx:1042-1056,1069-1076,1124-1129,991-999)",
+    "District→County→Route cascading selects with normalised lookups prevent invalid combinations (SubmissionDetailPage.tsx:809-858; caltransLookups)",
+    "Per-section 'Open attachments (n)' ties mobile-captured photos to the exact section (SubmissionSectionAttachmentsDialog.tsx:8-20; submissionAttachmentModel.ts:39-49)",
+    "Distribution uses pictograms, matching how geologists recognise movement types (SubmissionDetailPage.tsx:945-963)",
+    "Layout persistence is versioned and defensively normalised so stale layouts cannot break the page (submissionLayoutModel.ts:189-236)",
+    "Full-screen mode is a proper role=dialog with Escape and body scroll lock (SubmissionDetailPage.tsx:1236; useSubmissionDashboardLayout.ts:122-134)"
+   ]
+  },
+  {
+   "name": "Measurements card with 3D terrain scene",
+   "route": "/submissions/:id (canvas card 'Measurements'; deep link ?section=terrain)",
+   "purpose": "Capture landslide geometry measurements (H, alpha, Wd, Ld, Hs, beta, Lr, Wr) against a reference diagram, with an interactive ArcGIS 3D terrain scene of the incident for context.",
+   "roles": [
+    "All users see the scene and the diagram",
+    "Measurement inputs only when canEdit (inside the disabled fieldset)",
+    "'Sample terrain' / 'Refresh terrain samples' is rendered via the tools slot OUTSIDE the disabled fieldset, so read-only viewers can trigger the backend USGS sampling POST (SubmissionDetailPage.tsx:83-84,107,1134-1140; SubmissionMeasurementContext.tsx:39-53,67-74)"
+   ],
+   "primaryTasks": [
+    "Enter the eight field measurements using the diagram as a key",
+    "Inspect slope/road context in 3D before or during review",
+    "Sample USGS terrain around the point so the road-bearing and extent overlays exist"
+   ],
+   "dataShown": [
+    {
+     "label": "'3D terrain' label + 'Terrain samples YYYY-MM-DD' (checked_at)",
+     "necessity": "secondary",
+     "note": "Freshness of the USGS sample; 10px text.",
+     "source": "SubmissionMeasurementContext.tsx:60-66"
+    },
+    {
+     "label": "Scene overlay panel: incident label 'Submission #N', summary 'Rte 050 · PM 12.3 · County · lat, lon', Esri attribution",
+     "necessity": "essential",
+     "note": "Summary is useful; 'Submission #N' is a raw id; attribution is required (8px text).",
+     "source": "SubmissionMeasurementContext.tsx:99; InteractiveTerrainScene.tsx:397,405-412; terrainScene.ts:433-453"
+    },
+    {
+     "label": "Satellite / Topographic basemap buttons; Reset view; Full screen",
+     "necessity": "secondary",
+     "note": "10px text buttons over the scene.",
+     "source": "InteractiveTerrainScene.tsx:414-450"
+    },
+    {
+     "label": "Non-blocking amber warning (imagery or elevation failed)",
+     "necessity": "essential",
+     "note": "Mesh stays visible; copy references a removed 'USGS sampled-relief card below'.",
+     "source": "InteractiveTerrainScene.tsx:452-457; terrainScene.ts:308-321"
+    },
+    {
+     "label": "Overlay chips: Incident, Road bearing, Sample extent, Uploaded geometry (line-through when no real data)",
+     "necessity": "secondary",
+     "note": "9px text; honest availability.",
+     "source": "InteractiveTerrainScene.tsx:459-485,517-547"
+    },
+    {
+     "label": "Loading spinner 'Loading 3D terrain & imagery…' (Suspense + scene)",
+     "necessity": "essential",
+     "note": "Two identical loaders, one for the lazy chunk and one for the SceneView.",
+     "source": "SubmissionMeasurementContext.tsx:79-91; InteractiveTerrainScene.tsx:487-495"
+    },
+    {
+     "label": "Blocking error '3D map could not load' + explanation + Retry",
+     "necessity": "essential",
+     "note": "Access-error copy tells the user an admin must set VITE_ARCGIS_API_KEY.",
+     "source": "InteractiveTerrainScene.tsx:497-512; terrainScene.ts:317"
+    },
+    {
+     "label": "Empty state '3D terrain map unavailable' when coordinates are missing",
+     "necessity": "essential",
+     "note": "Explains what to fix.",
+     "source": "InteractiveTerrainScene.tsx:381-395"
+    },
+    {
+     "label": "Terrain sampling error / terrain.error",
+     "necessity": "essential",
+     "note": "10px red text under the scene.",
+     "source": "SubmissionMeasurementContext.tsx:104-105"
+    },
+    {
+     "label": "Landslide measurement diagram image (H, alpha, Wd, Ld, Hs, beta, Lr, Wr)",
+     "necessity": "essential",
+     "note": "Key for the inputs; max-h-64.",
+     "source": "SubmissionDetailPage.tsx:1142-1144"
+    },
+    {
+     "label": "Eight numeric inputs: Slope Height ft (H), Original Slope deg (alpha), Landslide Width ft (Wd), Landslide Length ft (Ld), Main Scarp Height ft (Hs), Landslide Slope deg (beta), Length/Width of Roadway Encroached ft (Lr/Wr)",
+     "necessity": "essential",
+     "note": "Map 1:1 to measure_* DECIMAL(10,2) columns.",
+     "source": "SubmissionDetailPage.tsx:1145-1154; docs/GISA_DATA_DICTIONARY.md:157-167"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Sample terrain / Refresh terrain samples / Sampling…",
+     "who": "all, including read-only viewers",
+     "where": "3D terrain header right",
+     "note": "POST /submissions/:id/gisa/terrain-grid with force=true, then reloads the whole page data (SubmissionMeasurementContext.tsx:39-53)."
+    },
+    {
+     "label": "Satellite / Topographic",
+     "who": "all",
+     "where": "scene top-right"
+    },
+    {
+     "label": "Reset view",
+     "who": "all",
+     "where": "scene top-right"
+    },
+    {
+     "label": "Full screen / Exit full screen (Fullscreen API with CSS fallback)",
+     "who": "all",
+     "where": "scene top-right"
+    },
+    {
+     "label": "Overlay toggles Incident / Road bearing / Sample extent / Uploaded geometry",
+     "who": "all",
+     "where": "scene bottom-left"
+    },
+    {
+     "label": "Retry",
+     "who": "all",
+     "where": "scene error overlay"
+    },
+    {
+     "label": "Home / Compass ArcGIS widgets; drag/tilt/zoom camera",
+     "who": "all",
+     "where": "scene top-left / canvas"
+    },
+    {
+     "label": "Edit the eight measurement inputs",
+     "who": "canEdit",
+     "where": "below the diagram"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Last card in the canvas flow (submissionLayoutModel.ts:15)",
+     "?section=terrain deep link scrolls #terrain-3d-section into view after 400ms (SubmissionMeasurementContext.tsx:28-37)"
+    ],
+    "exits": [
+     "Native or CSS full screen exit (InteractiveTerrainScene.tsx:319-344)"
+    ]
+   },
+   "responsive": {
+    "layout": "Scene is a fixed 460px-tall block at the top of a 520px-wide, 980px-tall canvas card whose body scrolls internally; diagram and inputs follow below inside the same scrolling card. Inputs use auto-fit minmax(220px,1fr).",
+    "breakpointsUsed": [
+     "none; fixed height prop 460 (InteractiveTerrainScene.tsx:73; SubmissionMeasurementContext.tsx:83)",
+     "card size 520×980 (submissionLayoutModel.ts:39)",
+     "input grid auto-fit (SubmissionDetailPage.tsx:1145)"
+    ],
+    "phoneRisks": [
+     "Scene captures wheel/touch for camera control inside a card that scrolls inside a page that scrolls: three nested scroll/gesture surfaces (SubmissionDetailPage.tsx:106; InteractiveTerrainScene.tsx:402-403)",
+     "Controls are 9–10px text (overlay chips text-[9px], buttons text-[10px], sample button text-[10px]) far below legibility and touch minimums (InteractiveTerrainScene.tsx:420,427,436,444,531,542; SubmissionMeasurementContext.tsx:63,71)",
+     "A high-quality SceneView (qualityProfile 'high') is mounted automatically for every viewer, heavy on mobile GPUs and data (InteractiveTerrainScene.tsx:161)",
+     "The 520px card is clipped at 375px, so the scene's right-hand controls are off-screen (see canvas blocker)"
+    ],
+    "tabletRisks": [
+     "Card inner scroll hides the measurement inputs ~700px below the top of the card; users may not realise the inputs exist",
+     "Native Fullscreen API generally unavailable on iPadOS Safari for arbitrary elements, so the fixed inset-0 CSS fallback is used (InteractiveTerrainScene.tsx:319-344; terrainScene.ts:397-401)"
+    ],
+    "desktopNotes": [
+     "Scene is stable across parent re-renders thanks to the anchorKey pattern; camera does not reset while typing (InteractiveTerrainScene.tsx:90-99,204-208)",
+     "Fullscreen fallback is fixed inset-0 z-50, above the canvas full-screen dialog at z-40 (terrainScene.ts:400; SubmissionDetailPage.tsx:1236)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "The card is titled 'Measurements' but opens with a 460px 3D scene; the diagram and the eight inputs the card exists for are pushed below an internal scroll.",
+     "evidence": "SubmissionDetailPage.tsx:107-110,1132-1155; submissionLayoutModel.ts:39",
+     "severity": "major"
+    },
+    {
+     "issue": "9–10px control text inside the scene and the sample button; 8px attribution.",
+     "evidence": "InteractiveTerrainScene.tsx:409,420,427,436,444,531,542; SubmissionMeasurementContext.tsx:63,71",
+     "severity": "major"
+    },
+    {
+     "issue": "Scene camera gestures conflict with the card's overflow-auto and the page scroll (nested scroll trap).",
+     "evidence": "SubmissionDetailPage.tsx:106; InteractiveTerrainScene.tsx:402-403",
+     "severity": "major"
+    },
+    {
+     "issue": "A heavyweight ArcGIS SceneView is auto-mounted on every visit for every role, even reviewers who only need the checklist.",
+     "evidence": "SubmissionMeasurementContext.tsx:7,78-102; InteractiveTerrainScene.tsx:153-162",
+     "severity": "major"
+    },
+    {
+     "issue": "'Sample terrain' is outside the disabled fieldset, so read-only viewers can trigger a server-side sampling job with no explanation of what it does or confirmation.",
+     "evidence": "SubmissionDetailPage.tsx:83-84,107; SubmissionMeasurementContext.tsx:67-74",
+     "severity": "minor"
+    },
+    {
+     "issue": "Error and warning copy still refers to 'the USGS sampled-relief card below', which was removed from this view.",
+     "evidence": "terrainScene.ts:311,315,317,319 vs SubmissionMeasurementContext.tsx:9-12",
+     "severity": "minor"
+    },
+    {
+     "issue": "Measurement input labels lack htmlFor; the diagram's symbol names (alpha, beta) are spelled out while the image shows Greek letters.",
+     "evidence": "SubmissionDetailPage.tsx:1143,1146-1153",
+     "severity": "minor"
+    },
+    {
+     "issue": "Two identical spinners (lazy chunk Suspense + scene loading) can flash back-to-back.",
+     "evidence": "SubmissionMeasurementContext.tsx:79-91; InteractiveTerrainScene.tsx:487-495",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Overlay chips are disabled with line-through when no real data backs them, so the scene never invents geometry (InteractiveTerrainScene.tsx:517-536; terrainScene.ts:106-128)",
+    "Health probing distinguishes blocking failure (Retry) from non-blocking warnings (terrainScene.ts:353-387; InteractiveTerrainScene.tsx:118-127)",
+    "Stable SceneView anchor prevents camera resets on parent re-render (terrainScene.ts:55-65; InteractiveTerrainScene.tsx:90-99)",
+    "Clear empty state when coordinates are missing tells the user how to fix it (InteractiveTerrainScene.tsx:381-395)",
+    "Fullscreen API with CSS fallback and Esc/native sync (InteractiveTerrainScene.tsx:319-379)",
+    "Deep link ?section=terrain for cross-page navigation (SubmissionMeasurementContext.tsx:28-37)",
+    "Reference diagram with meaningful alt text sits next to the inputs it explains (SubmissionDetailPage.tsx:1143)"
+   ]
+  },
+  {
+   "name": "Notes and actions panel",
+   "route": "/submissions/:id (section 'Notes and actions')",
+   "purpose": "Narrative notes for the GISA record, raw geometry JSON, immediate and follow-up action codes, and the optional submit comment.",
+   "roles": [
+    "All users see the panel; fieldset disabled unless canEdit (SubmissionDetailPage.tsx:1249)",
+    "Submit comment textarea only when canEdit (SubmissionDetailPage.tsx:1280-1285)"
+   ],
+   "primaryTasks": [
+    "Write the observation / event / assessment / recommendation narrative",
+    "Record immediate and follow-up actions",
+    "Add a comment to accompany submission"
+   ],
+   "dataShown": [
+    {
+     "label": "Observations (3 rows), Record of Event, Maintenance History, Geotechnical Assessment, Recommendations, Sketchpad (2 rows each) textareas with per-note 'Open attachments (n)'",
+     "necessity": "essential",
+     "note": "Observations, Record of Event, Geotechnical Assessment and Recommendations are the core narrative; Maintenance History is secondary; 'Sketchpad' as a textarea is a naming mismatch with the mobile sketch attachments.",
+     "source": "SubmissionDetailPage.tsx:65-72,1250-1269; submissionAttachmentModel.ts:51-58"
+    },
+    {
+     "label": "Geometry JSON textarea (font-mono, placeholder '{\"type\":\"Point\",…}')",
+     "necessity": "noise",
+     "note": "Raw JSON duplicate of the map sketch; parse failure only surfaces on Save.",
+     "source": "SubmissionDetailPage.tsx:1270-1273,335-338"
+    },
+    {
+     "label": "Immediate actions chips / Follow-up actions chips (from /gisa/lookups)",
+     "necessity": "essential",
+     "note": "Multi-select; selecting OPEN_HIGHWAY_TRAFFIC reveals a field in the Highway Status card above.",
+     "source": "SubmissionDetailPage.tsx:1275-1278,499"
+    },
+    {
+     "label": "Submit comment (optional) textarea with placeholder 'Included with the submission when you submit for review from the header'",
+     "necessity": "essential",
+     "note": "Consumed by the header Submit button.",
+     "source": "SubmissionDetailPage.tsx:1280-1285,373"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Edit six note textareas",
+     "who": "canEdit",
+     "where": "notes grid"
+    },
+    {
+     "label": "Open attachments (n) per note",
+     "who": "all",
+     "where": "note label row right"
+    },
+    {
+     "label": "Edit Geometry JSON",
+     "who": "canEdit",
+     "where": "notes grid last cell"
+    },
+    {
+     "label": "Toggle immediate / follow-up action chips",
+     "who": "canEdit (enforced by the disabled fieldset only)",
+     "where": "below notes, lg two columns"
+    },
+    {
+     "label": "Type submit comment",
+     "who": "canEdit",
+     "where": "panel footer"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Fourth block on the page, after the canvas (SubmissionDetailPage.tsx:1247)"
+    ],
+    "exits": [
+     "Section attachments modal (SubmissionDetailPage.tsx:1258,1325-1332)"
+    ]
+   },
+   "responsive": {
+    "layout": "Fluid CSS grid: notes use repeat(auto-fit, minmax(min(320px,100%),1fr)); actions use grid-cols-1 lg:grid-cols-2; chips wrap.",
+    "breakpointsUsed": [
+     "[grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))] (SubmissionDetailPage.tsx:1250)",
+     "lg:grid-cols-2 (SubmissionDetailPage.tsx:1275)"
+    ],
+    "phoneRisks": [
+     "Works: single column with full-width textareas",
+     "Action chips are rounded-full px-2 py-1 text-xs (~26px) targets (SubmissionDetailPage.tsx:1276-1277)",
+     "Two-row textareas are cramped for long narrative on a soft keyboard (SubmissionDetailPage.tsx:67-71)"
+    ],
+    "tabletRisks": [
+     "Two-column notes at ≥~680px; fine",
+     "Actions stay single column until lg (1024px)"
+    ],
+    "desktopNotes": [
+     "Three or four note columns on wide screens produce very short, wide textareas"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Submit comment is separated from the Submit button by the whole page; the placeholder text itself apologises for it.",
+     "evidence": "SubmissionDetailPage.tsx:1282-1284 vs SubmissionDetailHeader.tsx:129",
+     "severity": "major"
+    },
+    {
+     "issue": "Raw Geometry JSON textarea exposed to field users, duplicating the map sketch; invalid JSON throws only on Save.",
+     "evidence": "SubmissionDetailPage.tsx:1270-1273,335-338",
+     "severity": "major"
+    },
+    {
+     "issue": "Action chips have no aria-pressed and rely on colour/tint for selected state.",
+     "evidence": "SubmissionDetailPage.tsx:1276-1277",
+     "severity": "major"
+    },
+    {
+     "issue": "Narrative fields are 2-row textareas; geotechnical assessments and recommendations are long-form.",
+     "evidence": "SubmissionDetailPage.tsx:66-71",
+     "severity": "minor"
+    },
+    {
+     "issue": "'Sketchpad' is a textarea here but a sketch/photo attachment section on mobile (SECTION_KEY_LABELS.sketchpad).",
+     "evidence": "SubmissionDetailPage.tsx:71; submissionAttachmentModel.ts:36,57",
+     "severity": "minor"
+    },
+    {
+     "issue": "Action chip JSX is minified onto single lines, a maintenance smell and a sign the chips share no component with the canvas chips.",
+     "evidence": "SubmissionDetailPage.tsx:1276-1277 vs 61-62",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Fluid auto-fit grid with min(320px,100%) is the most responsive layout on the page (SubmissionDetailPage.tsx:1250)",
+    "Every textarea has an id and htmlFor label (SubmissionDetailPage.tsx:1257,1261,1271-1272,1282-1283)",
+    "Per-note attachment buttons connect mobile-tagged evidence to the right narrative field (SubmissionDetailPage.tsx:1252-1258)",
+    "Action codes come from server lookups, so labels stay in sync with the backend (SubmissionDetailPage.tsx:1276-1277)"
+   ]
+  },
+  {
+   "name": "Submission library and per-section attachments dialog",
+   "route": "/submissions/:id (section 'Submission library'; modal '<Section> attachments')",
+   "purpose": "Browse every file attached to the submission (photos, videos, documents) with the GISA section it was captured under, and open or download them via short-lived object-storage URLs.",
+   "roles": [
+    "All users who reach the page"
+   ],
+   "primaryTasks": [
+    "Find and view the evidence for a section",
+    "Download a file"
+   ],
+   "dataShown": [
+    {
+     "label": "Header 'Submission library' + count label 'N items · x photos · y videos · z documents' / 'No files'",
+     "necessity": "essential",
+     "note": "Totals.",
+     "source": "SubmissionLibrary.tsx:26-36; submissionAttachmentModel.ts:132-139"
+    },
+    {
+     "label": "Filter tabs All / Photos / Videos / Documents with counts",
+     "necessity": "secondary",
+     "note": "role=tablist without tabpanel semantics.",
+     "source": "SubmissionLibrary.tsx:37-58"
+    },
+    {
+     "label": "Tile: thumbnail or media glyph, media badge, section chip, file name, type label, size, '#id'",
+     "necessity": "essential",
+     "note": "'#id' is an internal attachment id (noise).",
+     "source": "SubmissionAttachmentTiles.tsx:245-291"
+    },
+    {
+     "label": "Inline viewer (image / video / PDF iframe / 'Preview unavailable in this browser')",
+     "necessity": "essential",
+     "note": "70vh media area with Back / New tab / Download.",
+     "source": "SubmissionAttachmentTiles.tsx:294-361"
+    },
+    {
+     "label": "Dialog title '<Section> attachments' + '<counts> tagged to this section by the field form.'",
+     "necessity": "essential",
+     "note": "Context for the modal.",
+     "source": "SubmissionSectionAttachmentsDialog.tsx:43-47"
+    },
+    {
+     "label": "Empty states 'No files are attached…', 'No files match this filter.', 'No attachments are tagged to this section.'",
+     "necessity": "essential",
+     "note": "Distinct, honest empties.",
+     "source": "SubmissionLibrary.tsx:65; SubmissionSectionAttachmentsDialog.tsx:53"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Filter tabs",
+     "who": "all",
+     "where": "library header right"
+    },
+    {
+     "label": "Open ▾ → Open here / Open in a new tab / Open in a new window",
+     "who": "all",
+     "where": "tile bottom-left (hover/focus revealed; always visible on hover:none)",
+     "note": "index.css:126-142"
+    },
+    {
+     "label": "Download",
+     "who": "all",
+     "where": "tile bottom-right"
+    },
+    {
+     "label": "Back to files / New tab / Download (inline viewer)",
+     "who": "all",
+     "where": "viewer toolbar"
+    },
+    {
+     "label": "Close (X) section dialog",
+     "who": "all",
+     "where": "dialog header right"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Fifth block on the page (SubmissionDetailPage.tsx:1288)",
+     "'Open attachments (n)' buttons in card headers and note labels open the dialog (SubmissionDetailPage.tsx:104,1258,1325-1332)"
+    ],
+    "exits": [
+     "Files open in new tabs/windows via window.open (SubmissionAttachmentTiles.tsx:77-83)"
+    ]
+   },
+   "responsive": {
+    "layout": "Tile grid repeat(auto-fill, minmax(min(200px,100%),1fr)); dialog max-w-5xl, max-h-[88vh], internal scroll.",
+    "breakpointsUsed": [
+     "[grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr))] (SubmissionAttachmentTiles.tsx:394)",
+     "@media (hover: none) shows tile actions permanently (index.css:138-142)"
+    ],
+    "phoneRisks": [
+     "Open ▾ menu pops upward (bottom-full) and can clip above the first row (SubmissionAttachmentTiles.tsx:164)",
+     "Filter tab row wraps under the title at 375px"
+    ],
+    "tabletRisks": [
+     "Three tiles per row; fine"
+    ],
+    "desktopNotes": [
+     "Hover-only action reveal with focus-within fallback (index.css:127-136)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Internal attachment id '#N' printed on every tile.",
+     "evidence": "SubmissionAttachmentTiles.tsx:287",
+     "severity": "minor"
+    },
+    {
+     "issue": "Three ways to open one file (here / new tab / new window) behind a dropdown adds a decision for a simple task.",
+     "evidence": "SubmissionAttachmentTiles.tsx:145-149",
+     "severity": "minor"
+    },
+    {
+     "issue": "Filter buttons use role=tab without a tabpanel or arrow-key handling.",
+     "evidence": "SubmissionLibrary.tsx:37-57",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Hover affordances degrade to always-visible on touch (index.css:138-142)",
+    "Presigned URL caching with early refresh avoids repeated API calls (SubmissionAttachmentTiles.tsx:16-75)",
+    "Inline viewer supports image, video and PDF with a graceful fallback (SubmissionAttachmentTiles.tsx:309-320,350-361)",
+    "Section chip on each tile shows where the field crew captured it (SubmissionAttachmentTiles.tsx:124-130,265)"
+   ]
+  },
+  {
+   "name": "Review context cards (Summary, Reviewer Note, Workflow History, Access Sharing)",
+   "route": "/submissions/:id (bottom card grid)",
+   "purpose": "Support the review decision with record identity and timestamps, the reviewer's note, the full status-transition history, and read-access grants.",
+   "roles": [
+    "Summary, Reviewer Note (read-only unless REVIEWER/ADMIN) and Workflow History: all users (SubmissionDetailPage.tsx:1290-1307; SubmissionReviewerSupport.tsx:24-36)",
+    "Access Sharing: only when can_manage_permissions (SubmissionDetailPage.tsx:1309-1319)"
+   ],
+   "primaryTasks": [
+    "Reviewer: write the note that accompanies Approve/Return",
+    "Audit who did what and when",
+    "Grant or revoke read access"
+   ],
+   "dataShown": [
+    {
+     "label": "Summary rows: Descriptor, Submission ID, Created, Updated, Submitted, Reviewed, Status",
+     "necessity": "secondary",
+     "note": "Descriptor and Status are the third repetition on the page; timestamps are raw ISO strings; Submission ID is useful only for support.",
+     "source": "SubmissionDetailPage.tsx:1291-1299; SubmissionDetailPrimitives.tsx:20-27"
+    },
+    {
+     "label": "Reviewer Note textarea + subtitle 'Recorded with the approval or return decision.' / 'Read-only for your current role.'",
+     "necessity": "essential",
+     "note": "Feeds the header Approve/Return actions.",
+     "source": "SubmissionReviewerSupport.tsx:24-36; SubmissionDetailPage.tsx:375"
+    },
+    {
+     "label": "Workflow History (N): event label, 'Event <RAW_TYPE> · Actor user #N', formatted time, transition text, comment",
+     "necessity": "essential",
+     "note": "Raw event code and user id are noise inside an otherwise useful timeline.",
+     "source": "SubmissionReviewerSupport.tsx:38-70"
+    },
+    {
+     "label": "Access Sharing: 'Find a user' search, Available users list (name, email), 'Users with explicit read access (N)' list",
+     "necessity": "secondary",
+     "note": "Admin-ish task, rarely used during review.",
+     "source": "SubmissionAccessSharing.tsx:31-103"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Edit reviewer note",
+     "who": "REVIEWER / ADMIN",
+     "where": "Reviewer Note card"
+    },
+    {
+     "label": "Grant read access / Revoke access",
+     "who": "can_manage_permissions",
+     "where": "Access Sharing card rows"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Last block on the page (SubmissionDetailPage.tsx:1290-1320)"
+    ],
+    "exits": [
+     "none"
+    ]
+   },
+   "responsive": {
+    "layout": "Card grid repeat(auto-fit, minmax(min(420px,100%),1fr)); summary rows are a 3-column grid (label / value spanning 2).",
+    "breakpointsUsed": [
+     "[grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr))] (SubmissionDetailPrimitives.tsx:65)",
+     "grid-cols-3 rows (SubmissionDetailPrimitives.tsx:22)"
+    ],
+    "phoneRisks": [
+     "Raw ISO timestamps wrap awkwardly in the 2/3-width value column at 375px (SubmissionDetailPage.tsx:1294-1297)"
+    ],
+    "tabletRisks": [
+     "Two cards per row from ~860px; fine"
+    ],
+    "desktopNotes": [
+     "Always-open cards replace the previous collapsed <details> (SubmissionDetailPrimitives.tsx:29-33)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Reviewer note is written at the bottom of the page but consumed by Approve/Return buttons in the header.",
+     "evidence": "SubmissionDetailPage.tsx:1301-1307,375; SubmissionDetailHeader.tsx:133-142",
+     "severity": "major"
+    },
+    {
+     "issue": "Summary timestamps are raw ISO strings while Workflow History formats its timestamps.",
+     "evidence": "SubmissionDetailPage.tsx:1294-1297 vs SubmissionReviewerSupport.tsx:55-57",
+     "severity": "minor"
+    },
+    {
+     "issue": "Descriptor and Status duplicated a third time; raw 'Event <TYPE>' and 'Actor user #N' shown.",
+     "evidence": "SubmissionDetailPage.tsx:1292,1298; SubmissionReviewerSupport.tsx:52",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Always-open cards with explanatory subtitles (SubmissionDetailPrimitives.tsx:29-61; SubmissionReviewerSupport.tsx:24,38)",
+    "Sharing copy explains that it does not change ownership or edit rights (SubmissionAccessSharing.tsx:33)",
+    "Workflow comments are shown inline under each transition (SubmissionReviewerSupport.tsx:60-64)"
+   ]
+  }
+ ],
+ "crossCutting": [
+  "Vocabulary: the same location facts appear in three formats (h1 descriptor '03-SAC-050-12.3', hero raw codes with tooltips, Report Header 'District 3' + county name, scene summary 'Rte 050 · PM'); status appears as badge, caption prose and a Summary row; evidence counts appear in three places (SubmissionDetailHeader.tsx:74,102,105; SubmissionLocationHero.tsx:135-138,237-247; SubmissionDetailPage.tsx:826,845,1292,1298; terrainScene.ts:441-442).",
+  "Role gating bypasses the role model: the page hard-codes 'FIELD_WORKER', 'REVIEWER', 'ADMIN' strings (SubmissionDetailPage.tsx:161-168) while roleModel.ts defines canonical aliases (GEOTECH_ENGINEER ↔ FIELD_WORKER) and hasRole/isEngineer helpers that go unused here; the route itself is ProtectedRoute, not RoleRoute, so any authenticated user (including maintenance-only) can open a submission (App.tsx:135-142).",
+  "Decision inputs are separated from their actions: submit comment (SubmissionDetailPage.tsx:1282-1284) and reviewer note (1301-1307) sit at the bottom of a page whose Submit / Approve / Return buttons are in the header (SubmissionDetailHeader.tsx:126-142).",
+  "Mixed persistence models on one form: map sketches PATCH immediately (SubmissionDetailPage.tsx:399-424), 'Sample terrain' writes server-side immediately from any role (SubmissionMeasurementContext.tsx:39-53), everything else waits for Save draft (332-364), and Refresh discards unsaved edits with no dirty indicator or beforeunload guard.",
+  "Two layout philosophies on one page: a pixel-fixed absolute canvas (520px cards, 360px map, 460px scene; submissionLayoutModel.ts:22-40,69; SubmissionLocationHero.tsx:259; InteractiveTerrainScene.tsx:73) versus fluid auto-fit grids for Notes, library and review cards (SubmissionDetailPage.tsx:1250; SubmissionAttachmentTiles.tsx:394; SubmissionDetailPrimitives.tsx:65). Only the fluid parts work on a 375px phone.",
+  "Three independent full-screen implementations with their own Escape handling and body-overflow locks: canvas (fixed inset-0 z-40, useSubmissionDashboardLayout.ts:122-134; SubmissionDetailPage.tsx:1236), 2D map modal (fixed inset-0 z-50, SubmissionArcGisMap.tsx:573-604), 3D scene (Fullscreen API + fixed z-50 fallback, InteractiveTerrainScene.tsx:319-379; terrainScene.ts:397-401).",
+  "Button style zoo, at least eight recipes: header btn (SubmissionDetailHeader.tsx:26), primary brand (129,138), red outline (135), toolbarButton (SubmissionDetailPage.tsx:63), chip/ynChip (61-62), tinted action chips (1276-1277), hero buttons (SubmissionLocationHero.tsx:114,124), Remove Contact / Add District Contact (SubmissionDetailPage.tsx:903,936), section attachment button (SubmissionSectionAttachmentsDialog.tsx:15), scene 10px white/85 buttons (InteractiveTerrainScene.tsx:420-447), sample-terrain 10px button (SubmissionMeasurementContext.tsx:71), library tabs (SubmissionLibrary.tsx:48-52).",
+  "Accessibility gaps: <label> without htmlFor across all canvas cards (SubmissionDetailPage.tsx:59,802-870,1051-1054,1071-1078,1092-1094,1112-1114,1146-1153); toggle chips lack aria-pressed and use colour-only selection (61-62,1276-1277); drag/resize are mouse-only with aria-hidden handles and no keyboard alternative (95-120; useSubmissionDashboardLayout.ts:154-194); contact accordion uses '>'/'v' text with no aria-expanded (884-891); 9–10px text in the scene (InteractiveTerrainScene.tsx:420-447,531-542); title-only hints on hero tiles and the header photo button (SubmissionLocationHero.tsx:135-138; SubmissionDetailHeader.tsx:119); '•••' menu is not a menu (SubmissionDetailHeader.tsx:146-156); most buttons are below 44px.",
+  "Raw ids and codes surfaced to users: 'owner user #N' (SubmissionDetailPage.tsx:1174), 'Actor user #N' and 'Event <RAW_TYPE>' (SubmissionReviewerSupport.tsx:52), attachment '#id' (SubmissionAttachmentTiles.tsx:287), 'Submission #N' in the scene (SubmissionMeasurementContext.tsx:99), raw section_key in map popups (SubmissionArcGisMap.tsx:101), 'Submission ID' row (SubmissionDetailPage.tsx:1293), stored district/county/route codes in the hero (SubmissionLocationHero.tsx:135-137).",
+  "Dead or legacy code: SubmissionDetailPrimitives exports compatibility aliases S and Section that the page no longer uses (SubmissionDetailPrimitives.tsx:68-79; only R is imported, SubmissionDetailPage.tsx:16); submissionDetailModel re-exports layout constants 'so existing imports keep working' (submissionDetailModel.ts:136-150); DASHBOARD_DEFAULT_ORDER and DASHBOARD_DEFAULT_SIZES still carry the removed 'location' card (submissionLayoutModel.ts:6,30,73-74); terrainSceneErrorMessage references a removed 'USGS sampled-relief card below' (terrainScene.ts:311-319; SubmissionMeasurementContext.tsx:9-12); layout v1 storage key is orphaned by design (submissionLayoutModel.ts:65-68).",
+  "Data-model fields round-tripped but never shown: distribution_advancing/retrogressive/enlarging/widening/moving/confined Tri flags are loaded and saved (SubmissionDetailPage.tsx:297,351; submissionDetailModel.ts:18-23) but the Distribution card edits distribution_code instead; est_soil_pct is loaded/saved with no input (299,353). The data dictionary also lists material_pavement_type, est_boulder_pct and est_debris_* with no UI (docs/GISA_DATA_DICTIONARY.md:103,113-117).",
+  "Dates are free-text 'YYYY-MM-DD' inputs rather than type=date (SubmissionDetailPage.tsx:802-807), and lat/lon, EA, Project ID, Post Mile have no inline validation; all errors funnel to one header banner (1205).",
+  "Duplicate network work: photo evidence fetched by both the header and the page (SubmissionDetailHeader.tsx:64; SubmissionDetailPage.tsx:254); Save draft and Sample terrain each trigger a full reload of submission, lookups and geometry (262-269,366; SubmissionMeasurementContext.tsx:47).",
+  "Loading and feedback: plain 'Loading...' text for the page (SubmissionDetailPage.tsx:1207), two stacked spinners for the 3D scene, no 'saved' toast, window.confirm for delete followed by a hard navigation (428-438).",
+  "Layout tooling shown to touch users who cannot use it: the toolbar hint is hidden below md but Tidy/Reset/Full screen and cursor-grab headers remain (SubmissionDetailPage.tsx:762-794,97); the canvas has no responsive fallback (no stacked/accordion mode) for narrow viewports."
+ ]
+}

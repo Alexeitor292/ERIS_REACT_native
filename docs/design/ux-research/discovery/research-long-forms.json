@@ -1,0 +1,178 @@
+{
+ "topic": "UX for long technical inspection forms (10-15 sections, tri-state fields, measurements with units, per-section photos, narratives) on web and tablet: section navigation, autosave/draft status, inline validation, read-only vs edit rendering, print/PDF parity, and customizable dashboards - applied to the ERIS GISA form and field intake report",
+ "findings": [
+  {
+   "principle": "GOV.UK's 'one thing per page' is the default starting structure, but the guidance explicitly says user research decides when pages can be merged, and calls out internal government users who repeat a task many times as the case where merging is appropriate. 'One thing' means one decision or concept, not one field (e.g. a date is three inputs).",
+   "source": "https://www.gov.uk/service-manual/design/form-structure",
+   "applicability": "ERIS engineers are internal, repeat users of the GISA; a strict one-question-per-page wizard would be slow and controlling for them. Treat one GISA section (e.g. 'Slope geometry') as the 'one thing' per page. Reserve true one-question pages for the short field incident report that rotating maintenance coordinators submit on phones, where cognitive load and error recovery matter most."
+  },
+  {
+   "principle": "For long transactions completed over several sessions, the GOV.UK task list pattern gives each task a status (Not yet started, In progress, Completed, Cannot start yet, 'There is a problem'), groups tasks by activity with verb-led names, lets users complete tasks in any order where possible, and lets the user self-declare completion with a closing question ('Have you completed this section? Yes / No, I'll come back later').",
+   "source": "https://design-system.service.gov.uk/patterns/complete-multiple-tasks/",
+   "applicability": "A 10-15 section GISA is exactly this pattern. Build a GISA hub page listing sections with these statuses, allow any order, and add the self-declared 'Section complete' question so 'In progress' vs 'Completed' reflects the engineer's judgement rather than a field count. Use 'Cannot start yet' for the reviewer sign-off task until required sections are complete, and the red 'problem' status only for validation failures."
+  },
+  {
+   "principle": "USWDS says a step indicator is only for linear processes with three or more fixed high-level steps and standard back/next navigation; it is not appropriate when the number of steps changes with user input or when steps can be completed in any order.",
+   "source": "https://designsystem.digital.gov/components/step-indicator/",
+   "applicability": "GISA sections are conditional (e.g. rockfall vs. slide vs. erosion sections) and non-linear, so a numbered stepper is the wrong navigation for it. A stepper does fit the 3-5 step coordinator intake (location -> what happened -> photos -> confirm). Do not reuse the intake stepper component for the GISA."
+  },
+  {
+   "principle": "NN/g finds wizards help novices with infrequent tasks but 'quickly become annoying and overly controlling' for frequent/expert users, hamper tasks that require comparing information across steps, and are unsuited to work that benefits from arbitrary ordering; wizards should still show a step list, allow going back, and allow saving mid-process to resume later.",
+   "source": "https://www.nngroup.com/articles/wizards/",
+   "applicability": "Rotating coordinators (novice, infrequent) benefit from a wizard-style intake; engineers and reviewers (frequent, comparing photos against measurements and narrative) need free access to all sections. Design two navigation models rather than one: guided steps for intake, a section hub plus in-page index for the GISA."
+  },
+  {
+   "principle": "Accordions hurt when users need most or all of the content, when auto-collapsing prevents combining information from several sections, when content must be printed (users need 'Expand all'), and when headings hide what is inside; they help only when sections are independent and users rarely need several at once.",
+   "source": "https://www.nngroup.com/articles/accordions-on-desktop/",
+   "applicability": "Reviewers and branch chiefs read the whole GISA, so the read-only view should be fully expanded by default with an index, not an accordion. If edit mode uses collapsible sections, never auto-collapse siblings, provide 'Expand all / Collapse all', and make the print stylesheet force everything open."
+  },
+  {
+   "principle": "In-page (jump) links and a labelled table of contents ('On this page') help on long, well-chunked pages when users have a specific target; most participants across ages recognised the pattern, but it fails when links look like external links and can be a poor fit on small screens because of long scrolling.",
+   "source": "https://www.nngroup.com/articles/in-page-links-content-navigation/",
+   "applicability": "Give the GISA read-only/review view and the desktop edit view a sticky 'On this form' section list that highlights the current section (scroll-spy) and carries status/error badges. On phones collapse it into a 'Jump to section' select; on iPad portrait keep it as a collapsible side rail."
+  },
+  {
+   "principle": "GOV.UK validation: do not validate as the user types or when they leave a field; validate when they try to continue/submit. On failure prefix the page title with 'Error:', show an error summary at the top and move focus to it, show field-level error messages, keep the user's input, always validate server-side, and add novalidate to suppress HTML5 bubbles.",
+   "source": "https://design-system.service.gov.uk/patterns/validation/",
+   "applicability": "For the GISA run required-field and cross-section checks only when the engineer marks a section complete or submits for review, never on blur of a narrative or measurement. Show an error summary that links to the offending field, mirror the count as a badge on the section index, prefix the tab title with 'Error:', and never wipe a half-filled section. Keep native browser validation off so iPad Safari bubbles do not appear."
+  },
+  {
+   "principle": "Baymard: 31% of sites have no inline validation at all; validating before the user finishes typing (or on focus) irritates users ('I haven't had a chance to fill it all out yet'). When inline validation is used, trigger it on blur (or once a known-length value is complete), remove the error immediately as the user corrects it, and add positive confirmation, which increased user confidence. NN/g adds that error summaries alone force users to hunt and memorise, so pair them with adjacent field-level errors.",
+   "source": "https://baymard.com/blog/inline-form-validation",
+   "applicability": "Use light inline format validation on blur for typed measurements (e.g. non-numeric, out-of-range slope angle) with the error clearing on the next keystroke, and a quiet check mark for parsed values with units. Leave completeness to the section-complete/submit step. This split keeps the iPad flow calm while still catching typos early."
+  },
+  {
+   "principle": "GOV.UK radios: 'Do not pre-select radio options as this makes it more likely that users will not realise they've missed a question, [or] submit the wrong answer.' Use inline (horizontal) radios only for exactly two short options; stack otherwise. Yes/no error messages should read 'Select yes if [condition]'. (NN/g argues for defaults where a strong majority preference exists, but explicitly exempts cases where the honest answer is unknown, which is the ERIS case.)",
+   "source": "https://design-system.service.gov.uk/components/radios/",
+   "applicability": "ERIS tri-state Yes/No/Unknown fields must start with nothing selected and treat 'Unknown / Not assessed' as an explicit recorded value distinct from 'not answered'. Because they have three options, stack them (or use a three-segment control with >=24px targets), and write errors as 'Select yes if the slope shows tension cracks'. Never default to 'No' - in a geotechnical record a silent 'No' is a false negative."
+  },
+  {
+   "principle": "GOV.UK text input: use prefixes/suffixes to show units (e.g. 'kg', 'per item'); size inputs to the expected content; use inputmode='numeric' for whole numbers and inputmode='decimal' for decimals; avoid type='number' because users can accidentally increment values with the spin control and get no explicit error; some on-screen keypads cannot enter negatives.",
+   "source": "https://design-system.service.gov.uk/components/text-input/",
+   "applicability": "Render every GISA measurement as a fixed-width text input with the unit as a suffix (ft, in, deg, cu yd), inputmode='decimal', and no spinbutton. Store the unit with the value and echo it in read-only and print output. For values that may be negative (e.g. elevation change), keep a plain text input and validate the sign server-side."
+  },
+  {
+   "principle": "Single-column forms produce fewer skipped fields and errors than multi-column forms, whose layout pulls attention in several directions and makes users unsure which fields apply; 2-3 fields per row are acceptable only for logically connected short fields (date parts, name parts, city/state/ZIP, card expiry/CVV). NN/g's form recommendations agree and also advise no Reset/Clear buttons and no placeholder-as-label.",
+   "source": "https://baymard.com/blog/avoid-multi-column-forms",
+   "applicability": "Do not reproduce the paper GISA's two-column grid on screen. Lay each section out in one column; allow a single row only for genuinely related trios such as length x width x depth or lat/long. Keep the paper's section numbering in headings so parity is by numbering, not by layout. No 'Clear section' button."
+  },
+  {
+   "principle": "GOV.UK check-answers and summary-list: present captured data as key/value rows with a 'Change' link (with visually hidden context for screen readers); for large multi-section transactions, add check-answers at the end of each section, especially when different people complete different parts; omit questions the user was not asked; show 'Not provided' for skipped optional fields; group related lists in summary cards; show missing required data as an 'Enter X' link in the value column.",
+   "source": "https://design-system.service.gov.uk/patterns/check-answers/",
+   "applicability": "Make the ERIS read-only GISA a stack of summary cards, one per section, with role-gated 'Change' links (engineer only, hidden for reviewer/read-only roles). Distinguish 'Not provided' from 'Unknown' in the value column, hide sections not applicable to the incident type, and render missing required fields as 'Enter slope height' links. Reviewers approve from this same view, so it doubles as the review rendering."
+  },
+  {
+   "principle": "Save and resume: USWDS 'Progress easily' says to let users pause and return, tell them upfront that save/resume exists, and never disable inputs; GOV.UK One Login places a 'Save and complete later' link under the primary action on every page and shows a success panel on the task list after saving. NN/g adds that autosave 'does not need to replace save: they can both coexist', that users expect Save/Apply semantics on forms, and that 'visual feedback must be displayed for every process', e.g. a 'Saved' indicator beside changed content.",
+   "source": "https://designsystem.digital.gov/patterns/complete-a-complex-form/progress-easily/",
+   "applicability": "ERIS should autosave GISA drafts to the server per field/section AND keep explicit 'Save and continue' / 'Mark section complete' buttons. Show a persistent status chip ('Draft saved 14:32', 'Saving...', 'Unsaved - offline') so an engineer on an iPad in the field never wonders whether work reached the server; show a success panel on the hub after 'Save and come back later'. Never disable the submit button; explain what is missing instead."
+  },
+  {
+   "principle": "USWDS 'Keep a record': strongly consider generating a PDF because print-to-PDF is poorly understood and cumbersome on mobile; include a print button on the summary page; the record should include every question asked regardless of answer, site name, date and confirmation; use a print stylesheet with 12pt minimum, visible link URLs, no page breaks mid-row, repeated table headers. NN/g's PDF research shows PDFs are poor for on-screen reading and should be an optional download behind an HTML view; CFPB's print styles hide navigation/chrome and narrow single-column pages to readable line lengths.",
+   "source": "https://designsystem.digital.gov/patterns/complete-a-complex-form/keep-a-record/",
+   "applicability": "Keep the HTML read-only GISA as the canonical on-screen record and generate a server-side PDF that mirrors the paper GISA's section numbers, labels and order (parity by structure, not pixel layout). The print stylesheet should expand all sections, hide the app shell and section rail, print 'Unknown' and 'Not provided' explicitly, keep photo captions with photos, and repeat table headers. Add a 'Print / Download PDF' button on the hub and review views."
+  },
+  {
+   "principle": "NN/g on drag-and-drop: it lacks a reliable signifier (grab handles are confused with hamburger/kebab menus), is 'inefficient, imprecise, and even physically challenging', and on touch devices should be used only when research shows users expect it and no lower-cost alternative exists - menu-based alternatives are less error-prone. NN/g on customization: most users 'are not interested in doing the work required to tweak the user interface', it adds interaction cost, and it should only enhance an already-working default design.",
+   "source": "https://www.nngroup.com/articles/drag-drop/",
+   "applicability": "For rotating public-sector staff, a drag-and-drop customizable dashboard hurts learnability: each new coordinator or chief would inherit or rebuild a layout. Ship fixed, role-based dashboards (coordinator triage queue, chief routing board, engineer 'my assessments', reviewer approvals) with strong defaults. If customization is needed, limit it to show/hide and reorder via a menu or settings list, persisted per role, with keyboard and touch parity."
+  }
+ ],
+ "patterns": [
+  {
+   "pattern": "Section hub (task list) + one section per page for the GISA",
+   "whenToUse": "Forms with 10+ sections, multi-session completion, conditional sections, and expert repeat users (GOV.UK task list; GOV.UK one-thing-per-page internal-user exemption; USWDS step indicator 'not for non-linear').",
+   "erisApplication": "GISA hub lists sections with Not yet started / In progress / Completed / Cannot start yet; each section opens as its own scrollable page ending in 'Have you completed this section? Yes / No, I'll come back later'; hub shows overall progress, last saved time, and a 'Submit for review' task that stays 'Cannot start yet' until required sections are complete. Page title 'Section 4 of 12: Slope geometry - GISA 2026-0117' (W3C multi-page guidance)."
+  },
+  {
+   "pattern": "Short linear wizard with step indicator for the field incident report",
+   "whenToUse": "3-5 fixed steps, infrequent novice users, phones, users under stress (USWDS step indicator; NN/g wizards; USWDS stress guidance).",
+   "erisApplication": "Coordinator intake: Location (map pin + route/postmile) -> What happened (few tri-state + narrative) -> Photos -> Check answers -> Confirmation with reference number and printable record. Large targets, calm language, no disabled Next button, back always allowed, draft kept if the app is backgrounded."
+  },
+  {
+   "pattern": "Sticky 'On this form' section index with scroll-spy and status badges",
+   "whenToUse": "Long single-page read or review views where users need the whole document and jump to specific parts (NN/g in-page links; NN/g accordions when users need all content).",
+   "erisApplication": "Read-only GISA and reviewer view: left rail (desktop/iPad landscape) listing sections with completion/error badges, current section highlighted while scrolling; on phone a 'Jump to section' select at the top. All sections expanded by default; optional 'Collapse all' but never single-open accordion behaviour."
+  },
+  {
+   "pattern": "Autosave plus explicit save with a visible draft status",
+   "whenToUse": "Long forms on tablets/field devices where connectivity and interruptions are common, and where users still expect Save semantics (NN/g efficiency-vs-expectations; USWDS progress easily; GOV.UK One Login save progress).",
+   "erisApplication": "Debounced per-field server autosave on the GISA; 'Save and continue' and 'Save and come back later' under each section's primary action; status chip in the form header cycling 'Saving...' / 'Draft saved 14:32' / 'Offline - changes stored on this device'; success panel on the hub after saving; unsaved-changes interrupt only when the device truly has unsaved local changes."
+  },
+  {
+   "pattern": "Three-tier validation ladder with error summary and section badges",
+   "whenToUse": "Long forms mixing typed measurements (typo-prone) with completeness rules that only make sense once a section is done (GOV.UK validation; Baymard inline validation; NN/g error guidelines).",
+   "erisApplication": "Tier 1 on blur: format/range for measurements only, error clears on next keystroke, quiet check mark for parsed values. Tier 2 on 'Section complete': required tri-states and required photos. Tier 3 on 'Submit for review': cross-section consistency (e.g. failure type vs. filled sections). Failures produce a focused error summary linking to fields, an 'Error:' title prefix, and red badges on the hub/rail; input is never cleared."
+  },
+  {
+   "pattern": "Tri-state field as an explicit three-option radio group with no default",
+   "whenToUse": "Inspection questions where 'not observed/not assessed' is a legitimate answer and a silent default would create false negatives (GOV.UK radios; NN/g radio defaults exemption for unknown preference).",
+   "erisApplication": "Yes / No / Unknown (not assessed) stacked radios or a 3-segment control with >=24px (ideally 44px) targets; nothing preselected; review view shows 'Unknown' distinctly from 'Not answered'; error copy 'Select yes if [condition observed]'; optional conditional reveal of a follow-up measurement under 'Yes' only."
+  },
+  {
+   "pattern": "Measurement input = text input + unit suffix + inputmode=decimal",
+   "whenToUse": "Numeric fields with units on touch devices (GOV.UK text input; WCAG 2.5.8 target size).",
+   "erisApplication": "Fixed-width text inputs sized to plausible magnitudes (e.g. 5 characters for slope angle), unit suffix rendered outside the field (never as placeholder), inputmode='decimal', unit persisted with the value, no spinbuttons; related dimensions may sit on one row as a labelled group; the same unit appears in read-only and PDF output."
+  },
+  {
+   "pattern": "Per-section photo attachments with reuse and explicit error messages",
+   "whenToUse": "Evidence-heavy inspections where photos belong to specific sections and the same photo may support several sections (GOV.UK file upload; Esri Survey123 pages reduce load time by separating heavy groups).",
+   "erisApplication": "Each GISA section has an attachment block: visible drop zone on desktop, 'Take photo / Choose from library' button on iPad/phone, thumbnails with caption and section tag, 'Reuse an uploaded photo' picker so a photo from Section 3 can be referenced in Section 7 without re-uploading, and GOV.UK-style errors ('The selected file must be smaller than 20 MB'). Lazy-load thumbnails so photo-heavy sections do not slow the hub."
+  },
+  {
+   "pattern": "Read-only summary cards that also drive print and PDF",
+   "whenToUse": "Review/approval workflows and records that must match a paper form (GOV.UK check answers + summary list; USWDS keep a record; CFPB print styles; NN/g PDF).",
+   "erisApplication": "One summary card per GISA section with the paper section number in the title, key/value rows, 'Not provided' vs 'Unknown' values, role-gated Change links, photos with captions; print CSS hides app chrome and rail, expands everything, 12pt minimum, repeats table headers, avoids mid-row page breaks; a server-generated PDF with identical numbering is offered via 'Download PDF' for the project file. Reviewers approve from this view."
+  },
+  {
+   "pattern": "Fixed role-based dashboards with menu-driven, limited customization",
+   "whenToUse": "Rotating or infrequent users where learnability and consistency across staff matter more than personal layout (NN/g customization; NN/g drag-and-drop).",
+   "erisApplication": "Coordinator: triage queue sorted by severity/age; Chief: routing board by district/engineer; Engineer: my assessments by due date and status; Reviewer: awaiting approval; Admin: users. Default layouts are designed, not user-arranged; optional 'Customise view' menu for show/hide and sort, persisted per role, with keyboard and touch parity; no drag-and-drop as the only way to change anything."
+  }
+ ],
+ "antiPatterns": [
+  "A numbered stepper for the 10-15 section GISA, where sections are conditional and completed out of order (USWDS says step indicators are only for linear, fixed-count flows).",
+  "Validating on focus or while typing, or validating narratives on blur; disabling Submit until the form is valid; relying on HTML5 native validation bubbles (GOV.UK validation, USWDS 'don't disable inputs', Baymard premature-validation findings).",
+  "Pre-selecting 'No' (or any option) on tri-state questions, or storing an unanswered question as 'No'; putting three options inline on a narrow screen.",
+  "type='number' spinbuttons for measurements on iPad, or units shown only as placeholder text inside the field.",
+  "Single-open accordions that auto-collapse sibling sections, no 'Expand all', and printing whatever happens to be expanded.",
+  "Reproducing the paper form's multi-column grid on screen 'for parity' - parity should come from section numbering and content order, not layout.",
+  "Silent autosave with no visible state, or removing explicit Save buttons because 'it autosaves' (NN/g: users expect Save/Apply and need feedback for every system process).",
+  "Presenting the GISA on screen as an embedded PDF, or making PDF the only read-only view (NN/g: PDFs are unfit for on-screen reading; HTML first, PDF as download).",
+  "Drag-and-drop-only dashboard customization, per-user free-form card layouts for rotating staff, and grab handles that look like menu icons.",
+  "Reset/Clear-section buttons on long forms, session timeouts that discard drafts, and critical instructions hidden behind links that navigate away from the form.",
+  "Touch targets under 24x24 CSS px for section navigation, tri-state controls, or photo delete/reorder icons on the iPad (WCAG 2.5.8).",
+  "An error summary at the top with no field-level messages, or field-level messages that do not persist the user's input."
+ ],
+ "sources": [
+  "https://www.gov.uk/service-manual/design/form-structure",
+  "https://design-system.service.gov.uk/patterns/complete-multiple-tasks/",
+  "https://design-system.service.gov.uk/patterns/check-answers/",
+  "https://design-system.service.gov.uk/patterns/validation/",
+  "https://design-system.service.gov.uk/components/radios/",
+  "https://design-system.service.gov.uk/components/text-input/",
+  "https://design-system.service.gov.uk/components/summary-list/",
+  "https://design-system.service.gov.uk/components/file-upload/",
+  "https://sign-in.service.gov.uk/documentation/design-recommendations/save-progress",
+  "https://designsystem.digital.gov/patterns/complete-a-complex-form/",
+  "https://designsystem.digital.gov/patterns/complete-a-complex-form/progress-easily/",
+  "https://designsystem.digital.gov/patterns/complete-a-complex-form/keep-a-record/",
+  "https://designsystem.digital.gov/components/step-indicator/",
+  "https://www.nngroup.com/articles/web-form-design/",
+  "https://www.nngroup.com/articles/errors-forms-design-guidelines/",
+  "https://www.nngroup.com/articles/wizards/",
+  "https://www.nngroup.com/articles/accordions-on-desktop/",
+  "https://www.nngroup.com/articles/in-page-links-content-navigation/",
+  "https://www.nngroup.com/articles/radio-buttons-default-selection/",
+  "https://www.nngroup.com/articles/customization-personalization/",
+  "https://www.nngroup.com/articles/drag-drop/",
+  "https://www.nngroup.com/articles/efficiency-vs-expectations/",
+  "https://www.nngroup.com/articles/pdf-unfit-for-human-consumption/",
+  "https://baymard.com/blog/inline-form-validation",
+  "https://baymard.com/blog/avoid-multi-column-forms",
+  "https://www.w3.org/WAI/tutorials/forms/multi-page/",
+  "https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html",
+  "https://doc.arcgis.com/en/survey123/create/main/xlsform-groups-pages.htm",
+  "https://cfpb.github.io/design-system/guidelines/print-styles",
+  "https://civicdesign.org/tools/creating-accessible-forms-for-print-and-pdf/"
+ ]
+}

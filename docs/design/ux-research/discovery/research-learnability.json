@@ -1,0 +1,193 @@
+{
+ "topic": "Learnability and onboarding for complex government/enterprise workflow systems used by rotating staff (ERIS: Caltrans geotechnical emergency-response web app) — first-run guidance, contextual help, plain-language status vocabulary, teaching empty states, next-step affordances, consistent object naming, error prevention, Nielsen's heuristics for complex apps, and WCAG 2.2 AA / Section 508 / California AB 434 accessibility requirements",
+ "findings": [
+  {
+   "principle": "Upfront onboarding tutorials are skipped and do not improve task performance. NN/g found users 'want to start using products immediately' (the paradox of the active user), tutorial content is 'hard to remember when the user needs it', and tutorials 'don't result in better task performance'. Contextual 'pull' help — shown at the step where it is needed, easily dismissed and recalled — is the recommended alternative.",
+   "source": "https://www.nngroup.com/articles/onboarding-tutorials/ ; https://www.nngroup.com/articles/paradox-of-the-active-user/",
+   "applicability": "ERIS users rotate through roles (maintenance coordinator, branch chief, engineer, reviewer) and may touch the system only during an emergency. Do not build a multi-screen welcome tour or coach-mark carousel on first login. Put the teaching into the interface itself: a per-role 'How this queue works' panel that is dismissible and re-openable, field-level hint text inside the GISA form, and a next-step banner on every incident."
+  },
+  {
+   "principle": "Nielsen heuristic 6 (Recognition rather than recall) and heuristic 10 (Help and documentation): 'Offer help in context, instead of giving users a long tutorial to memorize' and 'present the documentation in context right at the moment that the user requires it.' Heuristic 1 (Visibility of system status): 'keep users informed about what is going on, through appropriate feedback within a reasonable amount of time.'",
+   "source": "https://www.nngroup.com/articles/ten-usability-heuristics/",
+   "applicability": "Every incident detail page should state, in one glance, where the incident is in the workflow, who owns the next action, and what this user can do now. After any submit/route/approve action, show a confirmation that names what happened and what happens next ('Sent to District 4 Branch Chief for routing; you will be notified when an engineer is assigned'). Rotating staff should never have to remember the process from a training deck."
+  },
+  {
+   "principle": "Nielsen heuristic 2 (Match between system and real world): 'speak the users' language... rather than internal jargon' and 'never assume your understanding of words or concepts will match that of your users.' The federal Plain Writing Act of 2010 and digital.gov plain-language guidance require public-sector content to be written for its specific audience and 'clear and easy to understand'.",
+   "source": "https://www.nngroup.com/articles/ten-usability-heuristics/ ; https://digital.gov/guides/plain-language",
+   "applicability": "Workflow statuses must be human phrases, not enum names or codes (never 'RTD_BC', 'GISA_PEND'). Use e.g. 'Submitted', 'Awaiting routing', 'Assessment in progress', 'Under review', 'Approved', 'Returned for changes'. Spell out GISA/DEM/postmile terms with an inline definition the first time they appear on a screen. Notifications and emails should reuse the same words as the UI."
+  },
+  {
+   "principle": "Empty states must do three jobs: communicate system status, provide learning cues, and offer direct action pathways. 'Totally empty states cause confusion about how and whether the system is working.' Provide direct links/buttons ('a button labeled Create') rather than telling users what they could do, and give precise messages such as 'There are no records to display for the selected date range.'",
+   "source": "https://www.nngroup.com/articles/empty-state-interface-design/",
+   "applicability": "A newly assigned coordinator opening an empty triage queue, an engineer with no assigned assessments, an incident with no photos or no map location, or a filtered list with no matches — each needs an explanatory empty state that says why it is empty, what will appear here and when, and one primary action (e.g., 'Create incident report', 'Add site photo', 'Clear filters')."
+  },
+  {
+   "principle": "Nielsen heuristic 4 (Consistency and standards): 'Users should not have to wonder whether different words, situations, or actions mean the same thing.' Internal consistency (same terms, layouts and patterns inside the product) plus external consistency (platform and industry conventions, Jakob's Law) lets users 'transfer their knowledge... which will lower their learning curve'.",
+   "source": "https://www.nngroup.com/articles/consistency-and-standards/ ; https://www.nngroup.com/articles/ten-usability-heuristics/",
+   "applicability": "ERIS must use exactly one name per object across dashboard, detail pages, filters, notifications and emails: 'Incident report' (not ticket/field report), 'Assessment' (GISA), 'Review', 'Route/Assign'. Maintain a written glossary in the design system and lint UI copy against it. Same action = same verb, same button position, same icon everywhere."
+  },
+  {
+   "principle": "Error prevention (heuristic 5) distinguishes slips (right intent, wrong action) from mistakes (wrong mental model). Prevent slips with helpful constraints, suggestions/autocomplete, good defaults and forgiving formatting ('do some behind-the-scenes data scrubbing'); 'the designer is at fault for making it too easy for the user to commit the error.' Prioritize preventing high-cost errors first.",
+   "source": "https://www.nngroup.com/articles/slips/ ; https://www.nngroup.com/articles/ten-usability-heuristics/",
+   "applicability": "Constrain assessment dates to not precede the incident date; default district/branch/route from the user profile and the parent incident; accept lat/long and postmile in flexible formats and normalize; offer autocomplete for routes, counties and staff names; autosave the long GISA form; confirm consequential actions (route, approve, reject, delete user) with a dialog that names the consequence and who will be notified."
+  },
+  {
+   "principle": "Error messages should be displayed close to the source, be noticeable but accessible, use plain non-blaming language ('avoid invalid/incorrect'), precisely describe the issue, offer remedies, and 'let users correct errors by editing their original action instead of starting over'. Premature validation is 'a hostile pattern'. Validations 'should tell users how to fix it' (e.g., 'Please enter your street address' rather than 'Field is blank').",
+   "source": "https://www.nngroup.com/articles/error-message-guidelines/ ; https://www.nngroup.com/articles/indicators-validations-notifications/",
+   "applicability": "In the GISA form, show each error under its field with an icon and a fix ('Enter the postmile as a number, e.g. 12.4'), add a linked error summary at the top on submit, never clear entered text or uploaded photos on a failed submit, and keep a draft. Routing/review notifications need enough context (incident ID, location, what is required, direct link) because the recipient may not be thinking about the issue."
+  },
+  {
+   "principle": "Baymard's benchmark found 31% of sites lack inline validation and 4% implement it incorrectly; showing errors only on submit is 'a recipe for abandonment'. Validate on blur (or when input reaches the expected length), not on keystroke in an empty field ('Why are you telling me my email address is wrong, I haven't had a chance to fill it all out yet!'), and show positive confirmation (checkmark) for correct entries.",
+   "source": "https://baymard.com/blog/inline-form-validation",
+   "applicability": "ERIS forms (incident report, GISA, user admin) should validate each field when the user leaves it, display a subtle success indicator for complex fields (coordinates, postmile, phone), and reserve full-form validation for submit with an error summary. This matters most for iPad field entry where re-finding errors after submission is slow."
+  },
+  {
+   "principle": "Wizards suit 'situations where the users are likely to be unfamiliar with the process' but become tedious for experts; show 'a clear list or diagram of the steps... highlighting the current step', use descriptive step labels instead of generic Next/Previous, allow back navigation, and 'allow users to exit the wizard midway and save state... resume the process at a later time.' USWDS adds: use a step indicator for 3+ high-level steps, not for nonlinear processes or forms whose step count changes with conditional logic; mark the current step with aria-current and pair it with a real heading and 'step X of Y' text.",
+   "source": "https://www.nngroup.com/articles/wizards/ ; https://designsystem.digital.gov/components/step-indicator/",
+   "applicability": "Use a short linear wizard with a step indicator for the infrequent, unfamiliar flows (e.g., a coordinator's first incident report: Location → Conditions → Photos → Review & submit). Do not force the long GISA form into a locked wizard — engineers complete it across sessions and out of order."
+  },
+  {
+   "principle": "GOV.UK's 'Complete multiple tasks' (task list) pattern is for 'longer transactions involving multiple tasks that users may need to complete over a number of sessions'. Group tasks by related actions or stages, name tasks with verbs ('check', 'declare', 'report'), let users complete tasks in any order, start with minimal statuses ('Not yet started', 'Incomplete', 'In progress', 'Completed', 'Cannot start yet', 'There is a problem'), and consider asking 'Have you completed this section?' instead of auto-marking.",
+   "source": "https://design-system.service.gov.uk/patterns/complete-multiple-tasks/",
+   "applicability": "Model the GISA technical form as a task list: sections such as 'Describe site conditions', 'Add photos', 'Mark location on map', 'Enter geotechnical findings', 'Recommend actions', each with its own status and a 'You have completed 3 of 8 sections' counter. Sections that depend on others (e.g., cross-section needs a location) show 'Cannot start yet' with the reason. Submit for review unlocks only when required sections are complete."
+  },
+  {
+   "principle": "Complex applications serve professionals who 'prefer to start using it immediately, undeterred by its level of complexity' yet plateau at mediocre performance. NN/g recommends staged/progressive disclosure ('showing options to the user only when they are relevant to the task at hand'), flexible workflows that let users 'skip ahead, loop back to an earlier step', working-memory support via notes and comments to resume after interruptions, and visual salience of critical information.",
+   "source": "https://www.nngroup.com/articles/complex-application-design/",
+   "applicability": "Give each ERIS role a focused dashboard showing only its actionable items, with advanced filters and bulk actions behind progressive disclosure. Show GISA sections conditionally by incident type (e.g., rockfall vs. slope failure vs. flooding). Provide an internal notes/activity log per incident so a coordinator interrupted by a call can resume. Make overdue or high-severity incidents visually dominant."
+  },
+  {
+   "principle": "Tooltips must never hold essential information: 'Users shouldn't need to find a tooltip in order to complete their task', field requirements must be visible on-screen, and tooltips 'are not normally available on touchscreens' — use tap-triggered popup tips or persistent text instead.",
+   "source": "https://www.nngroup.com/articles/tooltip-guidelines/",
+   "applicability": "Because ERIS is used on iPads in the field, all GISA field guidance (units, expected format, what photo to take) must be visible hint text below the label or a tap/click-activated info popover with a visible 'i' button — never hover-only tooltips. Icon-only toolbar buttons on the map need visible labels or an accessible name plus a tap-to-reveal label."
+  },
+  {
+   "principle": "WCAG 2.2 adds SC 3.2.6 Consistent Help (Level A): when help mechanisms (contact details, contact form/chat, self-help/FAQ, chatbot) appear on multiple pages they must occur 'in the same order relative to other page content'; and SC 3.3.7 Redundant Entry (Level A): information already entered in the same process must be 'auto-populated, or available for the user to select' (exceptions: essential, security, no longer valid), because 'users experience a natural gradual mental fatigue as they proceed through steps in a process'.",
+   "source": "https://www.w3.org/WAI/WCAG22/Understanding/consistent-help.html ; https://www.w3.org/WAI/WCAG22/Understanding/redundant-entry.html ; https://www.w3.org/WAI/standards-guidelines/wcag/new-in-22/",
+   "applicability": "Place the ERIS 'Help / Contact GeoTech support / Glossary' control in the same header slot on every page. Prefill the GISA form from the incident report (route, postmile, county, district, lat/long, reporter, date observed) and offer 'Same as incident location' selectors; prefill user-admin forms from directory data where available."
+  },
+  {
+   "principle": "Touch target size: WCAG 2.2 SC 2.5.8 Target Size (Minimum), Level AA, requires pointer targets of 'at least 24 by 24 CSS pixels' (or equivalent spacing) to avoid 'accidentally activating an adjacent target'; SC 2.5.5 Target Size (Enhanced), Level AAA, sets 44 by 44 CSS pixels for users with 'hand tremors, limited dexterity' and touch input where 'a finger is larger than a mouse pointer'. WCAG 2.2 also adds 2.4.11 Focus Not Obscured (AA) — a focused item must be at least partially visible — and 2.5.7 Dragging Movements (AA) — any drag action needs a simple pointer alternative.",
+   "source": "https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html ; https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html ; https://www.w3.org/WAI/standards-guidelines/wcag/new-in-22/",
+   "applicability": "Adopt 44x44 CSS px as the ERIS design-system minimum for all buttons, list rows, checkboxes, map controls and photo thumbnails (exceeds the 24px AA floor and suits gloved/outdoor iPad use). Sticky headers, filter bars and the mobile action bar must not cover the focused field in the long GISA form. Map pin placement and cross-section line drawing need a non-drag alternative (tap to place, editable coordinate fields, arrow-key nudging)."
+  },
+  {
+   "principle": "Color and contrast: SC 1.4.3 (AA) requires 4.5:1 for normal text and 3:1 for large text (18pt or 14pt bold), with no rounding ('4.499:1 would not meet the 4.5:1 threshold'); SC 1.4.11 Non-text Contrast (AA) requires 3:1 for UI component boundaries/states, focus indicators and graphical objects (e.g., a #AAA input border on white fails at 2.3:1). GOV.UK and Esri Calcite both warn 'do not use colour alone to convey information' and recommend 'a combination of color, shapes, patterns, and text'. GOV.UK research found dark, uppercase status tags were mistaken for buttons; tags should be adjectives ('Completed'), never interactive.",
+   "source": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html ; https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html ; https://design-system.service.gov.uk/components/tag/ ; https://developers.arcgis.com/calcite-design-system/foundations/accessibility/",
+   "applicability": "ERIS status badges and severity indicators must pair color with text (and optionally an icon/shape), use light backgrounds with dark text so they do not look like buttons, and keep one fixed color per status. Form field borders, focus rings, disabled-vs-enabled states and map markers for severity need 3:1 against adjacent colors; add shape or label variation to markers so severity is readable in grayscale and outdoors."
+  },
+  {
+   "principle": "Keyboard operability: SC 2.1.1 (Level A) requires all functionality be operable through a keyboard interface except path-dependent input (freehand drawing); functions that depend only on endpoints (placing a point, drawing a shape between points) must be keyboard-operable. The ArcGIS Maps SDK for JavaScript supports keyboard navigation of MapView/SceneView, ARIA names/descriptions on Map and Scene components, focus trapping and focus return in Popups, and ARIA live announcements in Search/Bookmarks, but notes 'there are additional steps you can take' beyond built-in features. Calcite warns against tabindex greater than 0 and requires visible focus for mouse and keyboard users.",
+   "source": "https://www.w3.org/WAI/WCAG22/Understanding/keyboard.html ; https://developers.arcgis.com/javascript/latest/accessibility/ ; https://developers.arcgis.com/calcite-design-system/foundations/accessibility/",
+   "applicability": "Every ERIS map task (choose incident location, view incident clusters, define a cross-section) needs a keyboard/coordinate-entry equivalent and a list/table alternative of the same data. Give each map an accessible name ('Incident location map, District 4'), keep visible focus rings on all controls, and never rely on tabindex ordering hacks in the GISA form."
+  },
+  {
+   "principle": "Legal baseline for a Caltrans app: California AB 434 requires state entity websites (and contractors' work for them) to meet 'WCAG 2.1 Level AA'; California Government Code 7405 binds state agencies to Section 508; the Revised Section 508 Standards (effective January 18, 2018) incorporate WCAG 2.0 AA and require comparable access for 'disabled employees and members of the public'. Caltrans's own accessibility statement commits to WCAG 2.1 AA. USWDS form guidance adds practical requirements: vertical single-column layout, required-field text explanation plus asterisk, '(optional)' labels, fieldset/legend for grouped inputs, DOM order matching visual order, and error state announced in the page title.",
+   "source": "https://webstandards.ca.gov/web-policies/accessibility/ ; https://dot.ca.gov/accessibility ; https://www.section508.gov/manage/laws-and-policies/ ; https://designsystem.digital.gov/components/form/",
+   "applicability": "Even though ERIS is an internal staff tool, Section 508 covers employee-facing systems, so target WCAG 2.2 AA (a superset of 2.1 AA) as the acceptance bar for the design system and CI checks. Lay out the incident and GISA forms in one column with fieldset/legend groups, a visible required-field rule at the top, '(optional)' suffixes, and set the document title to 'Error: ...' when a submit fails so screen-reader users are told immediately."
+  }
+ ],
+ "patterns": [
+  {
+   "pattern": "Next-step banner on every workflow object (status + owner + single primary action + what happens after)",
+   "whenToUse": "Any object that moves through stages and changes hands — incidents, assessments, reviews. Use whenever a user could plausibly ask 'what am I supposed to do with this?'",
+   "erisApplication": "At the top of the incident detail page render a card: 'Status: Awaiting routing — owned by District 4 Branch Chief. Your action: Assign an engineer. After assignment the engineer is notified and the assessment opens.' Show one primary button per role; secondary actions live in an overflow menu. Same card text drives the email/notification body."
+  },
+  {
+   "pattern": "Plain-language status vocabulary with a governed tag component and glossary popover",
+   "whenToUse": "Whenever the system exposes workflow state. Establish once in the design system; extend only when research shows a needed distinction.",
+   "erisApplication": "Define a fixed set: Draft, Submitted, Awaiting routing, Assigned, Assessment in progress, Under review, Returned for changes, Approved, Closed. Each tag = fixed color + text + optional icon, light background/dark text, non-interactive. A tap/click on the '?' beside the status column opens a glossary popover explaining each state and who acts next. The same vocabulary is used in filters, dashboards, notifications and exports."
+  },
+  {
+   "pattern": "Teaching empty state (why it is empty + what will appear + one action)",
+   "whenToUse": "Any list, queue, upload area, map layer or dashboard widget that can have zero items, including filtered-to-zero and permission-restricted views.",
+   "erisApplication": "Coordinator queue: 'No incidents need triage. New field reports appear here as soon as they are submitted.' + 'Create incident report'. Engineer: 'No assessments assigned to you. Branch chiefs assign assessments after routing; you will get an email.' Photos section: 'No photos yet. Add at least one photo of the slope and roadway.' + 'Add photo'. Filtered list: 'No incidents match these filters.' + 'Clear filters'."
+  },
+  {
+   "pattern": "Task-list structure for the long GISA form (sections in any order, per-section status, save and resume)",
+   "whenToUse": "Long transactions completed over multiple sessions by professionals who need to jump between sections and add evidence (photos, map) as it becomes available.",
+   "erisApplication": "GISA landing page lists verb-named sections ('Describe site conditions', 'Add photos', 'Mark location and extent on map', 'Record geotechnical findings', 'Recommend actions', 'Attach references') with GOV.UK-style statuses and 'You have completed 3 of 8 sections'. Dependencies show 'Cannot start yet — mark the location first'. Each section autosaves; 'Submit for review' appears only when required sections are Completed and lists anything missing."
+  },
+  {
+   "pattern": "Short step-indicator wizard for infrequent, unfamiliar linear flows",
+   "whenToUse": "3+ high-level linear steps performed rarely by novices with no conditional step count (per USWDS/NN-g). Not for expert, repetitive, or nonlinear work.",
+   "erisApplication": "First-time incident report by a maintenance coordinator: Location → Observed conditions → Photos → Review & submit, with a USWDS step indicator (aria-current, 'Step 2 of 4' heading), descriptive step buttons ('Continue to photos'), Back always available, and 'Save and finish later'."
+  },
+  {
+   "pattern": "Visible inline help + on-blur validation + linked error summary + input preservation",
+   "whenToUse": "Every form, especially long technical forms and any form used on touch devices where hover help fails.",
+   "erisApplication": "Each GISA field has a label, visible hint text (units, format, example), and optional tap-to-open info popover. Validate on blur with a fix-oriented message ('Enter postmile as a decimal, e.g. 12.4') and a checkmark on success. On submit, show an error summary at the top with links to each field, set the page title to 'Error: ...', and never discard entered data or uploaded photos."
+  },
+  {
+   "pattern": "Prefill and smart defaults (Redundant Entry compliance)",
+   "whenToUse": "Whenever data already exists in the same process or the user profile — location, identifiers, organizational unit, dates.",
+   "erisApplication": "Create the GISA pre-populated from its incident report (route, postmile, county, district, coordinates, date observed, reporter contact) with 'Edit' affordances; default district/branch from the signed-in user's profile; 'Same as incident location' toggle for the assessment site; remember last-used filters per role."
+  },
+  {
+   "pattern": "Consistent help slot with role-aware, dismissible and recallable guidance",
+   "whenToUse": "All pages of an application with multiple screens (WCAG 3.2.6). Especially for rotating staff who return after months away.",
+   "erisApplication": "Same header position on every page for 'Help' opening a side panel with: 'How the [role] workflow works' (3-5 steps with the status vocabulary), glossary, and 'Contact GeoTech support' details. First visit to a queue opens the panel automatically once; a 'Show help' link restores it anytime. No modal tours."
+  },
+  {
+   "pattern": "Consequence-stating confirmation and reversible stage changes",
+   "whenToUse": "Actions that notify other people or change ownership — route, assign, approve, return, reject, deactivate user.",
+   "erisApplication": "Confirm dialog reads 'Route incident 24-0417 to District 4 GeoTech Branch Chief? They will be emailed and this incident will leave your queue.' Provide 'Return to previous stage' with a required reason where policy allows, disable the button after first press to prevent double submission, and log the action in the incident activity feed."
+  },
+  {
+   "pattern": "Accessible map interaction pattern (tap/click placement + coordinate fields + list alternative + labeled, high-contrast markers)",
+   "whenToUse": "Any map-based input or visualization in a WCAG-conformant app; required by SC 2.1.1, 2.5.7, 1.4.11 and Calcite guidance.",
+   "erisApplication": "Location step: tap/click to drop a pin or type lat/long or route+postmile; arrow keys nudge the pin; the map has an accessible name and the incident list/table is the equivalent view. Severity markers use distinct shape + label + 3:1 contrast; clusters are also listed in a table with the same status vocabulary. Map controls are 44x44 CSS px with visible labels."
+  }
+ ],
+ "antiPatterns": [
+  "Front-loaded multi-screen welcome tour, coach-mark carousel or video on first login (skipped, not remembered, no performance gain).",
+  "Hiding required-field rules, units or photo instructions in hover-only tooltips (invisible on iPads; fails 'important information should always be on the page').",
+  "Exposing internal enum names, codes or unexplained acronyms as statuses or labels ('RTD_BC', 'GISA_PEND', 'DEM').",
+  "Calling the same object different names in different places (incident / ticket / field report; assessment / GISA / evaluation) or using different verbs for the same action.",
+  "Validating on every keystroke in an empty or partially typed field, or showing errors only after submit with no inline validation.",
+  "Clearing the form, losing uploaded photos, or resetting the map pin when validation fails; asking users to retype location data already captured in the incident report (violates WCAG 3.3.7).",
+  "Color-only status badges or severity markers; dark uppercase tags that look like buttons; interactive tags.",
+  "Blank tables, dashboards or map layers with no explanation of why they are empty or what to do next (dead ends).",
+  "Locking the long GISA form into a strictly linear wizard that blocks skipping sections, saving mid-way or returning to earlier steps.",
+  "Disabled 'Submit' or 'Route' buttons with no visible explanation of what is missing (USWDS: disabled states give poor feedback).",
+  "Drag-only map interactions (pin placement, cross-section drawing) with no tap/keyboard/coordinate alternative (violates WCAG 2.1.1 and 2.5.7).",
+  "Icon-only or sub-24px controls in dense incident tables and map toolbars; targets under the ERIS 44px standard on touch devices.",
+  "Generic or blaming error copy ('An error occurred', 'Invalid input') instead of precise, fix-oriented messages placed next to the field.",
+  "Help/contact links that change position or order between pages (violates WCAG 3.2.6).",
+  "Sticky headers, filter bars or bottom action bars that cover the focused field on iPad/phone (violates WCAG 2.4.11).",
+  "Light-gray input borders and focus rings below 3:1 contrast; body text below 4.5:1 on tinted panel backgrounds.",
+  "Notifications that say only 'Status changed' without incident ID, location, required action and a direct link."
+ ],
+ "sources": [
+  "https://www.nngroup.com/articles/ten-usability-heuristics/",
+  "https://www.nngroup.com/articles/onboarding-tutorials/",
+  "https://www.nngroup.com/articles/paradox-of-the-active-user/",
+  "https://www.nngroup.com/articles/empty-state-interface-design/",
+  "https://www.nngroup.com/articles/error-message-guidelines/",
+  "https://www.nngroup.com/articles/slips/",
+  "https://www.nngroup.com/articles/complex-application-design/",
+  "https://www.nngroup.com/articles/wizards/",
+  "https://www.nngroup.com/articles/tooltip-guidelines/",
+  "https://www.nngroup.com/articles/consistency-and-standards/",
+  "https://www.nngroup.com/articles/indicators-validations-notifications/",
+  "https://baymard.com/blog/inline-form-validation",
+  "https://www.w3.org/WAI/standards-guidelines/wcag/new-in-22/",
+  "https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html",
+  "https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html",
+  "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html",
+  "https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html",
+  "https://www.w3.org/WAI/WCAG22/Understanding/keyboard.html",
+  "https://www.w3.org/WAI/WCAG22/Understanding/consistent-help.html",
+  "https://www.w3.org/WAI/WCAG22/Understanding/redundant-entry.html",
+  "https://www.section508.gov/manage/laws-and-policies/",
+  "https://webstandards.ca.gov/web-policies/accessibility/",
+  "https://dot.ca.gov/accessibility",
+  "https://designsystem.digital.gov/components/step-indicator/",
+  "https://designsystem.digital.gov/components/form/",
+  "https://design-system.service.gov.uk/patterns/complete-multiple-tasks/",
+  "https://design-system.service.gov.uk/components/tag/",
+  "https://digital.gov/guides/plain-language",
+  "https://developers.arcgis.com/calcite-design-system/foundations/accessibility/",
+  "https://developers.arcgis.com/javascript/latest/accessibility/"
+ ]
+}
