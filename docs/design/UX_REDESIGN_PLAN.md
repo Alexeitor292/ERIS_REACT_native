@@ -722,7 +722,7 @@ The increase from 66 to 73 days is four new specs (§7.19–7.21 and the print s
 
 ### Backend items
 
-**Three gate: B1, B12 and B3.** Two items v1.0 listed as backend work already ship server-side and are re-classified. Everything else lands behind an honest interim: keep the existing `limit:1000` fetches and label every count **"of loaded"**. **No field, state, role or disposition is renamed; no state transition changes.** One display string changes (B14) and one permission narrows (§4), both flagged.
+**Five gate: B1, B12, B15, B16 and B3.** Two items v1.0 listed as backend work already ship server-side and are re-classified. Everything else lands behind an honest interim: keep the existing `limit:1000` fetches and label every count **"of loaded"**. **No field, state, role or disposition is renamed; the only state-machine change is the owner's routing decision (B15): approval becomes the terminal state and finalize is retired.** One display string changes (B14) and one permission narrows (§4), both flagged.
 
 | # | Item | Why | BE-days | Phase |
 |---|---|---|---|---|
@@ -909,7 +909,7 @@ Sources are the three agreed discovery briefs (`ux-research/brief-core.md`, `bri
 | Three backend items gate — B1, B12, B3 | `judge-engineering.json`'s scoping, corrected twice in v1.1: B2 and B10 already ship server-side (`assessments.py:807-809`, `incidents.py:761-777`), and B12 is added because four Home groups had no queue behind them |
 | Feature flag is build-time, not per-user metadata | `parse_user_metadata` (`user_metadata.py:44-48`) whitelists `district`, `office_code`, `office_location` and drops every other key, and `routes/auth.py:39` returns it verbatim. `web/src/config.ts:15-22` already reads `import.meta.env.VITE_*`, and a repository search finds no flag module — so the mechanism is new, and it is one Vite variable |
 | Per-user UI preferences need a backend item (B11) | Nine "once per account" promises across §7.13, §7.18, §9.3 and §9.4 with nothing but `localStorage` behind them; `UiSettingsContext` is browser-scoped and the field iPads are shared |
-| 71 days with a stated team, not 66 unattributed | v1.0's Phase 0 was 10 days against 21 component-days of its own §8 scope, with no team size given. §11 now itemises component-days, assembly, QA and backend per phase and divides by two front-end engineers |
+| 73 days with a stated team, not 66 unattributed | v1.0's Phase 0 was 10 days against 21 component-days of its own §8 scope, with no team size given. §11 now itemises component-days, assembly, QA and backend per phase and divides by two front-end engineers |
 | Mirror labels into email templates, mobile strings and `workflow_tree.py` | `proposal-progressive.json`'s risk register; otherwise the redesign creates a second vocabulary split. `workflow_tree.py:40` renders "Maintenance Field Worker" inside the tree this plan mounts |
 | Preserve `?section=terrain` | `mobile/app/(tabs)/submissions/[id].tsx:5056` is the app's only link into the web 3D scene, served today by `SubmissionMeasurementContext.tsx:29-37` scrolling to `#terrain-3d-section` — an anchor §7.6 deletes with the canvas |
 | Status-chip tap-to-open on detail pages only | `proposal-progressive.json`, endorsed by `judge-new-user.json`. Restricted in v1.1 because §6.2 makes the whole list card one link, and a popover trigger nested inside a link is invalid and ambiguous to tap |
