@@ -553,7 +553,7 @@ export default function IncidentsTabScreen() {
   focusRefreshRef.current = { isDetailRoute, busy, canEditIncidentInForm, load };
 
   // When the incident detail screen regains focus (e.g. after performing office
-  // delegation / engineer assignment / submission / review / finalization /
+  // delegation / Staff assignment / submission / review / finalization /
   // resolution on another screen), refresh through the existing load() so the
   // embedded workflow tree is never stale. load() bumps workflowRefreshKey, which
   // the tree consumes as a silent refresh (no spinner flash). Guarded to avoid
@@ -1904,7 +1904,7 @@ export default function IncidentsTabScreen() {
                     </>
                   ) : null}
                   {/* Routing v2: the office chief routes on the assessment (hand off to a
-                      branch chief, or assign a senior specialist), never on the incident.
+                      branch chief, or assign a senior engineer), never on the incident.
                       The legacy incident-stage endpoints now return 410. */}
                   {isAdmin && item.current_stage === "ENGINEER_ASSIGNED" ? (
                     <>
@@ -2063,7 +2063,7 @@ export default function IncidentsTabScreen() {
                       Selected Case Timeline: {formatLocationDisplayName(reviewTimeline.location, `Location #${reviewTimeline.location.id}`)}
                     </Text>
                     <Text style={{ color: palette.muted }}>
-                      {reviewTimeline.incident_count} incidents, {reviewTimeline.submission_count} engineer forms
+                      {reviewTimeline.incident_count} incidents, {reviewTimeline.submission_count} technical forms
                     </Text>
                     {reviewTimeline.incidents.slice(0, 3).map((entry) => (
                       <View key={`inc-${entry.id}`} style={styles.timelineRow}>

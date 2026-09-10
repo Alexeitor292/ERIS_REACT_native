@@ -5,7 +5,7 @@
 > below is the legacy *implementation* of the Assessment technical form and is
 > kept for backward compatibility. The office chief now has exactly **two
 > mutually exclusive routing choices** — hand off to a branch chief, or assign a
-> **GeoTech senior specialist** directly — **review authority follows the
+> **GeoTech senior engineer** directly — **review authority follows the
 > assessment's routing path**, and **approval is terminal** (there is no
 > sign-off). For the current workflow, role/permission matrix, District→GeoTech
 > Office routing, and notifications, see
@@ -65,8 +65,8 @@ Lifecycle (implemented endpoints):
      (`routing_path='BRANCH'`, incident → `BRANCH_CHIEF_REVIEW`), then
      `POST /assessments/{id}/assign-engineer` by **that named branch chief**
      (incident → `ENGINEER_ASSIGNED`); or
-   - `POST /assessments/{id}/assign-specialist` — assign a GeoTech senior
-     specialist directly (`routing_path='SENIOR_SPECIALIST'`, incident →
+   - `POST /assessments/{id}/assign-senior-engineer` — assign a GeoTech senior
+     engineer directly (`routing_path='SENIOR_ENGINEER'`, incident →
      `ENGINEER_ASSIGNED`, reusing the `ENGINEER` assignment stage).
 7. The assignee fills and sends the technical form:
    `POST /assessments/{id}/submit`.
@@ -77,7 +77,7 @@ Lifecycle (implemented endpoints):
 
 **Retired (`410 Gone`):** `POST /incidents/{id}/office-chief/assign-branch` and
 `POST /incidents/{id}/branch-chief/assign-engineer`. They moved incident stages
-and created engineer assignments without touching `assessments.state` or
+and created `ENGINEER` assignments without touching `assessments.state` or
 `routing_path`. `GET /incidents/{id}/office-chief/branch-options` stays live.
 
 Supporting behavior:
@@ -114,9 +114,9 @@ Requested flow for implementation:
 7. Office Chief is notified (in-app today; email infrastructure now exists and is
    used for the approval notice).
 8. Office Chief routes: hands off to a Branch Chief **or** assigns a GeoTech
-   Senior Specialist. There is no third option — the office chief can no longer
-   name the assessment's author.
-9. Branch Chief assigns the Engineer (branch route only).
+   Senior Engineer. There is no third option — the office chief cannot assign
+   Staff directly.
+9. Branch Chief assigns a Staff member (branch route only).
 10. Coordinator is notified when the assignment is made, and again **in-app and
     by email** when the assessment is approved.
 11. Mobile surface remains role-minimal, showing only the views needed for each role.
@@ -147,8 +147,8 @@ When `scope=mobile`:
 - Maintenance reporter sees own incidents.
 - Coordinator sees district-scoped incidents.
 - Office chief sees office-scoped incidents after coordinator review.
-- Branch chief sees office incidents at branch/engineer/resolved stages.
-- Engineer **and senior specialist** see only incidents assigned to them — both
+- Branch chief sees office incidents at branch/`ENGINEER_ASSIGNED`/resolved stages.
+- Staff **and senior engineers** see only incidents assigned to them — both
   hold the same active `ENGINEER`-stage assignment row.
 
 ### Target Role Visibility (minimum-screen approach)

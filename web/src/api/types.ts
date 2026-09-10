@@ -1,6 +1,6 @@
 /**
  * Account profile metadata (`users.metadata_json`). `office_code` is
- * load-bearing in routing v2: a chief or senior specialist without one can
+ * load-bearing in routing v2: a chief or senior engineer without one can
  * neither be assigned nor review.
  */
 export type UserMetadata = {
@@ -226,7 +226,7 @@ export type SubmissionWorkflowContext = {
   assessment_id: number | null;
   assessment_state: string | null;
   /** Absent on a legacy form with no linked assessment — copy must stay neutral then. */
-  assessment_routing_path?: "BRANCH" | "SENIOR_SPECIALIST" | null;
+  assessment_routing_path?: "BRANCH" | "SENIOR_ENGINEER" | null;
   /** Path-based review authority, decided server-side. */
   can_review?: boolean;
 };

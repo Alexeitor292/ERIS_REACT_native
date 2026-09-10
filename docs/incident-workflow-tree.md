@@ -22,7 +22,7 @@ and reuses its records:
 * `assessment_events` (who performed each transition + when + notes)
 
 **Routing v2 shapes the tree.** The office chief's step is a *routing* step with
-two outcomes; `BRANCH_ASSIGNMENT` is `SKIPPED` on the senior-specialist route;
+two outcomes; `BRANCH_ASSIGNMENT` is `SKIPPED` on the senior engineer route;
 the assignee node is labelled and role-coded per route; the review node is owned
 by the route's reviewer; and `FINALIZATION` is emitted **only** for legacy rows
 that were signed off before routing v2.
@@ -42,8 +42,8 @@ GET /incidents/{incident_id}/workflow-tree
 Access (server-enforced, broad visibility / narrow authority):
 
 * Maintenance field workers: only for their **own** reports (403 otherwise).
-* Non-maintenance operational users (coordinator, office/branch chief, engineer,
-  senior specialist, legacy reviewer): any incident.
+* Non-maintenance operational users (coordinator, office/branch chief, Staff,
+  senior engineer, legacy reviewer): any incident.
 * Admin: all.
 
 Response:
@@ -63,7 +63,7 @@ Response:
   },
   "assessment": {                          // null until an Assessment exists
     "id": 9, "state": "PENDING_ENGINEER_ASSIGNMENT",
-    "routing_path": "BRANCH",              // null | "BRANCH" | "SENIOR_SPECIALIST"
+    "routing_path": "BRANCH",              // null | "BRANCH" | "SENIOR_ENGINEER"
     "office_code": "WEST",
     // holds the assignee on BOTH routes; routing_path says which kind of person
     "assigned_engineer_user_id": null, "branch_chief_user_id": 45
@@ -96,15 +96,15 @@ Response:
 | `REPORTER_SUBMISSION` | `MAINTENANCE_FIELD_WORKER` | Incident report submitted |
 | `COORDINATOR_TRIAGE` | `MAINTENANCE_COORDINATOR` | Coordinator triage |
 | `OFFICE_DELEGATION` | `GEOTECH_OFFICE_CHIEF` | Office chief routing |
-| `BRANCH_ASSIGNMENT` | `GEOTECH_BRANCH_CHIEF` | Branch chief engineer assignment |
-| `ENGINEER_ASSESSMENT` | `GEOTECH_ENGINEER` **or** `GEOTECH_SENIOR_SPECIALIST` | Engineer / Senior specialist assessment work |
+| `BRANCH_ASSIGNMENT` | `GEOTECH_BRANCH_CHIEF` | Branch chief Staff assignment |
+| `ENGINEER_ASSESSMENT` | `GEOTECH_ENGINEER` **or** `GEOTECH_SENIOR_ENGINEER` | Staff / Senior engineer assessment work |
 | `ASSESSMENT_REVIEW` | `GEOTECH_BRANCH_CHIEF` **or** `GEOTECH_OFFICE_CHIEF` (`ASSESSMENT_REVIEWER` while unrouted) | Assessment review |
 | `FINALIZATION` | `GEOTECH_OFFICE_CHIEF` | Assessment signed off (legacy) — **emitted only when `finalized_at` is set** |
 | `RESOLUTION` | (system / owner) | Incident resolution |
 
-Role codes render through `_ROLE_TITLES`, which gained
-`GEOTECH_SENIOR_SPECIALIST: "GeoTech Senior Specialist"` and replaced
-`REVIEWER_APPROVER: "Assigned Reviewer / Approver"` with the pseudo-role
+Role codes render through `_ROLE_TITLES`, which labels `GEOTECH_ENGINEER` as
+`"GeoTech Staff"`, gained `GEOTECH_SENIOR_ENGINEER: "GeoTech Senior Engineer"` and
+replaced `REVIEWER_APPROVER: "Assigned Reviewer / Approver"` with the pseudo-role
 `ASSESSMENT_REVIEWER: "The assessment's reviewer"` — used only where no route has
 been chosen yet and there is nobody to name.
 
@@ -140,21 +140,21 @@ comes from the live assignment.
 * **OFFICE_DELEGATION** (the *routing* step, two outcomes)
   * `COMPLETED` once `office_delegated_at` is set — the branch route (actor =
     `OFFICE_DELEGATED` event office chief).
-  * `COMPLETED` with label "Assigned to a senior specialist" when
-    `routing_path='SENIOR_SPECIALIST'` — that route has no hand-off, so
-    `office_delegated_at` stays NULL and the `SPECIALIST_ASSIGNED` event is what
-    completed the step (`completed_at` = `engineer_assigned_at`).
+  * `COMPLETED` with label "Assigned to a senior engineer" when
+    `routing_path='SENIOR_ENGINEER'` — that route has no hand-off, so
+    `office_delegated_at` stays NULL and the `SENIOR_ENGINEER_ASSIGNED` event
+    is what completed the step (`completed_at` = `engineer_assigned_at`).
   * else `CURRENT`/`UNASSIGNED` while state is `PENDING_OFFICE_DELEGATION`, with
     the note *"Office chief must route this assessment: hand it off to a branch
-    chief, or assign a senior specialist."*; else `PENDING`.
+    chief, or assign a senior engineer."*; else `PENDING`.
 * **BRANCH_ASSIGNMENT** — `COMPLETED` once `engineer_assigned_at` is set (actor =
-  `ENGINEER_ASSIGNED` event branch chief); **`SKIPPED` on the senior-specialist
+  `ENGINEER_ASSIGNED` event branch chief); **`SKIPPED` on the senior engineer
   route** ("the office chief assigned the assessment directly"), so it never
   reads as an open bottleneck; else `CURRENT`/`UNASSIGNED` while state
   is `PENDING_ENGINEER_ASSIGNMENT` (assigned person = the delegated branch chief).
 * **ENGINEER_ASSESSMENT** — the assignee's node. Its role code and wording follow
-  the route: `GEOTECH_ENGINEER`/"Engineer" on `BRANCH`,
-  `GEOTECH_SENIOR_SPECIALIST`/"Senior specialist" on `SENIOR_SPECIALIST`. Both
+  the route: `GEOTECH_ENGINEER`/"Staff" on `BRANCH`,
+  `GEOTECH_SENIOR_ENGINEER`/"Senior engineer" on `SENIOR_ENGINEER`. Both
   live in `assigned_engineer_user_id`.
   * state `REVISION_REQUESTED` → `REVISION_REQUESTED` (the assignee must revise).
   * state `SUBMITTED/APPROVED/FINALIZED` → `COMPLETED`; actor = `SUBMITTED` event
@@ -163,11 +163,11 @@ comes from the live assignment.
   * state `DRAFT` → `CURRENT` (assignee working).
 * **ASSESSMENT_REVIEW** — owned by **the route's reviewer**, never by an
   assignment row: `GEOTECH_BRANCH_CHIEF` = `branch_chief_user_id` on the branch
-  route, `GEOTECH_OFFICE_CHIEF` = the assessment's office chief on the specialist
-  route, `ASSESSMENT_REVIEWER` (nobody) while `routing_path IS NULL`.
+  route, `GEOTECH_OFFICE_CHIEF` = the assessment's office chief on the senior
+  engineer route, `ASSESSMENT_REVIEWER` (nobody) while `routing_path IS NULL`.
   "Awaiting reviewer assignment" is no longer a state the workflow can be in.
   * `APPROVED/FINALIZED` → `COMPLETED`; actor = `APPROVED` event reviewer.
-  * `SUBMITTED` → `CURRENT` on the specialist route (the **office** owns the
+  * `SUBMITTED` → `CURRENT` on the senior engineer route (the **office** owns the
     step, so it is never unassigned); `CURRENT` on the branch route when a branch
     chief is named, else `UNASSIGNED`; `UNASSIGNED` while unrouted.
   * `REVISION_REQUESTED` → `PENDING` (paused; **never** `COMPLETED` while a
@@ -182,7 +182,7 @@ comes from the live assignment.
   **"Assessment approved & incident resolved"** / "Assessment finalized &
   incident resolved" (legacy) / "Incident resolved"); `CURRENT` when the
   assessment is **`APPROVED` (or legacy `FINALIZED`)** but the incident is not yet
-  resolved, owned by the **assignee** — engineer *or* senior specialist — with
+  resolved, owned by the **assignee** — Staff member *or* senior engineer — with
   the note "Assessment approved; awaiting incident resolution."; else `PENDING`.
   Keying this on `FINALIZED` alone would leave `RESOLUTION` permanently `PENDING`
   and unowned for every v2 assessment, so nobody would ever be told to close the

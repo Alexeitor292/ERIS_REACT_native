@@ -12,7 +12,7 @@ departed or deactivated branch chief must never strand a SUBMITTED assessment
 with no supported repair.
 
 Requires a live MariaDB at Alembic head with database/init/020_seed.sql applied
-(routing v2 adds seniorspecialist@local). Run with: pytest -m db
+(routing v2 adds seniorengineer@local). Run with: pytest -m db
 """
 
 import uuid
@@ -48,10 +48,10 @@ def _me_id(client_db, token: str) -> int:
 
 
 @pytest.fixture(scope="module")
-def tokens(client_db, admin_token, specialist_token):
+def tokens(client_db, admin_token, senior_engineer_token):
     return {
         "admin": admin_token,
-        "specialist": specialist_token,
+        "senior_engineer": senior_engineer_token,
         "officechief": _login(client_db, "officechief@local"),
         "branchchief": _login(client_db, "branchchief@local"),
         "engineer": _login(client_db, "engineer@local"),
@@ -184,11 +184,11 @@ def _branch_submitted(client_db, tokens, ids) -> dict:
     return case
 
 
-def _specialist_routed(client_db, tokens, ids) -> dict:
+def _senior_engineer_routed(client_db, tokens, ids) -> dict:
     case = _triaged(client_db, tokens)
     resp = client_db.post(
-        f"/assessments/{case['assessment_id']}/assign-specialist",
-        json={"specialist_user_id": ids["specialist"]},
+        f"/assessments/{case['assessment_id']}/assign-senior-engineer",
+        json={"senior_engineer_user_id": ids["senior_engineer"]},
         headers=_auth(tokens["officechief"]),
     )
     assert resp.status_code == 200, resp.text
@@ -196,10 +196,10 @@ def _specialist_routed(client_db, tokens, ids) -> dict:
     return case
 
 
-def _specialist_submitted(client_db, tokens, ids) -> dict:
-    case = _specialist_routed(client_db, tokens, ids)
+def _senior_engineer_submitted(client_db, tokens, ids) -> dict:
+    case = _senior_engineer_routed(client_db, tokens, ids)
     resp = client_db.post(
-        f"/assessments/{case['assessment_id']}/submit", json={}, headers=_auth(tokens["specialist"])
+        f"/assessments/{case['assessment_id']}/submit", json={}, headers=_auth(tokens["senior_engineer"])
     )
     assert resp.status_code == 200, resp.text
     return case
@@ -322,10 +322,10 @@ class TestReviewAuthority:
         row = next(a for a in consulted.json()["assignments"] if a["assignment_role"] == "CONSULTED")
         assert row["is_authority"] is False
 
-    def test_office_chief_without_an_office_cannot_review_a_specialist_route(
+    def test_office_chief_without_an_office_cannot_review_a_senior_engineer_route(
         self, client_db, tokens, ids, extra_users
     ):
-        case = _specialist_submitted(client_db, tokens, ids)
+        case = _senior_engineer_submitted(client_db, tokens, ids)
         resp = client_db.post(
             f"/assessments/{case['assessment_id']}/review",
             json={"action": "APPROVE"},
@@ -340,7 +340,7 @@ class TestReviewAuthority:
         # The None == None case §4.1's falsy guard closes. An office-less
         # assessment cannot be produced through the API (triage refuses a
         # district with no office), so the row is made by hand.
-        case = _specialist_submitted(client_db, tokens, ids)
+        case = _senior_engineer_submitted(client_db, tokens, ids)
         aid = case["assessment_id"]
         _sql("UPDATE assessments SET office_code = NULL WHERE id = :aid", {"aid": aid})
 
@@ -392,45 +392,45 @@ class TestRouteExclusivity:
             headers=_auth(tokens["officechief"]),
         )
         assert resp.status_code == 400, resp.text
-        assert "no longer assigns the person who fills out the assessment directly" in resp.json()["detail"]
+        assert "cannot assign Staff directly" in resp.json()["detail"]
         # Rejected, not ignored: nothing was written.
         row = _assessment_row(case["assessment_id"])
         assert row["routing_path"] is None
         assert row["state"] == "PENDING_OFFICE_DELEGATION"
 
-    def test_assign_specialist_after_the_branch_route_is_409(self, client_db, tokens, ids):
+    def test_assign_senior_engineer_after_the_branch_route_is_409(self, client_db, tokens, ids):
         case = _branch_routed(client_db, tokens, ids)
         resp = client_db.post(
-            f"/assessments/{case['assessment_id']}/assign-specialist",
-            json={"specialist_user_id": ids["specialist"]},
+            f"/assessments/{case['assessment_id']}/assign-senior-engineer",
+            json={"senior_engineer_user_id": ids["senior_engineer"]},
             headers=_auth(tokens["officechief"]),
         )
         assert resp.status_code == 409, resp.text
         assert "handed off to a branch chief" in resp.json()["detail"]
         assert _assessment_row(case["assessment_id"])["routing_path"] == "BRANCH"
 
-    def test_delegate_branch_after_the_specialist_route_is_409(self, client_db, tokens, ids):
-        case = _specialist_routed(client_db, tokens, ids)
+    def test_delegate_branch_after_the_senior_engineer_route_is_409(self, client_db, tokens, ids):
+        case = _senior_engineer_routed(client_db, tokens, ids)
         resp = client_db.post(
             f"/assessments/{case['assessment_id']}/delegate-branch",
             json={"branch_chief_user_id": ids["branchchief"]},
             headers=_auth(tokens["officechief"]),
         )
         assert resp.status_code == 409, resp.text
-        assert "assigned to a senior specialist" in resp.json()["detail"]
-        assert _assessment_row(case["assessment_id"])["routing_path"] == "SENIOR_SPECIALIST"
+        assert "assigned to a senior engineer" in resp.json()["detail"]
+        assert _assessment_row(case["assessment_id"])["routing_path"] == "SENIOR_ENGINEER"
 
-    def test_assign_engineer_on_a_specialist_route_is_409(self, client_db, tokens, ids):
-        case = _specialist_routed(client_db, tokens, ids)
+    def test_assign_engineer_on_a_senior_engineer_route_is_409(self, client_db, tokens, ids):
+        case = _senior_engineer_routed(client_db, tokens, ids)
         resp = client_db.post(
             f"/assessments/{case['assessment_id']}/assign-engineer",
             json={"engineer_user_id": ids["engineer"]},
             headers=_auth(tokens["branchchief"]),
         )
         assert resp.status_code == 409, resp.text
-        assert "senior specialist route" in resp.json()["detail"]
-        # The specialist is still the assignee.
-        assert _assessment_row(case["assessment_id"])["assigned_engineer_user_id"] == ids["specialist"]
+        assert "senior engineer route" in resp.json()["detail"]
+        # The senior engineer is still the assignee.
+        assert _assessment_row(case["assessment_id"])["assigned_engineer_user_id"] == ids["senior_engineer"]
 
     def test_assign_engineer_before_any_route_is_409(self, client_db, tokens, ids):
         case = _triaged(client_db, tokens)
@@ -487,15 +487,15 @@ class TestRetiredEndpoints:
         # Nothing was routed by the refusals.
         assert _assessment_row(case["assessment_id"])["routing_path"] is None
 
-    def test_admin_recovery_assign_refuses_a_specialist_route(self, client_db, tokens, ids):
-        case = _specialist_routed(client_db, tokens, ids)
+    def test_admin_recovery_assign_refuses_a_senior_engineer_route(self, client_db, tokens, ids):
+        case = _senior_engineer_routed(client_db, tokens, ids)
         resp = client_db.post(
             f"/incidents/{case['incident_id']}/assign",
             json={"assignee_user_id": ids["engineer"]},
             headers=_auth(tokens["admin"]),
         )
         assert resp.status_code == 409, resp.text
-        assert _assessment_row(case["assessment_id"])["assigned_engineer_user_id"] == ids["specialist"]
+        assert _assessment_row(case["assessment_id"])["assigned_engineer_user_id"] == ids["senior_engineer"]
 
     def test_reviewer_kind_on_the_assignment_directory_is_400(self, client_db, tokens, ids):
         case = _branch_routed(client_db, tokens, ids)

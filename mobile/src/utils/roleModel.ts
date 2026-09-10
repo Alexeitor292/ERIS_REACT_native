@@ -9,11 +9,12 @@ const OPERATIONAL = [
   "OFFICE_CHIEF",
   "GEOTECH_BRANCH_CHIEF",
   "BRANCH_CHIEF",
+  // Labelled "Staff": the codes are deployed and stored, the name is not.
   "GEOTECH_ENGINEER",
   "FIELD_WORKER",
-  // New in routing v2, no legacy alias: the senior specialist fills assessments
+  // New in routing v2, no legacy alias: the senior engineer fills assessments
   // the office chief assigns directly. Operational, never maintenance-only.
-  "GEOTECH_SENIOR_SPECIALIST",
+  "GEOTECH_SENIOR_ENGINEER",
   "REVIEWER",
   "ADMIN",
 ];
@@ -44,6 +45,7 @@ export function canDelegateBranch(roles: string[] | undefined): boolean {
   return isAdmin(roles) || any(roles, ["GEOTECH_OFFICE_CHIEF", "OFFICE_CHIEF"]);
 }
 
+/** Branch chief: assign a Staff member (the deployed assign-engineer call). */
 export function canAssignEngineer(roles: string[] | undefined): boolean {
   return isAdmin(roles) || any(roles, ["GEOTECH_BRANCH_CHIEF", "BRANCH_CHIEF"]);
 }
@@ -51,7 +53,7 @@ export function canAssignEngineer(roles: string[] | undefined): boolean {
 export function assessmentStateLabel(state: string): string {
   const map: Record<string, string> = {
     PENDING_OFFICE_DELEGATION: "Pending office delegation",
-    PENDING_ENGINEER_ASSIGNMENT: "Pending engineer assignment",
+    PENDING_ENGINEER_ASSIGNMENT: "Pending Staff assignment",
     DRAFT: "Draft",
     SUBMITTED: "Submitted for review",
     REVISION_REQUESTED: "Revision requested",

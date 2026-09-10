@@ -3,41 +3,17 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../../api/client";
 import type { AdminUser } from "../../../api/types";
 import AppShell from "../../../ui/AppShell";
+import { roleLabel } from "../../../utils/roleModel";
 import PasswordResetDialog from "./PasswordResetDialog";
 
-/**
- * Canonical role labels, written out rather than title-cased: the title-caser
- * turns GEOTECH_* into "Geotech", which is not how the roles are named.
- */
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: "Administrator",
-  MAINTENANCE_FIELD_WORKER: "Maintenance Field Worker",
-  MAINTENANCE_COORDINATOR: "Maintenance Coordinator",
-  GEOTECH_OFFICE_CHIEF: "GeoTech Office Chief",
-  GEOTECH_BRANCH_CHIEF: "GeoTech Branch Chief",
-  GEOTECH_ENGINEER: "GeoTech Engineer",
-  GEOTECH_SENIOR_SPECIALIST: "GeoTech Senior Specialist",
-  // Legacy aliases and the retired reviewer role, kept for existing accounts.
-  MAINTENANCE: "Maintenance Field Worker (legacy)",
-  MAINT_COORDINATOR: "Maintenance Coordinator (legacy)",
-  OFFICE_CHIEF: "GeoTech Office Chief (legacy)",
-  BRANCH_CHIEF: "GeoTech Branch Chief (legacy)",
-  FIELD_WORKER: "GeoTech Engineer (legacy)",
-  REVIEWER: "Reviewer (legacy — no review authority)",
-};
-
-function roleLabel(role: string) {
-  return ROLE_LABELS[role] ?? role.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter: string) => letter.toUpperCase());
-}
-
-/** Offices a chief or senior specialist can be scoped to (users.metadata_json.office_code). */
+/** Offices a chief or senior engineer can be scoped to (users.metadata_json.office_code). */
 const OFFICE_OPTIONS: Array<{ code: string; label: string }> = [
   { code: "NORTH", label: "North GeoTech Office" },
   { code: "WEST", label: "West GeoTech Office" },
   { code: "SOUTH", label: "South GeoTech Office" },
 ];
 
-const OFFICE_HELPER = "Chiefs and senior specialists are scoped to an office; without one they cannot be assigned or review.";
+const OFFICE_HELPER = "Chiefs and senior engineers are scoped to an office; without one they cannot be assigned or review.";
 
 function normalizeOffice(value: string) {
   const trimmed = value.trim();
@@ -173,7 +149,7 @@ export default function AdminUsersOperationsPage() {
           full_name: fullName.trim(),
           password,
           roles: newRoles,
-          // Office scoping is load-bearing: a chief or senior specialist with no
+          // Office scoping is load-bearing: a chief or senior engineer with no
           // office_code can neither be assigned nor review.
           metadata: office ? { office_code: office } : undefined,
         }),

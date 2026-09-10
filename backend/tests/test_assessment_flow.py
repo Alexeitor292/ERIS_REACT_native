@@ -1,18 +1,20 @@
 """DB-backed integration tests for Assessment Routing v2.
 
 Requires a live MariaDB stamped at Alembic head seeded with the standard dev
-users from database/init/020_seed.sql (routing v2 adds seniorspecialist@local
+users from database/init/020_seed.sql (routing v2 adds seniorengineer@local
 and coordinator04@local — re-run the seed on an already-initialised database).
 Run with: pytest -m db
 
 The office chief has exactly two mutually exclusive choices, and each one is a
 full lifecycle here:
 
-  TestBranchRoute      triage -> delegate-branch (no engineer_user_id) ->
-                       assign-engineer as the NAMED branch chief -> submit as
-                       the engineer -> review APPROVE as that branch chief.
-  TestSpecialistRoute  triage -> assign-specialist -> submit as the specialist
-                       -> review APPROVE as the office chief.
+  TestBranchRoute          triage -> delegate-branch (no engineer_user_id) ->
+                           assign-engineer as the NAMED branch chief -> submit
+                           as the Staff member -> review APPROVE as that
+                           branch chief.
+  TestSeniorEngineerRoute  triage -> assign-senior-engineer -> submit as the
+                           senior engineer -> review APPROVE as the office
+                           chief.
 
 APPROVED is terminal on both: there is no sign-off step, and no reviewer is
 ever appointed. The negative matrix lives in test_routing_v2_authority.py.
@@ -23,8 +25,8 @@ Maps to the required test matrix (docs/assessment-routing-authority-model.md):
   3  coordinator can triage + route
   4  ASSESSMENT_REQUIRED creates/activates the Assessment
   5  routing selects a GeoTech office from district
-  6  office chief hands off to a branch chief, or assigns a senior specialist
-  7  branch chief assigns engineer
+  6  office chief hands off to a branch chief, or assigns a senior engineer
+  7  branch chief assigns a Staff member
   8  the assignee can edit only their own assessment's technical form
   9  review authority follows the assessment's routing path
  10  unassigned users cannot approve/request revisions
@@ -78,7 +80,7 @@ def tokens(client_db):
         "engineer": _login(client_db, "engineer@local"),
         # Kept: REVIEWER confers no authority in v2 but keeps its broad READ.
         "reviewer": _login(client_db, "reviewer@local"),
-        "specialist": _login(client_db, "seniorspecialist@local"),
+        "senior_engineer": _login(client_db, "seniorengineer@local"),
     }
 
 
@@ -214,7 +216,7 @@ def engineer_assigned(client_db, tokens, ids, delegated):
     assert body["assigned_engineer_user_id"] == ids["engineer"]
     # Route-neutral aliases over the same column (design §3.2).
     assert body["assigned_user_id"] == ids["engineer"]
-    assert body["assigned_user_kind"] == "ENGINEER"
+    assert body["assigned_user_kind"] == "STAFF"
     assert body["submission_id"] is not None
     return delegated
 
@@ -369,13 +371,13 @@ class TestBranchRoute:
 
 
 # ---------------------------------------------------------------------------
-# The SENIOR SPECIALIST route, end to end (the office chief's other choice)
+# The SENIOR ENGINEER route, end to end (the office chief's other choice)
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
-def specialist_assigned(client_db, tokens, ids):
-    """Triage a fresh district-04 incident and assign a senior specialist
+def senior_engineer_assigned(client_db, tokens, ids):
+    """Triage a fresh district-04 incident and assign a senior engineer
     directly — no branch chief is ever involved."""
     incident_id = _create_incident(client_db, tokens["admin"])
     triage = client_db.post(
@@ -386,24 +388,24 @@ def specialist_assigned(client_db, tokens, ids):
     assert triage.status_code == 200, triage.text
     aid = int(triage.json()["assessment"]["id"])
 
-    options = client_db.get(f"/assessments/{aid}/specialist-options", headers=_auth(tokens["officechief"]))
+    options = client_db.get(f"/assessments/{aid}/senior-engineer-options", headers=_auth(tokens["officechief"]))
     assert options.status_code == 200, options.text
     assert options.json()["office_code"] == "WEST"
-    assert ids["specialist"] in {int(item["id"]) for item in options.json()["items"]}
+    assert ids["senior_engineer"] in {int(item["id"]) for item in options.json()["items"]}
 
     resp = client_db.post(
-        f"/assessments/{aid}/assign-specialist",
-        json={"specialist_user_id": ids["specialist"], "notes": "Direct assignment"},
+        f"/assessments/{aid}/assign-senior-engineer",
+        json={"senior_engineer_user_id": ids["senior_engineer"], "notes": "Direct assignment"},
         headers=_auth(tokens["officechief"]),
     )
-    assert resp.status_code == 200, f"assign specialist failed: {resp.status_code} {resp.text}"
+    assert resp.status_code == 200, f"assign senior engineer failed: {resp.status_code} {resp.text}"
     body = resp.json()["assessment"]
     assert body["state"] == "DRAFT"
-    assert body["routing_path"] == "SENIOR_SPECIALIST"
+    assert body["routing_path"] == "SENIOR_ENGINEER"
     assert body["branch_chief_user_id"] is None
-    assert body["assigned_engineer_user_id"] == ids["specialist"]
-    assert body["assigned_user_id"] == ids["specialist"]
-    assert body["assigned_user_kind"] == "SENIOR_SPECIALIST"
+    assert body["assigned_engineer_user_id"] == ids["senior_engineer"]
+    assert body["assigned_user_id"] == ids["senior_engineer"]
+    assert body["assigned_user_kind"] == "SENIOR_ENGINEER"
     assert body["submission_id"] is not None
     assert resp.json()["submission_id"] == body["submission_id"]
     # The office owns the review, not one named chief.
@@ -411,54 +413,54 @@ def specialist_assigned(client_db, tokens, ids):
     return {"incident_id": incident_id, "assessment_id": aid}
 
 
-class TestSpecialistRoute:
-    def test_specialist_can_read_the_incident_behind_their_assessment(
-        self, client_db, tokens, specialist_assigned
+class TestSeniorEngineerRoute:
+    def test_senior_engineer_can_read_the_incident_behind_their_assessment(
+        self, client_db, tokens, senior_engineer_assigned
     ):
         # The incident endpoints carry literal role lists rather than following
-        # OPERATIONAL_ROLES, so a specialist-only account would be 403'd from
+        # OPERATIONAL_ROLES, so a senior-engineer-only account would be 403'd from
         # the report behind their own assessment unless the new role was added
         # to each of them by hand.
-        incident_id = specialist_assigned["incident_id"]
-        detail = client_db.get(f"/incidents/{incident_id}", headers=_auth(tokens["specialist"]))
+        incident_id = senior_engineer_assigned["incident_id"]
+        detail = client_db.get(f"/incidents/{incident_id}", headers=_auth(tokens["senior_engineer"]))
         assert detail.status_code == 200, detail.text
-        listed = client_db.get("/incidents", headers=_auth(tokens["specialist"]))
+        listed = client_db.get("/incidents", headers=_auth(tokens["senior_engineer"]))
         assert listed.status_code == 200, listed.text
         assert incident_id in {item["id"] for item in listed.json()["items"]}
-        mission = client_db.get("/mission-center/incidents", headers=_auth(tokens["specialist"]))
+        mission = client_db.get("/mission-center/incidents", headers=_auth(tokens["senior_engineer"]))
         assert mission.status_code == 200, mission.text
-        tree = client_db.get(f"/incidents/{incident_id}/workflow-tree", headers=_auth(tokens["specialist"]))
+        tree = client_db.get(f"/incidents/{incident_id}/workflow-tree", headers=_auth(tokens["senior_engineer"]))
         assert tree.status_code == 200, tree.text
-        # ...and the map/3D config, without which the specialist cannot work.
-        runtime = client_db.get("/arcgis/runtime-config", headers=_auth(tokens["specialist"]))
+        # ...and the map/3D config, without which the senior engineer cannot work.
+        runtime = client_db.get("/arcgis/runtime-config", headers=_auth(tokens["senior_engineer"]))
         assert runtime.status_code == 200, runtime.text
 
-    def test_specialist_can_edit_the_technical_form(self, client_db, tokens, specialist_assigned):
-        aid = specialist_assigned["assessment_id"]
-        detail = client_db.get(f"/assessments/{aid}", headers=_auth(tokens["specialist"]))
+    def test_senior_engineer_can_edit_the_technical_form(self, client_db, tokens, senior_engineer_assigned):
+        aid = senior_engineer_assigned["assessment_id"]
+        detail = client_db.get(f"/assessments/{aid}", headers=_auth(tokens["senior_engineer"]))
         assert detail.status_code == 200, detail.text
         submission_id = detail.json()["assessment"]["submission_id"]
         patch = client_db.patch(
             f"/submissions/{submission_id}/gisa",
-            json={"geotechnical_assessment_notes": "Specialist field assessment"},
-            headers=_auth(tokens["specialist"]),
+            json={"geotechnical_assessment_notes": "Senior Engineer field assessment"},
+            headers=_auth(tokens["senior_engineer"]),
         )
-        assert patch.status_code == 200, f"specialist edit failed: {patch.status_code} {patch.text}"
-        # The specialist's assignment row carries the 17-character role name.
+        assert patch.status_code == 200, f"senior engineer edit failed: {patch.status_code} {patch.text}"
+        # The senior engineer's assignment row carries the route's own role name.
         roles = {a["assignment_role"] for a in detail.json()["assignments"]}
-        assert "SENIOR_SPECIALIST" in roles
+        assert "SENIOR_ENGINEER" in roles
 
-    def test_specialist_sees_the_work_in_their_own_queue(self, client_db, tokens, specialist_assigned):
-        resp = client_db.get("/assessments?queue=assignee", headers=_auth(tokens["specialist"]))
+    def test_senior_engineer_sees_the_work_in_their_own_queue(self, client_db, tokens, senior_engineer_assigned):
+        resp = client_db.get("/assessments?queue=assignee", headers=_auth(tokens["senior_engineer"]))
         assert resp.status_code == 200
-        assert specialist_assigned["assessment_id"] in {a["id"] for a in resp.json()["items"]}
+        assert senior_engineer_assigned["assessment_id"] in {a["id"] for a in resp.json()["items"]}
 
-    def test_specialist_submits_and_office_chief_approves(self, client_db, tokens, ids, specialist_assigned):
-        aid = specialist_assigned["assessment_id"]
+    def test_senior_engineer_submits_and_office_chief_approves(self, client_db, tokens, ids, senior_engineer_assigned):
+        aid = senior_engineer_assigned["assessment_id"]
         submitted = client_db.post(
             f"/assessments/{aid}/submit",
-            json={"notes": "specialist assessment ready"},
-            headers=_auth(tokens["specialist"]),
+            json={"notes": "senior engineer assessment ready"},
+            headers=_auth(tokens["senior_engineer"]),
         )
         assert submitted.status_code == 200, submitted.text
         assert submitted.json()["assessment"]["state"] == "SUBMITTED"
@@ -482,29 +484,29 @@ class TestSpecialistRoute:
         )
         assert approved.status_code == 200, approved.text
         assert approved.json()["state"] == "APPROVED"
-        assert approved.json()["assessment"]["routing_path"] == "SENIOR_SPECIALIST"
+        assert approved.json()["assessment"]["routing_path"] == "SENIOR_ENGINEER"
         assert approved.json()["assessment"]["finalized_at"] is None
-        assert approved.json()["notified"]["author"] == ids["specialist"]
+        assert approved.json()["notified"]["author"] == ids["senior_engineer"]
 
         events = client_db.get(f"/assessments/{aid}", headers=_auth(tokens["admin"])).json()["events"]
         event_types = {e["event_type"] for e in events}
-        assert "SPECIALIST_ASSIGNED" in event_types
+        assert "SENIOR_ENGINEER_ASSIGNED" in event_types
         assert "OFFICE_DELEGATED" not in event_types
         assert "APPROVED" in event_types
 
-    def test_the_specialist_closes_the_incident_out(self, client_db, tokens, specialist_assigned):
+    def test_the_senior_engineer_closes_the_incident_out(self, client_db, tokens, senior_engineer_assigned):
         # Approval ends the ASSESSMENT; the incident stays open until someone
-        # resolves it, and on this route that someone is the specialist — who
+        # resolves it, and on this route that someone is the senior engineer — who
         # holds the incident's ENGINEER-stage assignment. Runs after the approve
         # test (definition order shares the module state).
         resolved = client_db.post(
-            f"/incidents/{specialist_assigned['incident_id']}/resolve",
+            f"/incidents/{senior_engineer_assigned['incident_id']}/resolve",
             json={"comment": "Mitigation complete"},
-            headers=_auth(tokens["specialist"]),
+            headers=_auth(tokens["senior_engineer"]),
         )
         assert resolved.status_code == 200, resolved.text
         incident = client_db.get(
-            f"/incidents/{specialist_assigned['incident_id']}", headers=_auth(tokens["admin"])
+            f"/incidents/{senior_engineer_assigned['incident_id']}", headers=_auth(tokens["admin"])
         )
         assert incident.json()["incident"]["status"] == "RESOLVED"
 

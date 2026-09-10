@@ -18,8 +18,8 @@ def is_reviewer(user: dict) -> bool:
     routing path (see routes/assessments._review_authority), and REVIEWER keeps
     only broad operational READ. Every read shortcut that used to call this now
     calls is_operational_user(), which already includes REVIEWER — so an office
-    chief reviewing on the specialist route has the same reach a legacy REVIEWER
-    has. New code must not call this function.
+    chief reviewing on the senior engineer route has the same reach a legacy
+    REVIEWER has. New code must not call this function.
     """
     return "REVIEWER" in user.get("roles", [])
 

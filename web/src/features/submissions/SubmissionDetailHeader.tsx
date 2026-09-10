@@ -96,7 +96,7 @@ export default function SubmissionDetailHeader({
    */
   const submittedHint = context?.assessment_routing_path === "BRANCH"
     ? "Awaiting branch chief review"
-    : context?.assessment_routing_path === "SENIOR_SPECIALIST"
+    : context?.assessment_routing_path === "SENIOR_ENGINEER"
       ? "Awaiting office chief review"
       : "Sent for review";
 

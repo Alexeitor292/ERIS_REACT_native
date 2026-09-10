@@ -20,7 +20,7 @@ _PAYLOAD = {
     "assessment_id": 12,
     "incident_id": 24,
     "incident_key": "INC-2026-0042",
-    "routing_path": "SENIOR_SPECIALIST",
+    "routing_path": "SENIOR_ENGINEER",
     "district": "07",
     "office_code": "SOUTH",
     "office_location": "South Office",

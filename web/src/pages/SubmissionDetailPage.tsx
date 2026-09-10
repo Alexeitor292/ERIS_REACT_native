@@ -162,7 +162,7 @@ export default function SubmissionDetailPage() {
   // Review authority follows the linked assessment's routing path, so it is
   // decided server-side and never re-derived from a role string here.
   const canReview = data?.submission.can_review === true || data?.context?.can_review === true;
-  // Authoring is the engineer's and the senior specialist's job, narrowed to
+  // Authoring is Staff's and the senior engineer's job, narrowed to
   // the people the server actually grants edit to (owner or editor grant).
   const canEdit = isAssessmentAuthor(me?.roles)
     && data?.submission.can_edit === true

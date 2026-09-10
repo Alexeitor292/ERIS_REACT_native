@@ -5,7 +5,7 @@ import {
   CANONICAL,
   OPERATIONAL_ROLE_NAMES,
   canAssignEngineer,
-  canAssignSpecialist,
+  canAssignSeniorEngineer,
   canDelegateBranch,
   canReportIncident,
   canTriage,
@@ -16,26 +16,40 @@ import {
   isEngineer,
   isMaintenanceOnly,
   isOperationalUser,
-  isSeniorSpecialist,
+  isSeniorEngineer,
+  roleLabel,
 } from "./roleModel.ts";
 
-const SPECIALIST = ["GEOTECH_SENIOR_SPECIALIST"];
-const ENGINEER = ["GEOTECH_ENGINEER"];
-const LEGACY_ENGINEER = ["FIELD_WORKER"];
+const SENIOR_ENGINEER = ["GEOTECH_SENIOR_ENGINEER"];
+// Staff keep the deployed GEOTECH_ENGINEER code and its FIELD_WORKER alias.
+const STAFF = ["GEOTECH_ENGINEER"];
+const LEGACY_STAFF = ["FIELD_WORKER"];
 const OFFICE_CHIEF = ["GEOTECH_OFFICE_CHIEF"];
 const BRANCH_CHIEF = ["GEOTECH_BRANCH_CHIEF"];
 const COORDINATOR = ["MAINTENANCE_COORDINATOR"];
 const LEGACY_REVIEWER = ["REVIEWER"];
 const MAINTENANCE = ["MAINTENANCE_FIELD_WORKER"];
 
-test("the senior specialist is a canonical operational role with no legacy alias", () => {
-  assert.deepEqual([...CANONICAL.GEOTECH_SENIOR_SPECIALIST], ["GEOTECH_SENIOR_SPECIALIST"]);
-  assert.ok(OPERATIONAL_ROLE_NAMES.includes("GEOTECH_SENIOR_SPECIALIST"));
-  assert.equal(isOperationalUser(SPECIALIST), true);
-  assert.equal(isMaintenanceOnly(SPECIALIST), false);
-  assert.equal(hasWorkQueue(SPECIALIST), true);
-  assert.equal(hasRole(SPECIALIST, "GEOTECH_SENIOR_SPECIALIST"), true);
-  assert.equal(hasRole(ENGINEER, "GEOTECH_SENIOR_SPECIALIST"), false);
+test("the senior engineer is a canonical operational role with no legacy alias", () => {
+  assert.deepEqual([...CANONICAL.GEOTECH_SENIOR_ENGINEER], ["GEOTECH_SENIOR_ENGINEER"]);
+  assert.ok(OPERATIONAL_ROLE_NAMES.includes("GEOTECH_SENIOR_ENGINEER"));
+  assert.equal(isOperationalUser(SENIOR_ENGINEER), true);
+  assert.equal(isMaintenanceOnly(SENIOR_ENGINEER), false);
+  assert.equal(hasWorkQueue(SENIOR_ENGINEER), true);
+  assert.equal(hasRole(SENIOR_ENGINEER, "GEOTECH_SENIOR_ENGINEER"), true);
+  assert.equal(hasRole(STAFF, "GEOTECH_SENIOR_ENGINEER"), false);
+});
+
+test("role labels name Staff and the senior engineer, and never call Staff engineers", () => {
+  assert.equal(roleLabel("GEOTECH_ENGINEER"), "GeoTech Staff");
+  assert.equal(roleLabel("FIELD_WORKER"), "GeoTech Staff (legacy)");
+  assert.equal(roleLabel("GEOTECH_SENIOR_ENGINEER"), "GeoTech Senior Engineer");
+  assert.equal(roleLabel("GEOTECH_OFFICE_CHIEF"), "GeoTech Office Chief");
+  // An unlabelled code still renders readably instead of as a raw code.
+  assert.equal(roleLabel("SOME_NEW_ROLE"), "Some New Role");
+  for (const code of CANONICAL.GEOTECH_ENGINEER) {
+    assert.doesNotMatch(roleLabel(code), /engineer/i, `${code} is labelled as an engineer`);
+  }
 });
 
 test("the legacy REVIEWER role keeps exactly the reach it has today", () => {
@@ -46,43 +60,43 @@ test("the legacy REVIEWER role keeps exactly the reach it has today", () => {
   // and grants no routing, authoring or review affordance of its own.
   assert.equal(isAssessmentAuthor(LEGACY_REVIEWER), false);
   assert.equal(canDelegateBranch(LEGACY_REVIEWER), false);
-  assert.equal(canAssignSpecialist(LEGACY_REVIEWER), false);
+  assert.equal(canAssignSeniorEngineer(LEGACY_REVIEWER), false);
   assert.equal(canAssignEngineer(LEGACY_REVIEWER), false);
   assert.equal(canReportIncident(LEGACY_REVIEWER), false);
 });
 
-test("assessment authors are the engineer, the senior specialist and admin", () => {
-  assert.equal(isAssessmentAuthor(ENGINEER), true);
-  assert.equal(isAssessmentAuthor(LEGACY_ENGINEER), true);
-  assert.equal(isAssessmentAuthor(SPECIALIST), true);
+test("assessment authors are Staff, the senior engineer and admin", () => {
+  assert.equal(isAssessmentAuthor(STAFF), true);
+  assert.equal(isAssessmentAuthor(LEGACY_STAFF), true);
+  assert.equal(isAssessmentAuthor(SENIOR_ENGINEER), true);
   assert.equal(isAssessmentAuthor(["ADMIN"]), true);
   assert.equal(isAssessmentAuthor(OFFICE_CHIEF), false);
   assert.equal(isAssessmentAuthor(BRANCH_CHIEF), false);
   assert.equal(isAssessmentAuthor(COORDINATOR), false);
   assert.equal(isAssessmentAuthor(undefined), false);
-  // isEngineer stays engineer-only: a specialist is not an assessment author under a branch chief.
-  assert.equal(isEngineer(SPECIALIST), false);
-  assert.equal(isSeniorSpecialist(ENGINEER), false);
-  assert.equal(isSeniorSpecialist(SPECIALIST), true);
+  // isEngineer stays GEOTECH_ENGINEER-only: a senior engineer is not Staff under a branch chief.
+  assert.equal(isEngineer(SENIOR_ENGINEER), false);
+  assert.equal(isSeniorEngineer(STAFF), false);
+  assert.equal(isSeniorEngineer(SENIOR_ENGINEER), true);
 });
 
 test("both routing choices belong to the office chief and admin", () => {
   assert.equal(canDelegateBranch(OFFICE_CHIEF), true);
-  assert.equal(canAssignSpecialist(OFFICE_CHIEF), true);
+  assert.equal(canAssignSeniorEngineer(OFFICE_CHIEF), true);
   assert.equal(canDelegateBranch(["OFFICE_CHIEF"]), true);
-  assert.equal(canAssignSpecialist(["OFFICE_CHIEF"]), true);
-  assert.equal(canAssignSpecialist(BRANCH_CHIEF), false);
-  assert.equal(canAssignSpecialist(SPECIALIST), false);
+  assert.equal(canAssignSeniorEngineer(["OFFICE_CHIEF"]), true);
+  assert.equal(canAssignSeniorEngineer(BRANCH_CHIEF), false);
+  assert.equal(canAssignSeniorEngineer(SENIOR_ENGINEER), false);
   assert.equal(canAssignEngineer(BRANCH_CHIEF), true);
   assert.equal(canAssignEngineer(OFFICE_CHIEF), false);
-  for (const helper of [canDelegateBranch, canAssignSpecialist, canAssignEngineer, canTriage, isAssessmentAuthor]) {
+  for (const helper of [canDelegateBranch, canAssignSeniorEngineer, canAssignEngineer, canTriage, isAssessmentAuthor]) {
     assert.equal(helper(["ADMIN"]), true, `${helper.name} should keep the admin bypass`);
   }
 });
 
-test("a senior specialist may file an incident report; a coordinator may not", () => {
-  assert.equal(canReportIncident(SPECIALIST), true);
-  assert.equal(canReportIncident(ENGINEER), true);
+test("a senior engineer may file an incident report; a coordinator may not", () => {
+  assert.equal(canReportIncident(SENIOR_ENGINEER), true);
+  assert.equal(canReportIncident(STAFF), true);
   assert.equal(canReportIncident(MAINTENANCE), true);
   assert.equal(canReportIncident(["ADMIN"]), true);
   assert.equal(canReportIncident(COORDINATOR), false);
@@ -94,7 +108,7 @@ test("maintenance-only accounts stay out of the operational surface", () => {
   assert.equal(isMaintenanceOnly(MAINTENANCE), true);
   assert.equal(isMaintenanceOnly(["MAINTENANCE"]), true);
   assert.equal(isOperationalUser(MAINTENANCE), false);
-  assert.equal(isMaintenanceOnly([...MAINTENANCE, ...SPECIALIST]), false);
-  assert.equal(isAdmin(SPECIALIST), false);
+  assert.equal(isMaintenanceOnly([...MAINTENANCE, ...SENIOR_ENGINEER]), false);
+  assert.equal(isAdmin(SENIOR_ENGINEER), false);
   assert.equal(isAdmin(["ADMIN"]), true);
 });

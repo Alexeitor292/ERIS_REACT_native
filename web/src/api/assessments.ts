@@ -18,11 +18,11 @@ export type AssessmentState =
  * took. `null` means the chief has not chosen yet; the choice is not
  * reversible, so each route endpoint refuses once the other one was taken.
  */
-export type RoutingPath = "BRANCH" | "SENIOR_SPECIALIST";
+export type RoutingPath = "BRANCH" | "SENIOR_ENGINEER";
 
 /**
  * Who may approve or return THIS assessment. `BRANCH` names one person;
- * `SENIOR_SPECIALIST` names an office function — any active office chief of
+ * `SENIOR_ENGINEER` names an office function — any active office chief of
  * that office — so its `user_id` is null by design.
  */
 export type ReviewOwner = {
@@ -54,7 +54,7 @@ export type Assessment = {
   assigned_engineer_user_id: number | null;
   /** Route-neutral alias of `assigned_engineer_user_id`. */
   assigned_user_id: number | null;
-  assigned_user_kind: "ENGINEER" | "SENIOR_SPECIALIST" | null;
+  assigned_user_kind: "STAFF" | "SENIOR_ENGINEER" | null;
   /** Server-computed: may the signed-in caller decide this assessment now? */
   can_review: boolean;
   review_owner: ReviewOwner | null;
@@ -80,7 +80,7 @@ export type AssessmentAssignment = {
    * be written with either. They keep rendering, muted, with `is_authority`
    * false. CONSULTED is the only writable assignment role.
    */
-  assignment_role: "ENGINEER" | "SENIOR_SPECIALIST" | "REVIEWER" | "APPROVER" | "CONSULTED";
+  assignment_role: "ENGINEER" | "SENIOR_ENGINEER" | "REVIEWER" | "APPROVER" | "CONSULTED";
   assigned_by_user_id: number;
   notes: string | null;
   email: string;
@@ -171,7 +171,7 @@ export function routingPreview(district: string): Promise<RoutingPreview> {
 
 export function assessmentAssignmentOptions(
   assessmentId: number,
-  kind: "ENGINEER" | "SENIOR_SPECIALIST" | "CONSULTED"
+  kind: "ENGINEER" | "SENIOR_ENGINEER" | "CONSULTED"
 ): Promise<{ assessment_id: number; kind: string; office_code: string | null; items: AssignmentUserOption[] }> {
   return api(`/admin/assessment-assignment-options/${assessmentId}?kind=${encodeURIComponent(kind)}`);
 }
@@ -197,17 +197,17 @@ export function branchOptions(
   return api(`/assessments/${assessmentId}/branch-options`);
 }
 
-/** The senior specialists of this assessment's office (the second route's picker). */
-export function specialistOptions(
+/** The senior engineers of this assessment's office (the second route's picker). */
+export function seniorEngineerOptions(
   assessmentId: number
 ): Promise<{ assessment_id: number; office_code: string | null; items: RoutingUserOption[] }> {
-  return api(`/assessments/${assessmentId}/specialist-options`);
+  return api(`/assessments/${assessmentId}/senior-engineer-options`);
 }
 
 /**
- * Hand the assessment off to a branch chief. The engineer shortcut was retired:
- * the office chief's two choices are this and `assignSpecialist`, and the server
- * rejects an `engineer_user_id` with a 400.
+ * Hand the assessment off to a branch chief. The direct-to-Staff shortcut was
+ * retired: the office chief's two choices are this and `assignSeniorEngineer`,
+ * and the server rejects an `engineer_user_id` with a 400.
  */
 export function delegateBranch(
   assessmentId: number,
@@ -220,15 +220,15 @@ export function delegateBranch(
   });
 }
 
-/** Assign a GeoTech senior specialist directly; the assessment returns to the office chief. */
-export function assignSpecialist(
+/** Assign a GeoTech senior engineer directly; the assessment returns to the office chief. */
+export function assignSeniorEngineer(
   assessmentId: number,
-  specialist_user_id: number,
+  senior_engineer_user_id: number,
   notes?: string
 ): Promise<{ assessment: Assessment; submission_id: number | null }> {
-  return api(`/assessments/${assessmentId}/assign-specialist`, {
+  return api(`/assessments/${assessmentId}/assign-senior-engineer`, {
     method: "POST",
-    body: JSON.stringify({ specialist_user_id, notes }),
+    body: JSON.stringify({ senior_engineer_user_id, notes }),
   });
 }
 

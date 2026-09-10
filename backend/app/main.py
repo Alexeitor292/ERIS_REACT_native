@@ -151,7 +151,7 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
 
 def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
     # Broad visibility: any non-maintenance operational user (admin, coordinator,
-    # office/branch chief, engineer, senior specialist, legacy reviewer) may READ
+    # office/branch chief, Staff, senior engineer, legacy reviewer) may READ
     # submissions / assessment technical forms. Maintenance field workers remain
     # restricted to records they own or were explicitly granted. Write access is
     # unchanged. is_operational_user() already includes REVIEWER, so the separate

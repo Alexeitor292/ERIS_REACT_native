@@ -28,11 +28,11 @@ function timestamp(value: string | null | undefined) {
  * reviewer, so the queues follow the route rather than an assignment:
  *
  *  - Maintenance Coordinator: field reports awaiting intake triage.
- *  - Office Chief: assessments to route (`office_chief`), and specialist-route
+ *  - Office Chief: assessments to route (`office_chief`), and senior-engineer-route
  *    assessments of their own office to review (`office_chief_review`).
  *  - Branch Chief: assessments handed to them that still need an assignee (`branch_chief`), and the
  *    same ones to approve or return once submitted (`branch_chief_review`).
- *  - Engineer or Senior Specialist: their own assessments in Draft / Revision
+ *  - Staff or Senior Engineer: their own assessments in Draft / Revision
  *    requested (`assignee` — both routes store the assignee in the same column).
  *  - Admin: every submitted assessment, matching the server's review bypass.
  *
@@ -75,7 +75,7 @@ export default function MyWorkPage() {
         requests.push(queue({ queue: "branch_chief" }));
         requests.push(queue({ queue: "branch_chief_review" }));
       }
-      // isAssessmentAuthor, not isEngineer: a specialist-only account owns
+      // isAssessmentAuthor, not isEngineer: a senior-engineer-only account owns
       // assessments too, and would otherwise never see its own drafts.
       if (isAssessmentAuthor(roles)) {
         requests.push(queue({ queue: "assignee" }, (a) => a.state === "DRAFT" || a.state === "REVISION_REQUESTED"));

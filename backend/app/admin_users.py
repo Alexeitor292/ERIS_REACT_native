@@ -16,7 +16,7 @@ from .roles import (
     GEOTECH_BRANCH_CHIEF,
     GEOTECH_ENGINEER,
     GEOTECH_OFFICE_CHIEF,
-    GEOTECH_SENIOR_SPECIALIST,
+    GEOTECH_SENIOR_ENGINEER,
     OPERATIONAL_ROLES,
     expand_roles,
 )
@@ -162,7 +162,7 @@ def assessment_assignment_options(
     # the handler below answers with an explanatory 400. Dropping it from the
     # pattern would make FastAPI return a bare 422 before the handler runs and
     # the explanation would be unreachable.
-    kind: str = Query(..., pattern="^(ENGINEER|SENIOR_SPECIALIST|CONSULTED|REVIEWER)$"),
+    kind: str = Query(..., pattern="^(ENGINEER|SENIOR_ENGINEER|CONSULTED|REVIEWER)$"),
     db: Session = Depends(get_db),
     user=Depends(require_roles(ASSESSMENT_ASSIGNMENT_DIRECTORY_ROLES)),
 ):
@@ -190,8 +190,8 @@ def assessment_assignment_options(
 
     if kind == "ENGINEER":
         eligible_roles = set(expand_roles(GEOTECH_ENGINEER)) | {ADMIN}
-    elif kind == "SENIOR_SPECIALIST":
-        eligible_roles = set(expand_roles(GEOTECH_SENIOR_SPECIALIST)) | {ADMIN}
+    elif kind == "SENIOR_ENGINEER":
+        eligible_roles = set(expand_roles(GEOTECH_SENIOR_ENGINEER)) | {ADMIN}
     else:
         # CONSULTED reproduces the previous REVIEWER behaviour: any operational
         # user may be attached for information. CONSULTED never conferred
@@ -209,10 +209,10 @@ def assessment_assignment_options(
             OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = ''
           )
         """
-    elif kind == "SENIOR_SPECIALIST":
-        # STRICT office filter, unlike the ENGINEER kind above: a specialist with
+    elif kind == "SENIOR_ENGINEER":
+        # STRICT office filter, unlike the ENGINEER kind above: a senior engineer with
         # no office_code is not assignable at all, and an assessment with no
-        # office_code has no specialist to offer — hence the `:office_code <> ''`
+        # office_code has no senior engineer to offer — hence the `:office_code <> ''`
         # guard rather than a blank-office fallback. ADMIN is exempt so the
         # picker keeps its admin escape hatch, matching the ENGINEER kind's
         # `| {ADMIN}` union.

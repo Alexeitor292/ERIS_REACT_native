@@ -47,13 +47,13 @@ export default function TabLayout() {
     roleSet.has("MAINTENANCE") ||
     roleSet.has("FIELD_WORKER") ||
     roleSet.has("ADMIN");
-  // The senior specialist fills the GISA form exactly as an engineer does, so
-  // without these two gates a specialist-only account would see the Assessments
+  // The senior engineer fills the GISA form exactly as Staff do, so without
+  // these two gates a senior-engineer-only account would see the Assessments
   // tab and nothing it links to.
   const canSeeDraftsSubmissions =
     rolesLoaded &&
     (roleSet.has("FIELD_WORKER") ||
-      roleSet.has("GEOTECH_SENIOR_SPECIALIST") ||
+      roleSet.has("GEOTECH_SENIOR_ENGINEER") ||
       roleSet.has("REVIEWER") ||
       roleSet.has("ADMIN"));
   const canSeeIncidents =
@@ -63,7 +63,7 @@ export default function TabLayout() {
     roleSet.has("OFFICE_CHIEF") ||
     roleSet.has("BRANCH_CHIEF") ||
     roleSet.has("FIELD_WORKER") ||
-    roleSet.has("GEOTECH_SENIOR_SPECIALIST") ||
+    roleSet.has("GEOTECH_SENIOR_ENGINEER") ||
     roleSet.has("ADMIN");
   // Assessments are for non-maintenance operational users only.
   const canSeeAssessments = rolesLoaded && isOperationalUser(roles);

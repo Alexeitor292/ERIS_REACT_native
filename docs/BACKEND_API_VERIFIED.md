@@ -21,10 +21,10 @@ Source files:
 ## ArcGIS Runtime Config
 
 - `GET /arcgis/runtime-config`
-  (`MAINTENANCE|FIELD_WORKER|MAINT_COORDINATOR|OFFICE_CHIEF|BRANCH_CHIEF|REVIEWER|GEOTECH_SENIOR_SPECIALIST|ADMIN`)
+  (`MAINTENANCE|FIELD_WORKER|MAINT_COORDINATOR|OFFICE_CHIEF|BRANCH_CHIEF|REVIEWER|GEOTECH_SENIOR_ENGINEER|ADMIN`)
   — the literal list does not consult `OPERATIONAL_ROLES`, so
-  `GEOTECH_SENIOR_SPECIALIST` is enumerated by hand; without it a
-  specialist-only account cannot load the map or the 3D terrain.
+  `GEOTECH_SENIOR_ENGINEER` is enumerated by hand; without it a
+  senior-engineer-only account cannot load the map or the 3D terrain.
 
 ## Submission APIs
 
@@ -59,8 +59,8 @@ Source files:
 
 The GISA write guards (`POST /submissions`, title/geometry/gisa/incident-types/
 actions patches, delete, share/unshare, permissions, notify-coordinator, submit)
-use `GISA_AUTHOR_ROLES` = `ADMIN|FIELD_WORKER|GEOTECH_ENGINEER|GEOTECH_SENIOR_SPECIALIST`
-instead of the old literal `FIELD_WORKER|ADMIN`. This lets a senior specialist
+use `GISA_AUTHOR_ROLES` = `ADMIN|FIELD_WORKER|GEOTECH_ENGINEER|GEOTECH_SENIOR_ENGINEER`
+instead of the old literal `FIELD_WORKER|ADMIN`. This lets a senior engineer
 fill the form and unblocks accounts holding only the canonical
 `GEOTECH_ENGINEER` name.
 
@@ -83,7 +83,7 @@ fill the form and unblocks accounts holding only the canonical
 - `PUT /admin/users/{user_id}/roles`
 - `POST /admin/users/{user_id}/reset-password`
 - `GET /admin/assessment-assignment-options/{assessment_id}?kind=` —
-  `ENGINEER|SENIOR_SPECIALIST|CONSULTED|REVIEWER`. `SENIOR_SPECIALIST` filters
+  `ENGINEER|SENIOR_ENGINEER|CONSULTED|REVIEWER`. `SENIOR_ENGINEER` filters
   **strictly** on the assessment's office (no blank-office fallback, unlike
   `ENGINEER`), with `ADMIN` exempt. `kind=REVIEWER` returns
   `400 "kind=REVIEWER was retired; use CONSULTED"` — it stays in the query
@@ -102,7 +102,7 @@ fill the form and unblocks accounts holding only the canonical
 - `GET /incidents/{incident_id}`
 - `POST /incidents/{incident_id}/claim` (currently disabled; returns workflow-required error)
 - `POST /incidents/{incident_id}/assign` (ADMIN) — admin recovery tool; **`409`
-  when the incident's assessment has `routing_path='SENIOR_SPECIALIST'`**
+  when the incident's assessment has `routing_path='SENIOR_ENGINEER'`**
 - `POST /incidents/{incident_id}/coordinator/forward`
 - `GET /incidents/{incident_id}/location-candidates` (coordinator/admin)
 - `POST /incidents/{incident_id}/location-link` (coordinator/admin)
@@ -110,17 +110,17 @@ fill the form and unblocks accounts holding only the canonical
   (a read, office access enforced; the branch half of the mobile picker)
 - `POST /incidents/{incident_id}/office-chief/assign-branch` — **`410 Gone`
   (retired):** *"Routing moved to the assessment: POST
-  /assessments/{aid}/delegate-branch or /assign-specialist"*
+  /assessments/{aid}/delegate-branch or /assign-senior-engineer"*
 - `POST /incidents/{incident_id}/branch-chief/assign-engineer` — **`410 Gone`
-  (retired)**, same detail. Both moved incident stages and created engineer
+  (retired)**, same detail. Both moved incident stages and created `ENGINEER`
   assignments without touching `assessments.state`/`routing_path` — the bypass
-  that could put an engineer on a senior-specialist-route assessment. They stay
+  that could put a Staff member on a senior-engineer-route assessment. They stay
   mounted so an old client gets the explanation, not a 404.
 - `POST /incidents/{incident_id}/unassign` (ADMIN)
 - `POST /incidents/{incident_id}/resolve` — role guard widened to
   `GISA_AUTHOR_ROLES`; the real gate is unchanged (`assignee_user_id == user.id`),
-  and on the specialist route the specialist *is* the active `ENGINEER`-stage
-  assignee
+  and on the senior engineer route the senior engineer *is* the active
+  `ENGINEER`-stage assignee
 - `POST /incidents/{incident_id}/attachments`
 - `GET /mission-center/incidents`
 
@@ -136,11 +136,11 @@ Routing/admin for incident ownership:
 
 - `MAINT_COORDINATOR`: district-scoped incidents (from routing assignments)
 - `OFFICE_CHIEF`: office incidents not at coordinator-review stage
-- `BRANCH_CHIEF`: office incidents at branch/engineer/resolved stages
-- `FIELD_WORKER` / `GEOTECH_ENGINEER` / `GEOTECH_SENIOR_SPECIALIST`: only
+- `BRANCH_CHIEF`: office incidents at branch/`ENGINEER_ASSIGNED`/resolved stages
+- `FIELD_WORKER` / `GEOTECH_ENGINEER` / `GEOTECH_SENIOR_ENGINEER`: only
   incidents where an `ENGINEER`-stage assignment is active for the user. The
-  specialist holds the same assignment row an engineer would, so only the role
-  guard in front of the `EXISTS` had to widen.
+  senior engineer holds the same assignment row a Staff member would, so only
+  the role guard in front of the `EXISTS` had to widen.
 - `MAINTENANCE`: incidents reported by user
 - `ADMIN`: unrestricted
 
@@ -169,29 +169,29 @@ an account role or an assignment row. See
 - `GET /assessments/{assessment_id}/branch-options`
 - `POST /assessments/{assessment_id}/delegate-branch` (office chief) — **choice
   1.** Stamps `routing_path='BRANCH'`. `engineer_user_id` is **rejected with
-  `400`**, not ignored: chiefs assign specialists only, branch chiefs assign
-  engineers only. Accepts **re-delegation** from any non-terminal branch-route
-  state (it then rewrites only `branch_chief_user_id`, leaving the state, the
-  engineer, the linked form and the incident stage alone). `409` from
-  `APPROVED`/`FINALIZED`, and `409` if the specialist route was taken.
-- `GET /assessments/{assessment_id}/specialist-options` **(new)** (office chief;
+  `400`**, not ignored: office chiefs assign senior engineers only, branch
+  chiefs assign Staff only. Accepts **re-delegation** from any non-terminal
+  branch-route state (it then rewrites only `branch_chief_user_id`, leaving the
+  state, the assignee, the linked form and the incident stage alone). `409` from
+  `APPROVED`/`FINALIZED`, and `409` if the senior engineer route was taken.
+- `GET /assessments/{assessment_id}/senior-engineer-options` **(new)** (office chief;
   office access enforced) — `{assessment_id, office_code, items[]}`
-- `POST /assessments/{assessment_id}/assign-specialist` **(new)** (office chief)
-  — **choice 2.** Stamps `routing_path='SENIOR_SPECIALIST'`, assigns the
-  specialist, opens the linked GISA draft. `409` if the branch route was taken;
-  `400 "Selected user is not a senior specialist for this office"`.
+- `POST /assessments/{assessment_id}/assign-senior-engineer` **(new)** (office chief)
+  — **choice 2.** Stamps `routing_path='SENIOR_ENGINEER'`, assigns the senior
+  engineer, opens the linked GISA draft. `409` if the branch route was taken;
+  `400 "Selected user is not a senior engineer for this office"`.
 - `POST /assessments/{assessment_id}/assign-engineer` — **only the branch chief
   the assessment was handed to** (`branch_chief_user_id`), or admin: `403`
   otherwise. `409` unless `routing_path='BRANCH'`.
-- `POST /assessments/{assessment_id}/submissions` (the assignee — engineer **or**
-  senior specialist; creates a supplemental DRAFT technical submission pre-filled
+- `POST /assessments/{assessment_id}/submissions` (the assignee — Staff member
+  **or** senior engineer; creates a supplemental DRAFT technical submission pre-filled
   from the incident and attaches it via `assessment_submissions`)
 - `POST /assessments/{assessment_id}/assignments` — `assignment_role` narrows to
   **`CONSULTED`** (for information only). `REVIEWER`/`APPROVER` →
   `400 "Reviewer assignment was retired. Review authority follows the
   assessment's routing path."`
 - `DELETE /assessments/{assessment_id}/assignments/{assignment_id}` — refuses to
-  detach `ENGINEER` **or** `SENIOR_SPECIALIST` rows
+  detach `ENGINEER` **or** `SENIOR_ENGINEER` rows
 - `POST /assessments/{assessment_id}/submit` (the assignee; requires at least one
   attached technical submission) — also drives the linked submissions
   `DRAFT`/`REJECTED` → `SUBMITTED` in the same transaction and notifies the
@@ -206,18 +206,18 @@ an account role or an assignment row. See
   and the author.
 - `POST /assessments/{assessment_id}/finalize` — **`410 Gone` (retired):**
   *"Assessment finalization was retired: approval by the branch chief (branch
-  route) or the office chief (senior specialist route) completes the
+  route) or the office chief (senior engineer route) completes the
   assessment."* The route stays mounted so old clients get the sentence, not a
   404, and the database refuses new `FINALIZED` rows via
   `trg_assessment_no_new_finalize`.
 
 Assessment payloads (`GET /assessments`, `GET /assessments/{id}`,
 `GET /incidents/{id}/assessment`) carry `routing_path`
-(`null|"BRANCH"|"SENIOR_SPECIALIST"`), the route-neutral aliases
-`assigned_user_id` / `assigned_user_kind` (`"ENGINEER"|"SENIOR_SPECIALIST"`) over
+(`null|"BRANCH"|"SENIOR_ENGINEER"`), the route-neutral aliases
+`assigned_user_id` / `assigned_user_kind` (`"STAFF"|"SENIOR_ENGINEER"`) over
 `assigned_engineer_user_id`, `can_review`, and `review_owner`
 (`{kind: "BRANCH_CHIEF"|"OFFICE_CHIEF", user_id, office_code}` — `user_id` is
-`null` on the specialist route, where the reviewer is an office *function*).
+`null` on the senior engineer route, where the reviewer is an office *function*).
 Assignment rows carry `is_authority`, which is **always `false`**: historical
 `REVIEWER`/`APPROVER` rows are kept as audit history and render as *"Former
 reviewer — no approval authority."*

@@ -3,13 +3,15 @@ import test from "node:test";
 
 import {
   BRANCH_PIPELINE,
-  SPECIALIST_PIPELINE,
+  SENIOR_ENGINEER_PIPELINE,
   UNROUTED_PIPELINE,
+  assessmentEventLabel,
   assessmentPermissions,
   assessmentSearchMatch,
   assessmentStateLabel,
   assessmentStateLabelFor,
   assessmentTone,
+  assignmentRoleLabel,
   isActionable,
   latestSubmissionId,
   pipelineFor,
@@ -41,7 +43,7 @@ const baseAssessment = {
   branch_chief_user_id: 8,
   assigned_engineer_user_id: 5,
   assigned_user_id: 5,
-  assigned_user_kind: "ENGINEER" as const,
+  assigned_user_kind: "STAFF" as const,
   can_review: false,
   review_owner: { kind: "BRANCH_CHIEF" as const, user_id: 8, office_code: "NORTH" },
   state: "SUBMITTED" as const,
@@ -58,11 +60,11 @@ const baseAssessment = {
   updated_at: "2026-08-30T16:50:00",
 };
 
-const specialistAssessment = {
+const seniorEngineerAssessment = {
   ...baseAssessment,
-  routing_path: "SENIOR_SPECIALIST" as const,
+  routing_path: "SENIOR_ENGINEER" as const,
   branch_chief_user_id: null,
-  assigned_user_kind: "SENIOR_SPECIALIST" as const,
+  assigned_user_kind: "SENIOR_ENGINEER" as const,
   review_owner: { kind: "OFFICE_CHIEF" as const, user_id: null, office_code: "NORTH" },
 };
 
@@ -79,21 +81,34 @@ const historicalReviewer = {
   created_at: "2026-08-20T09:00:00",
 };
 
-const noRoles = { admin: false, officeChief: false, branchChief: false, engineer: false, seniorSpecialist: false };
+const noRoles = { admin: false, officeChief: false, branchChief: false, engineer: false, seniorEngineer: false };
 
 test("each route has its own ladder and an unrouted assessment has one step", () => {
   assert.equal(pipelineFor(baseAssessment), BRANCH_PIPELINE);
-  assert.equal(pipelineFor(specialistAssessment), SPECIALIST_PIPELINE);
+  assert.equal(pipelineFor(seniorEngineerAssessment), SENIOR_ENGINEER_PIPELINE);
   assert.equal(pipelineFor({ state: "PENDING_OFFICE_DELEGATION", routing_path: null }), UNROUTED_PIPELINE);
   assert.equal(BRANCH_PIPELINE.length, 5);
-  assert.equal(SPECIALIST_PIPELINE.length, 4);
+  assert.equal(SENIOR_ENGINEER_PIPELINE.length, 4);
   assert.equal(BRANCH_PIPELINE[3].owner, "Branch Chief");
-  assert.equal(SPECIALIST_PIPELINE[2].owner, "Office Chief");
+  assert.equal(SENIOR_ENGINEER_PIPELINE[2].owner, "Office Chief");
+});
+
+test("ladder step names carry the role names, never \"engineer\" for Staff", () => {
+  assert.equal(BRANCH_PIPELINE[1].label, "Staff assignment");
+  assert.equal(BRANCH_PIPELINE[2].owner, "Assigned Staff");
+  assert.equal(SENIOR_ENGINEER_PIPELINE[0].label, "Senior engineer assignment");
+  assert.equal(SENIOR_ENGINEER_PIPELINE[1].owner, "Senior Engineer");
+  // The senior engineer is the only "engineer" either ladder may name.
+  for (const step of [...BRANCH_PIPELINE, ...SENIOR_ENGINEER_PIPELINE]) {
+    for (const text of [step.label, step.owner ?? ""]) {
+      if (/engineer/i.test(text)) assert.match(text, /senior engineer/i, `"${text}" calls the Staff role an engineer`);
+    }
+  }
 });
 
 test("every state resolves to a real step on every ladder", () => {
   for (const state of ALL_STATES) {
-    for (const routing_path of ["BRANCH", "SENIOR_SPECIALIST", null] as const) {
+    for (const routing_path of ["BRANCH", "SENIOR_ENGINEER", null] as const) {
       const index = pipelineIndex({ state, routing_path });
       const steps = pipelineFor({ state, routing_path });
       assert.ok(index >= 0 && index < steps.length, `${state}/${routing_path} landed outside the ladder`);
@@ -103,7 +118,7 @@ test("every state resolves to a real step on every ladder", () => {
 
 test("a legacy FINALIZED assessment renders complete, never step 0", () => {
   assert.equal(pipelineIndex({ state: "FINALIZED", routing_path: "BRANCH" }), BRANCH_PIPELINE.length - 1);
-  assert.equal(pipelineIndex({ state: "FINALIZED", routing_path: "SENIOR_SPECIALIST" }), SPECIALIST_PIPELINE.length - 1);
+  assert.equal(pipelineIndex({ state: "FINALIZED", routing_path: "SENIOR_ENGINEER" }), SENIOR_ENGINEER_PIPELINE.length - 1);
   // Terminal with no recorded route still reads as complete on the branch ladder.
   assert.equal(pipelineFor({ state: "FINALIZED", routing_path: null }), BRANCH_PIPELINE);
   assert.equal(pipelineIndex({ state: "FINALIZED", routing_path: null }), BRANCH_PIPELINE.length - 1);
@@ -113,7 +128,7 @@ test("a legacy FINALIZED assessment renders complete, never step 0", () => {
 test("pipeline index and tone follow the assessment state", () => {
   assert.equal(pipelineIndex({ state: "PENDING_OFFICE_DELEGATION", routing_path: "BRANCH" }), 0);
   assert.equal(pipelineIndex({ state: "REVISION_REQUESTED", routing_path: "BRANCH" }), 2);
-  assert.equal(pipelineIndex({ state: "REVISION_REQUESTED", routing_path: "SENIOR_SPECIALIST" }), 1);
+  assert.equal(pipelineIndex({ state: "REVISION_REQUESTED", routing_path: "SENIOR_ENGINEER" }), 1);
   assert.equal(assessmentTone("APPROVED"), "good");
   assert.equal(assessmentTone("REVISION_REQUESTED"), "bad");
   assert.equal(assessmentTone("SUBMITTED"), "brand");
@@ -122,31 +137,51 @@ test("pipeline index and tone follow the assessment state", () => {
 
 test("state labels are route-aware and never print a raw code", () => {
   assert.equal(assessmentStateLabelFor("SUBMITTED", "BRANCH"), "Awaiting branch chief review");
-  assert.equal(assessmentStateLabelFor("SUBMITTED", "SENIOR_SPECIALIST"), "Awaiting office chief review");
+  assert.equal(assessmentStateLabelFor("SUBMITTED", "SENIOR_ENGINEER"), "Awaiting office chief review");
   assert.equal(assessmentStateLabelFor("SUBMITTED", null), "Submitted for review");
   assert.equal(assessmentStateLabelFor("APPROVED", "BRANCH"), "Approved — complete");
   assert.equal(assessmentStateLabelFor("FINALIZED", "BRANCH"), "Signed off (legacy)");
   assert.equal(assessmentStateLabelFor("PENDING_OFFICE_DELEGATION", null), "Awaiting routing");
+  // The state code keeps its deployed name; the label does not repeat it.
+  assert.equal(assessmentStateLabelFor("PENDING_ENGINEER_ASSIGNMENT", "BRANCH"), "Awaiting Staff assignment");
   for (const state of ALL_STATES) {
     assert.notEqual(assessmentStateLabel(state), state, `${state} printed as a raw code`);
   }
 });
 
+test("assignment-role and event labels rename the role, not the code", () => {
+  assert.equal(assignmentRoleLabel("ENGINEER"), "Staff");
+  assert.equal(assignmentRoleLabel("SENIOR_ENGINEER"), "Senior Engineer");
+  assert.equal(assignmentRoleLabel("CONSULTED"), "Consulted");
+  // Anything the server adds later still renders readably.
+  assert.equal(assignmentRoleLabel("SOMETHING_NEW"), "Something New");
+  assert.equal(assessmentEventLabel("ENGINEER_ASSIGNED"), "Staff assigned");
+  assert.equal(assessmentEventLabel("SENIOR_ENGINEER_ASSIGNED"), "Senior engineer assigned");
+  assert.equal(assessmentEventLabel("OFFICE_DELEGATED"), "Office Delegated");
+});
+
 test("waiting-on names the route's reviewer and the assignee, and is null only when complete", () => {
   const routing = waitingOn({ state: "PENDING_OFFICE_DELEGATION", routing_path: null, office_code: "NORTH" }, []);
   assert.equal(routing?.who, "Office Chief");
-  assert.match(routing?.text ?? "", /hand it off to a branch chief, or assign a senior specialist/);
+  assert.match(routing?.text ?? "", /hand it off to a branch chief, or assign a senior engineer/);
   assert.doesNotMatch(routing?.text ?? "", /assign the engineer directly/);
 
   assert.equal(waitingOn(baseAssessment, [])?.who, "Branch Chief");
-  assert.equal(waitingOn(specialistAssessment, [])?.who, "North GeoTech Office Chief");
+  assert.equal(waitingOn(seniorEngineerAssessment, [])?.who, "North GeoTech Office Chief");
 
-  const engineer = { ...historicalReviewer, id: 1, user_id: 5, assignment_role: "ENGINEER" as const, full_name: "J. Ramos" };
-  assert.equal(waitingOn({ ...baseAssessment, state: "DRAFT" }, [engineer])?.who, "Engineer · J. Ramos");
-  const specialist = { ...engineer, assignment_role: "SENIOR_SPECIALIST" as const, full_name: "S. Ruiz" };
+  const staff = { ...historicalReviewer, id: 1, user_id: 5, assignment_role: "ENGINEER" as const, full_name: "J. Ramos" };
+  assert.equal(waitingOn({ ...baseAssessment, state: "DRAFT" }, [staff])?.who, "Staff · J. Ramos");
+  const seniorEngineer = { ...staff, assignment_role: "SENIOR_ENGINEER" as const, full_name: "S. Ruiz" };
   assert.equal(
-    waitingOn({ ...specialistAssessment, state: "DRAFT" }, [specialist])?.who,
-    "Senior Specialist · S. Ruiz",
+    waitingOn({ ...seniorEngineerAssessment, state: "DRAFT" }, [seniorEngineer])?.who,
+    "Senior Engineer · S. Ruiz",
+  );
+  // Nobody assigned yet: the placeholder names the role of the route.
+  assert.equal(waitingOn({ ...baseAssessment, state: "DRAFT" }, [])?.who, "Assigned Staff");
+  assert.equal(waitingOn({ ...seniorEngineerAssessment, state: "DRAFT" }, [])?.who, "Assigned Senior Engineer");
+  assert.match(
+    waitingOn({ ...baseAssessment, state: "PENDING_ENGINEER_ASSIGNMENT" }, [])?.text ?? "",
+    /Assign a Staff member/,
   );
 
   for (const state of ALL_STATES) {
@@ -168,18 +203,18 @@ test("branch review authority is identity bound to the named branch chief", () =
   assert.equal(assessmentPermissions({ ...noRoles, admin: true }, 99, "", baseAssessment).review, true);
 });
 
-test("specialist review is office bound with an explicit falsy guard", () => {
-  const chief = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "north", specialistAssessment);
+test("senior engineer review is office bound with an explicit falsy guard", () => {
+  const chief = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "north", seniorEngineerAssessment);
   assert.equal(chief.review, true);
-  const wrongOffice = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "WEST", specialistAssessment);
+  const wrongOffice = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "WEST", seniorEngineerAssessment);
   assert.equal(wrongOffice.review, false);
-  const unscopedChief = assessmentPermissions({ ...noRoles, officeChief: true }, 3, null, specialistAssessment);
+  const unscopedChief = assessmentPermissions({ ...noRoles, officeChief: true }, 3, null, seniorEngineerAssessment);
   assert.equal(unscopedChief.review, false);
   // Neither side has an office: null === null must NOT grant review.
-  const officeless = { ...specialistAssessment, office_code: "  " };
+  const officeless = { ...seniorEngineerAssessment, office_code: "  " };
   assert.equal(assessmentPermissions({ ...noRoles, officeChief: true }, 3, "", officeless).review, false);
-  // The named branch chief of a specialist-route assessment reviews nothing.
-  assert.equal(assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", specialistAssessment).review, false);
+  // The named branch chief of a senior-engineer-route assessment reviews nothing.
+  assert.equal(assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", seniorEngineerAssessment).review, false);
 });
 
 test("no permission comes from an assignment row", () => {
@@ -195,7 +230,7 @@ test("an approved assessment offers nothing to anybody", () => {
     { ...noRoles, officeChief: true },
     { ...noRoles, branchChief: true },
     { ...noRoles, engineer: true },
-    { ...noRoles, seniorSpecialist: true },
+    { ...noRoles, seniorEngineer: true },
     { ...noRoles, admin: true },
   ]) {
     const perms = assessmentPermissions(flags, 8, "NORTH", approved);
@@ -204,15 +239,15 @@ test("an approved assessment offers nothing to anybody", () => {
   }
 });
 
-test("engineering-step permissions accept the assignee on either route", () => {
+test("assessment-step permissions accept the assignee on either route", () => {
   const draft = { ...baseAssessment, state: "DRAFT" as const };
   const assigned = assessmentPermissions({ ...noRoles, engineer: true }, 5, "NORTH", draft);
   assert.equal(assigned.submit, true);
   assert.equal(assigned.addSubmission, true);
-  const specialistDraft = { ...specialistAssessment, state: "DRAFT" as const };
-  const specialist = assessmentPermissions({ ...noRoles, seniorSpecialist: true }, 5, "NORTH", specialistDraft);
-  assert.equal(specialist.submit, true);
-  assert.equal(specialist.addSubmission, true);
+  const seniorEngineerDraft = { ...seniorEngineerAssessment, state: "DRAFT" as const };
+  const seniorEngineer = assessmentPermissions({ ...noRoles, seniorEngineer: true }, 5, "NORTH", seniorEngineerDraft);
+  assert.equal(seniorEngineer.submit, true);
+  assert.equal(seniorEngineer.addSubmission, true);
   const other = assessmentPermissions({ ...noRoles, engineer: true }, 6, "NORTH", draft);
   assert.equal(other.submit, false);
   assert.equal(other.addSubmission, false);
@@ -224,20 +259,20 @@ test("the office chief has exactly two routing choices, and each closes the othe
   const unrouted = { ...baseAssessment, state: "PENDING_OFFICE_DELEGATION" as const, routing_path: null, branch_chief_user_id: null };
   const both = assessmentPermissions(chief, 3, "NORTH", unrouted);
   assert.equal(both.delegate, true);
-  assert.equal(both.assignSpecialist, true);
+  assert.equal(both.assignSeniorEngineer, true);
 
   const branchTaken = assessmentPermissions(chief, 3, "NORTH", { ...unrouted, routing_path: "BRANCH" });
   assert.equal(branchTaken.delegate, true, "re-delegation is the repair path");
-  assert.equal(branchTaken.assignSpecialist, false);
+  assert.equal(branchTaken.assignSeniorEngineer, false);
 
-  const specialistTaken = assessmentPermissions(chief, 3, "NORTH", { ...unrouted, routing_path: "SENIOR_SPECIALIST" });
-  assert.equal(specialistTaken.delegate, false);
-  assert.equal(specialistTaken.assignSpecialist, true);
+  const seniorEngineerTaken = assessmentPermissions(chief, 3, "NORTH", { ...unrouted, routing_path: "SENIOR_ENGINEER" });
+  assert.equal(seniorEngineerTaken.delegate, false);
+  assert.equal(seniorEngineerTaken.assignSeniorEngineer, true);
 
-  // Re-delegation still works from SUBMITTED; the specialist route is closed there.
+  // Re-delegation still works from SUBMITTED; the senior engineer route is closed there.
   const submitted = assessmentPermissions(chief, 3, "NORTH", baseAssessment);
   assert.equal(submitted.delegate, true);
-  assert.equal(submitted.assignSpecialist, false);
+  assert.equal(submitted.assignSeniorEngineer, false);
   // A branch chief never routes.
   assert.equal(assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", unrouted).delegate, false);
 });
@@ -246,8 +281,8 @@ test("assign-engineer belongs to the named branch chief on the branch route only
   const pending = { ...baseAssessment, state: "PENDING_ENGINEER_ASSIGNMENT" as const };
   assert.equal(assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", pending).assignEngineer, true);
   assert.equal(assessmentPermissions({ ...noRoles, branchChief: true }, 9, "NORTH", pending).assignEngineer, false);
-  const specialistPending = { ...specialistAssessment, state: "PENDING_ENGINEER_ASSIGNMENT" as const, branch_chief_user_id: 8 };
-  assert.equal(assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", specialistPending).assignEngineer, false);
+  const seniorEngineerPending = { ...seniorEngineerAssessment, state: "PENDING_ENGINEER_ASSIGNMENT" as const, branch_chief_user_id: 8 };
+  assert.equal(assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", seniorEngineerPending).assignEngineer, false);
 });
 
 test("search covers the assessment and its attached submissions", () => {

@@ -5,15 +5,15 @@ by Python, so they hold for direct SQL and for any future client. Four of them
 are pinned nowhere else:
 
   * the six eligibility triggers became route-aware, so the SAME column
-    (assessments.assigned_engineer_user_id) is checked against the engineer
-    rule on the branch route and the senior-specialist rule on the other;
+    (assessments.assigned_engineer_user_id) is checked against the Staff rule
+    on the branch route and the senior engineer rule on the other;
   * trg_assessment_no_new_finalize closes FINALIZED to everything, including
     direct SQL, while leaving already-FINALIZED rows fully updatable;
   * the backfill is non-destructive ONLY because those triggers fire on a
-    CHANGE of assignee — a SENIOR_SPECIALIST-route row still holding a legacy
-    FIELD_WORKER engineer keeps working, which is what backfill (b) produces;
-  * assignment_role is VARCHAR(24), because 'SENIOR_SPECIALIST' is 17
-    characters and the column used to be VARCHAR(16).
+    CHANGE of assignee — a SENIOR_ENGINEER-route row still holding a legacy
+    FIELD_WORKER assignee keeps working, which is what backfill (b) produces;
+  * assignment_role is VARCHAR(24), widened from VARCHAR(16) so the role
+    vocabulary has room to grow.
 
 Run with: pytest -m db
 """
@@ -32,7 +32,7 @@ _RUN = uuid.uuid4().hex[:8]
 # 20260910_routing_v2.py. test_db_smoke.py pins the engineer text verbatim;
 # these are the substrings that tell the two rules apart.
 _ENGINEER_MESSAGE = "must be an active GeoTech engineer or admin"
-_SPECIALIST_MESSAGE = "must be an active GeoTech senior specialist or admin"
+_SENIOR_ENGINEER_MESSAGE = "must be an active GeoTech senior engineer or admin"
 
 
 def _login(client_db, email: str, password: str = "password") -> str:
@@ -52,10 +52,10 @@ def _me_id(client_db, token: str) -> int:
 
 
 @pytest.fixture(scope="module")
-def tokens(client_db, admin_token, specialist_token):
+def tokens(client_db, admin_token, senior_engineer_token):
     return {
         "admin": admin_token,
-        "specialist": specialist_token,
+        "senior_engineer": senior_engineer_token,
         "officechief": _login(client_db, "officechief@local"),
         "branchchief": _login(client_db, "branchchief@local"),
         "engineer": _login(client_db, "engineer@local"),
@@ -135,51 +135,51 @@ def _scalar(statement: str, params: dict | None = None):
 
 
 class TestAssigneeEligibility:
-    def test_specialist_cannot_be_a_branch_route_engineer(self, client_db, tokens, ids):
+    def test_senior_engineer_cannot_be_a_branch_route_engineer(self, client_db, tokens, ids):
         case = _branch_routed(client_db, tokens, ids)
         resp = client_db.post(
             f"/assessments/{case['assessment_id']}/assign-engineer",
-            json={"engineer_user_id": ids["specialist"]},
+            json={"engineer_user_id": ids["senior_engineer"]},
             headers=_auth(tokens["branchchief"]),
         )
         assert resp.status_code == 400, resp.text
         assert _ENGINEER_MESSAGE in str(resp.json().get("detail", ""))
-        assert _SPECIALIST_MESSAGE not in str(resp.json().get("detail", ""))
+        assert _SENIOR_ENGINEER_MESSAGE not in str(resp.json().get("detail", ""))
         # The refusal rolled the whole assignment back.
         assert _scalar(
             "SELECT assigned_engineer_user_id FROM assessments WHERE id = :aid",
             {"aid": case["assessment_id"]},
         ) is None
 
-    def test_engineer_cannot_be_assigned_through_the_specialist_route(self, client_db, tokens, ids):
+    def test_engineer_cannot_be_assigned_through_the_senior_engineer_route(self, client_db, tokens, ids):
         case = _triaged(client_db, tokens)
         resp = client_db.post(
-            f"/assessments/{case['assessment_id']}/assign-specialist",
-            json={"specialist_user_id": ids["engineer"]},
+            f"/assessments/{case['assessment_id']}/assign-senior-engineer",
+            json={"senior_engineer_user_id": ids["engineer"]},
             headers=_auth(tokens["officechief"]),
         )
         # The picker guard answers first and more usefully than the trigger; the
         # trigger below is the boundary that holds for direct SQL.
         assert resp.status_code == 400, resp.text
-        assert "not a senior specialist for this office" in resp.json()["detail"]
+        assert "not a senior engineer for this office" in resp.json()["detail"]
         assert _scalar(
             "SELECT routing_path FROM assessments WHERE id = :aid", {"aid": case["assessment_id"]}
         ) is None
 
-    def test_specialist_assignment_row_rejects_an_engineer(self, client_db, tokens, ids):
+    def test_senior_engineer_assignment_row_rejects_an_engineer(self, client_db, tokens, ids):
         case = _branch_routed(client_db, tokens, ids)
         with pytest.raises(DBAPIError) as excinfo:
             _execute(
                 """
                 INSERT INTO assessment_assignments
                   (assessment_id, user_id, assignment_role, assigned_by_user_id)
-                VALUES (:aid, :uid, 'SENIOR_SPECIALIST', :by)
+                VALUES (:aid, :uid, 'SENIOR_ENGINEER', :by)
                 """,
                 {"aid": case["assessment_id"], "uid": ids["engineer"], "by": ids["officechief"]},
             )
-        assert _SPECIALIST_MESSAGE in str(excinfo.value)
+        assert _SENIOR_ENGINEER_MESSAGE in str(excinfo.value)
 
-    def test_engineer_assignment_row_rejects_a_specialist(self, client_db, tokens, ids):
+    def test_engineer_assignment_row_rejects_a_senior_engineer(self, client_db, tokens, ids):
         case = _branch_routed(client_db, tokens, ids)
         with pytest.raises(DBAPIError) as excinfo:
             _execute(
@@ -188,19 +188,19 @@ class TestAssigneeEligibility:
                   (assessment_id, user_id, assignment_role, assigned_by_user_id)
                 VALUES (:aid, :uid, 'ENGINEER', :by)
                 """,
-                {"aid": case["assessment_id"], "uid": ids["specialist"], "by": ids["branchchief"]},
+                {"aid": case["assessment_id"], "uid": ids["senior_engineer"], "by": ids["branchchief"]},
             )
         assert _ENGINEER_MESSAGE in str(excinfo.value)
 
     def test_incident_stage_assignment_follows_the_assessment_route(self, client_db, tokens, ids):
-        # The specialist route reuses incident stage ENGINEER, so the
+        # The senior engineer route reuses incident stage ENGINEER, so the
         # incident-level trigger cannot read a role off its own row: it reads
         # the incident's assessment. Both routes are exercised on the SAME
         # table to prove the branch is the routing path and nothing else.
-        specialist_case = _triaged(client_db, tokens)
+        senior_engineer_case = _triaged(client_db, tokens)
         assigned = client_db.post(
-            f"/assessments/{specialist_case['assessment_id']}/assign-specialist",
-            json={"specialist_user_id": ids["specialist"]},
+            f"/assessments/{senior_engineer_case['assessment_id']}/assign-senior-engineer",
+            json={"senior_engineer_user_id": ids["senior_engineer"]},
             headers=_auth(tokens["officechief"]),
         )
         assert assigned.status_code == 200, assigned.text
@@ -212,12 +212,12 @@ class TestAssigneeEligibility:
                 VALUES (:iid, :uid, :by, 'ENGINEER', 'ASSIGN', 1)
                 """,
                 {
-                    "iid": specialist_case["incident_id"],
+                    "iid": senior_engineer_case["incident_id"],
                     "uid": ids["engineer"],
                     "by": ids["officechief"],
                 },
             )
-        assert _SPECIALIST_MESSAGE in str(excinfo.value)
+        assert _SENIOR_ENGINEER_MESSAGE in str(excinfo.value)
 
         branch_case = _branch_routed(client_db, tokens, ids)
         with pytest.raises(DBAPIError) as excinfo:
@@ -227,7 +227,7 @@ class TestAssigneeEligibility:
                   (incident_id, assignee_user_id, assigned_by_user_id, assignment_stage, assignment_mode, is_active)
                 VALUES (:iid, :uid, :by, 'ENGINEER', 'ASSIGN', 1)
                 """,
-                {"iid": branch_case["incident_id"], "uid": ids["specialist"], "by": ids["branchchief"]},
+                {"iid": branch_case["incident_id"], "uid": ids["senior_engineer"], "by": ids["branchchief"]},
             )
         assert _ENGINEER_MESSAGE in str(excinfo.value)
 
@@ -292,11 +292,11 @@ class TestNoNewFinalize:
 
 
 class TestBackfilledRowKeepsWorking:
-    def test_specialist_route_row_with_a_legacy_engineer_still_completes(
+    def test_senior_engineer_route_row_with_a_legacy_engineer_still_completes(
         self, client_db, tokens, ids
     ):
         # Exactly the shape backfill (b) produces: an assessment past office
-        # delegation with no branch chief, stamped SENIOR_SPECIALIST, still
+        # delegation with no branch chief, stamped SENIOR_ENGINEER, still
         # holding the FIELD_WORKER engineer it was assigned before the release.
         case = _branch_routed(client_db, tokens, ids)
         aid = case["assessment_id"]
@@ -309,23 +309,23 @@ class TestBackfilledRowKeepsWorking:
         _execute(
             """
             UPDATE assessments
-               SET routing_path = 'SENIOR_SPECIALIST', branch_chief_user_id = NULL
+               SET routing_path = 'SENIOR_ENGINEER', branch_chief_user_id = NULL
              WHERE id = :aid
             """,
             {"aid": aid},
         )
 
         # The triggers fire only when assigned_engineer_user_id CHANGES, so
-        # every later write on this row is untouched by the specialist rule.
+        # every later write on this row is untouched by the senior engineer rule.
         submitted = client_db.post(
             f"/assessments/{aid}/submit", json={"notes": "legacy engineer submits"},
             headers=_auth(tokens["engineer"]),
         )
         assert submitted.status_code == 200, submitted.text
         assert submitted.json()["assessment"]["state"] == "SUBMITTED"
-        assert submitted.json()["assessment"]["assigned_user_kind"] == "SENIOR_SPECIALIST"
+        assert submitted.json()["assessment"]["assigned_user_kind"] == "SENIOR_ENGINEER"
 
-        # And the office chief — the specialist route's reviewer — approves it,
+        # And the office chief — the senior engineer route's reviewer — approves it,
         # so the row is not stranded.
         approved = client_db.post(
             f"/assessments/{aid}/review",
@@ -335,9 +335,9 @@ class TestBackfilledRowKeepsWorking:
         assert approved.status_code == 200, approved.text
         assert approved.json()["state"] == "APPROVED"
 
-    def test_reassigning_that_row_does_apply_the_specialist_rule(self, client_db, tokens, ids):
+    def test_reassigning_that_row_does_apply_the_senior_engineer_rule(self, client_db, tokens, ids):
         # The other half of the same fact: the moment the assignee CHANGES, the
-        # specialist rule applies, so the backfill is forgiving of history and
+        # senior engineer rule applies, so the backfill is forgiving of history and
         # strict about new work.
         case = _branch_routed(client_db, tokens, ids)
         aid = case["assessment_id"]
@@ -347,14 +347,14 @@ class TestBackfilledRowKeepsWorking:
             headers=_auth(tokens["branchchief"]),
         )
         _execute(
-            "UPDATE assessments SET routing_path = 'SENIOR_SPECIALIST' WHERE id = :aid", {"aid": aid}
+            "UPDATE assessments SET routing_path = 'SENIOR_ENGINEER' WHERE id = :aid", {"aid": aid}
         )
         with pytest.raises(DBAPIError) as excinfo:
             _execute(
                 "UPDATE assessments SET assigned_engineer_user_id = :uid WHERE id = :aid",
                 {"uid": ids["branchchief"], "aid": aid},
             )
-        assert _SPECIALIST_MESSAGE in str(excinfo.value)
+        assert _SENIOR_ENGINEER_MESSAGE in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
@@ -363,12 +363,12 @@ class TestBackfilledRowKeepsWorking:
 
 
 class TestAssignmentRoleWidth:
-    def test_seventeen_character_role_is_stored_untruncated(self, client_db, tokens, ids):
+    def test_the_route_role_is_stored_untruncated(self, client_db, tokens, ids):
         case = _triaged(client_db, tokens)
         aid = case["assessment_id"]
         assigned = client_db.post(
-            f"/assessments/{aid}/assign-specialist",
-            json={"specialist_user_id": ids["specialist"]},
+            f"/assessments/{aid}/assign-senior-engineer",
+            json={"senior_engineer_user_id": ids["senior_engineer"]},
             headers=_auth(tokens["officechief"]),
         )
         assert assigned.status_code == 200, assigned.text
@@ -378,10 +378,11 @@ class TestAssignmentRoleWidth:
              WHERE assessment_id = :aid AND is_active = 1 AND user_id = :uid
              ORDER BY id DESC LIMIT 1
             """,
-            {"aid": aid, "uid": ids["specialist"]},
+            {"aid": aid, "uid": ids["senior_engineer"]},
         )
-        assert stored == "SENIOR_SPECIALIST"
-        assert len(stored) == 17, "VARCHAR(16) would have truncated this to SENIOR_SPECIALIS"
+        # Round-trip, not a character count: the value the route writes must come
+        # back byte for byte, whatever the CHECK vocabulary is called next.
+        assert stored == "SENIOR_ENGINEER"
 
     def test_column_is_widened_to_twenty_four(self, client_db):
         width = _scalar(
@@ -395,22 +396,22 @@ class TestAssignmentRoleWidth:
         )
         assert int(width) == 24
 
-    def test_reassigning_a_specialist_retires_the_previous_row(self, client_db, tokens, ids):
+    def test_reassigning_a_senior_engineer_retires_the_previous_row(self, client_db, tokens, ids):
         # _perform_engineer_assignment deactivates by the SAME role it inserts,
-        # so a specialist reassignment cannot leave two active rows behind.
+        # so a senior engineer reassignment cannot leave two active rows behind.
         case = _triaged(client_db, tokens)
         aid = case["assessment_id"]
         for _ in range(2):
             resp = client_db.post(
-                f"/assessments/{aid}/assign-specialist",
-                json={"specialist_user_id": ids["specialist"]},
+                f"/assessments/{aid}/assign-senior-engineer",
+                json={"senior_engineer_user_id": ids["senior_engineer"]},
                 headers=_auth(tokens["officechief"]),
             )
             assert resp.status_code == 200, resp.text
         active = _scalar(
             """
             SELECT COUNT(*) FROM assessment_assignments
-             WHERE assessment_id = :aid AND assignment_role = 'SENIOR_SPECIALIST' AND is_active = 1
+             WHERE assessment_id = :aid AND assignment_role = 'SENIOR_ENGINEER' AND is_active = 1
             """,
             {"aid": aid},
         )

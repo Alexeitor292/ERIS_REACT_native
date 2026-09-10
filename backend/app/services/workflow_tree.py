@@ -44,8 +44,11 @@ _ROLE_TITLES = {
     "MAINTENANCE_COORDINATOR": "Maintenance Coordinator",
     "GEOTECH_OFFICE_CHIEF": "GeoTech Office Chief",
     "GEOTECH_BRANCH_CHIEF": "GeoTech Branch Chief",
-    "GEOTECH_ENGINEER": "GeoTech Engineer",
-    "GEOTECH_SENIOR_SPECIALIST": "GeoTech Senior Specialist",
+    # The people under a branch chief who fill out assessments are Staff. The
+    # role code and its legacy alias are unchanged — only the label is.
+    "GEOTECH_ENGINEER": "GeoTech Staff",
+    "FIELD_WORKER": "GeoTech Staff",
+    "GEOTECH_SENIOR_ENGINEER": "GeoTech Senior Engineer",
     # Routing v2 retired REVIEWER_APPROVER as the review node's role: authority
     # follows the assessment's routing path, so the node is owned by the named
     # branch chief or by the assessment's office chief. This pseudo-role is used
@@ -66,7 +69,7 @@ _ASSESSMENT_NODE_KEYS = {
 
 # assessments.routing_path
 _ROUTE_BRANCH = "BRANCH"
-_ROUTE_SENIOR_SPECIALIST = "SENIOR_SPECIALIST"
+_ROUTE_SENIOR_ENGINEER = "SENIOR_ENGINEER"
 
 
 def _user_map(db: Session, ids: set[int]) -> dict[int, dict]:
@@ -151,11 +154,11 @@ def build_workflow_tree(
     # The route decides who owns which step (routing v2, design §3.4). NULL means
     # the office chief has not chosen yet.
     routing_path = str(assessment.get("routing_path") or "") if assessment else ""
-    specialist_route = routing_path == _ROUTE_SENIOR_SPECIALIST
+    senior_engineer_route = routing_path == _ROUTE_SENIOR_ENGINEER
     branch_route = routing_path == _ROUTE_BRANCH
     # Both routes store the assignee in assigned_engineer_user_id; routing_path
     # says which kind of person it names.
-    assignee_role = "GEOTECH_SENIOR_SPECIALIST" if specialist_route else "GEOTECH_ENGINEER"
+    assignee_role = "GEOTECH_SENIOR_ENGINEER" if senior_engineer_route else "GEOTECH_ENGINEER"
 
     stage_assignees = _active_stage_assignees(db, incident_id)
 
@@ -279,20 +282,20 @@ def build_workflow_tree(
 
     # ----- Node 3: Office chief routing -----
     delegated_ev = latest("OFFICE_DELEGATED")
-    specialist_ev = latest("SPECIALIST_ASSIGNED")
+    senior_engineer_ev = latest("SENIOR_ENGINEER_ASSIGNED")
     if not assessment_path:
         node("OFFICE_DELEGATION", "GEOTECH_OFFICE_CHIEF", "Office chief delegation",
              SKIPPED if is_terminal_disposition else PENDING)
-    elif specialist_route:
+    elif senior_engineer_route:
         # On this route the office chief's step IS the direct assignment: there
         # is no hand-off, so office_delegated_at stays NULL and the
-        # SPECIALIST_ASSIGNED event is what completed the step.
+        # SENIOR_ENGINEER_ASSIGNED event is what completed the step.
         node(
-            "OFFICE_DELEGATION", "GEOTECH_OFFICE_CHIEF", "Assigned to a senior specialist", COMPLETED,
-            user=_event_user(specialist_ev) or user_of(stage_assignees.get("OFFICE_CHIEF")),
+            "OFFICE_DELEGATION", "GEOTECH_OFFICE_CHIEF", "Assigned to a senior engineer", COMPLETED,
+            user=_event_user(senior_engineer_ev) or user_of(stage_assignees.get("OFFICE_CHIEF")),
             completed_at=assessment.get("engineer_assigned_at"),
-            notes=specialist_ev.get("notes") if specialist_ev else None,
-            event_type="SPECIALIST_ASSIGNED",
+            notes=senior_engineer_ev.get("notes") if senior_engineer_ev else None,
+            event_type="SENIOR_ENGINEER_ASSIGNED",
         )
     elif assessment.get("office_delegated_at") is not None:
         node(
@@ -307,23 +310,23 @@ def build_workflow_tree(
         node("OFFICE_DELEGATION", "GEOTECH_OFFICE_CHIEF", "Office chief routing",
              CURRENT if oc else UNASSIGNED, user=user_of(oc),
              notes="Office chief must route this assessment: hand it off to a branch chief, "
-                   "or assign a senior specialist.")
+                   "or assign a senior engineer.")
     else:
         node("OFFICE_DELEGATION", "GEOTECH_OFFICE_CHIEF", "Office chief routing", PENDING)
 
-    # ----- Node 4: Branch engineer assignment (branch route only) -----
+    # ----- Node 4: Branch chief Staff assignment (branch route only) -----
     engineer_assigned_ev = latest("ENGINEER_ASSIGNED")
     if not assessment_path:
-        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief engineer assignment",
+        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief Staff assignment",
              SKIPPED if is_terminal_disposition else PENDING)
-    elif specialist_route:
-        # The specialist route has no branch chief step at all — SKIPPED, not
-        # PENDING, so it never reads as an open bottleneck.
-        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief engineer assignment", SKIPPED,
-             notes="Senior specialist route — the office chief assigned the assessment directly.")
+    elif senior_engineer_route:
+        # The senior engineer route has no branch chief step at all — SKIPPED,
+        # not PENDING, so it never reads as an open bottleneck.
+        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief Staff assignment", SKIPPED,
+             notes="Senior engineer route — the office chief assigned the assessment directly.")
     elif assessment.get("engineer_assigned_at") is not None:
         node(
-            "BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Engineer assigned", COMPLETED,
+            "BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Staff assigned", COMPLETED,
             user=_event_user(engineer_assigned_ev) or user_of(assessment.get("branch_chief_user_id")),
             completed_at=assessment.get("engineer_assigned_at"),
             notes=engineer_assigned_ev.get("notes") if engineer_assigned_ev else None,
@@ -331,19 +334,22 @@ def build_workflow_tree(
         )
     elif a_state == "PENDING_ENGINEER_ASSIGNMENT":
         bc = assessment.get("branch_chief_user_id")
-        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief engineer assignment",
+        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief Staff assignment",
              CURRENT if bc else UNASSIGNED, user=user_of(bc),
-             notes="Branch chief must assign an engineer.")
+             notes="Branch chief must assign a Staff member.")
     else:
-        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief engineer assignment", PENDING)
+        node("BRANCH_ASSIGNMENT", "GEOTECH_BRANCH_CHIEF", "Branch chief Staff assignment", PENDING)
 
     # ----- Node 5: The assignee's assessment work -----
     submitted_ev = latest("SUBMITTED")
     revision_ev = latest("REVISION_REQUESTED")
     assignee_user = user_of(assessment.get("assigned_engineer_user_id")) if assessment else None
-    assignee_word = "Senior specialist" if specialist_route else "Engineer"
+    # ``assignee_title`` heads a node label; ``assignee_word`` is the subject of
+    # a sentence, where the branch route's assignee reads as one person.
+    assignee_title = "Senior engineer" if senior_engineer_route else "Staff"
+    assignee_word = "Senior engineer" if senior_engineer_route else "Staff member"
     if not assessment_path:
-        node("ENGINEER_ASSESSMENT", assignee_role, "Engineer assessment work",
+        node("ENGINEER_ASSESSMENT", assignee_role, f"{assignee_title} assessment work",
              SKIPPED if is_terminal_disposition else PENDING)
     elif a_state == "REVISION_REQUESTED":
         node("ENGINEER_ASSESSMENT", assignee_role, "Assessment revision requested",
@@ -357,20 +363,20 @@ def build_workflow_tree(
              completed_at=assessment.get("submitted_at"),
              event_type="SUBMITTED")
     elif a_state == "DRAFT":
-        node("ENGINEER_ASSESSMENT", assignee_role, f"{assignee_word} assessment work",
+        node("ENGINEER_ASSESSMENT", assignee_role, f"{assignee_title} assessment work",
              CURRENT if assignee_user else UNASSIGNED, user=assignee_user,
              notes=f"{assignee_word} is completing the assessment.")
     else:
-        node("ENGINEER_ASSESSMENT", assignee_role, f"{assignee_word} assessment work", PENDING)
+        node("ENGINEER_ASSESSMENT", assignee_role, f"{assignee_title} assessment work", PENDING)
 
     # ----- Node 6: Assessment review -----
     # Owned by the route's reviewer, never by an assignment row: the named branch
-    # chief on the branch route, the assessment's office chief on the specialist
-    # route (design §4.1). REVIEWER/APPROVER assignment rows are history and
-    # confer nothing, so "awaiting reviewer assignment" is no longer a state the
-    # workflow can be in.
+    # chief on the branch route, the assessment's office chief on the senior
+    # engineer route (design §4.1). REVIEWER/APPROVER assignment rows are
+    # history and confer nothing, so "awaiting reviewer assignment" is no longer
+    # a state the workflow can be in.
     approved_ev = latest("APPROVED")
-    if specialist_route:
+    if senior_engineer_route:
         review_role = "GEOTECH_OFFICE_CHIEF"
         reviewer_user = user_of(stage_assignees.get("OFFICE_CHIEF"))
         review_note = "The office chief must approve or return the assessment."
@@ -444,7 +450,7 @@ def build_workflow_tree(
              extra=extra or None)
     elif assessment_path and a_state in ("APPROVED", "FINALIZED"):
         # Approved (or legacy signed-off) but not yet resolved: the assignee —
-        # engineer or senior specialist — resolves the incident. Keying this on
+        # Staff or senior engineer — resolves the incident. Keying this on
         # FINALIZED alone would leave RESOLUTION permanently PENDING and
         # unowned for every v2 assessment, so nobody would ever be told to close
         # the incident out and the "Ready to close out" Home group would be

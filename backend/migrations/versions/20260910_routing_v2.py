@@ -1,4 +1,4 @@
-"""Assessment routing v2: senior-specialist route, route discriminator, email outbox.
+"""Assessment routing v2: senior engineer route, route discriminator, email outbox.
 
 Revision ID: 20260910_routing_v2
 Revises: 20260904_assessment_subs
@@ -6,20 +6,21 @@ Create Date: 2026-09-10
 
 Routing v2 gives the GeoTech office chief exactly two mutually exclusive
 choices when an assessment lands with them: hand off to a branch chief (who
-assigns a GeoTech engineer and reviews the result), or assign a GeoTech Senior
-Specialist directly (who fills the form and reports back to the office chief).
+assigns a GeoTech Staff member and reviews the result), or assign a GeoTech
+Senior Engineer directly (who fills the form and reports back to that chief).
 Approval ends the assessment; ``FINALIZED`` becomes history-only.
 
 This revision is additive and idempotent (the clean base->head CI job re-runs
 it) and creates no new table:
 
-  1. the ``GEOTECH_SENIOR_SPECIALIST`` role row (the upgrade path;
+  1. the ``GEOTECH_SENIOR_ENGINEER`` role row, plus the Staff wording on the
+     two role descriptions 0008 re-asserts (the upgrade path;
      ``database/init/020_seed.sql`` is the fresh-install path — the migration
      never seeds users, because the clean base->head CI job never loads the
      seed);
   2. ``assessments.routing_path`` — the route discriminator (design §3.2);
   3. ``assessment_assignments.assignment_role`` widened to VARCHAR(24) BEFORE
-     the CHECK that admits ``SENIOR_SPECIALIST`` (design §7.2 step 3);
+     the CHECK that admits ``SENIOR_ENGINEER`` (design §7.2 step 3);
   4. the email outbox columns on ``incident_notifications`` (design §6.3);
   5. the six engineer-eligibility triggers re-created route-aware and the new
      ``trg_assessment_no_new_finalize`` guard (design §7.3);
@@ -32,8 +33,8 @@ NOT TOUCHED, deliberately (design §3.1, §3.4, §7.3) — do not "clean these u
     ``?state=FINALIZED`` still filters history.
   * ``chk_incidents_stage`` / ``chk_inc_assign_stage`` /
     ``chk_inc_route_assignment_type`` (database/init/010_schema.sql:232-233,
-    274-277, 292-293). The senior-specialist route reuses incident stage
-    ``ENGINEER`` and transition ``ENGINEER_ASSIGNED``; specialists are resolved
+    274-277, 292-293). The senior engineer route reuses incident stage
+    ``ENGINEER`` and transition ``ENGINEER_ASSIGNED``; senior engineers are resolved
     from ``user_roles`` + ``metadata_json`` like every other routing lookup,
     not from the decorative ``incident_routing_assignments`` table.
   * ``chk_inc_notify_channel`` — it already permits ``EMAIL``.
@@ -63,11 +64,11 @@ depends_on = None
 # already applied on dev, CI and Proxmox) and backend/tests/test_db_smoke.py
 # asserts on 'active GeoTech engineer or admin'.
 _ENGINEER_ROLE_SQL = "('GEOTECH_ENGINEER','FIELD_WORKER','ADMIN')"
-_SPECIALIST_ROLE_SQL = "('GEOTECH_SENIOR_SPECIALIST','ADMIN')"
+_SENIOR_ENGINEER_ROLE_SQL = "('GEOTECH_SENIOR_ENGINEER','ADMIN')"
 
 _ENGINEER_INCIDENT_MSG = "Engineer assignment target must be an active GeoTech engineer or admin"
 _ENGINEER_ASSESSMENT_MSG = "Assessment engineer target must be an active GeoTech engineer or admin"
-_SPECIALIST_MSG = "Senior specialist assignment target must be an active GeoTech senior specialist or admin"
+_SENIOR_ENGINEER_MSG = "Senior engineer assignment target must be an active GeoTech senior engineer or admin"
 
 
 def _eligible(user_expr: str, role_sql: str) -> str:
@@ -88,8 +89,8 @@ def _engineer_eligible(user_expr: str) -> str:
     return _eligible(user_expr, _ENGINEER_ROLE_SQL)
 
 
-def _specialist_eligible(user_expr: str) -> str:
-    return _eligible(user_expr, _SPECIALIST_ROLE_SQL)
+def _senior_engineer_eligible(user_expr: str) -> str:
+    return _eligible(user_expr, _SENIOR_ENGINEER_ROLE_SQL)
 
 
 # The original (pre-v2) predicate, used by downgrade() to restore the six
@@ -104,13 +105,34 @@ def _legacy_eligibility_predicate(user_expr: str) -> str:
 
 
 def upgrade() -> None:
-    # ---- 1. Role row (design §7.2 step 1) --------------------------------
+    # ---- 1. Role rows (design §7.2 step 1) -------------------------------
     op.execute(
         """
         INSERT INTO roles (name, description) VALUES
-          ('GEOTECH_SENIOR_SPECIALIST',
-           'GeoTech senior specialist: fills assessments assigned directly by the office chief')
+          ('GEOTECH_SENIOR_ENGINEER',
+           'GeoTech senior engineer: fills assessments assigned directly by the office chief')
         ON DUPLICATE KEY UPDATE description = VALUES(description)
+        """
+    )
+    # The people under a branch chief who fill out assessments are named Staff,
+    # not engineers. Their role CODES do not move — GEOTECH_ENGINEER and the
+    # legacy FIELD_WORKER alias are stored in deployed databases — but the
+    # description is display text, and 0008_assessment_domain.py (which is
+    # already applied and never edited) re-asserts the old wording on every
+    # `alembic upgrade`, so it is corrected here, after it. Descriptions only;
+    # no role is renamed, added or removed.
+    op.execute(
+        """
+        UPDATE roles
+           SET description = 'GeoTech Staff: completes assessments / technical form'
+         WHERE name = 'GEOTECH_ENGINEER'
+        """
+    )
+    op.execute(
+        """
+        UPDATE roles
+           SET description = 'GeoTech branch chief: assigns Staff to assessments'
+         WHERE name = 'GEOTECH_BRANCH_CHIEF'
         """
     )
 
@@ -132,7 +154,7 @@ def upgrade() -> None:
         """
         ALTER TABLE assessments
           ADD CONSTRAINT chk_assessment_routing_path
-          CHECK (routing_path IS NULL OR routing_path IN ('BRANCH','SENIOR_SPECIALIST'))
+          CHECK (routing_path IS NULL OR routing_path IN ('BRANCH','SENIOR_ENGINEER'))
         """
     )
     op.execute(
@@ -143,21 +165,24 @@ def upgrade() -> None:
     )
 
     # ---- 3. Assignment role vocabulary (design §7.2 step 3) --------------
-    # The column is VARCHAR(16) (0008_assessment_domain.py:174) and
-    # 'SENIOR_SPECIALIST' is 17 characters, so the widening MUST come first: in
-    # strict mode the first specialist assignment would raise 'Data too long for
-    # column', and without strict mode it would truncate to 'SENIOR_SPECIALIS'
-    # and then fail the new CHECK. assessment_assignments is created only by
-    # migration 0008 (it is absent from database/init/010_schema.sql), so there
-    # is no second definition to keep in step. MODIFY COLUMN to the same width
-    # is a no-op, so the step is re-runnable as a unit.
+    # The column is VARCHAR(16) (0008_assessment_domain.py:174) and the widening
+    # to VARCHAR(24) MUST come BEFORE the CHECK that admits the new value.
+    # 'SENIOR_ENGINEER' is 15 characters and would fit VARCHAR(16) as it stands,
+    # but the column is widened anyway so the vocabulary has room to grow without
+    # a second, order-sensitive column change: in strict mode a longer role added
+    # to the CHECK first would raise 'Data too long for column', and without
+    # strict mode it would silently truncate and then fail that same CHECK.
+    # assessment_assignments is created only by migration 0008 (it is absent from
+    # database/init/010_schema.sql), so there is no second definition to keep in
+    # step. MODIFY COLUMN to the same width is a no-op, so the step is
+    # re-runnable as a unit.
     op.execute("ALTER TABLE assessment_assignments MODIFY COLUMN assignment_role VARCHAR(24) NOT NULL")
     op.execute("ALTER TABLE assessment_assignments DROP CONSTRAINT IF EXISTS chk_assessment_assign_role")
     op.execute(
         """
         ALTER TABLE assessment_assignments
           ADD CONSTRAINT chk_assessment_assign_role
-          CHECK (assignment_role IN ('ENGINEER','SENIOR_SPECIALIST','REVIEWER','APPROVER','CONSULTED'))
+          CHECK (assignment_role IN ('ENGINEER','SENIOR_ENGINEER','REVIEWER','APPROVER','CONSULTED'))
         """
     )
 
@@ -221,15 +246,15 @@ def _create_route_aware_triggers() -> None:
     """Re-create the six eligibility triggers, route-aware.
 
     The bodies come from 20260817_engineer_assignment_eligibility.py:41-164 with
-    a parallel SENIOR_SPECIALIST rule added. That file is never edited — it is
+    a parallel SENIOR_ENGINEER rule added. That file is never edited — it is
     already applied on dev, CI and Proxmox.
     """
     # -- incident_assignments (stage ENGINEER) -----------------------------
-    # The specialist route reuses incident stage ENGINEER, so the incident-level
+    # The senior engineer route reuses incident stage ENGINEER, so the incident-level
     # trigger cannot read a role off the row: it consults the incident's
     # assessment instead. Two facts make that sound, and BOTH are load-bearing —
     # a later change to either would silently mis-classify a target:
-    #   (a) assign-specialist stamps assessments.routing_path='SENIOR_SPECIALIST'
+    #   (a) assign-senior-engineer stamps assessments.routing_path='SENIOR_ENGINEER'
     #       BEFORE the shared assignment machinery runs (design §3.3 T4), and
     #       _assign_incident (routes/incidents.py) is that machinery's first
     #       write — so the EXISTS below is already true when this trigger fires;
@@ -238,11 +263,11 @@ def _create_route_aware_triggers() -> None:
     #       (0008_assessment_domain.py:140) allows at most one assessment per
     #       incident. If ERIS ever allows more than one assessment per incident,
     #       this trigger must be revisited first.
-    incident_route_is_specialist = """
+    incident_route_is_senior_engineer = """
       EXISTS (
         SELECT 1 FROM assessments a
         WHERE a.incident_id = NEW.incident_id
-          AND a.routing_path = 'SENIOR_SPECIALIST'
+          AND a.routing_path = 'SENIOR_ENGINEER'
       )
     """
 
@@ -254,10 +279,10 @@ def _create_route_aware_triggers() -> None:
         FOR EACH ROW
         BEGIN
           IF NEW.assignment_stage = 'ENGINEER' AND NEW.is_active = 1 THEN
-            IF {incident_route_is_specialist} THEN
-              IF NOT ({_specialist_eligible('NEW.assignee_user_id')}) THEN
+            IF {incident_route_is_senior_engineer} THEN
+              IF NOT ({_senior_engineer_eligible('NEW.assignee_user_id')}) THEN
                 SIGNAL SQLSTATE '45000'
-                  SET MESSAGE_TEXT = '{_SPECIALIST_MSG}';
+                  SET MESSAGE_TEXT = '{_SENIOR_ENGINEER_MSG}';
               END IF;
             ELSE
               IF NOT ({_engineer_eligible('NEW.assignee_user_id')}) THEN
@@ -285,10 +310,10 @@ def _create_route_aware_triggers() -> None:
                OR NOT (NEW.assignee_user_id <=> OLD.assignee_user_id)
              )
           THEN
-            IF {incident_route_is_specialist} THEN
-              IF NOT ({_specialist_eligible('NEW.assignee_user_id')}) THEN
+            IF {incident_route_is_senior_engineer} THEN
+              IF NOT ({_senior_engineer_eligible('NEW.assignee_user_id')}) THEN
                 SIGNAL SQLSTATE '45000'
-                  SET MESSAGE_TEXT = '{_SPECIALIST_MSG}';
+                  SET MESSAGE_TEXT = '{_SENIOR_ENGINEER_MSG}';
               END IF;
             ELSE
               IF NOT ({_engineer_eligible('NEW.assignee_user_id')}) THEN
@@ -302,7 +327,7 @@ def _create_route_aware_triggers() -> None:
     )
 
     # -- assessment_assignments -------------------------------------------
-    # The ENGINEER rule is unchanged; the SENIOR_SPECIALIST rule is parallel.
+    # The ENGINEER rule is unchanged; the SENIOR_ENGINEER rule is parallel.
     op.execute("DROP TRIGGER IF EXISTS trg_assessment_assignment_engineer_elig_bi")
     op.execute(
         f"""
@@ -317,12 +342,12 @@ def _create_route_aware_triggers() -> None:
             SIGNAL SQLSTATE '45000'
               SET MESSAGE_TEXT = '{_ENGINEER_ASSESSMENT_MSG}';
           END IF;
-          IF NEW.assignment_role = 'SENIOR_SPECIALIST'
+          IF NEW.assignment_role = 'SENIOR_ENGINEER'
              AND NEW.is_active = 1
-             AND NOT ({_specialist_eligible('NEW.user_id')})
+             AND NOT ({_senior_engineer_eligible('NEW.user_id')})
           THEN
             SIGNAL SQLSTATE '45000'
-              SET MESSAGE_TEXT = '{_SPECIALIST_MSG}';
+              SET MESSAGE_TEXT = '{_SENIOR_ENGINEER_MSG}';
           END IF;
         END
         """
@@ -347,17 +372,17 @@ def _create_route_aware_triggers() -> None:
             SIGNAL SQLSTATE '45000'
               SET MESSAGE_TEXT = '{_ENGINEER_ASSESSMENT_MSG}';
           END IF;
-          IF NEW.assignment_role = 'SENIOR_SPECIALIST'
+          IF NEW.assignment_role = 'SENIOR_ENGINEER'
              AND NEW.is_active = 1
              AND (
-               OLD.assignment_role <> 'SENIOR_SPECIALIST'
+               OLD.assignment_role <> 'SENIOR_ENGINEER'
                OR OLD.is_active <> 1
                OR NOT (NEW.user_id <=> OLD.user_id)
              )
-             AND NOT ({_specialist_eligible('NEW.user_id')})
+             AND NOT ({_senior_engineer_eligible('NEW.user_id')})
           THEN
             SIGNAL SQLSTATE '45000'
-              SET MESSAGE_TEXT = '{_SPECIALIST_MSG}';
+              SET MESSAGE_TEXT = '{_SENIOR_ENGINEER_MSG}';
           END IF;
         END
         """
@@ -370,7 +395,7 @@ def _create_route_aware_triggers() -> None:
     #
     # These fire ONLY when assigned_engineer_user_id actually changes, which is
     # exactly why the §7.4 backfill is non-destructive: a backfilled
-    # SENIOR_SPECIALIST-route row still holding a legacy FIELD_WORKER engineer
+    # SENIOR_ENGINEER-route row still holding a legacy FIELD_WORKER engineer
     # keeps advancing through submit and review untouched.
     op.execute("DROP TRIGGER IF EXISTS trg_assessment_engineer_elig_bi")
     op.execute(
@@ -380,10 +405,10 @@ def _create_route_aware_triggers() -> None:
         FOR EACH ROW
         BEGIN
           IF NEW.assigned_engineer_user_id IS NOT NULL THEN
-            IF NEW.routing_path = 'SENIOR_SPECIALIST' THEN
-              IF NOT ({_specialist_eligible('NEW.assigned_engineer_user_id')}) THEN
+            IF NEW.routing_path = 'SENIOR_ENGINEER' THEN
+              IF NOT ({_senior_engineer_eligible('NEW.assigned_engineer_user_id')}) THEN
                 SIGNAL SQLSTATE '45000'
-                  SET MESSAGE_TEXT = '{_SPECIALIST_MSG}';
+                  SET MESSAGE_TEXT = '{_SENIOR_ENGINEER_MSG}';
               END IF;
             ELSE
               IF NOT ({_engineer_eligible('NEW.assigned_engineer_user_id')}) THEN
@@ -406,10 +431,10 @@ def _create_route_aware_triggers() -> None:
           IF NEW.assigned_engineer_user_id IS NOT NULL
              AND NOT (NEW.assigned_engineer_user_id <=> OLD.assigned_engineer_user_id)
           THEN
-            IF NEW.routing_path = 'SENIOR_SPECIALIST' THEN
-              IF NOT ({_specialist_eligible('NEW.assigned_engineer_user_id')}) THEN
+            IF NEW.routing_path = 'SENIOR_ENGINEER' THEN
+              IF NOT ({_senior_engineer_eligible('NEW.assigned_engineer_user_id')}) THEN
                 SIGNAL SQLSTATE '45000'
-                  SET MESSAGE_TEXT = '{_SPECIALIST_MSG}';
+                  SET MESSAGE_TEXT = '{_SENIOR_ENGINEER_MSG}';
               END IF;
             ELSE
               IF NOT ({_engineer_eligible('NEW.assigned_engineer_user_id')}) THEN
@@ -437,9 +462,9 @@ def _backfill_routing_path() -> None:
     #     routed: only delegate-branch puts an assessment there. Its branch chief
     #     may since have been NULLed by fk_assessment_branch_chief ON DELETE SET
     #     NULL (0008_assessment_domain.py:133-134); without this clause backfill
-    #     (b) would stamp it SENIOR_SPECIALIST and it would then be refused by
-    #     delegate-branch (specialist route), assign-engineer (not BRANCH) and
-    #     assign-specialist alike. Stamped BRANCH it is repairable in the
+    #     (b) would stamp it SENIOR_ENGINEER and it would then be refused by
+    #     delegate-branch (senior engineer route), assign-engineer (not BRANCH) and
+    #     assign-senior-engineer alike. Stamped BRANCH it is repairable in the
     #     product: re-delegation names a new branch chief from
     #     PENDING_ENGINEER_ASSIGNMENT with routing_path IN (NULL,'BRANCH').
     op.execute(
@@ -453,10 +478,10 @@ def _backfill_routing_path() -> None:
     # (b) Orphans: past office delegation with no branch chief (legacy
     #     /incidents endpoints, or an admin assign-engineer straight from
     #     PENDING_OFFICE_DELEGATION). Only an office chief can review these, so
-    #     the specialist route is the only path that leaves them approvable.
+    #     the senior engineer route is the only path that leaves them approvable.
     op.execute(
         """
-        UPDATE assessments SET routing_path = 'SENIOR_SPECIALIST'
+        UPDATE assessments SET routing_path = 'SENIOR_ENGINEER'
          WHERE routing_path IS NULL
            AND state <> 'PENDING_OFFICE_DELEGATION'
            AND branch_chief_user_id IS NULL
@@ -492,7 +517,7 @@ def _backfill_routing_path() -> None:
             "Each has no branch chief and no office_code, so no v2 reviewer can be "
             "derived. Repair them first, e.g.\n"
             f"  UPDATE assessments SET office_code = '<office>' WHERE id IN ({ids});\n"
-            "(office_code drives the senior-specialist route: an office chief of that "
+            "(office_code drives the senior engineer route: an office chief of that "
             "office reviews) or set branch_chief_user_id to the chief who should own "
             "it, then re-run `alembic upgrade head`."
         )
@@ -509,8 +534,8 @@ def downgrade() -> None:
     _restore_legacy_triggers()
 
     # Restore the four-value CHECK FIRST. It fails loudly if any
-    # SENIOR_SPECIALIST assignment row survives — correctly, since downgrading
-    # over specialist assignments is data loss and must not be silent. Only
+    # SENIOR_ENGINEER assignment row survives — correctly, since downgrading
+    # over senior engineer assignments is data loss and must not be silent. Only
     # after that CHECK has proved none survive is it safe to narrow the column
     # back: the reverse order would truncate the very rows the CHECK refuses.
     op.execute("ALTER TABLE assessment_assignments DROP CONSTRAINT IF EXISTS chk_assessment_assign_role")
@@ -534,7 +559,24 @@ def downgrade() -> None:
 
     # user_roles rows referencing the role are removed via ON DELETE CASCADE,
     # exactly as 0008_assessment_domain.py:253-261 does for its new roles.
-    op.execute("DELETE FROM roles WHERE name = 'GEOTECH_SENIOR_SPECIALIST'")
+    op.execute("DELETE FROM roles WHERE name = 'GEOTECH_SENIOR_ENGINEER'")
+
+    # ...and put the two descriptions back the way 0008 writes them, so a
+    # downgraded database reads exactly as it did before this revision.
+    op.execute(
+        """
+        UPDATE roles
+           SET description = 'GeoTech engineer: completes assessments / technical form'
+         WHERE name = 'GEOTECH_ENGINEER'
+        """
+    )
+    op.execute(
+        """
+        UPDATE roles
+           SET description = 'GeoTech branch chief: assigns engineers to assessments'
+         WHERE name = 'GEOTECH_BRANCH_CHIEF'
+        """
+    )
 
 
 def _restore_legacy_triggers() -> None:

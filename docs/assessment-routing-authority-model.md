@@ -12,7 +12,7 @@ document and the linked code win.
 > **Routing v2 (migration `20260910_routing_v2`).** When triage sets
 > `ASSESSMENT_REQUIRED` the assessment lands with the GeoTech office chief, who
 > now has exactly **two mutually exclusive choices**: hand off to a branch chief,
-> or assign a **GeoTech senior specialist** directly. **Review authority follows
+> or assign a **GeoTech senior engineer** directly. **Review authority follows
 > the assessment's routing path** — it is neither a job title nor an assignment.
 > **Approval ends the assessment**: the sign-off step and the `FINALIZED` state
 > are unreachable. On approval the district coordinator is notified **in-app and
@@ -41,13 +41,13 @@ ERIS is **not** an "incident-to-GISA" system.
 | Reviewer role | `REVIEWER` global role (kept, deprecated) | no reviewer role and no reviewer assignment — review follows `assessments.routing_path` |
 
 Another name kept for the same reason: `assessments.assigned_engineer_user_id`
-holds **the assignee on both routes**. On a `routing_path = 'SENIOR_SPECIALIST'`
-row it names a senior specialist, not an engineer. Renaming the column would
+holds **the assignee on both routes**. On a `routing_path = 'SENIOR_ENGINEER'`
+row it names a senior engineer, not a Staff member. Renaming the column would
 force a second branch into every reader (queue SQL, the submit identity check,
 `idx_assessment_engineer`, `workflow_tree`, `incident_classification`, web and
 mobile) for no gain, because `routing_path` already says which kind of person
 the id names. The API exposes the route-neutral aliases `assigned_user_id` and
-`assigned_user_kind` (`"ENGINEER" | "SENIOR_SPECIALIST"`).
+`assigned_user_kind` (`"STAFF" | "SENIOR_ENGINEER"`).
 
 **Technical debt / staged migration:** a future phase may rename the `gisa`
 tables/types behind a compatibility view. The legacy `REVIEWER` account role is
@@ -69,12 +69,12 @@ Maintenance Field Worker         Maintenance Coordinator                GeoTech 
                                 • NEEDS_REPORTER_INFORMATION ──► reporter resubmits     │
                                 • DUPLICATE_OR_LINKED                                   │
                          ┌──────────────────────────────────────────────────────────────┴───────────┐
-                         │ BRANCH route                                      SENIOR_SPECIALIST route│
+                         │ BRANCH route                                        SENIOR_ENGINEER route│
                          ▼                                                                          ▼
-              Branch Chief assigns Engineer                            Office Chief assigns a Senior Specialist
+              Branch Chief assigns a Staff member                      Office Chief assigns a Senior Engineer
                          │                                                                          │
                          ▼                                                                          ▼
-              Engineer fills the assessment (DRAFT)                   Senior Specialist fills it (DRAFT)
+              Staff member fills the assessment (DRAFT)               Senior Engineer fills it (DRAFT)
                          │  submit                                                                  │  submit
                          ▼                                                                          ▼
               The NAMED Branch Chief reviews                          An OFFICE CHIEF of that office reviews
@@ -83,15 +83,15 @@ Maintenance Field Worker         Maintenance Coordinator                GeoTech 
 ```
 
 On the branch route **the office chief is out of the picture from the hand-off
-onward** (except for re-delegation, §5). On the specialist route the work comes
+onward** (except for re-delegation, §5). On the senior engineer route the work comes
 back to the office chief, who approves it.
 
 ### Assessment states
 
 ```
 PENDING_OFFICE_DELEGATION      created by coordinator triage; routing_path IS NULL — no route chosen
-PENDING_ENGINEER_ASSIGNMENT    BRANCH route only: awaiting the branch chief's engineer assignment
-DRAFT                          the assignee (engineer or senior specialist) is filling the technical form
+PENDING_ENGINEER_ASSIGNMENT    BRANCH route only: awaiting the branch chief's Staff assignment
+DRAFT                          the assignee (Staff member or senior engineer) is filling the technical form
 SUBMITTED                      awaiting the route's reviewer
 REVISION_REQUESTED             returned to the assignee with the reviewer's note
 APPROVED                       TERMINAL — complete; approved_at set; nothing further is required
@@ -105,22 +105,22 @@ history.
 The legacy incident `current_stage` machine
 (`COORDINATOR_REVIEW → OFFICE_CHIEF_REVIEW → BRANCH_CHIEF_REVIEW →
 ENGINEER_ASSIGNED → RESOLVED`) is kept in sync by the Assessment endpoints so
-existing incident views keep working. The specialist route reuses the
-`ENGINEER_ASSIGNED` stage and the `ENGINEER` assignment stage — the specialist
-holds the same incident assignment row an engineer would.
+existing incident views keep working. The senior engineer route reuses the
+`ENGINEER_ASSIGNED` stage and the `ENGINEER` assignment stage — the senior
+engineer holds the same incident assignment row a Staff member would.
 
 ### The route discriminator
 
 `assessments.routing_path VARCHAR(24) NULL`, with
-`CHECK (routing_path IS NULL OR routing_path IN ('BRANCH','SENIOR_SPECIALIST'))`.
+`CHECK (routing_path IS NULL OR routing_path IN ('BRANCH','SENIOR_ENGINEER'))`.
 
 - `NULL` means **not yet chosen** — the honest state of a fresh assessment.
 - It is stamped in the same statement as the first assignment.
 - It is **not reversible**: `delegate-branch` returns `409` when the route is
-  already `SENIOR_SPECIALIST`, and `assign-specialist` returns `409` when it is
+  already `SENIOR_ENGINEER`, and `assign-senior-engineer` returns `409` when it is
   already `BRANCH`.
 - Swapping *people* stays legal: re-delegate a branch chief (§5), reassign the
-  specialist from `DRAFT`/`REVISION_REQUESTED`, reassign the engineer.
+  senior engineer from `DRAFT`/`REVISION_REQUESTED`, reassign the Staff member.
 
 ---
 
@@ -135,19 +135,19 @@ name satisfies an authority check.
 | --- | --- | --- |
 | `MAINTENANCE_FIELD_WORKER` | `MAINTENANCE` | reporter; narrow visibility |
 | `MAINTENANCE_COORDINATOR` | `MAINT_COORDINATOR` | triage + routing; notified on approval (in-app + email) |
-| `GEOTECH_OFFICE_CHIEF` | `OFFICE_CHIEF` | routes: hands off **or** assigns a senior specialist; reviews specialist-route work of their office |
-| `GEOTECH_BRANCH_CHIEF` | `BRANCH_CHIEF` | assigns the engineer and **reviews** the assessments handed to them |
-| `GEOTECH_ENGINEER` | `FIELD_WORKER` | completes the technical form |
-| `GEOTECH_SENIOR_SPECIALIST` | **none — the role is new** | completes the technical form on the specialist route; office-scoped |
+| `GEOTECH_OFFICE_CHIEF` | `OFFICE_CHIEF` | routes: hands off **or** assigns a senior engineer; reviews senior-engineer-route work of their office |
+| `GEOTECH_BRANCH_CHIEF` | `BRANCH_CHIEF` | assigns the Staff member and **reviews** the assessments handed to them |
+| `GEOTECH_ENGINEER` (label "Staff") | `FIELD_WORKER` | completes the technical form |
+| `GEOTECH_SENIOR_ENGINEER` | **none — the role is new** | completes the technical form on the senior engineer route; office-scoped |
 | `ADMIN` | `ADMIN` | full authority, including the review bypass |
 
-> Note: legacy `FIELD_WORKER` historically denotes the **engineer**, and legacy
+> Note: legacy `FIELD_WORKER` historically denotes the **Staff member**, and legacy
 > `MAINTENANCE` denotes the **field-worker reporter**. The alias table preserves
 > that meaning.
 
-`GEOTECH_SENIOR_SPECIALIST` deliberately has **no legacy alias**: inventing one
+`GEOTECH_SENIOR_ENGINEER` deliberately has **no legacy alias**: inventing one
 would make `expand_roles()` accept a name no database contains. It is in
-`OPERATIONAL_ROLES`, so a specialist has the same broad read every other
+`OPERATIONAL_ROLES`, so a senior engineer has the same broad read every other
 operational role has.
 
 `REVIEWER` is **deprecated**. It is retained for backward compatibility, keeps
@@ -155,27 +155,27 @@ broad operational read (it stays in `OPERATIONAL_ROLES`), and **grants no review
 authority**: `POST /submissions/{id}/review|approve|reject` no longer accept it.
 No new grants should be made.
 
-### The new role: GeoTech senior specialist
+### The new role: GeoTech senior engineer
 
 | Property | Value |
 | --- | --- |
-| Code / label | `GEOTECH_SENIOR_SPECIALIST` / "GeoTech Senior Specialist" |
-| Scoping | Office, via `users.metadata_json.$.office_code`, normalized by `normalize_office_code` — identical to chiefs. A specialist with **no** `office_code` is **not assignable**: the picker filters strictly (unlike the ENGINEER kind, which admits blank offices). |
+| Code / label | `GEOTECH_SENIOR_ENGINEER` / "GeoTech Senior Engineer" |
+| Scoping | Office, via `users.metadata_json.$.office_code`, normalized by `normalize_office_code` — identical to chiefs. A senior engineer with **no** `office_code` is **not assignable**: the picker filters strictly (unlike the ENGINEER kind, which admits blank offices). |
 | Operational read | Yes — in `OPERATIONAL_ROLES`, so `is_operational_user()` is true and `is_maintenance_only()` false. |
 
 **May**: be assigned by an office chief of their own office; own and edit the
 linked GISA technical form and supplementals; submit and resubmit; read all
 operational records; file an incident report; resolve the incident they were
 assigned. **May not**: review or approve anything, including their own work; be
-assigned by a branch chief; occupy an engineer slot on a branch-route assessment
+assigned by a branch chief; occupy a Staff slot on a branch-route assessment
 (the database refuses — §7); route or assign anyone.
 
-Because a specialist fills the form exactly as assessment authors under a branch chief do, the GISA write guards
+Because a senior engineer fills the form exactly as assessment authors under a branch chief do, the GISA write guards
 that were `require_roles(["FIELD_WORKER", "ADMIN"])` now use a single export:
 
 ```python
-GISA_AUTHOR_ROLES = expand_roles(GEOTECH_ENGINEER, GEOTECH_SENIOR_SPECIALIST) + [ADMIN]
-# ["ADMIN", "FIELD_WORKER", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_SPECIALIST"]
+GISA_AUTHOR_ROLES = expand_roles(GEOTECH_ENGINEER, GEOTECH_SENIOR_ENGINEER) + [ADMIN]
+# ["ADMIN", "FIELD_WORKER", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_ENGINEER"]
 ```
 
 That covers twelve guards in `app/main.py`, two in `app/photos.py`, and
@@ -183,8 +183,8 @@ That covers twelve guards in `app/main.py`, two in `app/photos.py`, and
 canonical `GEOTECH_ENGINEER` name, which could not edit before.
 
 Four literal role lists do **not** consult `OPERATIONAL_ROLES` and were widened
-by hand with `GEOTECH_SENIOR_SPECIALIST`: `GET /arcgis/runtime-config`
-(`routes/arcgis.py`) — without it a specialist-only account is 403'd from the map
+by hand with `GEOTECH_SENIOR_ENGINEER`: `GET /arcgis/runtime-config`
+(`routes/arcgis.py`) — without it a senior-engineer-only account is 403'd from the map
 *and* the 3D terrain — and `GET /incidents`, `GET /incidents/{id}`,
 `GET /mission-center/incidents` (`routes/incidents.py`).
 
@@ -196,11 +196,11 @@ by hand with `GEOTECH_SENIOR_SPECIALIST`: `GET /arcgis/runtime-config`
 | Triage / decide assessment required | Coordinator, Admin | `POST /incidents/{id}/triage` |
 | Route to GeoTech Office | Coordinator, Admin (auto by district; override audited) | triage |
 | **Route the assessment — choice 1:** hand off to a Branch Chief | Office Chief, Admin | `POST /assessments/{id}/delegate-branch` |
-| **Route the assessment — choice 2:** assign a Senior Specialist | Office Chief, Admin | `POST /assessments/{id}/assign-specialist` |
-| Assign/reassign Engineer (BRANCH route only) | **the named** `branch_chief_user_id`, Admin | `POST /assessments/{id}/assign-engineer` |
-| Reassign the Senior Specialist (SENIOR_SPECIALIST route only) | Office Chief, Admin | `POST /assessments/{id}/assign-specialist` |
+| **Route the assessment — choice 2:** assign a Senior Engineer | Office Chief, Admin | `POST /assessments/{id}/assign-senior-engineer` |
+| Assign/reassign a Staff member (BRANCH route only) | **the named** `branch_chief_user_id`, Admin | `POST /assessments/{id}/assign-engineer` |
+| Reassign the Senior Engineer (SENIOR_ENGINEER route only) | Office Chief, Admin | `POST /assessments/{id}/assign-senior-engineer` |
 | Re-delegate to a different Branch Chief (BRANCH route, non-terminal) | Office Chief, Admin | `POST /assessments/{id}/delegate-branch` |
-| Edit Assessment (technical form) | the assignee (engineer **or** senior specialist), Admin | `PATCH /submissions/{id}/gisa` (editor grant) |
+| Edit Assessment (technical form) | the assignee (Staff member **or** senior engineer), Admin | `PATCH /submissions/{id}/gisa` (editor grant) |
 | Submit assessment | the assignee, Admin | `POST /assessments/{id}/submit` |
 | Attach someone **for information** (`CONSULTED`) | Office Chief, Branch Chief, Admin | `POST /assessments/{id}/assignments` |
 | **Review / approve / request revisions** | **the route's reviewer** (§4), Admin | `POST /assessments/{id}/review` |
@@ -226,7 +226,7 @@ by hand with `GEOTECH_SENIOR_SPECIALIST`: `GET /arcgis/runtime-config`
   `is_reviewer()` to grant read the role model did not otherwise give (the
   submission list scope, listing every submission, two attachment fetches, and
   the photo index). They now call `is_operational_user()`, which already
-  includes `REVIEWER` — so an office chief reviewing on the specialist route has
+  includes `REVIEWER` — so an office chief reviewing on the senior engineer route has
   the same reach a legacy `REVIEWER` had. `permissions.is_reviewer()` is
   deprecated; new code must not call it.
 
@@ -242,15 +242,15 @@ cannot drift apart.
 | `routing_path` | Who may review | Rule |
 | --- | --- | --- |
 | `BRANCH` | The **named** branch chief | `branch_chief_user_id == user.id` **and** the caller holds `GEOTECH_BRANCH_CHIEF` (canonical or legacy) |
-| `SENIOR_SPECIALIST` | **An office chief of that assessment's office** | caller holds `GEOTECH_OFFICE_CHIEF` (canonical or legacy) **and** their `metadata.office_code` is non-blank **and** equals the assessment's non-blank `office_code` |
+| `SENIOR_ENGINEER` | **An office chief of that assessment's office** | caller holds `GEOTECH_OFFICE_CHIEF` (canonical or legacy) **and** their `metadata.office_code` is non-blank **and** equals the assessment's non-blank `office_code` |
 | `NULL` | Nobody | "This assessment has not been routed yet" |
 | any | `ADMIN` | Admin keeps the review bypass |
 
-The specialist route binds to the **office**, not to the individual chief who
+The senior engineer route binds to the **office**, not to the individual chief who
 made the assignment: offices have more than one chief, binding to a person would
 strand the assessment whenever that person is away, and no column records the
-assigner. Who assigned is preserved in the `SPECIALIST_ASSIGNED` event metadata
-(`{specialist_user_id, assigned_by_user_id}`).
+assigner. Who assigned is preserved in the `SENIOR_ENGINEER_ASSIGNED` event metadata
+(`{senior_engineer_user_id, assigned_by_user_id}`).
 
 The office comparison is an **explicit falsy guard on both sides**, not a chained
 `!= ''`: `normalize_office_code` returns `None` (never `''`) for blank input, so
@@ -261,7 +261,7 @@ Two consequences worth stating:
 
 - **Review is office-scoped for the first time.** A chief with a `NULL`
   `office_code` can review nothing — which is why the admin users page gained an
-  **Office** field and the seed gained an office-scoped specialist.
+  **Office** field and the seed gained an office-scoped senior engineer.
 - **`_scope_office` is strict for the review queues.** An unscoped chief sees an
   empty review queue, never every office's.
 
@@ -279,7 +279,7 @@ Two consequences worth stating:
 `CONSULTED` survives as the **only writable assignment role**: it never granted
 authority. `ASSIGN_REVIEWER_ROLES` was renamed `ASSIGN_CONSULTED_ROLES` with the
 same membership, and `DELETE /assessments/{id}/assignments/{aid}` refuses to
-detach `ENGINEER` **or** `SENIOR_SPECIALIST` rows (the assignee is changed
+detach `ENGINEER` **or** `SENIOR_ENGINEER` rows (the assignee is changed
 through the assignment endpoints, never here).
 
 ---
@@ -304,23 +304,22 @@ place:
   stage assignment.
 - **Re-delegation** (any later non-terminal state) changes **only**
   `branch_chief_user_id` and re-stamps `office_delegated_at` with the moment of
-  the swap. The state, the engineer, the linked submission, the incident stage
+  the swap. The state, the assignee, the linked submission, the incident stage
   and every other timestamp are untouched. An `OFFICE_DELEGATED` event records
   the swap with both ids in its metadata
   (`{branch_chief_user_id, previous_branch_chief_user_id, routing_path}`), and
   the new chief is notified (`ASSESSMENT_BRANCH_DELEGATION`).
-- `409` from `APPROVED`/`FINALIZED`; `409` if the specialist route was taken.
+- `409` from `APPROVED`/`FINALIZED`; `409` if the senior engineer route was taken.
 
 Re-delegating from `SUBMITTED` hands the pending decision to the new chief, which
 is the point. The office chief regains reach over a branch-route assessment
-**only** for this one act — they still cannot assign the engineer, review, or
+**only** for this one act — they still cannot assign the Staff member, review, or
 approve.
 
 `engineer_user_id` on this request is **rejected, not ignored**: it stays on
 `AssessmentDelegateBranchRequest` so an old client gets
-`400 "The office chief no longer assigns the person who fills out the assessment directly. Hand off to a branch
-chief, or assign a senior specialist with POST /assessments/{id}/assign-specialist."`
-instead of a silent behaviour change.
+`400 "The office chief cannot assign Staff directly. Hand off to a branch chief,
+or assign a senior engineer."` instead of a silent behaviour change.
 
 ---
 
@@ -328,12 +327,12 @@ instead of a silent behaviour change.
 
 ### Added
 
-- `POST /assessments/{id}/assign-specialist` — office chief, admin. Stamps
-  `routing_path='SENIOR_SPECIALIST'` **first**, then runs the shared assignment
-  machinery with assignment role `SENIOR_SPECIALIST`; writes the
-  `SPECIALIST_ASSIGNED` event. `409` if the branch route was taken;
-  `400 "Selected user is not a senior specialist for this office"`.
-- `GET /assessments/{id}/specialist-options` — office chief, admin; office access
+- `POST /assessments/{id}/assign-senior-engineer` — office chief, admin. Stamps
+  `routing_path='SENIOR_ENGINEER'` **first**, then runs the shared assignment
+  machinery with assignment role `SENIOR_ENGINEER`; writes the
+  `SENIOR_ENGINEER_ASSIGNED` event. `409` if the branch route was taken;
+  `400 "Selected user is not a senior engineer for this office"`.
+- `GET /assessments/{id}/senior-engineer-options` — office chief, admin; office access
   enforced. Returns `{assessment_id, office_code, items[]}`.
 - `GET /admin/notifications/undelivered` — admin. The EMAIL outbox backlog, so a
   silent SMTP failure is visible (§8).
@@ -347,39 +346,39 @@ instead of a silent behaviour change.
   "kind=REVIEWER was retired; use CONSULTED"`. `REVIEWER` stays in the query
   pattern on purpose: dropping it would make FastAPI answer a bare `422` before
   the handler could explain. The pattern is now
-  `^(ENGINEER|SENIOR_SPECIALIST|CONSULTED|REVIEWER)$`.
+  `^(ENGINEER|SENIOR_ENGINEER|CONSULTED|REVIEWER)$`.
 - `POST /incidents/{id}/office-chief/assign-branch` and
   `POST /incidents/{id}/branch-chief/assign-engineer` → **`410 Gone`**, pointing
-  at the assessment endpoints. They moved incident stages and created engineer
+  at the assessment endpoints. They moved incident stages and created `ENGINEER`
   assignments without touching `assessments.state` or `routing_path` — exactly
-  the bypass that could put an engineer on a specialist-route assessment.
+  the bypass that could put a Staff member on a senior-engineer-route assessment.
   `GET /incidents/{id}/office-chief/branch-options` **stays live and unchanged**:
   it is a read, it enforces office access, and it is the branch half of the
   two-choice picker on mobile.
 - `POST /incidents/{id}/assign` stays as an admin recovery tool but returns `409`
-  when the incident's assessment has `routing_path='SENIOR_SPECIALIST'`.
+  when the incident's assessment has `routing_path='SENIOR_ENGINEER'`.
 
 ### Queues — `GET /assessments?queue=`
 
 | Value | Rows | Office scoping |
 | --- | --- | --- |
 | `office_chief` | `state='PENDING_OFFICE_DELEGATION'` | permissive |
-| `office_chief_review` **(new)** | `state='SUBMITTED' AND routing_path='SENIOR_SPECIALIST'` | **strict** — an unscoped chief gets zero rows |
+| `office_chief_review` **(new)** | `state='SUBMITTED' AND routing_path='SENIOR_ENGINEER'` | **strict** — an unscoped chief gets zero rows |
 | `branch_chief` | `state='PENDING_ENGINEER_ASSIGNMENT' AND routing_path='BRANCH' AND branch_chief_user_id=me` | permissive |
 | `branch_chief_review` **(new)** | `state='SUBMITTED' AND routing_path='BRANCH' AND branch_chief_user_id=me` | permissive (identity narrows it) |
 | `assignee` **(new)**, `engineer` (alias) | `assigned_engineer_user_id=me`, no state filter | none |
-| `reviewer` (**permanent alias**) | `SUBMITTED` and (branch route + named chief) or (specialist route + my office) | strict on the specialist half |
+| `reviewer` (**permanent alias**) | `SUBMITTED` and (branch route + named chief) or (senior engineer route + my office) | strict on the senior engineer half |
 
 `_scope_office(..., strict=True)` appends `1=0` when the caller has no
 `office_code`, instead of returning an unscoped result. The `branch_chief` queue
 dropped its old `OR branch_chief_user_id IS NULL` clause — a NULL branch chief
-now means the specialist route or an unrouted assessment, neither of which
+now means the senior engineer route or an unrouted assessment, neither of which
 belongs in a branch chief's assignment queue.
 
 ### Keeping the linked technical form in step (B1)
 
 `assessments.state` and `submissions.status` used to be two independent machines,
-which is why an engineer could be told to fix a form the server had locked and a
+which is why a Staff member could be told to fix a form the server had locked and a
 reviewer saw two Approve buttons. `submit` and `review` now drive both **in the
 same transaction**, through the existing concurrency-safe helper, so the
 `rowcount == 1 or 409` guarantee survives:
@@ -407,7 +406,7 @@ back with it.
 `GET /assessments`, `GET /assessments/{id}` and `GET /incidents/{id}/assessment`
 now carry `routing_path`, `assigned_user_id`, `assigned_user_kind`, `can_review`
 and `review_owner` (`{kind, user_id, office_code}` — `user_id` is null on the
-specialist route, where the reviewer is an office **function**). Assignments
+senior engineer route, where the reviewer is an office **function**). Assignments
 carry `is_authority`, which is always `false`. `GET /submissions/{id}` gains
 `can_review` beside `can_edit`, and its workflow `context` gains
 `assessment_routing_path`.
@@ -419,27 +418,29 @@ carry `is_authority`, which is always `false`. `GET /submissions/{id}` gains
 The read model and the API are not the only guards; the database refuses the
 shapes the model forbids (`20260910_routing_v2`).
 
-- **Route-aware engineer eligibility.** The six eligibility triggers from
+- **Route-aware assignee eligibility.** The six eligibility triggers from
   `20260817_engineer_assignment_eligibility` are dropped and re-created: when the
-  assessment's `routing_path` is `SENIOR_SPECIALIST` the target must hold
-  `GEOTECH_SENIOR_SPECIALIST` or `ADMIN`; otherwise the original
+  assessment's `routing_path` is `SENIOR_ENGINEER` the target must hold
+  `GEOTECH_SENIOR_ENGINEER` or `ADMIN`; otherwise the original
   `GEOTECH_ENGINEER`/`FIELD_WORKER`/`ADMIN` rule applies, **with its message
   verbatim**. `trg_incident_engineer_elig_bi/bu` consults
   `EXISTS (SELECT 1 FROM assessments a WHERE a.incident_id = NEW.incident_id AND
-  a.routing_path='SENIOR_SPECIALIST')`; that is single-valued because
+  a.routing_path='SENIOR_ENGINEER')`; that is single-valued because
   `uk_assessment_incident` allows at most one assessment per incident, and it is
-  correct because `assign-specialist` stamps `routing_path` **before** the shared
+  correct because `assign-senior-engineer` stamps `routing_path` **before** the shared
   machinery writes the incident assignment.
 - **`FINALIZED` is closed.** New trigger `trg_assessment_no_new_finalize` (BEFORE
   UPDATE, `FOLLOWS trg_assessment_engineer_elig_bu`) signals `45000` when
   `NEW.state='FINALIZED' AND OLD.state<>'FINALIZED'` — closing the retired
   endpoint, old clients and direct SQL alike. Already-`FINALIZED` rows update
   freely.
-- **Assignment vocabulary.** `assessment_assignments.assignment_role` widened to
-  `VARCHAR(24)` **before** the CHECK was replaced (`'SENIOR_SPECIALIST'` is 17
-  characters and `VARCHAR(16)` would have truncated or raised), and the CHECK is
-  now `('ENGINEER','SENIOR_SPECIALIST','REVIEWER','APPROVER','CONSULTED')` —
-  the two retired values stay listed so historical rows remain valid.
+- **Assignment vocabulary.** `assessment_assignments.assignment_role` is widened
+  to `VARCHAR(24)` **before** the CHECK is replaced, and the CHECK is now
+  `('ENGINEER','SENIOR_ENGINEER','REVIEWER','APPROVER','CONSULTED')` — the two
+  retired values stay listed so historical rows remain valid. `'SENIOR_ENGINEER'`
+  is 15 characters and would have fitted the original `VARCHAR(16)`; the widening
+  is kept as written because the migration and its down-path were reviewed
+  against the wider column, and it leaves headroom for later values.
 - **Untouched on purpose:** `chk_assessment_state`, `chk_incidents_stage`,
   `chk_inc_assign_stage`, `chk_inc_route_assignment_type` and
   `trg_incident_identity_bu` (which gates `incidents.incident_type` on
@@ -453,7 +454,7 @@ reviewer, or the migration refuses to complete:
 - a recorded branch chief, **or** `state = 'PENDING_ENGINEER_ASSIGNMENT'` (only
   `delegate-branch` puts a row there) → `routing_path='BRANCH'`;
 - past office delegation, no branch chief, with an `office_code` →
-  `routing_path='SENIOR_SPECIALIST'` (only an office chief can review these);
+  `routing_path='SENIOR_ENGINEER'` (only an office chief can review these);
 - still `PENDING_OFFICE_DELEGATION` → `routing_path` stays `NULL`; the chief has
   not chosen, and v2 asks them to.
 
@@ -463,8 +464,8 @@ leave rows nobody but admin could act on. Existing `REVIEWER`/`APPROVER`
 assignment rows are **not** touched — no `is_active=0` sweep, no deletion.
 
 The re-created eligibility triggers fire only when
-`assigned_engineer_user_id` changes, so a backfilled `SENIOR_SPECIALIST`-route
-row that still holds a legacy `FIELD_WORKER` engineer keeps advancing through
+`assigned_engineer_user_id` changes, so a backfilled `SENIOR_ENGINEER`-route
+row that still holds a legacy `FIELD_WORKER` Staff member keeps advancing through
 submit and review untouched. That is the single reason the backfill is
 non-destructive, and a test pins it.
 
@@ -479,8 +480,8 @@ caused it. `_queue_incident_notifications` takes a `channels` tuple (default
 
 | Event | Template code | Recipients | Channels |
 | --- | --- | --- | --- |
-| Specialist assigned | `ASSESSMENT_SPECIALIST_ASSIGNMENT` | the specialist | IN_APP |
-| Submitted | `ASSESSMENT_SUBMITTED_FOR_REVIEW` | branch route: `branch_chief_user_id`; specialist route: the office's chiefs | IN_APP |
+| Senior engineer assigned | `ASSESSMENT_SENIOR_ENGINEER_ASSIGNMENT` | the senior engineer | IN_APP |
+| Submitted | `ASSESSMENT_SUBMITTED_FOR_REVIEW` | branch route: `branch_chief_user_id`; senior engineer route: the office's chiefs | IN_APP |
 | **Approved** | **`ASSESSMENT_APPROVED_COORDINATOR`** | the district's coordinators ∪ `incidents.triage_decided_by_user_id` | **IN_APP + EMAIL** |
 | Approved | `ASSESSMENT_APPROVED_AUTHOR` | the assignee | IN_APP |
 | Revision requested | `ASSESSMENT_REVISION_REQUESTED` | the assignee | IN_APP |
@@ -555,7 +556,7 @@ the timeline). The table is editable, giving a clear path to an administration
 UI without hardcoding the mapping inside route handlers.
 
 The resolved `office_code` is now **load-bearing for authority**, not just for
-queues: it is what makes an office chief the reviewer on the specialist route.
+queues: it is what makes an office chief the reviewer on the senior engineer route.
 
 ---
 
@@ -586,7 +587,7 @@ never overwrites the location-review JSON:
 Migration `20260910_routing_v2` (routing v2; raw `op.execute` SQL, idempotent,
 **creates no new table**):
 
-- inserts the `GEOTECH_SENIOR_SPECIALIST` role row (the upgrade path;
+- inserts the `GEOTECH_SENIOR_ENGINEER` role row (the upgrade path;
   `020_seed.sql` is the fresh-install path — the migration never seeds *users*);
 - adds `assessments.routing_path`, `chk_assessment_routing_path` and
   `idx_assessment_routing (routing_path, state)`;
@@ -601,8 +602,8 @@ Migration `20260910_routing_v2` (routing v2; raw `op.execute` SQL, idempotent,
 
 `downgrade()` reverses all of it: it drops the finalize trigger, restores the six
 original trigger bodies verbatim, restores the narrower assignment CHECK — which
-fails loudly if a `SENIOR_SPECIALIST` row exists, correctly, because downgrading
-over specialist assignments is data loss — and only then narrows the column back
+fails loudly if a `SENIOR_ENGINEER` row exists, correctly, because downgrading
+over senior engineer assignments is data loss — and only then narrows the column back
 to `VARCHAR(16)`, drops `routing_path` with its index and CHECK, drops the outbox
 columns and index, and deletes the role row (relying on `user_roles ON DELETE
 CASCADE`).
@@ -640,7 +641,7 @@ alembic upgrade 20260904_assessment_subs:20260910_routing_v2 --sql
 ```
 
 `database/init/020_seed.sql` also registers the new role for fresh dev DBs, and
-seeds `seniorspecialist@local` (office `WEST`) and `coordinator04@local`
+seeds `seniorengineer@local` (office `WEST`) and `coordinator04@local`
 (district `04`). **Re-run the seed on every already-initialised dev, CI and
 Proxmox database after upgrading** — the migration deliberately seeds only the
 role row, so those two accounts otherwise exist only on a fresh volume.
@@ -696,15 +697,15 @@ explanatory `400`/`409`/`410`, never a 404 and never a silent no-op.
    is announced.
 
 **What to tell users.** *Office chiefs*: "You now choose one of two paths and
-cannot name the person who fills out the assessment yourself. On the branch route the case leaves you
-for good; on the specialist route it comes back to you to approve." *Branch
+cannot assign Staff yourself. On the branch route the case leaves you for good;
+on the senior engineer route it comes back to you to approve." *Branch
 chiefs*: "You approve the assessments you were handed — no reviewer to assign, no
 sign-off afterwards, and you can only act on cases handed to you." *Anyone
 holding REVIEWER*: "Review is decided by the branch chief or office chief who
 owns the assessment. You keep access to read everything." *Coordinators*: "When a
 GeoTech assessment is approved you get a notice in ERIS and an email."
-*Engineers*: "Nothing changes, except that the person who returns your work is
-now always the branch chief."
+*Staff*: "Nothing changes, except that the person who returns your work is now
+always the branch chief."
 
 ---
 
@@ -741,9 +742,9 @@ The authority/lifecycle matrix maps 1:1 to these files:
 
 | File | Covers |
 | --- | --- |
-| `backend/tests/test_assessment_flow.py` | Both lifecycles end-to-end (`TestBranchRoute`, `TestSpecialistRoute`), field-worker isolation, triage + routing, supplementals, broad read (including that `REVIEWER` keeps it), the timeline, legacy compatibility |
+| `backend/tests/test_assessment_flow.py` | Both lifecycles end-to-end (`TestBranchRoute`, `TestSeniorEngineerRoute`), field-worker isolation, triage + routing, supplementals, broad read (including that `REVIEWER` keeps it), the timeline, legacy compatibility |
 | `backend/tests/test_routing_v2_authority.py` | The negative matrix: wrong chief, wrong route, wrong office, unscoped chief, historical `REVIEWER`/`APPROVER` rows, retired endpoints (`400`/`409`/`410`), the linked-submission `409`s, and re-delegation from `SUBMITTED` |
-| `backend/tests/test_routing_v2_eligibility.py` | The database boundary: route-aware eligibility triggers, the `FINALIZED` refusal, the untruncated 17-character assignment role, and a backfilled specialist-route row with a legacy engineer still completing |
+| `backend/tests/test_routing_v2_eligibility.py` | The database boundary: route-aware eligibility triggers, the `FINALIZED` refusal, the untruncated assignment role, and a backfilled senior-engineer-route row with a legacy Staff member still completing |
 | `backend/tests/test_routing_v2_notifications.py` | IN_APP + EMAIL rows on approval, the triaging coordinator as a recipient, per-route submit notices, and `.eml` dev delivery |
 | `backend/tests/test_routing_v2_transactions.py` | B1's all-or-nothing behaviour across the linked submissions |
 | `backend/tests/test_notification_templates.py` | `render()` (no DB) |
@@ -782,10 +783,10 @@ The authority/lifecycle matrix maps 1:1 to these files:
 6. **Triage never overwrites `location_match_metadata`** — the disposition lives in
    dedicated triage columns (migration 0009). Only the needs-info path writes
    metadata, and it merges rather than overwrites.
-7. **Office scoping is now load-bearing.** A chief or senior specialist with no
+7. **Office scoping is now load-bearing.** A chief or senior engineer with no
    `metadata.office_code` can neither review nor be assigned. The admin users
    page has an Office field for exactly this reason.
-8. **The specialist route binds review to the office, not to the assigning
+8. **The senior engineer route binds review to the office, not to the assigning
    chief.** The decision names "the office chief" as a function; offices have
    more than one chief, binding to a person would strand the assessment whenever
    that person is away, and no column records the assigner. This is the one place
@@ -806,7 +807,7 @@ The authority/lifecycle matrix maps 1:1 to these files:
 4. Decide the approval ↔ incident-resolution coupling.
 5. Bring the two-choice route step to mobile, and collapse
    `GET /incidents/{id}/office-chief/branch-options` into the assessment-scoped
-   `GET /assessments/{id}/specialist-options` pair.
+   `GET /assessments/{id}/senior-engineer-options` pair.
 6. Attachment access hardening parity check for assessment-linked attachments.
 7. An in-app inbox that reads `incident_notifications` — nothing renders the
    IN_APP rows today.

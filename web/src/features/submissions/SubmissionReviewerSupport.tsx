@@ -8,7 +8,7 @@ import { formatWorkflowTimestamp, workflowEventLabel, workflowTransitionLabel } 
  *
  * `canReview` is the server's path-based authority, not a role: on an assessment
  * the note is written by the branch chief (branch route) or an office chief of
- * the office (specialist route), and by nobody else.
+ * the office (senior engineer route), and by nobody else.
  */
 export default function SubmissionReviewerSupport({
   reviewNote,

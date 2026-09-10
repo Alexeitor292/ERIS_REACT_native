@@ -43,7 +43,7 @@ const QUEUES: { key: QueueKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "office_chief", label: "Office" },
   { key: "branch_chief", label: "Branch" },
-  { key: "engineer", label: "Engineering" },
+  { key: "engineer", label: "Staff" },
   { key: "reviewer", label: "Reviews" },
 ];
 
@@ -264,7 +264,7 @@ export default function AssessmentsScreen() {
                       onChangeText={setEngineerId}
                       editable={isBranchRoute}
                       keyboardType="number-pad"
-                      placeholder="Engineer user id"
+                      placeholder="Staff user id"
                       placeholderTextColor={palette.muted}
                       style={[
                         styles.input,
@@ -284,11 +284,11 @@ export default function AssessmentsScreen() {
                         { backgroundColor: palette.primary, opacity: engineerId && isBranchRoute ? 1 : 0.5 },
                       ]}
                     >
-                      <Text style={styles.actionText}>Assign engineer</Text>
+                      <Text style={styles.actionText}>Assign Staff member</Text>
                     </Pressable>
                     {!isBranchRoute && (
                       <Text style={{ color: palette.muted, fontSize: 11 }}>
-                        Engineers are assigned only on the branch route.
+                        Staff are assigned only on the branch route.
                       </Text>
                     )}
                   </View>
@@ -326,7 +326,7 @@ export default function AssessmentsScreen() {
                       </>
                     )}
                     <Text style={{ color: palette.muted, fontSize: 11 }}>
-                      Only the branch chief (or the office chief on the specialist route) can decide this.
+                      Only the branch chief (or the office chief on the senior engineer route) can decide this.
                     </Text>
                   </View>
                 )}

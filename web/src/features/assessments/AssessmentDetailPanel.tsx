@@ -5,13 +5,13 @@ import {
   addAssignment,
   assessmentAssignmentOptions,
   assignEngineer,
-  assignSpecialist,
+  assignSeniorEngineer,
   branchOptions,
   createAssessmentSubmission,
   delegateBranch,
   removeAssignment,
   reviewAssessment,
-  specialistOptions,
+  seniorEngineerOptions,
   submitAssessment,
   type AssessmentDetail,
   type AssignmentUserOption,
@@ -23,12 +23,14 @@ import type { Incident, Submission } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { SubmissionStatusBadge } from "../submissions/SubmissionDetailPrimitives";
 import { buildSubmissionDisplayTitle } from "../../utils/submissionLabel";
-import { canAssignEngineer, canDelegateBranch, isAdmin, isEngineer, isSeniorSpecialist } from "../../utils/roleModel";
+import { canAssignEngineer, canDelegateBranch, isAdmin, isEngineer, isSeniorEngineer } from "../../utils/roleModel";
 import {
+  assessmentEventLabel,
   assessmentPermissions,
   assessmentStateLabel,
   assessmentStateLabelFor,
   assessmentTone,
+  assignmentRoleLabel,
   humanizeCode,
   isActionable,
   latestSubmissionId,
@@ -71,7 +73,7 @@ export function AssessmentStateBadge({ state, routingPath = null, mini = false }
   );
 }
 
-/** The ladder this assessment actually walks — branch, specialist, or not yet routed. */
+/** The ladder this assessment actually walks — branch, senior engineer, or not yet routed. */
 export function Pipeline({ assessment }: { assessment: Pick<AssessmentDetail["assessment"], "state" | "routing_path"> }) {
   const steps = pipelineFor(assessment);
   const current = pipelineIndex(assessment);
@@ -132,12 +134,12 @@ const ROUTE_CHOICES: Array<{ value: RoutingPath; label: string; consequence: str
   {
     value: "BRANCH",
     label: "Hand off to a branch chief",
-    consequence: "The branch chief assigns the engineer and approves the finished assessment. You are done with this case.",
+    consequence: "The branch chief assigns a Staff member and approves the finished assessment. You are done with this case.",
   },
   {
-    value: "SENIOR_SPECIALIST",
-    label: "Assign a senior specialist",
-    consequence: "The specialist fills the assessment and returns it to you for approval.",
+    value: "SENIOR_ENGINEER",
+    label: "Assign a senior engineer",
+    consequence: "The senior engineer fills the assessment and returns it to you for approval.",
   },
 ];
 
@@ -172,7 +174,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
       officeChief: canDelegateBranch(roles),
       branchChief: canAssignEngineer(roles),
       engineer: isEngineer(roles),
-      seniorSpecialist: isSeniorSpecialist(roles),
+      seniorEngineer: isSeniorEngineer(roles),
     }),
     [roles],
   );
@@ -189,23 +191,23 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
   const [branchList, setBranchList] = useState<RoutingUserOption[]>([]);
-  const [specialistList, setSpecialistList] = useState<RoutingUserOption[]>([]);
+  const [seniorEngineerList, setSeniorEngineerList] = useState<RoutingUserOption[]>([]);
   const [engineerOptions, setEngineerOptions] = useState<AssignmentUserOption[]>([]);
   const [consultedOptions, setConsultedOptions] = useState<AssignmentUserOption[]>([]);
   const [routeChoice, setRouteChoice] = useState<RoutingPath | null>(null);
   const [consultedOpen, setConsultedOpen] = useState(false);
   const [branchChiefId, setBranchChiefId] = useState("");
-  const [specialistId, setSpecialistId] = useState("");
+  const [seniorEngineerId, setSeniorEngineerId] = useState("");
   const [engineerId, setEngineerId] = useState("");
   const [consultedId, setConsultedId] = useState("");
 
   const resetPickers = () => {
-    setBranchChiefId(""); setSpecialistId(""); setEngineerId(""); setConsultedId("");
+    setBranchChiefId(""); setSeniorEngineerId(""); setEngineerId(""); setConsultedId("");
   };
 
   useEffect(() => {
     setNotes(""); setRouteChoice(null); setConsultedOpen(false);
-    setBranchChiefId(""); setSpecialistId(""); setEngineerId(""); setConsultedId("");
+    setBranchChiefId(""); setSeniorEngineerId(""); setEngineerId(""); setConsultedId("");
   }, [assessment.id, assessment.state, assessment.routing_path]);
 
   // Incident title / Event Group for cross-links (incident payload carries event_group_id).
@@ -222,15 +224,15 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
     return () => { cancelled = true; };
   }, [assessment.incident_id]);
 
-  const showRouting = mode === "work" && (permissions.delegate || permissions.assignSpecialist);
+  const showRouting = mode === "work" && (permissions.delegate || permissions.assignSeniorEngineer);
   const showAssignEngineer = mode === "work" && permissions.assignEngineer;
   const showConsultedManagement = mode === "work" && permissions.manageConsulted;
 
   // The route choice precedes the picker, so exactly one routing option list is
-  // ever fetched — with the engineer list that is at most two per state.
+  // ever fetched — with the Staff list that is at most two per state.
   const routeOptions = useMemo(
-    () => ROUTE_CHOICES.filter((choice) => (choice.value === "BRANCH" ? permissions.delegate : permissions.assignSpecialist)),
-    [permissions.assignSpecialist, permissions.delegate],
+    () => ROUTE_CHOICES.filter((choice) => (choice.value === "BRANCH" ? permissions.delegate : permissions.assignSeniorEngineer)),
+    [permissions.assignSeniorEngineer, permissions.delegate],
   );
   const activeRoute: RoutingPath | null = showRouting
     ? (routeChoice && routeOptions.some((choice) => choice.value === routeChoice)
@@ -243,8 +245,8 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
     const requests: Array<Promise<void>> = [];
     if (activeRoute === "BRANCH") requests.push(branchOptions(assessment.id).then((response) => { if (!cancelled) setBranchList(response.items ?? []); }));
     else setBranchList([]);
-    if (activeRoute === "SENIOR_SPECIALIST") requests.push(specialistOptions(assessment.id).then((response) => { if (!cancelled) setSpecialistList(response.items ?? []); }));
-    else setSpecialistList([]);
+    if (activeRoute === "SENIOR_ENGINEER") requests.push(seniorEngineerOptions(assessment.id).then((response) => { if (!cancelled) setSeniorEngineerList(response.items ?? []); }));
+    else setSeniorEngineerList([]);
     if (showAssignEngineer) requests.push(assessmentAssignmentOptions(assessment.id, "ENGINEER").then((response) => { if (!cancelled) setEngineerOptions(response.items ?? []); }));
     else setEngineerOptions([]);
     Promise.all(requests).catch((error) => { if (!cancelled) onError(error instanceof Error ? error.message : "Failed to load assignment options."); });
@@ -392,11 +394,11 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                         </div>
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
-                          <select className={select} value={specialistId} onChange={(event) => setSpecialistId(event.target.value)}>
-                            <option value="">Select senior specialist…</option>
-                            {specialistList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
+                          <select className={select} value={seniorEngineerId} onChange={(event) => setSeniorEngineerId(event.target.value)}>
+                            <option value="">Select senior engineer…</option>
+                            {seniorEngineerList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
                           </select>
-                          <button type="button" disabled={busy || !specialistId} className={btnPrimary} onClick={() => run(() => assignSpecialist(assessment.id, Number(specialistId), notes.trim() || undefined))}>Assign specialist</button>
+                          <button type="button" disabled={busy || !seniorEngineerId} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign senior engineer</button>
                         </div>
                       )}
                     </>
@@ -409,10 +411,10 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                 {showAssignEngineer ? (
                   <>
                     <select className={select} value={engineerId} onChange={(event) => setEngineerId(event.target.value)}>
-                      <option value="">Select engineer…</option>
+                      <option value="">Select Staff member…</option>
                       {engineerOptions.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
                     </select>
-                    <button type="button" disabled={busy || !engineerId} className={btnPrimary} onClick={() => run(() => assignEngineer(assessment.id, Number(engineerId), notes.trim() || undefined))}>Assign engineer</button>
+                    <button type="button" disabled={busy || !engineerId} className={btnPrimary} onClick={() => run(() => assignEngineer(assessment.id, Number(engineerId), notes.trim() || undefined))}>Assign Staff member</button>
                   </>
                 ) : null}
                 {permissions.submit ? (
@@ -491,7 +493,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                   <div>
                     <div className={`text-sm font-semibold ${historical ? "text-muted" : ""}`}>{assignment.full_name}</div>
                     <div className="mt-0.5 text-xs text-muted">
-                      {historical ? "Former reviewer — no approval authority" : humanizeCode(assignment.assignment_role)} · {assignment.email}
+                      {historical ? "Former reviewer — no approval authority" : assignmentRoleLabel(assignment.assignment_role)} · {assignment.email}
                     </div>
                   </div>
                   {assignment.assignment_role === "CONSULTED" && showConsultedManagement ? (
@@ -510,7 +512,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
             {[...events].reverse().map((event) => (
               <div key={event.id} className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-[13px]">
                 <div className="flex flex-wrap justify-between gap-2">
-                  <div><div className="font-semibold">{humanizeCode(event.event_type)}{event.disposition ? ` · ${humanizeCode(event.disposition)}` : ""}</div><div className="mt-0.5 text-xs text-muted">by {event.actor_name || event.actor_email || `User #${event.actor_user_id}`}</div></div>
+                  <div><div className="font-semibold">{assessmentEventLabel(event.event_type)}{event.disposition ? ` · ${humanizeCode(event.disposition)}` : ""}</div><div className="mt-0.5 text-xs text-muted">by {event.actor_name || event.actor_email || `User #${event.actor_user_id}`}</div></div>
                   <span className="text-xs text-muted">{formatTimestamp(event.created_at)}</span>
                 </div>
                 {event.from_state || event.to_state ? <div className="mt-1.5 text-xs text-muted">{event.from_state ? assessmentStateLabel(event.from_state) : "—"} → {event.to_state ? assessmentStateLabel(event.to_state) : "—"}</div> : null}

@@ -45,10 +45,10 @@ def _me_id(client_db, token: str) -> int:
 
 
 @pytest.fixture(scope="module")
-def tokens(client_db, admin_token, specialist_token):
+def tokens(client_db, admin_token, senior_engineer_token):
     return {
         "admin": admin_token,
-        "specialist": specialist_token,
+        "senior_engineer": senior_engineer_token,
         # District 04 — the district these fixtures create in. coordinator@local
         # is district 01, so without this account every "the coordinator was
         # notified" assertion would pass vacuously against an empty list.
@@ -123,16 +123,16 @@ def _branch_submitted(client_db, tokens, ids, *, triaged_by: str = "admin") -> d
     return case
 
 
-def _specialist_submitted(client_db, tokens, ids) -> dict:
+def _senior_engineer_submitted(client_db, tokens, ids) -> dict:
     case = _triaged(client_db, tokens)
     aid = case["assessment_id"]
     assigned = client_db.post(
-        f"/assessments/{aid}/assign-specialist",
-        json={"specialist_user_id": ids["specialist"]},
+        f"/assessments/{aid}/assign-senior-engineer",
+        json={"senior_engineer_user_id": ids["senior_engineer"]},
         headers=_auth(tokens["officechief"]),
     )
     assert assigned.status_code == 200, assigned.text
-    submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(tokens["specialist"]))
+    submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(tokens["senior_engineer"]))
     assert submitted.status_code == 200, submitted.text
     return case
 
@@ -203,18 +203,18 @@ class TestApprovalNotifiesCoordinators:
         assert ids["admin"] in recipients, "triage_decided_by_user_id must be in the union"
         assert ids["coordinator04"] in recipients, "the district coordinator is still resolved"
 
-    def test_the_coordinator_who_routed_it_is_notified_on_the_specialist_route(
+    def test_the_coordinator_who_routed_it_is_notified_on_the_senior_engineer_route(
         self, client_db, tokens, ids
     ):
         case = _triaged(client_db, tokens, by="coordinator04")
         aid = case["assessment_id"]
         assigned = client_db.post(
-            f"/assessments/{aid}/assign-specialist",
-            json={"specialist_user_id": ids["specialist"]},
+            f"/assessments/{aid}/assign-senior-engineer",
+            json={"senior_engineer_user_id": ids["senior_engineer"]},
             headers=_auth(tokens["officechief"]),
         )
         assert assigned.status_code == 200, assigned.text
-        submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(tokens["specialist"]))
+        submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(tokens["senior_engineer"]))
         assert submitted.status_code == 200, submitted.text
         approved = client_db.post(
             f"/assessments/{aid}/review",
@@ -270,26 +270,26 @@ class TestSubmitAndRevisionNotices:
         assert {r["channel"] for r in rows} == {"IN_APP"}
         assert ids["officechief"] not in _recipients(rows, "IN_APP")
 
-    def test_submit_notifies_the_office_chiefs_on_the_specialist_route(self, client_db, tokens, ids):
-        case = _specialist_submitted(client_db, tokens, ids)
+    def test_submit_notifies_the_office_chiefs_on_the_senior_engineer_route(self, client_db, tokens, ids):
+        case = _senior_engineer_submitted(client_db, tokens, ids)
         recipients = _recipients(
             _notifications(case["incident_id"], "ASSESSMENT_SUBMITTED_FOR_REVIEW"), "IN_APP"
         )
         # The OFFICE owns the review, so every active chief of it is told.
         assert ids["officechief"] in recipients
         assert ids["branchchief"] not in recipients
-        assert ids["specialist"] not in recipients
+        assert ids["senior_engineer"] not in recipients
 
-    def test_specialist_assignment_notifies_the_specialist(self, client_db, tokens, ids):
+    def test_senior_engineer_assignment_notifies_the_senior_engineer(self, client_db, tokens, ids):
         case = _triaged(client_db, tokens)
         assigned = client_db.post(
-            f"/assessments/{case['assessment_id']}/assign-specialist",
-            json={"specialist_user_id": ids["specialist"]},
+            f"/assessments/{case['assessment_id']}/assign-senior-engineer",
+            json={"senior_engineer_user_id": ids["senior_engineer"]},
             headers=_auth(tokens["officechief"]),
         )
         assert assigned.status_code == 200, assigned.text
-        rows = _notifications(case["incident_id"], "ASSESSMENT_SPECIALIST_ASSIGNMENT")
-        assert _recipients(rows, "IN_APP") == {ids["specialist"]}
+        rows = _notifications(case["incident_id"], "ASSESSMENT_SENIOR_ENGINEER_ASSIGNMENT")
+        assert _recipients(rows, "IN_APP") == {ids["senior_engineer"]}
 
     def test_request_revision_notifies_the_assignee(self, client_db, tokens, ids):
         case = _branch_submitted(client_db, tokens, ids)
@@ -305,8 +305,8 @@ class TestSubmitAndRevisionNotices:
         assert {r["channel"] for r in rows} == {"IN_APP"}, "in-app only: no delivery risk added"
         assert json.loads(rows[0]["payload_json"])["notes"] == "fix section 3"
 
-    def test_revision_on_the_specialist_route_notifies_the_specialist(self, client_db, tokens, ids):
-        case = _specialist_submitted(client_db, tokens, ids)
+    def test_revision_on_the_senior_engineer_route_notifies_the_senior_engineer(self, client_db, tokens, ids):
+        case = _senior_engineer_submitted(client_db, tokens, ids)
         returned = client_db.post(
             f"/assessments/{case['assessment_id']}/review",
             json={"action": "REQUEST_REVISION", "notes": "add the borehole log"},
@@ -314,7 +314,7 @@ class TestSubmitAndRevisionNotices:
         )
         assert returned.status_code == 200, returned.text
         rows = _notifications(case["incident_id"], "ASSESSMENT_REVISION_REQUESTED")
-        assert _recipients(rows, "IN_APP") == {ids["specialist"]}
+        assert _recipients(rows, "IN_APP") == {ids["senior_engineer"]}
 
 
 # ---------------------------------------------------------------------------

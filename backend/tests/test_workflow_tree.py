@@ -6,7 +6,7 @@ Run with: pytest -m db
 Covers the required matrix:
   1  new report before triage
   2  branch route (hand-off -> engineer -> branch chief review -> approved)
-  2b senior specialist route (direct assignment -> specialist -> office chief review)
+  2b senior engineer route (direct assignment -> senior engineer -> office chief review)
   3  needs-reporter-information loop
   4  no-assessment-required terminal
   5  duplicate/linked terminal with linked target
@@ -52,7 +52,7 @@ def tokens(client_db):
         "branchchief": _login(client_db, "branchchief@local"),
         "engineer": _login(client_db, "engineer@local"),
         "reviewer": _login(client_db, "reviewer@local"),
-        "specialist": _login(client_db, "seniorspecialist@local"),
+        "senior_engineer": _login(client_db, "seniorengineer@local"),
     }
 
 
@@ -210,42 +210,42 @@ class TestAssessmentRequiredPath:
 
 
 # ---------------------------------------------------------------------------
-# 2b: the senior specialist route
+# 2b: the senior engineer route
 # ---------------------------------------------------------------------------
 
 
-class TestSpecialistRoutePath:
-    def test_specialist_route_tree(self, client_db, tokens, ids):
-        admin, oc, spec = tokens["admin"], tokens["officechief"], tokens["specialist"]
+class TestSeniorEngineerRoutePath:
+    def test_senior_engineer_route_tree(self, client_db, tokens, ids):
+        admin, oc, spec = tokens["admin"], tokens["officechief"], tokens["senior_engineer"]
         incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
         r = client_db.post(
             f"/incidents/{incident_id}/triage",
-            json={"disposition": "ASSESSMENT_REQUIRED", "notes": "specialist route"},
+            json={"disposition": "ASSESSMENT_REQUIRED", "notes": "senior engineer route"},
             headers=_auth(admin),
         )
         assert r.status_code == 200, r.text
         aid = r.json()["assessment"]["id"]
 
         assigned = client_db.post(
-            f"/assessments/{aid}/assign-specialist",
-            json={"specialist_user_id": ids["specialist"], "notes": "Coastal slope expertise."},
+            f"/assessments/{aid}/assign-senior-engineer",
+            json={"senior_engineer_user_id": ids["senior_engineer"], "notes": "Coastal slope expertise."},
             headers=_auth(oc),
         )
         assert assigned.status_code == 200, assigned.text
-        assert assigned.json()["assessment"]["routing_path"] == "SENIOR_SPECIALIST"
-        assert assigned.json()["assessment"]["assigned_user_kind"] == "SENIOR_SPECIALIST"
+        assert assigned.json()["assessment"]["routing_path"] == "SENIOR_ENGINEER"
+        assert assigned.json()["assessment"]["assigned_user_kind"] == "SENIOR_ENGINEER"
 
         tree = _tree(client_db, admin, incident_id)
-        assert tree["assessment"]["routing_path"] == "SENIOR_SPECIALIST"
+        assert tree["assessment"]["routing_path"] == "SENIOR_ENGINEER"
         # The office chief's routing step is complete, and there is no branch
         # chief step at all on this route.
         assert _node(tree, "OFFICE_DELEGATION")["status"] == "COMPLETED"
         assert _node(tree, "BRANCH_ASSIGNMENT")["status"] == "SKIPPED"
         work = _node(tree, "ENGINEER_ASSESSMENT")
         assert work["status"] == "CURRENT"
-        assert work["role"] == "GEOTECH_SENIOR_SPECIALIST"
-        assert work["role_title"] == "GeoTech Senior Specialist"
-        assert work["user"]["user_id"] == ids["specialist"]
+        assert work["role"] == "GEOTECH_SENIOR_ENGINEER"
+        assert work["role_title"] == "GeoTech Senior Engineer"
+        assert work["user"]["user_id"] == ids["senior_engineer"]
 
         submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(spec))
         assert submitted.status_code == 200, submitted.text
@@ -266,8 +266,8 @@ class TestSpecialistRoutePath:
         assert "FINALIZATION" not in [n["key"] for n in tree["nodes"]]
         resolution = _node(tree, "RESOLUTION")
         assert resolution["status"] == "CURRENT"
-        assert resolution["role"] == "GEOTECH_SENIOR_SPECIALIST"
-        assert resolution["user"]["user_id"] == ids["specialist"]
+        assert resolution["role"] == "GEOTECH_SENIOR_ENGINEER"
+        assert resolution["user"]["user_id"] == ids["senior_engineer"]
 
         # And once they close it out, the terminal label names the approval —
         # the already-resolved branch was widened with the CURRENT one, so an
@@ -393,10 +393,10 @@ def _drive_to_submitted(client_db, tokens, ids):
     return incident_id, aid
 
 
-def _drive_to_submitted_specialist(client_db, tokens, ids):
-    """The same, on the SENIOR_SPECIALIST route: no branch chief is involved and
+def _drive_to_submitted_senior_engineer(client_db, tokens, ids):
+    """The same, on the SENIOR_ENGINEER route: no branch chief is involved and
     the office chief holds the pending decision. Returns (incident_id, aid)."""
-    admin, oc, spec = tokens["admin"], tokens["officechief"], tokens["specialist"]
+    admin, oc, spec = tokens["admin"], tokens["officechief"], tokens["senior_engineer"]
     incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
     aid = client_db.post(
         f"/incidents/{incident_id}/triage",
@@ -404,8 +404,8 @@ def _drive_to_submitted_specialist(client_db, tokens, ids):
         headers=_auth(admin),
     ).json()["assessment"]["id"]
     assigned = client_db.post(
-        f"/assessments/{aid}/assign-specialist",
-        json={"specialist_user_id": ids["specialist"]},
+        f"/assessments/{aid}/assign-senior-engineer",
+        json={"senior_engineer_user_id": ids["senior_engineer"]},
         headers=_auth(oc),
     )
     assert assigned.status_code == 200, assigned.text
@@ -434,8 +434,8 @@ class TestRevisionRequested:
         assert tree["current_owner"]["user_id"] == ids["engineer"]
 
 
-    def test_specialist_route_revision_returns_to_the_specialist(self, client_db, tokens, ids):
-        incident_id, aid = _drive_to_submitted_specialist(client_db, tokens, ids)
+    def test_senior_engineer_route_revision_returns_to_the_senior_engineer(self, client_db, tokens, ids):
+        incident_id, aid = _drive_to_submitted_senior_engineer(client_db, tokens, ids)
         # Before the decision, the review step is the office chief's and is
         # CURRENT the moment the state is SUBMITTED — the office owns it, so it
         # is never UNASSIGNED waiting for someone to be appointed.
@@ -455,9 +455,9 @@ class TestRevisionRequested:
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "REVISION_REQUESTED"
         assert _node(tree, "ASSESSMENT_REVIEW")["status"] != "COMPLETED"
         assert tree["overall_status"] == "REVISION_REQUESTED"
-        assert tree["current_owner"]["role"] == "GEOTECH_SENIOR_SPECIALIST"
-        assert tree["current_owner"]["role_title"] == "GeoTech Senior Specialist"
-        assert tree["current_owner"]["user_id"] == ids["specialist"]
+        assert tree["current_owner"]["role"] == "GEOTECH_SENIOR_ENGINEER"
+        assert tree["current_owner"]["role_title"] == "GeoTech Senior Engineer"
+        assert tree["current_owner"]["user_id"] == ids["senior_engineer"]
 
 
 # ---------------------------------------------------------------------------

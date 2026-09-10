@@ -275,10 +275,10 @@ def admin_token(client_db):
 
 
 @pytest.fixture(scope="session")
-def specialist_token(client_db):
-    """JWT token for seniorspecialist@local (password: 'password').
+def senior_engineer_token(client_db):
+    """JWT token for seniorengineer@local (password: 'password').
 
-    Routing v2's second route needs an office-scoped GeoTech senior specialist in
+    Routing v2's second route needs an office-scoped GeoTech senior engineer in
     every module that exercises it. The module-scoped ``tokens`` / ``ids``
     fixtures live in tests/test_assessment_flow.py, not here, so this session
     fixture is what the routing-v2 modules (which do not import that module's
@@ -288,10 +288,10 @@ def specialist_token(client_db):
     """
     resp = client_db.post(
         "/auth/login",
-        json={"email": "seniorspecialist@local", "password": "password"},
+        json={"email": "seniorengineer@local", "password": "password"},
     )
     assert resp.status_code == 200, (
-        f"Senior specialist login failed: {resp.status_code} {resp.text}. "
-        "Re-run database/init/020_seed.sql — routing v2 adds seniorspecialist@local."
+        f"Senior engineer login failed: {resp.status_code} {resp.text}. "
+        "Re-run database/init/020_seed.sql — routing v2 adds seniorengineer@local."
     )
     return resp.json()["access_token"]

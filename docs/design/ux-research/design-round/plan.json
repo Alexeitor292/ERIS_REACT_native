@@ -1,6 +1,6 @@
 {
  "title": "ERIS UI/UX Redesign Plan (web client) v1.1",
- "summary": "ERIS's web client fails newcomers for one reason: a person must learn five numbered objects (Incident, Event Group, Assessment, Submission, cross-section Project) across six read-only record pages plus a separate action inbox before doing anything. Measured on main @ 727024e: the first 700px of /my-work, /incidents and /assessments is navigation on both a 375px phone and a 768px iPad; the engineer's technical form is 11.1 screens tall with 180 overflowing elements, 120 controls under 40px and 74 text nodes under 12px; of 15 first-day tasks, 4 were blocked and 4 confusing. The direction is Inbox + Case file. Every role, including the maintenance field reporter, gets a personal Home grouped by the action they must take, with rows that lead with the site rather than three internal ids. What changes per role after the owner's routing decisions: the office chief's Home is grouped To route / To review and the hand-off becomes one step with two choices - hand off to a branch chief, or assign a GeoTech Senior Specialist directly, with no third choice and no naming an assessment author under a branch chief; the branch chief now approves the assessments handed to them, so there is no reviewer to assign and no sign-off after; and a new GeoTech Senior Specialist role fills assessments the office chief assigns directly and returns them to that chief. Approval ends the assessment, review authority follows the assessment's routing path rather than an assignment or an account role, and the district coordinator is notified in-app and by email when an assessment is approved. /incidents/:id becomes the only record page, with assessment, technical form, evidence, site and history as tabs; no backend object is renamed, and the only state-machine change is the owner routing decision: approval becomes terminal and finalize is retired (B15). Navigation collapses to at most four destinations per role, rendered as a bottom bar on phones, an 80px labelled rail with 12px labels on iPads and a 256px sidebar on desktops. Every hand-off becomes a route-backed guided flow that is a full page below md and a centred dialog from md, states its consequence before the button, holds that action's note and leaves a receipt. v1.1 closes four classes of defect found in build-readiness review: the reporter now has a Home and a route-backed Update-your-report flow (/incidents/:id/update) that calls the PATCH /incidents/{id} endpoint that already exists and already enforces requested-fields-only, so the coordinator's 'ask the reporter' disposition no longer commits into a dead end; every full-height composition is re-costed against the measured 1097px main at 1440, so the three-region form is container-queried at 1240px of workspace rather than assumed from a breakpoint, and no route stacks a bottom nav bar under an action bar; the feature flag moves to a build-time Vite variable because parse_user_metadata whitelists three keys and drops the rest, and two new backend items are added for per-account UI preferences and the Home queue filters that six Home groups had no data source for; and every page spec now carries phone, tablet and desktop layouts plus an empty state, with three new specs for Not Found, access sharing and the reporter's update flow. Seven phases, 73 working days of calendar for two front-end engineers, two backend engineers full-time for Phase 1 and then one at roughly a third of their time, a designer at half time and QA at half time from Phase 3 - 137 front-end engineer-days and 37.75 backend engineer-days; Phase 1 carries 21.5 backend engineer-days, which one third-time engineer would spend 64 calendar days on rather than 11. Three backend items gate: B1 (one transaction driving assessment and submission), B12 (Home queue filters) and B3 (the case aggregate) - and two new ones, B15 (routing v2) and B16 (the approval email), gate Phase 1 with them. Of the two items previously listed as backend work, B2 is moot because there is no finalize list, and B10 already ships server-side and is client-only.",
+ "summary": "ERIS's web client fails newcomers for one reason: a person must learn five numbered objects (Incident, Event Group, Assessment, Submission, cross-section Project) across six read-only record pages plus a separate action inbox before doing anything. Measured on main @ 727024e: the first 700px of /my-work, /incidents and /assessments is navigation on both a 375px phone and a 768px iPad; the Staff technical form is 11.1 screens tall with 180 overflowing elements, 120 controls under 40px and 74 text nodes under 12px; of 15 first-day tasks, 4 were blocked and 4 confusing. The direction is Inbox + Case file. Every role, including the maintenance field reporter, gets a personal Home grouped by the action they must take, with rows that lead with the site rather than three internal ids. What changes per role after the owner's routing decisions: the office chief's Home is grouped To route / To review and the hand-off becomes one step with two choices - hand off to a branch chief, or assign a GeoTech Senior Engineer directly, with no third choice - the office chief cannot assign Staff directly; the branch chief now approves the assessments handed to them, so there is no reviewer to assign and no sign-off after; and a new GeoTech Senior Engineer role fills assessments the office chief assigns directly and returns them to that chief. Approval ends the assessment, review authority follows the assessment's routing path rather than an assignment or an account role, and the district coordinator is notified in-app and by email when an assessment is approved. /incidents/:id becomes the only record page, with assessment, technical form, evidence, site and history as tabs; no backend object is renamed, and the only state-machine change is the owner routing decision: approval becomes terminal and finalize is retired (B15). Navigation collapses to at most four destinations per role, rendered as a bottom bar on phones, an 80px labelled rail with 12px labels on iPads and a 256px sidebar on desktops. Every hand-off becomes a route-backed guided flow that is a full page below md and a centred dialog from md, states its consequence before the button, holds that action's note and leaves a receipt. v1.1 closes four classes of defect found in build-readiness review: the reporter now has a Home and a route-backed Update-your-report flow (/incidents/:id/update) that calls the PATCH /incidents/{id} endpoint that already exists and already enforces requested-fields-only, so the coordinator's 'ask the reporter' disposition no longer commits into a dead end; every full-height composition is re-costed against the measured 1097px main at 1440, so the three-region form is container-queried at 1240px of workspace rather than assumed from a breakpoint, and no route stacks a bottom nav bar under an action bar; the feature flag moves to a build-time Vite variable because parse_user_metadata whitelists three keys and drops the rest, and two new backend items are added for per-account UI preferences and the Home queue filters that six Home groups had no data source for; and every page spec now carries phone, tablet and desktop layouts plus an empty state, with three new specs for Not Found, access sharing and the reporter's update flow. Seven phases, 73 working days of calendar for two front-end engineers, two backend engineers full-time for Phase 1 and then one at roughly a third of their time, a designer at half time and QA at half time from Phase 3 - 137 front-end engineer-days and 37.75 backend engineer-days; Phase 1 carries 21.5 backend engineer-days, which one third-time engineer would spend 64 calendar days on rather than 11. Three backend items gate: B1 (one transaction driving assessment and submission), B12 (Home queue filters) and B3 (the case aggregate) - and two new ones, B15 (routing v2) and B16 (the approval email), gate Phase 1 with them. Of the two items previously listed as backend work, B2 is moot because there is no finalize list, and B10 already ships server-side and is client-only.",
  "problemNumbers": [
   {
    "label": "Main content start (/my-work, /incidents, /assessments)",
@@ -53,7 +53,7 @@
   {
    "label": "First-day walkthrough verdicts (15 tasks, 6 personas, no training)",
    "phone": "4 blocked, 4 confusing, 7 workable",
-   "tablet": "engineer form journey ~60 clicks and blocked",
+   "tablet": "Staff form journey ~60 clicks and blocked",
    "desktop": "office-chief office picture ~12 clicks and confusing"
   },
   {
@@ -104,7 +104,7 @@
   {
    "name": "Consequence before commit, receipt after",
    "statement": "Anything that changes ownership, notifies someone or cannot be undone opens a sheet naming the target and person, stating the consequence in one sentence, holding that action's note, focusing Cancel when destructive; on success a persistent notice says what happened and where it went. Nothing ever vanishes silently.",
-   "codeReviewTest": "Every call site of delegateBranch, assignSpecialist, assignEngineer, addAssignment, submit, review, resolve, triage, resubmitIncident, disableUser, resetPassword, deleteSubmission, grantAccess, revokeAccess and publishVersion must sit inside a confirm surface and pass a message to the notice region."
+   "codeReviewTest": "Every call site of delegateBranch, assignSeniorEngineer, assignEngineer, addAssignment, submit, review, resolve, triage, resubmitIncident, disableUser, resetPassword, deleteSubmission, grantAccess, revokeAccess and publishVersion must sit inside a confirm surface and pass a message to the notice region."
   },
   {
    "name": "Never disable a primary silently",
@@ -162,14 +162,14 @@
    "devices": "Desktop primary; phone for the hand-off; office iPad",
    "home": "Home — To route · To review · My office at a glance",
    "topTasks": [
-    "Hand an assessment to a branch chief, or assign a GeoTech Senior Specialist directly",
-    "Approve or return a senior specialist's assessment",
+    "Hand an assessment to a branch chief, or assign a GeoTech Senior Engineer directly",
+    "Approve or return a senior engineer's assessment",
     "See where the office is stuck"
    ],
    "mustSee": [
     "Office-scoped queues, route-scoped so nothing in them can 403",
     "Incident context inline: title, location, description excerpt, first photo, coordinator's note, routing",
-    "Eligible branch chiefs and senior specialists with workload",
+    "Eligible branch chiefs and senior engineers with workload",
     "Per-state counts and a 'longest in this step' sort"
    ],
    "neverBurdenedWith": [
@@ -183,16 +183,16 @@
   {
    "role": "GeoTech Branch Chief (GEOTECH_BRANCH_CHIEF / legacy BRANCH_CHIEF)",
    "devices": "Desktop primary; phone for assignment",
-   "home": "Home — To assign an engineer · To review · My branch in progress",
+   "home": "Home — To assign a Staff member · To review · My branch in progress",
    "topTasks": [
-    "Assign or reassign an engineer",
-    "Approve or return the engineer's assessment",
+    "Assign or reassign a Staff member",
+    "Approve or return the Staff member's assessment",
     "Watch the branch's drafts, submissions and returns"
    ],
    "mustSee": [
     "Who handed it over, when, and their note",
-    "The site location on the card so an engineer can be picked without opening anything",
-    "The engineer roster with branch, office and open-assessment count, sorted by load"
+    "The site location on the card so a Staff member can be picked without opening anything",
+    "The Staff roster with branch, office and open-assessment count, sorted by load"
    ],
    "neverBurdenedWith": [
     "Triage and the hand-off itself",
@@ -202,7 +202,7 @@
    ]
   },
   {
-   "role": "GeoTech Engineer (GEOTECH_ENGINEER / legacy FIELD_WORKER)",
+   "role": "GeoTech Staff (GEOTECH_ENGINEER / legacy FIELD_WORKER)",
    "devices": "iPad is primary (field and vehicle), laptop in the office, phone occasionally; offline is a constant concern",
    "home": "Home — Returned for changes first, then My drafts with section progress, Under review, Ready to close out",
    "topTasks": [
@@ -218,14 +218,14 @@
    ],
    "neverBurdenedWith": [
     "Triage, routing, assignment and review",
-    "Other engineers' drafts by default",
+    "Other people's drafts by default",
     "Admin pages",
     "Drag-and-resize dashboard tooling",
     "The words 'GISA' and 'REJECTED'"
    ]
   },
   {
-   "role": "GeoTech Senior Specialist (GEOTECH_SENIOR_SPECIALIST - new; no legacy alias)",
+   "role": "GeoTech Senior Engineer (GEOTECH_SENIOR_ENGINEER - new; no legacy alias)",
    "devices": "iPad primary, laptop in the office; the same technical work as an assessment author under a branch chief",
    "home": "Home — Returned for changes first, then My assessments, then Under review",
    "topTasks": [
@@ -267,7 +267,7 @@
   }
  ],
  "navigation": {
-  "model": "Four destinations at most, per role. 1) Home - what needs me; the landing page for every role including reporters, with a count badge. 2) Records - look something up; three segments (Incidents, Event Groups, Assessments) and no badge; for reporters a single list titled 'My reports'. 3) Map - where is it (renamed from Mission Center; the name 'Mission Center' survives only inside the per-record Technical details disclosure). 4) One role-specific fourth: Admin, or Terrain for engineers, the only persona whose top task begins there. Plus an avatar menu and a Help button in the same header slot on every page (SC 3.2.6). Everything else stops being a destination: assessments and technical forms are case-file tabs, Terrain opens from the case file for non-engineers, Settings lives in the avatar menu, and access sharing is a flow route off the technical form. Two contradictions between proposals are resolved on the record: Records keeps an Event Groups segment because the coordinator's first triage decision is an event decision and Event Group carries the highest confusion rating; and Records keeps an Assessments segment for chiefs, but selecting a row opens the case file's 'Who has it' tab, so there is exactly one record detail surface in the product.",
+  "model": "Four destinations at most, per role. 1) Home - what needs me; the landing page for every role including reporters, with a count badge. 2) Records - look something up; three segments (Incidents, Event Groups, Assessments) and no badge; for reporters a single list titled 'My reports'. 3) Map - where is it (renamed from Mission Center; the name 'Mission Center' survives only inside the per-record Technical details disclosure). 4) One role-specific fourth: Admin, or Terrain for Staff and senior engineers, the only personas whose top task begins there. Plus an avatar menu and a Help button in the same header slot on every page (SC 3.2.6). Everything else stops being a destination: assessments and technical forms are case-file tabs, Terrain opens from the case file for everyone else, Settings lives in the avatar menu, and access sharing is a flow route off the technical form. Two contradictions between proposals are resolved on the record: Records keeps an Event Groups segment because the coordinator's first triage decision is an event decision and Event Group carries the highest confusion rating; and Records keeps an Assessments segment for chiefs, but selecting a row opens the case file's 'Who has it' tab, so there is exactly one record detail surface in the product.",
   "desktop": "1280-1535: a 256px sidebar, collapsible to the rail, and defaulting to the rail on form and case-file routes with the choice remembered. Two panes. A third region appears only where the workspace itself measures at least 1240px, which is a container query and not a breakpoint: index 200 + form 720 + pane 320 + two 24px gaps is 1288px, so at 1280 with the rail the workspace is 1152px and it does not appear. Measured outcomes: 1440 with the sidebar pinned is 1097px so two regions; 1440 with the rail is 1312px so three; 1600 with the sidebar is 1296px so three. 1536 and above adds no new regions beyond that rule; the shell is capped at 1600px and dense pages at 1440px, and extra width reveals priority-3 columns and widens panes, never cells.",
   "tablet": "768-1023 (iPad portrait, the primary field width): a persistent 80px labelled icon rail - 24px icon, 4px gap, a 12px label (never 10px; a navigation label is essential text and the plan's own floor is 12px), 56px items with a 44px hit area, active brand-filled with aria-current. No bottom bar, no stacked nav card, no hamburger. Rail plus a single pane with drill-in, about 656px of content; supporting map and photos are a bottom sheet at 40/90 percent snaps, not a second column. A 44px title row carries h1 left and the primary action right. Dialogs become centred panels at this width - md is the single dialog breakpoint. 1024-1279 (iPad landscape): the same rail with a pinnable 256px sidebar; two panes switch on here for Home and Map only. The case file stays a single pane with its tab strip, because 1024 minus the 80px rail and padding leaves about 896px and a 320px queue would leave about 540px for a banner, key facts, a progress rail and a supporting pane.",
   "phone": "Under 640px: a 56px header (menu-or-back, title, avatar), a 56px bottom tab bar (--bottom-nav-h) and safe-area padding. On any :id, flow or section route the bottom nav bar is replaced by a back control naming the parent plus one sticky action bar - bars never stack. The one nav destination that needs an action bar, /terrain, has the action bar replace the nav bar and puts a Home control in the header. Every full-height container subtracts every bar on its route: /map is calc(100svh - --header-h - --segment-h - --bottom-nav-h - env(safe-area-inset-bottom)). The nav bar hides only when the soft keyboard is up, detected as visualViewport.height shrinking by more than 120px - never on focus alone, because on iPadOS with a hardware keyboard the viewport does not shrink. Single pane with drill-in; tables become cards; dialogs are full-screen sheets; maps are a tab or a sheet, never inside page scroll. The 640-767 band keeps this shell deliberately: md is Tailwind's switch and we do not add a custom one, so the iPad half-split at 678px gets a labelled bottom bar rather than a rail.",
@@ -302,7 +302,7 @@
    },
    {
     "role": "GeoTech Branch Chief",
-    "home": "Home — To assign an engineer / To review",
+    "home": "Home — To assign a Staff member / To review",
     "items": [
      "Home",
      "Records",
@@ -311,7 +311,7 @@
     ]
    },
    {
-    "role": "GeoTech Engineer",
+    "role": "GeoTech Staff",
     "home": "Home — Returned for changes / My drafts",
     "items": [
      "Home",
@@ -322,7 +322,7 @@
     ]
    },
    {
-    "role": "GeoTech Senior Specialist",
+    "role": "GeoTech Senior Engineer",
     "home": "Home — Returned for changes / My assessments / Under review",
     "items": [
      "Home",
@@ -519,7 +519,7 @@
    {
     "name": "md (tablet portrait)",
     "minWidthPx": 768,
-    "devices": "iPad 9.7/10.2/10.9/11 portrait (768, 810, 820, 834), Surface Go — the primary field width for engineers and coordinators",
+    "devices": "iPad 9.7/10.2/10.9/11 portrait (768, 810, 820, 834), Surface Go — the primary field width for Staff and coordinators",
     "shell": "Persistent 80px labelled icon rail (56px items, 44px hit area, aria-current=page); no bottom bar, no stacked nav card, no hamburger. Rail plus a SINGLE pane with drill-in, ~656px content. Supporting map or photos are a bottom sheet with 40%/90% snaps. 44px title row: h1 left, primary action right."
    },
    {
@@ -580,7 +580,7 @@
    },
    {
     "situation": "Status pipeline, timeline and history",
-    "phone": "Pipeline collapses to 'Step 3 of 5 — Engineering (with J. Doe since Sep 2)' on the branch route and 'Step 2 of 4' on the senior specialist route - the stepper is pipelineFor(), not one fixed ladder - with a 44px 'Show all steps' disclosure rendering a vertical stepper with aria-current=step; history renders in page flow, last 5 events with 'Show all 23'; the latest reviewer comment is quoted in the Next-step card, not only in history",
+    "phone": "Pipeline collapses to 'Step 3 of 5 — Assessment (with J. Doe since Sep 2)' on the branch route and 'Step 2 of 4' on the senior engineer route - the stepper is pipelineFor(), not one fixed ladder - with a 44px 'Show all steps' disclosure rendering a vertical stepper with aria-current=step; history renders in page flow, last 5 events with 'Show all 23'; the latest reviewer comment is quoted in the Next-step card, not only in history",
     "tablet": "Vertical stepper below an @2xl container, horizontal above it, with per-step timestamps; history in flow with no nested scroll",
     "desktop": "Horizontal pipeline with per-step owners and timestamps from office_delegated_at, engineer_assigned_at, submitted_at and approved_at (finalized_at only on legacy signed-off rows); history as a timeline in page flow, always after the Next-step card"
    },
@@ -612,7 +612,7 @@
     "situation": "Print and PDF (approved technical form)",
     "phone": "Not offered on phones.",
     "tablet": "Not offered on tablets.",
-    "desktop": "'Print / Save as PDF' on an approved GISA (or a signed-off one from before routing v2) - print/PDF parity is named in the agreed research heading for long technical inspection forms (brief-research.md:64) and index.css has no @media print rule today. One print block: the shell, tab strip, action bars, maps and 3D are display:none; every section renders expanded in DASHBOARD_DEFAULT_ORDER regardless of screen state; break-inside: avoid per section and per photo block; a repeating header carries the incident title, ERIS number, location string, assessment state, the engineer or senior specialist, the approver and the print date; photos print at two per row at most with captions and telemetry; tri-state answers print as words ('Yes' / 'No' / 'Unknown' / 'Not provided'), never as styled radios; links print with their label only."
+    "desktop": "'Print / Save as PDF' on an approved GISA (or a signed-off one from before routing v2) - print/PDF parity is named in the agreed research heading for long technical inspection forms (brief-research.md:64) and index.css has no @media print rule today. One print block: the shell, tab strip, action bars, maps and 3D are display:none; every section renders expanded in DASHBOARD_DEFAULT_ORDER regardless of screen state; break-inside: avoid per section and per photo block; a repeating header carries the incident title, ERIS number, location string, assessment state, the Staff member or senior engineer, the approver and the print date; photos print at two per row at most with captions and telemetry; tri-state answers print as words ('Yes' / 'No' / 'Unknown' / 'Not provided'), never as styled radios; links print with their label only."
    }
   ],
   "rules": [
@@ -699,14 +699,14 @@
    ],
    "job": "Show what is waiting on this person, grouped by the action they must take, and let them act without leaving the page.",
    "essential": [
-    "Grouped sections with counts, for the signed-in role only. REPORTER: Needs your update (location_match_status = NEEDS_REVISION, first), Filed and waiting, Recently accepted (7 days). COORDINATOR: Needs my decision, Waiting on reporter, Recently accepted (7 days). OFFICE CHIEF: To route (hand off or assign a specialist), To review (specialist route, office-scoped), My office at a glance. BRANCH CHIEF: To assign an engineer, To review (branch route, handed to me), My branch in progress. ENGINEER: Returned for changes (first), My drafts, Under review, Ready to close out. SENIOR SPECIALIST: Returned for changes (first), My assessments, Under review, Ready to close out. ADMIN: Assigned to me plus a System health strip. An account holding only the legacy REVIEWER role gets For information (Consulted) and an empty state explaining that review now follows the assessment's route.",
+    "Grouped sections with counts, for the signed-in role only. REPORTER: Needs your update (location_match_status = NEEDS_REVISION, first), Filed and waiting, Recently accepted (7 days). COORDINATOR: Needs my decision, Waiting on reporter, Recently accepted (7 days). OFFICE CHIEF: To route (hand off or assign a senior engineer), To review (senior engineer route, office-scoped), My office at a glance. BRANCH CHIEF: To assign a Staff member, To review (branch route, handed to me), My branch in progress. STAFF: Returned for changes (first), My drafts, Under review, Ready to close out. SENIOR ENGINEER: Returned for changes (first), My assessments, Under review, Ready to close out. ADMIN: Assigned to me plus a System health strip. An account holding only the legacy REVIEWER role gets For information (Consulted) and an empty state explaining that review now follows the assessment's route.",
     "Row grammar, five facts maximum: incident title, location string, one status badge, one age line, and the muted id. The age line is EITHER 'Waiting on you since 3 days' OR, in the hand-off groups only (To assign, To review, Needs your update), the hand-off sentence 'Sent to you by M. Ortiz (Office Chief) 4 h ago - note'. The two never both appear, because a hand-off is a personal request and its age is inside the sentence.",
     "A persistent success notice after every action, naming the object and where it went; the acted item stays visible as Done until dismissed.",
     "A teaching empty state per group; the selected row marked with aria-current."
    ],
    "secondary": [
     "Incident and assessment numbers as muted suffixes",
-    "'2 technical forms' as a third line, only for engineer and reviewer states",
+    "'2 technical forms' as a third line, only for Staff and reviewer states",
     "Office · District as a third line only for admins or an All-offices filter",
     "Refresh as an icon button with 'Updated 2 min ago'"
    ],
@@ -729,7 +729,7 @@
     }
    ],
    "actions": [
-    "One primary verb per row, opening its flow route directly: Review report, Route this assessment, Assign an engineer, Fix and resend, Update your report, Approve or return. The rest in an overflow. Hand off to a branch chief is gone as a primary verb - it is now one of two choices inside Route this assessment - and so is Add a reviewer.",
+    "One primary verb per row, opening its flow route directly: Review report, Route this assessment, Assign a Staff member, Fix and resend, Update your report, Approve or return. The rest in an overflow. Hand off to a branch chief is gone as a primary verb - it is now one of two choices inside Route this assessment - and so is Add a reviewer.",
     "One exception opens the record first rather than the flow - To review - because it accepts technical content the user must read before committing. The reference journeys count that extra tap."
    ],
    "layout": {
@@ -761,7 +761,7 @@
     "Segmented tabs 'Accepted reports (N)' / 'New reports — not yet accepted (N)' with counts",
     "Search over title, ERIS number and location with route normalisation so 80, 080, I-80 and R080 all match route 80 only",
     "District filter defaulting to my district for coordinators, with applied-filter chips and Clear all",
-    "One Workflow position label per row derived from current_stage + status + location_match_status + triage_disposition: 'Awaiting intake', 'Waiting on reporter', 'With North GeoTech Office', 'Engineer J. Doe — draft', 'Under review', 'Closed at review — linked to 24-0417', 'Resolved'"
+    "One Workflow position label per row derived from current_stage + status + location_match_status + triage_disposition: 'Awaiting intake', 'Waiting on reporter', 'With North GeoTech Office', 'Staff J. Doe — draft', 'Under review', 'Closed at review — linked to 24-0417', 'Resolved'"
    ],
    "secondary": [
     "Assigned to as a second line at lg+ and a column on desktop, hidden for reporters",
@@ -821,7 +821,7 @@
    "job": "In one glance: what this incident is, where it is on the way through ERIS, who holds it, what happens next, and what I can do now.",
    "essential": [
     "Header: title, ERIS number muted, location string, and THE ONE STATUS CHIP for this record - it lives here because the header survives every tab. Before intake: 'Not yet accepted - no ERIS number'.",
-    "Next-step banner, which LEADS WITH THE SENTENCE, not a second chip: 'Waiting on you' or 'Waiting on Ana Ruiz (Engineer) since 3 days', one sentence of what happens after, one primary button. On REVISION_REQUESTED the reviewer's comment is quoted inside it, clamped to four lines with 'Read the full comment' opening History anchored to that event, where it is quoted in full - so a long comment can never push the tab strip or the primary action below the fold on a 375x812 screen.",
+    "Next-step banner, which LEADS WITH THE SENTENCE, not a second chip: 'Waiting on you' or 'Waiting on Ana Ruiz (Staff) since 3 days', one sentence of what happens after, one primary button. On REVISION_REQUESTED the reviewer's comment is quoted inside it, clamped to four lines with 'Read the full comment' opening History anchored to that event, where it is quoted in full - so a long comment can never push the tab strip or the primary action below the fold on a 375x812 screen.",
     "The field report as filed: description, first observed and occurred, reporter, photo thumbnails, and the Road Inventory one-liner (lanes, surface).",
     "Progress rail: the 8-9 workflow nodes with humanised status, owner role and name and timestamp, plus 'Current owner: GeoTech Branch Chief - J. Smith'. This mounts WorkflowTreeView and getWorkflowTree, written and tested today and never called, with all eight node statuses mapped through the labels module.",
     "Event Group chip with its definition on first use.",
@@ -852,7 +852,7 @@
     }
    ],
    "actions": [
-    "Exactly one primary per role and state: Review report, Route this assessment, Assign an engineer, Open the technical form, Send for review, Approve, Return for changes, Mark resolved, Fix and resend, Update your report",
+    "Exactly one primary per role and state: Review report, Route this assessment, Assign a Staff member, Open the technical form, Send for review, Approve, Return for changes, Mark resolved, Fix and resend, Update your report",
     "Everything else in an overflow menu"
    ],
    "layout": {
@@ -874,16 +874,16 @@
    "route": "/incidents/:id/people (also reached as /assessments/:id)",
    "roles": [
     "Operational roles read",
-    "Office chief: route the assessment (hand off to a branch chief, or assign a senior specialist) and approve or return specialist work",
-    "Branch chief: assign the engineer and approve or return the finished assessment",
+    "Office chief: route the assessment (hand off to a branch chief, or assign a senior engineer) and approve or return senior engineer work",
+    "Branch chief: assign a Staff member and approve or return the finished assessment",
     "Admin: all"
    ],
-   "job": "See and change who is responsible — the route the assessment took, the office, the branch chief or senior specialist, the assignee and who reviews it — and perform the routing step that belongs to my role.",
+   "job": "See and change who is responsible — the route the assessment took, the office, the branch chief or senior engineer, the assignee and who reviews it — and perform the routing step that belongs to my role.",
    "essential": [
     "The Next-step banner (one per tab)",
-    "The route this assessment took - branch or senior specialist - and why",
-    "People as full names with humanised assignment roles: Engineer / Senior specialist / 'Consulted (for information only — no approval authority)', plus muted historical rows reading 'Former reviewer — no approval authority'",
-    "Who reviews this assessment, by name: the named branch chief on the branch route, an office chief of the assessment's office on the specialist route",
+    "The route this assessment took - branch or senior engineer - and why",
+    "People as full names with humanised assignment roles: Staff / Senior engineer / 'Consulted (for information only — no approval authority)', plus muted historical rows reading 'Former reviewer — no approval authority'",
+    "Who reviews this assessment, by name: the named branch chief on the branch route, an office chief of the assessment's office on the senior engineer route",
     "The hand-off line: 'Handed to you by M. Ortiz on Sep 2: please expedite'",
     "The assessment pipeline with per-step timestamps (office_delegated_at, engineer_assigned_at, submitted_at, approved_at; finalized_at shows only on legacy signed-off rows) which exist in the API and are never shown today",
     "The GeoTech office by name with its reason ('North GeoTech Office — based on District 7') and any override reason",
@@ -918,8 +918,8 @@
     }
    ],
    "actions": [
-    "Route this assessment (hand off to a branch chief · assign a senior specialist)",
-    "Assign an engineer",
+    "Route this assessment (hand off to a branch chief · assign a senior engineer)",
+    "Assign a Staff member",
     "Add or remove Consulted",
     "Approve",
     "Return for changes",
@@ -933,10 +933,10 @@
    "emptyState": "If no assessment exists yet: 'No GeoTech assessment has been opened. It opens automatically when a coordinator accepts this report and sends it for assessment.' The old 'No reviewer assigned - review will be blocked' state is deleted: review can no longer be unassigned, because the route names the reviewer.",
    "nextStep": "The banner sentence, role-aware, from the status-language table.",
    "changesFromToday": [
-    "The hand-off becomes a TWO-CHOICE step, each choice carrying its consequence - 'The branch chief assigns the engineer and approves the finished assessment. You are done with this case.' / 'The specialist fills the assessment and returns it to you for approval.'",
-    "The 'Assign engineer now' select is deleted with the request field behind it: the office chief can no longer name the person who fills out the assessment",
+    "The hand-off becomes a TWO-CHOICE step, each choice carrying its consequence - 'The branch chief assigns a Staff member and approves the finished assessment. You are done with this case.' / 'The senior engineer fills the assessment and returns it to you for approval.'",
+    "The assign-now select on the hand-off is deleted with the engineer_user_id request field behind it: the office chief cannot assign Staff directly",
     "Reviewer management is deleted; historical rows read 'Former reviewer — no approval authority', and the panel names the reviewer by role and person from the route, never 'Assigned Reviewer / Approver'",
-    "The engineer picker gains branch, office and open-assessment count, sorted by load, instead of an unlabeled 'name · email' dropdown",
+    "The Staff picker gains branch, office and open-assessment count, sorted by load, instead of an unlabeled 'name · email' dropdown",
     "Hand off no longer disables silently: the reason is printed",
     "Per-step timestamps that already exist in the API are finally rendered"
    ]
@@ -946,10 +946,10 @@
    "name": "Case file — Technical form (hub and section pages)",
    "route": "/submissions/:id (hub) and /submissions/:id/sections/:key",
    "roles": [
-    "The assignee - engineer or senior specialist - and admin edit",
+    "The assignee - Staff member or senior engineer - and admin edit",
     "The route's reviewer, chiefs and coordinators get the read view"
    ],
-   "job": "The assignee - engineer or senior specialist: complete the form section by section over several sessions and send it. The route's reviewer: read the whole thing top to bottom and decide.",
+   "job": "The assignee - Staff member or senior engineer: complete the form section by section over several sessions and send it. The route's reviewer: read the whole thing top to bottom and decide.",
    "essential": [
     "Hub: a 'Returned for changes' banner quoting the reviewer's comment with name, date and the sections needing attention",
     "Hub: the section task list — the 11 GISA sections in DASHBOARD_DEFAULT_ORDER with status tags (Not started / In progress / Complete / Has errors) and 'You have completed 3 of 11 sections'",
@@ -1012,7 +1012,7 @@
    "emptyState": "'No technical form has been started. Start the technical form — it will be pre-filled from the report.' (Today's 'Create draft technical submission' reads like sending something.)",
    "nextStep": "The hub's progress line plus one button; on a returned form the quoted reviewer comment is the first thing on the page.",
    "changesFromToday": [
-    "The edit gate becomes isAssessmentAuthor() plus assessmentPermissions() instead of the literal string FIELD_WORKER, so canonical GEOTECH_ENGINEER accounts stop being silently locked out and a senior specialist can edit at all",
+    "The edit gate becomes isAssessmentAuthor() plus assessmentPermissions() instead of the literal string FIELD_WORKER, so canonical GEOTECH_ENGINEER accounts stop being silently locked out and a senior engineer can edit at all",
     "The card bodies are relocated intact into section components — the 1,335-line page is moved, not re-authored — reusing DASHBOARD_DEFAULT_ORDER, DASHBOARD_CARD_TITLES, the cascading selects, the conditional reveals and the existing Save-draft call for autosave",
     "submissionLayoutModel.ts and useSubmissionDashboardLayout.ts are deleted",
     "One Submit advances both records, ending the double-submit confusion",
@@ -1024,7 +1024,7 @@
    "name": "Case file — Photos & site",
    "route": "/incidents/:id/photos",
    "roles": [
-    "Everyone who can read the incident; the engineer can attach where allowed"
+    "Everyone who can read the incident; the assignee can attach where allowed"
    ],
    "job": "See every photo, video and document for this incident, trust where each photo was taken, and see exactly where the site is. Merges the Submission library, the section-attachments dialog and the separate photo-evidence page.",
    "essential": [
@@ -1072,7 +1072,7 @@
     "tablet": "Three tiles per row with the map above at 280px.",
     "desktop": "Map 40% / tiles 60% inside the supporting pane where it exists, otherwise stacked with the map at 320px."
    },
-   "emptyState": "'No photos yet. Photos are captured in the ERIS mobile app and appear here after it syncs.' — the sentence the engineer walkthrough needed and never got.",
+   "emptyState": "'No photos yet. Photos are captured in the ERIS mobile app and appear here after it syncs.' — the sentence the walkthrough-engineer.json run needed and never got.",
    "nextStep": "For reviewers: 'Check that photos are mapped before approving — 2 of 14 have no location.'",
    "changesFromToday": [
     "The evidence page stops being a separate route that shows telemetry numbers and no map",
@@ -1121,7 +1121,7 @@
    "emptyState": "'Nothing has happened yet beyond the report being filed.'",
    "nextStep": "None; the banner on Overview carries it.",
    "changesFromToday": [
-    "The reviewer's comment — the most important sentence for the engineer — is no longer buried fourth card down in a 420px scroll box attributed to 'User #7'; it is quoted in the banner and preserved here with a name"
+    "The reviewer's comment — the most important sentence for the assignee — is no longer buried fourth card down in a 420px scroll box attributed to 'User #7'; it is quoted in the banner and preserved here with a name"
    ]
   },
   {
@@ -1187,8 +1187,8 @@
    ],
    "job": "Commit one workflow step safely: see the target, the person, the consequence, write the note that belongs to this action, confirm, get a receipt.",
    "essential": [
-    "The target named in the title: 'Assign an engineer to Route 101 slide — District 7 · Los Angeles · Route 101 · PM 12.30'",
-    "A TWO-CHOICE route step where the choice - hand off to a branch chief, or assign a senior specialist - precedes the picker, each carrying its consequence sentence",
+    "The target named in the title: 'Assign a Staff member to Route 101 slide — District 7 · Los Angeles · Route 101 · PM 12.30'",
+    "A TWO-CHOICE route step where the choice - hand off to a branch chief, or assign a senior engineer - precedes the picker, each carrying its consequence sentence",
     "A Consulted-only assignment sheet; there is no Reviewer or Approver option",
     "People pickers carrying role, office or branch and open-assessment workload, sorted by load — never 'name · email', never a raw user id",
     "A required comment on Return for changes",
@@ -1203,12 +1203,12 @@
    "hidden": [
     {
      "item": "The single shared 'Optional workflow notes' textarea",
-     "why": "It is sent with every action including Add reviewer, then cleared, so notes typed for the engineer end up on the wrong record"
+     "why": "It is sent with every action including Add reviewer, then cleared, so notes typed for the assignee end up on the wrong record"
     }
    ],
    "actions": [
-    "Route this assessment: hand off to a branch chief, or assign a senior specialist",
-    "Assign an engineer",
+    "Route this assessment: hand off to a branch chief, or assign a senior engineer",
+    "Assign a Staff member",
     "Add or remove Consulted",
     "Send for review",
     "Approve",
@@ -1221,8 +1221,8 @@
     "tablet": "Centred max-w-xl dialog at md and above - md is the single dialog breakpoint across the product, stated identically in the shell table, the pattern ladder and here so the three cannot drift.",
     "desktop": "The same centred dialog with the action's note inside and Cancel focused when destructive; max-h-[calc(100dvh-2rem)], focus trapped, Escape closes unless dirty."
    },
-   "emptyState": "When a picker has no options: 'No engineers are available in this branch. Ask an administrator to add one.' The primary stays live per the never-disable-a-primary principle and opens a request-help path rather than dimming.",
-   "nextStep": "The receipt: 'Handed off to Maria Lopez (GeoTech Branch Chief). She assigns the engineer and approves the result. It has left your queue. Open it.' / 'Assigned to Sofia Ruiz (GeoTech Senior Specialist). It comes back to you for approval.' / 'Approved. The assessment is complete and the District 7 coordinator has been notified by email.'",
+   "emptyState": "When a picker has no options: 'Nobody is available in this branch. Ask an administrator to add one.' The primary stays live per the never-disable-a-primary principle and opens a request-help path rather than dimming.",
+   "nextStep": "The receipt: 'Handed off to Maria Lopez (GeoTech Branch Chief). She assigns a Staff member and approves the result. It has left your queue. Open it.' / 'Assigned to Sofia Ruiz (GeoTech Senior Engineer). It comes back to you for approval.' / 'Approved. The assessment is complete and the District 7 coordinator has been notified by email.'",
    "changesFromToday": [
     "Six single-click irreversible buttons that fire with no confirmation, no summary and no success message become five confirmed flows",
     "/assessments/:id/finalize and /assessments/:id/reviewers are deleted; /assessments/:id/delegate becomes /assessments/:id/route, with delegate kept as a redirect for one release",
@@ -1235,7 +1235,7 @@
    "route": "/incidents/new",
    "roles": [
     "Maintenance field reporter",
-    "GeoTech engineer",
+    "GeoTech Staff",
     "Admin (canReportIncident)"
    ],
    "job": "File a field report from a browser in four short steps with location help, then hand it to the district coordinator.",
@@ -1498,7 +1498,7 @@
    "name": "Terrain cross sections",
    "route": "/terrain (alias /gis/terrain-cross-sections); accepts ?incident=, ?submission=, ?lat&lon",
    "roles": [
-    "Operational roles; a nav destination only for engineers, reached from Photos & site by everyone else"
+    "Operational roles; a nav destination only for Staff and senior engineers, reached from Photos & site by everyone else"
    ],
    "job": "Place a path on the 3D terrain at the incident site, build the elevation profile, read it, and save it to the case.",
    "essential": [
@@ -1573,7 +1573,7 @@
    "essential": [
     "Search (name, email, role) and a Status filter, with 'New account' in the filter row",
     "Row: full name, email, status badge, and assigned roles as humanised canonical labels",
-    "'Edit roles' opening a drawer with one-line descriptions per role ('GeoTech Branch Chief — assigns engineers to assessments')",
+    "'Edit roles' opening a drawer with one-line descriptions per role ('GeoTech Branch Chief — assigns Staff to assessments')",
     "A confirm dialog for Disable naming the user, blocked for self and for the last administrator",
     "Success notices naming the user, and unsaved role edits preserved across reloads with an 'Unsaved' pill",
     "Disable is blocked with a VISIBLE REASON, never a silently dimmed primary. Two cases, each rendered as text beside the control: 'You cannot disable your own account. Ask another administrator.' and 'This is the last active administrator. Give another account the Administrator role first.' The button stays live in both and opens a sheet carrying the reason and a link to the other administrators.",
@@ -1924,8 +1924,8 @@
   },
   {
    "name": "PeoplePicker",
-   "change": "Options carry name, role, office or branch and open-assessment count, sorted by load; a Branch chief / Senior specialist choice on the route step, Engineer on the assign step and Consulted on the for-information sheet - no Reviewer or Approver option exists; never a raw user id",
-   "reuses": "The assessmentAssignmentOptions payload; branch and engineer option loading in AssessmentDetailPanel",
+   "change": "Options carry name, role, office or branch and open-assessment count, sorted by load; a Branch chief / Senior engineer choice on the route step, Staff on the assign step and Consulted on the for-information sheet - no Reviewer or Approver option exists; never a raw user id",
+   "reuses": "The assessmentAssignmentOptions payload; branchOptions and engineerOptions loading in AssessmentDetailPanel",
    "effortDays": 1.5
   },
   {
@@ -2068,22 +2068,22 @@
   {
    "systemTerm": "submissions + submission_gisa* (GISA)",
    "uiLabel": "Technical form",
-   "definition": "The engineer's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
+   "definition": "The assessment author's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
   },
   {
    "systemTerm": "Draft (assessment DRAFT / submission DRAFT / mobile local draft)",
    "uiLabel": "Technical form",
-   "definition": "The engineer's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
+   "definition": "The assessment author's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
   },
   {
-   "systemTerm": "Delegate (POST /assessments/{id}/delegate-branch or /assign-specialist)",
+   "systemTerm": "Delegate (POST /assessments/{id}/delegate-branch or /assign-senior-engineer)",
    "uiLabel": "Route this assessment",
-   "definition": "The office chief's one step, with two choices: hand off to a branch chief, who assigns the engineer and approves the result, or assign a senior specialist, who fills it and returns it to the chief. There is no third choice - an assessment author under a branch chief cannot be named directly."
+   "definition": "The office chief's one step, with two choices: hand off to a branch chief, who assigns a Staff member and approves the result, or assign a senior engineer, who fills it and returns it to the chief. There is no third choice - an assessment author under a branch chief cannot be named directly."
   },
   {
    "systemTerm": "assignment_role ENGINEER / CONSULTED (legacy REVIEWER and APPROVER rows)",
-   "uiLabel": "Engineer / Senior specialist / Consulted (for information only)",
-   "definition": "People attached to one assessment. The engineer or senior specialist does the work; consulted people receive it for information only and have no approval authority. Review is not an assignment - it follows the assessment's routing path - so legacy REVIEWER and APPROVER rows remain as history and grant nothing, rendered 'Former reviewer — no approval authority'."
+   "uiLabel": "Staff / Senior engineer / Consulted (for information only)",
+   "definition": "People attached to one assessment. The Staff member or senior engineer does the work; consulted people receive it for information only and have no approval authority. Review is not an assignment - it follows the assessment's routing path - so legacy REVIEWER and APPROVER rows remain as history and grant nothing, rendered 'Former reviewer — no approval authority'."
   },
   {
    "systemTerm": "Review (APPROVE | REQUEST_REVISION)",
@@ -2123,7 +2123,7 @@
   {
    "systemTerm": "GISA measurements / roadway cross-section diagram",
    "uiLabel": "Technical form",
-   "definition": "The engineer's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
+   "definition": "The assessment author's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
   },
   {
    "systemTerm": "SceneView in the Measurements card",
@@ -2138,7 +2138,7 @@
   {
    "systemTerm": "Submission library / Gallery / Photo evidence",
    "uiLabel": "Technical form",
-   "definition": "The engineer's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
+   "definition": "The assessment author's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
   },
   {
    "systemTerm": "Camera-heading wedge",
@@ -2167,8 +2167,8 @@
   },
   {
    "systemTerm": "Legacy code FIELD_WORKER",
-   "uiLabel": "GeoTech Engineer",
-   "definition": "The legacy role code whose plain-English reading is the opposite of its meaning: FIELD_WORKER is the engineer, while the maintenance field worker is the reporter."
+   "uiLabel": "Staff (long form 'GeoTech Staff')",
+   "definition": "The legacy role code whose plain-English reading is the opposite of its meaning: FIELD_WORKER is Staff, while the maintenance field worker is the reporter."
   },
   {
    "systemTerm": "Legacy code MAINTENANCE",
@@ -2178,7 +2178,7 @@
   {
    "systemTerm": "Legacy global REVIEWER role",
    "uiLabel": "Reviewer (legacy account role - grants no review authority)",
-   "definition": "Review authority follows the assessment's routing path: the named branch chief on the branch route, or an office chief of the assessment's office on the specialist route. The role keeps operational read - it stays in OPERATIONAL_ROLES - and loses /submissions/{id}/review, approve and reject; existing REVIEWER and APPROVER assignment rows remain as history."
+   "definition": "Review authority follows the assessment's routing path: the named branch chief on the branch route, or an office chief of the assessment's office on the senior engineer route. The role keeps operational read - it stays in OPERATIONAL_ROLES - and loses /submissions/{id}/review, approve and reject; existing REVIEWER and APPROVER assignment rows remain as history."
   },
   {
    "systemTerm": "Operational user (internal gate)",
@@ -2193,7 +2193,7 @@
   {
    "systemTerm": "Legacy worklist (/submissions)",
    "uiLabel": "Technical form",
-   "definition": "The engineer's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
+   "definition": "The assessment author's geotechnical write-up. 'GISA' appears ONLY inside the per-record Technical details disclosure - not in a visible eyebrow, which v1.0 allowed and which left a second visible name inside a section titled one-name-per-object. Never 'submission' for the act of sending."
   }
  ],
  "statusLanguage": [
@@ -2221,16 +2221,16 @@
   {
    "object": "Incident (current_stage)",
    "code": "BRANCH_CHIEF_REVIEW",
-   "label": "With branch chief — awaiting engineer",
+   "label": "With branch chief — awaiting Staff",
    "whoActsNext": "GeoTech branch chief",
-   "nextStepCopy": "Branch chief: 'Assign an engineer to visit the site.' Others: 'Handed off to B. Chen on Sep 2; an engineer has not been assigned yet.'"
+   "nextStepCopy": "Branch chief: 'Assign a Staff member to visit the site.' Others: 'Handed off to B. Chen on Sep 2; nobody has been assigned yet.'"
   },
   {
    "object": "Incident (current_stage)",
    "code": "ENGINEER_ASSIGNED",
-   "label": "Engineer assigned — J. Doe",
-   "whoActsNext": "The named engineer, or the reviewer / office chief per the assessment state",
-   "nextStepCopy": "The incident line reads 'Engineer J. Doe assigned Sep 3'; the assessment-state sentence carries the action."
+   "label": "Staff assigned — J. Doe",
+   "whoActsNext": "The named Staff member, or the reviewer / office chief per the assessment state",
+   "nextStepCopy": "The incident line reads 'Staff J. Doe assigned Sep 3'; the assessment-state sentence carries the action."
   },
   {
    "object": "Incident (status)",
@@ -2286,20 +2286,20 @@
    "code": "PENDING_OFFICE_DELEGATION",
    "label": "Awaiting routing",
    "whoActsNext": "GeoTech office chief",
-   "nextStepCopy": "Office chief: 'Route this assessment: hand it off to a branch chief, or assign a senior specialist. You cannot assign the person who fills out the assessment directly.' Others: 'Waiting for the North office chief to route this assessment.'"
+   "nextStepCopy": "Office chief: 'Route this assessment: hand it off to a branch chief, or assign a senior engineer. You cannot assign Staff directly.' Others: 'Waiting for the North office chief to route this assessment.'"
   },
   {
    "object": "Assessment (state)",
    "code": "PENDING_ENGINEER_ASSIGNMENT",
-   "label": "Awaiting engineer assignment",
+   "label": "Awaiting Staff assignment",
    "whoActsNext": "GeoTech branch chief",
-   "nextStepCopy": "Branch chief: 'Assign an engineer. Handed to you by M. Ortiz on Sep 2: please expedite. You will approve the finished assessment.' Others: 'Waiting for B. Chen to assign an engineer.'"
+   "nextStepCopy": "Branch chief: 'Assign a Staff member. Handed to you by M. Ortiz on Sep 2: please expedite. You will approve the finished assessment.' Others: 'Waiting for B. Chen to assign a Staff member.'"
   },
   {
    "object": "Assessment (state)",
    "code": "DRAFT",
-   "label": "Engineer working — draft",
-   "whoActsNext": "The assignee - engineer or senior specialist",
+   "label": "Staff working — draft",
+   "whoActsNext": "The assignee - Staff member or senior engineer",
    "nextStepCopy": "Assignee: 'Complete the technical form, then send it for review.' Others: 'J. Doe is preparing the technical form.'"
   },
   {
@@ -2307,7 +2307,7 @@
    "code": "SUBMITTED",
    "label": "Under review",
    "whoActsNext": "The route's reviewer",
-   "nextStepCopy": "Branch route: 'B. Chen (GeoTech Branch Chief) is reviewing — sent Sep 5.' Specialist route: 'The North GeoTech Office chief is reviewing — sent Sep 5.' Reviewer: 'Read the technical form, then Approve or Return for changes.'"
+   "nextStepCopy": "Branch route: 'B. Chen (GeoTech Branch Chief) is reviewing — sent Sep 5.' Senior engineer route: 'The North GeoTech Office chief is reviewing — sent Sep 5.' Reviewer: 'Read the technical form, then Approve or Return for changes.'"
   },
   {
    "object": "Assessment (state)",
@@ -2334,7 +2334,7 @@
    "object": "Technical form (submission status)",
    "code": "DRAFT",
    "label": "Draft",
-   "whoActsNext": "Assigned engineer",
+   "whoActsNext": "Assigned Staff",
    "nextStepCopy": "'Draft saved 14:32. Send for review when every required section is complete (8 of 11 done).'"
   },
   {
@@ -2348,8 +2348,8 @@
    "object": "Technical form (submission status)",
    "code": "REJECTED",
    "label": "Returned for changes — never show the word 'Rejected'",
-   "whoActsNext": "Assigned engineer",
-   "nextStepCopy": "'Returned by A. Patel Sep 6: \"…\". Edit and send again.' Backend: keep the assessment REVISION_REQUESTED in sync so the item appears on the engineer's Home."
+   "whoActsNext": "Assigned Staff",
+   "nextStepCopy": "'Returned by A. Patel Sep 6: \"…\". Edit and send again.' Backend: keep the assessment REVISION_REQUESTED in sync so the item appears on the assignee's Home."
   },
   {
    "object": "Technical form (submission status)",
@@ -2391,14 +2391,14 @@
    "code": "CURRENT",
    "label": "Now - with {role} {name}",
    "whoActsNext": "The named holder",
-   "nextStepCopy": "Holder: the step's own action sentence ('Assign an engineer to visit the site.'). Others: 'With B. Chen since Sep 2 - 3 days.' Carries aria-current='step'."
+   "nextStepCopy": "Holder: the step's own action sentence ('Assign a Staff member to visit the site.'). Others: 'With B. Chen since Sep 2 - 3 days.' Carries aria-current='step'."
   },
   {
    "object": "Progress node (workflow tree)",
    "code": "PENDING",
    "label": "Not started yet",
    "whoActsNext": "Nobody yet",
-   "nextStepCopy": "'Starts when the engineer sends the form for review.' Names the step that unlocks it, never a date."
+   "nextStepCopy": "'Starts when the assignee sends the form for review.' Names the step that unlocks it, never a date."
   },
   {
    "object": "Progress node (workflow tree)",
@@ -2439,7 +2439,7 @@
    "object": "Offline draft / upload queue (mobile)",
    "code": "queued / failed",
    "label": "Waiting to upload / Upload failed",
-   "whoActsNext": "Reporter or engineer",
+   "whoActsNext": "Reporter or Staff",
    "nextStepCopy": "'3 items waiting to upload — they will send when you are back online.' Failed: 'Upload stopped at photo 4. Retry.'"
   },
   {
@@ -2453,8 +2453,8 @@
    "object": "Progress node (workflow tree)",
    "code": "REVISION_REQUESTED",
    "label": "Returned for changes",
-   "whoActsNext": "The assigned engineer",
-   "nextStepCopy": "Engineer: 'A. Patel asked for changes on Sep 6. Open the technical form.' The route's reviewer: 'Waiting for J. Doe to make the changes you asked for.' Chiefs: 'Returned to the engineer Sep 6 - not yet resent.'"
+   "whoActsNext": "The assignee",
+   "nextStepCopy": "Assignee: 'A. Patel asked for changes on Sep 6. Open the technical form.' The route's reviewer: 'Waiting for J. Doe to make the changes you asked for.' Chiefs: 'Returned to the assignee Sep 6 - not yet resent.'"
   },
   {
    "object": "Progress node (workflow tree)",
@@ -2471,7 +2471,7 @@
   "Empty states carry the teaching: every queue and list says why it is empty, what will appear there, and offers one action. This replaces onboarding prose repeated on every item, such as the triage explanatory paragraph and the 'Read-only record view' banner.",
   "Just-in-time definitions instead of a glossary tour: the first time a session shows Event Group, ERIS number, Route this assessment, Returned for changes or GeoTech office, the term renders with a dotted underline and a tap or click info popover. Never hover-only, because the primary device is an iPad.",
   "Status chips are tap-to-open ON DETAIL PAGES AND INSIDE THE NEXT-STEP BANNER ONLY. In list rows the chip is inert text, because the pattern ladder makes the whole card one link of at least 64px and a tappable popover trigger nested inside a link is ambiguous to tap and invalid to nest. In lists the definition lives on ONE info button per group header, outside every card. This is the contextual-help mechanic across the product.",
-  "Exactly two coach marks, once per account. The coordinator's first review flow: 'Pick the site this report belongs to - nothing is saved until you press Accept and send.' (v1.0 taught 'Record decision', a control the merged triage flow deletes.) The engineer's first form: 'Sections can be completed in any order; your work autosaves.' Nothing else earns one. WHY THESE TWO ARE EXEMPT from the no-coach-marks finding at brief-research.md:37: that finding is about FRONT-LOADED tours and carousels shown before the user has a task. These are single, in-context marks that appear inside the one irreversible flow in the product at the moment the user is in it, and each states a fact the interface cannot show - that nothing has been written yet, and that order does not matter. If the Phase 2 walkthrough shows either is ignored, it is deleted rather than reworded.",
+  "Exactly two coach marks, once per account. The coordinator's first review flow: 'Pick the site this report belongs to - nothing is saved until you press Accept and send.' (v1.0 taught 'Record decision', a control the merged triage flow deletes.) The Staff member's first form: 'Sections can be completed in any order; your work autosaves.' Nothing else earns one. WHY THESE TWO ARE EXEMPT from the no-coach-marks finding at brief-research.md:37: that finding is about FRONT-LOADED tours and carousels shown before the user has a task. These are single, in-context marks that appear inside the one irreversible flow in the product at the moment the user is in it, and each states a fact the interface cannot show - that nothing has been written yet, and that order does not matter. If the Phase 2 walkthrough shows either is ignored, it is deleted rather than reworded.",
   "Success confirmations as onboarding: after every workflow action a persistent notice names the object, the new state and where it went ('Assessment for ERIS no. 24-0417 handed off to Maria Chen. It has left your queue and is now under Records > Assessments.') with 'Open it' and Undo where the backend allows. People learn the flow by doing it.",
   "Consequence-stating confirmations for irreversible steps (Close - no assessment, Link and close, Route this assessment, Approve, Return for changes, Mark resolved, Disable user, Publish or Restore Road Inventory): one sentence of consequence, the note field inside the dialog, Cancel receiving initial focus, and the primary disabled only while submitting.",
   "Rotating-staff return path: an account with no sign-in for 60 or more days sees the 'How your work flows' card once more, and 'Recently done by me (7 days)' stays collapsed on Home so people can see where their last actions went. This is driven by last_sign_in_at, which B11 adds to /auth/me; without it the return path has no trigger.",
@@ -2499,7 +2499,7 @@
   "Session and timeouts (SC 2.2.1, 2.2.5): warn before expiry, preserve the current URL and unsaved draft across re-authentication, and never discard a form on a network error - keep the token on 5xx and show a retry.",
   "No hover-only affordances; links underlined; every title= value duplicated visibly or in Technical details. The affordance that matters is hand-written CSS at index.css:132, not a Tailwind hover: utility, and it already handles pure touch at index.css:138-142. The residual case is the hybrid pointer - an iPad with a trackpad reports hover: hover while the user taps - and it is covered by making discoverable controls unconditionally visible, not by a media query.",
   "Media and images: photo thumbnails carry alt text from caption and section ('Photo 3 - slope face, looking north'); video and PDF viewers have a visible 'Open in new tab' fallback on iOS where inline preview fails; map legends are real text, not images.",
-  "Testing gate for Caltrans and Section 508 review: an automated axe run (wcag2a, wcag2aa, wcag22aa) on every route in all three themes at 375, 768, 1024 and 1440px and at 200% and 400% zoom; a manual keyboard walkthrough of the four core paths (coordinator review, hand-off and assign, engineer send, reviewer decide) on desktop and iPad with VoiceOver; and a manual device pass across iPad portrait, landscape, Split View and Stage Manager plus one iPhone and one Android.",
+  "Testing gate for Caltrans and Section 508 review: an automated axe run (wcag2a, wcag2aa, wcag22aa) on every route in all three themes at 375, 768, 1024 and 1440px and at 200% and 400% zoom; a manual keyboard walkthrough of the four core paths (coordinator review, hand-off and assign, Staff send, reviewer decide) on desktop and iPad with VoiceOver; and a manual device pass across iPad portrait, landscape, Split View and Stage Manager plus one iPhone and one Android.",
   "Print (brief-research.md:64 names print/PDF parity for long technical inspection forms): the print stylesheet is part of the accessibility surface, not decoration. Printed tri-state answers are words ('Yes' / 'No' / 'Unknown' / 'Not provided'), printed links carry their label, and the print header repeats the record identity on every page.",
   "Minimum text size applies to NAVIGATION LABELS too, which is why the iPad rail label is 12px and not 10px: a primary navigation label is essential text and 10px would violate the plan's own floor."
  ],
@@ -2516,12 +2516,12 @@
   {
    "phase": "Phase 1 — Home, routing v2 and the hand-offs",
    "goal": "No hand-off can be lost, and every action tells you what it did.",
-   "scope": "/home for ALL SEVEN ROLES with grouped sections, ages, Recently done, the admin default plus All queues plus System health; B1, B12, B15 and B16, plus B7; NextStepBanner everywhere with the reviewer's comment and hand-off note quoted; the flow routes with people pickers, consequences, per-action notes and receipts; the two-choice route step and path-based review; canEdit / assessmentPermissions fixed so canonical GEOTECH_ENGINEER and GEOTECH_SENIOR_SPECIALIST accounts are unblocked; legacy-REVIEWER empty-queue copy. Costing: 1.5 component + 14.0 assembly + 2.5 QA = 18.0 front-end engineer-days = 11 calendar days. Backend in parallel: B1 4.0, B12 2.5, B15 9.0, B16 5.0, B7 1.0 = 21.5. B2 is moot - there is no finalize list, because approval is terminal - and office scoping itself already ships. STAFFING: 21.5 backend engineer-days do not fit 11 calendar days at one engineer working a third of their time, which would take 64; Phase 1 therefore requires two backend engineers full-time for its duration (21.5 divided by 2 is about 11), after which the original third-time single engineer carries Phases 2-6 comfortably (16.25 backend-days across 62 calendar days). If that second engineer is not available, Phase 1 is calendar-bound by backend work and the honest number is longer.",
+   "scope": "/home for ALL SEVEN ROLES with grouped sections, ages, Recently done, the admin default plus All queues plus System health; B1, B12, B15 and B16, plus B7; NextStepBanner everywhere with the reviewer's comment and hand-off note quoted; the flow routes with people pickers, consequences, per-action notes and receipts; the two-choice route step and path-based review; canEdit / assessmentPermissions fixed so canonical GEOTECH_ENGINEER and GEOTECH_SENIOR_ENGINEER accounts are unblocked; legacy-REVIEWER empty-queue copy. Costing: 1.5 component + 14.0 assembly + 2.5 QA = 18.0 front-end engineer-days = 11 calendar days. Backend in parallel: B1 4.0, B12 2.5, B15 9.0, B16 5.0, B7 1.0 = 21.5. B2 is moot - there is no finalize list, because approval is terminal - and office scoping itself already ships. STAFFING: 21.5 backend engineer-days do not fit 11 calendar days at one engineer working a third of their time, which would take 64; Phase 1 therefore requires two backend engineers full-time for its duration (21.5 divided by 2 is about 11), after which the original third-time single engineer carries Phases 2-6 comfortably (16.25 backend-days across 62 calendar days). If that second engineer is not available, Phase 1 is calendar-bound by backend work and the honest number is longer.",
    "effortDays": 11,
    "dependencies": [
     "Phase 0"
    ],
-   "exitCriteria": "An office chief has exactly two routing choices and no third; only the branch chief on the branch route and an office chief of the office on the specialist route can approve; approval is the end; a coordinator receives an email; EVERY Home group returns server-filtered rows (B12 - six groups had no queue behind them); every action leaves a receipt; a canonical-role engineer can edit.",
+   "exitCriteria": "An office chief has exactly two routing choices and no third; only the branch chief on the branch route and an office chief of the office on the senior engineer route can approve; approval is the end; a coordinator receives an email; EVERY Home group returns server-filtered rows (B12 - six groups had no queue behind them); every action leaves a receipt; a canonical-role Staff account can edit.",
    "userFeels": "Nothing vanishes any more, and you can always see who handed something to you and why."
   },
   {
@@ -2538,7 +2538,7 @@
   },
   {
    "phase": "Phase 3 — The technical form",
-   "goal": "An engineer can finish a form on an iPad.",
+   "goal": "Staff can finish a form on an iPad.",
    "scope": "SectionForm hub, section pages and index with card bodies RELOCATED INTACT; autosave with sessionStorage fallback, beforeunload and the updated_at precondition with a 'Newer changes exist - reload' notice against mobile offline drafts; field upgrades (tri-state radios, unit suffixes, type=date, aria-pressed chips, live soil total, validation ladder, error summary); SummaryList review mode with a sticky decision bar; THE PRINT/PDF SHEET; one Submit driving both records; the merged Evidence library with lightbox and photo map serving ?panel=terrain3d; AccessSharingFlow; B8 or the written mobile-app notice; 3D on demand behind the WebGL2-plus-gesture gate. Costing: 15.0 component + 8.0 assembly + 4.0 QA = 27.0 front-end engineer-days = 14 calendar days. Backend: B8 1.0.",
    "effortDays": 14,
    "dependencies": [
@@ -2645,7 +2645,7 @@
    "how": "Re-run the cognitive walkthroughs per role after each phase"
   },
   {
-   "name": "Engineer form journey",
+   "name": "Staff form journey",
    "baseline": "~60 clicks and blocked",
    "target": "<= 20 clicks and workable",
    "how": "Appendix A journey re-walked on an iPad"
@@ -2720,7 +2720,7 @@
  "openQuestions": [
   "Should approval auto-resolve the incident report? The sign-off half of this question is CLOSED by the owner: there is no sign-off. Approval ends the assessment and the incident stays open until someone calls /incidents/{id}/resolve, with the workflow tree showing Resolution as CURRENT owned by the assignee, which the plan surfaces honestly with a 'Ready to close out' group. What remains open is only the narrower question: if the policy should be auto-resolve, that is a one-line backend change and it removes a step from every journey.",
   "Can more than one assessment exist per incident? The case file assumes one. If a re-assessment can be opened for the same incident, the 'Who has it' tab needs a selector and the progress rail needs a branch.",
-  "Is the submission attachment endpoint callable from the browser origin today (CORS and presigning), or is that a backend task? Until it is, every form and evidence surface says in writing that photos come from the mobile app, and the engineer's first-day journey still ends one step short on an iPad browser.",
+  "Is the submission attachment endpoint callable from the browser origin today (CORS and presigning), or is that a backend task? Until it is, every form and evidence surface says in writing that photos come from the mobile app, and the Staff first-day journey still ends one step short on an iPad browser.",
   "Event Group versus Project on mobile: the mobile triage prompt and the cross-section save dialog both say 'Project' for what the web calls an Event Group. Do we change the mobile strings in the same release, or ship 'Event Group (formerly Project)' for one release?",
   "A district with no DISTRICT_COORDINATOR routing row leaves new reports UNASSIGNED with no notification. The admin System-health strip surfaces it, but should ERIS also refuse to accept a report into an unrouted district, or notify a fallback?",
   "Theme and density persist per browser rather than per account, so on a shared field iPad the last person's choice wins. Should they move to the user record?",
@@ -2728,17 +2728,17 @@
   "Do we keep three themes? Caltrans Light, Dark and Coastal each triple the contrast verification surface; dropping Coastal would measurably cut Phase 6.",
   "The 60-day return path needs a last_sign_in_at the client can read. B11 adds it to /auth/me - confirm the field exists on the user record, or it becomes a schema change.",
   "Nothing in the current model marks an incident urgent, so every queue in this plan sorts by age. If Caltrans wants a severity or emergency flag driving order, that is a backend field and a new status chip, and it should be decided before Phase 1 sets the sort.",
-  "Should a non-assigned engineer keep the edit access they have today? canEdit (SubmissionDetailPage.tsx:162) is currently ANY FIELD_WORKER or ADMIN on a DRAFT or REJECTED submission, with no assignment check. The technical-form spec narrows it to the assigned engineer, which both unblocks canonical GEOTECH_ENGINEER accounts (the widening the plan asserts) and locks out engineers covering for each other in the same branch (the narrowing v1.0 was silent about). It is unverified whether the server rejects the narrowed case. Confirm the intent, and whether the server should enforce it.",
+  "Should a non-assigned Staff member keep the edit access they have today? canEdit (SubmissionDetailPage.tsx:162) is currently ANY FIELD_WORKER or ADMIN on a DRAFT or REJECTED submission, with no assignment check. The technical-form spec narrows it to the assigned Staff member, which both unblocks canonical GEOTECH_ENGINEER accounts (the widening the plan asserts) and locks out Staff covering for each other in the same branch (the narrowing v1.0 was silent about). It is unverified whether the server rejects the narrowed case. Confirm the intent, and whether the server should enforce it.",
   "How big is the 3D terrain payload? The load prompt should name a real figure. No evidence file measures it, so v1.1 removed the 'about 20 MB' that v1.0 shipped as user-facing copy; Phase 4 measures it on the field iPad and puts the number back.",
   "Is users.email the deliverable address for the approval notice? It is the ERIS login. If coordinators sign in with something other than their mailbox, users needs a work_email column (or an external directory lookup) before SMTP_HOST is set anywhere, and B16 cannot deliver until that is answered.",
   "SMTP relay facts for the Caltrans environment: host, port, whether it authenticates, and which From domain it accepts. B16 is shaped for every common answer, but the values are not in the repository, and with no host configured the approval email queues instead of sending.",
   "Does mobile ship in the same release as routing v2? If yes, the two legacy incident-stage assignment endpoints close with it. If mobile lags, POST /incidents/{id}/office-chief/assign-branch must stay live one more release, and a branch-route assessment can still be routed from the app through a path the new rules do not describe.",
-  "On the senior specialist route, 'the office chief reviews' is read as the office FUNCTION - any active office chief whose office_code matches the assessment - rather than the individual who made the assignment, because offices have more than one chief, binding to a person would strand the assessment whenever that person is away, and no column records the assigner. Confirm that reading in one line; the alternative is a different rule and a different column."
+  "On the senior engineer route, 'the office chief reviews' is read as the office FUNCTION - any active office chief whose office_code matches the assessment - rather than the individual who made the assignment, because offices have more than one chief, binding to a person would strand the assessment whenever that person is away, and no column records the assigner. Confirm that reading in one line; the alternative is a different rule and a different column."
  ],
  "journeys": [
   {
    "persona": "GeoTech Branch Chief",
-   "task": "Assign an engineer to an assessment delegated to me",
+   "task": "Assign a Staff member to an assessment delegated to me",
    "device": "Desktop (13-inch laptop)",
    "tapsToday": 4,
    "tapsNew": 3,
@@ -2746,11 +2746,11 @@
   },
   {
    "persona": "GeoTech Branch Chief",
-   "task": "Approve an engineer's assessment",
+   "task": "Approve a Staff member's assessment",
    "device": "Desktop",
    "tapsToday": 5,
    "tapsNew": 3,
-   "verdictToday": "Was blocked — a reviewer had to be assigned first, and the control rendered only in My Work, which the assessment left the moment an engineer was assigned"
+   "verdictToday": "Was blocked — a reviewer had to be assigned first, and the control rendered only in My Work, which the assessment left the moment a Staff member was assigned"
   },
   {
    "persona": "GeoTech Branch Chief",
@@ -2785,7 +2785,7 @@
    "verdictToday": "Blocked — the statewide map plots Event Groups rather than incidents, there is no district filter anywhere, and route search substring-matches a concatenated string"
   },
   {
-   "persona": "GeoTech Engineer",
+   "persona": "GeoTech Staff",
    "task": "Open my assigned assessment, fill out the technical form including photos and measurements, and send it for review",
    "device": "iPad landscape (1024)",
    "tapsToday": 60,
@@ -2793,7 +2793,7 @@
    "verdictToday": "Blocked — canEdit gates on the literal role FIELD_WORKER so canonical accounts are read-only with no explanation, there is no web photo upload and nothing says so, and two different Submit buttons produce different outcomes"
   },
   {
-   "persona": "GeoTech Engineer",
+   "persona": "GeoTech Staff",
    "task": "Return to a form that was sent back for correction, understand what the reviewer wants, fix it and resubmit",
    "device": "Phone / iPad",
    "tapsToday": 12,
@@ -2801,7 +2801,7 @@
    "verdictToday": "Blocked — the assessment says 'fix it' while the submission is still locked; the reviewer's note is four cards deep attributed to 'User #7'; and the badge reads REJECTED"
   },
   {
-   "persona": "GeoTech Engineer",
+   "persona": "GeoTech Staff",
    "task": "Look at the 3D terrain around the site and create a terrain cross section",
    "device": "Desktop",
    "tapsToday": 18,
@@ -2810,15 +2810,15 @@
   },
   {
    "persona": "GeoTech Office Chief",
-   "task": "Route an assessment to a branch chief or a senior specialist",
+   "task": "Route an assessment to a branch chief or a senior engineer",
    "device": "Desktop",
    "tapsToday": 6,
    "tapsNew": 4,
-   "verdictToday": "Workable — but Delegate is disabled with no reason when only the engineer is known, and the engineer shortcut it offers is being removed"
+   "verdictToday": "Workable — but Delegate is disabled with no reason when only the assignee is known, and the direct Staff-assignment shortcut it offers is being removed"
   },
   {
    "persona": "GeoTech Office Chief",
-   "task": "Approve a senior specialist's assessment",
+   "task": "Approve a senior engineer's assessment",
    "device": "Desktop",
    "tapsToday": 2,
    "tapsNew": 3,
@@ -2904,11 +2904,11 @@
   },
   {
    "decision": "Review authority derived from the assessment's routing path",
-   "source": "Owner decisions 2 and 5 (ROUTING_V2_DESIGN.md §1, §4.1): the named branch chief (assessments.branch_chief_user_id) on the branch route, an office chief of the assessment's office on the specialist route, and nothing else. It also closes the branch-chief task that was blocked because AssessmentDetailPanel.tsx:191 rendered reviewer management only in mode='work'."
+   "source": "Owner decisions 2 and 5 (ROUTING_V2_DESIGN.md §1, §4.1): the named branch chief (assessments.branch_chief_user_id) on the branch route, an office chief of the assessment's office on the senior engineer route, and nothing else. It also closes the branch-chief task that was blocked because AssessmentDetailPanel.tsx:191 rendered reviewer management only in mode='work'."
   },
   {
    "decision": "People pickers with role, office and workload sorted by load",
-   "source": "Branch-chief and office-chief mental-model gaps: 'pick an engineer by location, expertise and current load' versus an unlabeled 'name · email' dropdown"
+   "source": "Branch-chief and office-chief mental-model gaps: 'pick a Staff member by location, expertise and current load' versus an unlabeled 'name · email' dropdown"
   },
   {
    "decision": "Never disable a primary; Submit opens a completeness sheet",
@@ -2919,20 +2919,20 @@
    "source": "S4 audit: Approve, Finalize, Request revision, Delegate, Assign and Remove fire on a single 28px click with no confirmation, no summary and no success message"
   },
   {
-   "decision": "The two-choice route step replaces the engineer shortcut",
+   "decision": "The two-choice route step replaces the direct Staff-assignment shortcut",
    "source": "Owner decision 3 (ROUTING_V2_DESIGN.md §1, §5.2) removes engineer_user_id from delegate-branch (assessments.py:1007-1017); judge-domain.json had flagged that shortcut as the one behaviour no proposal explained, and it is now deleted rather than explained."
   },
   {
    "decision": "Owner decision 1 - the office chief has exactly two mutually exclusive routing choices",
-   "source": "ROUTING_V2_DESIGN.md §1 and §3.3: when triage sets ASSESSMENT_REQUIRED the assessment lands with the GeoTech office chief, who either hands it off to a branch chief (who assigns the engineer, receives the submission and personally approves it) or assigns a GeoTech Senior Specialist directly (who fills it and returns it to the chief). §7.3's route-aware eligibility triggers make the database refuse any third shape."
+   "source": "ROUTING_V2_DESIGN.md §1 and §3.3: when triage sets ASSESSMENT_REQUIRED the assessment lands with the GeoTech office chief, who either hands it off to a branch chief (who assigns a Staff member, receives the submission and personally approves it) or assigns a GeoTech Senior Engineer directly (who fills it and returns it to the chief). §7.3's route-aware eligibility triggers make the database refuse any third shape."
   },
   {
-   "decision": "Owner decision 2 - a new GEOTECH_SENIOR_SPECIALIST role, office-scoped, that reviews nothing",
-   "source": "ROUTING_V2_DESIGN.md §2.1: canonical code GEOTECH_SENIOR_SPECIALIST with no legacy alias, scoped by users.metadata_json office_code exactly as chiefs are, added to OPERATIONAL_ROLES; it may fill, submit and resubmit but may not review or approve anything including its own work. The four literal role lists that enumerate names rather than consulting OPERATIONAL_ROLES must be edited by hand - arcgis.py:13 is what makes 'Home · Records · Map · Terrain' true for the role rather than aspirational."
+   "decision": "Owner decision 2 - a new GEOTECH_SENIOR_ENGINEER role, office-scoped, that reviews nothing",
+   "source": "ROUTING_V2_DESIGN.md §2.1: canonical code GEOTECH_SENIOR_ENGINEER with no legacy alias, scoped by users.metadata_json office_code exactly as chiefs are, added to OPERATIONAL_ROLES; it may fill, submit and resubmit but may not review or approve anything including its own work. The four literal role lists that enumerate names rather than consulting OPERATIONAL_ROLES must be edited by hand - arcgis.py:13 is what makes 'Home · Records · Map · Terrain' true for the role rather than aspirational."
   },
   {
    "decision": "Owner decision 3 - the office chief may no longer name the person who fills out the assessment",
-   "source": "ROUTING_V2_DESIGN.md §1 and §5.2: the engineer_user_id shortcut on delegate-branch (assessments.py:1007-1017) is removed and the request returns 400. Chiefs assign specialists only; branch chiefs assign engineers only."
+   "source": "ROUTING_V2_DESIGN.md §1 and §5.2: the engineer_user_id shortcut on delegate-branch (assessments.py:1007-1017) is removed and the request returns 400. Office chiefs assign senior engineers only; branch chiefs assign Staff only."
   },
   {
    "decision": "Owner decision 4 - approval ends the assessment; sign-off and FINALIZED are retired",
@@ -2940,7 +2940,7 @@
   },
   {
    "decision": "Owner decision 5 - the legacy REVIEWER role keeps operational read and loses all review authority",
-   "source": "ROUTING_V2_DESIGN.md §2.2 and §4.2: /submissions/{id}/review, approve and reject stop accepting it (main.py:3699, 3725, 3740) while it stays in OPERATIONAL_ROLES, so existing accounts keep visibility; REVIEWER and APPROVER assignment rows remain as history. is_reviewer()'s five read-only call sites (main.py:149, 2065, 3504, 3556; photos.py:291) become is_operational_user(), so an office chief reviewing on the specialist route has the reach a legacy REVIEWER has today."
+   "source": "ROUTING_V2_DESIGN.md §2.2 and §4.2: /submissions/{id}/review, approve and reject stop accepting it (main.py:3699, 3725, 3740) while it stays in OPERATIONAL_ROLES, so existing accounts keep visibility; REVIEWER and APPROVER assignment rows remain as history. is_reviewer()'s five read-only call sites (main.py:149, 2065, 3504, 3556; photos.py:291) become is_operational_user(), so an office chief reviewing on the senior engineer route has the reach a legacy REVIEWER has today."
   },
   {
    "decision": "Owner decision 6 - the district coordinator is notified in-app and by email on approval",
@@ -2976,15 +2976,15 @@
   },
   {
    "decision": "One Submit and one Approve driving both records (B1)",
-   "source": "Domain judge names it the load-bearing backend item; two engineer walkthroughs are blocked by the state drift"
+   "source": "Domain judge names it the load-bearing backend item; two Staff walkthroughs are blocked by the state drift"
   },
   {
    "decision": "canEdit fixed to isAssessmentAuthor() and assessmentPermissions()",
-   "source": "SubmissionDetailPage.tsx:161-162 gates on the literal string FIELD_WORKER, so canonical GEOTECH_ENGINEER accounts are silently locked out and a senior specialist could not edit at all; the twelve require_roles(['FIELD_WORKER','ADMIN']) guards in main.py and two in photos.py become GISA_AUTHOR_ROLES (ROUTING_V2_DESIGN.md §2.1). The narrowing side of the same change is flagged in the personas section and in the open questions."
+   "source": "SubmissionDetailPage.tsx:161-162 gates on the literal string FIELD_WORKER, so canonical GEOTECH_ENGINEER accounts are silently locked out and a senior engineer could not edit at all; the twelve require_roles(['FIELD_WORKER','ADMIN']) guards in main.py and two in photos.py become GISA_AUTHOR_ROLES (ROUTING_V2_DESIGN.md §2.1). The narrowing side of the same change is flagged in the personas section and in the open questions."
   },
   {
    "decision": "'Photos are added in the ERIS mobile app' stated in writing",
-   "source": "Field judge non-negotiable; engineer walkthrough S4 — no upload exists on the web and nothing tells the engineer"
+   "source": "Field judge non-negotiable; walkthrough-engineer.json S4 — no upload exists on the web and nothing tells the assignee"
   },
   {
    "decision": "Popup-first map selection with an explicit Open",
@@ -3088,7 +3088,7 @@
   },
   {
    "decision": "Bars never stack; /terrain's action bar replaces the bottom nav",
-   "source": "/terrain is an engineer's fourth nav destination and the terrain spec gives it a three-button bottom action bar below lg. 56px nav + 44px action bar is the stacking the plan forbids, and v1.0's scene height subtracted neither. Same arithmetic for /map, whose phone map height ignored the 56px nav bar plus safe-area inset."
+   "source": "/terrain is a Staff member's fourth nav destination and the terrain spec gives it a three-button bottom action bar below lg. 56px nav + 44px action bar is the stacking the plan forbids, and v1.0's scene height subtracted neither. Same arithmetic for /map, whose phone map height ignored the 56px nav bar plus safe-area inset."
   },
   {
    "decision": "The feature flag is a build-time Vite variable, not /auth/me metadata",

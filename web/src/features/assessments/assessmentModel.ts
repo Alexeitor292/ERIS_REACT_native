@@ -6,9 +6,10 @@ import type { Submission } from "../../api/types";
  * Assessments record view. No React, no network — unit tested with node --test.
  *
  * Routing v2: every assessment takes exactly one of two routes, recorded in
- * `routing_path`. The branch route runs office chief → branch chief → engineer
- * → the same branch chief's approval; the specialist route runs office chief →
- * senior specialist → that office's chief approval. Approval is terminal.
+ * `routing_path`. The branch route runs office chief → branch chief → Staff
+ * member → the same branch chief's approval; the senior engineer route runs
+ * office chief → senior engineer → that office's chief approval. Approval is
+ * terminal.
  */
 
 export const ASSESSMENT_STATES: AssessmentState[] = [
@@ -28,19 +29,19 @@ export function isTerminalState(state: AssessmentState | string): boolean {
 
 export type PipelineStep = { key: string; label: string; owner: string | null };
 
-/** Office chief hands off; the branch chief assigns the engineer and approves. */
+/** Office chief hands off; the branch chief assigns Staff and approves. */
 export const BRANCH_PIPELINE: PipelineStep[] = [
   { key: "handoff", label: "Hand-off", owner: "Office Chief" },
-  { key: "engineer", label: "Engineer assignment", owner: "Branch Chief" },
-  { key: "engineering", label: "Engineering", owner: "Assigned Engineer" },
+  { key: "engineer", label: "Staff assignment", owner: "Branch Chief" },
+  { key: "engineering", label: "Assessment", owner: "Assigned Staff" },
   { key: "review", label: "Review", owner: "Branch Chief" },
   { key: "approved", label: "Approved", owner: null },
 ];
 
-/** Office chief assigns a senior specialist and approves the result personally. */
-export const SPECIALIST_PIPELINE: PipelineStep[] = [
-  { key: "specialist", label: "Specialist assignment", owner: "Office Chief" },
-  { key: "assessment", label: "Assessment", owner: "Senior Specialist" },
+/** Office chief assigns a senior engineer and approves the result personally. */
+export const SENIOR_ENGINEER_PIPELINE: PipelineStep[] = [
+  { key: "senior_engineer", label: "Senior engineer assignment", owner: "Office Chief" },
+  { key: "assessment", label: "Assessment", owner: "Senior Engineer" },
   { key: "review", label: "Review", owner: "Office Chief" },
   { key: "approved", label: "Approved", owner: null },
 ];
@@ -63,7 +64,7 @@ const BRANCH_INDEX: Record<AssessmentState, number> = {
   FINALIZED: 4,
 };
 
-const SPECIALIST_INDEX: Record<AssessmentState, number> = {
+const SENIOR_ENGINEER_INDEX: Record<AssessmentState, number> = {
   PENDING_OFFICE_DELEGATION: 0,
   PENDING_ENGINEER_ASSIGNMENT: 0,
   DRAFT: 1,
@@ -82,7 +83,7 @@ export type RoutedAssessment = Pick<Assessment, "state" | "routing_path">;
  * read as complete rather than as step 0.
  */
 export function pipelineFor(assessment: RoutedAssessment): PipelineStep[] {
-  if (assessment.routing_path === "SENIOR_SPECIALIST") return SPECIALIST_PIPELINE;
+  if (assessment.routing_path === "SENIOR_ENGINEER") return SENIOR_ENGINEER_PIPELINE;
   if (assessment.routing_path === "BRANCH") return BRANCH_PIPELINE;
   return isTerminalState(assessment.state) ? BRANCH_PIPELINE : UNROUTED_PIPELINE;
 }
@@ -90,7 +91,7 @@ export function pipelineFor(assessment: RoutedAssessment): PipelineStep[] {
 export function pipelineIndex(assessment: RoutedAssessment): number {
   const steps = pipelineFor(assessment);
   if (steps === UNROUTED_PIPELINE) return 0;
-  const table = steps === SPECIALIST_PIPELINE ? SPECIALIST_INDEX : BRANCH_INDEX;
+  const table = steps === SENIOR_ENGINEER_PIPELINE ? SENIOR_ENGINEER_INDEX : BRANCH_INDEX;
   return table[assessment.state as AssessmentState] ?? steps.length - 1;
 }
 
@@ -114,13 +115,13 @@ export function assessmentStateLabelFor(
 ): string {
   if (state === "SUBMITTED") {
     if (routingPath === "BRANCH") return "Awaiting branch chief review";
-    if (routingPath === "SENIOR_SPECIALIST") return "Awaiting office chief review";
+    if (routingPath === "SENIOR_ENGINEER") return "Awaiting office chief review";
     return "Submitted for review";
   }
   return (
     {
       PENDING_OFFICE_DELEGATION: "Awaiting routing",
-      PENDING_ENGINEER_ASSIGNMENT: "Awaiting engineer assignment",
+      PENDING_ENGINEER_ASSIGNMENT: "Awaiting Staff assignment",
       DRAFT: "Draft",
       REVISION_REQUESTED: "Revision requested",
       APPROVED: "Approved — complete",
@@ -159,6 +160,33 @@ export function normalizeOfficeCode(value: string | null | undefined): string | 
   return trimmed ? trimmed.toUpperCase() : null;
 }
 
+/**
+ * Assignment-role chips. The codes are the deployed contract — `ENGINEER` is
+ * the Staff role's stored code and does not change — so only the label here
+ * carries the role's name.
+ */
+const ASSIGNMENT_ROLE_LABELS: Record<string, string> = {
+  ENGINEER: "Staff",
+  SENIOR_ENGINEER: "Senior Engineer",
+  CONSULTED: "Consulted",
+  REVIEWER: "Reviewer",
+  APPROVER: "Approver",
+};
+
+export function assignmentRoleLabel(role: string): string {
+  return ASSIGNMENT_ROLE_LABELS[role] ?? humanizeCode(role);
+}
+
+/** Assessment history rows: same rule, for the event codes the server writes. */
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  ENGINEER_ASSIGNED: "Staff assigned",
+  SENIOR_ENGINEER_ASSIGNED: "Senior engineer assigned",
+};
+
+export function assessmentEventLabel(eventType: string): string {
+  return EVENT_TYPE_LABELS[eventType] ?? humanizeCode(eventType);
+}
+
 export type WaitingOn = { who: string; text: string } | null;
 
 /** Who the next step is waiting on, with the action the role performs. */
@@ -167,31 +195,31 @@ export function waitingOn(
   assignments: AssessmentAssignment[],
 ): WaitingOn {
   const author = assignments.find(
-    (assignment) => assignment.assignment_role === "ENGINEER" || assignment.assignment_role === "SENIOR_SPECIALIST",
+    (assignment) => assignment.assignment_role === "ENGINEER" || assignment.assignment_role === "SENIOR_ENGINEER",
   );
-  const specialistRoute = assessment.routing_path === "SENIOR_SPECIALIST";
+  const seniorEngineerRoute = assessment.routing_path === "SENIOR_ENGINEER";
   const authorLabel = author
-    ? `${author.assignment_role === "SENIOR_SPECIALIST" ? "Senior Specialist" : "Engineer"} · ${author.full_name}`
-    : specialistRoute
-      ? "Assigned Senior Specialist"
-      : "Assigned Engineer";
+    ? `${assignmentRoleLabel(author.assignment_role)} · ${author.full_name}`
+    : seniorEngineerRoute
+      ? "Assigned Senior Engineer"
+      : "Assigned Staff";
   switch (assessment.state) {
     case "PENDING_OFFICE_DELEGATION":
       return {
         who: "Office Chief",
-        text: "Route this assessment: hand it off to a branch chief, or assign a senior specialist. You cannot assign the person who fills out the assessment directly.",
+        text: "Route this assessment: hand it off to a branch chief, or assign a senior engineer. You cannot assign Staff directly.",
       };
     case "PENDING_ENGINEER_ASSIGNMENT":
       return {
         who: "Branch Chief",
-        text: "Assign an engineer to perform the on-site assessment. You approve the finished assessment yourself.",
+        text: "Assign a Staff member to perform the on-site assessment. You approve the finished assessment yourself.",
       };
     case "DRAFT":
       return { who: authorLabel, text: "Complete the technical submission, then send the assessment for review." };
     case "REVISION_REQUESTED":
       return { who: authorLabel, text: "Make the changes the reviewer asked for, update the submission, and resend it." };
     case "SUBMITTED":
-      if (specialistRoute) {
+      if (seniorEngineerRoute) {
         return {
           who: `${officeLabel(assessment.office_code)} Chief`,
           text: "An office chief of this GeoTech office reads the technical form, then approves it or returns it for changes.",
@@ -216,14 +244,15 @@ export type RoleFlags = {
   admin: boolean;
   officeChief: boolean;
   branchChief: boolean;
+  /** GEOTECH_ENGINEER, the Staff role's deployed code. */
   engineer: boolean;
-  seniorSpecialist: boolean;
+  seniorEngineer: boolean;
 };
 
 export type AssessmentPermissions = {
   /** Hand off to a branch chief — also the repair path for a departed chief. */
   delegate: boolean;
-  assignSpecialist: boolean;
+  assignSeniorEngineer: boolean;
   assignEngineer: boolean;
   submit: boolean;
   addSubmission: boolean;
@@ -259,10 +288,10 @@ export function assessmentPermissions(
   // so a departed branch chief never strands a submitted assessment.
   const delegate =
     (flags.officeChief || flags.admin) && !terminal && (route == null || route === "BRANCH");
-  const assignSpecialist =
+  const assignSeniorEngineer =
     (flags.officeChief || flags.admin)
     && (routingStep || engineeringStep)
-    && (route == null || route === "SENIOR_SPECIALIST");
+    && (route == null || route === "SENIOR_ENGINEER");
 
   // Identity-bound: only the branch chief this assessment was handed to.
   const assignEngineer =
@@ -280,14 +309,14 @@ export function assessmentPermissions(
     assessment.state === "SUBMITTED"
     && (flags.admin
       || (route === "BRANCH" && flags.branchChief && isNamedBranchChief)
-      || (route === "SENIOR_SPECIALIST" && flags.officeChief && officeMatches));
+      || (route === "SENIOR_ENGINEER" && flags.officeChief && officeMatches));
 
   return {
     delegate,
-    assignSpecialist,
+    assignSeniorEngineer,
     assignEngineer,
     submit: (isAssignee || flags.admin) && engineeringStep,
-    addSubmission: ((isAssignee && (flags.engineer || flags.seniorSpecialist)) || flags.admin) && engineeringStep,
+    addSubmission: ((isAssignee && (flags.engineer || flags.seniorEngineer)) || flags.admin) && engineeringStep,
     review,
     manageConsulted: (flags.officeChief || flags.branchChief || flags.admin) && !terminal,
   };
@@ -296,7 +325,7 @@ export function assessmentPermissions(
 export function isActionable(permissions: AssessmentPermissions): boolean {
   return (
     permissions.delegate
-    || permissions.assignSpecialist
+    || permissions.assignSeniorEngineer
     || permissions.assignEngineer
     || permissions.submit
     || permissions.review
