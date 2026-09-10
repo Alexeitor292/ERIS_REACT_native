@@ -5,8 +5,65 @@ import type { AdminUser } from "../../../api/types";
 import AppShell from "../../../ui/AppShell";
 import PasswordResetDialog from "./PasswordResetDialog";
 
+/**
+ * Canonical role labels, written out rather than title-cased: the title-caser
+ * turns GEOTECH_* into "Geotech", which is not how the roles are named.
+ */
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Administrator",
+  MAINTENANCE_FIELD_WORKER: "Maintenance Field Worker",
+  MAINTENANCE_COORDINATOR: "Maintenance Coordinator",
+  GEOTECH_OFFICE_CHIEF: "GeoTech Office Chief",
+  GEOTECH_BRANCH_CHIEF: "GeoTech Branch Chief",
+  GEOTECH_ENGINEER: "GeoTech Engineer",
+  GEOTECH_SENIOR_SPECIALIST: "GeoTech Senior Specialist",
+  // Legacy aliases and the retired reviewer role, kept for existing accounts.
+  MAINTENANCE: "Maintenance Field Worker (legacy)",
+  MAINT_COORDINATOR: "Maintenance Coordinator (legacy)",
+  OFFICE_CHIEF: "GeoTech Office Chief (legacy)",
+  BRANCH_CHIEF: "GeoTech Branch Chief (legacy)",
+  FIELD_WORKER: "GeoTech Engineer (legacy)",
+  REVIEWER: "Reviewer (legacy — no review authority)",
+};
+
 function roleLabel(role: string) {
-  return role.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter: string) => letter.toUpperCase());
+  return ROLE_LABELS[role] ?? role.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter: string) => letter.toUpperCase());
+}
+
+/** Offices a chief or senior specialist can be scoped to (users.metadata_json.office_code). */
+const OFFICE_OPTIONS: Array<{ code: string; label: string }> = [
+  { code: "NORTH", label: "North GeoTech Office" },
+  { code: "WEST", label: "West GeoTech Office" },
+  { code: "SOUTH", label: "South GeoTech Office" },
+];
+
+const OFFICE_HELPER = "Chiefs and senior specialists are scoped to an office; without one they cannot be assigned or review.";
+
+function normalizeOffice(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed.toUpperCase() : "";
+}
+
+/** A free-text office code so a site with offices beyond the seeded three is not blocked. */
+function OfficeField({ value, onChange, id }: { value: string; onChange: (next: string) => void; id: string }) {
+  const inputClass = "w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
+  return (
+    <div className="grid gap-1.5">
+      <label className="text-xs font-semibold uppercase tracking-wide text-muted" htmlFor={`${id}-input`}>Office</label>
+      <input
+        id={`${id}-input`}
+        list={id}
+        className={inputClass}
+        value={value}
+        placeholder="e.g. NORTH"
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <datalist id={id}>
+        {OFFICE_OPTIONS.map((office) => <option key={office.code} value={office.code}>{office.label}</option>)}
+      </datalist>
+      <span className="text-[11px] text-muted">{OFFICE_HELPER}</span>
+    </div>
+  );
 }
 
 function AccountStatusBadge({ active }: { active: boolean }) {
@@ -21,6 +78,7 @@ export default function AdminUsersOperationsPage() {
   const [items, setItems] = useState<AdminUser[]>([]);
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
   const [draftRoles, setDraftRoles] = useState<Record<number, string[]>>({});
+  const [draftOffices, setDraftOffices] = useState<Record<number, string>>({});
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
   const [createOpen, setCreateOpen] = useState(false);
@@ -28,6 +86,7 @@ export default function AdminUsersOperationsPage() {
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [newRoles, setNewRoles] = useState<string[]>([]);
+  const [newOffice, setNewOffice] = useState("");
   const [resetUser, setResetUser] = useState<AdminUser | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +106,7 @@ export default function AdminUsersOperationsPage() {
       setItems(nextUsers);
       setRoleOptions(rolesResponse.items ?? []);
       setDraftRoles(Object.fromEntries(nextUsers.map((user) => [user.id, [...user.roles]])));
+      setDraftOffices(Object.fromEntries(nextUsers.map((user) => [user.id, user.metadata?.office_code ?? ""])));
     } catch (e: any) {
       setError(e?.message ?? "Failed to load user administration data.");
     } finally {
@@ -89,6 +149,7 @@ export default function AdminUsersOperationsPage() {
     setFullName("");
     setPassword("");
     setNewRoles([]);
+    setNewOffice("");
   }
 
   async function createUser() {
@@ -104,9 +165,18 @@ export default function AdminUsersOperationsPage() {
     }
     setBusy(true);
     try {
+      const office = normalizeOffice(newOffice);
       await api("/admin/users", {
         method: "POST",
-        body: JSON.stringify({ email: email.trim(), full_name: fullName.trim(), password, roles: newRoles }),
+        body: JSON.stringify({
+          email: email.trim(),
+          full_name: fullName.trim(),
+          password,
+          roles: newRoles,
+          // Office scoping is load-bearing: a chief or senior specialist with no
+          // office_code can neither be assigned nor review.
+          metadata: office ? { office_code: office } : undefined,
+        }),
       });
       setNotice(`Created account for ${fullName.trim()}.`);
       closeCreate();
@@ -118,9 +188,9 @@ export default function AdminUsersOperationsPage() {
     }
   }
 
-  async function saveRoles(user: AdminUser) {
+  async function saveUser(user: AdminUser, rolesChanged: boolean, officeChanged: boolean) {
     const roles = draftRoles[user.id] ?? [];
-    if (roles.length === 0) {
+    if (rolesChanged && roles.length === 0) {
       setError("Each active ERIS account must retain at least one application role.");
       return;
     }
@@ -128,14 +198,31 @@ export default function AdminUsersOperationsPage() {
     setError(null);
     setNotice(null);
     try {
-      await api(`/admin/users/${user.id}/roles`, {
-        method: "PUT",
-        body: JSON.stringify({ roles }),
-      });
-      setNotice(`Updated roles for ${user.full_name}.`);
+      if (rolesChanged) {
+        await api(`/admin/users/${user.id}/roles`, {
+          method: "PUT",
+          body: JSON.stringify({ roles }),
+        });
+      }
+      if (officeChanged) {
+        const office = normalizeOffice(draftOffices[user.id] ?? "");
+        // PATCH replaces the whole metadata object, so district and location
+        // are carried over rather than silently dropped.
+        await api(`/admin/users/${user.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            metadata: {
+              district: user.metadata?.district ?? null,
+              office_code: office || null,
+              office_location: user.metadata?.office_location ?? null,
+            },
+          }),
+        });
+      }
+      setNotice(`Updated ${user.full_name}.`);
       await load();
     } catch (e: any) {
-      setError(e?.message ?? "Failed to update roles.");
+      setError(e?.message ?? "Failed to update the account.");
     } finally {
       setBusy(false);
     }
@@ -194,6 +281,7 @@ export default function AdminUsersOperationsPage() {
               <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Email *</span><input type="email" autoComplete="off" className={inputClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
               <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Full name *</span><input className={inputClass} value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
               <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Initial password *</span><input type="password" autoComplete="new-password" className={inputClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+              <OfficeField id="new-user-office-options" value={newOffice} onChange={setNewOffice} />
             </div>
             <div className="mt-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted">Initial roles</div><RoleChoices options={roleOptions} selected={newRoles} onToggle={(role) => setNewRoles((current) => toggleRole(current, role))} /></div>
             <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeCreate} disabled={busy} className="rounded-md border border-[var(--line)] px-3 py-2 text-sm font-medium disabled:opacity-50">Cancel</button><button type="button" onClick={createUser} disabled={busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Creating…" : "Create account"}</button></div>
@@ -209,19 +297,37 @@ export default function AdminUsersOperationsPage() {
         {error ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
         {notice ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div> : null}
 
+        <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-xs text-muted">{OFFICE_HELPER}</div>
+
+        <datalist id="admin-user-office-options">
+          {OFFICE_OPTIONS.map((office) => <option key={office.code} value={office.code}>{office.label}</option>)}
+        </datalist>
+
         <div className="flex-1 overflow-auto rounded-xl border border-[var(--line)] bg-[var(--panel)]">
           <table className="w-full border-collapse">
-            <thead><tr className="border-b border-[var(--line)] bg-[var(--panel-soft)] text-left text-xs font-semibold uppercase tracking-wide text-muted"><th className="px-3 py-3">User</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Roles</th><th className="px-3 py-3 text-right">Actions</th></tr></thead>
+            <thead><tr className="border-b border-[var(--line)] bg-[var(--panel-soft)] text-left text-xs font-semibold uppercase tracking-wide text-muted"><th className="px-3 py-3">User</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Office</th><th className="px-3 py-3">Roles</th><th className="px-3 py-3 text-right">Actions</th></tr></thead>
             <tbody>
-              {filtered.length === 0 ? <tr><td colSpan={4} className="px-3 py-8 text-sm text-muted">{busy ? "Loading users…" : "No users match the current filters."}</td></tr> : filtered.map((user) => {
+              {filtered.length === 0 ? <tr><td colSpan={5} className="px-3 py-8 text-sm text-muted">{busy ? "Loading users…" : "No users match the current filters."}</td></tr> : filtered.map((user) => {
                 const roles = draftRoles[user.id] ?? [];
                 const rolesChanged = JSON.stringify([...roles].sort()) !== JSON.stringify([...user.roles].sort());
+                const office = draftOffices[user.id] ?? "";
+                const officeChanged = normalizeOffice(office) !== normalizeOffice(user.metadata?.office_code ?? "");
                 return (
                   <tr key={user.id} className="border-b border-[var(--line)]/60 align-top last:border-b-0">
                     <td className="px-3 py-3 text-sm"><div className="font-semibold">{user.full_name}</div><div className="text-xs text-muted">{user.email}</div><div className="mt-1 text-[11px] text-muted">User #{user.id}</div></td>
                     <td className="px-3 py-3"><AccountStatusBadge active={user.is_active} /></td>
+                    <td className="px-3 py-3">
+                      <input
+                        list="admin-user-office-options"
+                        aria-label={`Office for ${user.full_name}`}
+                        placeholder="—"
+                        className="w-28 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--brand)]"
+                        value={office}
+                        onChange={(event) => setDraftOffices((previous) => ({ ...previous, [user.id]: event.target.value }))}
+                      />
+                    </td>
                     <td className="px-3 py-3"><RoleChoices options={roleOptions} selected={roles} compact onToggle={(role) => setDraftRoles((previous) => ({ ...previous, [user.id]: toggleRole(previous[user.id] ?? [], role) }))} /></td>
-                    <td className="px-3 py-3 text-right"><div className="inline-flex flex-wrap justify-end gap-1.5"><button type="button" onClick={() => saveRoles(user)} disabled={busy || !rolesChanged} className="rounded border border-[var(--line)] px-2.5 py-1.5 text-xs font-semibold disabled:opacity-40">Save roles</button><button type="button" onClick={() => setResetUser(user)} disabled={busy} className="rounded border border-[var(--line)] px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50">Reset password</button><button type="button" onClick={() => setActive(user, !user.is_active)} disabled={busy} className={`rounded border px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${user.is_active ? "border-[color:color-mix(in_oklab,var(--bad)_45%,var(--line))] text-[var(--bad)]" : "border-[color:color-mix(in_oklab,var(--good)_45%,var(--line))] text-[var(--good)]"}`}>{user.is_active ? "Disable" : "Enable"}</button></div></td>
+                    <td className="px-3 py-3 text-right"><div className="inline-flex flex-wrap justify-end gap-1.5"><button type="button" onClick={() => saveUser(user, rolesChanged, officeChanged)} disabled={busy || (!rolesChanged && !officeChanged)} className="rounded border border-[var(--line)] px-2.5 py-1.5 text-xs font-semibold disabled:opacity-40">Save changes</button><button type="button" onClick={() => setResetUser(user)} disabled={busy} className="rounded border border-[var(--line)] px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50">Reset password</button><button type="button" onClick={() => setActive(user, !user.is_active)} disabled={busy} className={`rounded border px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${user.is_active ? "border-[color:color-mix(in_oklab,var(--bad)_45%,var(--line))] text-[var(--bad)]" : "border-[color:color-mix(in_oklab,var(--good)_45%,var(--line))] text-[var(--good)]"}`}>{user.is_active ? "Disable" : "Enable"}</button></div></td>
                   </tr>
                 );
               })}

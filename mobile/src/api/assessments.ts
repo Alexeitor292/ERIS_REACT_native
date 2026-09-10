@@ -19,7 +19,17 @@ export type TriageDisposition =
   | "NEEDS_REPORTER_INFORMATION"
   | "DUPLICATE_OR_LINKED";
 
-export type AssessmentQueue = "office_chief" | "branch_chief" | "engineer" | "reviewer";
+/** Which of the two routes an assessment took; null until the office chief chooses. */
+export type AssessmentRoutingPath = "BRANCH" | "SENIOR_SPECIALIST";
+
+export type AssessmentQueue =
+  | "office_chief"
+  | "office_chief_review"
+  | "branch_chief"
+  | "branch_chief_review"
+  | "assignee"
+  | "engineer"
+  | "reviewer";
 
 export type Assessment = {
   id: number;
@@ -29,8 +39,16 @@ export type Assessment = {
   district: string | null;
   office_code: string | null;
   office_override_reason: string | null;
+  routing_path: AssessmentRoutingPath | null;
   branch_chief_user_id: number | null;
+  /**
+   * The assignee on BOTH routes: on a SENIOR_SPECIALIST row this names a senior
+   * specialist, not an engineer. `assigned_user_kind` says which.
+   */
   assigned_engineer_user_id: number | null;
+  assigned_user_kind: "ENGINEER" | "SENIOR_SPECIALIST" | null;
+  /** Server-derived review authority for the caller. Never re-derive it from roles. */
+  can_review: boolean;
   state: AssessmentState;
   triage_disposition: TriageDisposition | null;
   notes: string | null;
@@ -48,7 +66,8 @@ export type Assessment = {
 export type AssessmentAssignment = {
   id: number;
   user_id: number;
-  assignment_role: "ENGINEER" | "REVIEWER" | "APPROVER" | "CONSULTED";
+  // REVIEWER/APPROVER are historical only — they confer no authority in v2.
+  assignment_role: "ENGINEER" | "SENIOR_SPECIALIST" | "REVIEWER" | "APPROVER" | "CONSULTED";
   assigned_by_user_id: number;
   notes: string | null;
   email: string;

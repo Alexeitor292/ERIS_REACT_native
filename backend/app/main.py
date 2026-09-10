@@ -32,10 +32,12 @@ from .routes.gisa import router as gisa_router
 from .migrations_check import check_migration_head
 from .routes.incidents import router as incidents_router
 from .routes.photo_map import router as photo_map_router
+from .routes import assessments as assessments_routes
 from .routes.assessments import router as assessments_router
 from .routes.workflow_tree import router as workflow_tree_router
 from .routes.road_inventory import router as road_inventory_router
-from .permissions import is_admin, is_reviewer, is_operational_user, require_is_owner_or_admin
+from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
+from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
 from .schemas.common import (
@@ -56,6 +58,7 @@ from .schemas.common import (
     WorkflowAction,
 )
 from .services import elevation_profile as elevation_profile_svc
+from .services import notifications as notifications_svc
 from .services import offline_scene as offline_scene_svc
 from .services import offline_scene_jobs as offline_scene_jobs_svc
 from .services.offline_scene_catalog import register_ready_package, PackageRegistrationError
@@ -83,6 +86,11 @@ async def lifespan(_app: FastAPI):
         else:
             raise
     check_migration_head()
+    # Retry whatever the last run's after-commit flushes could not deliver
+    # (design §6.3). Bounded by the same per-flush caps and never raises, so a
+    # dead relay or a backlog cannot hold up boot; with SMTP_HOST unset it is a
+    # no-op. The cron half is `python -m app.tools.flush_email_outbox`.
+    notifications_svc.sweep_startup()
     yield
 
 
@@ -143,10 +151,12 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
 
 def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
     # Broad visibility: any non-maintenance operational user (admin, coordinator,
-    # office/branch chief, engineer, legacy reviewer) may READ submissions /
-    # assessment technical forms. Maintenance field workers remain restricted to
-    # records they own or were explicitly granted. Write access is unchanged.
-    if is_admin(user) or is_reviewer(user) or is_operational_user(user):
+    # office/branch chief, engineer, senior specialist, legacy reviewer) may READ
+    # submissions / assessment technical forms. Maintenance field workers remain
+    # restricted to records they own or were explicitly granted. Write access is
+    # unchanged. is_operational_user() already includes REVIEWER, so the separate
+    # is_reviewer() term this used to carry was redundant.
+    if is_admin(user) or is_operational_user(user):
         return True
 
     row = db.execute(text("""
@@ -225,6 +235,48 @@ def can_manage_submission_permissions(db: Session, *, user: dict, submission_id:
 def require_can_manage_submission_permissions(submission_id: int, db: Session, user: dict) -> None:
     if not can_manage_submission_permissions(db, user=user, submission_id=submission_id):
         raise HTTPException(status_code=403, detail="Only owner/admin can manage permissions")
+
+# Broad enough to reach the explanation inside the handler. Routing v2 removed
+# review authority from the REVIEWER account role, but a 403 from the dependency
+# would hide WHY: a linked technical form is decided on its assessment, and an
+# unlinked legacy one is admin-only. Both answers come from the handler body.
+SUBMISSION_DECISION_ROLES = sorted(OPERATIONAL_ROLES)
+
+
+def linked_assessment_for_submission(db: Session, submission_id: int) -> dict | None:
+    """The assessment this technical form belongs to, or None.
+
+    Matches the same set of submissions B1 drives (``_submission_ids_for``): the
+    assessment's own ``submission_id`` plus every ``assessment_submissions`` row.
+    An assessment-linked form's status is written ONLY by the assessment
+    endpoints in v2 (design §4.2), and this is how they are recognised.
+    """
+    row = db.execute(text("""
+        SELECT a.id, a.incident_id, a.state, a.routing_path, a.office_code,
+               a.branch_chief_user_id, a.assigned_engineer_user_id
+        FROM assessments a
+        WHERE a.submission_id = :sid
+           OR EXISTS (
+                SELECT 1 FROM assessment_submissions s
+                WHERE s.assessment_id = a.id AND s.submission_id = :sid
+           )
+        LIMIT 1
+    """), {"sid": submission_id}).mappings().first()
+    return dict(row) if row else None
+
+
+def submission_can_review(db: Session, *, user: dict, submission_id: int, assessment: dict | None) -> bool:
+    """Whether this caller may decide THIS submission's outcome.
+
+    On an assessment-linked form the decision happens on the assessment, so the
+    answer is that assessment's path-based authority (design §4.1) while it is
+    SUBMITTED. An unlinked legacy submission stays admin-only.
+    """
+    if assessment is not None:
+        allowed, _reason = assessments_routes._review_authority(db, assessment, user)
+        return bool(allowed) and str(assessment.get("state")) == "SUBMITTED"
+    return bool(is_admin(user)) and get_submission_status(db, submission_id) == "SUBMITTED"
+
 
 def get_submission_status(db: Session, submission_id: int) -> str:
     status_value = db.execute(text("""
@@ -2019,7 +2071,7 @@ def enrich_point(
 def create_submission(
     db: Session = Depends(get_db),
     payload: SubmissionCreate = SubmissionCreate(),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
+    user=Depends(require_roles(GISA_AUTHOR_ROLES))
 ):
     try:
         status_value = "DRAFT"
@@ -2062,7 +2114,9 @@ def list_submissions(
         params["status"] = st
         status_filter = "WHERE status = :status"
 
-    if is_admin(user) or is_reviewer(user):
+    # Listing every submission is broad READ, not review authority, so it follows
+    # the operational role model (which already includes the legacy REVIEWER).
+    if is_admin(user) or is_operational_user(user):
         rows = db.execute(text("""
             SELECT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,
                    s.created_at, s.submitted_at, s.reviewed_at,
@@ -2147,7 +2201,8 @@ def get_submission(
     # the incident's primary link or as a supplemental assessment submission.
     context_row = db.execute(text("""
         SELECT i.id AS incident_id, i.event_group_id, i.title AS incident_title,
-               a.id AS assessment_id, a.state AS assessment_state
+               a.id AS assessment_id, a.state AS assessment_state,
+               a.routing_path AS assessment_routing_path
         FROM (
             SELECT incident_id FROM incident_submission_links WHERE submission_id = :sid
             UNION
@@ -2159,6 +2214,15 @@ def get_submission(
         LEFT JOIN assessments a ON a.incident_id = i.id
         LIMIT 1
     """), {"sid": submission_id}).mappings().first()
+    # Routing v2: the header and the decision affordances must come from the
+    # server, never from role strings — `assessment_routing_path` picks the
+    # "Awaiting branch chief review" / "Awaiting office chief review" wording
+    # (absent on a legacy unlinked form, which must fall back to neutral copy),
+    # and `can_review` is the path-based authority (design §4.2, §5.2).
+    linked_assessment = linked_assessment_for_submission(db, submission_id)
+    can_review = submission_can_review(
+        db, user=user, submission_id=submission_id, assessment=linked_assessment
+    )
     context = None
     if context_row:
         context = {
@@ -2167,6 +2231,8 @@ def get_submission(
             "event_group_id": int(context_row["event_group_id"]) if context_row["event_group_id"] is not None else None,
             "assessment_id": int(context_row["assessment_id"]) if context_row["assessment_id"] is not None else None,
             "assessment_state": context_row["assessment_state"],
+            "assessment_routing_path": context_row["assessment_routing_path"],
+            "can_review": can_review,
         }
 
     return {
@@ -2174,6 +2240,9 @@ def get_submission(
             **dict(sub),
             "can_edit": can_edit_submission(db, user=user, submission_id=submission_id),
             "can_manage_permissions": can_manage_submission_permissions(db, user=user, submission_id=submission_id),
+            # Beside can_edit rather than only in the context, because a legacy
+            # submission with no incident link has no context object at all.
+            "can_review": can_review,
         },
         "gisa": gisa,
         "incident_types": incident_types,
@@ -2190,7 +2259,7 @@ def patch_submission_title(
     submission_id: int = Path(..., ge=1),
     payload: SubmissionTitlePatch = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_can_edit_submission(submission_id, db, user)
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
@@ -2214,7 +2283,7 @@ def patch_submission_title(
 def delete_submission(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_is_owner_or_admin(db, user=user, submission_id=submission_id)
     current_status = get_submission_status(db, submission_id)
@@ -2267,7 +2336,7 @@ def put_submission_geometry(
     submission_id: int = Path(..., ge=1),
     payload: GeometryUpsert = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_can_edit_submission(submission_id, db, user)
 
@@ -2319,7 +2388,7 @@ def patch_gisa(
     submission_id: int = Path(..., ge=1),
     payload: GisaDraftPatch = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_can_edit_submission(submission_id, db, user)
 
@@ -3071,7 +3140,7 @@ def replace_incident_types(
     submission_id: int = Path(..., ge=1),
     payload: ReplaceIncidentTypes = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_can_edit_submission(submission_id, db, user)
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
@@ -3099,7 +3168,7 @@ def replace_actions(
     submission_id: int = Path(..., ge=1),
     payload: ReplaceActions = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_can_edit_submission(submission_id, db, user)
     if get_submission_status(db, submission_id) not in {"DRAFT", "REJECTED"}:
@@ -3141,7 +3210,7 @@ def share_submission(
     submission_id: int = Path(..., ge=1),
     payload: ShareRequest = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
+    user=Depends(require_roles(GISA_AUTHOR_ROLES))
 ):
     require_can_manage_submission_permissions(submission_id, db, user)
     exists = db.execute(text("SELECT 1 FROM submissions WHERE id=:sid"), {"sid": submission_id}).scalar()
@@ -3170,7 +3239,7 @@ def unshare_submission(
     submission_id: int = Path(..., ge=1),
     user_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
+    user=Depends(require_roles(GISA_AUTHOR_ROLES))
 ):
     require_can_manage_submission_permissions(submission_id, db, user)
     try:
@@ -3261,7 +3330,7 @@ def replace_submission_permissions(
     submission_id: int = Path(..., ge=1),
     payload: SubmissionPermissionsReplace = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_can_manage_submission_permissions(submission_id, db, user)
 
@@ -3501,7 +3570,8 @@ def attachment_download_url(
     if not row:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
-    if not (is_admin(user) or is_reviewer(user)):
+    # Broad READ on attachments, not review authority.
+    if not (is_admin(user) or is_operational_user(user)):
         sid = db.execute(text("""
             SELECT al.submission_id
             FROM attachment_links al
@@ -3553,7 +3623,8 @@ def attachment_content(
     if not row:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
-    if not (is_admin(user) or is_reviewer(user)):
+    # Broad READ on attachments, not review authority.
+    if not (is_admin(user) or is_operational_user(user)):
         sid = db.execute(text("""
             SELECT al.submission_id
             FROM attachment_links al
@@ -3592,9 +3663,20 @@ def submit(
     submission_id: int = Path(..., ge=1),
     payload: WorkflowAction = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))
+    user=Depends(require_roles(GISA_AUTHOR_ROLES))
 ):
     require_can_edit_submission(submission_id, db, user)
+    # Routing v2: an assessment-linked technical form is sent for review on its
+    # ASSESSMENT, which moves both records in one transaction (B1, design §3.5).
+    # Leaving this open would re-create the desync from the other end — the
+    # author locks their own form while the assessment sits in DRAFT — and would
+    # keep the two Submit buttons with different outcomes.
+    linked_assessment = linked_assessment_for_submission(db, submission_id)
+    if linked_assessment is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Send this for review on the assessment: POST /assessments/{int(linked_assessment['id'])}/submit",
+        )
     validate_submit_ready(db, submission_id)
 
     current_status = get_submission_status(db, submission_id)
@@ -3629,7 +3711,7 @@ def notify_coordinator(
     submission_id: int = Path(..., ge=1),
     payload: NotifyCoordinatorAction = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     require_can_edit_submission(submission_id, db, user)
     current_status = get_submission_status(db, submission_id)
@@ -3696,8 +3778,24 @@ def review_submission(
     submission_id: int = Path(..., ge=1),
     payload: ReviewAction = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["ADMIN", "REVIEWER"])),
+    user=Depends(require_roles(SUBMISSION_DECISION_ROLES)),
 ):
+    """Decide a LEGACY, unlinked submission. Admin only.
+
+    Routing v2 closed the back door: a technical form attached to an assessment
+    is decided on the assessment, which drives both records in one transaction,
+    so there is exactly one Approve per piece of work (design §4.2). The legacy
+    REVIEWER account role no longer decides anything here either.
+    """
+    linked_assessment = linked_assessment_for_submission(db, submission_id)
+    if linked_assessment is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Decide this on the assessment: POST /assessments/{int(linked_assessment['id'])}/review",
+        )
+    if not is_admin(user):
+        raise HTTPException(status_code=403, detail="You are not the reviewer for this assessment")
+
     from_status = "SUBMITTED"
     to_status = "APPROVED" if payload.decision == "APPROVE" else "REJECTED"
     try:
@@ -3722,7 +3820,7 @@ def approve(
     submission_id: int = Path(..., ge=1),
     payload: WorkflowAction = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["ADMIN", "REVIEWER"])),
+    user=Depends(require_roles(SUBMISSION_DECISION_ROLES)),
 ):
     return review_submission(
         submission_id=submission_id,
@@ -3737,7 +3835,7 @@ def reject(
     submission_id: int = Path(..., ge=1),
     payload: WorkflowAction = ...,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["ADMIN", "REVIEWER"])),
+    user=Depends(require_roles(SUBMISSION_DECISION_ROLES)),
 ):
     return review_submission(
         submission_id=submission_id,

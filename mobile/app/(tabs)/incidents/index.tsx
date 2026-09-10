@@ -9,9 +9,7 @@ import { router, useFocusEffect, useLocalSearchParams, usePathname } from "expo-
 import { getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import {
-  assignIncidentToBranchChief,
   createIncident,
-  getOfficeChiefBranchOptions,
   updateIncident,
   listIncidents,
   resolveIncident,
@@ -27,7 +25,6 @@ import {
   type IncidentLocationTimeline,
   type IncidentStatus,
   type RoadInventoryIncidentContext,
-  type RoutingUserOption,
 } from "@/src/api/incidents";
 import {
   routingPreview,
@@ -421,9 +418,6 @@ export default function IncidentsTabScreen() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [assignIncidentId, setAssignIncidentId] = useState<number | null>(null);
   const [projectReviewIncidentId, setProjectReviewIncidentId] = useState<number | null>(null);
-  const [branchRouteIncident, setBranchRouteIncident] = useState<Incident | null>(null);
-  const [branchChiefOptions, setBranchChiefOptions] = useState<RoutingUserOption[]>([]);
-  const [branchChiefOptionsLoading, setBranchChiefOptionsLoading] = useState(false);
   const [reviewIncident, setReviewIncident] = useState<Incident | null>(null);
   const [reviewCandidates, setReviewCandidates] = useState<IncidentLocationCandidate[]>([]);
   const [reviewTimeline, setReviewTimeline] = useState<IncidentLocationTimeline | null>(null);
@@ -1155,41 +1149,6 @@ export default function IncidentsTabScreen() {
       setAssignIncidentId(null);
       await load();
       openDraft(res.linked_submission_id ?? null);
-    } catch (e: any) {
-      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const openBranchRouting = async (incident: Incident) => {
-    const token = await getToken();
-    if (!token) return;
-    setBranchRouteIncident(incident);
-    setBranchChiefOptions([]);
-    setBranchChiefOptionsLoading(true);
-    setErr(null);
-    try {
-      const res = await getOfficeChiefBranchOptions(token, incident.id);
-      setBranchChiefOptions(res.items ?? []);
-    } catch (e: any) {
-      if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
-    } finally {
-      setBranchChiefOptionsLoading(false);
-    }
-  };
-
-  const onAssignBranchChief = async (branchChiefUserId: number) => {
-    const token = await getToken();
-    if (!token || !branchRouteIncident) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await assignIncidentToBranchChief(token, branchRouteIncident.id, branchChiefUserId);
-      setBranchRouteIncident(null);
-      setBranchChiefOptions([]);
-      await load();
-      Alert.alert("Routed", "This case is now with the selected branch chief.");
     } catch (e: any) {
       if (!isSessionExpiredError(e)) setErr(String(e?.message ?? e));
     } finally {
@@ -1944,14 +1903,9 @@ export default function IncidentsTabScreen() {
                       </Pressable>
                     </>
                   ) : null}
-                  {isOfficeChiefMobile && item.current_stage === "OFFICE_CHIEF_REVIEW" ? (
-                    <Pressable
-                      style={[styles.smallBtn, { borderColor: palette.border }]}
-                      onPress={() => openBranchRouting(item)}
-                    >
-                      <Text style={{ color: palette.text, fontWeight: "700" }}>Route to Branch Chief</Text>
-                    </Pressable>
-                  ) : null}
+                  {/* Routing v2: the office chief routes on the assessment (hand off to a
+                      branch chief, or assign a senior specialist), never on the incident.
+                      The legacy incident-stage endpoints now return 410. */}
                   {isAdmin && item.current_stage === "ENGINEER_ASSIGNED" ? (
                     <>
                       <Pressable
@@ -2302,48 +2256,6 @@ export default function IncidentsTabScreen() {
                 </View>
               </ScrollView>
             ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal visible={branchRouteIncident != null} transparent animationType="fade" onRequestClose={() => setBranchRouteIncident(null)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setBranchRouteIncident(null)}>
-          <Pressable style={[styles.modalCard, { backgroundColor: palette.panel, borderColor: palette.border }]}>
-            <Text style={[styles.modalTitle, { color: palette.text }]}>Route Case to Branch Chief</Text>
-            <Text style={{ color: palette.muted, marginBottom: 10 }}>
-              {branchRouteIncident
-                ? branchRouteIncident.title?.trim() || `Case #${branchRouteIncident.id}`
-                : ""}
-            </Text>
-            {branchChiefOptionsLoading ? (
-              <ActivityIndicator style={{ marginVertical: 18 }} color={palette.primary} />
-            ) : (
-              <FlatList
-                data={branchChiefOptions}
-                keyExtractor={(item) => String(item.id)}
-                renderItem={({ item }) => (
-                  <Pressable
-                    style={[styles.userRow, { borderColor: palette.border }]}
-                    onPress={() => onAssignBranchChief(item.id)}
-                  >
-                    <Text style={{ color: palette.text, fontWeight: "700" }}>{item.full_name}</Text>
-                    <Text style={{ color: palette.muted, fontSize: 12 }}>{item.email}</Text>
-                    <Text style={{ color: palette.muted, fontSize: 12 }}>
-                      Office: {item.metadata?.office_code || "-"} {item.metadata?.office_location ? `| ${item.metadata.office_location}` : ""}
-                    </Text>
-                  </Pressable>
-                )}
-                ListEmptyComponent={
-                  <Text style={{ color: palette.muted, paddingVertical: 14 }}>
-                    No branch chiefs are configured for this office yet.
-                  </Text>
-                }
-                style={{ maxHeight: 280 }}
-              />
-            )}
-            <Pressable style={[styles.btn, { borderColor: palette.border, marginTop: 8 }]} onPress={() => setBranchRouteIncident(null)}>
-              <Text style={{ color: palette.text, fontWeight: "700" }}>Close</Text>
-            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>

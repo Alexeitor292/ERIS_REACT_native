@@ -11,6 +11,9 @@ const OPERATIONAL = [
   "BRANCH_CHIEF",
   "GEOTECH_ENGINEER",
   "FIELD_WORKER",
+  // New in routing v2, no legacy alias: the senior specialist fills assessments
+  // the office chief assigns directly. Operational, never maintenance-only.
+  "GEOTECH_SENIOR_SPECIALIST",
   "REVIEWER",
   "ADMIN",
 ];

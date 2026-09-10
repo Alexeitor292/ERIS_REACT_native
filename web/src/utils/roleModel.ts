@@ -10,6 +10,9 @@ export const CANONICAL = {
   GEOTECH_OFFICE_CHIEF: ["GEOTECH_OFFICE_CHIEF", "OFFICE_CHIEF"],
   GEOTECH_BRANCH_CHIEF: ["GEOTECH_BRANCH_CHIEF", "BRANCH_CHIEF"],
   GEOTECH_ENGINEER: ["GEOTECH_ENGINEER", "FIELD_WORKER"],
+  // Routing v2: the office chief's second route. No legacy alias — the role is
+  // new, so an account either holds the canonical name or it is not one.
+  GEOTECH_SENIOR_SPECIALIST: ["GEOTECH_SENIOR_SPECIALIST"],
   ADMIN: ["ADMIN"],
 } as const;
 
@@ -19,6 +22,8 @@ export const OPERATIONAL_ROLE_NAMES = [
   ...CANONICAL.GEOTECH_OFFICE_CHIEF,
   ...CANONICAL.GEOTECH_BRANCH_CHIEF,
   ...CANONICAL.GEOTECH_ENGINEER,
+  ...CANONICAL.GEOTECH_SENIOR_SPECIALIST,
+  // Legacy REVIEWER keeps broad operational READ and no review authority.
   "REVIEWER",
   "ADMIN",
 ] as const;
@@ -47,7 +52,13 @@ export function canTriage(roles: string[] | undefined): boolean {
   return isAdmin(roles) || hasRole(roles, "MAINTENANCE_COORDINATOR");
 }
 
+/** Office chief: hand an assessment off to a branch chief (the branch route). */
 export function canDelegateBranch(roles: string[] | undefined): boolean {
+  return isAdmin(roles) || hasRole(roles, "GEOTECH_OFFICE_CHIEF");
+}
+
+/** Office chief: assign a senior specialist directly (the specialist route). */
+export function canAssignSpecialist(roles: string[] | undefined): boolean {
   return isAdmin(roles) || hasRole(roles, "GEOTECH_OFFICE_CHIEF");
 }
 
@@ -55,16 +66,21 @@ export function canAssignEngineer(roles: string[] | undefined): boolean {
   return isAdmin(roles) || hasRole(roles, "GEOTECH_BRANCH_CHIEF");
 }
 
-export function canAssignReviewer(roles: string[] | undefined): boolean {
-  return isAdmin(roles) || hasRole(roles, "GEOTECH_OFFICE_CHIEF") || hasRole(roles, "GEOTECH_BRANCH_CHIEF");
-}
-
 export function isEngineer(roles: string[] | undefined): boolean {
   return isAdmin(roles) || hasRole(roles, "GEOTECH_ENGINEER");
 }
 
-export function canFinalize(roles: string[] | undefined): boolean {
-  return canDelegateBranch(roles);
+export function isSeniorSpecialist(roles: string[] | undefined): boolean {
+  return isAdmin(roles) || hasRole(roles, "GEOTECH_SENIOR_SPECIALIST");
+}
+
+/**
+ * Roles that fill a technical assessment: the staff engineer on the branch
+ * route and the senior specialist on the specialist route do the same work,
+ * so every author affordance is gated on this rather than on the engineer.
+ */
+export function isAssessmentAuthor(roles: string[] | undefined): boolean {
+  return isAdmin(roles) || hasRole(roles, "GEOTECH_ENGINEER") || hasRole(roles, "GEOTECH_SENIOR_SPECIALIST");
 }
 
 /** Roles that can have workflow steps waiting on them (My Work). */
@@ -74,20 +90,10 @@ export function hasWorkQueue(roles: string[] | undefined): boolean {
 
 /** Roles allowed to file a new incident report from the web. */
 export function canReportIncident(roles: string[] | undefined): boolean {
-  return isAdmin(roles) || hasRole(roles, "MAINTENANCE_FIELD_WORKER") || hasRole(roles, "GEOTECH_ENGINEER");
-}
-
-// Human-readable assessment state label + badge color class.
-export function assessmentStateLabel(state: string): string {
   return (
-    {
-      PENDING_OFFICE_DELEGATION: "Pending office delegation",
-      PENDING_ENGINEER_ASSIGNMENT: "Pending engineer assignment",
-      DRAFT: "Draft",
-      SUBMITTED: "Submitted for review",
-      REVISION_REQUESTED: "Revision requested",
-      APPROVED: "Approved",
-      FINALIZED: "Finalized",
-    } as Record<string, string>
-  )[state] ?? state;
+    isAdmin(roles)
+    || hasRole(roles, "MAINTENANCE_FIELD_WORKER")
+    || hasRole(roles, "GEOTECH_ENGINEER")
+    || hasRole(roles, "GEOTECH_SENIOR_SPECIALIST")
+  );
 }

@@ -81,6 +81,10 @@ def test_incident_classification_follows_real_assessment_lifecycle(client_db, ad
         json={"branch_chief_user_id": branch_chief_id, "notes": "Classification lifecycle test."},
     )
     assert delegated.status_code == 200, delegated.text
+    # Routing v2: this is a BRANCH-route assessment driven by admin (whose
+    # review bypass is preserved), which is what makes the terminal-APPROVED
+    # assertion below a v2 assertion rather than a legacy one.
+    assert delegated.json()["assessment"]["routing_path"] == "BRANCH"
 
     assigned = client_db.post(
         f"/assessments/{assessment_id}/assign-engineer",
@@ -131,13 +135,26 @@ def test_incident_classification_follows_real_assessment_lifecycle(client_db, ad
     )
     assert approved.status_code == 200, approved.text
     assert approved.json()["state"] == "APPROVED"
+    # Approval ENDS the assessment in v2 — there is no sign-off after it.
+    assert approved.json()["assessment"]["finalized_at"] is None
 
     confirmed = client_db.get(f"/incidents/{incident_id}/classification", headers=headers)
     assert confirmed.status_code == 200, confirmed.text
     confirmed_body = confirmed.json()
+    # The property that makes terminal APPROVED safe: an approved v2 assessment
+    # classifies its incident exactly as a FINALIZED one used to, so removing
+    # the sign-off step does not leave every new incident unclassified.
     assert confirmed_body["classification_status"] == "CLASSIFIED"
     assert confirmed_body["confirmed"] is True
     assert confirmed_body["reason"] == "ASSESSMENT_APPROVED"
     assert confirmed_body["assessment_state"] == "APPROVED"
     assert confirmed_body["assigned_at"] is not None
     assert confirmed_body["codes"] == pending_body["codes"]
+
+    # ...and it stays that way, because nothing follows approval: the retired
+    # sign-off cannot move the row out from under the classification.
+    gone = client_db.post(f"/assessments/{assessment_id}/finalize", headers=headers, json={})
+    assert gone.status_code == 410, gone.text
+    still = client_db.get(f"/incidents/{incident_id}/classification", headers=headers)
+    assert still.json()["classification_status"] == "CLASSIFIED"
+    assert still.json()["confirmed"] is True

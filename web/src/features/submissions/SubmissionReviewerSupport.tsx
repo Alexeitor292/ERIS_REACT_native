@@ -5,6 +5,10 @@ import { formatWorkflowTimestamp, workflowEventLabel, workflowTransitionLabel } 
 /**
  * Reviewer Note and Workflow History cards. Both render always-open inside the review
  * context grid; the old attachments table is replaced by the Submission library.
+ *
+ * `canReview` is the server's path-based authority, not a role: on an assessment
+ * the note is written by the branch chief (branch route) or an office chief of
+ * the office (specialist route), and by nobody else.
  */
 export default function SubmissionReviewerSupport({
   reviewNote,
@@ -21,7 +25,7 @@ export default function SubmissionReviewerSupport({
 }) {
   return (
     <>
-      <SubmissionDetailCard title="Reviewer Note" subtitle={canReview ? "Recorded with the approval or return decision." : "Read-only for your current role."}>
+      <SubmissionDetailCard title="Reviewer Note" subtitle={canReview ? "Recorded with the approval or return decision." : "Read-only — the decision belongs to this assessment's reviewer."}>
         <label className="block">
           <span className="sr-only">Reviewer note</span>
           <textarea

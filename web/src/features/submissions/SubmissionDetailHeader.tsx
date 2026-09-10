@@ -14,6 +14,11 @@ type Props = {
   canAct: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  /**
+   * The form belongs to an assessment, so both the send-for-review and the
+   * approve/return decisions happen there — the server refuses them here.
+   */
+  assessmentLinked?: boolean;
   submitLabel?: string;
   onRefresh: () => void;
   onSaveDraft: () => void;
@@ -27,8 +32,12 @@ const btn = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 
 
 /**
  * Detail header: status + context (assessment / incident links), photo-evidence count,
- * and the actions for the current role — Save draft / Submit for review for the
- * engineer, Approve / Return for correction for the reviewer.
+ * and the actions available on this form — Save draft / Submit for review for the
+ * assignee, Approve / Return for correction for whoever may decide it.
+ *
+ * On an assessment-linked form neither decision belongs here: the send-for-review
+ * and approve/return controls are replaced by links to the assessment, so the
+ * header never offers a button the server answers with a 409.
  */
 export default function SubmissionDetailHeader({
   status,
@@ -40,6 +49,7 @@ export default function SubmissionDetailHeader({
   canAct,
   canEdit,
   canDelete,
+  assessmentLinked = false,
   submitLabel = "Submit for review",
   onRefresh,
   onSaveDraft,
@@ -77,6 +87,18 @@ export default function SubmissionDetailHeader({
   // Technical forms are reached through their assessment; standalone forms fall back to the worklist.
   const backTo = context?.assessment_id != null ? `/assessments/${context.assessment_id}` : "/submissions";
   const backLabel = context?.assessment_id != null ? `Assessment #${context.assessment_id}` : "Submissions";
+  const assessmentHref = context?.assessment_id != null ? `/assessments/${context.assessment_id}` : null;
+
+  /**
+   * Who is holding a SUBMITTED form. The route decides, and a legacy form with
+   * no linked assessment has no route — so it gets the neutral sentence rather
+   * than a reviewer it cannot name.
+   */
+  const submittedHint = context?.assessment_routing_path === "BRANCH"
+    ? "Awaiting branch chief review"
+    : context?.assessment_routing_path === "SENIOR_SPECIALIST"
+      ? "Awaiting office chief review"
+      : "Sent for review";
 
   return (
     <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3">
@@ -89,7 +111,7 @@ export default function SubmissionDetailHeader({
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {status ? <SubmissionStatusBadge status={status} /> : null}
             {status === "SUBMITTED" ? (
-              <span className="text-xs text-muted">Ready for reviewer decision</span>
+              <span className="text-xs text-muted">{submittedHint}</span>
             ) : status === "DRAFT" ? (
               <span className="text-xs text-muted">Editable field record</span>
             ) : status === "REJECTED" ? (
@@ -126,11 +148,23 @@ export default function SubmissionDetailHeader({
           {canEdit ? (
             <>
               <button type="button" onClick={onSaveDraft} disabled={busy || invalid} className={btn}>Save draft</button>
-              <button type="button" onClick={onSubmitDraft} disabled={busy || invalid} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">{submitLabel}</button>
+              {assessmentLinked && assessmentHref ? (
+                <Link to={assessmentHref} className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_50%,var(--line))] bg-[var(--panel)] px-3 py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))]">
+                  Send this for review on the assessment
+                </Link>
+              ) : (
+                <button type="button" onClick={onSubmitDraft} disabled={busy || invalid} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">{submitLabel}</button>
+              )}
             </>
           ) : null}
 
-          {canAct ? (
+          {assessmentLinked && assessmentHref ? (
+            status === "SUBMITTED" ? (
+              <Link to={assessmentHref} className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_50%,var(--line))] bg-[var(--panel)] px-3 py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))]">
+                Decide this on the assessment
+              </Link>
+            ) : null
+          ) : canAct ? (
             <>
               <button type="button" onClick={onReject} disabled={busy || invalid} className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_50%,var(--line))] bg-[var(--panel)] px-3 py-2 text-sm font-semibold text-[var(--bad)] hover:bg-[color:color-mix(in_oklab,var(--bad)_8%,var(--panel))] disabled:cursor-not-allowed disabled:opacity-50">
                 Return for correction

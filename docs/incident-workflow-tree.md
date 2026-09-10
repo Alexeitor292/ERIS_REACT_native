@@ -14,9 +14,18 @@ and reuses its records:
 * `incidents` (stage, status, triage disposition + decision fields, duplicate
   link fields, resolution fields, linked submission)
 * `incident_assignments` (active per-stage assignees)
-* `assessments` (lifecycle state + decision timestamps + branch/engineer)
-* `assessment_assignments` (engineer / reviewer / approver)
+* `assessments` (lifecycle state, **`routing_path`**, decision timestamps, the
+  branch chief and the assignee)
+* `assessment_assignments` (kept in the builder's signature for callers and
+  future nodes; **since routing v2 it grants nothing** — the review step's owner
+  comes from the routing path, not from a `REVIEWER`/`APPROVER` row)
 * `assessment_events` (who performed each transition + when + notes)
+
+**Routing v2 shapes the tree.** The office chief's step is a *routing* step with
+two outcomes; `BRANCH_ASSIGNMENT` is `SKIPPED` on the senior-specialist route;
+the assignee node is labelled and role-coded per route; the review node is owned
+by the route's reviewer; and `FINALIZATION` is emitted **only** for legacy rows
+that were signed off before routing v2.
 
 User-facing wording is **Assessment / Workflow / Current owner / Pending action /
 Assessment review / Revision requested / No assessment required / Linked or
@@ -34,7 +43,7 @@ Access (server-enforced, broad visibility / narrow authority):
 
 * Maintenance field workers: only for their **own** reports (403 otherwise).
 * Non-maintenance operational users (coordinator, office/branch chief, engineer,
-  reviewer): any incident.
+  senior specialist, legacy reviewer): any incident.
 * Admin: all.
 
 Response:
@@ -54,7 +63,9 @@ Response:
   },
   "assessment": {                          // null until an Assessment exists
     "id": 9, "state": "PENDING_ENGINEER_ASSIGNMENT",
+    "routing_path": "BRANCH",              // null | "BRANCH" | "SENIOR_SPECIALIST"
     "office_code": "WEST",
+    // holds the assignee on BOTH routes; routing_path says which kind of person
     "assigned_engineer_user_id": null, "branch_chief_user_id": 45
   },
   "linked_incident_id": null,              // DUPLICATE_OR_LINKED target
@@ -84,12 +95,18 @@ Response:
 | --- | --- | --- |
 | `REPORTER_SUBMISSION` | `MAINTENANCE_FIELD_WORKER` | Incident report submitted |
 | `COORDINATOR_TRIAGE` | `MAINTENANCE_COORDINATOR` | Coordinator triage |
-| `OFFICE_DELEGATION` | `GEOTECH_OFFICE_CHIEF` | Office chief delegation |
+| `OFFICE_DELEGATION` | `GEOTECH_OFFICE_CHIEF` | Office chief routing |
 | `BRANCH_ASSIGNMENT` | `GEOTECH_BRANCH_CHIEF` | Branch chief engineer assignment |
-| `ENGINEER_ASSESSMENT` | `GEOTECH_ENGINEER` | Engineer assessment work |
-| `ASSESSMENT_REVIEW` | `REVIEWER_APPROVER` | Assessment review |
-| `FINALIZATION` | `GEOTECH_OFFICE_CHIEF` | Finalization |
+| `ENGINEER_ASSESSMENT` | `GEOTECH_ENGINEER` **or** `GEOTECH_SENIOR_SPECIALIST` | Engineer / Senior specialist assessment work |
+| `ASSESSMENT_REVIEW` | `GEOTECH_BRANCH_CHIEF` **or** `GEOTECH_OFFICE_CHIEF` (`ASSESSMENT_REVIEWER` while unrouted) | Assessment review |
+| `FINALIZATION` | `GEOTECH_OFFICE_CHIEF` | Assessment signed off (legacy) — **emitted only when `finalized_at` is set** |
 | `RESOLUTION` | (system / owner) | Incident resolution |
+
+Role codes render through `_ROLE_TITLES`, which gained
+`GEOTECH_SENIOR_SPECIALIST: "GeoTech Senior Specialist"` and replaced
+`REVIEWER_APPROVER: "Assigned Reviewer / Approver"` with the pseudo-role
+`ASSESSMENT_REVIEWER: "The assessment's reviewer"` — used only where no route has
+been chosen yet and there is nobody to name.
 
 ## Statuses
 
@@ -120,30 +137,57 @@ comes from the live assignment.
     (current owner = the reporter who must update).
   * needs-info + reporter resubmitted → `CURRENT` (triage resumes).
   * a real disposition recorded → `COMPLETED`; actor = triage decider.
-* **OFFICE_DELEGATION** — `COMPLETED` once `office_delegated_at` is set (actor =
-  `OFFICE_DELEGATED` event office chief); else `CURRENT`/`UNASSIGNED` while state
-  is `PENDING_OFFICE_DELEGATION`; else `PENDING`.
+* **OFFICE_DELEGATION** (the *routing* step, two outcomes)
+  * `COMPLETED` once `office_delegated_at` is set — the branch route (actor =
+    `OFFICE_DELEGATED` event office chief).
+  * `COMPLETED` with label "Assigned to a senior specialist" when
+    `routing_path='SENIOR_SPECIALIST'` — that route has no hand-off, so
+    `office_delegated_at` stays NULL and the `SPECIALIST_ASSIGNED` event is what
+    completed the step (`completed_at` = `engineer_assigned_at`).
+  * else `CURRENT`/`UNASSIGNED` while state is `PENDING_OFFICE_DELEGATION`, with
+    the note *"Office chief must route this assessment: hand it off to a branch
+    chief, or assign a senior specialist."*; else `PENDING`.
 * **BRANCH_ASSIGNMENT** — `COMPLETED` once `engineer_assigned_at` is set (actor =
-  `ENGINEER_ASSIGNED` event branch chief); else `CURRENT`/`UNASSIGNED` while state
+  `ENGINEER_ASSIGNED` event branch chief); **`SKIPPED` on the senior-specialist
+  route** ("the office chief assigned the assessment directly"), so it never
+  reads as an open bottleneck; else `CURRENT`/`UNASSIGNED` while state
   is `PENDING_ENGINEER_ASSIGNMENT` (assigned person = the delegated branch chief).
-* **ENGINEER_ASSESSMENT**
-  * state `REVISION_REQUESTED` → `REVISION_REQUESTED` (engineer must revise).
+* **ENGINEER_ASSESSMENT** — the assignee's node. Its role code and wording follow
+  the route: `GEOTECH_ENGINEER`/"Engineer" on `BRANCH`,
+  `GEOTECH_SENIOR_SPECIALIST`/"Senior specialist" on `SENIOR_SPECIALIST`. Both
+  live in `assigned_engineer_user_id`.
+  * state `REVISION_REQUESTED` → `REVISION_REQUESTED` (the assignee must revise).
   * state `SUBMITTED/APPROVED/FINALIZED` → `COMPLETED`; actor = `SUBMITTED` event
-    engineer (**the original submitter**, preserved even if the engineer is later
+    assignee (**the original submitter**, preserved even if the assignee is later
     reassigned).
-  * state `DRAFT` → `CURRENT` (assigned engineer working).
-* **ASSESSMENT_REVIEW**
-  * `APPROVED/FINALIZED` → `COMPLETED`; actor = `APPROVED` event reviewer/approver.
-  * `SUBMITTED` → `CURRENT` if an active reviewer/approver assignment exists, else
-    `UNASSIGNED` (awaiting reviewer assignment).
+  * state `DRAFT` → `CURRENT` (assignee working).
+* **ASSESSMENT_REVIEW** — owned by **the route's reviewer**, never by an
+  assignment row: `GEOTECH_BRANCH_CHIEF` = `branch_chief_user_id` on the branch
+  route, `GEOTECH_OFFICE_CHIEF` = the assessment's office chief on the specialist
+  route, `ASSESSMENT_REVIEWER` (nobody) while `routing_path IS NULL`.
+  "Awaiting reviewer assignment" is no longer a state the workflow can be in.
+  * `APPROVED/FINALIZED` → `COMPLETED`; actor = `APPROVED` event reviewer.
+  * `SUBMITTED` → `CURRENT` on the specialist route (the **office** owns the
+    step, so it is never unassigned); `CURRENT` on the branch route when a branch
+    chief is named, else `UNASSIGNED`; `UNASSIGNED` while unrouted.
   * `REVISION_REQUESTED` → `PENDING` (paused; **never** `COMPLETED` while a
     revision is outstanding).
-* **FINALIZATION** — `COMPLETED` when `FINALIZED`; `CURRENT`/`UNASSIGNED` when
-  `APPROVED`; else `PENDING`.
+* **FINALIZATION** — **legacy only.** Emitted as `COMPLETED` ("Assessment signed
+  off (legacy)") if and only if `finalized_at` is set. Approval is terminal in
+  routing v2 and the database refuses new `FINALIZED` rows, so rendering a
+  permanently-`PENDING` step on every new assessment would tell everyone the
+  workflow is unfinished when it is done.
 * **RESOLUTION** — `TERMINAL` when the incident is `RESOLVED` (label reflects the
   disposition: "No assessment required" / "Linked / duplicate report" /
-  "Assessment finalized & incident resolved" / "Incident resolved"); `CURRENT`
-  when the assessment is `FINALIZED` but not yet resolved; else `PENDING`.
+  **"Assessment approved & incident resolved"** / "Assessment finalized &
+  incident resolved" (legacy) / "Incident resolved"); `CURRENT` when the
+  assessment is **`APPROVED` (or legacy `FINALIZED`)** but the incident is not yet
+  resolved, owned by the **assignee** — engineer *or* senior specialist — with
+  the note "Assessment approved; awaiting incident resolution."; else `PENDING`.
+  Keying this on `FINALIZED` alone would leave `RESOLUTION` permanently `PENDING`
+  and unowned for every v2 assessment, so nobody would ever be told to close the
+  incident out and the "Ready to close out" Home group would be permanently
+  empty.
 
 For terminal dispositions (`NO_ASSESSMENT_REQUIRED`, `DUPLICATE_OR_LINKED`) the
 intermediate assessment nodes are `SKIPPED` and `RESOLUTION` is `TERMINAL`.
@@ -176,11 +220,18 @@ detail screen usable for maintenance field workers viewing their own reports.
 
 ## Assumptions / unresolved policy
 
-1. **Finalization ↔ resolution** is still decoupled (see the assessment model
-   doc). When an assessment is `FINALIZED` but the incident is not yet `RESOLVED`,
-   the `RESOLUTION` node is shown as `CURRENT` with the assigned engineer as owner,
-   reflecting the existing resolve permission. Whether finalization should
-   auto-resolve the incident remains an open business decision.
+1. **Approval ↔ resolution** is still decoupled (see the assessment model doc).
+   When an assessment is `APPROVED` (or legacy `FINALIZED`) but the incident is
+   not yet `RESOLVED`, the `RESOLUTION` node is shown as `CURRENT` with the
+   assignee as owner, reflecting the existing resolve permission. Whether
+   approval should auto-resolve the incident remains an open business decision.
+   There is no longer a sign-off step in between.
 2. **One assessment per incident** — the tree assumes the single-assessment model
-   enforced by the Assessment layer.
-3. The read model derives everything live; it adds **no** new persisted state.
+   enforced by the Assessment layer. Routing v2's
+   `trg_incident_engineer_elig_*` triggers depend on the same uniqueness, so
+   relaxing it is a change to both.
+3. **Assignment rows are history, not authority.** `assessment_assignments` is
+   still passed to `build_workflow_tree` for callers and future nodes, but no
+   node derives ownership from it. A `REVIEWER`/`APPROVER` row never makes
+   anybody the review node's owner.
+4. The read model derives everything live; it adds **no** new persisted state.

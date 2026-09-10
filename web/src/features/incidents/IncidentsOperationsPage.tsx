@@ -312,7 +312,7 @@ export default function IncidentsOperationsPage() {
                     <td className="px-3 py-3 text-sm text-muted">{incident.assignment ? incident.assignment.assignee_name || incident.assignment.assignee_email : "Unassigned"}</td>
                     <td className="px-3 py-3 text-sm">
                       {assessment ? (
-                        <div className="flex flex-wrap items-center gap-1.5"><Link to={`/assessments/${assessment.id}`} className="font-semibold text-[var(--brand)] hover:underline">AS #{assessment.id}</Link><AssessmentStateBadge state={assessment.state} mini /></div>
+                        <div className="flex flex-wrap items-center gap-1.5"><Link to={`/assessments/${assessment.id}`} className="font-semibold text-[var(--brand)] hover:underline">AS #{assessment.id}</Link><AssessmentStateBadge state={assessment.state} routingPath={assessment.routing_path} mini /></div>
                       ) : <span className="text-muted">No assessment</span>}
                       {submissionIds.length ? (
                         <div className="mt-1 flex flex-wrap gap-2 text-xs">{submissionIds.map((submissionId) => <Link key={submissionId} to={`/submissions/${submissionId}`} className="text-[var(--brand)] hover:underline">Sub #{submissionId}</Link>)}</div>

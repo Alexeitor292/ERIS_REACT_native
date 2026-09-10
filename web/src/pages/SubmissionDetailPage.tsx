@@ -55,6 +55,7 @@ import {
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
+import { isAssessmentAuthor } from "../utils/roleModel";
 
 const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
 const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
@@ -158,9 +159,18 @@ export default function SubmissionDetailPage() {
 
   const canvas = useSubmissionDashboardLayout();
 
-  const canReview = !!me?.roles?.some((r) => r === "REVIEWER" || r === "ADMIN");
-  const canEdit = !!me?.roles?.some((r) => r === "FIELD_WORKER" || r === "ADMIN") && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
-  const canAct = canReview && data?.submission.status === "SUBMITTED";
+  // Review authority follows the linked assessment's routing path, so it is
+  // decided server-side and never re-derived from a role string here.
+  const canReview = data?.submission.can_review === true || data?.context?.can_review === true;
+  // Authoring is the engineer's and the senior specialist's job, narrowed to
+  // the people the server actually grants edit to (owner or editor grant).
+  const canEdit = isAssessmentAuthor(me?.roles)
+    && data?.submission.can_edit === true
+    && (data?.submission.status === "DRAFT" || data?.submission.status === "REJECTED");
+  // On an assessment-linked form the decision belongs to the assessment; the
+  // server answers 409 here, so the control must not be offered.
+  const assessmentLinked = data?.context?.assessment_id != null;
+  const canAct = canReview && !assessmentLinked && data?.submission.status === "SUBMITTED";
   const canManageSharing = data?.submission.can_manage_permissions === true;
   const canDeleteSubmission =
     !!data?.submission &&
@@ -365,6 +375,11 @@ export default function SubmissionDetailPage() {
 
   async function saveDraft() { setBusy(true); setErr(null); try { await persistDraft(); await load(); } catch (e: any) { setErr(e?.message ?? "Save failed"); setBusy(false); } }
   async function submitDraft() {
+    // A linked form is sent for review on its assessment; the server 409s here.
+    if (assessmentLinked) {
+      setErr("Send this for review on the assessment — the technical form no longer has its own Submit.");
+      return;
+    }
     const soilMsg = soilPercentValidationMessage();
     if (soilMsg) {
       setErr(soilMsg);
@@ -372,7 +387,9 @@ export default function SubmissionDetailPage() {
     }
     setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setErr(e?.message ?? "Submit failed"); setBusy(false); }
   }
-  async function review(decision: "APPROVE" | "REJECT") { setBusy(true); setErr(null); try { await api(`/submissions/${sid}/review`, { method: "POST", body: JSON.stringify({ decision, comment: reviewNote.trim() || null }) }); await load(); } catch (e: any) { setErr(e?.message ?? "Review failed"); setBusy(false); } }
+  // One approval per piece of work: on a linked form the decision is the
+  // assessment's, and the server refuses this endpoint with a 409.
+  async function review(decision: "APPROVE" | "REJECT") { if (assessmentLinked) { setErr("Decide this on the assessment — the technical form no longer carries the decision."); return; } setBusy(true); setErr(null); try { await api(`/submissions/${sid}/review`, { method: "POST", body: JSON.stringify({ decision, comment: reviewNote.trim() || null }) }); await load(); } catch (e: any) { setErr(e?.message ?? "Review failed"); setBusy(false); } }
   async function addShare(userId: number) {
     if (!canManageSharing) return;
     setBusy(true); setErr(null);
@@ -1178,6 +1195,7 @@ export default function SubmissionDetailPage() {
           canAct={canAct}
           canEdit={canEdit}
           canDelete={canDeleteSubmission}
+          assessmentLinked={assessmentLinked}
           submitLabel={data?.submission.status === "REJECTED" ? "Resubmit for review" : "Submit for review"}
           onRefresh={load}
           onSaveDraft={saveDraft}
@@ -1198,7 +1216,9 @@ export default function SubmissionDetailPage() {
             ) : data.context?.incident_id != null ? (
               <>It belongs to <Link to={`/incidents/${data.context.incident_id}`} className="font-medium text-[var(--brand)] hover:underline">incident #{data.context.incident_id}</Link>. </>
             ) : null}
-            Fill out the GISA form below — every field stays editable until you submit it for review.
+            {assessmentLinked
+              ? "Fill out the GISA form below — every field stays editable until the assessment is sent for review."
+              : "Fill out the GISA form below — every field stays editable until you submit it for review."}
           </div>
         ) : null}
 
@@ -1277,7 +1297,8 @@ export default function SubmissionDetailPage() {
                   <div><div className={label}>Follow-up actions</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.follow_up??[]).map((x)=><button key={x.code} type="button" onClick={()=>setFol((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${fol.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
                 </div>
               </fieldset>
-              {canEdit ? (
+              {/* A linked form is sent for review on its assessment, which carries its own note. */}
+              {canEdit && !assessmentLinked ? (
                 <div className="mt-3 border-t border-[var(--line)] pt-3">
                   <label className={label} htmlFor="submit-comment">Submit comment (optional)</label>
                   <textarea id="submit-comment" className={input} rows={2} placeholder="Included with the submission when you submit for review from the header" value={submitNote} onChange={(e)=>setSubmitNote(e.target.value)} />
@@ -1298,9 +1319,10 @@ export default function SubmissionDetailPage() {
                 <R l="Status" v={data.submission.status} />
               </SubmissionDetailCard>
 
+              {/* On a linked form the reviewer note is recorded with the assessment's decision. */}
               <SubmissionReviewerSupport
                 reviewNote={reviewNote}
-                canReview={canReview}
+                canReview={canReview && !assessmentLinked}
                 busy={busy}
                 workflowEvents={data.workflow_events}
                 onReviewNoteChange={setReviewNote}

@@ -272,8 +272,12 @@ class IncidentTriageRequest(BaseModel):
 
 class AssessmentDelegateBranchRequest(BaseModel):
     branch_chief_user_id: int = Field(..., ge=1)
-    # Optional: the office chief may assign the engineer at delegation time,
-    # which moves the assessment straight to DRAFT (skips the branch queue).
+    # RETIRED: the office chief used to be able to name the engineer at
+    # delegation time. Routing v2 gives the chief exactly two choices — hand off
+    # to a branch chief, or assign a senior specialist — so this field is now
+    # REJECTED with an explanatory 400 rather than ignored. It is kept on the
+    # model on purpose: dropping it would give an old client a silent behaviour
+    # change instead of an explanation.
     engineer_user_id: int | None = Field(default=None, ge=1)
     notes: str | None = Field(default=None, max_length=1000)
 
@@ -289,9 +293,23 @@ class AssessmentAssignEngineerRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class AssessmentAssignSpecialistRequest(BaseModel):
+    """Office chief assigns a GeoTech senior specialist directly.
+
+    The specialist route: the specialist fills the technical form exactly as a
+    staff engineer does and reports back to the office chief, who reviews.
+    """
+
+    specialist_user_id: int = Field(..., ge=1)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class AssessmentAssignmentRequest(BaseModel):
     user_id: int = Field(..., ge=1)
-    assignment_role: Literal["REVIEWER", "APPROVER", "CONSULTED"]
+    # CONSULTED is the only writable assignment role in routing v2: review
+    # authority follows the assessment's routing path, not an assignment row.
+    # REVIEWER/APPROVER are refused with an explanation by the endpoint.
+    assignment_role: Literal["CONSULTED"]
     notes: str | None = Field(default=None, max_length=255)
 
 

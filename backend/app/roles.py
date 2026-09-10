@@ -15,16 +15,26 @@ The Assessment Routing & Authority Model introduces clearer canonical names:
     MAINTENANCE_FIELD_WORKER, MAINTENANCE_COORDINATOR, GEOTECH_OFFICE_CHIEF,
     GEOTECH_BRANCH_CHIEF, GEOTECH_ENGINEER, ADMIN
 
+Routing v2 adds one more, which has NO legacy equivalent because the role is new:
+
+    GEOTECH_SENIOR_SPECIALIST   -- fills assessments the office chief assigns
+                                   directly, and reports back to that office chief
+
 We do NOT rename existing roles or remap existing user_roles rows (that would be
 a destructive migration). Instead, every canonical role aliases to its legacy
 equivalent, and authority checks accept either name. New deployments may assign
 the canonical roles; existing deployments keep working unchanged.
 
-Review authority is intentionally NOT a role here. Per the product model,
-"REVIEWER" is retained only for backward compatibility — review is an
-assessment-level assignment (see assessment_assignments), not a job
-classification. New code should rely on assignment checks, not the REVIEWER
-role.
+Review authority is intentionally NOT a role here, and as of routing v2 it is not
+an assignment either: it is DERIVED FROM THE ASSESSMENT'S ROUTING PATH. On the
+branch route only the branch chief named on that assessment
+(``assessments.branch_chief_user_id``) may review; on the senior-specialist route
+only an office chief of that assessment's office may. The legacy "REVIEWER"
+account role and ``assessment_assignments`` rows with role REVIEWER/APPROVER no
+longer confer any authority — REVIEWER is deprecated, kept only so existing
+accounts keep their broad operational READ, and no new grants should be made.
+New code must derive review authority from the assessment, never from a role
+string or an assignment row.
 """
 
 from __future__ import annotations
@@ -35,6 +45,7 @@ MAINTENANCE_COORDINATOR = "MAINTENANCE_COORDINATOR"
 GEOTECH_OFFICE_CHIEF = "GEOTECH_OFFICE_CHIEF"
 GEOTECH_BRANCH_CHIEF = "GEOTECH_BRANCH_CHIEF"
 GEOTECH_ENGINEER = "GEOTECH_ENGINEER"
+GEOTECH_SENIOR_SPECIALIST = "GEOTECH_SENIOR_SPECIALIST"
 ADMIN = "ADMIN"
 
 # Legacy role names (still present in seeds and existing databases)
@@ -52,6 +63,10 @@ ROLE_ALIASES: dict[str, set[str]] = {
     GEOTECH_OFFICE_CHIEF: {GEOTECH_OFFICE_CHIEF, LEGACY_OFFICE_CHIEF},
     GEOTECH_BRANCH_CHIEF: {GEOTECH_BRANCH_CHIEF, LEGACY_BRANCH_CHIEF},
     GEOTECH_ENGINEER: {GEOTECH_ENGINEER, LEGACY_FIELD_WORKER},
+    # The senior specialist is a new role: it has no legacy alias, because
+    # inventing one would make expand_roles() accept a name no database
+    # contains.
+    GEOTECH_SENIOR_SPECIALIST: {GEOTECH_SENIOR_SPECIALIST},
     ADMIN: {ADMIN},
 }
 
@@ -66,6 +81,7 @@ OPERATIONAL_ROLES: set[str] = (
     | ROLE_ALIASES[GEOTECH_OFFICE_CHIEF]
     | ROLE_ALIASES[GEOTECH_BRANCH_CHIEF]
     | ROLE_ALIASES[GEOTECH_ENGINEER]
+    | ROLE_ALIASES[GEOTECH_SENIOR_SPECIALIST]
     | {LEGACY_REVIEWER, ADMIN}
 )
 
@@ -79,6 +95,14 @@ def expand_roles(*canonical: str) -> list[str]:
     for role in canonical:
         out |= ROLE_ALIASES.get(role, {role})
     return sorted(out)
+
+
+# Authorship of the GISA technical form. The senior specialist fills the
+# assessment form exactly as the GeoTech engineer does (routing v2 decision 1),
+# so every GISA write guard accepts both — plus ADMIN. Using this list instead of
+# a literal ["FIELD_WORKER", "ADMIN"] also unblocks accounts that hold only the
+# canonical GEOTECH_ENGINEER name, which could not edit before.
+GISA_AUTHOR_ROLES: list[str] = expand_roles(GEOTECH_ENGINEER, GEOTECH_SENIOR_SPECIALIST) + [ADMIN]
 
 
 def user_role_set(user: dict) -> set[str]:

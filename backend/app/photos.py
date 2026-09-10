@@ -12,7 +12,8 @@ from .deps import get_current_user, require_roles
 from .db import get_db
 from .storage import put_object_bytes, make_object_key
 from .config import settings
-from .permissions import is_admin, is_reviewer, require_is_owner_or_admin
+from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
+from .roles import GISA_AUTHOR_ROLES
 
 router = APIRouter(tags=["photos"])
 
@@ -236,7 +237,7 @@ async def upload_submission_photo(submission_id: int = Path(..., ge=1), file: Up
                                   capture_metadata_json: str | None = Form(default=None),
                                   section_key: str | None = Query(default=None, max_length=64),
                                   db: Session = Depends(get_db),
-                                  user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))):
+                                  user=Depends(require_roles(GISA_AUTHOR_ROLES))):
     created = await _store_submission_attachment(
         submission_id=submission_id, file=file, section_key=section_key, kind="PHOTO",
         capture_metadata_json=capture_metadata_json, db=db, user=user,
@@ -251,7 +252,7 @@ async def upload_submission_attachment(submission_id: int = Path(..., ge=1), fil
                                        section_key: str | None = Query(default=None, max_length=64),
                                        kind: str = Query(default="DOC", max_length=16),
                                        db: Session = Depends(get_db),
-                                       user=Depends(require_roles(["FIELD_WORKER", "ADMIN"]))):
+                                       user=Depends(require_roles(GISA_AUTHOR_ROLES))):
     return await _store_submission_attachment(
         submission_id=submission_id, file=file, section_key=section_key, kind=kind,
         capture_metadata_json=capture_metadata_json, db=db, user=user,
@@ -288,7 +289,10 @@ def list_submissions_page(
         FROM submissions s
     """
 
-    if is_admin(user) or is_reviewer(user):
+    # The photo index across all submissions is broad READ, not review
+    # authority: it follows the operational role model, which already includes
+    # the legacy REVIEWER.
+    if is_admin(user) or is_operational_user(user):
         joins_sql = "LEFT JOIN submission_gisa g ON g.submission_id = s.id"
     else:
         params["uid"] = int(user["id"])

@@ -10,7 +10,11 @@ router = APIRouter(tags=["arcgis"])
 
 @router.get("/arcgis/runtime-config")
 def get_arcgis_runtime_config(
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
+    # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
+    # so GEOTECH_SENIOR_SPECIALIST has to be added by hand: without it a
+    # specialist-only account is 403'd here and can load neither the map nor the
+    # 3D terrain.
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_SPECIALIST", "ADMIN"])),
 ):
     now = datetime.now(timezone.utc)
     issued_at = now.isoformat()

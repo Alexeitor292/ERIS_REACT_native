@@ -6,7 +6,7 @@ import { api } from "../../api/client";
 import type { Incident } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import AppShell from "../../ui/AppShell";
-import { canAssignEngineer, canDelegateBranch, canFinalize, canTriage, hasWorkQueue, isAdmin, isEngineer } from "../../utils/roleModel";
+import { canAssignEngineer, canDelegateBranch, canTriage, hasWorkQueue, isAdmin, isAssessmentAuthor } from "../../utils/roleModel";
 import AssessmentDetailPanel, { AssessmentRailCard, formatTimestamp } from "../assessments/AssessmentDetailPanel";
 import { useSubmissionIndex } from "../assessments/AssessmentWorkspacePage";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
@@ -24,11 +24,20 @@ function timestamp(value: string | null | undefined) {
 /**
  * My Work: the single queue of items waiting on the signed-in user's role.
  *
+ * Every assessment takes exactly one of two routes, and the route names its
+ * reviewer, so the queues follow the route rather than an assignment:
+ *
  *  - Maintenance Coordinator: field reports awaiting intake triage.
- *  - Office Chief: assessments pending delegation (+ approved ones to finalize).
- *  - Branch Chief: assessments pending engineer assignment.
- *  - Engineer: assigned assessments in Draft / Revision requested.
- *  - Assigned reviewers: submitted assessments they were assigned to.
+ *  - Office Chief: assessments to route (`office_chief`), and specialist-route
+ *    assessments of their own office to review (`office_chief_review`).
+ *  - Branch Chief: assessments handed to them to staff (`branch_chief`), and the
+ *    same ones to approve or return once submitted (`branch_chief_review`).
+ *  - Engineer or Senior Specialist: their own assessments in Draft / Revision
+ *    requested (`assignee` — both routes store the assignee in the same column).
+ *  - Admin: every submitted assessment, matching the server's review bypass.
+ *
+ * Every request carries its own `.catch(() => [])`: one failing queue — or a
+ * failing /incidents call — must never blank the whole page.
  */
 export default function MyWorkPage() {
   const { me } = useAuth();
@@ -47,17 +56,36 @@ export default function MyWorkPage() {
     setLoading(true);
     setError(null);
     try {
-      const admin = isAdmin(roles);
+      // One queue per group, each isolated: a 4xx/5xx on any one of them yields
+      // an empty list for that group instead of failing the whole Promise.all.
+      const queue = (
+        params: Parameters<typeof listAssessments>[0],
+        keep?: (assessment: Assessment) => boolean,
+      ): Promise<Assessment[]> =>
+        listAssessments({ limit: 1000, ...params })
+          .then((r) => { const items = r.items ?? []; return keep ? items.filter(keep) : items; })
+          .catch(() => []);
+
       const requests: Array<Promise<Assessment[]>> = [];
-      if (canDelegateBranch(roles)) requests.push(listAssessments({ queue: "office_chief", limit: 1000 }).then((r) => r.items ?? []));
-      if (canAssignEngineer(roles)) requests.push(listAssessments({ queue: "branch_chief", limit: 1000 }).then((r) => r.items ?? []));
-      if (isEngineer(roles)) requests.push(listAssessments({ queue: "engineer", limit: 1000 }).then((r) => (r.items ?? []).filter((a) => a.state === "DRAFT" || a.state === "REVISION_REQUESTED")));
-      requests.push(listAssessments({ queue: "reviewer", limit: 1000 }).then((r) => (r.items ?? []).filter((a) => a.state === "SUBMITTED")));
-      if (canFinalize(roles)) requests.push(listAssessments({ state: "APPROVED", limit: 1000 }).then((r) => r.items ?? []));
-      if (admin) requests.push(listAssessments({ state: "SUBMITTED", limit: 1000 }).then((r) => r.items ?? []));
+      if (canDelegateBranch(roles)) {
+        requests.push(queue({ queue: "office_chief" }));
+        requests.push(queue({ queue: "office_chief_review" }));
+      }
+      if (canAssignEngineer(roles)) {
+        requests.push(queue({ queue: "branch_chief" }));
+        requests.push(queue({ queue: "branch_chief_review" }));
+      }
+      // isAssessmentAuthor, not isEngineer: a specialist-only account owns
+      // assessments too, and would otherwise never see its own drafts.
+      if (isAssessmentAuthor(roles)) {
+        requests.push(queue({ queue: "assignee" }, (a) => a.state === "DRAFT" || a.state === "REVISION_REQUESTED"));
+      }
+      if (isAdmin(roles)) requests.push(queue({ state: "SUBMITTED" }));
 
       const triagePromise: Promise<Incident[]> = canTriage(roles)
-        ? api<{ items: Incident[] }>("/incidents?limit=1000").then((r) => (r.items ?? []).filter((i) => i.current_stage === "COORDINATOR_REVIEW" && i.status !== "RESOLVED"))
+        ? api<{ items: Incident[] }>("/incidents?limit=1000")
+          .then((r) => (r.items ?? []).filter((i) => i.current_stage === "COORDINATOR_REVIEW" && i.status !== "RESOLVED"))
+          .catch(() => [])
         : Promise.resolve([]);
 
       const [triage, ...assessmentLists] = await Promise.all([triagePromise, ...requests]);

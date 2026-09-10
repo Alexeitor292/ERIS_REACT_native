@@ -1,4 +1,15 @@
-export type Me = { id: number; email: string; full_name?: string; roles: string[] };
+/**
+ * Account profile metadata (`users.metadata_json`). `office_code` is
+ * load-bearing in routing v2: a chief or senior specialist without one can
+ * neither be assigned nor review.
+ */
+export type UserMetadata = {
+  office_code?: string | null;
+  office_location?: string | null;
+  district?: string | null;
+};
+
+export type Me = { id: number; email: string; full_name?: string; roles: string[]; metadata?: UserMetadata };
 
 export type AdminUser = {
   id: number;
@@ -6,6 +17,7 @@ export type AdminUser = {
   full_name: string;
   is_active: boolean;
   roles: string[];
+  metadata?: UserMetadata;
 };
 
 export type Submission = {
@@ -194,6 +206,8 @@ export type SubmissionDetail = {
     submitted_at: string | null;
     can_edit?: boolean;
     can_manage_permissions?: boolean;
+    /** Beside can_edit rather than only in the context: a legacy form has no context. */
+    can_review?: boolean;
   };
   gisa: Gisa | null;
   incident_types: string[];
@@ -211,6 +225,10 @@ export type SubmissionWorkflowContext = {
   event_group_id: number | null;
   assessment_id: number | null;
   assessment_state: string | null;
+  /** Absent on a legacy form with no linked assessment — copy must stay neutral then. */
+  assessment_routing_path?: "BRANCH" | "SENIOR_SPECIALIST" | null;
+  /** Path-based review authority, decided server-side. */
+  can_review?: boolean;
 };
 
 export type RoadInventoryIncidentContext = {

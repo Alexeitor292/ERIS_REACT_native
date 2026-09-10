@@ -13,7 +13,15 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_roles
-from ..roles import is_maintenance_only
+from ..roles import (
+    GEOTECH_BRANCH_CHIEF,
+    GEOTECH_OFFICE_CHIEF,
+    GEOTECH_SENIOR_SPECIALIST,
+    GISA_AUTHOR_ROLES,
+    MAINTENANCE_COORDINATOR,
+    expand_roles,
+    is_maintenance_only,
+)
 from ..services import office_routing
 from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
 from ..schemas.common import (
@@ -98,28 +106,46 @@ def _queue_incident_notifications(
     recipient_user_ids: list[int],
     template_code: str,
     payload: dict | None = None,
-) -> None:
+    channels: tuple[str, ...] = ("IN_APP",),
+) -> list[int]:
+    """Write one outbox row per (recipient, channel) and return the new ids.
+
+    Rows are written INSIDE the caller's transaction, so the intent to notify is
+    atomic with the state change that caused it. Delivery is a separate, later
+    concern: ``services/notifications.py`` flushes the EMAIL rows after commit
+    and a sweeper retries whatever is left (design §6.2, §6.3).
+
+    The returned ids are what an endpoint hands to ``BackgroundTasks``; IN_APP
+    ids may be included freely because the flush filters on the EMAIL channel.
+    """
     unique_ids = sorted({int(x) for x in recipient_user_ids if int(x) > 0})
-    if not unique_ids:
-        return
+    wanted_channels = tuple(dict.fromkeys(str(c).strip().upper() for c in channels if str(c).strip()))
+    if not unique_ids or not wanted_channels:
+        return []
     payload_json = json.dumps(payload or {})
+    inserted: list[int] = []
     for uid in unique_ids:
-        db.execute(
-            text(
-                """
-                INSERT INTO incident_notifications
-                  (incident_id, recipient_user_id, channel, template_code, payload_json)
-                VALUES
-                  (:iid, :uid, 'IN_APP', :template_code, :payload_json)
-                """
-            ),
-            {
-                "iid": incident_id,
-                "uid": uid,
-                "template_code": template_code,
-                "payload_json": payload_json,
-            },
-        )
+        for channel in wanted_channels:
+            result = db.execute(
+                text(
+                    """
+                    INSERT INTO incident_notifications
+                      (incident_id, recipient_user_id, channel, template_code, payload_json)
+                    VALUES
+                      (:iid, :uid, :channel, :template_code, :payload_json)
+                    """
+                ),
+                {
+                    "iid": incident_id,
+                    "uid": uid,
+                    "channel": channel,
+                    "template_code": template_code,
+                    "payload_json": payload_json,
+                },
+            )
+            if result.lastrowid:
+                inserted.append(int(result.lastrowid))
+    return inserted
 
 
 def _create_or_select_location(
@@ -409,6 +435,18 @@ def _location_timeline(
     }
 
 
+# Routing lookups match the canonical role name AND its legacy alias. Matching
+# only the legacy name (the pre-v2 behaviour) made a user who holds just
+# MAINTENANCE_COORDINATOR or GEOTECH_OFFICE_CHIEF invisible to routing and to
+# every notification it drives. SENIOR_SPECIALIST has no legacy alias.
+_ROUTING_ROLE_NAMES: dict[str, list[str]] = {
+    "DISTRICT_COORDINATOR": expand_roles(MAINTENANCE_COORDINATOR),
+    "OFFICE_CHIEF": expand_roles(GEOTECH_OFFICE_CHIEF),
+    "BRANCH_CHIEF": expand_roles(GEOTECH_BRANCH_CHIEF),
+    "SENIOR_SPECIALIST": expand_roles(GEOTECH_SENIOR_SPECIALIST),
+}
+
+
 def _routing_users_for(
     *,
     db: Session,
@@ -417,16 +455,13 @@ def _routing_users_for(
     office_code: str | None = None,
 ) -> list[int]:
     assignment_key = assignment_type.strip().upper()
-    role_name = {
-        "DISTRICT_COORDINATOR": "MAINT_COORDINATOR",
-        "OFFICE_CHIEF": "OFFICE_CHIEF",
-        "BRANCH_CHIEF": "BRANCH_CHIEF",
-    }.get(assignment_key)
-    if not role_name:
+    role_names = _ROUTING_ROLE_NAMES.get(assignment_key)
+    if not role_names:
         return []
 
-    params: dict[str, object] = {"role_name": role_name}
-    where_parts = ["u.is_active = 1", "r.name = :role_name"]
+    params: dict[str, object] = {f"role_{idx}": name for idx, name in enumerate(role_names)}
+    role_tokens = ", ".join(f":role_{idx}" for idx in range(len(role_names)))
+    where_parts = ["u.is_active = 1", f"r.name IN ({role_tokens})"]
     if assignment_key == "DISTRICT_COORDINATOR":
         district_code = _normalized_district_code(district)
         if not district_code:
@@ -728,7 +763,11 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
                 "(i.office_code = :branch_chief_office AND i.location_id IS NOT NULL AND i.current_stage IN ('BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
             )
 
-    if "FIELD_WORKER" in roles:
+    # The senior specialist holds the SAME active ENGINEER-stage assignment row
+    # as an engineer does (the specialist route reuses stage ENGINEER), so the
+    # EXISTS below is correct for them unchanged — only the role guard in front
+    # of it has to widen, or a specialist-only account sees no incidents at all.
+    if roles & {"FIELD_WORKER", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_SPECIALIST"}:
         role_filters.append(
             "EXISTS (SELECT 1 FROM incident_assignments ia WHERE ia.incident_id = i.id AND ia.assignment_stage = 'ENGINEER' AND ia.is_active = 1 AND ia.assignee_user_id = :mobile_uid)"
         )
@@ -1559,7 +1598,11 @@ def list_incidents(
     scope: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
+    # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
+    # so GEOTECH_SENIOR_SPECIALIST has to be added by hand: without it a
+    # specialist-only account is 403'd from the incident behind their own
+    # assessment.
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_SPECIALIST", "ADMIN"])),
 ):
     params: dict[str, object] = {"limit": limit}
     where_parts: list[str] = []
@@ -1623,7 +1666,11 @@ def list_incidents(
 def get_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
+    # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
+    # so GEOTECH_SENIOR_SPECIALIST has to be added by hand: without it a
+    # specialist-only account is 403'd from the incident behind their own
+    # assessment.
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_SPECIALIST", "ADMIN"])),
 ):
     row = _incident_with_assignment(db, incident_id)
     if not row:
@@ -1662,6 +1709,26 @@ def assign_incident(
         raise HTTPException(
             status_code=409,
             detail="Choose or create a Project for this Incident before engineering assignment.",
+        )
+    # Admin recovery tool, but never a way around the routing decision: on the
+    # senior-specialist route the assignee is a specialist chosen by the office
+    # chief, and dropping an engineer into the incident's ENGINEER stage here
+    # would contradict the assessment and trip the route-aware eligibility
+    # trigger with a database message instead of an explanation (design §5.3).
+    specialist_route = db.execute(
+        text(
+            """
+            SELECT 1 FROM assessments
+            WHERE incident_id = :iid AND routing_path = 'SENIOR_SPECIALIST'
+            LIMIT 1
+            """
+        ),
+        {"iid": incident_id},
+    ).scalar()
+    if specialist_route:
+        raise HTTPException(
+            status_code=409,
+            detail="This incident's assessment was assigned to a senior specialist",
         )
 
     try:
@@ -1789,6 +1856,23 @@ def office_chief_branch_options(
     }
 
 
+# Routing v2 retired both incident-stage routing endpoints below (design §5.3).
+# They moved incident stages and created engineer assignments WITHOUT touching
+# assessments.state or assessments.routing_path — exactly the bypass that could
+# put an engineer on a senior-specialist-route assessment, or advance the
+# incident while the assessment stayed behind. Routing now happens on the
+# assessment, which drives the incident stage machine as a consequence.
+#
+# They stay mounted, and keep their request models, so an old client gets this
+# explanation rather than a 404. The GET sibling
+# /incidents/{id}/office-chief/branch-options is deliberately still live: it is
+# a read, it enforces office access, and it is the branch half of the
+# two-choice picker on mobile until the mobile minimum ships.
+_LEGACY_ROUTING_RETIRED_DETAIL = (
+    "Routing moved to the assessment: POST /assessments/{aid}/delegate-branch or /assign-specialist"
+)
+
+
 @router.post("/incidents/{incident_id}/office-chief/assign-branch")
 def office_chief_assign_branch(
     payload: IncidentAssignBranchChiefRequest,
@@ -1796,58 +1880,8 @@ def office_chief_assign_branch(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["OFFICE_CHIEF", "ADMIN"])),
 ):
-    incident = _incident_with_assignment(db, incident_id)
-    if not incident:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    if str(incident["status"]).upper() == "RESOLVED":
-        raise HTTPException(status_code=409, detail="Resolved incidents cannot be reassigned")
-
-    office_code = incident.get("office_code") or _office_for_district(incident.get("district"))
-    _ensure_incident_office_access(user, office_code)
-    allowed_branch_ids = _routing_users_for(
-        db=db,
-        assignment_type="BRANCH_CHIEF",
-        office_code=office_code,
-    )
-    if int(payload.branch_chief_user_id) not in set(allowed_branch_ids):
-        raise HTTPException(status_code=400, detail="Selected user is not configured as a branch chief for this office")
-
-    try:
-        db.execute(
-            text(
-                """
-                UPDATE incidents
-                SET current_stage = 'BRANCH_CHIEF_REVIEW',
-                    office_code = :office_code,
-                    updated_at = NOW()
-                WHERE id = :iid
-                """
-            ),
-            {"iid": incident_id, "office_code": office_code},
-        )
-        _set_stage_assignment(
-            db=db,
-            incident_id=incident_id,
-            assignee_user_id=int(payload.branch_chief_user_id),
-            assigned_by_user_id=int(user["id"]),
-            assignment_mode="ASSIGN",
-            assignment_stage="BRANCH_CHIEF",
-        )
-        _queue_incident_notifications(
-            db=db,
-            incident_id=incident_id,
-            recipient_user_ids=[int(payload.branch_chief_user_id)],
-            template_code="INCIDENT_BRANCH_CHIEF_ASSIGNMENT",
-            payload={"incident_id": incident_id, "office_code": office_code},
-        )
-        db.commit()
-        return {"incident_id": incident_id, "current_stage": "BRANCH_CHIEF_REVIEW"}
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc))
+    """410 Gone — hand off on the assessment (design §5.3)."""
+    raise HTTPException(status_code=410, detail=_LEGACY_ROUTING_RETIRED_DETAIL)
 
 
 @router.post("/incidents/{incident_id}/branch-chief/assign-engineer")
@@ -1857,27 +1891,8 @@ def branch_chief_assign_engineer(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["BRANCH_CHIEF", "ADMIN"])),
 ):
-    incident = _incident_with_assignment(db, incident_id)
-    if not incident:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_incident_office_access(user, incident.get("office_code") or _office_for_district(incident.get("district")))
-    try:
-        result = _assign_incident(
-            db=db,
-            incident_id=incident_id,
-            assignee_user_id=int(payload.engineer_user_id),
-            assigned_by_user_id=int(user["id"]),
-            mode="ASSIGN",
-        )
-        _notify_coordinator_engineer_assigned(db=db, incident_id=incident_id)
-        db.commit()
-        return result
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc))
+    """410 Gone — assign the engineer on the assessment (design §5.3)."""
+    raise HTTPException(status_code=410, detail=_LEGACY_ROUTING_RETIRED_DETAIL)
 
 
 @router.get("/incidents/routing/assignments")
@@ -2027,7 +2042,12 @@ def resolve_incident(
     payload: IncidentResolveRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["FIELD_WORKER", "ADMIN"])),
+    # The real gate is the identity check below (assignee_user_id == user.id).
+    # On the senior-specialist route the specialist IS the incident's active
+    # ENGINEER-stage assignee, so a literal ["FIELD_WORKER", "ADMIN"] would 403
+    # them before that check ever ran. Resolution policy is unchanged: it stays
+    # with the assignee.
+    user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -2076,7 +2096,11 @@ def resolve_incident(
 def mission_center_incident_feed(
     scope: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "ADMIN"])),
+    # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
+    # so GEOTECH_SENIOR_SPECIALIST has to be added by hand: without it a
+    # specialist-only account is 403'd from the incident behind their own
+    # assessment.
+    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_SPECIALIST", "ADMIN"])),
 ):
     where_parts: list[str] = []
     params: dict[str, object] = {}

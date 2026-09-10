@@ -5,7 +5,8 @@ Run with: pytest -m db
 
 Covers the required matrix:
   1  new report before triage
-  2  assessment-required path (delegation -> engineer -> review -> finalization)
+  2  branch route (hand-off -> engineer -> branch chief review -> approved)
+  2b senior specialist route (direct assignment -> specialist -> office chief review)
   3  needs-reporter-information loop
   4  no-assessment-required terminal
   5  duplicate/linked terminal with linked target
@@ -51,6 +52,7 @@ def tokens(client_db):
         "branchchief": _login(client_db, "branchchief@local"),
         "engineer": _login(client_db, "engineer@local"),
         "reviewer": _login(client_db, "reviewer@local"),
+        "specialist": _login(client_db, "seniorspecialist@local"),
     }
 
 
@@ -108,8 +110,10 @@ class TestNewReport:
         if triage["status"] == "CURRENT":
             assert triage["user"]["user_id"] == ids["coordinator"]
             assert tree["current_owner"]["role"] == "MAINTENANCE_COORDINATOR"
-        for key in ("OFFICE_DELEGATION", "BRANCH_ASSIGNMENT", "ENGINEER_ASSESSMENT", "ASSESSMENT_REVIEW", "FINALIZATION"):
+        for key in ("OFFICE_DELEGATION", "BRANCH_ASSIGNMENT", "ENGINEER_ASSESSMENT", "ASSESSMENT_REVIEW"):
             assert _node(tree, key)["status"] == "PENDING"
+        # Approval is terminal in routing v2, so there is no finalization step.
+        assert "FINALIZATION" not in [n["key"] for n in tree["nodes"]]
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +123,11 @@ class TestNewReport:
 
 class TestAssessmentRequiredPath:
     def test_full_lifecycle_tree(self, client_db, tokens, ids):
-        admin, oc, bc, eng, rev = (
+        admin, oc, bc, eng = (
             tokens["admin"],
             tokens["officechief"],
             tokens["branchchief"],
             tokens["engineer"],
-            tokens["reviewer"],
         )
         incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
 
@@ -169,40 +172,118 @@ class TestAssessmentRequiredPath:
         assert eng_node["user"]["user_id"] == ids["engineer"]
         assert tree["current_owner"]["user_id"] == ids["engineer"]
 
-        # Engineer submits.
+        # Engineer submits. The reviewer is the branch chief this assessment was
+        # handed to — known from the route, so the step is never UNASSIGNED and
+        # nobody has to be appointed first.
         client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(eng))
         tree = _tree(client_db, admin, incident_id)
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "COMPLETED"
         review_node = _node(tree, "ASSESSMENT_REVIEW")
-        # No reviewer assigned yet -> UNASSIGNED bottleneck.
-        assert review_node["status"] == "UNASSIGNED"
+        assert review_node["status"] == "CURRENT"
+        assert review_node["role"] == "GEOTECH_BRANCH_CHIEF"
+        assert review_node["role_title"] == "GeoTech Branch Chief"
+        assert review_node["user"]["user_id"] == ids["branchchief"]
+        assert tree["current_owner"]["user_id"] == ids["branchchief"]
+        # The retired reviewer/approver pseudo-role is gone from the tree
+        # entirely: nobody is ever "the assigned reviewer" any more.
+        assert "REVIEWER_APPROVER" not in {n["role"] for n in tree["nodes"]}
 
-        # Assign a reviewer, then that reviewer is the current owner.
-        client_db.post(
-            f"/assessments/{aid}/assignments",
-            json={"user_id": ids["reviewer"], "assignment_role": "REVIEWER"},
+        # The branch chief approves — and that ends the assessment.
+        approved = client_db.post(
+            f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(bc)
+        )
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["state"] == "APPROVED"
+        tree = _tree(client_db, admin, incident_id)
+        assert _node(tree, "ASSESSMENT_REVIEW")["status"] == "COMPLETED"
+        # No sign-off step exists any more...
+        assert "FINALIZATION" not in [n["key"] for n in tree["nodes"]]
+        # ...so the open step is the incident resolution, owned by the assignee.
+        resolution = _node(tree, "RESOLUTION")
+        assert resolution["status"] == "CURRENT"
+        assert resolution["user"]["user_id"] == ids["engineer"]
+        assert tree["current_owner"]["node_key"] == "RESOLUTION"
+
+        # Finalize is retired.
+        gone = client_db.post(f"/assessments/{aid}/finalize", json={}, headers=_auth(oc))
+        assert gone.status_code == 410, gone.text
+
+
+# ---------------------------------------------------------------------------
+# 2b: the senior specialist route
+# ---------------------------------------------------------------------------
+
+
+class TestSpecialistRoutePath:
+    def test_specialist_route_tree(self, client_db, tokens, ids):
+        admin, oc, spec = tokens["admin"], tokens["officechief"], tokens["specialist"]
+        incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
+        r = client_db.post(
+            f"/incidents/{incident_id}/triage",
+            json={"disposition": "ASSESSMENT_REQUIRED", "notes": "specialist route"},
+            headers=_auth(admin),
+        )
+        assert r.status_code == 200, r.text
+        aid = r.json()["assessment"]["id"]
+
+        assigned = client_db.post(
+            f"/assessments/{aid}/assign-specialist",
+            json={"specialist_user_id": ids["specialist"], "notes": "Coastal slope expertise."},
             headers=_auth(oc),
         )
+        assert assigned.status_code == 200, assigned.text
+        assert assigned.json()["assessment"]["routing_path"] == "SENIOR_SPECIALIST"
+        assert assigned.json()["assessment"]["assigned_user_kind"] == "SENIOR_SPECIALIST"
+
+        tree = _tree(client_db, admin, incident_id)
+        assert tree["assessment"]["routing_path"] == "SENIOR_SPECIALIST"
+        # The office chief's routing step is complete, and there is no branch
+        # chief step at all on this route.
+        assert _node(tree, "OFFICE_DELEGATION")["status"] == "COMPLETED"
+        assert _node(tree, "BRANCH_ASSIGNMENT")["status"] == "SKIPPED"
+        work = _node(tree, "ENGINEER_ASSESSMENT")
+        assert work["status"] == "CURRENT"
+        assert work["role"] == "GEOTECH_SENIOR_SPECIALIST"
+        assert work["role_title"] == "GeoTech Senior Specialist"
+        assert work["user"]["user_id"] == ids["specialist"]
+
+        submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(spec))
+        assert submitted.status_code == 200, submitted.text
         tree = _tree(client_db, admin, incident_id)
         review_node = _node(tree, "ASSESSMENT_REVIEW")
         assert review_node["status"] == "CURRENT"
-        assert review_node["user"]["user_id"] == ids["reviewer"]
-        assert tree["current_owner"]["user_id"] == ids["reviewer"]
+        assert review_node["role"] == "GEOTECH_OFFICE_CHIEF"
+        assert review_node["role_title"] == "GeoTech Office Chief"
+        assert "REVIEWER_APPROVER" not in {n["role"] for n in tree["nodes"]}
 
-        # Reviewer approves.
-        client_db.post(
-            f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(rev)
+        approved = client_db.post(
+            f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(oc)
         )
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["state"] == "APPROVED"
         tree = _tree(client_db, admin, incident_id)
         assert _node(tree, "ASSESSMENT_REVIEW")["status"] == "COMPLETED"
-        assert _node(tree, "FINALIZATION")["status"] == "CURRENT"
+        assert "FINALIZATION" not in [n["key"] for n in tree["nodes"]]
+        resolution = _node(tree, "RESOLUTION")
+        assert resolution["status"] == "CURRENT"
+        assert resolution["role"] == "GEOTECH_SENIOR_SPECIALIST"
+        assert resolution["user"]["user_id"] == ids["specialist"]
 
-        # Office chief finalizes.
-        client_db.post(f"/assessments/{aid}/finalize", json={}, headers=_auth(oc))
+        # And once they close it out, the terminal label names the approval —
+        # the already-resolved branch was widened with the CURRENT one, so an
+        # approved-and-resolved incident does not fall through to the bare
+        # "Incident resolved".
+        closed = client_db.post(
+            f"/incidents/{incident_id}/resolve",
+            json={"comment": "Mitigation complete"},
+            headers=_auth(spec),
+        )
+        assert closed.status_code == 200, closed.text
         tree = _tree(client_db, admin, incident_id)
-        assert _node(tree, "FINALIZATION")["status"] == "COMPLETED"
-        # Finalized but not resolved -> resolution is the open step.
-        assert _node(tree, "RESOLUTION")["status"] in ("CURRENT", "TERMINAL")
+        resolved_node = _node(tree, "RESOLUTION")
+        assert resolved_node["status"] == "TERMINAL"
+        assert resolved_node["label"] == "Assessment approved & incident resolved"
+        assert tree["current_owner"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +331,9 @@ class TestNoAssessment:
         assert tree["overall_status"] == "TERMINAL"
         assert tree["current_owner"] is None
         assert _node(tree, "COORDINATOR_TRIAGE")["status"] == "COMPLETED"
-        for key in ("OFFICE_DELEGATION", "BRANCH_ASSIGNMENT", "ENGINEER_ASSESSMENT", "ASSESSMENT_REVIEW", "FINALIZATION"):
+        for key in ("OFFICE_DELEGATION", "BRANCH_ASSIGNMENT", "ENGINEER_ASSESSMENT", "ASSESSMENT_REVIEW"):
             assert _node(tree, key)["status"] == "SKIPPED"
+        assert "FINALIZATION" not in [n["key"] for n in tree["nodes"]]
         res = _node(tree, "RESOLUTION")
         assert res["status"] == "TERMINAL"
         assert res["label"] == "No assessment required"
@@ -311,20 +393,38 @@ def _drive_to_submitted(client_db, tokens, ids):
     return incident_id, aid
 
 
+def _drive_to_submitted_specialist(client_db, tokens, ids):
+    """The same, on the SENIOR_SPECIALIST route: no branch chief is involved and
+    the office chief holds the pending decision. Returns (incident_id, aid)."""
+    admin, oc, spec = tokens["admin"], tokens["officechief"], tokens["specialist"]
+    incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
+    aid = client_db.post(
+        f"/incidents/{incident_id}/triage",
+        json={"disposition": "ASSESSMENT_REQUIRED"},
+        headers=_auth(admin),
+    ).json()["assessment"]["id"]
+    assigned = client_db.post(
+        f"/assessments/{aid}/assign-specialist",
+        json={"specialist_user_id": ids["specialist"]},
+        headers=_auth(oc),
+    )
+    assert assigned.status_code == 200, assigned.text
+    submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(spec))
+    assert submitted.status_code == 200, submitted.text
+    return incident_id, aid
+
+
 class TestRevisionRequested:
     def test_review_not_completed_when_revision_pending(self, client_db, tokens, ids):
         incident_id, aid = _drive_to_submitted(client_db, tokens, ids)
-        # Assign reviewer and request revision.
-        client_db.post(
-            f"/assessments/{aid}/assignments",
-            json={"user_id": ids["reviewer"], "assignment_role": "REVIEWER"},
-            headers=_auth(tokens["officechief"]),
-        )
-        client_db.post(
+        # The branch chief who was handed this assessment returns it. No reviewer
+        # is appointed: authority follows the route.
+        returned = client_db.post(
             f"/assessments/{aid}/review",
             json={"action": "REQUEST_REVISION", "notes": "fix section 3"},
-            headers=_auth(tokens["reviewer"]),
+            headers=_auth(tokens["branchchief"]),
         )
+        assert returned.status_code == 200, returned.text
         tree = _tree(client_db, tokens["admin"], incident_id)
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "REVISION_REQUESTED"
         # Review must NOT be marked completed while revisions are pending.
@@ -332,6 +432,67 @@ class TestRevisionRequested:
         assert tree["overall_status"] == "REVISION_REQUESTED"
         assert tree["current_owner"]["role"] == "GEOTECH_ENGINEER"
         assert tree["current_owner"]["user_id"] == ids["engineer"]
+
+
+    def test_specialist_route_revision_returns_to_the_specialist(self, client_db, tokens, ids):
+        incident_id, aid = _drive_to_submitted_specialist(client_db, tokens, ids)
+        # Before the decision, the review step is the office chief's and is
+        # CURRENT the moment the state is SUBMITTED — the office owns it, so it
+        # is never UNASSIGNED waiting for someone to be appointed.
+        tree = _tree(client_db, tokens["admin"], incident_id)
+        review = _node(tree, "ASSESSMENT_REVIEW")
+        assert review["status"] == "CURRENT"
+        assert review["role"] == "GEOTECH_OFFICE_CHIEF"
+        assert _node(tree, "BRANCH_ASSIGNMENT")["status"] == "SKIPPED"
+
+        returned = client_db.post(
+            f"/assessments/{aid}/review",
+            json={"action": "REQUEST_REVISION", "notes": "add the borehole log"},
+            headers=_auth(tokens["officechief"]),
+        )
+        assert returned.status_code == 200, returned.text
+        tree = _tree(client_db, tokens["admin"], incident_id)
+        assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "REVISION_REQUESTED"
+        assert _node(tree, "ASSESSMENT_REVIEW")["status"] != "COMPLETED"
+        assert tree["overall_status"] == "REVISION_REQUESTED"
+        assert tree["current_owner"]["role"] == "GEOTECH_SENIOR_SPECIALIST"
+        assert tree["current_owner"]["role_title"] == "GeoTech Senior Specialist"
+        assert tree["current_owner"]["user_id"] == ids["specialist"]
+
+
+# ---------------------------------------------------------------------------
+# FINALIZATION is legacy-only: present for a signed-off row, absent otherwise
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyFinalization:
+    def test_finalization_node_appears_only_for_a_signed_off_assessment(self, client_db, tokens, ids):
+        from sqlalchemy import text
+
+        from app.db import engine
+
+        incident_id, aid = _drive_to_submitted(client_db, tokens, ids)
+        approved = client_db.post(
+            f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(tokens["branchchief"])
+        )
+        assert approved.status_code == 200, approved.text
+        tree = _tree(client_db, tokens["admin"], incident_id)
+        assert "FINALIZATION" not in [n["key"] for n in tree["nodes"]]
+
+        # A row signed off BEFORE this release still renders its sign-off step.
+        # finalized_at is stamped directly: nothing can enter the FINALIZED
+        # state any more (trg_assessment_no_new_finalize), and the node keys on
+        # the timestamp rather than the state precisely so legacy history keeps
+        # rendering.
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE assessments SET finalized_at = NOW() WHERE id = :aid"), {"aid": aid}
+            )
+        tree = _tree(client_db, tokens["admin"], incident_id)
+        finalization = _node(tree, "FINALIZATION")
+        assert finalization["status"] == "COMPLETED"
+        assert finalization["role"] == "GEOTECH_OFFICE_CHIEF"
+        assert finalization["label"] == "Assessment signed off (legacy)"
 
 
 class TestHistoricalActor:

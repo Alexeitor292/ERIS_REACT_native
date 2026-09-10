@@ -272,3 +272,26 @@ def admin_token(client_db):
     )
     assert resp.status_code == 200, f"Admin login failed: {resp.status_code} {resp.text}"
     return resp.json()["access_token"]
+
+
+@pytest.fixture(scope="session")
+def specialist_token(client_db):
+    """JWT token for seniorspecialist@local (password: 'password').
+
+    Routing v2's second route needs an office-scoped GeoTech senior specialist in
+    every module that exercises it. The module-scoped ``tokens`` / ``ids``
+    fixtures live in tests/test_assessment_flow.py, not here, so this session
+    fixture is what the routing-v2 modules (which do not import that module's
+    fixtures) share. The account comes from database/init/020_seed.sql; the
+    migration deliberately seeds only the role row, so an already-initialised
+    database needs the seed re-run.
+    """
+    resp = client_db.post(
+        "/auth/login",
+        json={"email": "seniorspecialist@local", "password": "password"},
+    )
+    assert resp.status_code == 200, (
+        f"Senior specialist login failed: {resp.status_code} {resp.text}. "
+        "Re-run database/init/020_seed.sql — routing v2 adds seniorspecialist@local."
+    )
+    return resp.json()["access_token"]
