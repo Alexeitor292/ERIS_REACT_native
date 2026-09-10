@@ -1,0 +1,637 @@
+{
+ "area": "Incidents record view, new-incident intake panel, workflow tree",
+ "heuristicIssues": [
+  {
+   "severity": 4,
+   "heuristic": "Error prevention",
+   "screen": "New incident intake panel",
+   "issue": "A field worker must hand-type latitude and longitude to six decimals; there is no 'use my location' (navigator.geolocation) and no map pick, so a first-day reporter on a phone cannot complete the required fields without an external app.",
+   "evidence": "web/src/features/incidents/IncidentCreatePanel.tsx:83-104 (two type=number inputs, no geolocation or map affordance); required check at IncidentsOperationsPage.tsx:165-167",
+   "recommendation": "Add a 'Use my location' button that fills both fields from navigator.geolocation (with accuracy shown) and a compact map picker (the ArcGIS map already exists in Mission Center); keep manual entry as a fallback."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "Incidents record view",
+   "issue": "The 'record view' never shows the record: description, first_observed_at, current_stage, incident_key, office_code, reporter, created_at, resolved_at and resolution_comment exist on Incident but only six table columns render, so 'Open incident record' deep links land on a row with less information than the source page.",
+   "evidence": "IncidentsOperationsPage.tsx:274-326 renders id/title/classification/location/status/assignment/assessment only; web/src/api/types.ts:243-277 lists the unrendered fields",
+   "recommendation": "Give /incidents/:id a real detail surface (expandable row on desktop, full page on phone) that renders description, timestamps, stage, reporter, attachments and the workflow tree."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "Incidents record view",
+   "issue": "'No assessment' is shown for every row to non-operational users even when an assessment exists, because assessments are only fetched when isOperationalUser is true; on the intake tab the text is always true and therefore noise.",
+   "evidence": "IncidentsOperationsPage.tsx:85 (operational ? listAssessments : empty) and :314-316 (fallback text)",
+   "recommendation": "Render the Assessment column only for operational users; for reporters replace it with a 'Submission' column or hide it. On the intake tab render '—' or drop the column."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "New incident intake panel",
+   "issue": "Three dismiss controls (header Cancel, footer Cancel, toolbar 'Close report') all discard a half-typed report with no confirm-discard and no draft retention.",
+   "evidence": "IncidentCreatePanel.tsx:53-60 and :169-176 (duplicate Cancel), IncidentsOperationsPage.tsx:239-241 (toggle) all call resetCreateIncidentForm at :139-144 which wipes form and files",
+   "recommendation": "Keep one Cancel; if the form is dirty, ask 'Discard this report?' before resetting; persist a draft in sessionStorage so an accidental navigation does not lose the entry."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "New incident intake panel",
+   "issue": "When one or more attachment uploads fail after the incident is created, the panel has already been reset, the notice truncates to two failures, and this page offers no way to re-attach the files to the new incident.",
+   "evidence": "IncidentsOperationsPage.tsx:188-189 (upload then resetCreateIncidentForm), :194-195 (slice(0, 2))",
+   "recommendation": "Keep failed files in a 'Retry upload' list bound to the created incident id; list every failure; only reset once all uploads succeed or the user dismisses."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Help users recognize, diagnose, and recover from errors",
+   "screen": "New incident intake panel",
+   "issue": "Validation is imperative and page-level: no required/aria-invalid attributes, no field-level messages, the error renders in the shared page banner outside the panel, and the same banner is reused for list-load failures. Cancel does not clear it, so a stale validation message persists after the panel closes.",
+   "evidence": "IncidentsOperationsPage.tsx:163-167 (setError with generic strings), :271 (banner rendered after the panel and tab banner), :139-144 (resetCreateIncidentForm never calls setError(null)); IncidentCreatePanel.tsx:68-126 (no required/aria-invalid)",
+   "recommendation": "Wrap the panel in <form onSubmit>, add required + aria-invalid + aria-describedby per field, show inline messages next to the offending field, focus the first invalid field, and clear form errors on cancel; keep a separate error state for list loading."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "Incidents record view",
+   "issue": "The 'Event Group #id' row link is shown to every role, but the target is RoleRoute-gated to operational users, so maintenance-only reporters are bounced to /submissions (a page with no nav entry for them) with no explanation.",
+   "evidence": "IncidentsOperationsPage.tsx:304 renders the link unconditionally; gating per inventory (App.tsx:69-76, auth/RoleRoute.tsx:19)",
+   "recommendation": "Only render the Event Group link when isOperationalUser; for reporters show the Event Group id as plain text or link to the Mission Center map view they can open."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "Workflow tree",
+   "issue": "WorkflowTreeModal/WorkflowTreeView and getWorkflowTree are never mounted or called, so no screen shows where an incident sits in the review chain or who owns it; users only get the terse status badge and assignee name.",
+   "evidence": "web/src/components/WorkflowTree.tsx:77,110 and web/src/api/workflowTree.ts:71-73 are exported but IncidentsOperationsPage.tsx imports neither (imports at :1-24)",
+   "recommendation": "Mount WorkflowTreeView inside the incident detail surface as a 'Progress' section (or delete the dead code if the feature is abandoned)."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "Incidents record view",
+   "issue": "'Loading classification…' is a permanent state for any incident the classification endpoint returns no row for, because items and classifications are set together in load().",
+   "evidence": "incidentClassification.ts:19 returns the loading string whenever classification is undefined; IncidentsOperationsPage.tsx:81-88 sets both in one pass",
+   "recommendation": "Track a classificationsLoaded flag; once loaded, render 'Classification unavailable' (muted) instead of a loading message."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "Incidents record view",
+   "issue": "The count 'X of Y incidents' uses the per-tab filtered count for X and the total across both tabs for Y, so the intake tab reads '3 of 40'.",
+   "evidence": "IncidentsOperationsPage.tsx:236 uses visible.length and items.length",
+   "recommendation": "Denominate against the current tab (records: items.length - intakeCount; intake: intakeCount) and word it 'Showing 3 of 5 awaiting intake'."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "Incidents record view",
+   "issue": "A deep link to an unknown id, or to an id hidden by the status/unclaimed filter, produces no feedback; the page silently shows the unfiltered default tab.",
+   "evidence": "IncidentsOperationsPage.tsx:104-106 (return early if target missing), :116-130 (filters can hide the target)",
+   "recommendation": "If highlightId is set and not found after load, show 'Incident #n not found'; if found but filtered out, clear the filters or show 'Incident #n is hidden by your filters — show it'."
+  },
+  {
+   "severity": 2,
+   "heuristic": "User control and freedom",
+   "screen": "Incidents record view",
+   "issue": "While on /incidents/:id, pressing Refresh or switching tabs and then refreshing forces the tab back to the target's tab, because the highlight effect re-runs on every items change.",
+   "evidence": "IncidentsOperationsPage.tsx:103-112 depends on [highlightId, items] and calls setTab unconditionally",
+   "recommendation": "Run the tab switch and scroll once per highlightId (ref flag) rather than on every items change."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "New incident intake panel",
+   "issue": "Creating an incident and uploading N attachments sequentially shows only 'Creating…' with no per-file progress, and the Refresh button in the toolbar also flips to 'Refreshing…' because it shares the busy flag.",
+   "evidence": "IncidentCreatePanel.tsx:183; IncidentsOperationsPage.tsx:146-159 (sequential loop), :68,:243,:251 (shared busy)",
+   "recommendation": "Separate loading, creating and uploading flags; show 'Uploading 2 of 4…' and per-file state in the pending list."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Match between system and the real world",
+   "screen": "Incidents record view",
+   "issue": "NEW status is styled with the --bad (red) token, so the intake tab is a wall of red badges that read as errors rather than newly filed reports.",
+   "evidence": "incidentUiModel.ts:64-66",
+   "recommendation": "Use a neutral or brand tint for NEW, amber for IN_PROGRESS, green for RESOLVED; reserve --bad for genuine failure states."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Incidents record view",
+   "issue": "Vocabulary drift on one screen: the filter says 'Unclaimed only' while the column says 'Unassigned'; the tab says 'Awaiting intake', the banner says 'review', My Work and the workflow tree say 'triage'.",
+   "evidence": "IncidentsOperationsPage.tsx:234 vs :312; :223 vs :263; WorkflowTree.tsx:23 ('Awaiting triage')",
+   "recommendation": "Pick one term per concept (Unassigned; Intake) and apply it across the filter, column, banner, My Work and PATH_LABEL."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Incidents record view",
+   "issue": "Links are colour-only with underline on hover, so on touch devices and for colour-blind users nothing distinguishes 'View on map', 'AS #12' and 'Sub #4' from plain text.",
+   "evidence": "IncidentsOperationsPage.tsx:263,267,304,309,315,318 ('text-[var(--brand)] hover:underline')",
+   "recommendation": "Underline links by default or render row actions as small bordered chips/buttons with an icon."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Recognition rather than recall",
+   "screen": "Incidents record view",
+   "issue": "Search matches description, district and post mile, none of which are displayed as such, so a row can match with no visible reason; the placeholder also omits that id and post mile are searchable.",
+   "evidence": "IncidentsOperationsPage.tsx:124 (fields searched) vs :300-309 (fields rendered); placeholder at :225",
+   "recommendation": "Show a one-line description excerpt under the title (or a 'matched in description' hint when the needle only hits description) and update the placeholder to 'Search id, title, location or description'."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Incidents record view",
+   "issue": "The tab switcher is two plain buttons: selection is conveyed by background colour only, with no role=tablist/tab, aria-selected or keyboard arrow navigation; the search input and status select have no accessible label.",
+   "evidence": "IncidentsOperationsPage.tsx:207-215 (tabButton), :225 (placeholder only), :226 (unlabelled select)",
+   "recommendation": "Use role=tablist/tab with aria-selected and aria-controls, add aria-label to the search and status select, and add a visible 'Status' label or floating label."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Flexibility and efficiency of use",
+   "screen": "New incident intake panel",
+   "issue": "There is no /incidents/new route, no autoFocus on Title, and no 'Now' shortcut for First observed, so the primary mobile task cannot be deep-linked from My Work or a home-screen bookmark and always starts with two extra taps.",
+   "evidence": "IncidentsOperationsPage.tsx:238-259 (panel toggled by local state only); IncidentCreatePanel.tsx:69 (no autoFocus), :76-78 (datetime-local with no default)",
+   "recommendation": "Add /incidents/new that opens the panel (or a dedicated page), autoFocus Title, default First observed to now with a 'Now' button."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Error prevention",
+   "screen": "New incident intake panel",
+   "issue": "formatCoordinate on blur silently replaces a non-numeric or out-of-range entry with an empty string, so a typo disappears without explanation.",
+   "evidence": "IncidentCreatePanel.tsx:91,:102 (onBlur setField(..., formatCoordinate(...)))",
+   "recommendation": "Keep the raw text, mark the field invalid with a message ('Latitude must be between -90 and 90'), and only normalise when the value parses."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Flexibility and efficiency of use",
+   "screen": "Incidents record view",
+   "issue": "Every visit and Refresh fetches up to 1000 incidents, a classification query for every id, and 1000 assessments, then filters client-side with no pagination, sorting or column ordering; anything past 1000 is silently truncated.",
+   "evidence": "IncidentsOperationsPage.tsx:79-86",
+   "recommendation": "Push search/status/stage filters and paging to the API, add sortable column headers, and show 'Showing 1–50 of 312'."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Incidents record view",
+   "issue": "An explanatory banner is shown permanently on every visit under the toolbar, consuming a full row (two to three lines on phones) after the first read.",
+   "evidence": "IncidentsOperationsPage.tsx:261-269",
+   "recommendation": "Make the banner dismissible (remember in localStorage) or reduce it to an info icon with a tooltip/popover next to the tab label."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Match between system and the real world",
+   "screen": "Workflow tree",
+   "issue": "Raw codes leak into the UI: assessment state (e.g. PENDING_OFFICE_DELEGATION) and event_type are rendered verbatim although a shared assessmentStateLabel helper exists; the attachment kind enum (PHOTO/DOC) is likewise shown raw in the intake panel.",
+   "evidence": "WorkflowTree.tsx:89 (tree.assessment.state), :66 (event: {node.event_type}); IncidentCreatePanel.tsx:151 (pending.kind)",
+   "recommendation": "Map every enum through a label helper before rendering; hide event_type from users entirely."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Workflow tree",
+   "issue": "The tree uses a hard-coded dark-tuned Tailwind palette (emerald-300, sky-200, amber-200, red-200/300, slate-500/600, text-black dots, fixed rgba shadow) while every other surface in the area uses --brand/--good/--bad tokens, so contrast breaks on the light and coastal themes.",
+   "evidence": "WorkflowTree.tsx:12-19,49,52,93,134",
+   "recommendation": "Rebuild STATUS classes on the color-mix token pattern used in incidentUiModel.ts:63-71 and use ring/shadow tokens."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "New incident intake panel",
+   "issue": "The 'Classification: Unclassified · assigned after field assessment' box repeats the sentence in the helper paragraph directly above it; the footer Cancel duplicates the header Cancel.",
+   "evidence": "IncidentCreatePanel.tsx:49-51 vs :63-65; :53-60 vs :169-176",
+   "recommendation": "Delete the info box and the header Cancel."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Recognition rather than recall",
+   "screen": "New incident intake panel",
+   "issue": "Required fields are marked with a bare ' *' and no legend, no native required attribute, and no accept filter or type hint on the file input beyond helper text; the 'Supporting files' label is not associated with the input.",
+   "evidence": "IncidentCreatePanel.tsx:24 (' *'), :130 (label without htmlFor), :131-138 (no accept)",
+   "recommendation": "Add '* required' legend, required attributes, htmlFor/id on the file label, and accept='image/*,video/*,.pdf,.dwg,.dxf'."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Consistency and standards",
+   "screen": "Workflow tree",
+   "issue": "Unicode status glyphs (⮌ ► ■ ○ ↺) are font-dependent and not aria-hidden so screen readers announce them before the label; every node card body is a focusable <button> even when hasDetail is false; linked incident/location ids are plain text rather than links.",
+   "evidence": "WorkflowTree.tsx:11-19,52 (glyphs), :47-50 (button regardless of hasDetail), :64-65,:92-96 (ids as text)",
+   "recommendation": "Use aria-hidden SVG icons, render a plain div when there is nothing to expand, and link ids to /incidents/:id."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Incidents record view",
+   "issue": "The ID column duplicates the fallback title 'Incident #id' and raw six-decimal coordinates occupy the first line of every Location cell although the D/County/Route/PM label is what people read.",
+   "evidence": "IncidentsOperationsPage.tsx:300,302 (id twice when title is blank), :307 (formatCoordinate pair)",
+   "recommendation": "Fold the id into the title cell as a muted prefix and move coordinates to a tooltip/detail view."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Consistency and standards",
+   "screen": "All",
+   "issue": "Primary, secondary and small buttons are repeated as literal class strings with differing padding and radius, and three separate pill implementations exist (IncidentStatusBadge, AssessmentStateBadge mini, WorkflowTree STATUS).",
+   "evidence": "IncidentsOperationsPage.tsx:26-31,211,239,243; IncidentCreatePanel.tsx:57,157,173,181; WorkflowTree.tsx:83,132",
+   "recommendation": "Introduce Button and Badge primitives in web/src/ui and use them in all three files."
+  }
+ ],
+ "responsiveIssues": [
+  {
+   "screen": "Incidents record view",
+   "viewport": "phone",
+   "issue": "Six-column table has no min-width, column priority or card fallback; at 375px each column gets roughly 55px, so Incident and Location cells wrap into 5–6 line stacks or the overflow-x-auto wrapper scrolls with Assessment/Submission off-screen.",
+   "evidence": "IncidentsOperationsPage.tsx:274-275 ('overflow-x-auto' wrapper, 'w-full' table), :278-283 (six headers)",
+   "fix": "Below md render each incident as a card (title, status badge, location label, one action row); at md–lg hide ID and coordinates with 'hidden lg:table-cell'; add 'min-w-[720px]' to the table at lg+ so it scrolls instead of crushing."
+  },
+  {
+   "screen": "Incidents record view",
+   "viewport": "phone",
+   "issue": "The toolbar wraps into four or five rows: nowrap tab pair (~300px with counts), search on its own row (min-w-[220px]), select + checkbox + count, then the New incident/Refresh group, pushing the list one screen down.",
+   "evidence": "IncidentsOperationsPage.tsx:220-244 ('flex flex-wrap', whitespace-nowrap at :211, min-w-[220px] at :225, ml-auto at :237)",
+   "fix": "Stack: tabs full-width as a segmented control, search full-width, filters behind a 'Filters (1)' disclosure button, and make 'New incident' a sticky bottom action on phones."
+  },
+  {
+   "screen": "Incidents record view",
+   "viewport": "phone",
+   "issue": "Touch targets are under 44px: native checkbox (~13px), AS#/Sub# links at 11–12px text, tab buttons and inputs at ~36px; links show no non-hover affordance on touch.",
+   "evidence": "IncidentsOperationsPage.tsx:233 (native checkbox), :304,:315,:318 (text-[11px]/text-xs links, hover:underline), :211,:225-226 (py-2 text-sm)",
+   "fix": "Use min-h-11 on tabs, inputs and select; replace the checkbox with a toggle chip; render row links as 44px-tall chips with icons and permanent underline."
+  },
+  {
+   "screen": "Incidents record view",
+   "viewport": "phone",
+   "issue": "Deep-link scrollIntoView({block:'center'}) fires after 150ms; the sticky AppShell header can overlap the top of the row on short viewports and the highlight is inline style only.",
+   "evidence": "IncidentsOperationsPage.tsx:108-110, :296-298",
+   "fix": "Add 'scroll-mt-24' to rows (or compute the header height) and mark the row with aria-current='true'."
+  },
+  {
+   "screen": "New incident intake panel",
+   "viewport": "phone",
+   "issue": "A single column of ten fields plus the files block is roughly 2.5 screens tall; 'Create incident' is at the bottom and validation errors render in the page banner after the panel and after the tab banner, so the error can be off-screen from the field it refers to.",
+   "evidence": "IncidentCreatePanel.tsx:67-185 (grid then files then footer); IncidentsOperationsPage.tsx:247-271 (panel, then tab banner, then error)",
+   "fix": "Split into steps (What / When / Where / Evidence) or collapse optional location text fields under 'More location details'; make the footer sticky (position:sticky bottom-0) and show inline field errors."
+  },
+  {
+   "screen": "New incident intake panel",
+   "viewport": "phone",
+   "issue": "type=number with inputMode=decimal often hides the minus key on iOS numeric keypads, yet every California longitude is negative; there is no camera capture attribute and no thumbnails for chosen photos.",
+   "evidence": "IncidentCreatePanel.tsx:85-87,:96-98 (type=number, inputMode=decimal), :131-138 (file input without accept/capture)",
+   "fix": "Use type='text' inputMode='decimal' with a pattern and explicit validation; add a second 'Take photo' input with capture='environment' and accept='image/*'; render image thumbnails in the pending list."
+  },
+  {
+   "screen": "New incident intake panel",
+   "viewport": "phone",
+   "issue": "'Remove' buttons on pending files are about 26px tall, below the 44px minimum, and sit next to a truncated name so a mis-tap removes the wrong file.",
+   "evidence": "IncidentCreatePanel.tsx:153-160 ('px-2 py-1 text-xs')",
+   "fix": "Make Remove a 44px icon button with aria-label='Remove {file name}' and give the file row min-h-12."
+  },
+  {
+   "screen": "New incident intake panel",
+   "viewport": "tablet",
+   "issue": "At 768px the md two-column grid pairs Title with the min-h-20 Description textarea, producing an uneven first row that pushes the required First observed field below the fold in landscape; datetime-local inputs on iPadOS can exceed the cell because inputClass sets no width constraint.",
+   "evidence": "IncidentCreatePanel.tsx:18 (inputClass without w-full/min-w-0), :67-81 (md:grid-cols-2, Description md:col-span-1)",
+   "fix": "Add 'w-full min-w-0' to inputClass; make Description span both columns at md (md:col-span-2) so Title sits alone on row one and dates pair on row two."
+  },
+  {
+   "screen": "Incidents record view",
+   "viewport": "tablet",
+   "issue": "At 768 portrait the inline nav card renders above content (sidebar only at lg), and the six-column table gets ~120px per column, so Incident and Location cells wrap three to four lines each; at 1024 landscape the w-64 sidebar appears and leaves ~760px for the same six columns, so the crunch persists.",
+   "evidence": "IncidentsOperationsPage.tsx:274-283; shell breakpoints per inventory (ui/AppShell.tsx:164-181)",
+   "fix": "Hide ID and coordinates below xl, merge Assignment into the Status cell as a second line, and default the sidebar to the w-16 rail below xl."
+  },
+  {
+   "screen": "Incidents record view",
+   "viewport": "tablet",
+   "issue": "The toolbar wraps to two rows and the ml-auto New incident/Refresh group jumps to the second line, separating the primary action from the tabs.",
+   "evidence": "IncidentsOperationsPage.tsx:220,:237",
+   "fix": "Put tabs and the action group on row one (justify-between) and search/filters on row two at all widths below xl."
+  },
+  {
+   "screen": "New incident intake panel",
+   "viewport": "desktop",
+   "issue": "At 1440px the xl three-column grid leaves a blank spacer cell in row two and splits the location fields across two rows (Lat | Lon | District, County | Route | Post mile), so the Caltrans location group reads as unrelated inputs.",
+   "evidence": "IncidentCreatePanel.tsx:67 (xl:grid-cols-3), :82 (hidden xl:block spacer), :83-126",
+   "fix": "Group Latitude/Longitude and District/County/Route/Post mile in a <fieldset> 'Location' with its own 4-column sub-grid and drop the spacer."
+  },
+  {
+   "screen": "Workflow tree",
+   "viewport": "phone",
+   "issue": "A vertical stack of four to six cards plus connectors exceeds the viewport; the overlay scrolls while body scroll is locked, mt-10 plus p-4 wastes ~56px above the title, the summary bar wraps to three or four lines, and 'Close' is ~30px tall.",
+   "evidence": "WorkflowTree.tsx:98-105 (flex-col below xl), :127-128 (mt-10, p-4), :82-90 (flex-wrap summary), :132 ('px-3 py-1 text-sm')",
+   "fix": "Render as a full-screen sheet below md (mt-0, min-h-dvh), put the summary in a two-line header, make Close 44px, and collapse completed steps by default."
+  },
+  {
+   "screen": "Workflow tree",
+   "viewport": "tablet",
+   "issue": "The tree stays a vertical list below xl (1280px) even on a 1024px landscape tablet where four or five 180px cards would fit side by side.",
+   "evidence": "WorkflowTree.tsx:74 (xl:hidden/hidden xl:inline connectors), :98,:100 (xl:flex-row)",
+   "fix": "Switch to lg: or use a container query on the modal panel; layout the node list as 'grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))]'."
+  },
+  {
+   "screen": "Workflow tree",
+   "viewport": "desktop",
+   "issue": "At >=1280px flex-1 cards stretch unevenly when a row wraps, and the current-node ring uses a fixed rgba(31,94,255,0.25) shadow that ignores the theme.",
+   "evidence": "WorkflowTree.tsx:49 ('flex-1 min-w-[180px]', shadow-[0_6px_18px_rgba(31,94,255,0.25)])",
+   "fix": "Use the auto-fit grid above so cards share equal width, and express the shadow with color-mix on --brand."
+  },
+  {
+   "screen": "All",
+   "viewport": "all",
+   "issue": "Every button, badge and link relies on hover states (hover:bg, hover:underline, hover:brightness-95) with no focus-visible ring, so keyboard and touch users get weaker affordances than mouse users.",
+   "evidence": "IncidentsOperationsPage.tsx:211,239,243,304; IncidentCreatePanel.tsx:57,157,181; WorkflowTree.tsx:132",
+   "fix": "Add 'focus-visible:ring-2 focus-visible:ring-[var(--brand)]' to the shared Button primitive and permanent underline to links."
+  }
+ ],
+ "dataDensity": [
+  {
+   "screen": "Incidents record view",
+   "element": "Tab labels with live counts (Incident records / Awaiting intake)",
+   "verdict": "keep",
+   "reason": "Orients every role and doubles as the intake backlog indicator; primary way to find a report (IncidentsOperationsPage.tsx:222-223)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Result count 'X of Y incidents'",
+   "verdict": "demote",
+   "reason": "Useful for filter feedback but currently misleading; fix the denominator and move it to the table header row (:236)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Explanatory banner (intake / record view)",
+   "verdict": "progressive",
+   "reason": "First-visit orientation only; show once, then behind an info icon (:261-269)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Error banner",
+   "verdict": "keep",
+   "reason": "Essential, but split into a list-load error and inline form errors (:271)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Success notice after filing",
+   "verdict": "keep",
+   "reason": "Tells the reporter what happens next; make it dismissible (:272)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "ID column '#id'",
+   "verdict": "demote",
+   "reason": "Needed for cross-referencing but a column is expensive; render as a muted prefix in the Incident cell (:300)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Incident title",
+   "verdict": "keep",
+   "reason": "Primary identifier a human scans for (:302)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Classification label",
+   "verdict": "keep",
+   "reason": "What kind of incident; essential for operational triage (:38,:303)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Classification state line ('Pending assessment review' / 'Confirmed from approved assessment')",
+   "verdict": "remove",
+   "reason": "Redundant with the AssessmentStateBadge in the last column; fold into the badge tooltip (:39)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'Loading classification…' placeholder",
+   "verdict": "remove",
+   "reason": "Becomes a permanent lie when no row is returned; replace with a loaded-aware fallback (incidentClassification.ts:19)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'Event Group #id' link",
+   "verdict": "keep",
+   "reason": "Container the incident was accepted into; gate to operational users (:304)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Coordinates 'lat, lon' at 6 decimals",
+   "verdict": "progressive",
+   "reason": "Raw numbers nobody scans; show in the detail view or on hover, keep the D/County/Route/PM label (:307)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Location label D/County/Route/PM",
+   "verdict": "keep",
+   "reason": "Caltrans-native vocabulary; the location a dispatcher recognises (:308)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'View on map' link",
+   "verdict": "keep",
+   "reason": "Primary onward action for spatial context; render as an icon chip (:309)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Status badge",
+   "verdict": "keep",
+   "reason": "Core state; recolour NEW away from red (:311)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Assignment (assignee / Unassigned)",
+   "verdict": "demote",
+   "reason": "Essential for coordinators, irrelevant for reporters; merge under the Status badge as a second line and hide below lg (:312)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'AS #id' link + AssessmentStateBadge",
+   "verdict": "keep",
+   "reason": "Operational roles need the assessment hop; hide the column for non-operational users (:315)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'No assessment' text",
+   "verdict": "remove",
+   "reason": "Always shown for non-operational users and always true on intake tab; render '—' or nothing (:316)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'Sub #id' links",
+   "verdict": "progressive",
+   "reason": "Secondary hop; show in the detail view or as a count chip '2 submissions' (:317-319)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Deep-linked row highlight",
+   "verdict": "keep",
+   "reason": "Only cue that the deep link worked; add aria-current and a 'clear' affordance (:292,:298)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Empty state text",
+   "verdict": "keep",
+   "reason": "Essential; add a 'Clear filters' action (:288)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Search input",
+   "verdict": "keep",
+   "reason": "Primary lookup tool; fix the placeholder (:225)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Status select",
+   "verdict": "keep",
+   "reason": "Core filter; give it a visible label (:226-231)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'Unclaimed only' checkbox",
+   "verdict": "progressive",
+   "reason": "Coordinator-only concern; show it only for operational users, behind the Filters disclosure on phones (:232-235)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "Refresh button",
+   "verdict": "demote",
+   "reason": "Lists should refresh on focus/interval; keep as a small icon button (:243)."
+  },
+  {
+   "screen": "Incidents record view",
+   "element": "'New incident' button",
+   "verdict": "keep",
+   "reason": "Primary action for reporting roles; make it sticky on phones (:238-242)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "Heading + helper paragraph",
+   "verdict": "keep",
+   "reason": "Sets the 'unclassified until assessment' expectation once (IncidentCreatePanel.tsx:48-51)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "'Classification: Unclassified' info box",
+   "verdict": "remove",
+   "reason": "Repeats the paragraph above it (:63-65)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "Header Cancel",
+   "verdict": "remove",
+   "reason": "Duplicate of footer Cancel (:53-60)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "Title, First observed, Latitude, Longitude",
+   "verdict": "keep",
+   "reason": "Required fields that define the report (:68,:76,:83,:94)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "Description",
+   "verdict": "keep",
+   "reason": "Primary free-text evidence; give it more room on phones (:72-74)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "First occurred",
+   "verdict": "progressive",
+   "reason": "Optional and often unknown in the field; show under 'Add when it occurred' (:79-81)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "District, County, Route, Post mile",
+   "verdict": "progressive",
+   "reason": "Optional and derivable from coordinates; collapse under 'Location details' with auto-fill from the map/geolocation (:105-126)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "Supporting files input + helper",
+   "verdict": "keep",
+   "reason": "Photos are the field worker's main evidence; add capture and thumbnails (:130-139)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "Pending file rows (name, kind, size)",
+   "verdict": "keep",
+   "reason": "Confirms what will upload; humanise the kind enum (:143-151)."
+  },
+  {
+   "screen": "New incident intake panel",
+   "element": "Hidden incident_type form field",
+   "verdict": "remove",
+   "reason": "Dead field never rendered or posted (incidentUiModel.ts:5,19)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "Modal title 'Incident #id — Workflow'",
+   "verdict": "keep",
+   "reason": "Dialog heading and aria-labelledby target (WorkflowTree.tsx:131)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "Overall status pill + Path label + Current owner",
+   "verdict": "keep",
+   "reason": "Answers 'where is it and who is it waiting on' (:83-88)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "'Assessment: <raw state> · Office <code>' chip",
+   "verdict": "demote",
+   "reason": "Secondary; humanise the state and move into the assessment node card (:89)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "Linked / duplicate banner",
+   "verdict": "keep",
+   "reason": "Important exception state; make ids links (:92-96)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "Node card: role, step label, status, person, completed_at",
+   "verdict": "keep",
+   "reason": "The core of the visualisation (:44-59)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "Node details: actor email, notes, linked ids",
+   "verdict": "progressive",
+   "reason": "Already behind a Details toggle; keep that pattern (:60-67)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "Node details 'event: RAW_EVENT_TYPE'",
+   "verdict": "remove",
+   "reason": "Internal enum with no user meaning (:66)."
+  },
+  {
+   "screen": "Workflow tree",
+   "element": "WorkflowNode.disposition",
+   "verdict": "remove",
+   "reason": "Typed but never rendered (api/workflowTree.ts:40)."
+  }
+ ],
+ "quickWins": [
+  "Fix the result count denominator to the current tab and reword to 'Showing X of Y awaiting intake' (IncidentsOperationsPage.tsx:236).",
+  "Replace 'Loading classification…' with a loaded-aware 'Classification unavailable' fallback (incidentClassification.ts:19; pass a loaded flag from IncidentsOperationsPage.tsx:88).",
+  "Hide the Assessment column and 'No assessment' text for non-operational users and on the intake tab (IncidentsOperationsPage.tsx:283,313-316).",
+  "Recolour NEW to brand/neutral and IN_PROGRESS to amber (incidentUiModel.ts:64-70).",
+  "Rename 'Unclaimed only' to 'Unassigned only' and align tab/banner wording to 'intake' (IncidentsOperationsPage.tsx:234,263).",
+  "Add role=tablist/tab + aria-selected to the tab buttons and aria-label to the search input and status select (IncidentsOperationsPage.tsx:207-231).",
+  "Make links always underlined and add focus-visible rings (drop 'hover:' prefix at :263,267,304,309,315,318).",
+  "Gate the 'Event Group #id' link on isOperationalUser; show plain text for reporters (IncidentsOperationsPage.tsx:304).",
+  "Add 'scroll-mt-24' to rows and aria-current on the highlighted row; run the deep-link tab switch once per id (IncidentsOperationsPage.tsx:103-112,296-298).",
+  "Wrap IncidentCreatePanel in <form onSubmit>, add required/aria-invalid, autoFocus Title, and clear error in resetCreateIncidentForm (IncidentCreatePanel.tsx:44-69; IncidentsOperationsPage.tsx:139-144).",
+  "Add a 'Use my location' button (navigator.geolocation) beside Latitude/Longitude and a 'Now' button beside First observed (IncidentCreatePanel.tsx:76-104).",
+  "Add accept and capture='environment' to the file input, humanise kind labels, and make Remove a 44px icon button (IncidentCreatePanel.tsx:131-160).",
+  "Delete the duplicate Classification info box and header Cancel (IncidentCreatePanel.tsx:53-60,63-65) and the dead incident_type field (incidentUiModel.ts:5,19).",
+  "Split the shared busy flag into loading/creating so Refresh and the form do not disable each other (IncidentsOperationsPage.tsx:68,76,169,243,251).",
+  "Make the explanatory banners dismissible with a localStorage flag (IncidentsOperationsPage.tsx:261-269).",
+  "Add 'w-full min-w-0' to inputClass and 'hidden lg:table-cell' to the ID and coordinate cells (IncidentCreatePanel.tsx:18; IncidentsOperationsPage.tsx:278,300,307).",
+  "Retheme WorkflowTree STATUS classes onto --good/--brand/--bad color-mix tokens and aria-hide the glyphs (WorkflowTree.tsx:11-19,52)."
+ ],
+ "structuralChanges": [
+  "Give /incidents/:id a real incident record page: header (title, id, incident_key, stage, status), description, first observed/occurred, location with mini map, reporter and timestamps, attachments, assessment/submission links, and the mounted WorkflowTreeView as a 'Progress' section; the table becomes the index and the deep link becomes a page instead of a highlighted row.",
+  "Create a dedicated /incidents/new mobile-first intake flow (What / When / Where with geolocation + map pick / Evidence with camera capture), sticky footer, inline validation, draft persistence and retryable uploads; link it from My Work, the nav and the Incidents toolbar.",
+  "Make the list responsive by design: table with column priority at lg+ (hide ID/coordinates/Assignment progressively), card list below lg, and a filter bar that collapses to search + 'Filters' popover on phones with the primary action sticky.",
+  "Move search, stage/status filters, sorting and pagination server-side; drop the three 1000-row fetches and add sortable headers and 'Showing 1–50 of N'.",
+  "Unify the four overlapping state vocabularies (status, current_stage, classification_status, assessment state) into a single 'Stage' column with one Badge primitive and one colour mapping, and extract Button/Input/Badge primitives into web/src/ui used by Incidents, the intake panel and the workflow tree.",
+  "Add a mobile navigation drawer to AppShell so field workers on phones and portrait tablets do not scroll past the full nav card to reach the Incidents toolbar (cross-cutting; ui/AppShell.tsx:164 per inventory)."
+ ]
+}

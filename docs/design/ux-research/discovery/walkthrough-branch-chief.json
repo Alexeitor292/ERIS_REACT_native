@@ -1,0 +1,188 @@
+{
+ "persona": "GeoTech Branch Chief (GEOTECH_BRANCH_CHIEF / legacy BRANCH_CHIEF), first day, 13-inch laptop, desktop web. Knows the job (office chief delegates a case, I pick an engineer and a reviewer, I watch the case move) but has never seen ERIS and has no training.",
+ "tasks": [
+  {
+   "task": "Assign an engineer to an assessment delegated to me",
+   "steps": [
+    "Sign in at /login; land on /my-work regardless of role (web/src/pages/LoginPage.tsx:42). Header shows my name and the raw code 'GEOTECH_BRANCH_CHIEF' (web/src/ui/AppShell.tsx:157).",
+    "Read 'N items waiting on your role' and the left rail. Each card reads 'Assessment #12 / Incident #40 · Office NORTH · D07', a badge 'Pending engineer assignment', 'Waiting on Branch Chief', 'No technical submissions attached' (web/src/features/assessments/AssessmentDetailPanel.tsx:434-444). The queue is branch_chief + reviewer SUBMITTED items merged (web/src/features/myWork/MyWorkPage.tsx:53,55).",
+    "The first card is auto-selected (MyWorkPage.tsx:88); the detail panel appears to the right only at >=1280px, otherwise below the up-to-860px rail (MyWorkPage.tsx:136-137).",
+    "In the detail panel read header 'Incident #40 · <title>' and 'North GeoTech Office · District 07 · Updated ...', the six-dot pipeline with 'Branch assignment' bold, then the blue 'NEXT STEP  Waiting on Branch Chief — Assign an engineer to perform the on-site assessment.' card (AssessmentDetailPanel.tsx:232-265; assessmentModel.ts:79-80).",
+    "Try to find out where the slide is: the panel has no county/route/PM; click 'Open incident' (AssessmentDetailPanel.tsx:241), which goes to /incidents/40 and merely highlights a row in the Incidents table (IncidentsOperationsPage.tsx:102-112, 298). Read Location column, then browser Back to My Work (selection resets to the first item; MyWorkPage.tsx:88).",
+    "Back in the Next step card: skip (or fill) the textarea 'Optional workflow notes' (AssessmentDetailPanel.tsx:294), open the unlabeled select showing 'Select engineer…' with options 'Full name · email' (311-313), pick one.",
+    "Click 'Assign engineer' (315). No confirmation. The item disappears from the queue and the rail jumps to the next item with no success message (MyWorkPage.tsx:88; notice is only set for triage at 177)."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Reading the rail",
+     "problem": "Cards identify the case by three internal ids ('Assessment #12', 'Incident #40', 'Office NORTH · D07') and never show the incident title, county, route or post mile; triage cards for coordinators do show a location line but assessment cards do not.",
+     "severity": 3,
+     "whyConfusing": "A branch chief chooses an engineer by where the site is. The card gives no location, so every item must be opened (and then 'Open incident' followed) to learn it. AssessmentDetailPanel.tsx:434-444 vs MyWorkPage.tsx:155."
+    },
+    {
+     "step": "Understanding 'delegated to me'",
+     "problem": "The page says 'items waiting on your role' and the card says 'Waiting on Branch Chief'; nothing says who delegated it, when, or that it was delegated to me specifically. The 'Office Delegated' event and delegating chief are only in the Assessment history card at the bottom of a ~1500px panel.",
+     "severity": 2,
+     "whyConfusing": "The job model is a personal hand-off from a named office chief; the software shows a role queue. A newcomer cannot tell whether another branch chief in the office sees the same item. MyWorkPage.tsx:123,138; AssessmentDetailPanel.tsx:390-401."
+    },
+    {
+     "step": "Finding the site location",
+     "problem": "'Open incident' does not open an incident page; it navigates to the Incidents table and highlights a row, with a banner 'Read-only record view ... actions live in My Work'. Returning to My Work loses the selection.",
+     "severity": 3,
+     "whyConfusing": "The button label promises a record, the destination is a list; the user then has to re-find the assessment in My Work. IncidentsOperationsPage.tsx:102-112, 266-268; MyWorkPage.tsx:88,148."
+    },
+    {
+     "step": "Choosing the engineer",
+     "problem": "The select has no label (placeholder option only), options are 'Full name · email', and there is no workload, office, or availability information; the 'Optional workflow notes' textarea sits above the select with no explanation of where the notes go.",
+     "severity": 2,
+     "whyConfusing": "The picker answers 'who exists' not 'who should take this'; the notes box looks like it could be required or could be a message to the engineer. AssessmentDetailPanel.tsx:294,311-313."
+    },
+    {
+     "step": "Clicking 'Assign engineer'",
+     "problem": "One click commits the assignment with no confirmation and no success message; the item vanishes and the panel silently switches to a different assessment.",
+     "severity": 3,
+     "whyConfusing": "A first-day user cannot tell whether the action worked or whether they just lost the item; the only trace is the count decreasing. AssessmentDetailPanel.tsx:208-220,315; MyWorkPage.tsx:88,177 (notice only for triage)."
+    },
+    {
+     "step": "Panel layout below 1280px",
+     "problem": "On a 13-inch laptop at typical 1280-1440px width the two-column layout is borderline; at browser widths under 1280px the detail panel sits under a rail up to 860px tall and clicking a card does not scroll to the panel.",
+     "severity": 2,
+     "whyConfusing": "The user clicks a card and sees nothing change in the viewport. MyWorkPage.tsx:136-139."
+    },
+    {
+     "step": "Vocabulary",
+     "problem": "The same step is called 'Pending engineer assignment' (badge), 'Branch assignment' (pipeline) and 'Waiting on Branch Chief' (next step); office is 'Office NORTH' in the rail but 'North GeoTech Office' in the header; district 'D07' vs 'District 07'.",
+     "severity": 1,
+     "whyConfusing": "Three names for one state make a newcomer wonder if they are three different things. assessmentModel.ts:20,55,80; AssessmentDetailPanel.tsx:234,434."
+    }
+   ],
+   "estimatedClicks": 4,
+   "verdict": "workable"
+  },
+  {
+   "task": "Add a reviewer to an assessment",
+   "steps": [
+    "On /my-work select the assessment (only assessments in state PENDING_ENGINEER_ASSIGNMENT, or SUBMITTED ones I am assigned to review, appear in my queue; MyWorkPage.tsx:53,55).",
+    "Look in the 'NEXT STEP' card for anything about reviewers: there is none; it only offers the engineer select and 'Assign engineer' (AssessmentDetailPanel.tsx:309-317).",
+    "Scroll past the 'Technical submissions (0)' card (hint 'All GISA forms attached to this assessment's incident') to the third card 'Assignments', which reads 'No active assignments yet.' (336-339, 366-378).",
+    "In the Assignments card header find a small text-xs select whose placeholder is 'Add reviewer…' and a plain 'Add' button (370-374). Pick a name (names only, no email/role/office).",
+    "Click 'Add'. The reviewer row appears as 'Full name / Reviewer · email' with a red 'Remove' button (380-384). No success message.",
+    "If the engineer was assigned first (the natural order), the assessment moves to DRAFT, leaves the branch_chief queue, and reviewer management is no longer reachable on the web: the Assessments record view renders the panel in mode='record', which hides the Add reviewer control (showReviewerManagement requires mode === 'work'; 191) and does not offer the 'act on it in My Work' link because addReviewer is not part of isActionable (assessmentModel.ts:137-139; AssessmentDetailPanel.tsx:267-270)."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Order of operations",
+     "problem": "Reviewer management is only rendered in My Work (mode='work'), and the assessment leaves the branch chief's My Work queue the moment an engineer is assigned. A branch chief who assigns first can never add a reviewer from the web; nothing warns about this.",
+     "severity": 4,
+     "whyConfusing": "The job model is 'assign engineer, then decide who reviews'; the software silently requires the reverse. AssessmentDetailPanel.tsx:191; assessmentModel.ts:128,133,137-139; MyWorkPage.tsx:53."
+    },
+    {
+     "step": "Finding the control",
+     "problem": "'Add reviewer…' is a text-xs select hidden in the header of the third card, below the fold, while every other workflow action lives in the 'NEXT STEP' card; the Next step text never mentions reviewers.",
+     "severity": 3,
+     "whyConfusing": "The page teaches 'act in the blue Next step card'; the reviewer control breaks that rule and looks like a filter. AssessmentDetailPanel.tsx:261-265,366-376."
+    },
+    {
+     "step": "Record view dead end",
+     "problem": "On /assessments/:id the panel says 'Actions for this step are performed from My Work by the responsible role.' but My Work will not contain a DRAFT assessment for a branch chief, so the pointer leads nowhere.",
+     "severity": 3,
+     "whyConfusing": "The user follows the instruction, arrives at My Work, and the item is not there. AssessmentDetailPanel.tsx:270; MyWorkPage.tsx:53-55."
+    },
+    {
+     "step": "Choosing the reviewer",
+     "problem": "The reviewer list shows names only, no role, office or workload; only the REVIEWER assignment role can be added (no APPROVER/CONSULTED), and the shared 'Optional workflow notes' textarea in a different card is silently attached to the assignment.",
+     "severity": 2,
+     "whyConfusing": "The domain distinguishes reviewer, approver and consulted; the UI offers one unlabeled kind, and notes typed for the engineer end up on the reviewer assignment. AssessmentDetailPanel.tsx:372-374."
+    },
+    {
+     "step": "Feedback",
+     "problem": "Adding or removing a reviewer gives no confirmation message; 'Remove' is a one-click destructive action with no confirm.",
+     "severity": 2,
+     "whyConfusing": "The row simply appears/disappears; a first-day user is unsure whether the reviewer was notified or whether removal was intended. AssessmentDetailPanel.tsx:374,383."
+    }
+   ],
+   "estimatedClicks": 5,
+   "verdict": "blocked"
+  },
+  {
+   "task": "Check the status of an incident a district called me about",
+   "steps": [
+    "In the sidebar under Operations choose between 'Mission Center', 'Event Groups', 'Incidents', 'Assessments' (AppShell.tsx:84-87). Pick 'Incidents'.",
+    "Page shows tabs 'Incident records (N)' / 'Awaiting intake (M)', a search box 'Search title, county, route, or description', a status select (All statuses / New / In progress / Resolved), an 'Unclaimed only' checkbox, and a banner 'Read-only record view. Triage, routing, and assignment actions live in My Work' (IncidentsOperationsPage.tsx:220-236,266-268).",
+    "Type the county or route the district mentioned; the filter matches raw fields (id, title, description, district, county, route, post_mile; 124-128).",
+    "Scan the row: ID, Incident title + classification text ('Unclassified · assessment not started'), Location (6-decimal lat/lon plus 'D7 · County · R001 · PM 12.30'), Status badge (New / In progress / Resolved), Assignment (name or 'Unassigned'), and 'Assessment / Submission' ('AS #12' + badge 'Pending engineer assignment', 'Sub #9') (300-320).",
+    "Infer the real workflow position from the assessment badge in the last column; optionally click 'AS #12' to open /assessments/12 and read the pipeline and 'Waiting on ...' card (315; AssessmentDetailPanel.tsx:245-265).",
+    "If the caller's report is not on the 'Incident records' tab, switch to 'Awaiting intake' — reports still with the coordinator live only there (114-120, 261-264)."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Choosing where to look",
+     "problem": "Four Operations entries (Mission Center, Event Groups, Incidents, Assessments) all plausibly hold 'the status of an incident'; Mission Center is listed first and reads like the main map.",
+     "severity": 2,
+     "whyConfusing": "No description of what each area is for; a newcomer may open Mission Center or Event Groups first. AppShell.tsx:84-87."
+    },
+    {
+     "step": "Reading the Status column",
+     "problem": "Incident status is only New / In progress / Resolved; the workflow stage (with coordinator, office chief, branch chief, engineer) is not shown on the incident at all. The answer the district wants is in the last column as an 'AS #12' abbreviation plus an assessment-state badge.",
+     "severity": 3,
+     "whyConfusing": "The column literally named 'Status' does not answer 'where is it and who has it'; 'AS #' and 'Sub #' are unexplained abbreviations. incidentUiModel.ts:57-61; IncidentsOperationsPage.tsx:311-319."
+    },
+    {
+     "step": "Two tabs",
+     "problem": "A report the coordinator has not yet triaged is invisible on the default 'Incident records' tab; it is only under 'Awaiting intake', and the empty result says 'No incidents match the current filters.'",
+     "severity": 2,
+     "whyConfusing": "The empty state suggests a search mistake rather than 'try the other tab'; 'intake' is coordinator vocabulary. IncidentsOperationsPage.tsx:120,222-223,288."
+    },
+    {
+     "step": "Classification and assignment text",
+     "problem": "Under the title the row prints 'Unclassified · assessment not started' or 'Pending assessment review'; the Assignment column shows a name or 'Unassigned' without saying assignment of what (coordinator stage vs engineer); the 'Unclaimed only' checkbox is unexplained.",
+     "severity": 2,
+     "whyConfusing": "Jargon from the classification/assignment subsystems appears with no legend; 'Unassigned' next to an assessment that is 'Pending engineer assignment' looks contradictory. incidentClassification.ts:18-31; IncidentsOperationsPage.tsx:233-234,312."
+    },
+    {
+     "step": "No incident detail",
+     "problem": "There is no incident detail page or workflow tree on the web: /incidents/:id highlights a table row, and WorkflowTreeModal has no consumer in web/src (grep shows only its definition in web/src/components/WorkflowTree.tsx:110).",
+     "severity": 2,
+     "whyConfusing": "Photos, description, reporter and timeline are not reachable from the table; the user has to bounce to Assessments or Mission Center for context. IncidentsOperationsPage.tsx:102-112,298."
+    },
+    {
+     "step": "Search matching",
+     "problem": "Search matches raw stored values (e.g. route '001'), not the displayed 'R001' label, and the district caller usually gives route + post mile rather than the incident title.",
+     "severity": 1,
+     "whyConfusing": "Typing 'Route 1' or 'R001' returns nothing while '001' works. IncidentsOperationsPage.tsx:124-128; eventGroupTypes.ts:71-79."
+    }
+   ],
+   "estimatedClicks": 2,
+   "verdict": "workable"
+  }
+ ],
+ "firstDayConfusions": [
+  "Header prints the raw role code 'GEOTECH_BRANCH_CHIEF' instead of a human title, so the first thing a newcomer sees is an enum (AppShell.tsx:157).",
+  "Login always lands on My Work with 'N items waiting on your role' — no explanation of what a queue item is or that the first one is already selected (LoginPage.tsx:42; MyWorkPage.tsx:88,123).",
+  "Every case is referenced by up to three ids (Incident #, Assessment #, Submission #, plus 'AS #' / 'Sub #' abbreviations on the Incidents page) and no location on assessment cards, so cases cannot be recognised by place (AssessmentDetailPanel.tsx:434; IncidentsOperationsPage.tsx:315-318).",
+  "'Open incident' leads to a highlighted table row, not a record; 'Read-only record view' banners on Incidents and Assessments push the user back to My Work, which may not contain the item (IncidentsOperationsPage.tsx:266-268; AssessmentWorkspacePage.tsx:114-116).",
+  "The reviewer control is a tiny 'Add reviewer…' select in the Assignments card header rather than in the Next step card, and it disappears once the engineer is assigned (AssessmentDetailPanel.tsx:191,370-374).",
+  "No success feedback after 'Assign engineer', 'Add', or 'Remove'; items just vanish and the panel switches to another case (AssessmentDetailPanel.tsx:208-220; MyWork Page notice only for triage at MyWorkPage.tsx:177).",
+  "The same step has three names: 'Pending engineer assignment' / 'Branch assignment' / 'Waiting on Branch Chief'; office and district appear as 'Office NORTH · D07' in the rail and 'North GeoTech Office · District 07' in the header (assessmentModel.ts:20,55,80; AssessmentDetailPanel.tsx:234,434).",
+  "Unexplained vocabulary: 'Awaiting intake', 'Unclaimed only', 'Unclassified · assessment not started', 'technical submissions' vs 'GISA forms', 'Optional workflow notes' (IncidentsOperationsPage.tsx:223,234; incidentClassification.ts:21-23; AssessmentDetailPanel.tsx:294,336).",
+  "Below 1280px the My Work detail panel is beneath an 860px rail, so clicking a card appears to do nothing (MyWorkPage.tsx:136-139)."
+ ],
+ "mentalModelGaps": [
+  "Job: 'the office chief handed me a case' (personal hand-off from a named person). Software: a role queue ('waiting on your role') with no delegator, delegation time, or note visible until the history card at the bottom (MyWorkPage.tsx:123; AssessmentDetailPanel.tsx:390-401).",
+  "Job: pick an engineer by site location, distance, expertise and current load. Software: an unlabeled dropdown of 'name · email' with no location on the card and no workload data (AssessmentDetailPanel.tsx:311-313,434).",
+  "Job: assign the engineer, then name the reviewer whenever it is decided. Software: reviewer management exists only while the item is in My Work (PENDING_ENGINEER_ASSIGNMENT), so the reviewer must be added before the engineer or not at all on the web (AssessmentDetailPanel.tsx:191; assessmentModel.ts:128,133,137-139).",
+  "Job: one 'incident' that moves through people. Software: Incident (status New/In progress/Resolved), Assessment (7 states), Submission (own status), each with its own id and page; the workflow position lives on the Assessment, not the Incident (incidentUiModel.ts:57-61; assessmentModel.ts:9-17).",
+  "Job: 'status' means where it is and who is holding it. Software: incident current_stage is never displayed on the web; the Incidents table shows only status, an assignment name, and an assessment badge (IncidentsOperationsPage.tsx:311-319).",
+  "Job: act where you look. Software: records (Incidents, Assessments) are read-only and point to My Work; My Work only holds items at the exact state the role owns, so browsing and acting are two separate places (AssessmentWorkspacePage.tsx:114-116; AssessmentDetailPanel.tsx:267-270).",
+  "Job: reviewer / approver / consulted are different responsibilities. Software: only 'REVIEWER' can be added from the web and the row label is the humanized code (AssessmentDetailPanel.tsx:374,382)."
+ ],
+ "topFixes": [
+  "Make reviewer management available wherever a chief can see the assessment: render the Add reviewer control in record mode for canAssignReviewer roles, include addReviewer in isActionable so the 'act on it in My Work' link appears, and offer 'Add reviewer' inline in the Assign engineer step (AssessmentDetailPanel.tsx:191,267-270; assessmentModel.ts:137-139).",
+  "Put place before ids: show incident title, 'D7 · County · R001 · PM 12.30', reported date and a map link on assessment rail cards and in the Next step card, so a branch chief can pick an engineer without leaving My Work (AssessmentDetailPanel.tsx:434-444, 261-265).",
+  "Close the loop on actions: a labeled 'Engineer' field, a confirm summary ('Assign Jane Doe to Assessment #12 — Incident #40, R001 PM 12.3?'), and a persistent success notice after assign/add/remove instead of silently switching to the next item (AssessmentDetailPanel.tsx:311-315,374,383; MyWorkPage.tsx:88,177).",
+  "On the Incidents table replace 'Status' + 'AS #12' with a plain-language workflow column ('With Branch Chief — awaiting engineer', 'Engineer J. Doe — draft', 'Awaiting coordinator intake'), show intake items in the same list with that label instead of a separate tab, and wire the existing WorkflowTreeModal to a per-row 'Timeline' button (IncidentsOperationsPage.tsx:222-223,311-319; WorkflowTree.tsx:110).",
+  "One name per step and per place: use 'Awaiting engineer assignment (Branch Chief)' consistently across badge, pipeline and Next step; spell 'North GeoTech Office · District 07' in the rail; humanize the header role code via a shared roleLabel (assessmentModel.ts:20,55,80; AssessmentDetailPanel.tsx:434; AppShell.tsx:157).",
+  "Give the engineer picker decision data: office, branch, open assessments count and distance to the site, sorted by load (AssessmentDetailPanel.tsx:311-313; assessmentAssignmentOptions payload).",
+  "Show 'Delegated by <office chief> on <date> — <note>' at the top of the Next step card so the hand-off reads as a personal request rather than a role queue (AssessmentDetailPanel.tsx:261-265; events at 390-401)."
+ ]
+}

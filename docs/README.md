@@ -14,6 +14,7 @@ This documentation is generated from the current repository implementation (not 
 - [Workflow Spec (As Implemented)](./WORKFLOWS_VERIFIED.md)
 - [Diagrams](./DIAGRAMS.md)
 - [Proxmox Deployment](./PROXMOX_DEPLOYMENT.md)
+- [UI/UX Redesign Plan](./design/UX_REDESIGN_PLAN.md)
 
 ## Notes
 

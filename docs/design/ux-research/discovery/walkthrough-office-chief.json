@@ -1,0 +1,224 @@
+{
+ "persona": "GeoTech Office Chief (GEOTECH_OFFICE_CHIEF / legacy OFFICE_CHIEF), first day, no training, 13-inch laptop. Lands on /my-work after sign-in (web/src/pages/LoginPage.tsx:42). Sidebar shows Workspace › My Work, Operations › Mission Center / Event Groups / Incidents / Assessments, GIS Tools › Terrain Cross Sections, Account › Settings (web/src/ui/AppShell.tsx:72-104). Header shows the raw role code 'GEOTECH_OFFICE_CHIEF' next to the name (AppShell.tsx:157). All three tasks are performed on the My Work queue (web/src/features/myWork/MyWorkPage.tsx) and the shared assessment panel (web/src/features/assessments/AssessmentDetailPanel.tsx); the office-wide picture must come from Operations › Assessments (web/src/features/assessments/AssessmentWorkspacePage.tsx).",
+ "tasks": [
+  {
+   "task": "See which assessments are waiting for my delegation and delegate one to a branch chief, assigning the engineer directly when I know who should take it",
+   "steps": [
+    "Sign in; land on My Work with the line '<N> items waiting on your role' and a rail of cards (MyWorkPage.tsx:120-138).",
+    "Scan the rail for cards whose mini badge reads 'Pending office delegation' (AssessmentDetailPanel.tsx:434-437; label from assessmentModel.ts:54). Every card in my queue reads 'Waiting on Office Chief', so I must rely on the badge text to separate delegation items from 'Approved' items.",
+    "Click one card. On a 13-inch laptop at 1280 CSS px or wider the detail panel appears to the right; at any narrower effective width it renders below the up-to-860px-tall rail (MyWorkPage.tsx:136-137).",
+    "Read the header 'Assessment #12 / Incident #40 · <title> / North GeoTech Office · District 7 · Updated …', the six-dot pipeline with 'Office delegation' active, and the Next step card 'Waiting on Office Chief — Delegate this assessment to a branch chief — or assign the engineer directly.' (AssessmentDetailPanel.tsx:232-265; assessmentModel.ts:78).",
+    "Look for the report context. The panel offers only 'Open incident', 'View on map', 'Event Group #N' buttons (AssessmentDetailPanel.tsx:241-243) and, far below, the 'Assessment history' card whose first event is 'Created · Assessment Required by <coordinator>' with any triage notes (390-401). Open the incident in the same tab if I need photos/description, then use the browser Back button (no breadcrumb or back link in the shell).",
+    "Optionally type into the textarea whose only label is the placeholder 'Optional workflow notes' (294).",
+    "Open 'Select branch chief…' and pick 'Name · email' (298-301).",
+    "Open 'Assign engineer now (optional)…' and pick the engineer (302-305).",
+    "Click the small 'Delegate' button (306). It is disabled until a branch chief is chosen. No confirmation; the card disappears and the panel silently switches to the first remaining item (MyWorkPage.tsx:88, 99-104). No success message is shown for assessment actions (notice is only set by triage, MyWorkPage.tsx:177)."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Scanning the rail for delegation items",
+     "problem": "Delegation items and approved-to-finalize items are mixed in one unfiltered list, and both show 'Waiting on Office Chief'; reviewer items I was assigned may also be present. There is no grouping, count per kind, or filter.",
+     "severity": 2,
+     "whyConfusing": "MyWorkPage.tsx:52-57 merges office_chief queue, APPROVED list and reviewer queue into one rail sorted by updated_at (71); the only differentiator is the small badge text (AssessmentDetailPanel.tsx:435). A newcomer asked 'what is waiting for delegation' has to read every badge."
+    },
+    {
+     "step": "Deciding whom to delegate to",
+     "problem": "The panel gives no incident context inline — no description, reporter photos, incident type, or routing explanation — only three buttons that navigate away, and the triage notes are buried at the bottom of the history card.",
+     "severity": 3,
+     "whyConfusing": "AssessmentDetailPanel.tsx:241-243 links out; the incident title is fetched only for the heading (176-187). The chief must leave My Work to judge the case, and the shell has no back affordance (AppShell.tsx:141-144, 184), so returning means browser Back and re-selecting the card since selection is not in the URL (MyWorkPage.tsx:148)."
+    },
+    {
+     "step": "Filling the two selects",
+     "problem": "Neither select has a visible label; after a value is chosen both fields display the same 'Full name · email' format, so it is easy to lose track of which field is the branch chief and which is the engineer.",
+     "severity": 2,
+     "whyConfusing": "Placeholder-only options at AssessmentDetailPanel.tsx:299 and 303; both use the identical option template (300, 304)."
+    },
+    {
+     "step": "Assigning the engineer directly",
+     "problem": "When I already know the engineer, I still cannot press Delegate until a branch chief is chosen, and nothing explains why the button is disabled. Nothing tells me that naming an engineer skips the branch chief's queue entirely.",
+     "severity": 3,
+     "whyConfusing": "Delegate is disabled on !branchChiefId (AssessmentDetailPanel.tsx:306) with no helper text; the Next step sentence says 'or assign the engineer directly' (assessmentModel.ts:78), which reads as an alternative to picking a branch chief, but the UI treats it as an addition. The server-side consequence — assessment goes straight to DRAFT and the branch chief never sees it (backend/app/routes/assessments.py:1008-1018) — is invisible in the UI."
+    },
+    {
+     "step": "Pressing Delegate",
+     "problem": "Single click, no confirmation, no success notice; the panel jumps to a different assessment, so a first-time user is unsure whether the delegation happened or they mis-clicked into another record.",
+     "severity": 3,
+     "whyConfusing": "run() calls onChanged and clears the form (AssessmentDetailPanel.tsx:208-220); MyWorkPage falls back to items[0] when the selected id disappears (88) and only triage sets the green notice (177). The only trace is that the card is gone."
+    },
+    {
+     "step": "Seeing 'Add reviewer…' in the Assignments card at the delegation step",
+     "problem": "The reviewer picker is visible before delegation, with no guidance on whether a reviewer must be added now, later, or by the branch chief.",
+     "severity": 2,
+     "whyConfusing": "permissions.addReviewer is true in every non-FINALIZED state (assessmentModel.ts:133) and the control sits in the card header (AssessmentDetailPanel.tsx:366-376), separate from the Next step card. The job model says review is blocked until someone is assigned, but nothing in the UI says when to do it."
+    },
+    {
+     "step": "Reading the rail card",
+     "problem": "Rail shows raw codes 'Office NORTH · D7' while the panel spells 'North GeoTech Office · District 7'; the incident title is absent from the card, so cards are distinguishable only by number.",
+     "severity": 1,
+     "whyConfusing": "AssessmentDetailPanel.tsx:434 vs 234; incident title is only fetched for the selected detail (176-187)."
+    },
+    {
+     "step": "Handling an error",
+     "problem": "If delegation fails (e.g. server 403 'Incident is outside your assigned office'), the message appears in a banner at the very top of the page above the rail, not next to the Delegate button, and persists across item switches.",
+     "severity": 2,
+     "whyConfusing": "onError feeds MyWorkPage.tsx:127; the panel has no inline error slot. On a scaled 13-inch screen (single column) the banner may be off-screen above the rail."
+    }
+   ],
+   "estimatedClicks": 6,
+   "verdict": "workable"
+  },
+  {
+   "task": "Finalize an approved assessment",
+   "steps": [
+    "Open My Work (default landing). Scan the rail for a card with the green 'Approved' mini badge and 'Waiting on Office Chief' (AssessmentDetailPanel.tsx:435-437; assessmentModel.ts:45, 59).",
+    "Click the card. Header shows the state badge 'Approved', the pipeline with 'Approval' active, and the Next step card 'Waiting on Office Chief — Finalize the assessment to close out the workflow.' (assessmentModel.ts:87-88).",
+    "Check the 'Technical submissions' table: rows show '#id', descriptor link, a raw status badge, reporter as 'You' or 'User #7', created/submitted dates and an 'Open' button that leaves the page to /submissions/:id (AssessmentDetailPanel.tsx:336-364).",
+    "Check 'Assignments' (engineer and reviewer names) and 'Assessment history' for the 'Approved' event and the reviewer's note (378-401).",
+    "Optionally type in 'Optional workflow notes'.",
+    "Click the green 'Finalize assessment' button (328). No confirmation; the item leaves the queue and the panel switches to the next item with no success message."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Choosing which approved card to finalize",
+     "problem": "The APPROVED list in My Work is statewide, not office-scoped, but the finalize endpoint rejects assessments outside my office. A first-day chief sees approved assessments from other offices listed under 'items waiting on your role', clicks Finalize and gets 'Incident is outside your assigned office' in the top banner.",
+     "severity": 3,
+     "whyConfusing": "MyWorkPage.tsx:56 calls listAssessments({ state: 'APPROVED' }) without the office_chief queue, so backend _scope_office is never applied (backend/app/routes/assessments.py:803-806, 858-868); finalize_assessment enforces _ensure_incident_office_access (assessments.py:1461; incidents.py:502-508). The queue promises the item is mine; the server says it is not."
+    },
+    {
+     "step": "Understanding what 'Finalize' adds to 'Approved'",
+     "problem": "The assessment already reads 'Approved' in green; the instruction 'close out the workflow' does not say what finalizing changes, whether it is reversible, or that the incident itself stays open until an engineer resolves it.",
+     "severity": 3,
+     "whyConfusing": "Only text is assessmentModel.ts:88 and the post-action banner 'Workflow complete. Finalized <date>' (AssessmentDetailPanel.tsx:249-252). Nothing mentions that incident resolution is a separate step owned by the engineer, so a chief will believe the case is closed."
+    },
+    {
+     "step": "Pressing Finalize",
+     "problem": "Terminal, irreversible transition fires on one click with no confirmation, and success is signalled only by the card vanishing and the panel jumping to another record.",
+     "severity": 3,
+     "whyConfusing": "AssessmentDetailPanel.tsx:328 and run() 208-220; MyWorkPage.tsx:88 auto-selects the next item; no notice for assessment actions."
+    },
+    {
+     "step": "Reviewing the approved report before finalizing",
+     "problem": "To read the approved technical submission the chief must click 'Open' which navigates to /submissions/:id and out of My Work; the table also shows the reporter as 'User #7' and the status as a raw enum.",
+     "severity": 2,
+     "whyConfusing": "AssessmentDetailPanel.tsx:352-357; SubmissionStatusBadge prints the raw status (web/src/features/submissions/SubmissionDetailPrimitives.tsx). No back link on return; My Work selection is lost."
+    },
+    {
+     "step": "Notes textarea",
+     "problem": "It is unclear where 'Optional workflow notes' go or who reads them.",
+     "severity": 1,
+     "whyConfusing": "Placeholder-only label (AssessmentDetailPanel.tsx:294); notes surface only later as an event note in the history card (400)."
+    },
+    {
+     "step": "Locating the panel on a scaled 13-inch display",
+     "problem": "Below 1280 CSS px (e.g. 1920×1080 at 175% scaling) the detail panel renders under an 860px rail and clicking a card does not scroll to it.",
+     "severity": 2,
+     "whyConfusing": "Two-column layout is xl-only (MyWorkPage.tsx:136-137); no scroll-into-view on selection (148)."
+    }
+   ],
+   "estimatedClicks": 2,
+   "verdict": "workable"
+  },
+  {
+   "task": "Get a picture of all active assessments in my office and where they are stuck",
+   "steps": [
+    "Start on My Work. Realise it lists only steps waiting on me (delegation, approved, reviewer); assessments sitting with a branch chief or engineer are absent. The only pointer to another view is the empty-state sentence 'Browse the records under Operations › Assessments' (MyWorkPage.tsx:133), which is not shown while the queue has items.",
+    "Try the sidebar: 'Mission Center' (map), 'Event Groups', 'Incidents', 'Assessments'. Pick Operations › Assessments (AppShell.tsx:87).",
+    "Read the banner 'Read-only record view of every assessment…' and the toolbar: state select ('All states' + 7 states), search box 'Search assessments, incidents, or submissions', '<n> of <m> assessments', Refresh (AssessmentWorkspacePage.tsx:104-116).",
+    "Scan the rail: 'Assessment #12 / Incident #40 · Office NORTH · D7 / badge / Waiting on Branch Chief / submission line'. Notice assessments from Office SOUTH and WEST are mixed in — the list is statewide (AssessmentWorkspacePage.tsx:49 calls listAssessments({ limit: 1000 }) with no office filter).",
+    "Guess at narrowing to my office: there is no office filter; typing 'NORTH' into search happens to match office_code (assessmentModel.ts:156) but nothing suggests this.",
+    "Switch the state filter one value at a time (Pending office delegation, Pending engineer assignment, Draft, Submitted for review, Revision requested) and note the '<n> of <m>' count each time to build a picture.",
+    "Click a card to see its 'Updated <date>' in the header (AssessmentDetailPanel.tsx:234), the pipeline dot, the engineer's name in 'Waiting on Engineer · Name' (only for the selected card), and the history timestamps. Repeat per assessment to judge how long each has been stuck.",
+    "If a step is mine, click 'This step is yours — act on it in My Work' (269) to hop back."
+   ],
+   "frictionPoints": [
+    {
+     "step": "Looking for the office overview from My Work",
+     "problem": "My Work is a personal step queue, not an office portfolio; the label 'items waiting on your role' invites the interpretation 'everything in my office', and the pointer to the Assessments record view is hidden unless the queue is empty.",
+     "severity": 3,
+     "whyConfusing": "MyWorkPage.tsx:52-57 fetch only office_chief, APPROVED and reviewer queues; the cross-link at 133 renders only in the empty state. A chief with pending work never sees the hint."
+    },
+    {
+     "step": "Narrowing the Assessments list to my office",
+     "problem": "The record view is statewide with no office (or district) filter; office appears only as a raw code on each card. The backend supports office_code filtering but the UI never uses it.",
+     "severity": 4,
+     "whyConfusing": "AssessmentWorkspacePage.tsx:49, 104-111 (state + text search only); backend list_assessments accepts office_code (backend/app/routes/assessments.py:785, 807-809) but web/src/api/assessments.ts is called without it. Search matching office_code (assessmentModel.ts:156) is undocumented."
+    },
+    {
+     "step": "Judging where things are stuck",
+     "problem": "Rail cards carry no dates, ages or 'stuck since' indicator, and the list is sorted most-recently-updated first, so the stalest assessments sink to the bottom of a scrolling 860px rail.",
+     "severity": 4,
+     "whyConfusing": "AssessmentRailCard shows id, office/district, badge, waiting-on, submissions only (AssessmentDetailPanel.tsx:431-445); ORDER BY updated_at DESC (assessments.py:846); updated_at is visible only in the detail header (234). The core question 'what has been sitting with whom for how long' needs one click per record."
+    },
+    {
+     "step": "Reading 'Waiting on' on unselected cards",
+     "problem": "Cards say 'Waiting on Branch Chief' or 'Waiting on Assigned Engineer' without a person's name; the engineer's name appears only after the card is selected.",
+     "severity": 2,
+     "whyConfusing": "assignments are passed only for the loaded detail (AssessmentWorkspacePage.tsx:128), so waitingOn falls back to the generic label (assessmentModel.ts:75). Branch chief names are never shown at all — branch_chief_user_id is not rendered."
+    },
+    {
+     "step": "Counting by state",
+     "problem": "There are no per-state counts; the only number is '<n> of <m>', so the chief must cycle the state filter five times to tally the pipeline.",
+     "severity": 3,
+     "whyConfusing": "AssessmentWorkspacePage.tsx:105-110, 122; the count is even duplicated in the rail header instead of being broken down."
+    },
+    {
+     "step": "Filtering to 'active'",
+     "problem": "'All states' includes Finalized records; there is no 'active only' option, so completed work pollutes the overview.",
+     "severity": 2,
+     "whyConfusing": "State select lists ASSESSMENT_STATES including FINALIZED (AssessmentWorkspacePage.tsx:106-107; assessmentModel.ts:9-17) with no multi-select or exclusion."
+    },
+    {
+     "step": "Telling assessments apart",
+     "problem": "Rail cards show 'Incident #40' but not the incident title or location, so the chief cannot recognise a case without clicking it.",
+     "severity": 2,
+     "whyConfusing": "AssessmentDetailPanel.tsx:434; the assessment list payload carries district but not location/title, and the title is fetched per selected item only (176-187)."
+    },
+    {
+     "step": "Choosing between Mission Center, Event Groups, Incidents and Assessments",
+     "problem": "Four sibling 'Operations' entries with no descriptions; a newcomer may try Mission Center or Incidents first for an office picture.",
+     "severity": 1,
+     "whyConfusing": "AppShell.tsx:84-87 nav labels only; the Assessments page's own banner explains it only once inside."
+    }
+   ],
+   "estimatedClicks": 12,
+   "verdict": "confusing"
+  }
+ ],
+ "firstDayConfusions": [
+  "My Work vs Assessments: both pages have an identical rail+detail layout and the same cards, but one is 'act' and one is 'browse'; the difference is stated only in a grey banner on Assessments (AssessmentWorkspacePage.tsx:114-116) and in the empty state of My Work (MyWorkPage.tsx:133).",
+  "Every card in the office chief's queue says 'Waiting on Office Chief' — never 'Waiting on you' — so it is not obvious that the list is personal (assessmentModel.ts:78, 88).",
+  "'Delegate' requires a branch chief even when the engineer is named, and naming an engineer silently bypasses the branch chief (AssessmentDetailPanel.tsx:306; backend assessments.py:1008-1018).",
+  "Approved ≠ Finalized ≠ Resolved: three closure words, with no explanation of what Finalize changes or that the incident stays open (assessmentModel.ts:88; AssessmentDetailPanel.tsx:249-252).",
+  "Approved assessments from other offices appear in My Work and fail with a server 403 on Finalize (MyWorkPage.tsx:56 vs assessments.py:1461).",
+  "No success feedback for Delegate/Finalize: the card disappears and the panel jumps to a different assessment (MyWorkPage.tsx:88; AssessmentDetailPanel.tsx:208-220).",
+  "Unlabeled selects with placeholder-only prompts and identical 'Name · email' option formats (AssessmentDetailPanel.tsx:298-305); unlabeled 'Optional workflow notes' textarea (294).",
+  "'Add reviewer…' appears in the Assignments card at every step with no cue about when reviewers must be added (AssessmentDetailPanel.tsx:366-376; assessmentModel.ts:133).",
+  "Raw codes everywhere: 'GEOTECH_OFFICE_CHIEF' in the header (AppShell.tsx:157), 'Office NORTH · D7' on cards (AssessmentDetailPanel.tsx:434), 'User #7' as reporter (354), raw submission status enum (353).",
+  "No office filter anywhere on the Assessments page even though the persona is defined by office (AssessmentWorkspacePage.tsx:104-111).",
+  "Rail cards have no dates, so 'how long has this been stuck' cannot be answered without opening each record (AssessmentDetailPanel.tsx:431-445).",
+  "Leaving the panel via 'Open incident' or 'Open' submission loses the My Work selection; the shell has no back link or breadcrumb (AppShell.tsx:141-144, 184; MyWorkPage.tsx:148).",
+  "On a 13-inch laptop with display scaling below 1280 CSS px the detail panel sits under an 860px rail and clicking a card does not scroll to it (MyWorkPage.tsx:136-148).",
+  "Vocabulary drift within one panel: 'technical submission', 'GISA form', 'Submission' (AssessmentDetailPanel.tsx:288, 336, 339)."
+ ],
+ "mentalModelGaps": [
+  "Job model: 'my office's caseload, grouped by who has it and how long' — software model: a personal inbox of individual steps (My Work) plus a statewide read-only record list (Assessments) with no office dimension.",
+  "Job model: delegation is either to a branch chief OR directly to an engineer — software model: branch chief is always required and the engineer is an optional add-on that changes routing without saying so (AssessmentDetailPanel.tsx:302-306; assessments.py:1008-1018).",
+  "Job model: the office chief approves/closes a case — software model: a reviewer 'Approves', the chief 'Finalizes' the assessment, and the engineer or admin 'Resolves' the incident later; the chief's screen never mentions the last step.",
+  "Job model: reviewer/approver assignment is part of routing the case — software model: it is a detached 'Add reviewer…' control in the Assignments card at any state, not part of the Next step (AssessmentDetailPanel.tsx:366-376).",
+  "Job model: an assessment is about a site (D/C/R/PM, slide, photos) — software model: an assessment is a numbered record with an incident number, office code and pipeline dot; site context is one or two navigations away (241-243).",
+  "Job model: 'my office' is a named place (North GeoTech Office) — software model: office is a code in card text and a hidden server scope that applies to some queues but not others (MyWorkPage.tsx:52 vs 56; assessments.py:858-868).",
+  "Job model: 'stuck' means old and unmoved — software model: nothing surfaces age; lists sort newest-first and cards omit timestamps."
+ ],
+ "topFixes": [
+  "Group the My Work rail into labelled sections with counts — 'To delegate (3)', 'To finalize (1)', 'To review (2)' — and change 'Waiting on Office Chief' to 'Waiting on you' for the signed-in role.",
+  "Scope the APPROVED-to-finalize list to the chief's office (use the office_chief scoping or pass office_code from the user's metadata in MyWorkPage.tsx:56) so no item in My Work can fail with 'outside your assigned office'.",
+  "Add an Office filter (default: my office) and an 'Active only' toggle to the Assessments record view, plus a per-state count strip; show the office as its name, not 'Office NORTH'.",
+  "Put age on every rail card ('Updated 6 days ago', 'In this step since …') and offer a 'Longest waiting first' sort so stuck items rise to the top.",
+  "Rework the delegation form: visible labels ('Branch chief' / 'Engineer (optional)'), a helper line under Delegate explaining why it is disabled, and an explicit note that choosing an engineer sends the assessment straight to Draft and skips the branch chief's queue.",
+  "Show a success toast/banner after Delegate, Finalize and other assessment actions ('Assessment #12 delegated to <name>'), keep the user on a summary of what just happened instead of auto-selecting the next record, and add a confirmation step for Finalize with one sentence on what it does and does not close.",
+  "Surface incident context inline in the panel (title, location, description excerpt, first photo, coordinator triage notes/routing override) so the chief can delegate without leaving My Work; add a 'Back to My Work' link on incident and submission pages.",
+  "Move reviewer assignment into the Next step card at delegation time ('Also assign a reviewer for the engineering write-up') with a one-line explanation that review is blocked until someone is assigned.",
+  "Replace raw codes with names: humanise role codes in the header, show the branch chief's and engineer's names on unselected cards, replace 'User #7' with the reporter name and the raw submission status with the humanised label.",
+  "Add a one-line pipeline glossary or hover text for Approved → Finalized → Resolved so the chief knows finalization does not close the incident."
+ ]
+}

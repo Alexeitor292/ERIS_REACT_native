@@ -1,0 +1,635 @@
+{
+ "area": "Terrain Cross Sections GIS workspace",
+ "heuristicIssues": [
+  {
+   "severity": 4,
+   "heuristic": "Flexibility and efficiency of use",
+   "screen": "Terrain cross-section scene (toolbar)",
+   "issue": "The primary toolbar has no responsive strategy: its width is max-w-[calc(100%-360px)] with flex-wrap and no breakpoint, so below ~1360px viewport it wraps to 2-3 rows and at phone width it computes to 0px and stacks nine buttons vertically over the drawing hint and Esri Home/Compass widgets.",
+   "evidence": "web/src/features/terrainCrossSections/TerrainCrossSectionWorkspace.tsx:600-601 (max-w-[calc(100%-360px)], flex flex-wrap); hint at :699 (left-14 top-16); Esri widgets added top-left at :281-282. No sm:/md:/lg: class exists anywhere in the file.",
+   "recommendation": "Replace the calc() cap with a breakpoint-driven layout: below lg render the toolbar as a full-width bottom action bar (New / Build / Save + overflow menu), at lg+ keep it top-left with max-w-[calc(100%-320px)] and move Esri Search into the Setup panel so the reserved 360px is not needed."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Error prevention",
+   "screen": "Terrain cross-section scene (toolbar)",
+   "issue": "'+ New' and 'Clear' wipe control points, the built profile and the 'Saved to' state instantly with no confirmation; 'Add points' silently discards a built profile.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:423-433 (beginDrawing resets everything incl. setSavedCrossSection(null)), :455-465 (clearAll), :435-443 (continueDrawing sets profile null); buttons at :602-609, :611-620, :658-666 have only a title tooltip.",
+   "recommendation": "When controlPoints.length >= 2 or a profile/saved state exists, gate New and Clear behind a small inline confirm ('Discard 5 points and the profile?') and show an undoable toast for 8 s; for Add points keep the profile until the next Build instead of nulling it."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "Control points panel / scene",
+   "issue": "The only edit operation is 'Undo' (drops the last point). A user who mis-places P2 of 6 must undo five points; the Points list is read-only with no delete, drag, nudge or zoom-to affordance.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:445-453 (undoLastPoint slices the array); Points panel rows :833-845 render text only; the map popupTemplate :376-379 offers no action.",
+   "recommendation": "Add per-row 'Remove' and 'Zoom to' buttons in the Points panel (splice by index, then null the profile) and use an ArcGIS SketchViewModel 'update' workflow so a placed marker can be dragged on desktop and moved via the row actions on touch."
+  },
+  {
+   "severity": 3,
+   "heuristic": "User control and freedom",
+   "screen": "Terrain cross-section scene / Save dialog",
+   "issue": "Work is write-only: state lives solely in component memory, the 'Saved to' chip disappears on New/Clear/navigation, and nothing on this screen (or any route) reopens a saved cross section, so 'Save' gives no path back to the work.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:16 imports only the SavedCrossSectionDetail type (no loader); savedCrossSection cleared at :431 and :464; chip rendered only while in memory :691-695; route takes no params (web/src/pages/TerrainCrossSectionsPage.tsx:4-10).",
+   "recommendation": "Add a 'Saved sections' list (Project > cross sections) to the panel rail that loads a saved record back into controlPoints/profile, and encode the saved id in the URL (?section=123) so refresh and deep links restore the work."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Match between system and the real world",
+   "screen": "Elevation analysis / Stats / Setup panels, legend",
+   "issue": "Esri-internal vocabulary is shown as primary user copy: 'Terrain3D', 'Data Extents catalog', 'PixelSize footprint', 'finest contiguous', 'cached terrain level of detail'. A maintenance coordinator cannot act on these terms.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:77-95 (demQualityNote), :586, :769-776, :813-817, :876, :887, :893-895, :932, :967-969.",
+   "recommendation": "Keep one plain sentence per panel ('Elevation data: Esri World Elevation, ~1 m source resolution along this path') and move the provenance detail behind an 'About this data' disclosure or tooltip; rename 'Terrain3D sampling' to 'Sampling resolution' and 'Source footprint' to 'Source resolution'."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Visibility of system status",
+   "screen": "Elevation analysis panel",
+   "issue": "After Build profile the map auto-zooms to the profile extent and, in the same tick, a 720px panel opens over it; at 1440px the panel plus rail hide all but a ~320px strip of the map, so the yellow sampled line and red hover marker the chart links to are mostly out of view.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:537 (setActivePanel('profile')), :546 (view.goTo(extent.expand(1.25))), :713-715 (right-20 + w-[min(720px,...)]); main content is 1120px at 1440 (AppShell.tsx:163-165 px-6, w-64 nav, gap-4).",
+   "recommendation": "Dock the profile chart as a bottom drawer (h-[280px]) spanning the map width so the terrain stays visible above it, and pad goTo() by the panel size (view.padding = { right: panelWidth }) whenever a side panel is open."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Flexibility and efficiency of use",
+   "screen": "Elevation analysis panel (chart)",
+   "issue": "Chart-to-terrain linkage is pointer-move only: no keyboard focus, arrow-key stepping or tap-to-pin, so keyboard users and tablet users get no readout and no 3D marker.",
+   "evidence": "web/src/features/terrainCrossSections/CrossSectionProfileChart.tsx:102-109 (onPointerMove/onPointerLeave only; role=img, no tabIndex, no onKeyDown); crosshair cursor is the only draw-mode affordance TerrainCrossSectionWorkspace.tsx:416-421.",
+   "recommendation": "Give the SVG tabIndex=0 with ArrowLeft/ArrowRight (+Shift for x10) moving hoverIndex, make a tap/click pin the sample until the next tap, and show the pinned readout inline so touch users can compare two positions."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Consistency and standards",
+   "screen": "Save cross section dialog / Aerial capture dialog",
+   "issue": "Both modals lack a focus trap, Escape-to-close and backdrop close; the Save dialog has no aria-labelledby, uses <label> without htmlFor, and the create-Project inputs rely on placeholders as their only label.",
+   "evidence": "web/src/features/terrainCrossSections/CrossSectionSaveDialog.tsx:130 (role=dialog aria-modal, no labelledby), :137 (text 'Close'), :158-160 (placeholder-only inputs), :171 and :175 (label without htmlFor); web/src/features/terrainCrossSections/AerialCaptureDialog.tsx:426-432 (no key handlers).",
+   "recommendation": "Extract one Modal primitive (focus trap, Escape, backdrop click, aria-labelledby, x close button) and use it for both dialogs; add id/htmlFor pairs and visible labels for Project number/title/district."
+  },
+  {
+   "severity": 3,
+   "heuristic": "Help users recognize, diagnose, and recover from errors",
+   "screen": "Aerial capture dialog",
+   "issue": "The primary button 'Copy JPEG to clipboard' writes a ClipboardItem of type image/jpeg; browsers' async clipboard write only guarantees image/png, so the primary action throws and the user sees a DOMException string rather than a usable path.",
+   "evidence": "AerialCaptureDialog.tsx:414-416 (new ClipboardItem({ 'image/jpeg': blob })), :419 (raw reason.message surfaced), :497-504 (brand-coloured primary button).",
+   "recommendation": "Convert the canvas to PNG for the clipboard write (keep JPEG for download), make 'Download JPEG' the primary button, and if clipboard write is unsupported hide the copy button instead of failing."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Elevation analysis / Stats / Setup panels, bottom pill",
+   "issue": "Path length, sample count, spacing and source coverage are rendered in up to five places at once (panel subtitle, metric row, DEM block, Stats panel, Setup card, bottom pill) and demQualityNote is rendered verbatim twice.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:583 (subtitle), :761-764 (metric row), :771 and :906 (demQualityNote twice), :773-774 and :899-904 (same two values), :810-815 (Stats), :982 (bottom pill).",
+   "recommendation": "Show Path + Source resolution once in the panel header, keep Samples/Spacing only in Setup (they are sampling controls), and delete the Setup provenance card and the bottom pill's suffix."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Terrain cross-section scene / Points panel",
+   "issue": "One action has six names ('Build profile', 'Finish & profile', 'Rebuild', 'Sampling…', 'Sample profile to resolve', 'Build profile to sample the DEM') and the rail labels do not match the panel titles they open (Stats -> 'Cross-section statistics', Setup -> 'Cross-section setup', Profile -> 'Elevation analysis').",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:637, :841, :986; rail :706-709 vs titles :572-578.",
+   "recommendation": "Standardise on 'Build profile' (busy: 'Building…'; existing: 'Rebuild profile') everywhere and make each panel title equal its rail label ('Profile', 'Statistics', 'Points', 'Setup')."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Toolbar, legend, panels",
+   "issue": "The Esri PixelSize footprint value is labelled five different ways: 'DEM coverage' (toolbar), 'DEM source coverage' (legend), 'Source coverage' (metric), 'Source footprint' (DEM block), 'Source footprint resolution' (Setup).",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:678, :955, :764, :773, :899.",
+   "recommendation": "Use one label, 'Source resolution', for the value and 'Source resolution map' for the overlay toggle and legend title."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "Stats panel / Points panel",
+   "issue": "Stats is reachable before any profile exists and shows 13 of 15 tiles as '—' with no call to action; the Points empty state tells the user to 'Start a cross section' but offers no button.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:707 (Stats always rendered), :811-824 (dashes), :831 (empty-state copy without a control).",
+   "recommendation": "Hide the Stats rail button until a profile exists (as Profile already is) or replace the dashes with a single 'Build a profile to see statistics' state; add a '+ New cross section' button to the Points empty state that calls beginDrawing."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "Elevation analysis panel (3D slice)",
+   "issue": "Every main-map zoom re-runs the hidden-MapView screenshot and re-drapes the slice texture (with the 'Draping … onto the DEM…' overlay) even while the panel covers the map the user is zooming.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:285 (view.watch('scale')) -> :801 (sceneScale prop) -> web/src/features/terrainCrossSections/TerrainSlice3D.tsx:320 (effect depends on referenceScale), overlay :426-430.",
+   "recommendation": "Quantise referenceScale to the basemap LOD (round(log2(scale))) and debounce 500 ms so only a real LOD change re-drapes; keep the previous texture visible until the new one arrives."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Help users recognize, diagnose, and recover from errors",
+   "screen": "Terrain cross-section scene",
+   "issue": "The '3D terrain unavailable' overlay is terminal: no Retry, no link, and the only recovery is a full page reload.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:1006-1013.",
+   "recommendation": "Add a 'Retry' button that re-runs the scene effect (bump a key on the container) and a secondary 'Check network' hint; keep the error text."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Consistency and standards",
+   "screen": "Panels, scene container",
+   "issue": "Accessibility gaps: the profile/slice tabs are plain buttons without role=tab/aria-selected; the Setup selects have no associated <label>; the SceneView container has no accessible name; the drawing hint is pointer-events-none with no aria-live; the slice container has aria-label on a plain div.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:740-757, :852-853, :876-877, :598, :698-703; TerrainSlice3D.tsx:424.",
+   "recommendation": "Use role=tablist/tab/tabpanel, label the selects with <label htmlFor>, give the scene div role=application aria-label='3D terrain map', and put the drawing hint text in an aria-live=polite region."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Visibility of system status",
+   "screen": "Toolbar, legend, scale bar, tiles",
+   "issue": "Disabled buttons use opacity-35 over a 80% dark translucent bar (white text drops to roughly 2:1 contrast) and several labels are 9-10px (legend rows, legend footnote, scale caption, full-screen hint, metric tile labels).",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:626, :635, :644, :653, :662 (disabled:opacity-35 on bg-slate-950/80 at :601); :958 text-[10px], :967 text-[9px], :991 text-[10px]; :1061 text-[10px]; web/src/features/terrainCrossSections/SceneDualScaleBar.tsx:9 text-[9px], :19 text-[10px].",
+   "recommendation": "Use a solid disabled treatment (text-white/45 on bg-white/5, no opacity on the whole button) and raise every label to at least 11px (text-[11px]); drop the 9px legend footnote entirely."
+  },
+  {
+   "severity": 2,
+   "heuristic": "Match between system and the real world",
+   "screen": "Save cross section dialog",
+   "issue": "The dialog's capitalised 'Project' is a terrain-only entity (project_number, title, district) that ERIS users will read as the app-wide project concept; nothing explains the difference and Save is enabled with only a path and no profile, saving profile_snapshot: null without saying so.",
+   "evidence": "CrossSectionSaveDialog.tsx:135, :148, :153 ('Project'); :115 (profile_snapshot: profile may be null), :180 (Samples '—'); enabled at TerrainCrossSectionWorkspace.tsx:643 (controlPoints.length < 2 only).",
+   "recommendation": "Rename to 'Cross-section project' in the dialog and select, and show an inline note 'No profile built yet — only the path will be saved' when profile is null."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Match between system and the real world",
+   "screen": "Elevation analysis panel (3D slice)",
+   "issue": "Slice width presets are metre round numbers rendered in feet (164 ft, 328 ft, 820 ft, 1,640 ft) so they look arbitrary; 'Cut base' and the DEM-grid paragraph describe rendering internals.",
+   "evidence": "TerrainSlice3D.tsx:541-552 (presets 50/100/250/500 with metric=false from TerrainCrossSectionWorkspace.tsx:798), :627 (Cut base), :629-631 (explanation paragraph).",
+   "recommendation": "Use feet-native presets (100 / 250 / 500 / 1,000 ft) converted to metres internally, drop 'Cut base', and cut the paragraph to one line under an info icon."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Aesthetic and minimalist design",
+   "screen": "Terrain cross-section scene",
+   "issue": "Basemap switching exists twice (bottom-left pill and Setup panel) and the Profile panel can be opened three ways (rail, bottom pill, auto-open); the toolbar mixes five button treatments with no hierarchy rule.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:940-951 vs :912-929; :706, :976-983, :537; button classes :606, :616, :635, :644, :653, :662.",
+   "recommendation": "Keep the bottom-left basemap pill, remove the Setup duplicate; make the bottom pill a status-only chip; reduce the toolbar to primary (Build), secondary (New, Undo, Add points), and an overflow menu (Save, Capture, Clear, DEM coverage, Full screen)."
+  },
+  {
+   "severity": 1,
+   "heuristic": "Consistency and standards",
+   "screen": "Aerial capture / Save dialogs",
+   "issue": "The success notice is not announced (no aria-live) while the error uses role=alert; the Save dialog error uses a light-only palette (bg-red-50 text-red-800) inside a theme-token dialog; Close is a text button in one dialog and an x in the other.",
+   "evidence": "AerialCaptureDialog.tsx:490-494 vs :485; CrossSectionSaveDialog.tsx:169, :137 vs AerialCaptureDialog.tsx:441-448.",
+   "recommendation": "Give the notice role=status, reuse the red-950/red-50 alert style from :485 in the Save dialog, and use the shared Modal close button."
+  }
+ ],
+ "responsiveIssues": [
+  {
+   "screen": "Terrain cross-section scene (toolbar)",
+   "viewport": "phone",
+   "issue": "Toolbar max-width calc(100% - 360px) resolves to 0 at a 343px content width, so all nine buttons stack in a single column overflowing a zero-width box that overlaps the drawing hint and the Esri Home/Compass widgets.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:600-601; hint :699; widgets :281-282; AppShell.tsx:163 px-4.",
+   "fix": "Below lg, render the toolbar as a fixed bottom action bar (w-full, overflow-x-auto, 44px buttons) and put DEM coverage / Full screen / Clear in a '…' menu; at lg+ use max-w-[calc(100%-320px)]."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "viewport": "phone",
+   "issue": "Below lg the workspace is a 620px-tall box inside a scrolling page (h-full of an auto-height parent, min-h-[620px]); the SceneView captures touch for pan/tilt so the user cannot scroll past the map, and the escape hatch (Full screen) is in the broken toolbar.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:594-596; AppShell.tsx:138 (min-h-screen lg:h-screen lg:overflow-hidden), :183-185.",
+   "fix": "Apply h-screen/overflow-hidden to the workspace shell at all widths (h-[calc(100dvh-var(--header-h))]) and collapse the mobile navigation card into a hamburger so the map fills the phone viewport."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "viewport": "phone",
+   "issue": "The aside becomes ~247px wide (calc(100% - 6rem) of 343px) at right-20; the grid-cols-4 metric row squeezes to ~60px cells and the chart forces min-w-[520px] horizontal scrolling inside the panel while the pointer handler maps clientX against the scrolled SVG.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:713-715, :760; CrossSectionProfileChart.tsx:101-104.",
+   "fix": "Below md, render panels as a full-width bottom sheet (inset-x-0 bottom-0 max-h-[70dvh]) instead of a right-anchored aside; use grid-cols-2 md:grid-cols-4 for the metric row and drop min-w on the SVG (let the 1000x300 viewBox scale)."
+  },
+  {
+   "screen": "Terrain cross-section scene (bottom row)",
+   "viewport": "phone",
+   "issue": "Three absolutely positioned bottom items collide at 343px: basemap pill (left-3), the centred 'Elevation analysis' pill (~330px of text), and the scale bar (right-3).",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:940 (bottom-3 left-3), :979 (bottom-3 left-1/2), SceneDualScaleBar.tsx:8 (bottom-3 right-3).",
+   "fix": "Below md hide the centred pill (the bottom sheet handle carries the distance) and move the basemap toggle into the Setup sheet; keep only the scale bar bottom-left."
+  },
+  {
+   "screen": "Toolbar, rail, panel close, basemap pill",
+   "viewport": "phone",
+   "issue": "All controls are 28-32px tall (px-3 py-2 text-xs; min-w-16 py-2; h-8 w-8; py-2 text-[11px]), below the 44px touch minimum, and the rail sits vertically centred over the right map edge where a thumb pans the scene.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:606, :626, :1051, :730, :946, :705.",
+   "fix": "Use min-h-11 min-w-11 on every map-overlay button below lg and move the rail into the bottom sheet's tab strip."
+  },
+  {
+   "screen": "Scene, toolbar, chart, slice",
+   "viewport": "phone",
+   "issue": "Hover-only affordances: crosshair cursor as the only drawing-mode signal, title tooltips on Clear/DEM coverage/Full screen, the chart readout via onPointerMove, and the slice footer 'Drag to orbit · Scroll to zoom' hint.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:420, :663, :676, :686; CrossSectionProfileChart.tsx:107; TerrainSlice3D.tsx:439.",
+   "fix": "Keep the text hint 'Tap terrain to place P{n}' visible on touch, replace title tooltips with visible labels or an aria-describedby help popover, add tap-to-pin on the chart, and change the slice hint to 'Drag to orbit · Pinch to zoom' when (pointer: coarse)."
+  },
+  {
+   "screen": "Save cross section dialog",
+   "viewport": "phone",
+   "issue": "The card has no max-height or overflow-y-auto; with the create-Project form open the stacked content (~800px) exceeds the 812px viewport minus p-4, and because the wrapper is items-center the top of the card is pushed off-screen with no way to reach the Save button.",
+   "evidence": "CrossSectionSaveDialog.tsx:130-131 (fixed inset-0 flex items-center p-4; card w-full max-w-3xl overflow-hidden), :140 (grid stacks below md), :156-163 (create form).",
+   "fix": "Add max-h-[92dvh] overflow-y-auto to the card (or flex-col with a scrolling body and sticky footer) as AerialCaptureDialog already does at :431."
+  },
+  {
+   "screen": "Aerial capture dialog",
+   "viewport": "phone",
+   "issue": "Below lg the two panes stack inside a grid capped at max-h-[94vh] with overflow-hidden; the left pane is ~530px of content and the preview row has min-h-[420px], so the preview (and on short phones the Download button) is clipped with no scroll.",
+   "evidence": "AerialCaptureDialog.tsx:431-433 (grid max-h-[94vh] overflow-hidden lg:grid-cols-[...]), :520 (min-h-[420px]).",
+   "fix": "Below lg make the card a single overflow-y-auto column (grid-rows-[auto_auto], remove min-h on the preview, img max-h-[50dvh]) and put the format buttons and actions above the preview."
+  },
+  {
+   "screen": "Terrain cross-section scene (toolbar + hint)",
+   "viewport": "tablet",
+   "issue": "At 768px portrait the content is 720px so the toolbar is capped at 360px and wraps to three rows that overlap the 'Click terrain to place P#' hint at top-16; the wide Profile panel becomes 624px and covers all but ~16px of the map.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:600 (calc), :699 (top-16 hint), :713-715 (w-[min(720px,calc(100%-6rem))] right-20).",
+   "fix": "Same bottom action bar as phone below lg, position the hint relative to the toolbar height (top-auto, after the toolbar in a flex column), and use the bottom-sheet panel below lg."
+  },
+  {
+   "screen": "Terrain cross-section scene / panels",
+   "viewport": "tablet",
+   "issue": "At 1024px landscape the w-64 nav appears so the workspace is ~704px wide: the toolbar is capped at 344px (still 3 rows) and the Profile panel is 608px at right-20, hiding the terrain goTo() just framed.",
+   "evidence": "AppShell.tsx:165 (w-64 at lg), :163 (px-6, gap-4); TerrainCrossSectionWorkspace.tsx:600, :713-715, :546.",
+   "fix": "Auto-collapse the AppShell nav to w-16 on workspace pages below xl, and dock the profile as a bottom drawer (h-[260px]) instead of a 608px right panel at lg."
+  },
+  {
+   "screen": "Elevation analysis panel (3D slice)",
+   "viewport": "tablet",
+   "issue": "A 430px ArcGIS SceneView with wheel/touch zoom sits inside an overflow-y-auto aside, so scrolling the panel to reach the stats below gets trapped in the scene (the same for busy placeholder height).",
+   "evidence": "TerrainSlice3D.tsx:424 (h-[430px]), :603 (busy h-[430px]), :439 ('Scroll to zoom'); aside overflow-y-auto at TerrainCrossSectionWorkspace.tsx:713.",
+   "fix": "Cap the slice scene at h-[min(430px,45dvh)], disable mouse-wheel/pinch navigation until the scene is tapped/focused (view.navigation.mouseWheelZoomEnabled=false + a 'Tap to interact' overlay), and move the stats above the scene."
+  },
+  {
+   "screen": "Terrain cross-section scene (toolbar + Profile panel)",
+   "viewport": "desktop",
+   "issue": "At 1440px the workspace is ~1120px wide; the toolbar (~730px of buttons, up to ~790px with 'Finish & profile' and 'Save changes') fits only barely in max-w 760px, and the 720px Profile panel plus 80px rail gap leaves a ~320px strip of map visible while the goTo() extent is centred behind the panel.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:600, :637, :646 (label variants), :713-715 (w-[min(720px,...)] right-20), :546.",
+   "fix": "Set view.padding.right to the open panel width before goTo() so the profile frames inside the visible strip, and reduce the panel to 560px (chart 1000x300 viewBox is legible at 520px) or dock it as a bottom drawer."
+  },
+  {
+   "screen": "All overlays",
+   "viewport": "all",
+   "issue": "Map overlays are hard-coded dark (bg-[#0f172a], bg-slate-950/80, bg-black/60, white/20) while the aside and dialogs use --panel/--ink tokens; Light and Coastal themes render three visual systems on one screen.",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:594, :601, :705, :940, :954, :979, :997 vs :713; CrossSectionSaveDialog.tsx:169.",
+   "fix": "Define --map-chrome / --map-chrome-ink tokens (dark in every theme is fine, but declared once) and use them for every overlay so the treatment is a deliberate, single style."
+  },
+  {
+   "screen": "Terrain cross-section scene (Esri Search)",
+   "viewport": "all",
+   "issue": "The stock Esri Search widget (~240px) is placed top-right and is the reason 360px is reserved from the toolbar; on tablets it and the toolbar share the same 720px edge and the search input overlaps the profile error alert (top-20, centred).",
+   "evidence": "TerrainCrossSectionWorkspace.tsx:277-280 (Search at top-right), :600 (calc reserve), :997 (alert left-1/2 top-20).",
+   "fix": "Move Search into the toolbar as a magnifier button that expands a search input on demand (Search widget with container in the toolbar), freeing the top-right edge and the 360px reserve."
+  }
+ ],
+ "dataDensity": [
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "AppShell page heading 'Terrain Cross Sections' (TerrainCrossSectionsPage.tsx:6; AppShell.tsx:184)",
+   "verdict": "demote",
+   "reason": "Costs ~36px of vertical space in a viewport-filling workspace and duplicates the active sidebar item; fold the title into the AppShell header breadcrumb when workspace=true."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "ArcGIS SceneView with satellite/topo basemap on world-elevation (TerrainCrossSectionWorkspace.tsx:246-262, 598)",
+   "verdict": "keep",
+   "reason": "This is where the primary task (placing the path) happens; it should fill the viewport."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Control-point markers P1..Pn and dashed/solid path (365-393, 349-363)",
+   "verdict": "keep",
+   "reason": "Essential feedback on where the path is and whether drawing is in progress."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Control-point popup with lat/lon (376-379)",
+   "verdict": "progressive",
+   "reason": "Already on demand via click; extend it with 'Remove point' and 'Copy coordinates' so it becomes the per-point edit surface."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Sampled profile polyline (yellow) and red chart-synced hover marker (396-414, 137-160)",
+   "verdict": "keep",
+   "reason": "The analytic core: they show the sampled geodesic and link chart position to terrain."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Drawing hint 'Click terrain to place P{n}' (698-703)",
+   "verdict": "keep",
+   "reason": "Only instruction for the click-to-place interaction; make it 'Tap' on touch and aria-live."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Toolbar: + New, Add points, Undo, Build profile (602-638)",
+   "verdict": "keep",
+   "reason": "Primary drawing state machine; these are the first-day user's whole workflow."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Toolbar: Save, Capture (640-656)",
+   "verdict": "keep",
+   "reason": "Hand-off actions for the primary task; demote to a secondary style but keep them visible once 2+ points exist."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Toolbar: Clear, DEM coverage, Full screen (658-689)",
+   "verdict": "demote",
+   "reason": "Destructive or diagnostic/view actions used rarely; put them behind an overflow menu to let the primary buttons fit on one row and survive narrow widths."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "'Saved to {project} · {title}' chip (691-695)",
+   "verdict": "keep",
+   "reason": "Only confirmation that the work is persisted; should become a link to reopen the saved record."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Right rail Profile / Stats / Points N / Setup (705-710)",
+   "verdict": "keep",
+   "reason": "Navigation to the analysis panels; anchor it (do not centre) and hide Stats until a profile exists."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Bottom-left basemap toggle Imagery / Topographic (940-951)",
+   "verdict": "keep",
+   "reason": "Basemap choice affects where a user can recognise a road cut; keep this one and remove the Setup duplicate."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "DEM source coverage legend with 7 classes (953-966)",
+   "verdict": "progressive",
+   "reason": "Only meaningful while the overlay is on; already conditional — keep conditional but shrink to 4 classes with one notation."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Legend footnote 'Color = finest cataloged Esri PixelSize footprint…' at 9px (967-969)",
+   "verdict": "remove",
+   "reason": "Unreadable size and Esri jargon; repeats the Setup caveat and adds nothing to the placing/sampling task."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Scale bar (SceneDualScaleBar.tsx:8-11)",
+   "verdict": "keep",
+   "reason": "Standard map reference for judging path length; drop the 'SCALE' caption to save a line."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Bottom pill 'Elevation analysis · Profile + 3D slice · {distance} · {res} source coverage' (975-983)",
+   "verdict": "demote",
+   "reason": "Third way to open the profile and repeats panel metrics; reduce to a status chip showing distance only (or drop when the panel is docked)."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Draft pill '{distance} path selected · Build profile to sample the DEM' (984-987)",
+   "verdict": "keep",
+   "reason": "Tells the first-day user the next step; make it a button that triggers Build profile."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Full-screen hint '…Esc to exit' (990-994)",
+   "verdict": "progressive",
+   "reason": "Show for 4 s after entering full screen then fade; permanent 10px text adds clutter."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Esri Search / Home / Compass widgets (277-282)",
+   "verdict": "demote",
+   "reason": "Search is useful for jumping to a route but should collapse to an icon in the toolbar; Home and Compass are stock chrome that can merge into one 'Reset view' button."
+  },
+  {
+   "screen": "Terrain cross-section scene",
+   "element": "Profile error alert, loading overlay, scene error overlay (996-1013)",
+   "verdict": "keep",
+   "reason": "Essential status; add Retry to the scene error."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "Panel subtitle '{distance} · {n} samples · {res} source coverage' (579-584, 725)",
+   "verdict": "remove",
+   "reason": "Duplicates the metric row directly beneath it and truncates at narrow widths."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "Tabs Elevation Profile / 3D Terrain Slice (739-758)",
+   "verdict": "keep",
+   "reason": "Primary mode switch of the analysis panel."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "Metric row Path / Samples / Spacing / Source coverage (760-765)",
+   "verdict": "demote",
+   "reason": "Keep Path and Source resolution in the panel header; move Samples and Spacing to Setup where the user controls them."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "DEM block: 'ArcGIS World Elevation · mode' + demQualityNote + footprint/sampling pair (767-776)",
+   "verdict": "progressive",
+   "reason": "Provenance matters for defensibility but is 40+ words of jargon above the chart; collapse into an 'About this data' disclosure with one plain summary line."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "Chart card title 'DEM cross-section profile' + hover instruction (CrossSectionProfileChart.tsx:77-80)",
+   "verdict": "remove",
+   "reason": "Third heading in a row (panel title, tab, card title); the tab already says Elevation Profile and the readout row makes the instruction self-evident."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "Hover readout Distance / Elevation / Coordinates / Segment grade (82-99)",
+   "verdict": "keep",
+   "reason": "Answers the primary analysis question at any point; shorten coordinates to 5 dp so they fit 4 columns."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "SVG profile with P# markers and hover crosshair (102-161)",
+   "verdict": "keep",
+   "reason": "The core visual of the screen; should be the first thing visible when the panel opens."
+  },
+  {
+   "screen": "Elevation analysis panel",
+   "element": "Minimum / Maximum / Gain / Loss tiles (787-792)",
+   "verdict": "keep",
+   "reason": "Summary statistics field engineers quote; make this the single home for them and drop the Stats duplicate."
+  },
+  {
+   "screen": "Elevation analysis panel (slice)",
+   "element": "Slice width value, slider and presets (TerrainSlice3D.tsx:520-553)",
+   "verdict": "keep",
+   "reason": "Drives the corridor query; switch presets to feet-native values."
+  },
+  {
+   "screen": "Elevation analysis panel (slice)",
+   "element": "Surface layer Match map / Bare DEM + explanation (555-580)",
+   "verdict": "progressive",
+   "reason": "Diagnostic override used rarely; a single 'Bare terrain' checkbox with a tooltip is enough."
+  },
+  {
+   "screen": "Elevation analysis panel (slice)",
+   "element": "Control points Show/Hide + sentence (582-599)",
+   "verdict": "demote",
+   "reason": "On by default and seldom toggled; make it an icon toggle in the scene corner without the explanatory sentence."
+  },
+  {
+   "screen": "Elevation analysis panel (slice)",
+   "element": "3D slice SceneView with draping overlay and texture-error banner (422-436)",
+   "verdict": "keep",
+   "reason": "The slice tab's purpose; cap height on small screens."
+  },
+  {
+   "screen": "Elevation analysis panel (slice)",
+   "element": "Footer 'Drag to orbit · Scroll to zoom · 1x vertical scale · Surface · © Esri · N points visible' (438-442)",
+   "verdict": "demote",
+   "reason": "Attribution is required; the rest is help text — keep '© Esri' and 'Surface: …', move the navigation hint to a first-open tooltip."
+  },
+  {
+   "screen": "Elevation analysis panel (slice)",
+   "element": "Highest / Lowest / Terrain range / Cut base tiles (623-628)",
+   "verdict": "demote",
+   "reason": "Highest/Lowest/Range are useful secondary figures; 'Cut base' is a rendering plane and should be removed."
+  },
+  {
+   "screen": "Elevation analysis panel (slice)",
+   "element": "Explanatory paragraph 'ERIS samples a two-dimensional ArcGIS DEM grid…' (629-631)",
+   "verdict": "remove",
+   "reason": "Describes implementation; carries no decision value for a corridor review."
+  },
+  {
+   "screen": "Stats panel",
+   "element": "Path, Elevation range, Min, Max, Gain, Loss, Start, End tiles (810, 818-824)",
+   "verdict": "keep",
+   "reason": "Start/End and Range are the only figures unique to this panel; merge the whole panel into the Profile tab as a 'Statistics' section."
+  },
+  {
+   "screen": "Stats panel",
+   "element": "Samples, Spacing, DEM request, Source coverage, Terrain3D sampling tiles (811-815)",
+   "verdict": "demote",
+   "reason": "Sampling internals already in the Profile header and Setup; show once, in Setup."
+  },
+  {
+   "screen": "Stats panel",
+   "element": "'Coverage samples' and 'Terrain metadata' counters (816-817)",
+   "verdict": "remove",
+   "reason": "Unlabeled internal counts (covered/total footprints, finite demResolution count) with no user meaning."
+  },
+  {
+   "screen": "Stats panel",
+   "element": "13 '—' placeholder tiles before a profile exists (811-824)",
+   "verdict": "progressive",
+   "reason": "Replace with one 'Build a profile to see statistics' state until data exists."
+  },
+  {
+   "screen": "Control points panel",
+   "element": "Per-row P#, cumulative distance, lat/lon, elevation (833-845)",
+   "verdict": "keep",
+   "reason": "Chainage and vertex elevation are exactly what a section needs; add Remove / Zoom-to actions per row."
+  },
+  {
+   "screen": "Control points panel",
+   "element": "Subtitle '{n} selected points' (588)",
+   "verdict": "remove",
+   "reason": "The count is already in the rail label 'Points N'."
+  },
+  {
+   "screen": "Setup panel",
+   "element": "Profile sample spacing select (852-869)",
+   "verdict": "keep",
+   "reason": "The one sampling control users legitimately change (detail vs long transects)."
+  },
+  {
+   "screen": "Setup panel",
+   "element": "Spacing caveat paragraph (870-872)",
+   "verdict": "progressive",
+   "reason": "Useful once; put behind an info icon next to the label."
+  },
+  {
+   "screen": "Setup panel",
+   "element": "Terrain3D elevation query select + caveat paragraph (876-895)",
+   "verdict": "progressive",
+   "reason": "Advanced Esri option; hide under 'Advanced' with the default 'Best available' preselected."
+  },
+  {
+   "screen": "Setup panel",
+   "element": "Source footprint / Terrain3D sampling card + demQualityNote (896-908)",
+   "verdict": "remove",
+   "reason": "Third rendering of the same two values and paragraph; the Profile panel's disclosure is the single home."
+  },
+  {
+   "screen": "Setup panel",
+   "element": "Basemap Imagery / Topographic buttons (912-929)",
+   "verdict": "remove",
+   "reason": "Duplicate of the always-visible bottom-left pill."
+  },
+  {
+   "screen": "Setup panel",
+   "element": "Units note 'Terrain distances and elevations are displayed in feet…' (931-933)",
+   "verdict": "demote",
+   "reason": "Important convention but buried in the least-visited panel; surface as '(ft)' in axis titles and tile labels instead of a paragraph."
+  },
+  {
+   "screen": "Save cross section dialog",
+   "element": "Project select + inline create form (143-163)",
+   "verdict": "keep",
+   "reason": "Required to persist; add a search box since the list can hold 250 items."
+  },
+  {
+   "screen": "Save cross section dialog",
+   "element": "Selected project card '{number} · {title} / District' (165)",
+   "verdict": "remove",
+   "reason": "Repeats the select's own text directly above it."
+  },
+  {
+   "screen": "Save cross section dialog",
+   "element": "Name and Notes inputs (171-176)",
+   "verdict": "keep",
+   "reason": "Essential identity of the saved record; default the name to 'Cross section {date}' rather than 'Cross Section'."
+  },
+  {
+   "screen": "Save cross section dialog",
+   "element": "Metrics Points / Samples / Spacing (178-182)",
+   "verdict": "demote",
+   "reason": "Sanity check; render as one line of muted text under the Save button."
+  },
+  {
+   "screen": "Aerial capture dialog",
+   "element": "Format 1:1 / 16:9 / 9:16 + pixel dimensions (451-470)",
+   "verdict": "keep",
+   "reason": "The only decision the user makes in this dialog."
+  },
+  {
+   "screen": "Aerial capture dialog",
+   "element": "'Capture standard' six-line checklist (472-482)",
+   "verdict": "remove",
+   "reason": "Reassurance copy repeating what the preview visibly shows; pushes the actions further down on tablets."
+  },
+  {
+   "screen": "Aerial capture dialog",
+   "element": "Copy JPEG / Download JPEG buttons + notices (484-513)",
+   "verdict": "keep",
+   "reason": "The task's exit; make Download primary."
+  },
+  {
+   "screen": "Aerial capture dialog",
+   "element": "Privacy note 'Capture files stay in the browser…' (515-517)",
+   "verdict": "demote",
+   "reason": "Useful but secondary; one muted line under the buttons is enough (it already is; keep it short)."
+  },
+  {
+   "screen": "Aerial capture dialog",
+   "element": "JPEG preview with north arrow, scale and attribution (520-534)",
+   "verdict": "keep",
+   "reason": "The deliverable itself."
+  }
+ ],
+ "quickWins": [
+  "Add max-h-[92dvh] overflow-y-auto to the Save dialog card (CrossSectionSaveDialog.tsx:131), matching AerialCaptureDialog.tsx:431.",
+  "Switch the clipboard write to a PNG blob and make 'Download JPEG' the primary button (AerialCaptureDialog.tsx:414-416, 497-512).",
+  "Add an inline confirm (or 8 s undo toast) before beginDrawing/clearAll discard 2+ points or a profile (TerrainCrossSectionWorkspace.tsx:423-433, 455-465).",
+  "Set view.padding = { right: panelWidth } before goTo() so the profile frames inside the visible map strip (TerrainCrossSectionWorkspace.tsx:546).",
+  "Add tabIndex=0 + ArrowLeft/ArrowRight and tap-to-pin to the profile SVG (CrossSectionProfileChart.tsx:102-109).",
+  "Delete the duplicates: Setup basemap buttons (912-929), Setup provenance card (896-908), panel subtitle (579-584), bottom-pill suffix (982), chart card title (CrossSectionProfileChart.tsx:77-80), 'Coverage samples'/'Terrain metadata' tiles (816-817), 'Cut base' tile and DEM-grid paragraph (TerrainSlice3D.tsx:627-631), 'Capture standard' checklist (AerialCaptureDialog.tsx:472-482).",
+  "Rename labels once: 'Build profile' everywhere (637, 841, 986), 'Source resolution' for the PixelSize value (678, 764, 773, 899, 955), rail labels equal to panel titles (706-709 vs 572-578).",
+  "Wrap demQualityNote and the two Setup caveats in a <details> 'About this data' disclosure (771, 870-872, 893-895) and rewrite them without 'Terrain3D', 'Data Extents' or 'PixelSize'.",
+  "Raise all 9-10px text to 11px and replace disabled:opacity-35 with a solid muted style (TerrainCrossSectionWorkspace.tsx:626-662, 958, 967, 991, 1061; SceneDualScaleBar.tsx:9, 19).",
+  "Add a Retry button to the scene error overlay (1006-1013) and a '+ New cross section' button to the Points empty state (831); hide the Stats rail button until a profile exists (707).",
+  "Add per-row 'Remove' and 'Zoom to' buttons in the Points panel (833-845) and 'Remove point' in the map popup (376-379).",
+  "Give the tabs role=tablist/tab, label the Setup selects with <label htmlFor> (852-853, 876-877), add aria-labelledby + Escape/backdrop close to both dialogs, and role=status to the aerial success notice (AerialCaptureDialog.tsx:490-494).",
+  "Debounce and LOD-quantise referenceScale so the slice texture is not re-draped on every zoom (TerrainSlice3D.tsx:320; TerrainCrossSectionWorkspace.tsx:285).",
+  "Use feet-native slice presets (100/250/500/1,000 ft) instead of 164/328/820/1,640 ft (TerrainSlice3D.tsx:541-552)."
+ ],
+ "structuralChanges": [
+  "Responsive shell: make the workspace fill the viewport at every width (h-[calc(100dvh-header)] with the AppShell nav collapsed to a hamburger/rail below lg, and auto-collapsed to w-16 on workspace pages below xl), replacing the min-h-[620px] scrolling box and the lg-only h-screen split (AppShell.tsx:138, 163-185; TerrainCrossSectionWorkspace.tsx:594-596).",
+  "Toolbar redesign: one primary action ('Build profile' / 'Rebuild'), secondary drawing actions (New, Undo, Add points), and an overflow menu (Save, Capture, Clear, Source-resolution overlay, Full screen, Search); rendered top-left at lg+ and as a bottom action bar with 44px targets below lg — no calc() width cap.",
+  "Panel architecture: replace the four right-anchored asides with two surfaces — a docked bottom drawer for the Profile (chart, hover readout, Min/Max/Gain/Loss/Start/End, slice tab) that keeps the map visible above it, and a single right/side sheet with Points and Setup tabs (Stats merged into Profile). Below md both become full-width bottom sheets with a drag handle.",
+  "Point editing model: adopt ArcGIS SketchViewModel for create/update so points can be dragged on desktop and removed/zoomed from the Points list on touch; keep a profile until the next explicit Build instead of nulling it on every edit.",
+  "Persistence and reopening: URL-encoded saved-section id, a 'Saved sections' browser (Project > cross sections) that loads a record back into the workspace, and sessionStorage draft recovery so refresh/navigation does not destroy an unsaved path.",
+  "Vocabulary and provenance: one glossary for the feature ('Source resolution', 'Sampling resolution', 'Cross-section project'), one plain-language provenance line per panel with an 'About this data' disclosure, and a shared Stat tile + Modal primitive so the four tile components and two dialogs render identically across Light/Dark/Coastal themes."
+ ]
+}

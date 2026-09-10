@@ -1,0 +1,1328 @@
+{
+ "area": "Event Groups list/detail plus legacy Projects pages",
+ "screens": [
+  {
+   "name": "Event Groups list",
+   "route": "/event-groups",
+   "purpose": "Read-only worklist of Event Groups (shared grouping context across independent incidents) that lets operational staff find a group by title/location and open its record.",
+   "roles": [
+    "MAINTENANCE_COORDINATOR / MAINT_COORDINATOR",
+    "GEOTECH_OFFICE_CHIEF / OFFICE_CHIEF",
+    "GEOTECH_BRANCH_CHIEF / BRANCH_CHIEF",
+    "GEOTECH_ENGINEER / FIELD_WORKER",
+    "REVIEWER",
+    "ADMIN",
+    "Gate: RoleRoute roles={OPERATIONAL_ROLE_NAMES} (web/src/App.tsx:61-68; web/src/utils/roleModel.ts:17-24). Maintenance field workers are redirected to /submissions (web/src/auth/RoleRoute.tsx:19). Sidebar entry only when isOperationalUser (web/src/ui/AppShell.tsx:85)."
+   ],
+   "primaryTasks": [
+    "Find a specific Event Group by title, county, route or description",
+    "Scan open groups for incident volume and recency to decide where to look next",
+    "Open an Event Group record"
+   ],
+   "dataShown": [
+    {
+     "label": "Search box (placeholder: Search title, county, route, or description)",
+     "necessity": "essential",
+     "note": "Primary finding mechanism; debounced 250 ms server search via ?q=.",
+     "source": "web/src/pages/EventGroupsPage.tsx:65"
+    },
+    {
+     "label": "Status filter select (Open / Closed / Archived / All Event Groups), default OPEN",
+     "necessity": "essential",
+     "note": "Scopes the worklist; default hides closed and archived groups.",
+     "source": "web/src/pages/EventGroupsPage.tsx:66-71"
+    },
+    {
+     "label": "Summary line 'N groups · N incidents · N active'",
+     "necessity": "secondary",
+     "note": "Aggregate over the loaded page only (capped at 500); useful context but rendered as xs muted text and not needed to find a group.",
+     "source": "web/src/pages/EventGroupsPage.tsx:55-59,72"
+    },
+    {
+     "label": "Refresh button label ('Refresh' / 'Refreshing…')",
+     "necessity": "secondary",
+     "note": "Busy-state feedback; the list already reloads on filter/search change.",
+     "source": "web/src/pages/EventGroupsPage.tsx:73"
+    },
+    {
+     "label": "Error banner",
+     "necessity": "essential",
+     "note": "Only path to learn the list failed to load; not announced (no role=alert).",
+     "source": "web/src/pages/EventGroupsPage.tsx:76"
+    },
+    {
+     "label": "Column: Event Group title (link)",
+     "necessity": "essential",
+     "note": "Identifies the group; the only human-readable key.",
+     "source": "web/src/pages/EventGroupsPage.tsx:86"
+    },
+    {
+     "label": "Sub-line 'Event Group #<id>'",
+     "necessity": "secondary",
+     "note": "Numeric DB id; other screens cross-reference groups as 'Event Group #N' (IncidentsOperationsPage.tsx:304, AssessmentDetailPanel.tsx:243) so it works as a lookup key, but it is not the permanent event_group_key.",
+     "source": "web/src/pages/EventGroupsPage.tsx:86"
+    },
+    {
+     "label": "Column: Location label 'D<district> · <county> · R<route> · PM <post_mile>' or 'Location not recorded'",
+     "necessity": "essential",
+     "note": "Spatial identity of the group; abbreviations D/R/PM are undefined on screen.",
+     "source": "web/src/pages/EventGroupsPage.tsx:87; web/src/features/eventGroups/eventGroupTypes.ts:71-79"
+    },
+    {
+     "label": "Column: Incidents '<count> total · <open_count> active'",
+     "necessity": "essential",
+     "note": "Volume and how much is still live; core triage signal.",
+     "source": "web/src/pages/EventGroupsPage.tsx:88"
+    },
+    {
+     "label": "Column: Status badge (Open/Closed/Archived, colour-coded)",
+     "necessity": "secondary",
+     "note": "Redundant with the status filter in 3 of 4 filter modes; only informative under 'All Event Groups'.",
+     "source": "web/src/pages/EventGroupsPage.tsx:17-24,89"
+    },
+    {
+     "label": "Column: Last activity (latest_incident_activity_at, silently falls back to updated_at)",
+     "necessity": "essential",
+     "note": "Recency is the main sort cue for a worklist, though the table cannot be sorted by it.",
+     "source": "web/src/pages/EventGroupsPage.tsx:90"
+    },
+    {
+     "label": "Column: 'Open Event Group' link button",
+     "necessity": "noise",
+     "note": "Duplicates the title link in the same row; adds a sixth column that forces horizontal scroll on small screens.",
+     "source": "web/src/pages/EventGroupsPage.tsx:91"
+    },
+    {
+     "label": "Empty/loading row text ('Loading Event Groups…' / 'No Event Groups match the current filters.')",
+     "necessity": "secondary",
+     "note": "Distinguishes loading from empty; does not hint that the default OPEN filter may be hiding matches.",
+     "source": "web/src/pages/EventGroupsPage.tsx:83"
+    },
+    {
+     "label": "AppShell page heading 'Event Groups'",
+     "necessity": "secondary",
+     "note": "Shell h1; duplicates the active sidebar item.",
+     "source": "web/src/pages/EventGroupsPage.tsx:62; web/src/ui/AppShell.tsx:184"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Type in search",
+     "who": "All operational roles",
+     "where": "Toolbar, first control (flex-1, min-w 280px)",
+     "note": "Debounced 250 ms; searches within the selected status only."
+    },
+    {
+     "label": "Change status filter",
+     "who": "All operational roles",
+     "where": "Toolbar select next to search"
+    },
+    {
+     "label": "Refresh",
+     "who": "All operational roles",
+     "where": "Toolbar, last item (wraps to a new line on narrow screens)",
+     "note": "Disabled while busy."
+    },
+    {
+     "label": "Open Event Group via title link",
+     "who": "All operational roles",
+     "where": "First table cell (block-level Link)",
+     "note": "Navigates to /event-groups/:id."
+    },
+    {
+     "label": "Open Event Group via 'Open Event Group' chip",
+     "who": "All operational roles",
+     "where": "Right-aligned Action column",
+     "note": "Same target as the title link; 11px text, ~22px tall."
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Sidebar Operations › Event Groups (web/src/ui/AppShell.tsx:85), operational users only",
+     "Legacy redirect /projects → /event-groups (web/src/App.tsx:77)",
+     "'← Event Groups' back link on the detail page (web/src/pages/EventGroupDetailPage.tsx:77)"
+    ],
+    "exits": [
+     "Row title link / 'Open Event Group' chip → /event-groups/:id (EventGroupsPage.tsx:86,91)",
+     "Sidebar navigation (AppShell)",
+     "No breadcrumbs, no deep-linkable filter state (search/status are not in the URL)"
+    ]
+   },
+   "responsive": {
+    "layout": "AppShell (sidebar becomes a stacked 'Navigation' card below lg) → single column: flex-wrap toolbar, optional error banner, one 6-column table inside an overflow-x-auto rounded panel.",
+    "breakpointsUsed": [
+     "md:p-5 (EventGroupsPage.tsx:63)",
+     "min-w-[280px] flex-1 on search input (EventGroupsPage.tsx:65)",
+     "overflow-x-auto on table wrapper, w-full table (EventGroupsPage.tsx:78-79)",
+     "whitespace-nowrap on status badge (EventGroupsPage.tsx:23)",
+     "Shell: lg:flex-row sidebar, lg:hidden mobile nav card, md:px-6 (AppShell.tsx:163-165)"
+    ],
+    "phoneRisks": [
+     "375px: the 6-column table cannot fit; the wrapper scrolls horizontally with no sticky first column, so title and Action are never visible together (EventGroupsPage.tsx:78-80).",
+     "Toolbar wraps into 3-4 rows (search full width, then select, summary text, Refresh) pushing the table below the fold (EventGroupsPage.tsx:64-74).",
+     "'Open Event Group' chip is text-[11px] px-2 py-1 (~22px tall) — well under a 44px touch target (EventGroupsPage.tsx:91).",
+     "Title is a Link styled text-[var(--ink)] with hover-only colour change; on touch there is no visible cue that it is tappable (EventGroupsPage.tsx:86).",
+     "Mobile nav card is rendered above the content, so the user scrolls past the whole navigation list before reaching the toolbar (AppShell.tsx:164)."
+    ],
+    "tabletRisks": [
+     "768-1024px: sidebar is still the stacked mobile card (lg breakpoint is 1024), consuming ~300px of vertical space above the list (AppShell.tsx:164-165).",
+     "Table generally fits at 768px but title/location cells wrap onto 2-3 lines; row hover highlight is hover-only (EventGroupsPage.tsx:85)."
+    ],
+    "desktopNotes": [
+     "At lg+ the sidebar is 256px (collapsible to 64px) and content is capped at max-w-[1900px]; the table stretches to full width with no max width, so on wide monitors the six columns are separated by large whitespace (AppShell.tsx:163-165; EventGroupsPage.tsx:79).",
+     "Summary counts render as xs muted text inline in the toolbar — easy to miss compared with the KPI cards the legacy Projects page used (EventGroupsPage.tsx:72)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Hard-coded limit=500 with no pagination, sorting or truncation notice; the summary counts silently describe only the first 500 groups.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:38,55-59,72",
+     "severity": "major"
+    },
+    {
+     "issue": "Duplicate affordance: title link and 'Open Event Group' chip go to the same place, costing a column and horizontal scroll on phones.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:86,91",
+     "severity": "minor"
+    },
+    {
+     "issue": "Search is scoped to the current status filter (default OPEN); searching for a closed group returns 'No Event Groups match the current filters' without suggesting the filter be widened.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:29,38-39,83",
+     "severity": "minor"
+    },
+    {
+     "issue": "Search input and status select have no label or aria-label; the placeholder is the only label.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:65-66",
+     "severity": "minor"
+    },
+    {
+     "issue": "Error banner is not role=alert while the detail page's integrity banner is; screen-reader users are not told the load failed.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:76 vs web/src/pages/EventGroupDetailPage.tsx:102",
+     "severity": "minor"
+    },
+    {
+     "issue": "Link affordance relies on hover colour only; title links are the same colour as body text.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:86",
+     "severity": "minor"
+    },
+    {
+     "issue": "Vocabulary drift inside one row: status 'Open' (group) vs 'active' (open_incident_count) vs 'Last activity'.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:72,88-90; eventGroupTypes.ts:81-85",
+     "severity": "minor"
+    },
+    {
+     "issue": "Status badge component lives in a page module and is imported by another page instead of features/eventGroups or ui.",
+     "evidence": "web/src/pages/EventGroupsPage.tsx:17; web/src/pages/EventGroupDetailPage.tsx:10",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Single compact table with the same column grammar as Incidents/Assessments; header styling (11px uppercase tracking) consistent across the redesign (EventGroupsPage.tsx:80).",
+    "Sensible default (OPEN) plus a four-option filter that covers the whole lifecycle including ARCHIVED (EventGroupsPage.tsx:66-71).",
+    "Debounced server search with explicit 'Refreshing…' state and distinct loading vs empty messaging (EventGroupsPage.tsx:49-53,73,83).",
+    "Uses <Link> for navigation (right-click / open in new tab works), unlike the legacy Projects page (EventGroupsPage.tsx:86,91).",
+    "Shared eventGroupLocationLabel and status label helpers keep location/status text identical across list, detail and Mission Center (eventGroupTypes.ts:71-85).",
+    "Table is wrapped in overflow-x-auto so the page body never scrolls horizontally (EventGroupsPage.tsx:78)."
+   ]
+  },
+  {
+   "name": "Event Group detail",
+   "route": "/event-groups/:id",
+   "purpose": "Read-only record of one Event Group showing its header facts, the incidents grouped under it with cross-links, and the audited group history.",
+   "roles": [
+    "Same as list: OPERATIONAL_ROLE_NAMES via RoleRoute (web/src/App.tsx:69-76); others redirected to /submissions (web/src/auth/RoleRoute.tsx:19).",
+    "No role-conditional UI inside the page — every reaching role sees identical content and links (no edit/close/reopen controls exist)."
+   ],
+   "primaryTasks": [
+    "Understand what the group is (title, location, status, volume, recency)",
+    "See which incidents belong to it and their status/stage, then jump to an incident, its assessment/submission, or the Mission Center map",
+    "Review the group's history (who did what, when)"
+   ],
+   "dataShown": [
+    {
+     "label": "Page heading = group title (fallback 'Event Group #<id>')",
+     "necessity": "essential",
+     "note": "Shell h1; the only place the record type is not stated when a title exists.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:74"
+    },
+    {
+     "label": "Header: group title + status badge",
+     "necessity": "essential",
+     "note": "Identity and lifecycle state.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:89"
+    },
+    {
+     "label": "Header: 'Event Group #<id> · <location label>'",
+     "necessity": "essential",
+     "note": "Location is essential; the numeric id is a secondary cross-reference key (the permanent event_group_key is never shown).",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:90; eventGroupTypes.ts:27"
+    },
+    {
+     "label": "Header dl: Incidents '<count> · <open> active'",
+     "necessity": "essential",
+     "note": "Volume and live workload.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:93"
+    },
+    {
+     "label": "Header dl: Created <date>",
+     "necessity": "secondary",
+     "note": "Provenance; rarely needed for the primary tasks.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:94"
+    },
+    {
+     "label": "Header dl: Last activity <date>",
+     "necessity": "essential",
+     "note": "Recency; shows '—' when latest_incident_activity_at is null (no fallback to updated_at here, unlike the list).",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:95"
+    },
+    {
+     "label": "Header: description paragraph (if present)",
+     "necessity": "secondary",
+     "note": "Optional narrative; correctly hidden when empty.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:98"
+    },
+    {
+     "label": "Data integrity alert (incidents without permanent incident_key)",
+     "necessity": "essential",
+     "note": "Error state that should never occur; role=alert; tells the user to report to an administrator but offers no action.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:70,101-105"
+    },
+    {
+     "label": "Toolbar link labels ('← Event Groups', 'View on Mission Center map', 'Refresh'/'Refreshing…')",
+     "necessity": "secondary",
+     "note": "Navigation chrome.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:77-79"
+    },
+    {
+     "label": "Error banner / loading text / 'Event Group unavailable.'",
+     "necessity": "essential",
+     "note": "Failure and loading states; 'Invalid Event Group ID.' for non-numeric ids.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:45-47,82,84"
+    },
+    {
+     "label": "Associated Incidents table: '#<id> <title>' link (fallback 'Incident')",
+     "necessity": "essential",
+     "note": "Identity of each grouped incident; links to /incidents/:id.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:121"
+    },
+    {
+     "label": "Associated Incidents: 'Observed <first_observed_at>'",
+     "necessity": "secondary",
+     "note": "Useful for ordering but the table has no sort.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:122"
+    },
+    {
+     "label": "Associated Incidents: 'Missing permanent incident key' flag + tinted row",
+     "necessity": "essential",
+     "note": "Per-row echo of the integrity alert; tint is an inline style rather than a token class.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:117-119,123"
+    },
+    {
+     "label": "Associated Incidents: Location label per incident",
+     "necessity": "essential",
+     "note": "Incidents in one group can sit at different post miles; needed to tell them apart.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:125"
+    },
+    {
+     "label": "Associated Incidents: Status '<Resolved|In progress|New> · <Stage label>'",
+     "necessity": "essential",
+     "note": "Any status other than RESOLVED/IN_PROGRESS is rendered as 'New'; stage is a title-cased raw enum.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:20-27,126"
+    },
+    {
+     "label": "Associated Incidents: 'Map' chip → /mission-center/:gid/:iid",
+     "necessity": "essential",
+     "note": "Spatial context is the main reason to open a group; consistent with the group-level Mission Center link.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:129"
+    },
+    {
+     "label": "Associated Incidents: 'Assessment #<id>' chip",
+     "necessity": "secondary",
+     "note": "Drill-down; label conveys only a number, not the assessment state.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:130"
+    },
+    {
+     "label": "Associated Incidents: 'Submission #<id>' chips (one per submission)",
+     "necessity": "secondary",
+     "note": "Drill-down; a busy incident yields a row of numeric chips.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:131"
+    },
+    {
+     "label": "Associated Incidents empty state",
+     "necessity": "secondary",
+     "note": "'No Incidents are associated with this Event Group.'",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:114"
+    },
+    {
+     "label": "History: event type label (title-cased raw event_type)",
+     "necessity": "secondary",
+     "note": "Audit trail; newest first but unlabeled as such.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:145"
+    },
+    {
+     "label": "History: date · actor name/email",
+     "necessity": "secondary",
+     "note": "Falls back to email when no name.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:145"
+    },
+    {
+     "label": "History: 'Incident #<id>' link → Mission Center",
+     "necessity": "secondary",
+     "note": "Links to the map view, not to /incidents/:id — different target from the incident title link in the table above.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:145"
+    },
+    {
+     "label": "History: notes paragraph",
+     "necessity": "secondary",
+     "note": "Free text supplied at lifecycle/association time.",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:145"
+    },
+    {
+     "label": "History empty state 'No Event Group history recorded.'",
+     "necessity": "secondary",
+     "note": "",
+     "source": "web/src/pages/EventGroupDetailPage.tsx:145"
+    }
+   ],
+   "actions": [
+    {
+     "label": "← Event Groups",
+     "who": "All reaching roles",
+     "where": "Toolbar, first item",
+     "note": "Link back to the list; list filter state is not preserved."
+    },
+    {
+     "label": "View on Mission Center map",
+     "who": "All reaching roles",
+     "where": "Toolbar, second item (only once the group has loaded)",
+     "note": "Link to /mission-center/:gid."
+    },
+    {
+     "label": "Refresh",
+     "who": "All reaching roles",
+     "where": "Toolbar, right-aligned (ml-auto)",
+     "note": "Re-fetches detail and the full assessments list."
+    },
+    {
+     "label": "Open incident (title link)",
+     "who": "All reaching roles",
+     "where": "Associated Incidents table, first cell",
+     "note": "→ /incidents/:id"
+    },
+    {
+     "label": "Map chip",
+     "who": "All reaching roles",
+     "where": "Associated Incidents table, Links column",
+     "note": "→ /mission-center/:gid/:iid"
+    },
+    {
+     "label": "Assessment #N chip",
+     "who": "All reaching roles",
+     "where": "Links column, only when an assessment exists for the incident",
+     "note": "→ /assessments/:id"
+    },
+    {
+     "label": "Submission #N chip(s)",
+     "who": "All reaching roles",
+     "where": "Links column, one per submission",
+     "note": "→ /submissions/:id"
+    },
+    {
+     "label": "Incident #N link in history",
+     "who": "All reaching roles",
+     "where": "History list item",
+     "note": "→ /mission-center/:gid/:iid"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Event Groups list row links (EventGroupsPage.tsx:86,91)",
+     "Incidents operations table 'Event Group #N' link (web/src/features/incidents/IncidentsOperationsPage.tsx:304)",
+     "Assessment detail panel 'Event Group #N' button (web/src/features/assessments/AssessmentDetailPanel.tsx:243)",
+     "Mission Center explorer 'Open full Event Group workspace' / 'Open Event Group' (web/src/features/missionCenter/MissionCenterProjectExplorer.tsx:316,361)",
+     "Legacy deep links /projects/:id → /event-groups/:id (web/src/App.tsx:78,180-183)"
+    ],
+    "exits": [
+     "← Event Groups (EventGroupDetailPage.tsx:77)",
+     "View on Mission Center map (EventGroupDetailPage.tsx:78)",
+     "Per-incident Map / Assessment / Submission chips and incident title links (EventGroupDetailPage.tsx:121,129-131)",
+     "History incident links (EventGroupDetailPage.tsx:145)",
+     "Sidebar; 'Event Groups' NavLink stays active on the detail route (non-end NavLink, AppShell.tsx:34)",
+     "No breadcrumb trail"
+    ]
+   },
+   "responsive": {
+    "layout": "Single column: toolbar → optional banners → header card (flex-wrap title block left, 2-column dl right) → xl two-column grid (incidents table 1.6fr | history 0.8fr, min 320px) that stacks below 1280px.",
+    "breakpointsUsed": [
+     "md:p-5 (EventGroupDetailPage.tsx:75)",
+     "xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)] (EventGroupDetailPage.tsx:107)",
+     "flex-wrap header with gap-x-8, dl grid-cols-[auto_auto] shrink-0 (EventGroupDetailPage.tsx:87,92)",
+     "overflow-x-auto incidents table, whitespace-nowrap on Status and Links cells (EventGroupDetailPage.tsx:110,126-127)",
+     "max-h-[520px] overflow-auto history panel (EventGroupDetailPage.tsx:144)",
+     "ml-auto Refresh in a flex-wrap toolbar (EventGroupDetailPage.tsx:76-79)"
+    ],
+    "phoneRisks": [
+     "375px: 4-column incidents table with nowrap Status ('In progress · Awaiting Assessment') and nowrap Links cell forces horizontal scroll; the incident title is off-screen while tapping chips (EventGroupDetailPage.tsx:111-134).",
+     "Chips are text-[11px] px-2 py-1 (~22px tall) and several can wrap into a cluster; small, adjacent touch targets (EventGroupDetailPage.tsx:129-131).",
+     "Header dl (Incidents/Created/Last activity) wraps under the title as a 2-column grid — works, but 'shrink-0' means a long title block can push it below rather than compress (EventGroupDetailPage.tsx:88-96).",
+     "Toolbar: 'View on Mission Center map' is long; with Refresh ml-auto the three buttons wrap into two rows (EventGroupDetailPage.tsx:76-80).",
+     "History panel is a nested scroll region (max-h 520px) inside the page scroll — nested scrolling on touch (EventGroupDetailPage.tsx:144)."
+    ],
+    "tabletRisks": [
+     "768-1279px: incidents and history stack (xl breakpoint), so the history sits below a potentially long incidents table; no jump link (EventGroupDetailPage.tsx:107).",
+     "Below lg (1024) the sidebar is a stacked card above content, so the record header is ~300px down the page (AppShell.tsx:164)."
+    ],
+    "desktopNotes": [
+     "At xl+ the incidents/history split works well; history is capped at 520px with its own scroll (EventGroupDetailPage.tsx:107,144).",
+     "Header card uses a compact dl with justify-between — reads as a proper record header at desktop widths (EventGroupDetailPage.tsx:86-99)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Page fetches the entire assessments list (limit 1000) in parallel with the group just to map incident→assessment links; render waits for both, and incidents whose assessment is outside the first 1000 silently lose their Assessment/Submission chips.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:52-57,115-116",
+     "severity": "major"
+    },
+    {
+     "issue": "incidentStatusText maps every status except RESOLVED / IN_PROGRESS to 'New', so any other backend status is mislabeled.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:24-27,126",
+     "severity": "minor"
+    },
+    {
+     "issue": "Cross-links are labeled only by numeric ids ('Assessment #12', 'Submission #34'); no state or date, so users cannot tell which chip is the current one.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:130-131",
+     "severity": "minor"
+    },
+    {
+     "issue": "Two different targets for 'incident' links on the same page: table title → /incidents/:id, history 'Incident #N' → Mission Center map.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:121 vs 145",
+     "severity": "minor"
+    },
+    {
+     "issue": "No lifecycle or edit actions on the record (read-only by design per AppShell IA comment); the legacy Project detail had Close/Reopen/Edit, so coordinators lose an obvious place to close a group unless My Work covers it.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:26,76-80; web/src/ui/AppShell.tsx:64-70; web/src/features/projects/ProjectManagementPanel.tsx:97-124",
+     "severity": "major"
+    },
+    {
+     "issue": "Load error banner lacks role=alert while the integrity banner has it; inconsistent announcement.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:82 vs 102",
+     "severity": "minor"
+    },
+    {
+     "issue": "Closed groups show no closed_at / closed-by information even though the API returns it.",
+     "evidence": "web/src/features/eventGroups/eventGroupTypes.ts:46-47; EventGroupDetailPage.tsx:92-96",
+     "severity": "minor"
+    },
+    {
+     "issue": "Broken-row tint uses an inline style with a hard-coded color-mix instead of a token class, diverging from the rest of the design system.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:119",
+     "severity": "minor"
+    },
+    {
+     "issue": "No breadcrumb; h1 is the group title alone, so the record type is only inferable from the '#id' sub-line and the sidebar highlight.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:74,90",
+     "severity": "minor"
+    },
+    {
+     "issue": "Table has no sort or filter; large groups list incidents in API order with no way to surface active ones first.",
+     "evidence": "web/src/pages/EventGroupDetailPage.tsx:114",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Compact single header card with a dl of the three facts that matter (incidents, created, last activity) — denser and calmer than the legacy five-card grid (EventGroupDetailPage.tsx:86-99).",
+    "Data-integrity guard: incidents without a permanent key are flagged at page level (role=alert) and per row, with plain-language explanation (EventGroupDetailPage.tsx:70,101-105,123).",
+    "Rich, consistent cross-linking to Mission Center, incident, assessment and submission records using one chip style (EventGroupDetailPage.tsx:129-131).",
+    "Two-column xl layout with a bounded, scrollable history keeps the incidents table primary (EventGroupDetailPage.tsx:107,144).",
+    "Reuses EventGroupStatusBadge and eventGroupLocationLabel so list and detail read identically (EventGroupDetailPage.tsx:7,10).",
+    "Uses <Link> everywhere; 'View on Mission Center map' and per-incident 'Map' preserve the group/incident context in the URL (EventGroupDetailPage.tsx:78,129)."
+   ]
+  },
+  {
+   "name": "Legacy Projects list (unrouted)",
+   "route": "none — file web/src/pages/ProjectsPage.tsx is not imported by App.tsx; /projects redirects to /event-groups (web/src/App.tsx:77)",
+   "purpose": "Superseded predecessor of the Event Groups list: a worklist of 'Projects' (operational parent of incidents) with KPI cards, search, status filter and table.",
+   "roles": [
+    "Unreachable in the running app (dead code).",
+    "No internal role gating; if routed it would rely on the wrapping route only."
+   ],
+   "primaryTasks": [
+    "Find a Project by title/location",
+    "See counts of projects / incidents / active incidents",
+    "Open a Project record"
+   ],
+   "dataShown": [
+    {
+     "label": "Intro banner 'Project operations' + explanatory paragraph",
+     "necessity": "secondary",
+     "note": "Defines the concept for new users; takes ~100px above the fold on every visit.",
+     "source": "web/src/pages/ProjectsPage.tsx:62-66"
+    },
+    {
+     "label": "KPI cards: Projects shown / Incidents in Projects / Active incidents",
+     "necessity": "secondary",
+     "note": "Same aggregates the Event Groups page shows as inline text, but large and scannable.",
+     "source": "web/src/pages/ProjectsPage.tsx:70-74"
+    },
+    {
+     "label": "Search box (same placeholder as Event Groups)",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectsPage.tsx:77"
+    },
+    {
+     "label": "Status select (Open/Closed/Archived/All Projects)",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectsPage.tsx:78-83"
+    },
+    {
+     "label": "Error banner",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectsPage.tsx:86"
+    },
+    {
+     "label": "Table: Project title (button) + 'Project #<id>'",
+     "necessity": "essential",
+     "note": "Title essential; '#id' secondary. Rendered as a <button> that calls navigate(), not a link.",
+     "source": "web/src/pages/ProjectsPage.tsx:105-110"
+    },
+    {
+     "label": "Table: Location label",
+     "necessity": "essential",
+     "note": "projectLocationLabel — identical logic to eventGroupLocationLabel.",
+     "source": "web/src/pages/ProjectsPage.tsx:111; projectTypes.ts:98-106"
+    },
+    {
+     "label": "Table: Incidents '<count> total · <open> active'",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectsPage.tsx:112"
+    },
+    {
+     "label": "Table: StatusBadge",
+     "necessity": "secondary",
+     "note": "Local near-duplicate of EventGroupStatusBadge with different opacities and padding.",
+     "source": "web/src/pages/ProjectsPage.tsx:15-22,113"
+    },
+    {
+     "label": "Table: Last activity (toLocaleString)",
+     "necessity": "essential",
+     "note": "Different date format from Event Groups (locale string with seconds).",
+     "source": "web/src/pages/ProjectsPage.tsx:9-13,114"
+    },
+    {
+     "label": "Table: 'Open Project' button",
+     "necessity": "noise",
+     "note": "Duplicate of the title button.",
+     "source": "web/src/pages/ProjectsPage.tsx:115"
+    },
+    {
+     "label": "Refresh button",
+     "necessity": "secondary",
+     "note": "Lives inside the intro banner, far from the filters.",
+     "source": "web/src/pages/ProjectsPage.tsx:67"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refresh",
+     "who": "n/a (dead)",
+     "where": "Right side of intro banner (self-start on mobile)"
+    },
+    {
+     "label": "Search / status filter",
+     "who": "n/a (dead)",
+     "where": "Toolbar below KPI cards"
+    },
+    {
+     "label": "Open Project (title button, 'Open Project' button)",
+     "who": "n/a (dead)",
+     "where": "Table row",
+     "note": "navigate('/projects/:id') — which today redirects to /event-groups/:id"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "None. Not routed; /projects → Navigate to /event-groups (App.tsx:77). No sidebar entry (AppShell.tsx:83-88)."
+    ],
+    "exits": [
+     "navigate('/projects/:id') (ProjectsPage.tsx:106,115) — would land on the Event Group detail via LegacyProjectRedirect"
+    ]
+   },
+   "responsive": {
+    "layout": "h-full flex-col page: intro banner (md:flex-row), 3 KPI cards (md:grid-cols-3), toolbar, then a flex-1 overflow-auto table panel.",
+    "breakpointsUsed": [
+     "md:p-5, md:flex-row md:items-center md:justify-between, md:self-auto (ProjectsPage.tsx:61-67)",
+     "md:grid-cols-3 KPI grid (ProjectsPage.tsx:70)",
+     "min-w-[280px] flex-1 search (ProjectsPage.tsx:77)",
+     "flex-1 overflow-auto table wrapper (ProjectsPage.tsx:88)"
+    ],
+    "phoneRisks": [
+     "Banner + three stacked KPI cards + wrapped toolbar consume roughly the whole first screen before the table appears (ProjectsPage.tsx:62-84).",
+     "6-column table scrolls horizontally inside overflow-auto; buttons are px-3 py-1.5 text-xs (~28px tall) (ProjectsPage.tsx:88,115).",
+     "Title is a <button> with text-left — no link semantics, no long-press/open-in-new-tab (ProjectsPage.tsx:106)."
+    ],
+    "tabletRisks": [
+     "KPI cards go to 3 columns at md, which is fine; banner becomes a row with Refresh at the far right, separated from the filters (ProjectsPage.tsx:62-67)."
+    ],
+    "desktopNotes": [
+     "flex-1 overflow-auto table inside a min-h-full product-card means the table panel scrolls independently only if the parent constrains height; the non-workspace AppShell does not, so overflow-auto mostly adds a stray inner scrollbar on wide tables (ProjectsPage.tsx:61,88; AppShell.tsx:185)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Dead code: not imported by any routed module while /projects redirects to /event-groups; the file will drift from the live Event Groups page (it already differs in date format, badge styling and link semantics).",
+     "evidence": "web/src/App.tsx:77 (redirect); grep shows ProjectsPage referenced only at web/src/pages/ProjectsPage.tsx:24",
+     "severity": "major"
+    },
+    {
+     "issue": "Navigation via <button onClick={navigate}> instead of <Link> — breaks open-in-new-tab, middle-click and link semantics for screen readers.",
+     "evidence": "web/src/pages/ProjectsPage.tsx:106,115",
+     "severity": "major"
+    },
+    {
+     "issue": "Duplicate StatusBadge and formatDate implementations diverging from Event Groups (toLocaleString includes seconds; badge px-2.5 py-1 text-xs vs px-2 py-0.5 text-[11px]).",
+     "evidence": "web/src/pages/ProjectsPage.tsx:9-22 vs web/src/pages/EventGroupsPage.tsx:9-24",
+     "severity": "minor"
+    },
+    {
+     "issue": "Refresh sits in the intro banner, separated from the search/filter toolbar it refreshes.",
+     "evidence": "web/src/pages/ProjectsPage.tsx:67 vs 76-84",
+     "severity": "minor"
+    },
+    {
+     "issue": "Same hard-coded limit=500 and no pagination as Event Groups.",
+     "evidence": "web/src/pages/ProjectsPage.tsx:36",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "KPI cards make the three aggregates legible at a glance — a pattern worth carrying into Event Groups instead of the xs inline text (ProjectsPage.tsx:70-74).",
+    "Intro banner states the domain concept in one sentence ('Projects are the operational parent of Incidents…'), which the Event Groups page lacks (ProjectsPage.tsx:64-65)."
+   ]
+  },
+  {
+   "name": "Legacy Project detail (unrouted)",
+   "route": "none — web/src/pages/ProjectDetailPage.tsx is not imported; /projects/:id → LegacyProjectRedirect → /event-groups/:id (web/src/App.tsx:78,180-183)",
+   "purpose": "Superseded record page for a Project: five summary cards, a coordinator management panel, an ArcGIS incident map, an incidents table with classification, and history.",
+   "roles": [
+    "Unreachable in the running app (dead code).",
+    "Internal gating that would apply if routed: ProjectManagementPanel only for canTriage = ADMIN or MAINTENANCE_COORDINATOR (ProjectDetailPage.tsx:108; roleModel.ts:46-48)."
+   ],
+   "primaryTasks": [
+    "Review a Project's facts and its incidents (with classification provenance)",
+    "Coordinator: edit title/description, close or reopen the Project",
+    "See incidents on a map and in the audited history"
+   ],
+   "dataShown": [
+    {
+     "label": "Toolbar: '← Projects', 'Refresh'",
+     "necessity": "secondary",
+     "note": "Both are <button>s calling navigate()/load().",
+     "source": "web/src/pages/ProjectDetailPage.tsx:82-83"
+    },
+    {
+     "label": "Card 'Project': title, status pill, location, description",
+     "necessity": "essential",
+     "note": "Status pill here is a plain neutral pill, not the coloured StatusBadge used on the list.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:94-102"
+    },
+    {
+     "label": "Card 'Incidents': count + '<n> active'",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectDetailPage.tsx:103"
+    },
+    {
+     "label": "Card 'Created': date + 'Project #<id>'",
+     "necessity": "secondary",
+     "note": "The id is tucked under the created date — odd grouping.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:104"
+    },
+    {
+     "label": "Card 'Latest incident activity': date",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectDetailPage.tsx:105"
+    },
+    {
+     "label": "ProjectManagementPanel (see separate panel entry)",
+     "necessity": "essential",
+     "note": "Coordinator/admin only.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:108"
+    },
+    {
+     "label": "ProjectDetailMap: hybrid basemap, project centroid marker, incident markers (diamond active / circle resolved), Home/Compass/ScaleBar widgets, popups with title/status/classification/classification state, legend row",
+     "necessity": "secondary",
+     "note": "Spatial context; fixed 420px height; double-click handler never wired because onOpenIncident is not passed.",
+     "source": "web/src/features/projects/ProjectDetailMap.tsx:24,36-83,88-97,105-113; ProjectDetailPage.tsx:110"
+    },
+    {
+     "label": "Incidents table header + explanatory sentence about classification provenance",
+     "necessity": "secondary",
+     "note": "Good domain copy, shown on every visit.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:114"
+    },
+    {
+     "label": "Incidents table: '#<id> <title>' + 'Observed <date>'",
+     "necessity": "essential",
+     "note": "Plain text — no link to the incident.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:121"
+    },
+    {
+     "label": "Incidents table: Location label",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectDetailPage.tsx:122"
+    },
+    {
+     "label": "Incidents table: Classification cell (label + 'Pending assessment review' / 'Confirmed from approved assessment')",
+     "necessity": "essential",
+     "note": "Shows 'Loading classification…' until a second POST completes; label derived from assessment codes.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:25-36,123; web/src/features/incidents/incidentClassification.ts:18-24"
+    },
+    {
+     "label": "Incidents table: Status = raw incident.status enum (e.g. IN_PROGRESS)",
+     "necessity": "noise",
+     "note": "Raw backend code shown verbatim; the live page humanises it.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:124"
+    },
+    {
+     "label": "Incidents table: 'Open in Incidents' button",
+     "necessity": "secondary",
+     "note": "Navigates to the /incidents list, not to /incidents/:id.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:125"
+    },
+    {
+     "label": "Project history: event type, date · actor, 'Incident #<id>' (plain text), notes; subtitle 'Audited Project and Incident association activity.'",
+     "necessity": "secondary",
+     "note": "Same structure as Event Group history minus the incident link.",
+     "source": "web/src/pages/ProjectDetailPage.tsx:133-149"
+    },
+    {
+     "label": "Loading / unavailable / error / invalid-id states",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/pages/ProjectDetailPage.tsx:49-52,87-90"
+    }
+   ],
+   "actions": [
+    {
+     "label": "← Projects",
+     "who": "n/a (dead)",
+     "where": "Toolbar",
+     "note": "navigate('/projects')"
+    },
+    {
+     "label": "Refresh",
+     "who": "n/a (dead)",
+     "where": "Toolbar"
+    },
+    {
+     "label": "Edit details / Close Project / Reopen Project (panel)",
+     "who": "ADMIN, MAINTENANCE_COORDINATOR (canTriage)",
+     "where": "Project management panel below the cards"
+    },
+    {
+     "label": "Map pan/zoom, Home, Compass, popups; double-click incident (no-op)",
+     "who": "n/a (dead)",
+     "where": "ProjectDetailMap",
+     "note": "onOpenIncident prop never supplied (ProjectDetailPage.tsx:110)."
+    },
+    {
+     "label": "Open in Incidents",
+     "who": "n/a (dead)",
+     "where": "Incidents table Action column",
+     "note": "Goes to the list route /incidents."
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "None. /projects/:id is intercepted by LegacyProjectRedirect (App.tsx:78,180-183); old bookmarks land on /event-groups/:id with the same numeric id."
+    ],
+    "exits": [
+     "navigate('/projects') → redirected to /event-groups (ProjectDetailPage.tsx:82)",
+     "navigate('/incidents') list (ProjectDetailPage.tsx:125)"
+    ]
+   },
+   "responsive": {
+    "layout": "Stacked: toolbar → 5-card grid (md:grid-cols-2, xl:grid-cols-5 with Project card col-span-2) → management panel → 420px map → xl two-column incidents/history grid.",
+    "breakpointsUsed": [
+     "md:p-5 (ProjectDetailPage.tsx:79)",
+     "md:grid-cols-2 xl:grid-cols-5, xl:col-span-2 (ProjectDetailPage.tsx:93-94)",
+     "xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)] (ProjectDetailPage.tsx:112)",
+     "overflow-auto incidents table, max-h-[480px] overflow-auto history (ProjectDetailPage.tsx:115,135)",
+     "Map: inline style height=420 (ProjectDetailMap.tsx:24,107)"
+    ],
+    "phoneRisks": [
+     "ArcGIS MapView at a fixed 420px inside a scrolling page captures touch pan/pinch — a scroll trap occupying half the 812px viewport (ProjectDetailMap.tsx:38-44,107).",
+     "5-column incidents table (with multi-line Classification cell) scrolls horizontally (ProjectDetailPage.tsx:116-117).",
+     "Five stacked cards + panel push the map and table far down; no summary-first ordering (ProjectDetailPage.tsx:93-106)."
+    ],
+    "tabletRisks": [
+     "md:grid-cols-2 with five cards leaves an orphan card in the third row because col-span-2 applies only at xl (ProjectDetailPage.tsx:93-94).",
+     "Incidents/history stack below 1280px; map at 420px is fine."
+    ],
+    "desktopNotes": [
+     "At xl the 5-card row (2+1+1+1) reads well; map rebuilds (view.destroy + new MapView) on every load/refresh because the effect depends on classifications/incidents/project objects, causing a visible flicker (ProjectDetailMap.tsx:103)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Dead code: page, map and panel are not routed; /projects/:id redirects to the Event Group detail. Any fix here is wasted; any UI it has that the live page lacks (map, lifecycle actions, classification column) was dropped without an obvious replacement on /event-groups/:id.",
+     "evidence": "web/src/App.tsx:78,180-183; grep: ProjectDetailPage referenced only at web/src/pages/ProjectDetailPage.tsx:38",
+     "severity": "major"
+    },
+    {
+     "issue": "'Open in Incidents' navigates to the /incidents list rather than /incidents/:id, losing the selected incident.",
+     "evidence": "web/src/pages/ProjectDetailPage.tsx:125",
+     "severity": "major"
+    },
+    {
+     "issue": "Raw status enum (e.g. IN_PROGRESS) rendered in the Status column.",
+     "evidence": "web/src/pages/ProjectDetailPage.tsx:124",
+     "severity": "minor"
+    },
+    {
+     "issue": "Classification is loaded in a second sequential request after the detail, so every row flashes 'Loading classification…'.",
+     "evidence": "web/src/pages/ProjectDetailPage.tsx:56-64; incidentClassification.ts:19",
+     "severity": "minor"
+    },
+    {
+     "issue": "Map double-click-to-open is implemented but never wired (onOpenIncident not passed); map has no keyboard path and only an aria-label.",
+     "evidence": "web/src/features/projects/ProjectDetailMap.tsx:88-97,107; ProjectDetailPage.tsx:110",
+     "severity": "minor"
+    },
+    {
+     "issue": "Map view is destroyed and recreated on every data change/refresh (effect deps include object identities), causing flicker and lost pan/zoom.",
+     "evidence": "web/src/features/projects/ProjectDetailMap.tsx:32,99-103",
+     "severity": "minor"
+    },
+    {
+     "issue": "Navigation via <button onClick={navigate}> instead of <Link> for back and row actions.",
+     "evidence": "web/src/pages/ProjectDetailPage.tsx:82,125",
+     "severity": "minor"
+    },
+    {
+     "issue": "Status pill on the Project card is an uncoloured neutral pill while the list uses the coloured StatusBadge — same status, two looks.",
+     "evidence": "web/src/pages/ProjectDetailPage.tsx:98 vs web/src/pages/ProjectsPage.tsx:15-22",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Inline map with a three-item legend (centroid / active / resolved) and informative popups gives spatial context the live Event Group page only offers via a link-out (ProjectDetailMap.tsx:76-79,108-112).",
+    "Classification column with provenance copy ('Confirmed from approved assessment' / 'Pending assessment review') explains where the classification comes from (ProjectDetailPage.tsx:25-36,114).",
+    "Role-gated management panel is rendered only for coordinators/admins, keeping the record page clean for others (ProjectDetailPage.tsx:108)."
+   ]
+  },
+  {
+   "name": "Legacy Project management panel (unrouted)",
+   "route": "none — component web/src/features/projects/ProjectManagementPanel.tsx is only mounted by the dead ProjectDetailPage (ProjectDetailPage.tsx:108)",
+   "purpose": "Coordinator/admin panel to edit a Project's title/description and to close or reopen it with an inline confirmation and optional note.",
+   "roles": [
+    "Would be shown only when canTriage(me.roles): ADMIN or MAINTENANCE_COORDINATOR/MAINT_COORDINATOR (ProjectDetailPage.tsx:108; roleModel.ts:46-48).",
+    "Panel copy names 'Maintenance Coordinators and administrators' explicitly (ProjectManagementPanel.tsx:82)."
+   ],
+   "primaryTasks": [
+    "Edit Project title/description",
+    "Close an open Project (blocked while it has active incidents)",
+    "Reopen a closed Project"
+   ],
+   "dataShown": [
+    {
+     "label": "Heading 'Project management' + role sentence",
+     "necessity": "secondary",
+     "note": "Explains who can act; useful once.",
+     "source": "web/src/features/projects/ProjectManagementPanel.tsx:81-82"
+    },
+    {
+     "label": "Close-blocked notice: 'This Project still has N active Incident(s). Resolve those Incidents before closing the Project.'",
+     "necessity": "essential",
+     "note": "Explains the disabled Close button inline (better than the tooltip alone).",
+     "source": "web/src/features/projects/ProjectManagementPanel.tsx:75,128-132"
+    },
+    {
+     "label": "Archived notice: 'Archived legacy Projects are retained for provenance and are not editable or reopenable.'",
+     "necessity": "essential",
+     "note": "Only state explanation for ARCHIVED.",
+     "source": "web/src/features/projects/ProjectManagementPanel.tsx:133-135"
+    },
+    {
+     "label": "Error banner / success notice ('Project details updated.', 'Project closed.', 'Project reopened.', 'Project is already <status>.')",
+     "necessity": "essential",
+     "note": "Result feedback; persists until the next action.",
+     "source": "web/src/features/projects/ProjectManagementPanel.tsx:42,64-66,136-137"
+    },
+    {
+     "label": "Edit form: 'Project title *' input, 'Description' textarea (3 rows)",
+     "necessity": "essential",
+     "note": "Shown only while editing.",
+     "source": "web/src/features/projects/ProjectManagementPanel.tsx:139-148"
+    },
+    {
+     "label": "Lifecycle confirmation: heading ('Close this Project?' / 'Reopen this Project?'), consequence paragraph, 'Lifecycle note' textarea (placeholder 'Optional operational context')",
+     "necessity": "essential",
+     "note": "Plain-language consequences of closing/reopening.",
+     "source": "web/src/features/projects/ProjectManagementPanel.tsx:156-169"
+    },
+    {
+     "label": "Disabled-button tooltip on Close Project",
+     "necessity": "noise",
+     "note": "Duplicates the inline notice and is unreachable on touch / with disabled buttons in some browsers.",
+     "source": "web/src/features/projects/ProjectManagementPanel.tsx:106"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Edit details / Cancel edit (toggle)",
+     "who": "ADMIN, MAINTENANCE_COORDINATOR",
+     "where": "Panel header, right",
+     "note": "Disabled when ARCHIVED or busy."
+    },
+    {
+     "label": "Close Project",
+     "who": "ADMIN, MAINTENANCE_COORDINATOR",
+     "where": "Panel header, right (OPEN only)",
+     "note": "Disabled while open_incident_count > 0; styled with --good (green)."
+    },
+    {
+     "label": "Reopen Project",
+     "who": "ADMIN, MAINTENANCE_COORDINATOR",
+     "where": "Panel header, right (CLOSED only)",
+     "note": "Brand-blue primary."
+    },
+    {
+     "label": "Cancel / Save Project",
+     "who": "ADMIN, MAINTENANCE_COORDINATOR",
+     "where": "Bottom-right of the edit form",
+     "note": "Save disabled when title empty."
+    },
+    {
+     "label": "Cancel / Confirm closure | Confirm reopen",
+     "who": "ADMIN, MAINTENANCE_COORDINATOR",
+     "where": "Bottom-right of the lifecycle section",
+     "note": "Confirm closure is green, Confirm reopen is brand."
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Embedded in the dead ProjectDetailPage only (ProjectDetailPage.tsx:108)."
+    ],
+    "exits": [
+     "None — in-place; calls onChanged() to reload the parent."
+    ]
+   },
+   "responsive": {
+    "layout": "One card: flex-wrap header (title block left, button group right) → stacked notices → optional edit form (grid gap-3) or lifecycle confirmation (grid gap-3), each with a right-aligned button row.",
+    "breakpointsUsed": [
+     "No responsive prefixes; relies on flex-wrap and full-width inputs (ProjectManagementPanel.tsx:79,84,141-152,166-173)"
+    ],
+    "phoneRisks": [
+     "Header buttons wrap below the heading — acceptable; primary buttons are px-3/px-4 py-2 (~38px) so touch is OK.",
+     "Tooltip on the disabled Close button is invisible on touch; the inline notice compensates (ProjectManagementPanel.tsx:106,128-132)."
+    ],
+    "tabletRisks": [
+     "None specific; single card scales."
+    ],
+    "desktopNotes": [
+     "Inline (non-modal) confirmation keeps context visible; the two-textarea heights (rows=3) are consistent."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Dead code (mounted only by the unrouted ProjectDetailPage); the lifecycle UX it implements has no visible counterpart on the live Event Group detail page.",
+     "evidence": "web/src/pages/ProjectDetailPage.tsx:108; web/src/App.tsx:78",
+     "severity": "major"
+    },
+    {
+     "issue": "Semantic colour inversion: 'Close Project' and 'Confirm closure' use --good (green) while 'Reopen' uses brand; closing is the more consequential action but reads as the safe/positive one.",
+     "evidence": "web/src/features/projects/ProjectManagementPanel.tsx:107,172",
+     "severity": "minor"
+    },
+    {
+     "issue": "Unreachable validation branch: Save is disabled when the title is empty, so the 'Project title is required.' error can never display.",
+     "evidence": "web/src/features/projects/ProjectManagementPanel.tsx:29-32 vs 151",
+     "severity": "minor"
+    },
+    {
+     "issue": "Success notice never auto-dismisses and stays while the user starts a different action, e.g. 'Project details updated.' remains visible during a close confirmation.",
+     "evidence": "web/src/features/projects/ProjectManagementPanel.tsx:42,137",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Inline confirmation with a one-sentence consequence for Close and Reopen instead of a modal (ProjectManagementPanel.tsx:159-164).",
+    "Business rule surfaced as UI: Close is disabled and explained when active incidents remain; ARCHIVED is explained rather than silently disabled (ProjectManagementPanel.tsx:75,128-135).",
+    "Optional lifecycle note captured with the action, feeding the audited history (ProjectManagementPanel.tsx:166-169).",
+    "State-appropriate button set (only Close for OPEN, only Reopen for CLOSED, nothing for ARCHIVED) (ProjectManagementPanel.tsx:97-124)."
+   ]
+  },
+  {
+   "name": "Legacy Project association dialog (unmounted)",
+   "route": "none — modal component web/src/features/projects/ProjectAssociationDialog.tsx is imported by no file; superseded by web/src/features/eventGroups/EventGroupAssociationDialog.tsx (mounted from web/src/features/incidents/IncidentDecisionDialogs.tsx:73)",
+   "purpose": "Coordinator-review modal that lets a coordinator attach an incident to an existing nearby Project (map + ranked list) or create a new Project, then continue to triage.",
+   "roles": [
+    "Unreachable (dead).",
+    "If mounted: the associate button is rendered only when the server says context.can_change_association; 'Continue to triage' needs an assigned project (ProjectAssociationDialog.tsx:280,305)."
+   ],
+   "primaryTasks": [
+    "Decide whether the incident belongs to an existing nearby Project or needs a new one",
+    "Record the association (with an optional coordinator note)",
+    "Continue to triage once a Project is assigned"
+   ],
+   "dataShown": [
+    {
+     "label": "Eyebrow 'Coordinator review', h2 'Choose the Project for Incident #<id>', intro paragraph",
+     "necessity": "secondary",
+     "note": "Framing copy; the h2 is essential, the paragraph is secondary.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:139-143"
+    },
+    {
+     "label": "Error / notice banners",
+     "necessity": "essential",
+     "note": "'Project created and incident associated.' / 'Incident associated with the selected Project.'",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:122,149-150"
+    },
+    {
+     "label": "Context card: Reported location",
+     "necessity": "essential",
+     "note": "What the coordinator compares against nearby Projects.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:158-161"
+    },
+    {
+     "label": "Context card: Coordinates to 6 decimals",
+     "necessity": "noise",
+     "note": "Sub-10cm precision lat/long is not actionable for a coordinator; the map already shows the point.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:162-165"
+    },
+    {
+     "label": "Context card: Classification 'Unclassified' / 'Set after field assessment'",
+     "necessity": "noise",
+     "note": "Hard-coded static text, identical for every incident.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:166-170"
+    },
+    {
+     "label": "Context card: Current Project (title or 'Not assigned')",
+     "necessity": "essential",
+     "note": "Tells the coordinator whether this is a first association or a change.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:171-174"
+    },
+    {
+     "label": "ProjectAssociationMap: reported incident (red diamond), nearby Projects (amber), selected Project (brand blue), their incidents (small white dots), popups with distance/incidents/location, Home/Compass/ScaleBar, legend row; fixed 520px",
+     "necessity": "essential",
+     "note": "Primary comparison surface; click selects a Project.",
+     "source": "web/src/features/projects/ProjectAssociationMap.tsx:28,45-66,87-181,194-202"
+    },
+    {
+     "label": "Nearby Projects panel: heading, subtitle 'Open Projects ranked by nearest existing incident.', radius select 5/10/25/50 miles",
+     "necessity": "essential",
+     "note": "Radius defaults to 5 mi.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:189-210"
+    },
+    {
+     "label": "Nearby Project card: title, location, distance ('x mi away' / 'n ft away'), '<n> incident(s) · <n> active'",
+     "necessity": "essential",
+     "note": "Ranked list; selected card gets brand border.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:216-239; projectTypes.ts:92-96"
+    },
+    {
+     "label": "Nearby empty state 'No open Projects were found in this search radius.'",
+     "necessity": "secondary",
+     "note": "Dialog auto-switches to Create new when the list is empty.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:65-67,214"
+    },
+    {
+     "label": "Mode toggle 'Existing Project' / 'Create new'",
+     "necessity": "essential",
+     "note": "Segmented control.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:245-248"
+    },
+    {
+     "label": "Selected Project summary (title, location, description) or prompt 'Select a Project from the map or nearby list.'",
+     "necessity": "essential",
+     "note": "Confirms the choice before committing.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:250-261"
+    },
+    {
+     "label": "Create form: 'Project title *' (prefilled 'Route N · PM x · County Project' or 'Incident #N Project'), 'Description'",
+     "necessity": "essential",
+     "note": "Generated title uses 'Route N' while location labels elsewhere use 'RN'.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:23-32,263-272"
+    },
+    {
+     "label": "'Coordinator note' textarea (placeholder 'Why this Project matches the incident (optional)')",
+     "necessity": "secondary",
+     "note": "Optional rationale stored with the association.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:275-278"
+    },
+    {
+     "label": "Primary button label: 'Create Project and associate' / 'Project already assigned' / 'Associate with selected Project' / 'Saving…'",
+     "necessity": "essential",
+     "note": "Label reflects state; disabled when nothing would change.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:284-287"
+    },
+    {
+     "label": "Footer sentence: 'Incident belongs to <title>.' or 'A Project association is required before triage can advance this incident.'",
+     "necessity": "essential",
+     "note": "Explains why Continue to triage is disabled.",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:297-299"
+    },
+    {
+     "label": "Loading / unavailable text",
+     "necessity": "essential",
+     "note": "",
+     "source": "web/src/features/projects/ProjectAssociationDialog.tsx:152-153"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Close (header)",
+     "who": "Any viewer",
+     "where": "Top-right of dialog header",
+     "note": "Duplicate of footer Close."
+    },
+    {
+     "label": "Change search radius",
+     "who": "Any viewer",
+     "where": "Nearby Projects panel header",
+     "note": "Reloads context + nearby list."
+    },
+    {
+     "label": "Select Project (list card or map click)",
+     "who": "Any viewer",
+     "where": "Nearby list / map",
+     "note": "Map click on a Project's incident dot also selects that Project (ProjectAssociationMap.tsx:60,141)."
+    },
+    {
+     "label": "Existing Project / Create new toggle",
+     "who": "Any viewer",
+     "where": "Right column card"
+    },
+    {
+     "label": "Edit title / description / coordinator note",
+     "who": "Any viewer",
+     "where": "Right column card"
+    },
+    {
+     "label": "Associate with selected Project / Create Project and associate",
+     "who": "Only when context.can_change_association (server-decided)",
+     "where": "Full-width primary at bottom of right column",
+     "note": "Hidden, not disabled, for users without permission (line 280)."
+    },
+    {
+     "label": "Close (footer)",
+     "who": "Any viewer",
+     "where": "Sticky footer, left of primary"
+    },
+    {
+     "label": "Continue to triage",
+     "who": "Any viewer",
+     "where": "Sticky footer, right",
+     "note": "Disabled until a Project is assigned or while busy."
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "None — no component imports ProjectAssociationDialog (grep). The live equivalent is EventGroupAssociationDialog opened from IncidentDecisionDialogs.tsx:73."
+    ],
+    "exits": [
+     "onClose callback (two Close buttons: lines 145, 301)",
+     "onContinueToTriage(incidentId) (line 304)"
+    ]
+   },
+   "responsive": {
+    "layout": "Full-screen overlay (fixed inset-0, p-3 md:p-6) containing a max-w-[1500px], max-h-[94vh] flex-col panel: header, scrollable body (xl two-column: context cards + map | nearby list + decision card), sticky footer.",
+    "breakpointsUsed": [
+     "p-3 md:p-6 overlay padding (ProjectAssociationDialog.tsx:135)",
+     "max-h-[94vh] max-w-[1500px] (ProjectAssociationDialog.tsx:136)",
+     "xl:grid-cols-[minmax(0,1.7fr)_minmax(360px,0.8fr)] (ProjectAssociationDialog.tsx:155)",
+     "md:grid-cols-4 context cards (ProjectAssociationDialog.tsx:157)",
+     "max-h-72 overflow-auto nearby list (ProjectAssociationDialog.tsx:212)",
+     "grid-cols-2 mode toggle (ProjectAssociationDialog.tsx:245)",
+     "Map inline height 520px (ProjectAssociationMap.tsx:28,196)"
+    ],
+    "phoneRisks": [
+     "375x812: the 520px ArcGIS map fills ~65% of the viewport inside a 94vh scroll region; touch pans the map instead of the dialog — a scroll trap between the context cards and the decision controls (ProjectAssociationMap.tsx:196; ProjectAssociationDialog.tsx:148).",
+     "Order on a single column is header → 4 stacked context cards → map → nearby list (own 288px scroll) → decision card; the primary button is 3-4 screens down (ProjectAssociationDialog.tsx:155-291).",
+     "Two 'Close' buttons plus 'Continue to triage' in the footer; footer stays visible (good) but header Close is redundant (ProjectAssociationDialog.tsx:145,301).",
+     "Nested scroll regions: dialog body, nearby list, map — three competing gesture targets."
+    ],
+    "tabletRisks": [
+     "768-1279px: still single column (xl breakpoint), so map and list are stacked; 4 context cards fit at md (ProjectAssociationDialog.tsx:155,157).",
+     "1024px landscape: dialog is 1024-48px wide but still stacked; a lot of vertical scrolling for the decision card."
+    ],
+    "desktopNotes": [
+     "At xl+ the map (1.7fr) and decision column (min 360px) sit side by side; primary button, selected-project summary and list all visible without scrolling on a 1080p display.",
+     "Dialog has role=dialog and aria-modal but no focus trap, no initial focus, and no Escape handler (ProjectAssociationDialog.tsx:135)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Dead code: never mounted; the live EventGroupAssociationDialog duplicates this flow for Event Groups, so two ~300-line association dialogs and two ArcGIS map components coexist.",
+     "evidence": "grep: ProjectAssociationDialog only defined at web/src/features/projects/ProjectAssociationDialog.tsx:34; live counterpart mounted at web/src/features/incidents/IncidentDecisionDialogs.tsx:73",
+     "severity": "major"
+    },
+    {
+     "issue": "Modal accessibility: no focus trap, no autofocus, no Escape-to-close; background remains tabbable.",
+     "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:135-136",
+     "severity": "major"
+    },
+    {
+     "issue": "Static 'Classification: Unclassified / Set after field assessment' card is identical for every incident — noise occupying one of four context slots.",
+     "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:166-170",
+     "severity": "minor"
+    },
+    {
+     "issue": "Coordinates shown to 6 decimal places; not actionable and hard to scan.",
+     "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:164",
+     "severity": "minor"
+    },
+    {
+     "issue": "Vocabulary drift: generated title says 'Route 1 · PM 12 · County Project' while location labels say 'R1 · PM 12'; note field is 'Coordinator note' here but 'Lifecycle note' in the management panel.",
+     "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:27-31,276 vs projectTypes.ts:102; ProjectManagementPanel.tsx:167",
+     "severity": "minor"
+    },
+    {
+     "issue": "Duplicate Close buttons (header and footer).",
+     "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:145,301",
+     "severity": "minor"
+    },
+    {
+     "issue": "Fixed 520px map height regardless of viewport; on phones the map alone exceeds 60% of the screen.",
+     "evidence": "web/src/features/projects/ProjectAssociationMap.tsx:28,196",
+     "severity": "major"
+    },
+    {
+     "issue": "Radius select has no visible label (only the panel heading nearby).",
+     "evidence": "web/src/features/projects/ProjectAssociationDialog.tsx:195-209",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Map + ranked list with distance and incident counts gives the coordinator two coordinated ways to pick a Project; selection syncs both (ProjectAssociationDialog.tsx:177-185,216-239).",
+    "Primary button label changes with state ('Project already assigned', 'Create Project and associate'), and it is disabled when nothing would change (ProjectAssociationDialog.tsx:132,284-287).",
+    "Sensible auto-mode: existing Project preselected, first nearby preselected, or Create new when nothing is nearby (ProjectAssociationDialog.tsx:59-69).",
+    "Prefilled generated title reduces typing for the create path (ProjectAssociationDialog.tsx:23-32,69).",
+    "Sticky footer explains the gate ('A Project association is required before triage can advance this incident.') and keeps Continue to triage always reachable (ProjectAssociationDialog.tsx:296-311).",
+    "Legend row under the map with the same three symbols used on the map (ProjectAssociationMap.tsx:197-201)."
+   ]
+  }
+ ],
+ "crossCutting": [
+  "Dead legacy code: web/src/pages/ProjectsPage.tsx, web/src/pages/ProjectDetailPage.tsx, web/src/features/projects/ProjectManagementPanel.tsx, ProjectAssociationDialog.tsx, ProjectAssociationMap.tsx and ProjectDetailMap.tsx are imported by nothing routed (grep across web/src; App.tsx:77-78 only redirects /projects and /projects/:id). Only projectTypes.ts remains live, imported by web/src/features/missionCenter/MissionCenterProjectExplorer.tsx:10 and MissionCenterProjectGisMap.tsx:24-25 — Mission Center file names still say 'Project' while the UI says 'Event Group'.",
+  "Parallel type/helper duplication: eventGroupTypes.ts and projectTypes.ts are field-for-field copies (event_group_key vs project_uuid); eventGroupLocationLabel (eventGroupTypes.ts:71-79) and projectLocationLabel (projectTypes.ts:98-106) are identical; eventGroupStatusLabel and projectStatusLabel are identical (eventGroupTypes.ts:81-85; projectTypes.ts:108-112).",
+  "formatDate is re-declared in four files with two different output formats: Intl 'Sep 5, 2026, 3:04 PM' (EventGroupsPage.tsx:9-15, EventGroupDetailPage.tsx:12-18) vs toLocaleString with seconds (ProjectsPage.tsx:9-13, ProjectDetailPage.tsx:15-19). eventLabel is duplicated (EventGroupDetailPage.tsx:20-22, ProjectDetailPage.tsx:21-23). inputClass is duplicated (ProjectManagementPanel.tsx:11, ProjectAssociationDialog.tsx:21).",
+  "Two status badges for the same OPEN/CLOSED/ARCHIVED enum: EventGroupStatusBadge (EventGroupsPage.tsx:17-24, 11px, py-0.5, 45%/10% mixes) and StatusBadge (ProjectsPage.tsx:15-22, xs, py-1, 42%/9% and 35%/8% mixes); ProjectDetailPage.tsx:98 renders a third, uncoloured pill. EventGroupStatusBadge is exported from a page module and imported by another page (EventGroupDetailPage.tsx:10) rather than living in features/eventGroups or ui.",
+  "No shared Button component; at least five hand-rolled variants in this area: toolbar 'rounded-md border px-3 py-2 text-sm font-medium' (EventGroupsPage.tsx:73, EventGroupDetailPage.tsx:29), chip 'rounded border px-2 py-1 text-[11px]' (EventGroupsPage.tsx:91, EventGroupDetailPage.tsx:129-131), 'rounded-md px-3 py-1.5 text-xs' (ProjectsPage.tsx:115), 'rounded-md px-2.5 py-1.5 text-xs' (ProjectDetailPage.tsx:125), brand primary 'bg-[var(--brand)] text-white' (ProjectManagementPanel.tsx:120,151; ProjectAssociationDialog.tsx:285,306) and a green 'success' lifecycle button (ProjectManagementPanel.tsx:107,172).",
+  "Navigation semantics diverge: live Event Group pages use <Link> (EventGroupsPage.tsx:86,91; EventGroupDetailPage.tsx:77-78,121,129-131) while legacy Projects pages use <button onClick={navigate}> for the same purposes (ProjectsPage.tsx:106,115; ProjectDetailPage.tsx:82,125), which breaks open-in-new-tab and link semantics.",
+  "Vocabulary inconsistencies: 'active' (open_incident_count) vs status 'Open' vs incident 'In progress'; 'Last activity' (list/detail) vs 'Latest incident activity' (ProjectDetailPage.tsx:105); table header 'Links' (EventGroupDetailPage.tsx:112) vs 'Action' (EventGroupsPage.tsx:80, ProjectDetailPage.tsx:117); location abbreviations 'D7 · R1 · PM 12.3' are never expanded on screen while the legacy generated title spells out 'Route N'; 'Coordinator note' vs 'Lifecycle note'; the permanent event_group_key exists in the API (eventGroupTypes.ts:27) but the UI only ever shows the numeric 'Event Group #id' while insisting incidents must have a 'permanent incident key' (EventGroupDetailPage.tsx:103).",
+  "Hard-coded fetch limits with no pagination or truncation notice: 500 groups (EventGroupsPage.tsx:38), 500 projects (ProjectsPage.tsx:36), 1000 assessments fetched wholesale on every Event Group detail load/refresh to derive assessment/submission links (EventGroupDetailPage.tsx:54).",
+  "Responsive vocabulary is thin: only md and xl prefixes are used across the whole area (EventGroupsPage.tsx:63; EventGroupDetailPage.tsx:75,107; ProjectsPage.tsx:61-70; ProjectDetailPage.tsx:79,93,112; ProjectAssociationDialog.tsx:135,155,157). No sm/lg/2xl. Every table relies on overflow-x-auto with no mobile card layout; ArcGIS maps use fixed inline pixel heights (420px ProjectDetailMap.tsx:24; 520px ProjectAssociationMap.tsx:28) that become scroll traps on touch; action chips are ~22px tall (text-[11px] py-1).",
+  "Accessibility gaps: search inputs and selects have no accessible label beyond placeholder (EventGroupsPage.tsx:65-66; ProjectsPage.tsx:77-78; ProjectAssociationDialog.tsx:195); load-error banners lack role=alert except the integrity banner (EventGroupDetailPage.tsx:82 vs 102); tables have no caption; link text relies on hover colour only (EventGroupsPage.tsx:86; EventGroupDetailPage.tsx:121); the legacy modal has role=dialog but no focus trap or Escape handling (ProjectAssociationDialog.tsx:135); maps expose only an aria-label with the list as the sole keyboard path (ProjectDetailMap.tsx:107; ProjectAssociationMap.tsx:196); tooltip on a disabled button (ProjectManagementPanel.tsx:106).",
+  "Read-only-by-design record pages (AppShell.tsx:64-70 IA comment) mean the live Event Group detail carries no lifecycle/edit actions, whereas the dead legacy Project detail carried Edit/Close/Reopen with a well-designed inline confirmation (ProjectManagementPanel.tsx:97-175). Confirm My Work covers group closure or port that panel; otherwise coordinators have no UI to close an Event Group.",
+  "The live Event Group pages dropped three things the legacy Project detail had: an inline incident map with legend (ProjectDetailMap.tsx), a per-incident classification column with provenance copy (ProjectDetailPage.tsx:25-36,114), and KPI cards on the list (ProjectsPage.tsx:70-74). The first is replaced by link-outs to Mission Center; the other two have no replacement.",
+  "API fields returned but never rendered: EventGroupSummary.event_group_key, source, anchor_*/centroid_* coordinates, created_by_user_id, closed_at, closed_by_user_id (eventGroupTypes.ts:27,31-35,41,46-47); EventGroupIncidentSummary.incident_type, approved_at, approved_by_user_id (eventGroupTypes.ts:8-11); EventGroupEvent.metadata (eventGroupTypes.ts:61). Closed-by/closed-at in particular would be cheap, useful secondary information on CLOSED groups.",
+  "Inline-style colour usage bypasses tokens in two places: the broken-row tint (EventGroupDetailPage.tsx:119) and the legend swatches using Tailwind palette colours bg-red-600 / bg-slate-500 / bg-amber-500 instead of --bad/--muted/--warn tokens (ProjectDetailMap.tsx:110-111; ProjectAssociationMap.tsx:198-199)."
+ ]
+}

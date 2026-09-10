@@ -1,0 +1,2654 @@
+{
+ "method": "Information-design pass over every current ERIS web screen inventoried in brief-screens.md (53 screens incl. dialogs, panels and dead code), using brief-core.md as the only agreed facts: live DOM measurements (phone 375, iPad portrait 768, laptop 1440), the seven personas' top tasks and must-see/should-not-see lists, the first-day walkthrough friction (branch chief, coordinator, engineer, office chief, reviewer+admin), the vocabulary table and the per-area data-density verdicts (REMOVE/DEMOTE/PROGRESSIVE). For each screen the persona's primary task was fixed first; every data element was then classified as essential (visible by default because a top task needs it to decide or act), secondary (available on demand with an exact placement: expandable row, details drawer or bottom sheet, hover/long-press with an always-visible fallback, 'More' tab, overflow menu, confirm sheet) or hidden/removed (duplicate, raw code, internal id, page-local KPI, dead code). Column budgets follow the responsive-table ladder in brief-research.md (card rows below 600px, prioritised columns 600-1199px, full table >=1200px, max 6-7 columns, one status per row, location as a single string, 44px targets on coarse pointers). Field availability was verified against web/src/api/types.ts, web/src/api/assessments.ts and web/src/features/eventGroups/eventGroupTypes.ts; where a needed value is not in the API (reporter name, submission creator name, WorkflowEvent actor name, office_name on Assessment, incident photo list, per-incident assessment id on Event Group detail) the item says 'flag: backend' instead of inventing it. Backend objects and the state machine are unchanged; UI labels map 1:1 to Incident, Event Group, Assessment, Submission (technical submission) and the canonical roles.",
+ "screens": [
+  {
+   "screen": "App shell (header, navigation, page frame)",
+   "route": "Wrapper for every authenticated route (AppShell)",
+   "primaryTask": "Move between the areas my role uses and see who I am signed in as, on any device, without the navigation eating the first screen",
+   "essential": [
+    {
+     "item": "Role-filtered navigation with max five top-level destinations per role (e.g. coordinator: My Work, Incidents, Map, Event Groups, More); label + Lucide icon; active item marked with aria-current",
+     "why": "Every persona's first-day confusion starts with 'which of these four Operations pages holds my thing'; capping and ordering destinations by frequency is the learn-from-zero fix; NN/g: never hide nav behind a hamburger on desktop/iPad landscape"
+    },
+    {
+     "item": "Count badge on My Work (items waiting on me) and, for coordinators, on Awaiting intake",
+     "why": "Passive indicator that answers 'is anything waiting for me' without opening the page; counts are actionable here"
+    },
+    {
+     "item": "Page title h1 (one per page) and, on record pages, a breadcrumb slot ('Event Groups / <title>')",
+     "why": "Deep links land users on records with no context today; breadcrumb names the object type in the agreed vocabulary"
+    },
+    {
+     "item": "Wordmark 'ERIS' (full product name only at md+) linking to '/'",
+     "why": "Full name truncates to 'Emergency Response Inf...' at 375px; the wordmark is enough for internal users"
+    },
+    {
+     "item": "Avatar/initials button, always visible at every width",
+     "why": "On phones today no identity is shown at all; the avatar is the single door to name, role, theme, help and sign out"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "full_name + humanised role labels (roleLabel(): 'GeoTech Branch Chief', 'Maintenance Coordinator', 'Administrator')",
+     "where": "Avatar popover, first two lines"
+    },
+    {
+     "item": "Theme choice (Light / Dark / Coastal, plus System)",
+     "where": "Avatar popover radio group; also on Settings"
+    },
+    {
+     "item": "Sign out",
+     "where": "Last item of the avatar popover"
+    },
+    {
+     "item": "Help slot: 'How the <role> workflow works' (3-5 steps in status vocabulary), glossary, GeoTech support contact",
+     "where": "Same header position on every page (WCAG 2.2 SC 3.2.6); opens a side panel"
+    },
+    {
+     "item": "Sidebar collapse/expand toggle, persisted per user",
+     "where": "Bottom of the desktop sidebar only (xl+)"
+    },
+    {
+     "item": "Access-denied notice 'You do not have access to <path>'",
+     "where": "Dismissible banner under the header after a RoleRoute redirect to '/'"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Subtitle 'Caltrans | Geotechnical Services' and copyright footer",
+     "why": "Organisational boilerplate on every page adds nothing to any task; keep on Login only"
+    },
+    {
+     "item": "Raw role codes joined by ' · ' (e.g. 'FIELD_WORKER · ADMIN') and the 'ERIS user' fallback",
+     "why": "Internal enums as identity; FIELD_WORKER even means the opposite of its plain-English reading"
+    },
+    {
+     "item": "Stacked 'Navigation' card above content below lg (700px before content on phone and iPad portrait)",
+     "why": "Measured blocker: main content starts at 700px on every page; replaced by bottom bar (<600) / icon rail (600-1199) / sidebar (>=1200)"
+    },
+    {
+     "item": "'Navigation' caption and theme <select> in the header",
+     "why": "Redundant label; theme is a rarely changed preference"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Bottom navigation bar: 4 destinations + 'More'; header shows wordmark, page title, avatar (3 items)",
+    "tablet": "64px icon rail with labels on long-press/tooltip fallback list in 'More'; header wordmark + title + help + avatar",
+    "desktop": "256px sidebar with labels and section headings (Work / Records / GIS / Admin); header wordmark + breadcrumb + help + avatar"
+   }
+  },
+  {
+   "screen": "Login",
+   "route": "/login",
+   "primaryTask": "Sign in and return to what I was doing",
+   "essential": [
+    {
+     "item": "Email and password fields (autofocus email, show/hide password), 'Sign in' with busy state",
+     "why": "The only task on the page"
+    },
+    {
+     "item": "Session-expired notice naming why the user is here",
+     "why": "Field staff on flaky connections must not read a forced sign-out as a failure of the app"
+    },
+    {
+     "item": "Error message with role=alert, plain language",
+     "why": "Error prevention/recognition"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "'If you cannot access ERIS, contact your ERIS administrator' help text",
+     "where": "Below the button, one line"
+    },
+    {
+     "item": "Brand tile + 'Caltrans · Geotechnical Services' eyebrow (once)",
+     "where": "Above the form; the wide brand panel only at lg+"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Marketing paragraph listing features",
+     "why": "Internal users already know the tool"
+    },
+    {
+     "item": "Third repetition of the product name in the footer and 'Use your authorized ERIS account to continue' line",
+     "why": "Restates the heading"
+    },
+    {
+     "item": "min-h 620px card on phones",
+     "why": "Form floats in whitespace and pushes the button under the soft keyboard"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Single column, 2 fields + button; card fits 100dvh",
+    "tablet": "Single column, card capped at max-w-md",
+    "desktop": "Two panels (brand | form), form still max-w-md"
+   }
+  },
+  {
+   "screen": "Session validation gate (AuthGateLoading)",
+   "route": "Rendered in place of guarded routes while /auth/me resolves",
+   "primaryTask": "Wait for the session check without wondering whether ERIS is broken",
+   "essential": [
+    {
+     "item": "'Checking your session…' status text with role=status and a progress indicator",
+     "why": "Visibility of system status; must not flash protected content"
+    },
+    {
+     "item": "On network/5xx failure: 'Cannot reach ERIS' + Retry button (token kept; only 401/403 signs out)",
+     "why": "A flaky field connection today looks like a forced sign-out and loses the deep link"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Brand tile",
+     "where": "Above the status text"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Sentence 'Confirming your account and access before loading…'",
+     "why": "Restates the status line"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (single status card)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Settings",
+   "route": "/settings (nav section renamed 'Account' honestly or to 'Preferences')",
+   "primaryTask": "See my account identity and pick a colour theme",
+   "essential": [
+    {
+     "item": "Account section: full_name, email, humanised roles (from GET /auth/me) read-only",
+     "why": "The nav says 'Account'; first-day users look here for 'who am I in this system' and today find only a colour picker"
+    },
+    {
+     "item": "Appearance: theme cards (Caltrans Light / Dark / Coastal / System) with aria-pressed and a swatch strip",
+     "why": "The one setting that exists; selected state must not rely on a 12px dot"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "One-line purpose per theme ('Reduced-glare dark workspace…')",
+     "where": "Inside each theme card"
+    },
+    {
+     "item": "'Stored in this browser only' note",
+     "where": "Caption under the Appearance heading"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'About these settings' section explaining absent features",
+     "why": "A page should not explain what it does not do"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 column (theme cards stacked)",
+    "tablet": "2 theme cards per row",
+    "desktop": "3 theme cards per row, Account section above"
+   }
+  },
+  {
+   "screen": "Not Found",
+   "route": "* (unmatched URL)",
+   "primaryTask": "Get back to a working page for my role",
+   "essential": [
+    {
+     "item": "Title 'This ERIS page does not exist' and one CTA 'Go to my home' (navigates to '/', role-aware), rendered inside AppShell when signed in",
+     "why": "Signed-in users today lose header/nav/sign-out on 404; the Mission Center CTA bounces maintenance users into a refusal notice"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "'Go back' (browser history) and 'Go to sign in' when anonymous",
+     "where": "Secondary buttons beside the primary"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Open submissions' CTA and 'Go to Mission Center' CTA",
+     "why": "/submissions has no nav entry; Mission Center is role-gated"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (single card, buttons stacked)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Route guards and redirects (HomeRedirect, ProtectedRoute, RoleRoute, legacy /projects)",
+   "route": "/, /projects, /projects/:id, guards on all routes",
+   "primaryTask": "Land on the right page for my role and never be silently bounced",
+   "essential": [
+    {
+     "item": "One home definition: '/' -> My Work for queue roles, Incidents for maintenance-only; Login, Not Found and RoleRoute all go to '/'",
+     "why": "Four competing homes today (/my-work, /mission-center, /submissions, role-aware '/')"
+    },
+    {
+     "item": "Deep link preserved through sign-in (state.from / sessionStorage on expiry)",
+     "why": "Shared /assessments/:id links are lost on re-auth today"
+    },
+    {
+     "item": "Access-denied feedback (banner on '/') naming the path",
+     "why": "Silent redirect to /submissions reads as a broken link"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Legacy /projects -> /event-groups redirects",
+     "where": "Kept as router redirects, no UI"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "RoleRoute fallback to /submissions",
+     "why": "Page has no nav entry and older vocabulary"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (non-visual)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Modal dialog primitive (ModalDialog / DialogShell)",
+   "route": "Shared by all dialogs",
+   "primaryTask": "Complete or cancel one focused decision without losing page context",
+   "essential": [
+    {
+     "item": "Title naming the object in agreed vocabulary ('Delegate Assessment for Route 101 PM 12.3'), one consequence sentence, primary + Cancel (Cancel gets initial focus on irreversible actions), in-dialog error region",
+     "why": "Errors today land in the page banner behind the overlay; irreversible actions fire with no consequence text"
+    },
+    {
+     "item": "Panel max-h calc(100dvh-2rem) with internal scroll and a sticky footer",
+     "why": "Tall dialogs and the soft keyboard push buttons off-screen on phones"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Optional notes textarea for the specific action",
+     "where": "Inside the dialog body, above the footer, collapsed under 'Add a note' when optional"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Eyebrows such as 'Destructive action' / 'Authoritative dataset change' / 'Coordinator review'",
+     "why": "Title and button tone already signal it; adds a line on small screens"
+    },
+    {
+     "item": "Internal ids in dl rows ('Dataset ID #14', 'Creator: User #7')",
+     "why": "Version tag and names are the human keys"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Full-width sheet, buttons stacked full width (primary first in DOM order)",
+    "tablet": "Centered max-w-xl, buttons in one row",
+    "desktop": "Centered max-w-xl (wide variants for map dialogs), buttons in one row"
+   }
+  },
+  {
+   "screen": "My Work queue (list + detail shell)",
+   "route": "/my-work (?assessment=<id> deep link)",
+   "primaryTask": "See what is waiting on me, grouped by what I must do, pick the next item and act without leaving the page",
+   "essential": [
+    {
+     "item": "Grouped sections with counts for the signed-in role only: coordinator 'Needs my decision (3)', 'Waiting on reporter (1)'; office chief 'To delegate', 'To finalize'; branch chief 'To assign an engineer'; engineer 'My drafts', 'Returned to me'; reviewer 'To review'; admin defaults to 'Assigned to me' with an 'All queues' toggle",
+     "why": "Office chief and reviewer+admin walkthroughs: one unfiltered rail mixing six kinds; admin firehose; sent-back reports masquerade as new"
+    },
+    {
+     "item": "Row: incident title (or 'Field report'), single location string (District 7 · Los Angeles · Route 101 · PM 12.30), one state badge (assessment state or 'Awaiting intake'), 'Waiting on you since 3 days'",
+     "why": "Branch chief and engineer walkthroughs: cards identify cases by three ids and no place; chiefs pick engineers by where the site is"
+    },
+    {
+     "item": "Persistent success notice after any action ('Assessment for Route 101 PM 12.3 delegated to J. Smith') with Dismiss; the acted item stays visible as 'Done' until dismissed",
+     "why": "Delegate/Assign/Finalize today give no feedback; the panel silently jumps to another item"
+    },
+    {
+     "item": "Teaching empty state per group ('No reports need your decision. New field reports appear here as soon as they are filed.')",
+     "why": "Rotating staff need the learning cue; dead-end empties today"
+    },
+    {
+     "item": "Selected row persistently highlighted with aria-current; below lg the row opens a full-width detail with 'Queue (N)' back control",
+     "why": "Measured: on phone and iPad the 860px rail pushes the detail below the fold and tapping does not scroll"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Incident # / Assessment # (and incident_key once minted)",
+     "where": "Muted suffix at the end of the row title, never leading"
+    },
+    {
+     "item": "Submissions count ('2 technical submissions')",
+     "where": "Third line of the row, only for engineer/reviewer states (DRAFT, REVISION_REQUESTED, SUBMITTED)"
+    },
+    {
+     "item": "Office name · District",
+     "where": "Row third line only for admins or when the user's office filter is 'All'"
+    },
+    {
+     "item": "'Recently completed (7 days)' group",
+     "where": "Collapsed at the bottom of the list"
+    },
+    {
+     "item": "Refresh",
+     "where": "Icon button at the end of the list header; auto-refresh keeps a relative 'Updated 2 min ago'"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Rail header 'N items waiting on you' duplicating the count 15px above",
+     "why": "Exact duplicate"
+    },
+    {
+     "item": "'New report' red pill on every triage card",
+     "why": "Constant label; the group header carries the kind"
+    },
+    {
+     "item": "'Office NORTH · D7' raw codes on assessment cards",
+     "why": "Raw enums; office name belongs to the detail meta line (flag: backend - Assessment lacks office_name; map office_code client-side until then)"
+    },
+    {
+     "item": "Up to 1000 items per queue rendered in one list",
+     "why": "Show open work only, most-urgent first, with 'Show more'"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Card row, 3 lines: title + state badge / location string / waiting-on + age; tap opens detail full screen",
+    "tablet": "List pane 360px with the same 3-line cards beside the detail from 840px (iPad landscape); portrait uses list -> detail drill-in",
+    "desktop": "List pane 4 fields (title, location, state, age) sticky and viewport-tall beside the detail; no table columns"
+   }
+  },
+  {
+   "screen": "Triage work item panel (field report awaiting intake)",
+   "route": "/my-work (detail when a triage item is selected)",
+   "primaryTask": "Judge a new field report (what, where, who, evidence) and start the triage decision",
+   "essential": [
+    {
+     "item": "Title, location string, 'Reported 2 hours ago' (first_observed_at relative), description",
+     "why": "The four facts the coordinator reads first; already essential today"
+    },
+    {
+     "item": "Reporter photo thumbnails (incident attachments) and reporter name (flag: backend - Incident carries reporter_user_id only; needs reporter_name or an incident attachments endpoint on the web)",
+     "why": "Coordinator walkthrough S3: the assessment-vs-no-assessment decision is made from photos and who called it in; today they must leave the queue"
+    },
+    {
+     "item": "incident_type label and Road Inventory match one-liner from road_inventory_context.snapshot (lanes, surface)",
+     "why": "Persona must-see: road-inventory context"
+    },
+    {
+     "item": "One primary action 'Start triage' and a link 'Open incident record' (a real record, not a highlighted table row)",
+     "why": "Single unmistakable next step"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Coordinates (latitude, longitude)",
+     "where": "'Copy coordinates' button; shown on the triage map, not printed at 6 decimals"
+    },
+    {
+     "item": "'Waiting on reporter since <date> - fields requested: <revision_fields>'",
+     "where": "Amber line replacing the primary action when location_match_status is NEEDS_REVISION"
+    },
+    {
+     "item": "'How triage works' (Event Group + four dispositions)",
+     "where": "Disclosure link under the action, remembered once opened"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Awaiting triage' red pill",
+     "why": "Third label for the same state on one screen"
+    },
+    {
+     "item": "'NEXT STEP · Waiting on Maintenance Coordinator' line",
+     "why": "The viewer is that coordinator"
+    },
+    {
+     "item": "Explanatory paragraph repeated on every item",
+     "why": "Onboarding text; move to the disclosure"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Single object: title, location, reported, 3 photo thumbnails, description, action visible in the first screen",
+    "tablet": "Same, photos as a 4-up strip",
+    "desktop": "Same in the 2/3 detail pane; photos 6-up strip"
+   }
+  },
+  {
+   "screen": "Assessment detail panel (shared; record mode at /assessments/:id, work mode in /my-work)",
+   "route": "Component rendered by /assessments/:id and /my-work",
+   "primaryTask": "Understand where this assessment is, who it is waiting on, what happens next, and open the technical submission",
+   "essential": [
+    {
+     "item": "Header: incident title as h2 + location string; one state badge (assessmentStateLabel); Incident / Map / Event Group links as 44px chips",
+     "why": "Place before ids (branch chief walkthrough); one status per object"
+    },
+    {
+     "item": "'Next step' card: 'Waiting on you' (when the viewer owns the step) or 'Waiting on <role or Engineer · Name>' + 'since <relative>' + one instruction sentence",
+     "why": "Strong existing pattern; personalising 'you' fixes the office chief confusion"
+    },
+    {
+     "item": "Latest reviewer note quoted in the Next step card when state is REVISION_REQUESTED (events where to_state = REVISION_REQUESTED, with actor_name and relative date) and the delegation note when PENDING_ENGINEER_ASSIGNMENT ('Delegated by <actor_name> on <date>: <notes>')",
+     "why": "Engineer walkthrough S4: 'Address the reviewer's comments' without the comments; branch chief cannot see who handed it over"
+    },
+    {
+     "item": "Pipeline of 6 steps with per-step timestamps (office_delegated_at, engineer_assigned_at, submitted_at, review_requested_at, approved_at, finalized_at); compact 'Step 3 of 6 · Engineering' with expandable vertical stepper below md",
+     "why": "Pipeline needs 504px today and scrolls off a 311px card; timestamps exist in the API but are never shown"
+    },
+    {
+     "item": "Technical submissions rows: descriptor link ('#9' muted) + humanised status (REJECTED shown as 'Returned for correction') + 'Submitted 3 days ago' + one role-aware primary action",
+     "why": "7-column table with raw enum codes and a raw user id today"
+    },
+    {
+     "item": "Assignments: full_name + humanised assignment_role (Engineer / Reviewer / Approver / Consulted)",
+     "why": "Reviewers must know whether they hold review authority (CONSULTED has none)"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "office name · District N · Updated <relative>",
+     "where": "One muted meta line under the header (office_code humanised client-side; flag: backend to return office_name)"
+    },
+    {
+     "item": "Routing override reason (office_override_reason) and triage_disposition + triage notes",
+     "where": "Collapsed 'Routing and triage notes' disclosure under the header"
+    },
+    {
+     "item": "History: humanised event_type, actor_name (fallback actor_email), relative time, notes",
+     "where": "Collapsed card 'Show N events'; no nested scroll region"
+    },
+    {
+     "item": "Submission created_at and creator",
+     "where": "Expanded row state (creator only once the API supplies a name; flag: backend)"
+    },
+    {
+     "item": "'This step is yours - act on it in My Work' CTA",
+     "where": "Record mode only, inside the Next step card, only for the owning viewer"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'ASSESSMENT #id' eyebrow as the first line",
+     "why": "Ids never lead; move to a muted suffix"
+    },
+    {
+     "item": "Sentence 'Actions for this step are performed from My Work by the responsible role'",
+     "why": "Repeats the page banner on every non-actionable record"
+    },
+    {
+     "item": "Card hint 'All GISA forms attached to this assessment's incident'",
+     "why": "Introduces a second name (GISA) for technical submissions"
+    },
+    {
+     "item": "Submissions table ID column, Reporter 'You / User #id' column, Action column duplicating the link",
+     "why": "Raw ids and duplicates that force horizontal scroll on phones and tablets"
+    },
+    {
+     "item": "assessment_uuid, created_by_user_id, branch_chief_user_id as raw values",
+     "why": "Internal identifiers; names are shown in Assignments"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Submission rows as cards: descriptor + status / submitted age / action button (3 lines)",
+    "tablet": "3 columns: Submission, Status, Submitted + trailing action",
+    "desktop": "4 columns: Submission, Status, Submitted, Created by (when name available) + trailing action"
+   }
+  },
+  {
+   "screen": "Assessment work item panel (mode=work additions)",
+   "route": "/my-work (detail when an assessment item is selected)",
+   "primaryTask": "Perform the one workflow step my role owns (delegate, assign engineer, submit, approve/return, finalize, add reviewer) safely",
+   "essential": [
+    {
+     "item": "One primary action for my step inside the Next step card, with visibly labelled controls: 'Branch chief' select, 'Engineer (optional)' select with helper 'Naming an engineer routes the case directly', 'Engineer' select for branch chiefs",
+     "why": "Office chief walkthrough: Delegate disabled with no explanation; selects rely on placeholders"
+    },
+    {
+     "item": "Per-action confirm sheet naming the target and consequence ('Delegate to J. Smith? They will be notified and this leaves your queue'); 'Request revision' requires a comment; Approve/Finalize state what changes and that the incident stays open",
+     "why": "S4: irreversible transitions fire on one click; 'Request revision' silently substitutes a canned note"
+    },
+    {
+     "item": "'Also assign a reviewer' inside the Next step card for office/branch chiefs at delegation/assignment time, and Add reviewer available in record mode for canAssignReviewer roles",
+     "why": "Branch chief blocked: reviewer control vanishes once the engineer is assigned"
+    },
+    {
+     "item": "Engineer 'Fill out technical submission' / 'Create technical submission' primary, with one 'Submit for review' that advances the assessment (form-level submit hidden when linked)",
+     "why": "Engineer walkthrough S4: two independent Submit buttons"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Optional workflow notes",
+     "where": "Inside each action's confirm sheet, not a shared always-visible textarea"
+    },
+    {
+     "item": "Option email",
+     "where": "Only appended when two options share a full_name"
+    },
+    {
+     "item": "Engineer decision data (office/branch, open assessments count)",
+     "where": "Second line of each option in the engineer picker when the options payload carries it (flag: backend for workload count)"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Single shared 'Optional workflow notes' textarea feeding six actions",
+     "why": "Notes typed for the engineer end up on Add reviewer"
+    },
+    {
+     "item": "'No actions for your role on this step.' sentence",
+     "why": "The 'Waiting on <role>' line already says it"
+    },
+    {
+     "item": "Auto-select of the next item after an action",
+     "why": "Users cannot tell whether the action succeeded; show the success summary instead"
+    }
+   ],
+   "columnBudget": {
+    "phone": "One primary button full width + secondary in an overflow menu; selects stacked full width",
+    "tablet": "Primary + one secondary visible; selects side by side",
+    "desktop": "Primary + two secondary + overflow; labelled selects in one row"
+   }
+  },
+  {
+   "screen": "Event Group review dialog (triage step 1; merged with step 2 into one 'Accept report' flow)",
+   "route": "/my-work (modal from 'Start triage')",
+   "primaryTask": "Decide whether this report belongs to an existing nearby Event Group or starts its own, then record the disposition in one commit",
+   "essential": [
+    {
+     "item": "Report summary line (title · location string) and a one-line definition: 'An Event Group is one real-world event or site; several reports can belong to it'",
+     "why": "Coordinator walkthrough: 'Event Group' is the first thing asked and never defined"
+    },
+    {
+     "item": "Nearby groups as radio cards with NO default: title, location string, distance ('1.5 mi away'), 'N incidents · M open'; nearest marked 'Suggested', not pre-checked",
+     "why": "S3: nearest group pre-selected biases association; 25 miles of I-80 spans unrelated slides"
+    },
+    {
+     "item": "Option 'Starts its own event' with prefilled Event Group title",
+     "why": "Explicit alternative to association"
+    },
+    {
+     "item": "Map of the report, candidate groups and the selected group's incidents; 'List | Map' segmented control below lg",
+     "why": "Spatial judgement is the task; on phones the 380px map inside a 92vh modal is a scroll trap"
+    },
+    {
+     "item": "Single progression: 'Continue' holds the choice client-side; nothing is written until the final 'Accept report'; in-dialog error region",
+     "why": "Association is persisted before the disposition today and cannot be undone; errors go behind the overlay"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Search radius select",
+     "where": "Compact control at the end of the list header"
+    },
+    {
+     "item": "New group description and coordinator note",
+     "where": "Collapsed 'Add details' under the new-group title"
+    },
+    {
+     "item": "Selected group summary (title, location, incident count)",
+     "where": "Caption under the map"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'#id' prefix on every group row",
+     "why": "Title + location already distinguish rows"
+    },
+    {
+     "item": "Separate 'Record decision · use selected Event Group' commit and the 'Decision recorded' status line",
+     "why": "Two-button commit for one choice; disabled Continue with no tooltip"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Radio cards, 3 lines: title / location / distance · incidents; map on its own tab",
+    "tablet": "Two columns from 768px: list (3 lines per card) | map aspect 4:3",
+    "desktop": "List 0.9fr (3 lines per card) | map 1.4fr"
+   }
+  },
+  {
+   "screen": "Nearby Event Groups map (pane inside the triage dialog)",
+   "route": "/my-work (modal pane; EventGroupTriageMap)",
+   "primaryTask": "See how far the new report is from candidate groups and pick one by tapping",
+   "essential": [
+    {
+     "item": "New report marker, open Event Group markers (tappable, >=20px on touch), selected group's incidents, legend of those three symbols",
+     "why": "Three-layer story is the decision aid"
+    },
+    {
+     "item": "Height derived from the column (aspect 4:3, max 50vh)",
+     "why": "Fixed 380px is 57% of a phone viewport inside a modal"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Basemap (theme-aware) and zoom controls",
+     "where": "Default ArcGIS chrome, top-left"
+    },
+    {
+     "item": "Marker popups",
+     "where": "Docked bottom-center below md or disabled on touch; selection happens by tap, popup is preview only"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "GraphicsLayer titles ('Open Event Groups', 'Event Group incidents')",
+     "why": "No layer list exists; never visible"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (map tab, legend 3 chips)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Triage disposition dialog (triage step 2)",
+   "route": "/my-work (second step of the merged triage flow)",
+   "primaryTask": "Choose one of four dispositions with the structured data it needs and accept the report",
+   "essential": [
+    {
+     "item": "Disposition as a radio group (no default) with one consequence sentence each: Assessment required, No assessment required, Needs reporter information, Duplicate or linked",
+     "why": "Default 'Assessment required' routes every report to GeoTech in one click"
+    },
+    {
+     "item": "Structured inputs revealed by choice: target incident picker (target_incident_id / target_location_id) for Duplicate or linked; revision_fields checklist (district, county, route, post_mile, lat/lon, first_observed_at, description) for Needs reporter information",
+     "why": "Both dispositions accept only free text today; the API already takes these fields"
+    },
+    {
+     "item": "Event Group choice summary line with 'Change'",
+     "why": "Keeps step 1 visible without remounting it"
+    },
+    {
+     "item": "Primary 'Accept report' (label reflects disposition) + Cancel; buttons wrap on phones; in-dialog error",
+     "why": "Footer overflows a 375px panel today; errors hidden behind overlay"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Decision notes",
+     "where": "Collapsed 'Add a note' textarea"
+    },
+    {
+     "item": "Routing preview 'Will route to North GeoTech Office' with rare 'Override…' (required reason)",
+     "where": "Shown only when Assessment required is selected; override behind a link"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Long description paragraph about Event Group confirmation and the green 'Event Group decision recorded' banner",
+     "why": "Replaced by the one-line summary"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Radio list stacked, buttons stacked",
+    "tablet": "Same, centred max-w-xl",
+    "desktop": "Same, centred max-w-xl"
+   }
+  },
+  {
+   "screen": "Resolve incident dialog (currently unreachable)",
+   "route": "None today; mount from the incident record for the assigned engineer/admin once the assessment is FINALIZED",
+   "primaryTask": "Close the incident with a resolution note after the assessment is finalized",
+   "essential": [
+    {
+     "item": "Title 'Resolve <incident title>' with the location string, consequence 'Marks the incident resolved; the finalized assessment stays on record', resolution note, Resolve + Cancel",
+     "why": "Vocabulary table: users assume Finalized = closed; the incident stays open until Resolve is called, and no UI offers it"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Link to the finalized assessment",
+     "where": "Caption under the title"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Nothing beyond the fields above",
+     "why": "Dialog is short by design"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (single dialog)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Incidents record view (Incident records / Awaiting intake)",
+   "route": "/incidents and /incidents/:id",
+   "primaryTask": "Look up an incident and read, in one label, where it is in the workflow and who has it; reporters check whether their report was accepted",
+   "essential": [
+    {
+     "item": "Tabs 'Incident records (N)' / 'Awaiting intake (N)' as a segmented control; empty state on one tab points to the other",
+     "why": "Branch chief: untriaged reports invisible on the default tab and the empty state reads like a search mistake"
+    },
+    {
+     "item": "Search (title, incident_key, location) and filters District (default my district for coordinators) and Workflow position; applied-filter chips with Clear all",
+     "why": "Coordinator: no district filter anywhere; 'my district' is their whole world"
+    },
+    {
+     "item": "Row: title with incident_key muted; location string; ONE 'Workflow position' label derived from current_stage + status + location_match_status + triage_disposition ('Awaiting intake', 'Waiting on reporter', 'With North GeoTech Office', 'Engineer J. Doe - draft', 'Under review', 'Closed at triage - duplicate of #40', 'Resolved'); first_observed_at relative",
+     "why": "'Status' column says New for accepted reports and the stage is never shown; four overlapping vocabularies collapse to one"
+    },
+    {
+     "item": "Incident record surface (/incidents/:id): description, first_observed_at and first_occurred_at, reporter, location with mini map, road_inventory_context snapshot, attachments, Progress (workflow tree), resolution_comment",
+     "why": "S3: the record view never shows the record; 'Open incident' lands on a highlighted table row"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Assigned to (assignment.assignee_name)",
+     "where": "Second line under the workflow label at lg+; own column on desktop; hidden for reporters"
+    },
+    {
+     "item": "Assessment state badge linking to the assessment (operational roles only)",
+     "where": "Desktop column; expanded row on tablet"
+    },
+    {
+     "item": "Event Group link and 'View on map'",
+     "where": "Row action menu / detail header; Event Group link only for operational roles (plain text for reporters)"
+    },
+    {
+     "item": "Result count 'Showing 12 of 87 awaiting intake'",
+     "where": "Table caption row"
+    },
+    {
+     "item": "Coordinates (latitude, longitude)",
+     "where": "Detail surface with copy button; on hover in the location cell on desktop"
+    },
+    {
+     "item": "Submissions",
+     "where": "Detail surface as 'Technical submissions (N)'"
+    },
+    {
+     "item": "'Unassigned only' toggle",
+     "where": "Filters popover, coordinators/admins only"
+    },
+    {
+     "item": "Explanatory banner about intake vs records",
+     "where": "Shown once, then behind an info icon next to the tabs"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "ID column",
+     "why": "Muted suffix in the title cell is enough; a column is expensive on tablets"
+    },
+    {
+     "item": "Classification state line ('Pending assessment review') and 'Loading classification…'",
+     "why": "Redundant with the assessment badge; placeholder becomes a permanent lie"
+    },
+    {
+     "item": "'No assessment' text for reporters and on the intake tab",
+     "why": "Always shown for non-operational users even when an assessment exists"
+    },
+    {
+     "item": "'AS #12' / 'Sub #9' abbreviations",
+     "why": "Unexplained; replaced by the badge and detail count"
+    },
+    {
+     "item": "6-decimal coordinates in the list",
+     "why": "Nobody scans them; the location string is the scannable key"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Card row, 3 lines: title (key muted) + workflow label / location / observed age; whole row is the link",
+    "tablet": "4 columns: Incident, Location, Workflow position, Observed; assignee and assessment in the expanded row",
+    "desktop": "6 columns: Incident, Location, Workflow position, Assigned to, Assessment, Observed (+ row action menu)"
+   }
+  },
+  {
+   "screen": "New incident intake panel (web)",
+   "route": "/incidents (inline today) -> proposed /incidents/new mobile-first flow",
+   "primaryTask": "File a field report from the web with location, time and evidence, quickly and without typing coordinates by hand",
+   "essential": [
+    {
+     "item": "Steps What / When / Where / Evidence / Check answers with a step indicator; single column",
+     "why": "Infrequent novice flow (research: wizard fits); today 10 fields are 2.5 screens tall with errors in a banner outside the panel"
+    },
+    {
+     "item": "Title, description; first_observed_at with a 'Now' shortcut",
+     "why": "Required facts"
+    },
+    {
+     "item": "Where: 'Use my location' (geolocation with accuracy), map pin picker, latitude/longitude as text inputmode=decimal, District/County/Route/Post mile cascading selects with Road Inventory match card",
+     "why": "S4: coordinates must be hand-typed to 6 decimals; minus key hidden on iOS numeric keypads"
+    },
+    {
+     "item": "Evidence: 'Take photo' (capture) and 'Choose files' with thumbnails and 44px Remove; failed uploads kept in a retry list",
+     "why": "Attachment failures cannot be retried today"
+    },
+    {
+     "item": "Inline field errors (aria-invalid, described-by) and a linked error summary on submit",
+     "why": "Validation is page-level today"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "first_occurred_at",
+     "where": "'When' step under 'More about timing'"
+    },
+    {
+     "item": "incident_type",
+     "where": "'What' step as a select (render it or drop the hidden field)"
+    },
+    {
+     "item": "Draft persistence and 'Discard this report?' confirm",
+     "where": "sessionStorage; confirm on Cancel when dirty"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Classification: Unclassified · assigned after…' line",
+     "why": "Repeats the paragraph above it"
+    },
+    {
+     "item": "Duplicate header/footer Cancel and toolbar 'Close report' toggle",
+     "why": "Three dismiss controls that discard a half-typed report"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 column, one step per screen, sticky Back / Continue",
+    "tablet": "1 column max 640px, steps stacked with the indicator sticky",
+    "desktop": "1 column max 640px; map picker beside the coordinate fields"
+   }
+  },
+  {
+   "screen": "Workflow tree (WorkflowTreeView; currently unmounted)",
+   "route": "None today; mount as the 'Progress' section of the incident record",
+   "primaryTask": "See where an incident sits in the review chain and who owns the current step",
+   "essential": [
+    {
+     "item": "Nodes in order (Report, Coordinator intake, Office chief, Branch chief, Engineer, Review, Finalize, Resolution) each with humanised status (Done / Current / Waiting / Waiting on reporter / Not needed), owner role + name, timestamp",
+     "why": "Persona must-see for coordinators and chiefs; no screen shows the chain today"
+    },
+    {
+     "item": "'Current owner: GeoTech Branch Chief - J. Smith' summary line",
+     "why": "Answers 'who has it' in one glance"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Node details (notes, actor email, linked/duplicate target incident)",
+     "where": "Expand per node"
+    },
+    {
+     "item": "Path label (Assessment required / No assessment / Duplicate)",
+     "where": "Caption under the summary line"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Raw assessment state and office codes ('PENDING_OFFICE_DELEGATION · Office NORTH')",
+     "why": "Raw enums; the assessment badge already exists"
+    },
+    {
+     "item": "Hard-coded dark-palette colours",
+     "why": "Break contrast on the light theme; use tokens"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Vertical stepper, 1 node per row (status, owner, date)",
+    "tablet": "Horizontal up to 4 nodes visible, wraps",
+    "desktop": "Horizontal 6-8 nodes in one row"
+   }
+  },
+  {
+   "screen": "Assessments record view (list + toolbar)",
+   "route": "/assessments and /assessments/:id",
+   "primaryTask": "Find an assessment, see where it is and how long it has been there; office chiefs get an office-wide picture of what is stuck",
+   "essential": [
+    {
+     "item": "Filters: Office (default my office; API supports office_code), State (multi-select chips), 'Active only' toggle; per-state count strip",
+     "why": "Office chief S4: statewide list with no office filter; must cycle the filter five times to count"
+    },
+    {
+     "item": "Sort: 'Longest waiting first' / 'Recently updated'",
+     "why": "Stuck items sink to the bottom today"
+    },
+    {
+     "item": "Row: incident title, location string, one state badge, 'Waiting on <role> · 6 days in this step' (from the matching per-step timestamp)",
+     "why": "Cards carry no place and no age today"
+    },
+    {
+     "item": "Below lg: list only at /assessments, detail only at /assessments/:id with a sticky 'Back to assessments' bar",
+     "why": "Measured: rail up to 860px above the detail on every phone and tablet"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Assessment # and Incident #",
+     "where": "Muted suffix at the end of the row title"
+    },
+    {
+     "item": "'2 technical submissions'",
+     "where": "Row third line"
+    },
+    {
+     "item": "Office name · District",
+     "where": "Row third line only when the Office filter is 'All'"
+    },
+    {
+     "item": "Read-only orientation hint with My Work link",
+     "where": "Dismissible one-line tip shown on first visit"
+    },
+    {
+     "item": "Search (id, incident, submission descriptor)",
+     "where": "Toolbar, full width on phones"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Toolbar 'N of M assessments' duplicated 12px below in the rail header",
+     "why": "Exact duplicate; keep one caption"
+    },
+    {
+     "item": "'Office NORTH' raw code and 'D03' fragment on cards",
+     "why": "Raw enums"
+    },
+    {
+     "item": "Submission descriptors line per card",
+     "why": "Third line on every card; count is enough"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Card row, 3 lines: title + state / location / waiting-on + age",
+    "tablet": "List pane with the same cards beside the detail from 840px; drill-in below",
+    "desktop": "List pane 4 fields (title, location, state, age) + detail pane"
+   }
+  },
+  {
+   "screen": "Event Groups list",
+   "route": "/event-groups",
+   "primaryTask": "Find an Event Group by title or place and see how much is happening there and how recently",
+   "essential": [
+    {
+     "item": "Search (title, county, route, description) and Status filter (default Open); District filter",
+     "why": "Existing strengths plus the missing district scope"
+    },
+    {
+     "item": "Row: title; location string; 'N incidents · M open'; last activity relative (latest_incident_activity_at); whole row is the link",
+     "why": "Volume and recency are the two scan signals; title link only hover-differentiated today"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Status badge",
+     "where": "Column only when the Status filter is 'All'"
+    },
+    {
+     "item": "Event Group # / event_group_key",
+     "where": "Muted suffix on hover/desktop and in the detail header"
+    },
+    {
+     "item": "'Showing 200 of 1,240' caption with Load more",
+     "where": "Table caption row (flag: backend total_count)"
+    },
+    {
+     "item": "Refresh",
+     "where": "Icon button at the end of the toolbar"
+    },
+    {
+     "item": "Description",
+     "where": "Detail page only"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Open Event Group' chip column",
+     "why": "Duplicates the title link and forces a sixth column that breaks phone layout"
+    },
+    {
+     "item": "Summary line 'N groups · N incidents · N active' as KPI",
+     "why": "Computed over a truncated 500-row page; misleads"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Card row, 3 lines: title + status (when All) / location / incidents · last activity",
+    "tablet": "4 columns: Title, Location, Incidents, Last activity",
+    "desktop": "5 columns: Title, Location, Incidents, Last activity, Status (when All); panel capped at 1200px"
+   }
+  },
+  {
+   "screen": "Event Group detail",
+   "route": "/event-groups/:id",
+   "primaryTask": "Understand one Event Group (what, where, how active) and jump to its incidents and their assessments",
+   "essential": [
+    {
+     "item": "Header: title + status badge; location string; facts 'N incidents · M open' and 'Last activity <relative>'; 'Map' link",
+     "why": "The three facts that matter; already the strength of the page"
+    },
+    {
+     "item": "Incidents rows: title (incident_key muted), location string, workflow position label, observed relative; 'Missing permanent key' flagged inline",
+     "why": "Same grammar as the Incidents page; data-integrity guard kept"
+    },
+    {
+     "item": "Page-level alert when incidents lack a permanent key",
+     "why": "Admin task: investigate data-integrity errors"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Description",
+     "where": "Two lines with 'More' under the header"
+    },
+    {
+     "item": "Created <relative>; closed_at / closed by (when CLOSED)",
+     "where": "Last facts in the header dl; closed facts only when status is CLOSED"
+    },
+    {
+     "item": "Assessment chip carrying its state ('Assessment · Approved')",
+     "where": "Incident row trailing chip (flag: backend to return assessment_id + state per incident instead of loading 1000 assessments)"
+    },
+    {
+     "item": "Submissions",
+     "where": "'Submissions (N)' chip that opens the assessment, not a row of numeric chips"
+    },
+    {
+     "item": "History (event label, actor_name, relative time, notes)",
+     "where": "Side panel at lg+; 'History' tab below lg; no nested scroll"
+    },
+    {
+     "item": "Manage Event Group (edit title/description, Close with active-incident guard, Reopen)",
+     "where": "Collapsed section for canTriage roles (ported from the legacy management panel)"
+    },
+    {
+     "item": "Refresh",
+     "where": "Icon button"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Event Group #id' as the header sub-line lead",
+     "why": "Id trails, location leads"
+    },
+    {
+     "item": "Raw event_type codes title-cased",
+     "why": "Use one event label map"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Incident cards, 3 lines: title + workflow label / location / observed; links as 40px buttons row",
+    "tablet": "3 columns: Incident, Workflow position, Observed + links row; history as a tab",
+    "desktop": "4 columns: Incident, Location, Workflow position, Observed + trailing chips; history side panel"
+   }
+  },
+  {
+   "screen": "Legacy Projects list (unrouted dead code)",
+   "route": "None (/projects redirects to /event-groups)",
+   "primaryTask": "None - delete after porting the two ideas worth keeping",
+   "essential": [
+    {
+     "item": "None (delete web/src/pages/ProjectsPage.tsx)",
+     "why": "Dead code drifting from the live Event Groups page"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "One-sentence concept definition ('Event Groups are the shared context several incidents attach to')",
+     "where": "Port as the Event Groups list info tip"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "KPI cards, 'Open Project' button, all table columns",
+     "why": "Superseded; the Event Groups list decisions above apply"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (removed)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Legacy Project detail (unrouted dead code)",
+   "route": "None (/projects/:id redirects to /event-groups/:id)",
+   "primaryTask": "None - delete after porting the inline map and lifecycle actions to Event Group detail",
+   "essential": [
+    {
+     "item": "None (delete ProjectDetailPage.tsx and ProjectDetailMap.tsx)",
+     "why": "Not routed; fixes here are wasted"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Inline map with centroid/active/resolved legend and classification provenance text",
+     "where": "Port to Event Group detail as an optional 'Map' tab / collapsed section (never above the incident list on phones)"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Five summary cards, raw incident.status column, 'Open in Incidents' to the list",
+     "why": "Superseded"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (removed)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Legacy Project management panel (unrouted dead code)",
+   "route": "None (mounted only by the dead Project detail)",
+   "primaryTask": "None - port to Event Group detail as 'Manage Event Group'",
+   "essential": [
+    {
+     "item": "Port: Edit title/description, Close (disabled + explained while active incidents remain), Reopen, inline consequence confirmation with optional note",
+     "why": "Coordinators lost the only place to close/reopen a group; business rule surfaced as UI is a strength to keep"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Role sentence 'Maintenance Coordinators and administrators can…'",
+     "where": "Not needed once the section renders only for canTriage roles"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Disabled-button tooltip duplicating the inline notice",
+     "why": "Unreachable on touch"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (removed; ported section is one card)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Legacy Project association dialog (unmounted dead code)",
+   "route": "None (superseded by EventGroupAssociationDialog)",
+   "primaryTask": "None - delete; its map+ranked-list strength already lives in the triage dialog",
+   "essential": [
+    {
+     "item": "None (delete ProjectAssociationDialog.tsx and ProjectAssociationMap.tsx)",
+     "why": "Two 300-line association dialogs coexist"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "State-dependent primary button labels",
+     "where": "Already applied in the merged triage flow"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Coordinates to 6 decimals and static 'Classification: Unclassified' context card",
+     "why": "Noise identified by the inventory; not carried forward"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (removed)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Mission Center - statewide Event Groups (map + list)",
+   "route": "/mission-center",
+   "primaryTask": "Find an Event Group on the map or in the list, by district/route, and drill in",
+   "essential": [
+    {
+     "item": "Map with Event Group markers encoded by shape + colour + label; popup-first on tap with an explicit 'Open' action",
+     "why": "Click navigates immediately today so popups are dead copy; touch users cannot preview"
+    },
+    {
+     "item": "List cards: title; location string; 'N incidents · M active'; status pill only when the status filter is All",
+     "why": "Cards and markers are the two synchronized entry points; keyboard/screen-reader path"
+    },
+    {
+     "item": "Search, Status filter, District filter (default my district), route normalisation ('80' = '080' = 'I-80')",
+     "why": "Coordinator blocked: no district filter; route input format unclear"
+    },
+    {
+     "item": "'Map | List' segmented control sticky at the top below lg; two panes from lg",
+     "why": "Measured: map begins 912px down on phone and the list a full screen below it"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "'Updated 2 min ago' + refresh icon",
+     "where": "End of the list header (feed auto-refreshes every 60 s)"
+    },
+    {
+     "item": "Legend (operational symbols only, updates with toggles/scale)",
+     "where": "Collapsible chip row under the map; bottom sheet on phones"
+    },
+    {
+     "item": "Event Group #",
+     "where": "Muted, at the end of the card second line"
+    },
+    {
+     "item": "Search widget, Basemap gallery, Layer list",
+     "where": "One grouped 'Map tools' expand; empty layers hidden"
+    },
+    {
+     "item": "Statewide pulse 'N open · M active incidents'",
+     "where": "One line in the list header, not a separate strip"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Summary strip competing with '{n} shown on map'",
+     "why": "Two counts for one thing"
+    },
+    {
+     "item": "Popup sentence 'Click the marker to inspect this Event Group.'",
+     "why": "Dead copy"
+    },
+    {
+     "item": "Viewport reset to California on every poll/keystroke",
+     "why": "Destroys the user's pan/zoom (behaviour, not data, but it removes the map's usefulness)"
+    }
+   ],
+   "columnBudget": {
+    "phone": "List tab: card 2-3 lines (title + status / location / incidents); Map tab: map with bottom-sheet preview",
+    "tablet": "Two panes from 840px: map 1.4fr | list 300px (3-line cards); portrait uses the toggle",
+    "desktop": "Map 2fr | list 340px with 3-line cards"
+   }
+  },
+  {
+   "screen": "Mission Center - Event Group drill-down",
+   "route": "/mission-center/:gid",
+   "primaryTask": "See a group's incidents on the map, which are active, and pick one to inspect its evidence",
+   "essential": [
+    {
+     "item": "Breadcrumb 'Event Groups / <group title>'; group title; status pill; 'N incidents · M active'",
+     "why": "Orientation for deep links; mode derived from the route so a loading group never shows the statewide list"
+    },
+    {
+     "item": "Incident cards: title (incident_key muted); status pill; location string; classification label with a loaded-aware fallback ('Classification unavailable')",
+     "why": "'Loading classification…' becomes a permanent lie on failure"
+    },
+    {
+     "item": "Incident markers (diamond, status-coded, >=20px on touch) with popup-first preview and 'Inspect evidence' action",
+     "why": "Adjacent incidents cannot be tapped distinctly today"
+    },
+    {
+     "item": "'Open Event Group record' link",
+     "why": "Keeps Mission Center a read-only lens"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Group description",
+     "where": "Two lines with 'More'"
+    },
+    {
+     "item": "Group location string",
+     "where": "Once, in the breadcrumb bar (not repeated in the aside)"
+    },
+    {
+     "item": "Legend: active / resolved incident, Event Group centroid",
+     "where": "Collapsible chip row"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'← All California Event Groups' button and 'Selected Event Group' eyebrow",
+     "why": "Duplicate the breadcrumb; 22px targets"
+    },
+    {
+     "item": "'Event Group #id · location' line under the title",
+     "why": "Location already shown; id muted elsewhere"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Incident cards, 3 lines: title + status / location / classification; Map tab separate",
+    "tablet": "Two panes from 840px; cards 3 lines",
+    "desktop": "Map 2fr | aside 340px, cards 3 lines"
+   }
+  },
+  {
+   "screen": "Mission Center - Incident GIS evidence",
+   "route": "/mission-center/:gid/:iid",
+   "primaryTask": "Verify where field photos were taken and which way the camera pointed, against the incident location and drawn area, then open the technical submission",
+   "essential": [
+    {
+     "item": "Breadcrumb; incident title + status pill; location string",
+     "why": "Orientation; header built from incidentGis.incident so it never blanks when the group list lacks the incident"
+    },
+    {
+     "item": "Evidence coverage as filter chips: Photos N / Mapped / With heading / Unmapped",
+     "why": "Reviewer's trust check in one glance; counts double as filters"
+    },
+    {
+     "item": "Photo rows: thumbnail; captured relative; Mapped / Heading badges; 'Corrected' pill when location_overridden or heading_overridden; '±n m' from horizontal_accuracy_m",
+     "why": "S3: integrity fields fetched but never shown; a reviewer cannot judge a photo's provenance"
+    },
+    {
+     "item": "Map: selected incident marker, saved geometry, numbered photo markers + heading wedges; tapping a row highlights the marker and scrolls the map into view below xl",
+     "why": "Row-to-map sync is defeated when map and list are never visible together"
+    },
+    {
+     "item": "Primary 'Open technical submission' (when linked_submission_id)",
+     "why": "The onward task"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Coordinates (lat / lon on two lines + copy)",
+     "where": "Details drawer under the header"
+    },
+    {
+     "item": "Observed <relative>, report description",
+     "where": "Details drawer"
+    },
+    {
+     "item": "'Affected area drawn' / 'Not drawn'",
+     "where": "Legend chip, replacing the raw GeoJSON type"
+    },
+    {
+     "item": "location_source, heading_source, altitude, correction history",
+     "where": "Photo popup / per-photo details sheet"
+    },
+    {
+     "item": "'Open in Incidents', 'Open Event Group'",
+     "where": "Secondary links under the primary action"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'← Event Group Incidents' button and 'Incident GIS Evidence' eyebrow",
+     "why": "Duplicate the breadcrumb"
+    },
+    {
+     "item": "Raw geometry type ('Polygon'), geometry_srid",
+     "why": "Developer values"
+    },
+    {
+     "item": "Six-decimal coordinate pair in a fixed 2-column dl",
+     "why": "Wraps mid-coordinate at 150px"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Photo cards: thumbnail + captured / badges (2 lines); Map tab separate",
+    "tablet": "Photo rows 3 fields: thumbnail, captured + badges, heading",
+    "desktop": "Photo rows 4 fields: thumbnail, captured, badges, heading/accuracy beside the map"
+   }
+  },
+  {
+   "screen": "Mission Center GIS map panel (shared MapView)",
+   "route": "/mission-center, /mission-center/:gid, /mission-center/:gid/:iid",
+   "primaryTask": "Pan, zoom and tap markers to preview and open records; see only the symbols that are on the map",
+   "essential": [
+    {
+     "item": "Theme-aware basemap; one operational layer per mode; markers with shape + colour + label",
+     "why": "Esri phone guidance: one map, one operational layer; colour-alone fails AA"
+    },
+    {
+     "item": "Legend listing only visible, in-scale operational symbols",
+     "why": "Legends that list everything mislead"
+    },
+    {
+     "item": "Popups docked bottom-center below 768px; images max-width 100%",
+     "why": "Undocked 320px image popup exceeds a 309px map"
+    },
+    {
+     "item": "Height clamp(280px, 42vh, 420px) below md; full pane height at lg+",
+     "why": "Fixed 540px minimum consumes 66% of a phone viewport"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Home, Compass, scale bar",
+     "where": "Default top-left chrome; Home resets to the current level's extent, not the statewide one"
+    },
+    {
+     "item": "Search, Basemap gallery, Layer list",
+     "where": "One grouped Expand ('Map tools')"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Empty GraphicsLayers in the Layer list",
+     "why": "Noise in the current mode"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (map; 3 chrome buttons + Map tools)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Mission Center access notice (non-operational users)",
+   "route": "/mission-center/* when the user has no operational role",
+   "primaryTask": "Understand why the page is empty and go somewhere useful",
+   "essential": [
+    {
+     "item": "Plain sentence 'Mission Center is available to ERIS operational roles' + 'Go to my home' button",
+     "why": "Rule stated plainly; needs an exit"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Who to contact for access",
+     "where": "One line under the button"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Nothing further",
+     "why": "Short by design"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Submissions worklist",
+   "route": "/submissions (give it a nav entry under Records or fold into Assessments)",
+   "primaryTask": "Find technical submissions awaiting review or a specific one by place, and open it",
+   "essential": [
+    {
+     "item": "Status filter chips with true per-status totals (server-side; 'Submitted' first)",
+     "why": "Cards today count only the loaded page and read as KPIs"
+    },
+    {
+     "item": "Search by descriptor/district/county/route/post mile (server-side)",
+     "why": "Client search over 50 loaded rows hides older records"
+    },
+    {
+     "item": "Row: descriptor link 'District 7 · Los Angeles · Route 101 · PM 12.30 · Sep 2' ('#9' muted); humanised status; submitted relative; primary action Review (SUBMITTED) / Open",
+     "why": "Fixed 1200px table with the action off-screen on phones and tablets"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Sort Newest / Oldest",
+     "where": "Toolbar toggle"
+    },
+    {
+     "item": "Created by (name)",
+     "where": "Desktop column once the API returns a creator name; until then omitted (flag: backend - Submission has created_by_user_id only)"
+    },
+    {
+     "item": "Created date",
+     "where": "Expanded row / detail summary"
+    },
+    {
+     "item": "'Showing 50 of N'",
+     "where": "Table caption with Load more"
+    },
+    {
+     "item": "Delete",
+     "where": "Row overflow menu rendered in a portal (admin any status; owner while DRAFT)"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Summary KPI cards (Loaded / Submitted / Approved / Returned / Draft)",
+     "why": "Page-local counts presented as totals"
+    },
+    {
+     "item": "Status <select> with raw codes",
+     "why": "Duplicates the chips and leaks enums"
+    },
+    {
+     "item": "Created column and Reporter 'User #id' column",
+     "why": "Date already in the descriptor; raw id"
+    },
+    {
+     "item": "Raw ISO timestamps and creator id in hover titles",
+     "why": "Unreachable on touch"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Card row, 2 lines (descriptor + status / submitted age) + full-width action button",
+    "tablet": "3 columns: Submission, Status, Submitted + trailing action",
+    "desktop": "4 columns: Submission, Status, Submitted, Created by + trailing action"
+   }
+  },
+  {
+   "screen": "Delete submission dialog",
+   "route": "/submissions (modal)",
+   "primaryTask": "Confirm or cancel permanent deletion",
+   "essential": [
+    {
+     "item": "Title 'Delete technical submission?', descriptor, sentence 'This permanently deletes the record and its attachments. It cannot be undone.' (stronger variant when already in review), Cancel (initial focus), Delete",
+     "why": "Safe default kept; wording today implies it can be undone elsewhere"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Humanised status",
+     "where": "Caption under the descriptor"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Destructive action' eyebrow, 'Creator: User #id', 'from the Web app' phrasing",
+     "why": "Redundant, raw id, misleading"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (single dialog)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Submission library (attachment tiles + viewer; also hosts 'Photo evidence' mode)",
+   "route": "/submissions/:id (section)",
+   "primaryTask": "Look at the field photos, videos and documents for the section I am reading, and open one without losing my place",
+   "essential": [
+    {
+     "item": "Filter as a segmented control All / Photos / Videos / Documents with counts (44px targets)",
+     "why": "Pills wrap into three rows today"
+    },
+    {
+     "item": "Tile: thumbnail (or glyph); section label full width in the footer; file name wrapping to two lines; Open and Download as 44px controls, always visible on touch",
+     "why": "Section chips truncate at 60% width; names only in hover titles"
+    },
+    {
+     "item": "Lightbox with previous/next (keys, swipe), thumbnail strip and a metadata drawer",
+     "why": "Stepping through 15 photos means 15 round trips today"
+    },
+    {
+     "item": "Empty state saying where files come from ('Photos are captured in the ERIS mobile app and appear here after sync') or an Upload control if added",
+     "why": "Engineer blocked: no way to add photos on the web and nothing says so"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "File size",
+     "where": "Tile footer, muted"
+    },
+    {
+     "item": "Captured date, Mapped / Heading / Corrected badges",
+     "where": "'Photo evidence' mode overlays on the same tiles; details in the lightbox drawer"
+    },
+    {
+     "item": "PDF preview",
+     "where": "pdf.js or <object> with fallback; on iOS default to 'Open in a new tab'"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Header icon, count label 'N items · x photos …'",
+     "why": "Repeats the filter counts"
+    },
+    {
+     "item": "Media badge and type label (third repetition of the media type)",
+     "why": "Glyph and filter already say it"
+    },
+    {
+     "item": "'#id' attachment id",
+     "why": "Internal id"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1-2 tiles per row, footer 2 lines (name / section · size)",
+    "tablet": "3 tiles per row",
+    "desktop": "4-5 tiles per row"
+   }
+  },
+  {
+   "screen": "Section attachments dialog + 'Attachments (n)' button",
+   "route": "/submissions/:id (modal from a section header or note label)",
+   "primaryTask": "See the photos tagged to the section I am reviewing",
+   "essential": [
+    {
+     "item": "'Attachments (n)' as a 44px button in the section header (paperclip + count)",
+     "why": "22px control inside a drag handle today"
+    },
+    {
+     "item": "Dialog title '<Section> attachments' and the same tile grid without section chips",
+     "why": "Contextual evidence exactly where the reviewer is reading"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Provenance sentence 'tagged to this section by the field form'",
+     "where": "Dialog description line"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Empty state for zero attachments",
+     "why": "Unreachable while the button is hidden at count 0"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 tile per row",
+    "tablet": "2-3 tiles per row",
+    "desktop": "3-4 tiles per row"
+   }
+  },
+  {
+   "screen": "Review context cards (Summary, Reviewer Note, Workflow History, Access Sharing)",
+   "route": "/submissions/:id (bottom of the page)",
+   "primaryTask": "Understand what happened to this record and when; write the review note where the decision is made",
+   "essential": [
+    {
+     "item": "Workflow History rows: humanised event label ('Returned for correction'), actor name (flag: backend - WorkflowEvent has actor_user_id only), relative time, transition ('Draft -> Submitted'), comment inline",
+     "why": "Raw 'Event SUBMIT · Actor user #7' line today"
+    },
+    {
+     "item": "Latest review_comment displayed read-only with reviewer and date (the editable Reviewer Note moves into the Approve / Return decision dialog)",
+     "why": "Note typed at the bottom of a very long page is consumed by header buttons; no save state"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Summary: descriptor, created / submitted / reviewed relative with absolute on hover",
+     "where": "Meta strip under the page header, not a bottom card"
+    },
+    {
+     "item": "Access Sharing (find user, grant/revoke read access)",
+     "where": "Collapsed section for owner/admin (can_manage_permissions) or overflow menu 'Share…'"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Event SUBMIT · Actor user #id' line",
+     "why": "Raw code duplicating the label; raw id"
+    },
+    {
+     "item": "Submission ID row and raw ISO timestamps",
+     "why": "Internal id; timestamps formatted"
+    }
+   ],
+   "columnBudget": {
+    "phone": "History rows 2 lines: label + age / actor · comment",
+    "tablet": "3 fields: label, actor, when",
+    "desktop": "4 fields: label, actor, when, comment"
+   }
+  },
+  {
+   "screen": "Photo evidence page (merge into the Submission library as 'Photo evidence' mode)",
+   "route": "/submissions/:id/photo-evidence -> /submissions/:id#photos",
+   "primaryTask": "Check that field photos are geotagged and oriented well enough to trust before approving",
+   "essential": [
+    {
+     "item": "Compact map above the tiles (reference point + numbered photo pins with heading wedges; pin highlights on tile hover/focus)",
+     "why": "A page about mapped telemetry shows no map today"
+    },
+    {
+     "item": "Tiles with Mapped / Heading recorded / Corrected badges, captured relative, ±accuracy",
+     "why": "Immediate trust signal; strength to keep"
+    },
+    {
+     "item": "Coverage chips Photos / Mapped / With heading / Unmapped as filters",
+     "why": "Replace four stat cards that take 260px before the list"
+    },
+    {
+     "item": "'Open original' via refreshed presigned URL",
+     "why": "URLs expire after 15 minutes and show a misleading 'Preview unavailable'"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Effective location, altitude, heading source, location source, reference location",
+     "where": "Per-photo details drawer in the lightbox"
+    },
+    {
+     "item": "Telemetry correction history incl. location_override and heading_override_deg values",
+     "where": "Disclosure inside the details drawer"
+    },
+    {
+     "item": "Linked incident",
+     "where": "Link in the page header meta strip"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Duplicate panel header 'Photo evidence / Field photo telemetry'",
+     "why": "Repeats the h1"
+    },
+    {
+     "item": "'Attachment #id', raw 'Section: highway_status', MIME type",
+     "why": "Internal id, raw key, developer value"
+    },
+    {
+     "item": "Timestamps with seconds",
+     "why": "Inconsistent format; relative + absolute on hover"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 tile per row (thumb + badges / captured)",
+    "tablet": "2 tiles per row",
+    "desktop": "3 tiles per row beside a 1/3 map"
+   }
+  },
+  {
+   "screen": "Submission detail - page frame and action header",
+   "route": "/submissions/:id",
+   "primaryTask": "Engineer: complete and submit the technical submission; reviewer: read it and approve or return it; anyone: know its status and parent",
+   "essential": [
+    {
+     "item": "h1 = descriptor (location string · date); back link to the parent (Assessment or My Work when arrived from there); one humanised status badge (DRAFT / Submitted / Approved / Returned for correction)",
+     "why": "'REJECTED' reads as final rejection; back link should return to the work item"
+    },
+    {
+     "item": "'Returned for correction' banner at the top quoting review_comment with reviewer name and date",
+     "why": "Engineer S4: cannot find what the reviewer wants"
+    },
+    {
+     "item": "Sticky action bar (header on desktop, bottom bar on phone) with one primary per state/role: engineer Save draft + Submit for review; reviewer Approve + Return; Submit/Approve/Return open a dialog holding the comment and a completeness summary",
+     "why": "Action cluster wraps to 3 rows on phones; decision inputs far from the buttons"
+    },
+    {
+     "item": "Draft status chip 'Draft saved 14:32' / 'Saving…' / 'Unsaved changes' with leave-page guard",
+     "why": "Refresh silently discards edits; no saved confirmation"
+    },
+    {
+     "item": "'On this form' section index with completion/error badges: rail at lg+, 'Jump to section' select on phones",
+     "why": "Long form navigation; reviewers need the whole document with an index"
+    },
+    {
+     "item": "Incident link chip (incident title) and Assessment state",
+     "why": "Parent context; the engineer must know the assessment and the form are one case"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "'N photos · M mapped' button",
+     "where": "Header meta, jumps to the library's Photo evidence mode"
+    },
+    {
+     "item": "View on map",
+     "where": "Header meta link"
+    },
+    {
+     "item": "Refresh (guarded when dirty), Delete, Share…",
+     "where": "Overflow menu"
+    },
+    {
+     "item": "Edit-mode explanation 'You are completing this technical submission for Incident …'",
+     "where": "One line shown once per session"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Status caption prose ('Ready for reviewer decision')",
+     "why": "Restates the badge"
+    },
+    {
+     "item": "'· descriptor · owner user #N' meta line",
+     "why": "Descriptor is the h1 above; owner is a raw id"
+    },
+    {
+     "item": "'N unmapped' red pill duplicate",
+     "why": "Already in the photo button label"
+    },
+    {
+     "item": "'GISA Sheet' / 'GISA form' wording",
+     "why": "Web vocabulary is 'Technical submission'"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Header: title + status + back; bottom bar: 1 primary + overflow",
+    "tablet": "Header: title, status, back, 2 actions + overflow",
+    "desktop": "Header action bar: up to 4 actions + overflow; section index rail 220px"
+   }
+  },
+  {
+   "screen": "Submission detail - Location and map hero",
+   "route": "/submissions/:id (first section)",
+   "primaryTask": "Verify or set where the incident is (D/C/R/PM and coordinates), draw the affected area, and see mapped photos",
+   "essential": [
+    {
+     "item": "Editable District / County / Route / Post mile with human labels and cascading selects, single source = the draft (canEdit) or read-only values",
+     "why": "Three vocabularies for the same facts today; hero shows stored values while the card edits the draft"
+    },
+    {
+     "item": "Latitude / Longitude inputs (canEdit) or values with copy",
+     "why": "Coordinates are the second key"
+    },
+    {
+     "item": "Map: point, drawn geometry, photo markers with wedges; Sketch tools for canEdit; geometry save status (role=status) tied to the draft's save model",
+     "why": "Geometry autosaves while everything else waits for Save draft"
+    },
+    {
+     "item": "Expand map (full-screen modal) as the only extra map control on small screens",
+     "why": "Eleven widgets plus an overlapping custom button on a 360px map"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "CCS83 Northing / Easting",
+     "where": "'Show N/E' toggle (already on demand)"
+    },
+    {
+     "item": "'Fill from GPS' (renamed; confirms before overwriting D/C/R)",
+     "where": "Button under the coordinate inputs, canEdit only"
+    },
+    {
+     "item": "Search, Basemap gallery, Layers, Legend, Measurement, Coordinate conversion",
+     "where": "Only inside the expanded map modal ('Map tools')"
+    },
+    {
+     "item": "Legend with live counts (submission point, N mapped photos)",
+     "where": "Chip row under the map"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Stored-code tiles ('03', county code, '050') with tooltip apologies",
+     "why": "Raw codes duplicating the editable selects"
+    },
+    {
+     "item": "'Photo evidence details' link",
+     "why": "Duplicate of the header button"
+    }
+   ],
+   "columnBudget": {
+    "phone": "4 location fields stacked + coordinates; map clamp(240px, 45vh, 360px)",
+    "tablet": "Two columns from 768px: fields 320px | map 420px tall",
+    "desktop": "Fields 380px | map 480px tall"
+   }
+  },
+  {
+   "screen": "Submission detail - technical form sections (GISA card canvas replaced by a section grid / task list)",
+   "route": "/submissions/:id (main section)",
+   "primaryTask": "Fill in or read the checklist section by section, with evidence beside each section",
+   "essential": [
+    {
+     "item": "Sections A-M (Report header, Distribution, Highway status, Incident type, Material, Pavement/Ground status, Vegetation, Water/Drainage, Water content, Measurements, Notes) as full-width cards in fixed order with a status tag (Not started / In progress / Complete / Has errors)",
+     "why": "S4 blocker: 520px absolutely positioned cards clip on every viewport under 545px and degrade to one column at 1440px; task-list structure fits a 10+ section multi-session form"
+    },
+    {
+     "item": "Every field with a visible label; tri-state Yes/No/Unknown as radios with no default; measurements as text inputs with unit suffix and inputmode=decimal; conditional reveals kept (Cracks -> dimensions, Rock/Soil -> subtypes, Lanes closed -> count)",
+     "why": "Research: tri-state defaults create false negatives; spinbuttons and placeholder units fail on iPad"
+    },
+    {
+     "item": "Report date and Date incident reported as type=date",
+     "why": "Free-text 'YYYY-MM-DD' brings up the full keyboard"
+    },
+    {
+     "item": "'Attachments (n)' 44px button in each section header; per-section inline validation on 'Section complete' and a linked error summary on Submit",
+     "why": "One banner far from the offending field today"
+    },
+    {
+     "item": "Chips/toggles with aria-pressed and a check glyph",
+     "why": "Colour-only selected state"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "EA, Project ID",
+     "where": "Report header, collapsed 'Project references'"
+    },
+    {
+     "item": "District contacts",
+     "where": "Accordion inside Report header (add/remove)"
+    },
+    {
+     "item": "Read-only summary rendering for reviewers (key/value rows, 'Not provided' vs 'Unknown', no disabled inputs)",
+     "where": "Same sections in review mode; drives print/PDF"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Drag/resize, Tidy, Reset, Full screen, 'Custom layout' pill, drag hint, localStorage layout",
+     "why": "Dashboard tooling on a checklist form; mouse-only; nested scroll traps"
+    },
+    {
+     "item": "'Raw Contact Data' debug details",
+     "why": "Developer fallback"
+    },
+    {
+     "item": "Fixed card heights with inner scroll",
+     "why": "Cards grow to content"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 column; one section per screen with 'Section 3 of 11' + Jump to; sticky Back / Save / Next",
+    "tablet": "1 column of full-width sections (max 640px measure) with the section index sticky; supporting pane collapsed to a 48px strip",
+    "desktop": "Form column max 720px + supporting pane 1/3 (map / photos / cross-section tabs); related trios (length x width x depth) may share a row"
+   }
+  },
+  {
+   "screen": "Submission detail - Measurements and 3D terrain",
+   "route": "/submissions/:id (section; ?section=terrain deep link)",
+   "primaryTask": "Enter the eight slope measurements against the diagram; optionally inspect the site in 3D",
+   "essential": [
+    {
+     "item": "Measurement diagram first, then eight inputs with unit suffix: Slope height H (ft), Original slope angle alpha (deg), Wd, Ld, Hs, beta (deg), Lr, Wr",
+     "why": "Card titled Measurements opens with a 460px scene and hides the inputs 700px down"
+    },
+    {
+     "item": "'3D terrain' as a separate optional section: static preview image + 'Load 3D terrain' button; terrain sample date",
+     "why": "Heavy SceneView auto-mounted for every viewer including reviewers; never auto-load on phones"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Sample terrain / Refresh terrain samples",
+     "where": "Inside the 3D section, canEdit only (today read-only viewers can trigger the POST)"
+    },
+    {
+     "item": "Satellite / Topographic, Reset view, Full screen, overlay chips (Incident, Road bearing, Sample extent)",
+     "where": "Toolbar inside the loaded scene, 44px on touch, 12px minimum text"
+    },
+    {
+     "item": "Elevation profile classification and confidence (elevation_profile)",
+     "where": "One plain line under the scene ('Road bearing from Road Inventory; classification: Cut slope, high confidence')"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "9-10px control text and 8px attribution",
+     "why": "Below legibility and WCAG"
+    },
+    {
+     "item": "Scene inside a fixed 980px scrolling card",
+     "why": "Three nested gesture surfaces"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Inputs 1 column; 3D section shows preview image only",
+    "tablet": "Inputs 2 columns (related pairs); scene min(460px, 55vh) on demand",
+    "desktop": "Inputs 2 columns beside the diagram; scene in the supporting pane"
+   }
+  },
+  {
+   "screen": "Submission detail - Notes and actions",
+   "route": "/submissions/:id (section)",
+   "primaryTask": "Write the narrative and record immediate and follow-up actions",
+   "essential": [
+    {
+     "item": "Six labelled textareas (Observations, Record of event, Maintenance, Assessment, Recommendation, Other) each with 'Attachments (n)'",
+     "why": "Per-note attachment buttons connect mobile evidence to the right field - strength kept"
+    },
+    {
+     "item": "Immediate / Follow-up action chips with aria-pressed and check glyph; 'Open highway traffic lanes' count shown whenever a lanes-closed highway status is chosen (in the Highway status section)",
+     "why": "Invisible cross-panel dependency between this panel and the Highway status card"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Submit comment",
+     "where": "Inside the Submit for review dialog (not a bottom-of-page field)"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Geometry JSON textarea",
+     "why": "Raw duplicate of the map sketch; invalid JSON fails only on Save; keep for admins in a 'Developer' disclosure at most"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 column",
+    "tablet": "2 columns of notes",
+    "desktop": "2 columns of notes; actions in 2 columns"
+   }
+  },
+  {
+   "screen": "Terrain cross-section scene (3D canvas, toolbar, overlays)",
+   "route": "/gis/terrain-cross-sections (?lat&lon or ?submission=<id> to open at a site)",
+   "primaryTask": "Place two or more points on the terrain at the incident site, build the elevation profile, and save it to the case",
+   "essential": [
+    {
+     "item": "Scene filling the viewport at every width (drawer nav below lg; no page scroll behind the map)",
+     "why": "620px box in a scrolling page is a touch trap; toolbar width calc breaks below 1360px (blocker)"
+    },
+    {
+     "item": "Toolbar: one primary ('Build profile' / 'Rebuild'), secondary New, Undo, Add points; overflow for the rest; bottom action bar with 44px buttons below lg",
+     "why": "Nine equal buttons wrap into 3 rows on tablets and a 0-width column on phones"
+    },
+    {
+     "item": "Hint 'Tap terrain to place P{n}' visible on touch; P1..Pn markers, path, profile line; distance status chip",
+     "why": "Crosshair cursor is the only drawing signal today"
+    },
+    {
+     "item": "Opens at the incident/submission coordinates when launched from a submission; 'Saved to <project> · <name>' chip persists and a 'Saved sections' list reopens work",
+     "why": "Engineer S4: opens on all of California; saved work cannot be reopened"
+    },
+    {
+     "item": "Confirm before New / Clear discard 2+ points or a profile; profile error alert",
+     "why": "Instant wipe with no confirmation"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Save, Capture (aerial), Clear, Source-resolution overlay, Full screen",
+     "where": "Overflow menu"
+    },
+    {
+     "item": "Search (route/place)",
+     "where": "Collapsed to an icon in the toolbar"
+    },
+    {
+     "item": "Profile / Points / Setup",
+     "where": "Two surfaces: bottom drawer (Profile) and side sheet (Points, Setup); Stats merged into Profile"
+    },
+    {
+     "item": "Basemap Imagery / Topographic",
+     "where": "Setup sheet only"
+    },
+    {
+     "item": "Scale bar",
+     "where": "Bottom-right, kept"
+    },
+    {
+     "item": "Source-resolution legend (4 classes)",
+     "where": "Only while the overlay is on"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "AppShell h1 'Terrain Cross Sections'",
+     "why": "36px of a viewport-filling workspace; duplicates the nav item"
+    },
+    {
+     "item": "Legend footnote 'Color = finest cataloged Esri PixelSize footprint…' and other Esri-internal vocabulary (Terrain3D, Data Extents, PixelSize)",
+     "why": "Jargon; one plain provenance line + 'About this data' disclosure"
+    },
+    {
+     "item": "Bottom pill 'Elevation analysis · Profile + 3D slice · distance · …', Home and Compass widgets, permanent full-screen hint",
+     "why": "Third way to open the profile; rarely used; hint fades after 4 s"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Bottom action bar: 3 buttons (New, Undo, Build) + overflow; panels as bottom sheets",
+    "tablet": "Toolbar 4 buttons + overflow; Profile as a 280px bottom drawer",
+    "desktop": "Toolbar 5 buttons + overflow; Profile drawer spanning the map width; side sheet 360px"
+   }
+  },
+  {
+   "screen": "Elevation analysis panel (Profile and 3D slice)",
+   "route": "/gis/terrain-cross-sections (Profile drawer)",
+   "primaryTask": "Read elevation, distance and grade along the path and compare min/max/gain/loss",
+   "essential": [
+    {
+     "item": "Tabs Elevation profile / 3D slice",
+     "why": "Two views of one result"
+    },
+    {
+     "item": "Chart with keyboard (arrow keys) and tap-to-pin readout: Distance, Elevation, Grade; P# markers on the chart",
+     "why": "Pointer-only linkage excludes keyboard and tablet users"
+    },
+    {
+     "item": "Minimum / Maximum / Gain / Loss / Start / End (ft)",
+     "why": "The decision numbers (Start/End come from the merged Stats panel)"
+    },
+    {
+     "item": "Header: path length + source resolution in one line",
+     "why": "Provenance without the paragraph"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Samples, spacing, DEM query mode",
+     "where": "Setup sheet, where the user controls them"
+    },
+    {
+     "item": "'About this data' plain-language provenance",
+     "where": "Disclosure at the drawer's end"
+    },
+    {
+     "item": "Slice width slider + presets, Surface layer Match map / Bare DEM, Show control points, slice stats",
+     "where": "3D slice tab controls, 44px on touch"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Panel subtitle duplicating the metric row; chart card title; 40-word provenance paragraph; 'ERIS samples a two…' note",
+     "why": "Three headings before any data push the chart below the fold"
+    },
+    {
+     "item": "Coverage samples 'covered / total' and 'Terrain metadata' counters (from Stats)",
+     "why": "Internal counters with no decision value"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Metrics 2 per row; chart full width in a 70dvh bottom sheet",
+    "tablet": "Metrics 4 per row; drawer 280px",
+    "desktop": "Metrics 6 in one row; drawer 280px spanning the map"
+   }
+  },
+  {
+   "screen": "Cross-section statistics panel (rail: Stats)",
+   "route": "/gis/terrain-cross-sections (activePanel details) -> merged into the Profile drawer",
+   "primaryTask": "Read start/end elevation and range (everything else duplicates Profile)",
+   "essential": [
+    {
+     "item": "Start elevation, End elevation, Elevation range (ft) added to the Profile metrics",
+     "why": "The only values Stats adds"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Draft path length before a profile exists",
+     "where": "Distance status chip on the map"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Ten duplicated tiles, 13 '—' placeholders before a profile, coverage/metadata counters",
+     "why": "Panel is reachable but empty; duplicates Profile"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a (merged)",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Control points panel (rail: Points)",
+   "route": "/gis/terrain-cross-sections (side sheet)",
+   "primaryTask": "Verify point order and spacing, fix a misplaced point",
+   "essential": [
+    {
+     "item": "Row: P#, cumulative distance (ft), elevation (ft) or 'Build profile to sample'; per-row Remove and Zoom to",
+     "why": "Only Undo exists; a misplaced P2 of 6 costs five undos"
+    },
+    {
+     "item": "Empty state 'Tap the terrain to place your first point'",
+     "why": "Teaching empty state"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Latitude / longitude",
+     "where": "Expand per row with Copy"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Nothing further",
+     "why": "Panel is already lean"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Row 2 lines: P# + distance / elevation; actions as icon buttons",
+    "tablet": "3 fields + actions",
+    "desktop": "4 fields (P#, distance, elevation, coords on expand) + actions"
+   }
+  },
+  {
+   "screen": "Cross-section setup panel (rail: Setup)",
+   "route": "/gis/terrain-cross-sections (side sheet)",
+   "primaryTask": "Pick sample spacing and basemap",
+   "essential": [
+    {
+     "item": "'Profile sample spacing' labelled select (options pair number with intent: '25 m - long transects')",
+     "why": "Strength kept; selects lack accessible names today"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Elevation query mode (Best available / Auto / 1 m / 3 m / 10 m)",
+     "where": "Second labelled select, under 'Advanced'"
+    },
+    {
+     "item": "Basemap Imagery / Topographic",
+     "where": "Segmented control"
+    },
+    {
+     "item": "Units note and one plain provenance sentence",
+     "where": "'About this data' disclosure"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Three caveat paragraphs and the repeated source-resolution card",
+     "why": "Panel is mostly prose (~900px) on a 279px sheet"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 column, 2 selects + segmented control",
+    "tablet": "Same",
+    "desktop": "Same in a 360px sheet"
+   }
+  },
+  {
+   "screen": "Save cross section dialog",
+   "route": "/gis/terrain-cross-sections (modal)",
+   "primaryTask": "Save the section to the case so it can be reopened and shown to the reviewer",
+   "essential": [
+    {
+     "item": "Name; container select labelled 'Cross-section project' (never 'Project' alone) or, preferably, the linked Assessment/Submission when launched from one (flag: backend - saved sections attach to Projects only)",
+     "why": "'Project' collides with Event Group vocabulary and construction projects"
+    },
+    {
+     "item": "Save / Update primary; accessible dialog (labelled title, focus trap, Escape); scrollable body",
+     "why": "Card clips on phones; no focus trap today"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Create project inline (number, title, district)",
+     "where": "Disclosure '+ New project'"
+    },
+    {
+     "item": "Notes",
+     "where": "Collapsed 'Add a note'"
+    },
+    {
+     "item": "Points / Samples / Spacing summary",
+     "where": "Caption under the name field"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Nothing further",
+     "why": "Dialog is short"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 column, scrollable",
+    "tablet": "2 columns",
+    "desktop": "2 columns"
+   }
+  },
+  {
+   "screen": "Aerial capture dialog",
+   "route": "/gis/terrain-cross-sections (modal)",
+   "primaryTask": "Export a north-up aerial image of the section points",
+   "essential": [
+    {
+     "item": "Aspect buttons 1:1 / 16:9 / 9:16; preview; 'Download JPEG' primary; 'Copy image' (PNG) secondary",
+     "why": "Clipboard write of image/jpeg fails in every browser; download must be primary"
+    },
+    {
+     "item": "Success/error notice inside the dialog",
+     "why": "Feedback"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "'Capture standard' checklist (north-up, scale bar in feet, attribution)",
+     "where": "Collapsed disclosure"
+    },
+    {
+     "item": "'Files stay in the browser' note",
+     "where": "Caption under the buttons"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Nothing further",
+     "why": "Already lean"
+    }
+   ],
+   "columnBudget": {
+    "phone": "1 column, scrollable; preview max 50dvh",
+    "tablet": "1 column until 1024px",
+    "desktop": "2 columns: controls 340px | preview"
+   }
+  },
+  {
+   "screen": "User Administration",
+   "route": "/admin/users",
+   "primaryTask": "Find a user and change their roles or access; create an account",
+   "essential": [
+    {
+     "item": "Search (name, email, role) and Status filter (All / Active / Inactive); 'New account' in the filter row",
+     "why": "Core tasks"
+    },
+    {
+     "item": "Row: full_name, email, status badge, assigned roles as humanised canonical labels; 'Edit roles' opens a popover/drawer with one-line role descriptions",
+     "why": "Every unassigned role rendered as a chip on every row makes a wall of chips (major)"
+    },
+    {
+     "item": "Confirm dialog for Disable naming the user; Disable blocked for self and the last administrator",
+     "why": "Single click today with no guard"
+    },
+    {
+     "item": "Success notices naming the user; unsaved role edits preserved across reloads with an 'Unsaved' pill",
+     "why": "Edits silently discarded on load()"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "'N accounts · M active' summary",
+     "where": "One line in the filter row caption"
+    },
+    {
+     "item": "Administrators count as a guard",
+     "where": "Inline warning next to the ADMIN toggle when it is the last one"
+    },
+    {
+     "item": "Reset password",
+     "where": "Row overflow menu (dialog unchanged)"
+    },
+    {
+     "item": "Refresh",
+     "where": "Icon button"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Count cards (Accounts / Active / Inactive / Administrators)",
+     "why": "Overview stats not needed to create/edit/reset"
+    },
+    {
+     "item": "'ERIS access management' header card",
+     "why": "Restates the h1 and buttons"
+    },
+    {
+     "item": "'User #id', chip hover title with raw role code, legacy alias names shown beside canonical",
+     "why": "Internal id; raw enum; confusing duplicates"
+    },
+    {
+     "item": "Top Cancel in the create form",
+     "why": "Duplicate"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Card row, 2 lines: name + status / roles summary, + Edit button",
+    "tablet": "3 columns: User (name + email), Roles, Status + actions",
+    "desktop": "4 columns: Name, Email, Roles, Status + actions"
+   }
+  },
+  {
+   "screen": "Password reset dialog",
+   "route": "/admin/users (modal)",
+   "primaryTask": "Set a new password for the named user",
+   "essential": [
+    {
+     "item": "Title, 'Set a new password for {userName}', New password + Confirm (show/hide), inline error, Reset primary",
+     "why": "Accessible modal already; keep"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Password policy hint / generator",
+     "where": "Under the first input"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Nothing further",
+     "why": "Already lean"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  },
+  {
+   "screen": "Road Inventory workspace (summary, authoritative dataset, versions)",
+   "route": "/admin/road-inventory (workflow-ordered tabs: Import / Versions / Mobile package / Verify)",
+   "primaryTask": "Release a new road-inventory version: import, publish, regenerate the mobile package, verify",
+   "essential": [
+    {
+     "item": "Overview line: Authoritative version tag + Published <relative>; Mobile package Ready / Not ready with the consequence sentence when stale and a 'Generate package' button",
+     "why": "Publish is not the finish line; devices cannot sync until the package is regenerated"
+    },
+    {
+     "item": "Versions table: Version, Status, Actions (Publish / Rollback) first, then Rows, Extract date",
+     "why": "Actions are the 9th column off-screen on phones today"
+    },
+    {
+     "item": "Post-publish notice with inline 'Regenerate package now'",
+     "why": "Advice disappears with the dialog"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Pending / Superseded counts",
+     "where": "Versions tab header caption"
+    },
+    {
+     "item": "Package size, generated relative, full SHA-256 with Copy",
+     "where": "Mobile package tab, hash in a disclosure"
+    },
+    {
+     "item": "Uploaded date, Source file, Skipped rows",
+     "where": "Desktop columns (xl+) / expanded row"
+    },
+    {
+     "item": "Download package",
+     "where": "Mobile package tab button"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Eyebrow 'Authoritative roadway reference', duplicate Version and Segments metrics, second 'Mobile package' label with different wording",
+     "why": "Duplicates of the summary"
+    },
+    {
+     "item": "ID column; truncated 16-char hash",
+     "why": "Internal id; a truncated hash verifies nothing"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Version cards, 2 lines: tag + status / extract · published, + action button",
+    "tablet": "4 columns: Version, Status, Rows, Extract + Actions",
+    "desktop": "6 columns: Version, Status, Rows, Extract, Uploaded, Source file + Actions"
+   }
+  },
+  {
+   "screen": "Import Road Inventory panel",
+   "route": "/admin/road-inventory (Import tab)",
+   "primaryTask": "Upload an .xlsx extract and get straight to publishing the resulting version",
+   "essential": [
+    {
+     "item": "File picker (.xlsx) with selected name + size, 'Start import'",
+     "why": "Core action; disabled until a file is chosen"
+    },
+    {
+     "item": "Current job card: status badge, plain progress ('Reading rows…'), success '{rows} imported · {skipped} skipped' with a 'Publish version {tag}' button; failure message",
+     "why": "Handoff gap: 'Dataset #14 is pending publication' with no link to the Publish row"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Version tag input",
+     "where": "Beside the file picker, optional"
+    },
+    {
+     "item": "Recent import history: file, version tag (link to the row), status, rows, finished relative",
+     "where": "Collapsed 'Recent imports' list under the form"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "Raw 'stage' string, job uuid prefix, raw dataset_version_id integer",
+     "why": "Backend codes and ids"
+    }
+   ],
+   "columnBudget": {
+    "phone": "History cards, 2 lines: file + status / finished",
+    "tablet": "3 columns: File, Status, Finished",
+    "desktop": "5 columns: File, Version, Status, Rows, Finished"
+   }
+  },
+  {
+   "screen": "Verify authoritative lookup panel",
+   "route": "/admin/road-inventory (Verify tab)",
+   "primaryTask": "Confirm a county/route/post mile resolves to a segment in the published dataset",
+   "essential": [
+    {
+     "item": "Inputs County*, Route*, Post mile* (empty rejected), District (optional) and 'Run lookup' aligned with the inputs",
+     "why": "Validation bug lets an empty PM query 0.000; required marking missing"
+    },
+    {
+     "item": "Result: District, County, Route, PM begin / end, Segment id; explicit no-match state",
+     "why": "Essential columns first"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "PM prefix, lanes L/R, length, surface, landmark",
+     "where": "Expanded result row"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "17-column nowrap table",
+     "why": "Several screens of horizontal scroll; replaced by 6 columns + expand"
+    }
+   ],
+   "columnBudget": {
+    "phone": "Result card, 3 lines",
+    "tablet": "5 columns: District, County, Route, PM range, Segment",
+    "desktop": "7 columns (+ Lanes, Surface) + expand"
+   }
+  },
+  {
+   "screen": "Publish / Rollback confirmation dialog",
+   "route": "/admin/road-inventory (modal)",
+   "primaryTask": "Confirm an authoritative-state change knowing what it supersedes",
+   "essential": [
+    {
+     "item": "Title 'Publish version {tag}' / 'Roll back to {tag}', consequence naming the version being superseded, Cancel (initial focus), primary (rollback styled destructive)",
+     "why": "Strengths kept"
+    }
+   ],
+   "secondary": [
+    {
+     "item": "Rows, current status",
+     "where": "Two-line caption under the title"
+    },
+    {
+     "item": "'Regenerate the mobile package afterwards'",
+     "where": "Becomes the action button in the success notice, not dialog prose"
+    }
+   ],
+   "hidden": [
+    {
+     "item": "'Dataset ID #id' and the 'Authoritative dataset change' eyebrow",
+     "why": "Internal id; redundant eyebrow"
+    }
+   ],
+   "columnBudget": {
+    "phone": "n/a",
+    "tablet": "n/a",
+    "desktop": "n/a"
+   }
+  }
+ ],
+ "globalRules": [
+  "One name per object everywhere on the web: Incident (report), Event Group, Assessment, Technical submission, Review; never GISA, Project (except 'Cross-section project'), Case, ticket or 'submission' for the act of submitting.",
+  "Never render raw enum codes, state codes, stage codes, event types, role codes, office codes, section keys or MIME types as user text; every code passes through one label map (roleLabel, assessmentStateLabel, submissionStatusLabel, incidentWorkflowLabel, eventTypeLabel, officeLabel, sectionLabel). REJECTED is shown as 'Returned for correction'.",
+  "One status per object per row: an incident shows a single 'Workflow position' label derived from current_stage + status + location_match_status + triage_disposition; an assessment shows its state; a technical submission shows its status. Never show status and stage side by side.",
+  "Internal ids (Incident #, Assessment #, Submission #, User #, Dataset #, attachment #, UUIDs) are never primary text; they trail the human key as muted text or live in a details drawer. incident_key is the incident's human key once minted. Never show 'User #7': omit the value until the API supplies a name (flag backend).",
+  "Location is always one string from one helper: 'District 7 · Los Angeles · Route 101 · PM 12.30' (district, county, route, post_mile), never four separate fields or 'D7 · R101' abbreviations in the UI; coordinates are secondary (details, copy button, map) and never appear in list rows.",
+  "Timestamps are relative by default ('3 days ago', 'Updated 6 min ago') with the absolute date-time on hover/long-press and in detail views; never raw ISO strings, never seconds; queue and record rows carry an age ('in this step 6 days').",
+  "Counts appear only where they are actionable: nav badges for items waiting on me, group headers, filter chips with true server totals, table captions ('Showing 50 of 1,240'). No page-local KPI cards computed from the loaded page, and never the same count twice on one screen.",
+  "Names, not codes, for people and places: full_name (email only to disambiguate duplicates), office name ('North GeoTech Office'), 'District 7', 'Route 101'; 'Waiting on you' when the viewer owns the step, otherwise the humanised role and person.",
+  "Place before ids: any row or card describing an incident, assessment or submission leads with the incident title and location string, then status, then age; ids last.",
+  "Column budget: below 600px every list is a card list (2-3 lines, whole row is the target, 44px min height); 600-1199px a table with at most 4 prioritised columns plus a trailing action and an expandable row; >=1200px at most 6 columns plus one row action; numeric columns right-aligned; column pickers instead of horizontal scroll for primary tables.",
+  "Progressive disclosure has three tiers and only those: secondary content goes to an expandable row, a details drawer/bottom sheet, a hover/long-press tooltip with an always-visible fallback, an overflow ('…') menu, or a 'More' tab; never nest disclosure more than two levels; never put essential information (units, requirements, status meaning) in hover-only tooltips.",
+  "Every screen gets one primary action per role/state, placed where the decision is read (Next step card, sticky action bar); irreversible or notifying actions open a confirm sheet that names the target and consequence and holds that action's optional note; every action ends with a persistent success notice naming what happened.",
+  "Maps appear at most once per screen and never inside list rows; below 840px a map and its list are separated by a sticky 'Map | List' control or the map is a secondary tab; map heights are viewport-relative (clamp), popups dock below 768px, and markers encode status by shape + colour + label. The global .esri-view class never receives position or z-index.",
+  "Empty states have three tiers: skeleton while loading (never flash 'No results'), teaching empty ('No reports need your decision. New field reports appear here automatically.' + one action), and filtered-empty ('No open Event Groups match \"x\" - Search all Event Groups').",
+  "Forms are single-column (max 640-720px measure); labels always visible; units as suffixes outside the input with inputmode=decimal; tri-state questions are radios with no default; validation on section-complete/submit with inline messages and a linked error summary; drafts autosave with a visible 'Draft saved 14:32' chip and a leave-page guard.",
+  "Role-gated content is not rendered at all for roles that cannot act on it (no disabled admin controls for coordinators, no Event Group links for reporters, no assessment column for maintenance-only users); read-only views render values, not disabled inputs.",
+  "Duplicates are removed, not demoted: no eyebrow that restates a title, no header card that restates the h1 and its buttons, no second back button beside a breadcrumb, no organisational taglines or copyright inside the app frame.",
+  "Colour never carries meaning alone: badges pair colour with text (and optional icon), selected chips carry aria-pressed and a check glyph, current pipeline step carries aria-current; contrast >= 4.5:1 for text and 3:1 for badges and map symbols; 24px minimum targets everywhere and 44px under @media (pointer: coarse).",
+  "Dead code is deleted, not redesigned: legacy Projects pages, ProjectAssociationDialog, the unused MissionCenterMap; the two dead components with live value (WorkflowTreeView, IncidentResolveDialog) are mounted where the persona needs them (incident record).",
+  "Anything that needs a new API field (reporter_name on Incident, creator name on Submission, actor_name on WorkflowEvent, office_name on Assessment, incident attachments list, per-incident assessment_id/state on Event Group detail, total_count on lists, workload on engineer options, cross sections attached to an assessment) is marked 'flag: backend' and omitted from the UI until it exists; nothing in this spec renames a backend field or changes a state transition."
+ ],
+ "roleVisibility": [
+  {
+   "role": "Maintenance field reporter (MAINTENANCE_FIELD_WORKER / legacy MAINTENANCE)",
+   "seesByDefault": [
+    "Incidents with only their own reports (server-scoped): title, location string, single workflow label in reporter vocabulary ('Under review', 'Needs your information: route, post mile', 'Accepted', 'Resolved'), observed age",
+    "New incident intake flow (/incidents/new) with geolocation, map pick and camera capture",
+    "Incident record for their own report: description, times, location + mini map, attachments, Road Inventory match, requested-fields notice",
+    "Settings (Account identity + Appearance) and Help"
+   ],
+   "neverSees": [
+    "My Work, Mission Center, Event Groups, Assessments, Terrain Cross Sections, Submissions, Administration",
+    "Assessment column, 'AS #' / 'Sub #' links, Event Group links, assignee names, coordinator triage notes",
+    "Raw stage codes (COORDINATOR_REVIEW), office codes, routing overrides, other people's incidents, the workflow tree of anyone else's incident"
+   ]
+  },
+  {
+   "role": "Maintenance coordinator (MAINTENANCE_COORDINATOR / legacy MAINT_COORDINATOR)",
+   "seesByDefault": [
+    "My Work grouped 'Needs my decision', 'Waiting on reporter', 'Recently triaged (7 days)' with title, location, age",
+    "Triage panel with photos, reporter, incident type, Road Inventory match and one merged Accept-report flow (Event Group choice + disposition, no defaults, structured duplicate/revision inputs)",
+    "Incidents filtered to my district by default with Workflow position, Assigned to and the Awaiting intake tab count",
+    "Event Groups and Mission Center filtered to my district; Event Group detail with 'Manage Event Group' (edit, close, reopen)",
+    "Routing preview 'Will route to <office>' with a rare override link"
+   ],
+   "neverSees": [
+    "Technical submission editing, Delegate / Assign engineer / Finalize / Approve controls, reviewer assignment",
+    "Administration pages, Road Inventory admin",
+    "Raw assessment state codes, assignment user-id inputs, Terrain Cross Sections toolbar (nav item hidden unless they opt in via More)"
+   ]
+  },
+  {
+   "role": "GeoTech Office Chief (GEOTECH_OFFICE_CHIEF / legacy OFFICE_CHIEF)",
+   "seesByDefault": [
+    "My Work grouped 'To delegate', 'To finalize', 'To review (assigned to me)' scoped to my office, rows with incident title, location, state, age",
+    "Assessment panel with incident context inline (title, location, description excerpt, first photo, triage notes, routing override), labelled Branch chief / Engineer (optional) selects, 'Also assign a reviewer', confirm sheets and success notices",
+    "Assessments record view defaulting to Office = mine, Active only, with per-state counts and 'Longest waiting first'",
+    "Incidents, Event Groups, Mission Center statewide with district/office filters; Terrain Cross Sections"
+   ],
+   "neverSees": [
+    "Technical submission field editing (read-only summary rendering only)",
+    "Coordinator triage dialogs and location-link mechanics",
+    "Road Inventory / Users administration, free-text user-id inputs, approved assessments from other offices in the finalize group"
+   ]
+  },
+  {
+   "role": "GeoTech Branch Chief (GEOTECH_BRANCH_CHIEF / legacy BRANCH_CHIEF)",
+   "seesByDefault": [
+    "My Work 'To assign an engineer' rows with incident title, location, 'Delegated by <office chief> on <date>: <note>', age",
+    "Engineer picker with names (and office/branch, workload when available), confirm sheet, success notice; 'Also assign a reviewer' available at assignment time and later from the record view",
+    "Assessments record view defaulting to my office with 'Draft / Submitted / Returned' filters to monitor the branch",
+    "Incident record with workflow tree; Event Groups; Mission Center; Terrain Cross Sections"
+   ],
+   "neverSees": [
+    "Delegate and Finalize controls, triage and location-link controls",
+    "Technical submission editing, Administration pages",
+    "Raw office/district codes, assignment user-id inputs"
+   ]
+  },
+  {
+   "role": "GeoTech Engineer (GEOTECH_ENGINEER / legacy FIELD_WORKER)",
+   "seesByDefault": [
+    "My Work 'My drafts' and 'Returned to me' rows with incident title, location, reviewer's latest note quoted, age; one 'Fill out technical submission' primary",
+    "Technical submission editor: section task list, autosave chip, section index, location hero editing, measurements first, 3D terrain on demand, one 'Submit for review' that advances the assessment, 'Returned for correction' banner at the top",
+    "Submission library (with the mobile-app provenance notice or upload), Photo evidence mode, Terrain Cross Sections opened at the site with 'Saved sections'",
+    "Own assigned assessments' incident context (description, photos, Road Inventory snapshot, Event Group); 'Resolve incident' after finalization; New incident intake"
+   ],
+   "neverSees": [
+    "Coordinator triage queue and dialogs; Delegate / Assign / Finalize / Approve controls; reviewer assignment",
+    "Other engineers' drafts by default (filter available in Records), Administration pages",
+    "Drag/resize dashboard tooling, raw geometry JSON, 'GISA' labels, 'REJECTED' wording"
+   ]
+  },
+  {
+   "role": "Assessment reviewer / approver (assessment_assignments REVIEWER or APPROVER; legacy REVIEWER role grants no authority)",
+   "seesByDefault": [
+    "My Work 'To review' containing only assessments where they hold an active REVIEWER/APPROVER assignment, rows with incident title, location, 'Submitted 2 days ago'",
+    "Technical submission in review mode: read-only summary sections fully expanded with an index, photos with Mapped/Heading/Corrected badges and map, workflow history with names, and a sticky decision bar whose Approve / Return dialog holds the review note (one decision that drives both assessment and submission)",
+    "Their assignment role label (Reviewer / Approver / Consulted) on the assessment panel; 'Consulted' shows no decision buttons"
+   ],
+   "neverSees": [
+    "Form field editing, disabled input canvases, drag/resize tools",
+    "Delegate / Assign / Finalize / triage controls, reviewer assignment controls",
+    "Unassigned SUBMITTED assessments in their queue, two different Approve buttons, raw event codes or 'User #id' actors"
+   ]
+  },
+  {
+   "role": "Admin (ADMIN)",
+   "seesByDefault": [
+    "My Work defaulting to 'Assigned to me' with an 'All queues' toggle that reveals every role's groups with counts (unblocking stuck items)",
+    "Administration: Users (card/table with humanised canonical roles, Edit roles drawer, guarded Disable) and Road Inventory as a guided release (Import -> Versions -> Mobile package -> Verify) with routing-gap warnings (districts/offices without coordinator or office-chief assignments; flag: backend surface)",
+    "Everything operational roles see, plus audit timelines (assessment events, workflow events, Event Group history) with actor names, data-integrity alerts (incidents without permanent keys), and developer disclosures (geometry JSON, full SHA-256, correction override values)"
+   ],
+   "neverSees": [
+    "Every SUBMITTED assessment mixed into the default My Work view as if it were theirs",
+    "Raw enum codes, 'User #id', truncated hashes or job UUIDs as primary text (developer values live in disclosures)",
+    "Legacy Projects pages, the phone 'Create incident' as a primary destination"
+   ]
+  }
+ ]
+}

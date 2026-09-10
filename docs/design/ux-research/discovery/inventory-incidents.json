@@ -1,0 +1,742 @@
+{
+ "area": "Incidents record view, new-incident intake panel, workflow tree",
+ "screens": [
+  {
+   "name": "Incidents record view (Incident records / Awaiting intake tabs)",
+   "route": "/incidents and /incidents/:id (deep link highlights + scrolls to a row) - web/src/App.tsx:45-60; page alias web/src/pages/IncidentsPage.tsx:1 re-exports web/src/features/incidents/IncidentsOperationsPage.tsx",
+   "purpose": "Read-only, tabbed table of every incident in ERIS, split into coordinator-accepted records and field reports still awaiting coordinator intake, with links out to the Event Group, map, assessment and submissions.",
+   "roles": [
+    "All authenticated roles (ProtectedRoute only, App.tsx:48,56): MAINTENANCE_FIELD_WORKER/MAINTENANCE, MAINTENANCE_COORDINATOR/MAINT_COORDINATOR, GEOTECH_OFFICE_CHIEF/OFFICE_CHIEF, GEOTECH_BRANCH_CHIEF/BRANCH_CHIEF, GEOTECH_ENGINEER/FIELD_WORKER, REVIEWER, ADMIN",
+    "Nav item 'Operations > Incidents' shown to every role (web/src/ui/AppShell.tsx:86)",
+    "Default landing page for roles without a work queue, i.e. maintenance-only reporters (App.tsx:174-178, roleModel.ts:71-73)",
+    "Assessment / Submission column data is fetched only for operational roles via isOperationalUser (IncidentsOperationsPage.tsx:59,85; roleModel.ts:17-25,36-38)"
+   ],
+   "primaryTasks": [
+    "Look up an incident by id, title or location and read its current status, assignee and assessment state",
+    "Arrive by deep link from My Work / Assessments / Mission Center / Event Group and jump onward to the Event Group, map, assessment or submission",
+    "(Reporters) check whether a filed field report is still awaiting intake or has been accepted into the record"
+   ],
+   "dataShown": [
+    {
+     "label": "Tab labels with live counts: 'Incident records (N)' / 'Awaiting intake (M)'",
+     "necessity": "essential",
+     "note": "Orients user between accepted records and pending intake; counts derived from current_stage === COORDINATOR_REVIEW",
+     "source": "IncidentsOperationsPage.tsx:114,222-223"
+    },
+    {
+     "label": "Result count 'X of Y incidents'",
+     "necessity": "secondary",
+     "note": "X is the filtered count for the current tab but Y is the total across both tabs, so '3 of 40' on the intake tab misreads",
+     "source": "IncidentsOperationsPage.tsx:236"
+    },
+    {
+     "label": "Explanatory banner (intake: 'These field reports are not yet part of the ERIS incident record...'; records: 'Read-only record view. Triage, routing... live in My Work')",
+     "necessity": "secondary",
+     "note": "Useful on first visit only; shown permanently on every visit and consumes a full row on phones",
+     "source": "IncidentsOperationsPage.tsx:261-269"
+    },
+    {
+     "label": "Error banner (load failure or create-form validation)",
+     "necessity": "essential",
+     "note": "Single slot shared by list loading and form validation",
+     "source": "IncidentsOperationsPage.tsx:91,163-167,271"
+    },
+    {
+     "label": "Success notice after filing ('Incident reported... awaiting coordinator intake', upload counts)",
+     "necessity": "essential",
+     "note": "Tells the reporter what happens next",
+     "source": "IncidentsOperationsPage.tsx:192-198,272"
+    },
+    {
+     "label": "ID column '#id'",
+     "necessity": "secondary",
+     "note": "Needed to cross-reference AS #/Sub #/Event Group # links but duplicates the fallback title 'Incident #id' when title is blank",
+     "source": "IncidentsOperationsPage.tsx:300,302"
+    },
+    {
+     "label": "Incident title",
+     "necessity": "essential",
+     "note": "Primary identifier a human scans for",
+     "source": "IncidentsOperationsPage.tsx:302"
+    },
+    {
+     "label": "Classification label (type codes joined by ' · ', or 'Unclassified · assessment not started / in progress / no type recorded')",
+     "necessity": "essential",
+     "note": "What kind of incident it is; essential for operational roles, secondary for reporters",
+     "source": "IncidentsOperationsPage.tsx:38,303; incidentClassification.ts:18-24"
+    },
+    {
+     "label": "Classification state line 'Pending assessment review' / 'Confirmed from approved assessment'",
+     "necessity": "secondary",
+     "note": "Largely redundant with the AssessmentStateBadge in the last column",
+     "source": "IncidentsOperationsPage.tsx:39; incidentClassification.ts:26-31"
+    },
+    {
+     "label": "'Loading classification…' placeholder",
+     "necessity": "noise",
+     "note": "Classifications load in the same Promise.all as items, so this text persists forever whenever the backend returns no row for an incident",
+     "source": "incidentClassification.ts:19; IncidentsOperationsPage.tsx:81-88"
+    },
+    {
+     "label": "'Event Group #id' link",
+     "necessity": "essential",
+     "note": "Container the incident was accepted into; only rendered when event_group_id is set; RoleRoute-gated target bounces maintenance-only users",
+     "source": "IncidentsOperationsPage.tsx:304; App.tsx:69-76"
+    },
+    {
+     "label": "Coordinates 'lat, lon' at 6 decimals",
+     "necessity": "secondary",
+     "note": "Raw numbers nobody scans; the D/County/Route/PM label below is what people read",
+     "source": "IncidentsOperationsPage.tsx:307; utils/precision.ts:40-43"
+    },
+    {
+     "label": "Location label 'D7 · County · R001 · PM 12.30' or 'Location not recorded'",
+     "necessity": "essential",
+     "note": "Caltrans-native location vocabulary",
+     "source": "IncidentsOperationsPage.tsx:308; features/eventGroups/eventGroupTypes.ts:71-79"
+    },
+    {
+     "label": "'View on map' link to /mission-center/:gid/:iid",
+     "necessity": "essential",
+     "note": "Only when event_group_id exists; intake-tab rows never get a map link",
+     "source": "IncidentsOperationsPage.tsx:309"
+    },
+    {
+     "label": "Status badge New / In progress / Resolved",
+     "necessity": "essential",
+     "note": "NEW is styled with the --bad (red) token so intake rows read as errors",
+     "source": "IncidentsOperationsPage.tsx:26-32,311; incidentUiModel.ts:57-71"
+    },
+    {
+     "label": "Assignment: assignee name, else email, else 'Unassigned'",
+     "necessity": "essential",
+     "note": "Essential for operational roles; secondary for reporters",
+     "source": "IncidentsOperationsPage.tsx:312"
+    },
+    {
+     "label": "'AS #id' link + AssessmentStateBadge (mini)",
+     "necessity": "essential",
+     "note": "Operational roles only (assessments fetched only for them)",
+     "source": "IncidentsOperationsPage.tsx:290,315; features/assessments/AssessmentDetailPanel.tsx:71-77"
+    },
+    {
+     "label": "'No assessment' text",
+     "necessity": "noise",
+     "note": "Always shown for non-operational users (assessments never fetched, line 85) and always true on the intake tab where no assessment can exist yet",
+     "source": "IncidentsOperationsPage.tsx:85,316"
+    },
+    {
+     "label": "'Sub #id' links to /submissions/:id",
+     "necessity": "secondary",
+     "note": "From assessment submission ids or incident.linked_submission_id",
+     "source": "IncidentsOperationsPage.tsx:291,317-319"
+    },
+    {
+     "label": "Deep-linked row highlight (brand tint + inset left bar)",
+     "necessity": "essential",
+     "note": "Only meaningful when arriving via /incidents/:id; persists until the URL changes",
+     "source": "IncidentsOperationsPage.tsx:292,298"
+    },
+    {
+     "label": "Empty state 'No incidents match the current filters.' / 'Loading incidents…'",
+     "necessity": "essential",
+     "note": "No clear-filters action offered",
+     "source": "IncidentsOperationsPage.tsx:288"
+    },
+    {
+     "label": "AppShell chrome: product name, 'Caltrans | Geotechnical Services', display name + raw role codes joined by ' · ', theme select, footer",
+     "necessity": "secondary",
+     "note": "Raw role codes such as GEOTECH_BRANCH_CHIEF are shown verbatim in the header",
+     "source": "ui/AppShell.tsx:142-158,189"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Tab 'Incident records' / 'Awaiting intake'",
+     "who": "All roles",
+     "where": "Toolbar, far left (segmented button pair)",
+     "note": "Plain buttons; selection shown by brand background only; no tablist semantics (IncidentsOperationsPage.tsx:207-224)"
+    },
+    {
+     "label": "Search input (placeholder 'Search title, county, route, or description')",
+     "who": "All roles",
+     "where": "Toolbar, grows to fill (min-w-[220px] flex-1)",
+     "note": "Also matches id, district and post mile, which the placeholder does not say (IncidentsOperationsPage.tsx:124,225)"
+    },
+    {
+     "label": "Status filter select (All / New / In progress / Resolved)",
+     "who": "All roles",
+     "where": "Toolbar",
+     "note": "No visible label (IncidentsOperationsPage.tsx:226-231)"
+    },
+    {
+     "label": "'Unclaimed only' checkbox",
+     "who": "All roles",
+     "where": "Toolbar",
+     "note": "Filters incident.assignment == null; column calls the same thing 'Unassigned' (IncidentsOperationsPage.tsx:232-235,312)"
+    },
+    {
+     "label": "'New incident' / 'Close report' toggle",
+     "who": "canReportIncident: ADMIN, MAINTENANCE_FIELD_WORKER/MAINTENANCE, GEOTECH_ENGINEER/FIELD_WORKER (roleModel.ts:76-78)",
+     "where": "Toolbar, right-aligned (ml-auto group)",
+     "note": "Opens IncidentCreatePanel inline above the banner (IncidentsOperationsPage.tsx:238-242,247-259)"
+    },
+    {
+     "label": "'Refresh' / 'Refreshing…'",
+     "who": "All roles",
+     "where": "Toolbar, right-aligned",
+     "note": "Disabled while busy; busy is shared with the create action (IncidentsOperationsPage.tsx:243)"
+    },
+    {
+     "label": "'My Work' inline link inside banners",
+     "who": "All roles see it; only hasWorkQueue roles have a queue there",
+     "where": "Banner text under toolbar",
+     "note": "For reporters My Work just says to go back to Incidents (features/myWork/MyWorkPage.tsx:112) (IncidentsOperationsPage.tsx:263,267)"
+    },
+    {
+     "label": "Row link 'Event Group #id'",
+     "who": "All roles when event_group_id set; target is RoleRoute operational-only",
+     "where": "Incident cell, under classification",
+     "note": "IncidentsOperationsPage.tsx:304"
+    },
+    {
+     "label": "Row link 'View on map'",
+     "who": "All roles when event_group_id set",
+     "where": "Location cell",
+     "note": "IncidentsOperationsPage.tsx:309"
+    },
+    {
+     "label": "Row link 'AS #id'",
+     "who": "Operational roles only",
+     "where": "Assessment / Submission cell",
+     "note": "IncidentsOperationsPage.tsx:315"
+    },
+    {
+     "label": "Row links 'Sub #id'",
+     "who": "All roles when submission ids exist",
+     "where": "Assessment / Submission cell",
+     "note": "IncidentsOperationsPage.tsx:317-319"
+    },
+    {
+     "label": "No row click / no per-incident open, claim, triage, or edit action",
+     "who": "n/a",
+     "where": "n/a",
+     "note": "By design, workflow actions live in My Work (IncidentsOperationsPage.tsx:46-52)"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Sidebar 'Operations > Incidents' for every role (ui/AppShell.tsx:86)",
+     "Home redirect '/' -> /incidents for roles without a work queue (App.tsx:174-178)",
+     "My Work triage item 'Open incident record' -> /incidents/:id (features/myWork/TriageWorkItem.tsx:63); reporter note link in My Work (features/myWork/MyWorkPage.tsx:112)",
+     "Assessment detail 'Open incident' -> /incidents/:id (features/assessments/AssessmentDetailPanel.tsx:241)",
+     "Mission Center explorer 'Open in Incidents' -> /incidents/:id (features/missionCenter/MissionCenterProjectExplorer.tsx:360)",
+     "Event Group detail incident title link -> /incidents/:id (pages/EventGroupDetailPage.tsx:121)",
+     "Submission detail context links -> /incidents/:id (pages/SubmissionDetailPage.tsx:1197-1199; features/submissions/SubmissionDetailHeader.tsx:107)",
+     "Legacy unrouted ProjectDetailPage 'Open in Incidents' (pages/ProjectDetailPage.tsx:125) - dead"
+    ],
+    "exits": [
+     "Banner links to /my-work (IncidentsOperationsPage.tsx:263,267)",
+     "Row links: /event-groups/:id (RoleRoute operational; others bounced to /submissions per auth/RoleRoute.tsx:19), /mission-center/:gid/:iid (ProtectedRoute), /assessments/:id (RoleRoute operational), /submissions/:id (ProtectedRoute)",
+     "Sidebar nav and 'Sign out' in AppShell (ui/AppShell.tsx:158,164-182)",
+     "No breadcrumbs and no 'back to where you came from' after a deep link; the highlight only clears by navigating away"
+    ]
+   },
+   "responsive": {
+    "layout": "Single column: AppShell (sticky header; sidebar only at lg+, inline nav card below lg) -> page 'grid gap-4 p-4 md:p-5' -> wrapping toolbar ('flex flex-wrap') -> optional create panel -> banner -> 'overflow-x-auto' card holding a 6-column 'w-full' table with no column priority or card fallback.",
+    "breakpointsUsed": [
+     "md:p-5 page padding (IncidentsOperationsPage.tsx:219)",
+     "Toolbar flex-wrap with min-w-[220px] flex-1 search and ml-auto button group (220,225,237)",
+     "overflow-x-auto table wrapper, w-full table (274-275)",
+     "whitespace-nowrap on tab buttons and status badges (28,211)",
+     "AppShell: lg:flex-row layout, 'aside lg:hidden' inline nav, 'hidden lg:block' sidebar w-64/w-16, md:px-6, 'hidden sm:flex' theme select, 'hidden md:block' user identity (ui/AppShell.tsx:138-185)"
+    ],
+    "phoneRisks": [
+     "Below lg the full navigation card renders inline above the content, so a 375px user scrolls past up to ~10 nav items before reaching the tabs (ui/AppShell.tsx:164)",
+     "Toolbar wraps into 4-5 rows: nowrap tab pair (~300px), search on its own row, select + checkbox + count, then the New incident / Refresh group (220-244)",
+     "Six-column table has no min-width or column hiding: columns compress and coordinates/location labels wrap into narrow stacks, or content forces horizontal scrolling inside overflow-x-auto with the Assessment / Submission column off-screen (274-326)",
+     "Links are colour-only ('text-[var(--brand)] hover:underline'); on touch there is no hover so nothing marks them as links (304,309,315,318)",
+     "Touch targets: tab buttons, select and inputs are ~36-38px tall (py-2 text-sm); native checkbox is ~13px; AS#/Sub# links are 11-12px text (225-243,315-318)",
+     "Deep-link scrollIntoView({block:'center'}) fires after 150ms; the sticky header (ui/AppShell.tsx:139) can overlap the top of the centred row on short viewports (108-110)"
+    ],
+    "tabletRisks": [
+     "768-1024px still uses the inline nav card (lg breakpoint is 1024), so tablet portrait pays the same nav-scroll cost (ui/AppShell.tsx:164-165)",
+     "Six columns fit but Incident and Location cells wrap 3-4 lines each ('Unclassified · assessment not started' under the title, coordinates + label + map link)",
+     "Toolbar wraps to two rows and the ml-auto button group jumps to the second line"
+    ],
+    "desktopNotes": [
+     "At >=1024px with the w-64 sidebar the table is comfortable; shell max-w-[1900px]",
+     "Sticky header plus sticky sidebar (top-[82px]) keep navigation in view while scrolling long lists (ui/AppShell.tsx:139,166)",
+     "Sidebar collapse toggle (w-16 icon rail) gives the table extra width (ui/AppShell.tsx:165-181)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "The 'record view' never shows the record: description, first_observed_at, first_occurred_at, current_stage, office_code, incident_key, reporter, created_at, resolved_at and resolution_comment exist on Incident but only six columns render; deep links labelled 'Open incident record' land on a highlighted table row with less information than the page they came from",
+     "evidence": "IncidentsOperationsPage.tsx:274-326 vs api/types.ts:243-277; TriageWorkItem.tsx:63",
+     "severity": "major"
+    },
+    {
+     "issue": "'Event Group #id' link sends maintenance-only reporters to a RoleRoute-gated page that bounces them to /submissions, a page with no nav entry for their role",
+     "evidence": "IncidentsOperationsPage.tsx:304; App.tsx:69-76; auth/RoleRoute.tsx:19; ui/AppShell.tsx:83-88",
+     "severity": "major"
+    },
+    {
+     "issue": "'No assessment' is shown to non-operational users even when an assessment exists, because assessments are only fetched for operational roles",
+     "evidence": "IncidentsOperationsPage.tsx:85,314-316",
+     "severity": "major"
+    },
+    {
+     "issue": "'Loading classification…' is a permanent state whenever the backend returns no classification row (items and classifications are set together)",
+     "evidence": "incidentClassification.ts:19; IncidentsOperationsPage.tsx:81-88",
+     "severity": "minor"
+    },
+    {
+     "issue": "Count 'X of Y incidents' mixes the per-tab filtered count with the total across both tabs",
+     "evidence": "IncidentsOperationsPage.tsx:236",
+     "severity": "minor"
+    },
+    {
+     "issue": "Pressing Refresh while on /incidents/:id forcibly switches the tab back to the target's tab because the highlight effect depends on items",
+     "evidence": "IncidentsOperationsPage.tsx:103-112",
+     "severity": "minor"
+    },
+    {
+     "issue": "Deep link to an unknown id, or to an id hidden by the status/unclaimed filter, gives no feedback at all",
+     "evidence": "IncidentsOperationsPage.tsx:104-106,116-130",
+     "severity": "minor"
+    },
+    {
+     "issue": "Vocabulary drift on one screen: 'Unclaimed only' filter vs 'Unassigned' column; 'Awaiting intake' tab vs 'review' in the banner vs 'triage' in My Work",
+     "evidence": "IncidentsOperationsPage.tsx:223,234,263,312; features/myWork/TriageWorkItem.tsx",
+     "severity": "minor"
+    },
+    {
+     "issue": "NEW status uses the --bad red token, so the intake tab is a wall of red badges signalling error rather than newness",
+     "evidence": "incidentUiModel.ts:64-66",
+     "severity": "minor"
+    },
+    {
+     "issue": "Accessibility: tab switcher is two buttons without role=tablist/aria-selected; search input and status select have no accessible label beyond placeholder; links are colour-only",
+     "evidence": "IncidentsOperationsPage.tsx:207-215,225-231,304-318",
+     "severity": "minor"
+    },
+    {
+     "issue": "Whole-list fetch (limit=1000) plus classification and assessment fetches on every visit/refresh, filtered client-side; no pagination, silent truncation past 1000",
+     "evidence": "IncidentsOperationsPage.tsx:79-86",
+     "severity": "minor"
+    },
+    {
+     "issue": "One busy flag and one error slot serve list loading, form validation and creation: Refresh disables the create panel, and a form validation message appears in the page banner below the panel",
+     "evidence": "IncidentsOperationsPage.tsx:68-70,76,163-167,251,271",
+     "severity": "minor"
+    },
+    {
+     "issue": "Intake banner tells reporters to use My Work, and My Work tells reporters to use Incidents - a circular pointer for the role that files reports",
+     "evidence": "IncidentsOperationsPage.tsx:263; features/myWork/MyWorkPage.tsx:112",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Clear conceptual split between accepted records and awaiting-intake reports, documented in code and echoed in tab labels and banners (IncidentsOperationsPage.tsx:46-52,222-223,261-269)",
+    "Deep link /incidents/:id auto-selects the right tab, scrolls and highlights the row (IncidentsOperationsPage.tsx:102-112,298)",
+    "Instant client-side search across id, title, description, district, county, route and post mile (IncidentsOperationsPage.tsx:116-130)",
+    "Consistent CSS-variable theming (--brand/--good/--bad/--panel with color-mix) so the page works in light, dark and coastal themes (IncidentsOperationsPage.tsx:262-272; incidentUiModel.ts:63-71)",
+    "Each row is a hub with links to Event Group, map, assessment and submissions (IncidentsOperationsPage.tsx:304,309,315,318)",
+    "Tab counts double as an intake backlog indicator (IncidentsOperationsPage.tsx:114,222-223)",
+    "Caltrans location vocabulary (D/County/R/PM) via a shared formatter (features/eventGroups/eventGroupTypes.ts:71-79)"
+   ]
+  },
+  {
+   "name": "New incident intake panel (IncidentCreatePanel)",
+   "route": "/incidents (inline section toggled by the toolbar 'New incident' button; no route of its own such as /incidents/new) - IncidentsOperationsPage.tsx:238-259; web/src/features/incidents/IncidentCreatePanel.tsx",
+   "purpose": "Lets a reporting role file a field report (title, when, where, supporting files) that enters the 'Awaiting intake' queue for Maintenance Coordinator review.",
+   "roles": [
+    "canReportIncident only: ADMIN, MAINTENANCE_FIELD_WORKER (+MAINTENANCE alias), GEOTECH_ENGINEER (+FIELD_WORKER alias) (utils/roleModel.ts:76-78)",
+    "Coordinators, office/branch chiefs and reviewers never see the 'New incident' button (IncidentsOperationsPage.tsx:238)"
+   ],
+   "primaryTasks": [
+    "File a new incident with a title, first-observed time and coordinates",
+    "Attach photos, videos, PDFs or CAD as supporting evidence at filing time"
+   ],
+   "dataShown": [
+    {
+     "label": "Heading 'Create incident' + helper paragraph about remaining unclassified until assessment",
+     "necessity": "secondary",
+     "note": "Sets expectations once; fine",
+     "source": "IncidentCreatePanel.tsx:48-51"
+    },
+    {
+     "label": "'Classification: Unclassified · assigned after field assessment' info box",
+     "necessity": "noise",
+     "note": "Repeats the paragraph immediately above it",
+     "source": "IncidentCreatePanel.tsx:63-65"
+    },
+    {
+     "label": "Field labels: Title*, Description, First observed*, First occurred, Latitude*, Longitude*, District, County, Route, Post mile",
+     "necessity": "essential",
+     "note": "Uppercase tracking-wide labels; required marked by ' *' with no legend and no native required attribute",
+     "source": "IncidentCreatePanel.tsx:20-28,68-126"
+    },
+    {
+     "label": "Supporting files label + helper 'Add photos, videos, PDFs, CAD, or other supporting evidence.'",
+     "necessity": "secondary",
+     "note": "Helper text is the only hint about accepted types; no accept attribute",
+     "source": "IncidentCreatePanel.tsx:130,139"
+    },
+    {
+     "label": "Pending file rows: file name (truncated), inferred kind + size ('PHOTO · 1.2 MB')",
+     "necessity": "essential",
+     "note": "Name and size are essential; the raw kind enum PHOTO/VIDEO/DOC/SKETCH is noise as displayed",
+     "source": "IncidentCreatePanel.tsx:143-151; incidentUiModel.ts:38-55"
+    },
+    {
+     "label": "Button state 'Creating…'",
+     "necessity": "essential",
+     "note": "Only progress feedback; uploads happen after creation with no per-file progress",
+     "source": "IncidentCreatePanel.tsx:183; IncidentsOperationsPage.tsx:146-159"
+    },
+    {
+     "label": "Validation messages ('Incident title is required.', 'First observed date/time is required.', 'Latitude and longitude must be valid numbers.') and success notice",
+     "necessity": "essential",
+     "note": "Rendered in the page-level banner below the panel, not next to the offending field",
+     "source": "IncidentsOperationsPage.tsx:163-167,271-272"
+    },
+    {
+     "label": "Blur-normalised values: coordinates to 6 dp, route zero-padded to 3 digits, post mile to fixed decimals",
+     "necessity": "secondary",
+     "note": "Silent reformat on blur; invalid coordinate text is cleared to empty",
+     "source": "IncidentCreatePanel.tsx:91,102,116,124; utils/precision.ts:9-43"
+    },
+    {
+     "label": "Hidden form field incident_type",
+     "necessity": "noise",
+     "note": "Exists in IncidentCreateForm/EMPTY_INCIDENT_FORM but is never rendered nor posted - dead field",
+     "source": "incidentUiModel.ts:5,19; IncidentsOperationsPage.tsx:175-186"
+    }
+   ],
+   "actions": [
+    {
+     "label": "'Cancel' (header)",
+     "who": "canReportIncident roles",
+     "where": "Panel header, right of the title",
+     "note": "Resets form, clears pending files, closes panel (IncidentCreatePanel.tsx:53-60; IncidentsOperationsPage.tsx:139-144)"
+    },
+    {
+     "label": "'Cancel' (footer)",
+     "who": "canReportIncident roles",
+     "where": "Panel footer, left of Create",
+     "note": "Exact duplicate of the header Cancel (IncidentCreatePanel.tsx:169-176)"
+    },
+    {
+     "label": "'Create incident' / 'Creating…'",
+     "who": "canReportIncident roles",
+     "where": "Panel footer, right-aligned primary button",
+     "note": "POST /incidents then sequential attachment uploads; not inside a <form>, so Enter does not submit (IncidentCreatePanel.tsx:177-184; IncidentsOperationsPage.tsx:161-205)"
+    },
+    {
+     "label": "Native file chooser (multiple)",
+     "who": "canReportIncident roles",
+     "where": "Supporting files block",
+     "note": "No capture attribute for camera, no drag-and-drop, no accept filter (IncidentCreatePanel.tsx:131-138)"
+    },
+    {
+     "label": "'Remove' per pending file",
+     "who": "canReportIncident roles",
+     "where": "Right end of each pending file row",
+     "note": "px-2 py-1 text-xs, roughly 26px tall (IncidentCreatePanel.tsx:153-160)"
+    },
+    {
+     "label": "'New incident' / 'Close report' toolbar toggle",
+     "who": "canReportIncident roles",
+     "where": "Page toolbar, right group",
+     "note": "Third way to dismiss the panel alongside the two Cancel buttons (IncidentsOperationsPage.tsx:239-241)"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Toolbar 'New incident' button on /incidents (IncidentsOperationsPage.tsx:238-242)",
+     "No deep link (no /incidents/new route in App.tsx), so My Work, Mission Center and mobile cannot link straight into filing"
+    ],
+    "exits": [
+     "Cancel / Close report collapses the panel and discards input (IncidentsOperationsPage.tsx:139-144)",
+     "On success: panel resets, list reloads, tab switches to 'Awaiting intake' and a notice explains next steps (IncidentsOperationsPage.tsx:189-198)",
+     "On upload failure: incident already created, panel already reset; no path to re-attach the failed files from this page (IncidentsOperationsPage.tsx:188-196)"
+    ]
+   },
+   "responsive": {
+    "layout": "Section card 'p-4 md:p-5'; header 'flex flex-wrap items-start justify-between'; fields 'grid gap-4 md:grid-cols-2 xl:grid-cols-3' with Description spanning two columns at xl and a 'hidden xl:block' spacer keeping Latitude/Longitude on one row; files block stacked; footer 'flex justify-end'.",
+    "breakpointsUsed": [
+     "md:p-5 (IncidentCreatePanel.tsx:45)",
+     "md:grid-cols-2 xl:grid-cols-3 (67)",
+     "md:col-span-1 xl:col-span-2 on Description (71)",
+     "hidden xl:block spacer cell (82)",
+     "min-h-20 w-full textarea (73)",
+     "min-w-0 + truncate on file names (149-150)",
+     "Header flex-wrap so Cancel drops under the title on narrow widths (46)"
+    ],
+    "phoneRisks": [
+     "Single column of 10 fields plus the files block is roughly 2.5 screens tall; the Create button sits at the bottom and validation errors render in the page banner below the panel, so the reason for a failed submit is often off-screen (IncidentCreatePanel.tsx:67-185; IncidentsOperationsPage.tsx:271)",
+     "No geolocation or map pick: a field worker on a phone types six-decimal latitude/longitude by hand; California longitudes are negative and type=number keypads often hide the minus key (IncidentCreatePanel.tsx:83-104)",
+     "datetime-local twice on a phone is fine natively, but there is no 'now' shortcut for First observed (76-78)",
+     "Native file input with no capture attribute means no direct camera shortcut; no thumbnails for chosen photos (131-138)",
+     "'Remove' buttons are ~26px tall, below the 44px touch minimum (157)",
+     "Three dismiss controls (header Cancel, footer Cancel, toolbar Close report) and no confirm-discard, so a stray tap loses a half-typed report (53-60,169-176; IncidentsOperationsPage.tsx:239)"
+    ],
+    "tabletRisks": [
+     "md 2-column grid pairs Title with Description; the min-h-20 textarea makes row one uneven and pushes the required First observed field below the fold on 768px landscape (67-78)",
+     "datetime-local inputs are wide on iPadOS and can exceed a 2-column cell at 768px because inputClass sets no width constraints (18,76-81)"
+    ],
+    "desktopNotes": [
+     "xl 3-column layout leaves a blank spacer cell in row two and splits location fields across rows three (Lat | Lon | District) and four (County | Route | Post mile) (67-126)",
+     "No autoFocus on Title when the panel opens; not wrapped in <form> so Enter does nothing (44,69)"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Coordinates must be hand-typed; no 'use my location' (navigator.geolocation) and no map picker even though Mission Center already hosts an ArcGIS map",
+     "evidence": "IncidentCreatePanel.tsx:83-104",
+     "severity": "major"
+    },
+    {
+     "issue": "Validation is imperative and page-level: no required/aria-invalid attributes, no field-level messages, errors surface in the shared page banner outside the panel",
+     "evidence": "IncidentsOperationsPage.tsx:163-167,271; IncidentCreatePanel.tsx:68-126",
+     "severity": "major"
+    },
+    {
+     "issue": "Attachment failures cannot be retried: the incident is created, the panel resets, the notice truncates to two failures, and this page has no attachments UI to add the files afterwards",
+     "evidence": "IncidentsOperationsPage.tsx:139-144,188-196",
+     "severity": "major"
+    },
+    {
+     "issue": "Dead incident_type field in the form model, never rendered or sent",
+     "evidence": "incidentUiModel.ts:5,19; IncidentsOperationsPage.tsx:175-186",
+     "severity": "minor"
+    },
+    {
+     "issue": "Duplicate Cancel buttons and duplicated 'unclassified' copy inside one panel",
+     "evidence": "IncidentCreatePanel.tsx:53-60,169-176; 49-51 vs 63-65",
+     "severity": "minor"
+    },
+    {
+     "issue": "Raw attachment kind enum shown to users; SKETCH is inferred only when a PNG's file name contains 'sketch'",
+     "evidence": "IncidentCreatePanel.tsx:151; incidentUiModel.ts:40,44",
+     "severity": "minor"
+    },
+    {
+     "issue": "formatCoordinate on blur silently wipes a non-numeric entry to an empty string",
+     "evidence": "IncidentCreatePanel.tsx:91,102; utils/precision.ts:40-43",
+     "severity": "minor"
+    },
+    {
+     "issue": "Shared busy flag: while the list refreshes the whole form is disabled, and while creating the Refresh button is disabled",
+     "evidence": "IncidentsOperationsPage.tsx:68,76,243,251",
+     "severity": "minor"
+    },
+    {
+     "issue": "'Supporting files' label is a bare <label> with no htmlFor, so the file input has no accessible name",
+     "evidence": "IncidentCreatePanel.tsx:130-138",
+     "severity": "minor"
+    },
+    {
+     "issue": "No route for intake (e.g. /incidents/new), so the primary mobile task for field workers cannot be deep-linked or bookmarked",
+     "evidence": "App.tsx:45-60; IncidentsOperationsPage.tsx:238-259",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Every field is an implicit <label> wrapper, giving accessible names for free (IncidentCreatePanel.tsx:20-28)",
+    "Blur normalisation of route, post mile and coordinates enforces ERIS precision rules at entry (IncidentCreatePanel.tsx:91,102,116,124; utils/precision.ts)",
+    "Attachment kind is inferred client-side so the user does not pick a type per file (incidentUiModel.ts:38-48)",
+    "Success path reloads, switches to the intake tab and tells the reporter what happens next (IncidentsOperationsPage.tsx:189-198)",
+    "Honest 'unclassified until field assessment' messaging matches the real workflow (IncidentCreatePanel.tsx:49-51)",
+    "inputMode=decimal and step=0.000001 on coordinate inputs give a numeric keypad and sane precision (IncidentCreatePanel.tsx:85-87)"
+   ]
+  },
+  {
+   "name": "Workflow tree modal (WorkflowTreeModal / WorkflowTreeView) - unmounted",
+   "route": "None. Exported from web/src/components/WorkflowTree.tsx:77,110 but no page or feature imports it (grep across web/src finds only self-references); the API client getWorkflowTree -> GET /incidents/:id/workflow-tree (web/src/api/workflowTree.ts:71-73) is likewise unused by the web app.",
+   "purpose": "Intended to visualise an incident's review chain (coordinator, office chief, branch chief, engineer, ...) as a row of status cards showing the current owner, path type and per-step details.",
+   "roles": [
+    "Unreachable by any role today (dead code)",
+    "The component itself has no role gate; if mounted it would depend solely on the backend endpoint's authorisation"
+   ],
+   "primaryTasks": [
+    "See where an incident sits in the workflow and who currently owns it",
+    "Inspect a completed step's notes, timestamp and actor"
+   ],
+   "dataShown": [
+    {
+     "label": "Modal title 'Incident #id — Workflow'",
+     "necessity": "essential",
+     "note": "Dialog heading, also aria-labelledby target",
+     "source": "WorkflowTree.tsx:131"
+    },
+    {
+     "label": "Overall status pill (glyph + label, e.g. '► Current')",
+     "necessity": "essential",
+     "note": "Uses the same STATUS map as nodes",
+     "source": "WorkflowTree.tsx:11-20,83"
+    },
+    {
+     "label": "'Path: Awaiting triage / Assessment required / Needs reporter information / No assessment required / Linked / duplicate report'",
+     "necessity": "essential",
+     "note": "Humanised path_type; falls back to the raw code",
+     "source": "WorkflowTree.tsx:22-28,84"
+    },
+    {
+     "label": "'Current owner: Role — Name' | 'Role — Unassigned' | 'None (closed)'",
+     "necessity": "essential",
+     "note": "Answers 'who is this waiting on'",
+     "source": "WorkflowTree.tsx:85-88"
+    },
+    {
+     "label": "'Assessment: <raw state code> · Office <code>'",
+     "necessity": "noise",
+     "note": "Raw state such as PENDING_OFFICE_DELEGATION is shown verbatim even though roleModel.assessmentStateLabel exists; the underlying info is secondary",
+     "source": "WorkflowTree.tsx:89; utils/roleModel.ts:81-93"
+    },
+    {
+     "label": "Linked / duplicate banner '→ incident #n → location #n'",
+     "necessity": "secondary",
+     "note": "Amber banner only when linked ids exist; ids are not links",
+     "source": "WorkflowTree.tsx:92-96"
+    },
+    {
+     "label": "Per-node card: status glyph on coloured dot, ROLE TITLE, step label, 'Status · person', completed_at (toLocaleString), 'Details' toggle",
+     "necessity": "essential",
+     "note": "Person resolves to full name, email, 'Unassigned', '—' or role title",
+     "source": "WorkflowTree.tsx:30-59"
+    },
+    {
+     "label": "Node details: actor email, notes, 'Linked incident #n', 'Linked location #n', 'event: RAW_EVENT_TYPE'",
+     "necessity": "secondary",
+     "note": "Notes are essential when present; email and linked ids secondary; raw event_type is noise",
+     "source": "WorkflowTree.tsx:60-68"
+    },
+    {
+     "label": "'Loading workflow…' text and role=alert error box",
+     "necessity": "essential",
+     "note": "Error box uses hard-coded red-300/red-500 palette",
+     "source": "WorkflowTree.tsx:134"
+    },
+    {
+     "label": "WorkflowNode.disposition",
+     "necessity": "noise",
+     "note": "Typed in the API client but never rendered",
+     "source": "api/workflowTree.ts:40"
+    }
+   ],
+   "actions": [
+    {
+     "label": "'Close'",
+     "who": "n/a (unmounted); would be anyone who can open the modal",
+     "where": "Modal header, right",
+     "note": "Receives initial focus via data-dialog-initial-focus (WorkflowTree.tsx:132; ui/ModalDialog.tsx:49-56)"
+    },
+    {
+     "label": "Escape key / backdrop mousedown",
+     "who": "n/a",
+     "where": "Whole overlay",
+     "note": "Provided by ModalDialog (ui/ModalDialog.tsx:62-68,108-110)"
+    },
+    {
+     "label": "Node card body button toggles 'Details' / 'Hide details'",
+     "who": "n/a",
+     "where": "Each node card",
+     "note": "Whole card is a <button> even when hasDetail is false (WorkflowTree.tsx:47-59)"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "None - no page renders WorkflowTreeModal or WorkflowTreeView"
+    ],
+    "exits": [
+     "Close button, Escape, backdrop click; ModalDialog restores focus to the opener and unlocks body scroll (ui/ModalDialog.tsx:100-105)"
+    ]
+   },
+   "responsive": {
+    "layout": "ModalDialog overlay 'fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/50 p-4'; panel 'mt-10 w-full max-w-[1400px] p-4'; summary bar 'flex flex-wrap gap-3'; nodes 'flex flex-col gap-2 xl:flex-row xl:flex-wrap' with a ↓ connector below xl and → at xl+; cards 'flex-1 min-w-[180px]'.",
+    "breakpointsUsed": [
+     "xl:flex-row xl:flex-wrap xl:items-stretch on the node list and each node wrapper (WorkflowTree.tsx:98,100)",
+     "xl:hidden ↓ / hidden xl:inline → connector glyphs, xl:px-1 (74)",
+     "min-w-[180px] flex-1 node cards (49)",
+     "max-w-[1400px] w-full panel, mt-10 (128)",
+     "flex-wrap summary bar with ml-auto assessment chip (82,89)"
+    ],
+    "phoneRisks": [
+     "Vertical stack of 4-6 cards plus connectors exceeds a 375x667 viewport; the overlay scrolls but body scroll is locked so the incident context behind is hidden (WorkflowTree.tsx:98-105; ui/ModalDialog.tsx:47)",
+     "'Close' is px-3 py-1 text-sm, roughly 30px tall (132)",
+     "Summary bar wraps to 3-4 lines and the ml-auto assessment chip drops to its own line (82-90)",
+     "mt-10 plus p-4 overlay padding wastes ~56px of vertical space before the title (127-128)"
+    ],
+    "tabletRisks": [
+     "Below xl (1280px) the tree stays a vertical list even on 1024px landscape tablets where four or five 180px cards would fit side by side (74,98)",
+     "Current-node ring uses a fixed rgba(31,94,255,0.25) shadow that ignores the theme (49)"
+    ],
+    "desktopNotes": [
+     "At >=1280px cards flow horizontally with → arrows and wrap; flex-1 stretches cards unevenly when a row wraps (49,98-104)",
+     "Panel capped at 1400px inside the 1900px shell"
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Component and API client are dead code: never mounted, so users have no workflow visualisation anywhere on the incident record",
+     "evidence": "components/WorkflowTree.tsx:77,110 and api/workflowTree.ts:71 have no importers; IncidentsOperationsPage.tsx never references them",
+     "severity": "major"
+    },
+    {
+     "issue": "Hard-coded Tailwind palette tuned for a dark background (text-emerald-300, text-sky-200, text-amber-200, text-red-200/300, bg-slate-500/600, text-black on dots) breaks contrast on the Light and Coastal themes the shell offers; every other panel in this area uses --good/--bad/--brand tokens",
+     "evidence": "WorkflowTree.tsx:12-19,52,93,134; ui/AppShell.tsx:125-129",
+     "severity": "major"
+    },
+    {
+     "issue": "Raw codes leak into the UI: assessment state and event_type are rendered unlabelled although a shared assessmentStateLabel helper exists",
+     "evidence": "WorkflowTree.tsx:66,89; utils/roleModel.ts:81-93",
+     "severity": "minor"
+    },
+    {
+     "issue": "Unicode glyph icons (⮌ U+2B8C, ►, ■, ○) are font-dependent and not aria-hidden, so screen readers announce them before the status label",
+     "evidence": "WorkflowTree.tsx:11-19,52",
+     "severity": "minor"
+    },
+    {
+     "issue": "Every node card is a focusable <button> even when it has no details to reveal",
+     "evidence": "WorkflowTree.tsx:47-50",
+     "severity": "minor"
+    },
+    {
+     "issue": "Linked incident/location ids are plain text rather than links to /incidents/:id",
+     "evidence": "WorkflowTree.tsx:64-65,92-96",
+     "severity": "minor"
+    },
+    {
+     "issue": "disposition is typed but never rendered",
+     "evidence": "api/workflowTree.ts:40",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "ModalDialog supplies focus trap, Escape, backdrop close, focus restore and role=dialog/aria-modal/aria-labelledby (ui/ModalDialog.tsx:43-126)",
+    "Workflow status and path codes are mapped to plain-English labels in one place (WorkflowTree.tsx:11-28)",
+    "Current-owner card ring is a clear 'you are here' cue (WorkflowTree.tsx:49,101)",
+    "Progressive disclosure of notes/email via a Details toggle with aria-expanded (WorkflowTree.tsx:47-59)",
+    "Orientation-aware connectors (↓ stacked, → horizontal) show the design already considered narrow layouts (WorkflowTree.tsx:73-75)"
+   ]
+  }
+ ],
+ "crossCutting": [
+  "Dead and legacy code: components/WorkflowTree.tsx and api/workflowTree.ts are never imported; pages/ProjectDetailPage.tsx is unrouted (App.tsx:77-78 redirects /projects/* to /event-groups) yet still carries an 'Open in Incidents' button (ProjectDetailPage.tsx:125); features/projects/ProjectAssociationDialog.tsx (lines 52-102) duplicates features/eventGroups/EventGroupAssociationDialog.tsx (lines 84-140) against parallel /incidents/:id/*-context, nearby-* and *-association endpoints; IncidentCreateForm.incident_type is a dead field (incidentUiModel.ts:5,19).",
+  "Vocabulary drift for the same object and state across this area and its neighbours: 'report' (Close report, 'Incident reported', 'field report'), 'incident', 'Create incident'; 'intake' (tab) vs 'review' (banner) vs 'triage' (My Work TriageWorkItem, WorkflowTree PATH_LABEL 'Awaiting triage'); 'Unclaimed' (filter) vs 'Unassigned' (column, WorkflowTree); tab 'Awaiting intake' vs stage code COORDINATOR_REVIEW.",
+  "Four overlapping state vocabularies can appear in a single table row: incident status (NEW/IN_PROGRESS/RESOLVED badge), current_stage (drives tabs but is never displayed), classification_status text, and assessment state badge - each with its own colour mapping (incidentUiModel.ts:63-71; incidentClassification.ts:26-31; features/assessments/AssessmentDetailPanel.tsx:71-77; WorkflowTree.tsx:11-20).",
+  "No shared Button/Badge/Input primitives: primary, secondary and small buttons are repeated as literal class strings with slightly different padding and radius (IncidentsOperationsPage.tsx:211,239,243; IncidentCreatePanel.tsx:57,157,173,181; WorkflowTree.tsx:132), and three separate pill implementations exist (IncidentStatusBadge, AssessmentStateBadge mini, WorkflowTree STATUS pills).",
+  "Theme-token discipline is inconsistent: incidents pages use --brand/--good/--bad color-mix tokens, while WorkflowTree uses raw Tailwind palette classes plus fixed rgba shadows (WorkflowTree.tsx:12-19,49) and AppShell also hard-codes rgba(31,94,255,0.25) for the active nav item (ui/AppShell.tsx:41).",
+  "Links are colour-only everywhere ('text-[var(--brand)] hover:underline'), which fails non-colour link identification on touch devices and for colour-blind users (IncidentsOperationsPage.tsx:263,267,304,309,315,318).",
+  "Accessibility gaps: tab switcher without tablist/aria-selected; search input and status select rely on placeholder/no label; file input label not associated; unicode status glyphs not aria-hidden; raw role codes in the header (AppShell.tsx:157); several controls under the 44px touch minimum (Remove, Close, native checkbox).",
+  "Mobile shell: below lg (1024px) the entire navigation renders inline above page content with no drawer or hamburger (ui/AppShell.tsx:164), so phones and portrait tablets scroll past the nav on every visit - the users most likely on a phone are the field workers this area's intake panel serves.",
+  "Role-gating asymmetry: /incidents is open to every role, but row links go to RoleRoute-gated pages (/event-groups, /assessments) that bounce non-operational users to /submissions (auth/RoleRoute.tsx:19), a page with no nav entry for them; My Work and Incidents point reporters at each other (MyWorkPage.tsx:112; IncidentsOperationsPage.tsx:263).",
+  "Data-loading pattern: three whole-table fetches on every visit and Refresh (incidents limit=1000, classifications for every id, assessments limit=1000) with client-side filtering and no pagination (IncidentsOperationsPage.tsx:79-86).",
+  "Feedback pattern: single page-level error and notice slots are shared by list loading, form validation and upload results, so messages appear far from their cause (IncidentsOperationsPage.tsx:68-70,163-167,271-272).",
+  "The 'record view' has no detail surface: the Incident type carries description, timestamps, stage, office, key, reporter and resolution fields (api/types.ts:243-277) that no screen in this area renders, and the unmounted WorkflowTree is the only component that would have shown per-step history."
+ ]
+}

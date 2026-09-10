@@ -1,0 +1,1319 @@
+{
+ "area": "Administration: Users and Road Inventory",
+ "screens": [
+  {
+   "name": "User Administration",
+   "route": "/admin/users",
+   "purpose": "Single-page admin console to create ERIS accounts, edit each account's application roles inline, reset passwords, and enable/disable sign-in access.",
+   "roles": [
+    "ADMIN only. Route is wrapped in RoleRoute roles={[\"ADMIN\"]} (web/src/App.tsx:143-150); sidebar entry 'Administration > Users' is pushed only when isAdmin(roles) (web/src/ui/AppShell.tsx:93-101). Non-admins hitting the URL are redirected to /submissions (web/src/auth/RoleRoute.tsx:18-19); unauthenticated users go to /login (RoleRoute.tsx:15-16)."
+   ],
+   "primaryTasks": [
+    "Create a new account with an initial password and one or more roles",
+    "Find a user and change their roles (Save roles)",
+    "Reset a user's password or disable/enable their access"
+   ],
+   "dataShown": [
+    {
+     "label": "Page title 'User Administration' (AppShell h1)",
+     "necessity": "essential",
+     "note": "Only orientation cue; there are no breadcrumbs.",
+     "source": "AdminUsersOperationsPage.tsx:173, AppShell.tsx:184"
+    },
+    {
+     "label": "Count card 'Accounts' + hint 'All ERIS users'",
+     "necessity": "secondary",
+     "note": "Overview stat; not needed for any of the three tasks and not clickable to filter.",
+     "source": "AdminUsersOperationsPage.tsx:176-182"
+    },
+    {
+     "label": "Count card 'Active' + hint 'Can sign in'",
+     "necessity": "secondary",
+     "note": "Duplicates what the status filter already exposes.",
+     "source": "AdminUsersOperationsPage.tsx:176"
+    },
+    {
+     "label": "Count card 'Inactive' + hint 'Access disabled'",
+     "necessity": "secondary",
+     "note": "Same as above.",
+     "source": "AdminUsersOperationsPage.tsx:176"
+    },
+    {
+     "label": "Count card 'Administrators' + hint 'ADMIN role'",
+     "necessity": "noise",
+     "note": "Hint is a raw role code that merely restates the card label.",
+     "source": "AdminUsersOperationsPage.tsx:176"
+    },
+    {
+     "label": "Header card 'ERIS access management' + sentence 'Create accounts, manage operational roles, reset passwords, and disable access.'",
+     "necessity": "noise",
+     "note": "Restates the page title and lists the buttons already visible below; only exists to host the 'New account' button.",
+     "source": "AdminUsersOperationsPage.tsx:185-188"
+    },
+    {
+     "label": "Create form heading 'Create ERIS account' + helper 'Assign only the roles required...'",
+     "necessity": "secondary",
+     "note": "Shown only when the form is open; helper is useful guidance.",
+     "source": "AdminUsersOperationsPage.tsx:192"
+    },
+    {
+     "label": "Create form inputs: Email *, Full name *, Initial password *",
+     "necessity": "essential",
+     "note": "Required for the create task; no password-policy hint is shown.",
+     "source": "AdminUsersOperationsPage.tsx:194-196"
+    },
+    {
+     "label": "Create form 'Initial roles' chip group (all role options)",
+     "necessity": "essential",
+     "note": "At least one role is required (validated client-side at :101).",
+     "source": "AdminUsersOperationsPage.tsx:198"
+    },
+    {
+     "label": "Search box (placeholder 'Search name, email, role, or user ID')",
+     "necessity": "essential",
+     "note": "Primary way to find a user; client-side filter over name/email/roles/id.",
+     "source": "AdminUsersOperationsPage.tsx:204, 69-80"
+    },
+    {
+     "label": "Status filter select (All accounts / Active / Inactive)",
+     "necessity": "secondary",
+     "note": "Useful occasionally; has no accessible label.",
+     "source": "AdminUsersOperationsPage.tsx:205"
+    },
+    {
+     "label": "Error banner / success notice banner",
+     "necessity": "essential",
+     "note": "Only outcome feedback for every mutation; rendered above the table, not near the affected row.",
+     "source": "AdminUsersOperationsPage.tsx:209-210"
+    },
+    {
+     "label": "Table column 'User': full name",
+     "necessity": "essential",
+     "note": "Identity for every task.",
+     "source": "AdminUsersOperationsPage.tsx:221"
+    },
+    {
+     "label": "Table column 'User': email",
+     "necessity": "essential",
+     "note": "Login identity; distinguishes same-name users.",
+     "source": "AdminUsersOperationsPage.tsx:221"
+    },
+    {
+     "label": "Table column 'User': 'User #<id>'",
+     "necessity": "noise",
+     "note": "Internal database id shown on every row; only justification is that search accepts an id (:78).",
+     "source": "AdminUsersOperationsPage.tsx:221"
+    },
+    {
+     "label": "Table column 'Status': Active/Inactive badge",
+     "necessity": "essential",
+     "note": "Needed to decide Disable vs Enable.",
+     "source": "AdminUsersOperationsPage.tsx:12-18, 222"
+    },
+    {
+     "label": "Table column 'Roles': the user's assigned roles (highlighted chips)",
+     "necessity": "essential",
+     "note": "Core of the role-management task.",
+     "source": "AdminUsersOperationsPage.tsx:223, 238-251"
+    },
+    {
+     "label": "Table column 'Roles': every UNASSIGNED role option rendered as an unselected chip on every row",
+     "necessity": "secondary",
+     "note": "Edit affordance is inlined for all rows at once; candidate for progressive disclosure (popover/edit mode) because it makes each row 2-4 lines tall and dominates the table on narrow screens.",
+     "source": "AdminUsersOperationsPage.tsx:223, 240-247"
+    },
+    {
+     "label": "Chip hover title showing the raw role code (e.g. GEOTECH_OFFICE_CHIEF)",
+     "necessity": "noise",
+     "note": "Hover-only raw enum under a humanized label.",
+     "source": "AdminUsersOperationsPage.tsx:244, 8-10"
+    },
+    {
+     "label": "Empty/loading row text ('Loading users…' / 'No users match the current filters.')",
+     "necessity": "secondary",
+     "note": "Good empty state; loading text only appears when the list is empty.",
+     "source": "AdminUsersOperationsPage.tsx:216"
+    },
+    {
+     "label": "Busy label swaps ('Refreshing…', 'Creating…')",
+     "necessity": "secondary",
+     "note": "Sole progress indication; one global busy flag drives all of them.",
+     "source": "AdminUsersOperationsPage.tsx:199, 206"
+    },
+    {
+     "label": "AppShell header: signed-in name + raw role codes joined by ' · ' (hidden below md)",
+     "necessity": "noise",
+     "note": "Raw enum strings such as 'ADMIN · GEOTECH_ENGINEER' in the chrome.",
+     "source": "AppShell.tsx:157"
+    }
+   ],
+   "actions": [
+    {
+     "label": "New account / Close new account (toggle)",
+     "who": "ADMIN",
+     "where": "Right side of the 'ERIS access management' header card; self-start on phone, inline at md+",
+     "note": "AdminUsersOperationsPage.tsx:187"
+    },
+    {
+     "label": "Cancel (top-right of create form)",
+     "who": "ADMIN",
+     "where": "Create ERIS account section header",
+     "note": "AdminUsersOperationsPage.tsx:192 - duplicate of the bottom Cancel and of the header toggle"
+    },
+    {
+     "label": "Cancel (bottom) and Create account",
+     "who": "ADMIN",
+     "where": "Create form footer, right-aligned",
+     "note": "AdminUsersOperationsPage.tsx:199; Create disabled while busy; no <form>, Enter does not submit"
+    },
+    {
+     "label": "Toggle initial role chips",
+     "who": "ADMIN",
+     "where": "Create form, 'Initial roles' row",
+     "note": "AdminUsersOperationsPage.tsx:198, 238-251 (sr-only checkbox inside a label)"
+    },
+    {
+     "label": "Search (type-to-filter)",
+     "who": "ADMIN",
+     "where": "Filter row above table",
+     "note": "AdminUsersOperationsPage.tsx:204"
+    },
+    {
+     "label": "Status filter",
+     "who": "ADMIN",
+     "where": "Filter row",
+     "note": "AdminUsersOperationsPage.tsx:205"
+    },
+    {
+     "label": "Refresh",
+     "who": "ADMIN",
+     "where": "Filter row, right of the select",
+     "note": "AdminUsersOperationsPage.tsx:206"
+    },
+    {
+     "label": "Toggle role chip (per row)",
+     "who": "ADMIN",
+     "where": "Table 'Roles' cell",
+     "note": "AdminUsersOperationsPage.tsx:223; edits a draft only"
+    },
+    {
+     "label": "Save roles",
+     "who": "ADMIN",
+     "where": "Table 'Actions' cell (right-aligned, first)",
+     "note": "AdminUsersOperationsPage.tsx:224; disabled until draft differs from saved roles (:218)"
+    },
+    {
+     "label": "Reset password (opens dialog)",
+     "who": "ADMIN",
+     "where": "Table 'Actions' cell (second)",
+     "note": "AdminUsersOperationsPage.tsx:224, 233"
+    },
+    {
+     "label": "Disable / Enable",
+     "who": "ADMIN",
+     "where": "Table 'Actions' cell (third; red border when Disable)",
+     "note": "AdminUsersOperationsPage.tsx:224, 144-157; immediate PATCH with no confirmation"
+    },
+    {
+     "label": "Sidebar navigation links, Collapse/Expand navigation (lg+), Theme select (sm+), Sign out",
+     "who": "ADMIN (nav sections vary by role)",
+     "where": "AppShell header and sidebar / stacked nav card",
+     "note": "AppShell.tsx:146-158, 164-182"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Sidebar 'Administration > Users' (AppShell.tsx:97), rendered only for ADMIN",
+     "Direct URL /admin/users (App.tsx:144); unauthenticated -> /login, non-admin -> /submissions (RoleRoute.tsx:15-19)"
+    ],
+    "exits": [
+     "Sidebar links to other sections; Sign out (AppShell.tsx:158)",
+     "No breadcrumbs, no per-user detail route, no deep-linkable search/filter state (query and statusFilter live only in React state :24-25)",
+     "No cross-link to /admin/road-inventory beyond the sidebar"
+    ]
+   },
+   "responsive": {
+    "layout": "Single vertical stack inside AppShell (non-workspace mode): count-card grid, header card, optional inline create form, filter row, banners, full-width table. Below lg the sidebar becomes a nav card stacked ABOVE the content (AppShell.tsx:164), at lg+ a 256px/64px sticky sidebar (AppShell.tsx:165).",
+    "breakpointsUsed": [
+     "p-4 md:p-5 (:174, :191)",
+     "grid grid-cols-2 gap-3 lg:grid-cols-4 (:175)",
+     "flex-col md:flex-row md:items-center md:justify-between; self-start md:self-auto (:185-187)",
+     "grid gap-4 md:grid-cols-3 (:193)",
+     "flex-col md:flex-row md:items-center; md:max-w-xl; md:w-52 (:203-205)",
+     "flex-1 overflow-auto container around a w-full table with no min-w (:212-213)",
+     "RoleChoices max-w-3xl when compact (:240)",
+     "AppShell: lg:hidden stacked nav / hidden lg:block sidebar w-64|w-16; header name hidden md:block; theme select hidden sm:flex (AppShell.tsx:146,157,164-165)"
+    ],
+    "phoneRisks": [
+     "Stacked navigation card (AppShell.tsx:164) renders the full section list above the page content on every visit, so the count cards and table start roughly one screen down.",
+     "Table is w-full with 4 columns and no min-width (:213): on ~280px of usable width the Roles chip cloud collapses to one chip per line, giving each row 6+ lines of chips; long emails in text-xs cannot wrap (:221) so the whole table scrolls horizontally inside overflow-auto (:212).",
+     "The three row buttons (Save roles / Reset password / Disable) wrap into a vertical stack via inline-flex flex-wrap (:224); each is ~28px tall (py-1.5 text-xs) and role chips ~24px (py-1 text-[11px], :244) - below the 44px touch guideline.",
+     "Create form stacks to one column (fine) but exposes two Cancel buttons plus the header toggle (:187, :192, :199).",
+     "No hover fallback for chip title tooltips (:244) - purely cosmetic loss."
+    ],
+    "tabletRisks": [
+     "768-1023px is still below lg, so the nav card stays stacked above content (AppShell.tsx:164) - portrait iPads pay the same scroll cost as phones.",
+     "Table gets ~650-900px: chip cloud wraps to 2-3 lines per row; action buttons wrap to two lines; no column is hidden or collapsed.",
+     "md:grid-cols-3 create form (:193) yields ~200px inputs at 768px - usable but tight for emails."
+    ],
+    "desktopNotes": [
+     "At lg+ the 4 count cards sit in one row; table fills the remaining width with chips capped at max-w-3xl (:240).",
+     "Entire user list renders in one table with no pagination or column sorting (:69-80, :216); filtering is client-side only.",
+     "Nav collapse to 64px is available (AppShell.tsx:169-178)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Unsaved role edits on any row are silently discarded whenever load() runs - i.e. after saving roles for a different user, toggling Disable/Enable, creating an account, or pressing Refresh - because draftRoles is rebuilt from the server response.",
+     "evidence": "AdminUsersOperationsPage.tsx:49 (draftRoles reset in load), :113, :136, :151 (load() after every mutation), :206 (Refresh)",
+     "severity": "major"
+    },
+    {
+     "issue": "Disable is a single click with no confirmation and no client-side guard against disabling your own account or the last administrator.",
+     "evidence": "AdminUsersOperationsPage.tsx:224 (onClick -> setActive), :144-157 (immediate PATCH)",
+     "severity": "major"
+    },
+    {
+     "issue": "Every row renders the full role-option chip set as inline editors, so the table is tall and, on phones and tablets, becomes a wall of chips with the actions pushed off to the right; role editing should be progressively disclosed.",
+     "evidence": "AdminUsersOperationsPage.tsx:223, :238-251",
+     "severity": "major"
+    },
+    {
+     "issue": "One global busy flag disables every button on the page (all rows, Refresh, Create) during any single request, and 'Refreshing…' appears while, e.g., a password reset is in flight.",
+     "evidence": "AdminUsersOperationsPage.tsx:32, :199, :206, :224, :233",
+     "severity": "minor"
+    },
+    {
+     "issue": "Search input and status select have no accessible name (placeholder only); tables have no caption; banners are not live regions so screen readers are not told a save succeeded or failed.",
+     "evidence": "AdminUsersOperationsPage.tsx:204-205, :209-210, :213",
+     "severity": "minor"
+    },
+    {
+     "issue": "Role chips hide the checkbox with sr-only and give the label no focus-visible style, so keyboard users get no visible focus indicator while tabbing through 6+ chips per row.",
+     "evidence": "AdminUsersOperationsPage.tsx:244-245",
+     "severity": "minor"
+    },
+    {
+     "issue": "Three redundant ways to dismiss the create form (header toggle, top Cancel, bottom Cancel).",
+     "evidence": "AdminUsersOperationsPage.tsx:187, :192, :199",
+     "severity": "minor"
+    },
+    {
+     "issue": "No <form> element: pressing Enter in the create fields or search does nothing; no password policy hint on 'Initial password'.",
+     "evidence": "AdminUsersOperationsPage.tsx:193-199, :196",
+     "severity": "minor"
+    },
+    {
+     "issue": "Success/error feedback renders above the table, far from the row that was acted on in a long list; notices never auto-dismiss.",
+     "evidence": "AdminUsersOperationsPage.tsx:209-210, :135, :150",
+     "severity": "minor"
+    },
+    {
+     "issue": "Count cards are static and not clickable as filters; no sort or pagination for the table.",
+     "evidence": "AdminUsersOperationsPage.tsx:176-182, :213-229",
+     "severity": "minor"
+    },
+    {
+     "issue": "Internal 'User #id' printed on every row.",
+     "evidence": "AdminUsersOperationsPage.tsx:221",
+     "severity": "minor"
+    },
+    {
+     "issue": "The chip set is whatever /admin/roles returns; the role model carries legacy aliases (MAINTENANCE, MAINT_COORDINATOR, OFFICE_CHIEF, BRANCH_CHIEF, FIELD_WORKER), so if the backend lists them the admin sees near-duplicate chips like 'Office Chief' and 'Geotech Office Chief' with no explanation. Not verifiable from the frontend.",
+     "evidence": "AdminUsersOperationsPage.tsx:44, :241-247; web/src/utils/roleModel.ts:8-13",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Dirty-checking: 'Save roles' is disabled until the draft differs from the saved roles, preventing no-op saves (:218, :224).",
+    "Client-side guardrails with clear copy: at least one role required for new and existing accounts (:101-103, :123-125); required-field message names the fields (:97-99).",
+    "Success notices name the affected user ('Updated roles for Jane Doe.') (:111, :135, :150, :165).",
+    "Combined search over name, email, role and id with instant client-side filtering plus a status filter (:69-80).",
+    "Create form is inline and collapsible rather than a modal; uses autoComplete='off'/'new-password' correctly (:194-196).",
+    "Role codes are humanized via roleLabel (:8-10); status badge uses color plus text (:12-18).",
+    "Consistent theme tokens (--line/--panel/--brand/--good/--bad) so light/dark/coastal themes work without page-specific colors."
+   ]
+  },
+  {
+   "name": "Password Reset Dialog",
+   "route": "/admin/users (modal opened from a table row)",
+   "purpose": "Modal that lets an admin set a new password for a chosen user with a confirmation field.",
+   "roles": [
+    "ADMIN (only reachable from User Administration, App.tsx:146)"
+   ],
+   "primaryTasks": [
+    "Enter and confirm a new password for the named user"
+   ],
+   "dataShown": [
+    {
+     "label": "Title 'Reset password'",
+     "necessity": "essential",
+     "note": "Dialog purpose.",
+     "source": "PasswordResetDialog.tsx:47"
+    },
+    {
+     "label": "Description 'Set a new password for {userName}. The existing password is not displayed or recovered.'",
+     "necessity": "essential",
+     "note": "Names the target user - the only confirmation of who is affected.",
+     "source": "PasswordResetDialog.tsx:48"
+    },
+    {
+     "label": "New password input",
+     "necessity": "essential",
+     "note": "Receives initial focus via data-dialog-initial-focus.",
+     "source": "PasswordResetDialog.tsx:56"
+    },
+    {
+     "label": "Confirm password input",
+     "necessity": "essential",
+     "note": "Mismatch validated client-side (:26-29).",
+     "source": "PasswordResetDialog.tsx:60"
+    },
+    {
+     "label": "Inline error (role=alert)",
+     "necessity": "essential",
+     "note": "Covers empty, mismatch and server errors.",
+     "source": "PasswordResetDialog.tsx:63"
+    },
+    {
+     "label": "Busy label 'Resetting…'",
+     "necessity": "secondary",
+     "note": "Progress feedback on the primary button.",
+     "source": "PasswordResetDialog.tsx:67"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Close (x)",
+     "who": "ADMIN",
+     "where": "Dialog header, right",
+     "note": "PasswordResetDialog.tsx:50; has aria-label"
+    },
+    {
+     "label": "Cancel",
+     "who": "ADMIN",
+     "where": "Dialog footer, left of primary",
+     "note": "PasswordResetDialog.tsx:66"
+    },
+    {
+     "label": "Reset password (primary)",
+     "who": "ADMIN",
+     "where": "Dialog footer, right",
+     "note": "PasswordResetDialog.tsx:67; no <form>, Enter does not submit"
+    },
+    {
+     "label": "Escape key / backdrop click closes when not busy",
+     "who": "ADMIN",
+     "where": "ModalDialog wrapper",
+     "note": "ModalDialog.tsx:62-67, :108-110"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "'Reset password' button on a user row (AdminUsersOperationsPage.tsx:224, :233)"
+    ],
+    "exits": [
+     "x, Cancel, Escape, backdrop click; on success the dialog closes and a page-level notice appears (AdminUsersOperationsPage.tsx:165-166)",
+     "Focus is restored to the opening button (ModalDialog.tsx:104)"
+    ]
+   },
+   "responsive": {
+    "layout": "Centered overlay (fixed inset-0 flex items-center justify-center p-4) with a w-full max-w-lg panel; body scroll locked.",
+    "breakpointsUsed": [
+     "max-w-lg panel (PasswordResetDialog.tsx:43)",
+     "overlay p-4 (ModalDialog.tsx:25)",
+     "no sm/md/lg classes inside the dialog"
+    ],
+    "phoneRisks": [
+     "Panel spans full width minus 32px - fine. Panel has no max-height/overflow-y-auto (ModalDialog.tsx:26), but content is short so it fits even in landscape.",
+     "Footer buttons are 36px tall (py-2 text-sm) - acceptable; the x close is ~30px."
+    ],
+    "tabletRisks": [
+     "None specific; dialog is 512px wide centered."
+    ],
+    "desktopNotes": [
+     "Standard centered modal; focus trap and Escape handled by ModalDialog."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "No password rules or strength hint and no show-password toggle; the admin only learns the server's policy after a failed submit.",
+     "evidence": "PasswordResetDialog.tsx:56, :60; validation only checks empty and mismatch at :22-29",
+     "severity": "minor"
+    },
+    {
+     "issue": "No <form>: Enter in either field does not submit.",
+     "evidence": "PasswordResetDialog.tsx:53-68 (div container, type=button)",
+     "severity": "minor"
+    },
+    {
+     "issue": "Busy state is the page-wide flag, so while the reset is in flight the table behind the modal also greys out and the Refresh button reads 'Refreshing…'.",
+     "evidence": "AdminUsersOperationsPage.tsx:161, :233",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Accessible modal: role=dialog, aria-modal, aria-labelledby/aria-describedby, focus trap, Escape, focus restore, backdrop click blocked while busy (ModalDialog.tsx:19-127).",
+    "Initial focus lands on the first password input (PasswordResetDialog.tsx:56).",
+    "Error region uses role=alert (PasswordResetDialog.tsx:63).",
+    "Description explicitly tells the admin the old password is not shown or recoverable (:48).",
+    "autoComplete='new-password' on both fields (:56, :60)."
+   ]
+  },
+  {
+   "name": "Road Inventory Workspace (header, summary, authoritative dataset, dataset versions)",
+   "route": "/admin/road-inventory",
+   "purpose": "Admin console for the authoritative road-inventory dataset: see what is published, generate/download the mobile package, and publish or roll back dataset versions (import and lookup panels are embedded and inventoried separately).",
+   "roles": [
+    "ADMIN only. RoleRoute roles={[\"ADMIN\"]} (web/src/App.tsx:151-158); sidebar 'Administration > Road Inventory' only for admins (web/src/ui/AppShell.tsx:93-101). Non-admins redirected to /submissions (RoleRoute.tsx:19)."
+   ],
+   "primaryTasks": [
+    "Check which version is authoritative and whether the mobile package is ready",
+    "Publish a pending version (or roll back to a superseded one) with confirmation",
+    "Generate/regenerate and download the mobile package after a change"
+   ],
+   "dataShown": [
+    {
+     "label": "Page title 'Road Inventory' (AppShell h1)",
+     "necessity": "essential",
+     "note": "Orientation.",
+     "source": "RoadInventoryWorkspacePage.tsx:121"
+    },
+    {
+     "label": "Eyebrow 'Authoritative roadway reference'",
+     "necessity": "noise",
+     "note": "Third title-like line stacked with the h1 and the h2; decorative.",
+     "source": "RoadInventoryWorkspacePage.tsx:126"
+    },
+    {
+     "label": "h2 'Road inventory operations'",
+     "necessity": "secondary",
+     "note": "Near-duplicate of the h1 'Road Inventory'.",
+     "source": "RoadInventoryWorkspacePage.tsx:127"
+    },
+    {
+     "label": "Intro paragraph 'Manage the version ERIS uses... Publication and rollback are explicit authoritative-state changes.'",
+     "necessity": "secondary",
+     "note": "Useful first-visit framing; could collapse after first read.",
+     "source": "RoadInventoryWorkspacePage.tsx:128"
+    },
+    {
+     "label": "Summary card 'Authoritative version' = version_tag, hint '{row_count} segments' / 'No published dataset'",
+     "necessity": "essential",
+     "note": "Answers task 1 at a glance.",
+     "source": "RoadInventoryWorkspacePage.tsx:137"
+    },
+    {
+     "label": "Summary card 'Mobile package' = Ready/Not ready, hint 'Generated {date}' / 'Field sync package unavailable', good/warn tone",
+     "necessity": "essential",
+     "note": "Answers task 1; duplicated by the package card at :166-170.",
+     "source": "RoadInventoryWorkspacePage.tsx:138"
+    },
+    {
+     "label": "Summary card 'Pending versions' count, hint 'Imported, not authoritative'",
+     "necessity": "secondary",
+     "note": "Signals work to do; not clickable.",
+     "source": "RoadInventoryWorkspacePage.tsx:139"
+    },
+    {
+     "label": "Summary card 'Superseded' count, hint 'Available for rollback'",
+     "necessity": "secondary",
+     "note": "Rarely needed.",
+     "source": "RoadInventoryWorkspacePage.tsx:140"
+    },
+    {
+     "label": "Error / notice banners",
+     "necessity": "essential",
+     "note": "Only feedback for package, publish and rollback outcomes; rendered near the top of a long page.",
+     "source": "RoadInventoryWorkspacePage.tsx:143-144"
+    },
+    {
+     "label": "'Current authoritative dataset' heading + empty/loading copy",
+     "necessity": "essential",
+     "note": "Empty state explicitly tells the admin to import then publish.",
+     "source": "RoadInventoryWorkspacePage.tsx:149-153"
+    },
+    {
+     "label": "Metric 'Version'",
+     "necessity": "noise",
+     "note": "Exact duplicate of the 'Authoritative version' card value.",
+     "source": "RoadInventoryWorkspacePage.tsx:156 vs :137"
+    },
+    {
+     "label": "Metric 'Segments'",
+     "necessity": "noise",
+     "note": "Duplicate of the card hint; also labelled 'Rows' elsewhere.",
+     "source": "RoadInventoryWorkspacePage.tsx:157 vs :137"
+    },
+    {
+     "label": "Metric 'Extract date'",
+     "necessity": "essential",
+     "note": "Data currency of the published dataset - not shown elsewhere in the summary.",
+     "source": "RoadInventoryWorkspacePage.tsx:158"
+    },
+    {
+     "label": "Metric 'Published'",
+     "necessity": "essential",
+     "note": "When the current version became authoritative.",
+     "source": "RoadInventoryWorkspacePage.tsx:159"
+    },
+    {
+     "label": "Package card label 'Mobile package' + badge Ready / Not generated",
+     "necessity": "noise",
+     "note": "Repeats the summary card with different wording ('Not generated' vs 'Not ready').",
+     "source": "RoadInventoryWorkspacePage.tsx:166 vs :138"
+    },
+    {
+     "label": "Package 'Size'",
+     "necessity": "secondary",
+     "note": "Useful for field-sync planning.",
+     "source": "RoadInventoryWorkspacePage.tsx:169"
+    },
+    {
+     "label": "Package 'Generated' date",
+     "necessity": "secondary",
+     "note": "Duplicate of the summary card hint.",
+     "source": "RoadInventoryWorkspacePage.tsx:170 vs :138"
+    },
+    {
+     "label": "Package 'SHA-256' truncated to 16 hex chars + '…'",
+     "necessity": "noise",
+     "note": "A truncated hash cannot be used to verify anything and has no copy affordance.",
+     "source": "RoadInventoryWorkspacePage.tsx:171"
+    },
+    {
+     "label": "'Download package' link (new tab)",
+     "necessity": "essential",
+     "note": "Task 3 output.",
+     "source": "RoadInventoryWorkspacePage.tsx:172"
+    },
+    {
+     "label": "Warning 'Field devices cannot synchronize this road inventory until a mobile package is generated.'",
+     "necessity": "essential",
+     "note": "Explains the consequence of the Not-ready state.",
+     "source": "RoadInventoryWorkspacePage.tsx:174"
+    },
+    {
+     "label": "'Dataset versions' heading + sentence 'Only one version is authoritative at a time...'",
+     "necessity": "secondary",
+     "note": "Good one-line rule.",
+     "source": "RoadInventoryWorkspacePage.tsx:185-186"
+    },
+    {
+     "label": "Versions table 'ID' (#id)",
+     "necessity": "noise",
+     "note": "Internal id column; the version tag is the human key.",
+     "source": "RoadInventoryWorkspacePage.tsx:192, :195"
+    },
+    {
+     "label": "Versions table 'Version' tag",
+     "necessity": "essential",
+     "note": "Human identifier used in every notice and dialog.",
+     "source": "RoadInventoryWorkspacePage.tsx:195"
+    },
+    {
+     "label": "Versions table 'Source file' (truncated max-w-64, hover title)",
+     "necessity": "secondary",
+     "note": "Traceability; full name only on hover.",
+     "source": "RoadInventoryWorkspacePage.tsx:195"
+    },
+    {
+     "label": "Versions table 'Rows' and 'Skipped'",
+     "necessity": "secondary",
+     "note": "Import quality signal; 'Rows' here equals 'Segments' in the metric.",
+     "source": "RoadInventoryWorkspacePage.tsx:195"
+    },
+    {
+     "label": "Versions table 'Status' badge (pending/published/superseded)",
+     "necessity": "essential",
+     "note": "Determines which action is available.",
+     "source": "RoadInventoryWorkspacePage.tsx:30-38, :195"
+    },
+    {
+     "label": "Versions table 'Extract' and 'Uploaded' dates",
+     "necessity": "secondary",
+     "note": "Helps pick the right version to publish.",
+     "source": "RoadInventoryWorkspacePage.tsx:195"
+    },
+    {
+     "label": "Versions table 'Actions' (Publish / Rollback / 'Authoritative' text)",
+     "necessity": "essential",
+     "note": "The 'Authoritative' text duplicates the 'Published' badge in the same row.",
+     "source": "RoadInventoryWorkspacePage.tsx:196"
+    },
+    {
+     "label": "Green tint on the published row",
+     "necessity": "secondary",
+     "note": "Helpful scan cue (also conveyed by badge).",
+     "source": "RoadInventoryWorkspacePage.tsx:194"
+    },
+    {
+     "label": "Empty state 'No road inventory versions have been imported.'",
+     "necessity": "secondary",
+     "note": "Clear.",
+     "source": "RoadInventoryWorkspacePage.tsx:189"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refresh state",
+     "who": "ADMIN",
+     "where": "Top header section, right (self-start; stacks under text below md)",
+     "note": "RoadInventoryWorkspacePage.tsx:130-132"
+    },
+    {
+     "label": "Generate mobile package / Regenerate package",
+     "who": "ADMIN",
+     "where": "Full-width primary button at the bottom of the package card (right column at lg, below the metrics otherwise)",
+     "note": "RoadInventoryWorkspacePage.tsx:175; no confirmation; only rendered when a manifest exists (:164)"
+    },
+    {
+     "label": "Download package (opens new tab)",
+     "who": "ADMIN",
+     "where": "Package card, under SHA-256",
+     "note": "RoadInventoryWorkspacePage.tsx:172"
+    },
+    {
+     "label": "Publish (pending rows only)",
+     "who": "ADMIN",
+     "where": "Versions table, rightmost 'Actions' column",
+     "note": "RoadInventoryWorkspacePage.tsx:196; opens confirmation dialog"
+    },
+    {
+     "label": "Rollback (superseded rows only)",
+     "who": "ADMIN",
+     "where": "Versions table, rightmost 'Actions' column, red outline",
+     "note": "RoadInventoryWorkspacePage.tsx:196; opens confirmation dialog"
+    },
+    {
+     "label": "Import and lookup controls",
+     "who": "ADMIN",
+     "where": "Embedded panels between the authoritative section and the versions table (import) and at the very bottom (lookup)",
+     "note": "RoadInventoryWorkspacePage.tsx:181, :204 - see separate screens"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Sidebar 'Administration > Road Inventory' (AppShell.tsx:98), admins only",
+     "Direct URL /admin/road-inventory (App.tsx:152); no query params or anchors for the embedded panels"
+    ],
+    "exits": [
+     "Sidebar links; Sign out",
+     "'Download package' opens the package URL in a new tab (RoadInventoryWorkspacePage.tsx:172)",
+     "No breadcrumbs; no links from the versions table or import history to any detail view; import-history 'Dataset' id is not linked to the versions table (RoadInventoryImportPanel.tsx:165)"
+    ]
+   },
+   "responsive": {
+    "layout": "One long vertical stack: header section, 2x2/4-up summary cards, banners, 'Current authoritative dataset' (metrics dl left + package card right at lg), Import panel, Dataset versions table, Lookup panel. Below lg the AppShell nav card sits above all of it.",
+    "breakpointsUsed": [
+     "p-4 md:p-5 (:122, :123, :146, :183)",
+     "flex-col md:flex-row md:items-start md:justify-between (:124)",
+     "grid grid-cols-2 gap-3 lg:grid-cols-4 (:136)",
+     "flex-col gap-4 lg:flex-row lg:items-start lg:justify-between (:147)",
+     "dl grid gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-4 (:155)",
+     "package card min-w-72 (288px) (:165)",
+     "max-w-3xl intro (:128)",
+     "overflow-x-auto wrapper around a 9-column w-full table (:190-191); max-w-64 truncate on Source file (:195)",
+     "SummaryCard value truncate with title (:213)"
+    ],
+    "phoneRisks": [
+     "Package card min-w-72 = 288px exceeds the ~279px available at 375px (375 - 2x16 shell px-4 - 2x16 page p-4 - 2x16 section p-4), so the card spills into the section padding and on 360px devices past the section border; the AppShell product-card is overflow-hidden (AppShell.tsx:185) so the excess is clipped (:165).",
+     "Versions table has 9 columns in overflow-x-auto (:190-196); the Actions column with Publish/Rollback is the rightmost, so the primary controls are off-screen until the user scroll horizontally - nothing signals that the table scrolls.",
+     "Page height: nav card + six stacked sections (~4-5 screens) with no in-page navigation; the notice for a publish/rollback appears at :144 above the fold while the user is at the versions table near the bottom.",
+     "Summary cards 2x2 (fine); SummaryCard values truncate with hover-only title (:213).",
+     "Row buttons ~28px tall (py-1.5 text-xs, :196) - small touch targets."
+    ],
+    "tabletRisks": [
+     "Below 1024px the nav card is stacked above content (AppShell.tsx:164) and the authoritative section stays stacked (lg:flex-row only, :147): the package card drops under the metrics and stretches full width while retaining min-w-72.",
+     "Versions table gets ~650-900px for 9 columns: filenames truncate at max-w-64, dates wrap to two lines, but usually no horizontal scroll until sidebar appears at exactly 1024.",
+     "Summary cards remain 2x2 until lg (:136)."
+    ],
+    "desktopNotes": [
+     "At 1024-1280 with the 256px sidebar the versions table fits; the four summary cards and four metrics go single-row.",
+     "Package card sits to the right of the metrics (lg:flex-row, :147) at a fixed min 288px.",
+     "No sorting on the versions table; order is whatever the API returns (:193)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Page order runs against the workflow: import lives in the middle, the resulting pending version and its Publish button are below it, and the package Generate/Regenerate control the dialog tells you to use next is at the top - so the import -> publish -> regenerate sequence reads bottom-to-top with a long scroll between each step.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:146-179 (package card), :181 (import panel), :183-202 (versions); RoadInventoryVersionActionDialog.tsx:67 ('After this change, regenerate the mobile ... package')",
+     "severity": "major"
+    },
+    {
+     "issue": "On phones the Publish/Rollback buttons are the 9th column of a horizontally scrolling table with no scroll affordance, hiding the page's primary actions.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:190-196",
+     "severity": "major"
+    },
+    {
+     "issue": "Package card fixed min-w-72 overflows the 375px content width and gets clipped on 360px devices.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:165; AppShell.tsx:163 (px-4), :185 (overflow-hidden)",
+     "severity": "minor"
+    },
+    {
+     "issue": "Version, segment count, package readiness and generated date are each shown twice (summary cards vs authoritative section/package card) with divergent wording ('Not ready' vs 'Not generated', 'Segments' vs 'Rows').",
+     "evidence": "RoadInventoryWorkspacePage.tsx:137-138 vs :156-157, :166, :170; :192 'Rows'",
+     "severity": "minor"
+    },
+    {
+     "issue": "SHA-256 is truncated to 16 characters with no copy button, so it cannot serve its verification purpose.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:171",
+     "severity": "minor"
+    },
+    {
+     "issue": "Internal ids exposed: '#id' first column, 'Authoritative' text duplicating the 'Published' badge in the same row.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:195-196",
+     "severity": "minor"
+    },
+    {
+     "issue": "Success/error banners for publish, rollback and package generation render near the top of a ~5-screen page, away from the control that triggered them; no aria-live.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:143-144 vs :175, :196",
+     "severity": "minor"
+    },
+    {
+     "issue": "Truncated filenames and card values reveal their full text only via hover title - unavailable on touch.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:195, :213",
+     "severity": "minor"
+    },
+    {
+     "issue": "Horizontal scroll containers are not keyboard-focusable (no tabIndex), so keyboard-only users cannot reach the Actions column when it overflows.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:190",
+     "severity": "minor"
+    },
+    {
+     "issue": "Three heading-like lines stacked at the top (h1 'Road Inventory', eyebrow 'Authoritative roadway reference', h2 'Road inventory operations').",
+     "evidence": "RoadInventoryWorkspacePage.tsx:121, :126-127",
+     "severity": "minor"
+    },
+    {
+     "issue": "Generate/Regenerate package has no confirmation even though regeneration replaces the artifact field devices download; 'Download package' opens a new tab with no indicator.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:172, :175",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Authoritative-state changes are explicit and confirmed through a dialog that names both the target and the version being superseded (RoadInventoryVersionActionDialog.tsx:53-65).",
+    "Action buttons are rendered only when valid for the row status (Publish for pending, Rollback for superseded), and the published row is tinted (:194-196).",
+    "Summary cards carry tone: package readiness turns warn/red when the field package is missing, with a plain-language consequence sentence (:138, :174).",
+    "Empty states everywhere explain the next step ('Import a dataset and explicitly publish the version ERIS should use.') (:151, :189).",
+    "Notices are specific ('Published road inventory version 2026-08-17.') (:86, :104, :107).",
+    "Manifest fetch failure is handled separately from version-list failure, so a missing manifest shows an empty state rather than an error (:57-63).",
+    "Locale-aware dates and thousands separators (formatDate, toLocaleString) (:17-22, :137)."
+   ]
+  },
+  {
+   "name": "Import Road Inventory panel",
+   "route": "/admin/road-inventory (embedded section between the authoritative dataset and the versions table)",
+   "purpose": "Upload an .xlsx road-inventory extract as an import job, watch it progress, and review recent import jobs.",
+   "roles": [
+    "ADMIN (rendered only inside RoadInventoryWorkspacePage, RoadInventoryWorkspacePage.tsx:181)"
+   ],
+   "primaryTasks": [
+    "Choose an Excel file, optionally tag it, and start an import",
+    "See whether the import succeeded, how many rows were imported/skipped, and that a pending version now exists",
+    "Review recent import jobs and failures"
+   ],
+   "dataShown": [
+    {
+     "label": "Heading 'Import road inventory' + sentence 'Upload an authoritative Excel extract. Successful imports remain pending until an administrator explicitly publishes a version.'",
+     "necessity": "essential",
+     "note": "The sentence sets the pending-then-publish expectation; keep.",
+     "source": "RoadInventoryImportPanel.tsx:114-115"
+    },
+    {
+     "label": "File input 'Excel file (.xlsx)' (native, accept .xlsx)",
+     "necessity": "essential",
+     "note": "Only input needed to start.",
+     "source": "RoadInventoryImportPanel.tsx:124-136"
+    },
+    {
+     "label": "Version tag input (placeholder 'Optional, e.g. 2026-08-17')",
+     "necessity": "secondary",
+     "note": "Optional; the placeholder is the only format guidance.",
+     "source": "RoadInventoryImportPanel.tsx:139-140"
+    },
+    {
+     "label": "'Selected: {name} · {size}'",
+     "necessity": "essential",
+     "note": "Confirms the chosen file before submit.",
+     "source": "RoadInventoryImportPanel.tsx:147"
+    },
+    {
+     "label": "Error banner (shared by history load and submit)",
+     "necessity": "essential",
+     "note": "One state for two different failures.",
+     "source": "RoadInventoryImportPanel.tsx:148, :58, :104"
+    },
+    {
+     "label": "Current job card: status badge (queued/processing/succeeded/failed)",
+     "necessity": "essential",
+     "note": "Live outcome while polling every 2s.",
+     "source": "RoadInventoryImportPanel.tsx:30-40, :152"
+    },
+    {
+     "label": "Current job card: upload filename",
+     "necessity": "secondary",
+     "note": "Already confirmed by 'Selected:'.",
+     "source": "RoadInventoryImportPanel.tsx:152"
+    },
+    {
+     "label": "Current job card: raw 'stage' string in monospace",
+     "necessity": "noise",
+     "note": "Backend stage code shown verbatim; no progress percentage.",
+     "source": "RoadInventoryImportPanel.tsx:152"
+    },
+    {
+     "label": "Current job card: message",
+     "necessity": "secondary",
+     "note": "Human text from backend when present.",
+     "source": "RoadInventoryImportPanel.tsx:153"
+    },
+    {
+     "label": "Success summary '{rows} rows imported; {skipped} skipped. Dataset #{id} is pending publication.'",
+     "necessity": "essential",
+     "note": "Rows/skipped are essential; the '#id' is internal noise and not linked to the versions table.",
+     "source": "RoadInventoryImportPanel.tsx:154"
+    },
+    {
+     "label": "Failure error_message",
+     "necessity": "essential",
+     "note": "Only diagnostic on failure.",
+     "source": "RoadInventoryImportPanel.tsx:155"
+    },
+    {
+     "label": "'Recent import history' heading + loading/empty copy",
+     "necessity": "secondary",
+     "note": "Good empty state.",
+     "source": "RoadInventoryImportPanel.tsx:160-161"
+    },
+    {
+     "label": "History 'Job' = first 8 chars of job_uuid (mono, hover title full uuid)",
+     "necessity": "noise",
+     "note": "Truncated UUID no one types or compares.",
+     "source": "RoadInventoryImportPanel.tsx:165"
+    },
+    {
+     "label": "History 'Status' badge",
+     "necessity": "essential",
+     "note": "Scan for failures.",
+     "source": "RoadInventoryImportPanel.tsx:165"
+    },
+    {
+     "label": "History 'File' (truncated max-w-60, hover title)",
+     "necessity": "secondary",
+     "note": "Traceability.",
+     "source": "RoadInventoryImportPanel.tsx:165"
+    },
+    {
+     "label": "History 'Rows'",
+     "necessity": "secondary",
+     "note": "Shows '—' when 0.",
+     "source": "RoadInventoryImportPanel.tsx:165"
+    },
+    {
+     "label": "History 'Dataset' = raw dataset_version_id",
+     "necessity": "noise",
+     "note": "Bare integer with no link to the versions table where the tag lives.",
+     "source": "RoadInventoryImportPanel.tsx:165"
+    },
+    {
+     "label": "History 'Created' / 'Finished' datetimes",
+     "necessity": "secondary",
+     "note": "Locale formatted.",
+     "source": "RoadInventoryImportPanel.tsx:10-21, :165"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refresh history",
+     "who": "ADMIN",
+     "where": "Panel header, right",
+     "note": "RoadInventoryImportPanel.tsx:117-119"
+    },
+    {
+     "label": "Choose file (native file input)",
+     "who": "ADMIN",
+     "where": "First grid column",
+     "note": "RoadInventoryImportPanel.tsx:125-136; resets current job and error on change"
+    },
+    {
+     "label": "Version tag (text)",
+     "who": "ADMIN",
+     "where": "Second grid column (220px at md+)",
+     "note": "RoadInventoryImportPanel.tsx:140"
+    },
+    {
+     "label": "Start import (primary; disabled until a file is chosen)",
+     "who": "ADMIN",
+     "where": "Third grid column, bottom-aligned at md+",
+     "note": "RoadInventoryImportPanel.tsx:142-144"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Scroll within /admin/road-inventory; no anchor or tab (RoadInventoryWorkspacePage.tsx:181)"
+    ],
+    "exits": [
+     "On success the panel calls onDatasetChanged so the versions table below refreshes (RoadInventoryImportPanel.tsx:81, :102); no link from the job to the new version row"
+    ]
+   },
+   "responsive": {
+    "layout": "Card with header row, a 3-column form (file / tag / button) at md+, selected-file line, error, current-job card, then a 7-column history table in overflow-x-auto.",
+    "breakpointsUsed": [
+     "p-4 md:p-5 (:111)",
+     "flex-wrap header (:112)",
+     "grid gap-3 md:grid-cols-[minmax(260px,1fr)_220px_auto] md:items-end (:122)",
+     "file: pseudo-element styling on the native input (:135)",
+     "flex-wrap current-job header with ml-auto stage (:152)",
+     "overflow-x-auto history wrapper; max-w-60 truncate on File (:162, :165)"
+    ],
+    "phoneRisks": [
+     "Form stacks to one column (good); the native file input's button styling relies on file: pseudo-classes, which iOS Safari renders as a 'Choose File' control of its own height.",
+     "History table (7 columns) scrolls horizontally with no scroll hint; job uuid/filename only expand on hover title (:165).",
+     "Current-job stage text is pushed to the right with ml-auto and wraps under the filename on narrow widths (:152)."
+    ],
+    "tabletRisks": [
+     "At exactly 768px the md grid needs ~614px (260 + 220 + ~110 button + 2x12 gap) inside ~656px of content width - fits but the file input is squeezed to its 260px minimum.",
+     "History table fits ~650-900px with wrapped dates."
+    ],
+    "desktopNotes": [
+     "Form is a single row; history table fits comfortably; polling every 2s until terminal state with no visible spinner (:73-86)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "The import succeeds into a pending version but the only pointer to it is 'Dataset #id' text; the admin must scroll down to the versions table and match the id to find the Publish button.",
+     "evidence": "RoadInventoryImportPanel.tsx:154, :165 vs RoadInventoryWorkspacePage.tsx:195-196",
+     "severity": "major"
+    },
+    {
+     "issue": "Progress is a raw backend stage code in monospace with no spinner or progress bar while polling; a job stuck in queued/processing polls forever with no timeout or cancel.",
+     "evidence": "RoadInventoryImportPanel.tsx:73-86, :152",
+     "severity": "minor"
+    },
+    {
+     "issue": "One error state is shared by 'load history' and 'submit import', so a history-load failure can be mistaken for an upload failure and vice versa.",
+     "evidence": "RoadInventoryImportPanel.tsx:51, :58, :104",
+     "severity": "minor"
+    },
+    {
+     "issue": "Version-tag format guidance lives only in the placeholder, which disappears on typing.",
+     "evidence": "RoadInventoryImportPanel.tsx:140",
+     "severity": "minor"
+    },
+    {
+     "issue": "History exposes truncated UUIDs and bare dataset ids instead of version tags; hover-only titles for full values.",
+     "evidence": "RoadInventoryImportPanel.tsx:165",
+     "severity": "minor"
+    },
+    {
+     "issue": "No <form>; Enter in the version tag field does nothing.",
+     "evidence": "RoadInventoryImportPanel.tsx:122-145",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Clear expectation-setting copy that imports stay pending until explicitly published (:115).",
+    "Start import is disabled until a file is chosen; the selected file name and size are echoed back (:142, :147).",
+    "Accept filter restricts the picker to .xlsx (:128); the file input and tag are cleared after submit (:97-99).",
+    "Polling stops on terminal states, refreshes history and notifies the parent so the versions table updates without a manual refresh (:77-82).",
+    "Poll interval is cleared on unmount (:66-68).",
+    "Success summary states rows imported and skipped in one sentence (:154)."
+   ]
+  },
+  {
+   "name": "Verify Authoritative Lookup panel",
+   "route": "/admin/road-inventory (last embedded section)",
+   "purpose": "Lets an admin test how the published road inventory resolves a county/route/post-mile before field workflows rely on it.",
+   "roles": [
+    "ADMIN (rendered only inside RoadInventoryWorkspacePage, RoadInventoryWorkspacePage.tsx:204)"
+   ],
+   "primaryTasks": [
+    "Enter county, route, post mile (and optional district) and confirm a segment resolves",
+    "Inspect the matched segment's attributes"
+   ],
+   "dataShown": [
+    {
+     "label": "Heading 'Verify authoritative lookup' + explanatory sentence",
+     "necessity": "secondary",
+     "note": "Explains why the tool exists.",
+     "source": "RoadInventoryLookupPanel.tsx:35-36"
+    },
+    {
+     "label": "Inputs: County code (placeholder SAC, maxLength 8), Route (50), Post mile (number, step 0.001), District (Optional, maxLength 4)",
+     "necessity": "essential",
+     "note": "Placeholders double as format examples; labels are real <label>s via Field.",
+     "source": "RoadInventoryLookupPanel.tsx:40-43, :62-64"
+    },
+    {
+     "label": "Validation error 'County, route, and a numeric post mile are required.'",
+     "necessity": "essential",
+     "note": "But an empty post mile passes (see pain points).",
+     "source": "RoadInventoryLookupPanel.tsx:17, :47"
+    },
+    {
+     "label": "No-match message 'No matching road segments were returned by the published dataset.'",
+     "necessity": "essential",
+     "note": "Primary negative outcome.",
+     "source": "RoadInventoryLookupPanel.tsx:48"
+    },
+    {
+     "label": "Results columns District, County, Route(+suffix), Begin PM, End PM",
+     "necessity": "essential",
+     "note": "Confirm the match and its PM range - the verification outcome.",
+     "source": "RoadInventoryLookupPanel.tsx:53-54"
+    },
+    {
+     "label": "Results column 'PM Prefix'",
+     "necessity": "secondary",
+     "note": "Raw code (e.g. R/M); matters for PM disambiguation.",
+     "source": "RoadInventoryLookupPanel.tsx:53-54"
+    },
+    {
+     "label": "Results columns Length mi, Left/Right Lanes, Left/Right Surface, Median, Median W, Terrain, Speed, ADT, Landmark (12 columns)",
+     "necessity": "secondary",
+     "note": "Raw inventory attribute codes; useful occasionally, candidate for an expandable detail row.",
+     "source": "RoadInventoryLookupPanel.tsx:53-54"
+    },
+    {
+     "label": "Busy label 'Looking up…'",
+     "necessity": "secondary",
+     "note": "Only progress cue.",
+     "source": "RoadInventoryLookupPanel.tsx:44"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Run lookup (primary)",
+     "who": "ADMIN",
+     "where": "Fifth grid cell: full-width on phone, half-width orphan cell at sm-lg, inline at lg+",
+     "note": "RoadInventoryLookupPanel.tsx:44; no <form>, Enter does nothing"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "Scroll to the bottom of /admin/road-inventory (RoadInventoryWorkspacePage.tsx:204); no anchor, tab, or link from elsewhere"
+    ],
+    "exits": [
+     "None; results stay in local state and are lost on refresh"
+    ]
+   },
+   "responsive": {
+    "layout": "Card with a 5-cell form grid and a 17-column results table in overflow-x-auto.",
+    "breakpointsUsed": [
+     "p-4 md:p-5 (:33)",
+     "grid gap-3 sm:grid-cols-2 lg:grid-cols-[140px_140px_160px_160px_auto] lg:items-end (:39)",
+     "w-full inputs (:40-43)",
+     "overflow-x-auto results wrapper; whitespace-nowrap headers; text-xs; max-w-52 truncate on Landmark (:51-54)"
+    ],
+    "phoneRisks": [
+     "Results table has 17 columns with nowrap headers (:53) - several screens of horizontal scroll to reach Landmark; the essential columns are first, which mitigates it.",
+     "No scroll affordance on the overflow container; Landmark full text only on hover title (:54).",
+     "Form stacks to one column (fine); inputs 36px tall."
+    ],
+    "tabletRisks": [
+     "sm-lg: 2-column grid puts the 'Run lookup' button alone in a third row, stretched to half width and not aligned with any input (:39).",
+     "17-column results still overflow at 768-1024."
+    ],
+    "desktopNotes": [
+     "Form is one row at lg; the 17-column text-xs table still needs horizontal scroll below roughly 1500px of content width."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Validation bug: Number('') is 0 and Number.isFinite(0) is true, so leaving Post mile empty passes validation and silently queries PM 0.000 even though the error copy says a numeric post mile is required.",
+     "evidence": "RoadInventoryLookupPanel.tsx:15-17",
+     "severity": "major"
+    },
+    {
+     "issue": "Seventeen raw-coded columns for a 'does it resolve' check; no progressive disclosure of the 12 attribute columns and no human labels for codes like surface/terrain/PM prefix.",
+     "evidence": "RoadInventoryLookupPanel.tsx:53-54",
+     "severity": "minor"
+    },
+    {
+     "issue": "Button orphaned in its own row between sm and lg.",
+     "evidence": "RoadInventoryLookupPanel.tsx:39, :44",
+     "severity": "minor"
+    },
+    {
+     "issue": "No <form>/Enter submit; no aria-live on error or no-match message; overflow container not keyboard-focusable.",
+     "evidence": "RoadInventoryLookupPanel.tsx:39-48, :51",
+     "severity": "minor"
+    },
+    {
+     "issue": "Tool is buried at the bottom of a ~5-screen admin page though it is the only place to sanity-check a published dataset.",
+     "evidence": "RoadInventoryWorkspacePage.tsx:204",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Explicit no-match empty state distinct from errors (:48).",
+    "County code is normalized to upper case client-side (:24); post mile uses a numeric input with 0.001 step (:42).",
+    "Essential columns (District, County, Route, PMs) are ordered first (:53).",
+    "Placeholders give concrete Caltrans examples (SAC, 50, 12.5) (:40-42)."
+   ]
+  },
+  {
+   "name": "Publish / Rollback Confirmation Dialog",
+   "route": "/admin/road-inventory (modal opened from the versions table)",
+   "purpose": "Confirms an authoritative-state change by restating the target version, what will be superseded, and the follow-up package regeneration.",
+   "roles": [
+    "ADMIN (only reachable from Road Inventory Workspace, RoadInventoryWorkspacePage.tsx:207)"
+   ],
+   "primaryTasks": [
+    "Confirm or cancel publishing a pending version or rolling back to a superseded one"
+   ],
+   "dataShown": [
+    {
+     "label": "Eyebrow 'Authoritative dataset change'",
+     "necessity": "secondary",
+     "note": "Category label; acceptable but could be dropped.",
+     "source": "RoadInventoryVersionActionDialog.tsx:38"
+    },
+    {
+     "label": "Title 'Publish road inventory version' / 'Rollback road inventory version'",
+     "necessity": "essential",
+     "note": "States the action.",
+     "source": "RoadInventoryVersionActionDialog.tsx:26, :39"
+    },
+    {
+     "label": "'Target version' tag",
+     "necessity": "essential",
+     "note": "What is being made authoritative.",
+     "source": "RoadInventoryVersionActionDialog.tsx:46"
+    },
+    {
+     "label": "'Dataset ID' #id",
+     "necessity": "noise",
+     "note": "Internal id repeated from the table.",
+     "source": "RoadInventoryVersionActionDialog.tsx:47"
+    },
+    {
+     "label": "'Rows'",
+     "necessity": "secondary",
+     "note": "Sanity check that the dataset is not empty.",
+     "source": "RoadInventoryVersionActionDialog.tsx:48"
+    },
+    {
+     "label": "'Current status' (pending/superseded)",
+     "necessity": "secondary",
+     "note": "Implied by which button was clicked.",
+     "source": "RoadInventoryVersionActionDialog.tsx:49"
+    },
+    {
+     "label": "Consequence paragraph naming the target and the currently published version that will be superseded",
+     "necessity": "essential",
+     "note": "The real confirmation content; wired as aria-describedby.",
+     "source": "RoadInventoryVersionActionDialog.tsx:53-65"
+    },
+    {
+     "label": "Reminder 'After this change, regenerate the mobile road-inventory package if field devices need the new authoritative dataset.'",
+     "necessity": "secondary",
+     "note": "Good next-step hint but there is no button to do it from here.",
+     "source": "RoadInventoryVersionActionDialog.tsx:67"
+    },
+    {
+     "label": "Busy label 'Applying…'",
+     "necessity": "secondary",
+     "note": "Progress cue.",
+     "source": "RoadInventoryVersionActionDialog.tsx:71"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Close (x)",
+     "who": "ADMIN",
+     "where": "Dialog header right",
+     "note": "RoadInventoryVersionActionDialog.tsx:41; aria-label present"
+    },
+    {
+     "label": "Cancel (initial focus)",
+     "who": "ADMIN",
+     "where": "Footer, left of primary",
+     "note": "RoadInventoryVersionActionDialog.tsx:70; data-dialog-initial-focus so Enter does not accidentally confirm"
+    },
+    {
+     "label": "Publish version (brand) / Confirm rollback (red)",
+     "who": "ADMIN",
+     "where": "Footer, right",
+     "note": "RoadInventoryVersionActionDialog.tsx:71"
+    },
+    {
+     "label": "Escape / backdrop click (blocked while busy)",
+     "who": "ADMIN",
+     "where": "ModalDialog wrapper",
+     "note": "ModalDialog.tsx:62-67, :108-110"
+    }
+   ],
+   "navigation": {
+    "entryPoints": [
+     "'Publish' or 'Rollback' button in the versions table (RoadInventoryWorkspacePage.tsx:196, :207)"
+    ],
+    "exits": [
+     "Cancel/x/Escape/backdrop; on confirm the dialog closes, the workspace reloads and a notice appears at the top of the page (RoadInventoryWorkspacePage.tsx:104-110); focus returns to the row button (ModalDialog.tsx:104)"
+    ]
+   },
+   "responsive": {
+    "layout": "Centered overlay with a w-full max-w-xl rounded-2xl panel; 2-column dl at sm+.",
+    "breakpointsUsed": [
+     "max-w-xl (:34)",
+     "dl grid gap-3 sm:grid-cols-2 (:45)",
+     "overlay p-4 (ModalDialog.tsx:25)"
+    ],
+    "phoneRisks": [
+     "Panel is full width minus 32px; dl stacks to one column; total height ~420px fits portrait, may need scroll in landscape but the panel has no overflow-y-auto (ModalDialog.tsx:26)."
+    ],
+    "tabletRisks": [
+     "None specific."
+    ],
+    "desktopNotes": [
+     "576px centered modal; destructive rollback uses --bad background for the confirm button (:71)."
+    ]
+   },
+   "painPoints": [
+    {
+     "issue": "Rollback copy degrades when no version is currently published: 'The currently published version will be superseded by the rollback.' with no name.",
+     "evidence": "RoadInventoryVersionActionDialog.tsx:61-62",
+     "severity": "minor"
+    },
+    {
+     "issue": "The dialog tells the admin to regenerate the package next but offers no way to do it; after confirm the user is left at the bottom table while the button is at the top of the page.",
+     "evidence": "RoadInventoryVersionActionDialog.tsx:67; RoadInventoryWorkspacePage.tsx:175",
+     "severity": "minor"
+    },
+    {
+     "issue": "'Dataset ID' duplicates an internal id already in the table; 'Current status' restates the button that was clicked.",
+     "evidence": "RoadInventoryVersionActionDialog.tsx:47, :49",
+     "severity": "minor"
+    },
+    {
+     "issue": "Inconsistent verb form: title 'Rollback ...', button 'Confirm rollback', notice 'Rolled back' (noun used as verb in UI labels).",
+     "evidence": "RoadInventoryVersionActionDialog.tsx:26, :71; RoadInventoryWorkspacePage.tsx:107, :196",
+     "severity": "minor"
+    }
+   ],
+   "strengths": [
+    "Cancel receives initial focus so Enter cannot accidentally publish/roll back (:70).",
+    "Consequence text names both the target and the version being superseded, and rollback is styled destructive (:53-65, :71).",
+    "Consequence block is the aria-describedby target of the dialog (:31, :53).",
+    "Escape and backdrop dismissal are suppressed while the request is in flight (ModalDialog.tsx:63, :109)."
+   ]
+  }
+ ],
+ "crossCutting": [
+  "Mobile/tablet navigation: below lg (1024px) AppShell renders the full sidebar as a card above the page content (AppShell.tsx:164), so every admin page starts one screen down on phones and portrait tablets; there is no drawer/hamburger.",
+  "Unauthorized redirect target: RoleRoute sends non-admins to /submissions (RoleRoute.tsx:19), a page that deliberately has no nav entry (AppShell.tsx:66-67); HomeRedirect ('/') would be the consistent landing.",
+  "Vocabulary drift for the same things: page h1 'User Administration' vs nav 'Users' vs card 'ERIS access management' vs 'Create ERIS account' (AdminUsersOperationsPage.tsx:173, :186, :192; AppShell.tsx:97); h1 'Road Inventory' vs eyebrow 'Authoritative roadway reference' vs h2 'Road inventory operations' (RoadInventoryWorkspacePage.tsx:121-127); 'Refresh' / 'Refresh state' / 'Refresh history' (AdminUsersOperationsPage.tsx:206, RoadInventoryWorkspacePage.tsx:131, RoadInventoryImportPanel.tsx:118); 'Not ready' vs 'Not generated' (RoadInventoryWorkspacePage.tsx:138, :166); 'Segments' vs 'Rows' for row_count (:137, :157 vs :192, RoadInventoryVersionActionDialog.tsx:48); 'Published' badge plus 'Authoritative' label on the same row (:196); 'Uploaded' vs 'Created' for created_at (:192, RoadInventoryImportPanel.tsx:164).",
+  "Raw codes leak into the UI: role enums in the AppShell header ('ADMIN · GEOTECH_ENGINEER', AppShell.tsx:157) and chip titles (AdminUsersOperationsPage.tsx:244); import job 'stage' (RoadInventoryImportPanel.tsx:152); 17 inventory attribute codes in lookup results (RoadInventoryLookupPanel.tsx:53-54); internal ids everywhere ('User #id' :221, versions '#id' :195, 'Dataset ID' dialog :47, job uuid prefix and dataset_version_id :165, 'Dataset #id' :154).",
+  "Three hand-rolled pill badges with the same color-mix class strings but different sizes: AccountStatusBadge (text-xs px-2.5 py-1, AdminUsersOperationsPage.tsx:12-18), DatasetStatusBadge (text-[11px] px-2.5 py-1, RoadInventoryWorkspacePage.tsx:30-38), JobBadge (text-[11px] px-2 py-0.5, RoadInventoryImportPanel.tsx:30-40) - one Badge component with a tone prop would replace all three.",
+  "Duplicated helpers: formatBytes exists twice with different null handling (RoadInventoryWorkspacePage.tsx:24-28 vs RoadInventoryImportPanel.tsx:23-28); formatDate vs formatDateTime (RoadInventoryWorkspacePage.tsx:17-22, RoadInventoryImportPanel.tsx:10-21); SummaryCard (RoadInventoryWorkspacePage.tsx:212-214) vs the inline count cards (AdminUsersOperationsPage.tsx:176-182); Field label helper (RoadInventoryLookupPanel.tsx:62-64) vs inline label/span pairs in the other files; the error/notice banner markup is copy-pasted in five places (AdminUsersOperationsPage.tsx:209-210, RoadInventoryWorkspacePage.tsx:143-144, RoadInventoryImportPanel.tsx:148, RoadInventoryLookupPanel.tsx:47, PasswordResetDialog.tsx:63).",
+  "Inconsistent button styles: primary buttons sometimes have hover:brightness-95 (AdminUsersOperationsPage.tsx:187, RoadInventoryWorkspacePage.tsx:175, RoadInventoryImportPanel.tsx:142, RoadInventoryLookupPanel.tsx:44) and sometimes not (AdminUsersOperationsPage.tsx:199, RoadInventoryVersionActionDialog.tsx:71); secondary buttons alternate between bare border (AdminUsersOperationsPage.tsx:192, :199, :206) and border + bg + hover (RoadInventoryWorkspacePage.tsx:130, RoadInventoryImportPanel.tsx:117, dialogs); row buttons use rounded in Users (:224) but rounded-md in Road Inventory (:196); padding alternates px-3/px-4; the dialog close 'x' button is duplicated verbatim in both dialogs (PasswordResetDialog.tsx:50, RoadInventoryVersionActionDialog.tsx:41).",
+  "No <form> elements anywhere in the area: every submit is a type=button onClick, so Enter never submits (create account :193-199, search :204, password reset dialog :53-68, import :122-145, lookup :39-45).",
+  "Accessibility gaps: search input and status select without accessible names (AdminUsersOperationsPage.tsx:204-205); no captions on any table; page-level error/notice banners lack role=alert/aria-live (only PasswordResetDialog.tsx:63 has it); overflow-x-auto containers are not keyboard focusable (RoadInventoryWorkspacePage.tsx:190, RoadInventoryImportPanel.tsx:162, RoadInventoryLookupPanel.tsx:51); role chips hide their checkbox with sr-only and provide no focus-visible style (AdminUsersOperationsPage.tsx:244-245); busy states are text-only with no aria-busy; truncated values rely on hover title attributes (RoadInventoryWorkspacePage.tsx:195, :213; RoadInventoryImportPanel.tsx:165; RoadInventoryLookupPanel.tsx:54); row action buttons ~28px and chips ~24px tall.",
+  "Feedback placement: mutation notices render at the top of each page (AdminUsersOperationsPage.tsx:209-210, RoadInventoryWorkspacePage.tsx:143-144) while the triggering controls are in tables far below; notices never auto-dismiss and are not announced.",
+  "Global busy flags: AdminUsersOperationsPage uses one busy boolean for load/create/save/toggle/reset so every control on the page is disabled during any request (:32, :199, :206, :224); RoadInventoryWorkspacePage is better (loading / packageBusy / versionBusyId, :44-46).",
+  "Dead/legacy indirection: web/src/pages/AdminUsersPage.tsx and web/src/pages/RoadInventoryPage.tsx are one-line re-export shims of the feature components (pages/AdminUsersPage.tsx:1, pages/RoadInventoryPage.tsx:1); roleModel.ts carries legacy role aliases (MAINTENANCE, MAINT_COORDINATOR, OFFICE_CHIEF, BRANCH_CHIEF, FIELD_WORKER) that may surface as duplicate chips in the role editor (roleModel.ts:8-13).",
+  "No URL state or deep links in the area: user search/filter, selected file, lookup inputs and results all live in component state; there are no /admin/users/:id or /admin/road-inventory/versions/:id routes (App.tsx:143-158).",
+  "Strength to keep across the area: consistent use of theme tokens (--line/--panel/--panel-soft/--brand/--good/--bad) and color-mix tints, so all three themes work without page-specific colors; a single accessible ModalDialog primitive (ModalDialog.tsx) is reused by both dialogs; every list has a written empty state."
+ ]
+}
