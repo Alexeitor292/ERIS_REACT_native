@@ -6,6 +6,8 @@ existing read helpers and the broad-visibility / narrow-authority access model:
 
   * Maintenance field workers may retrieve the tree only for their OWN reports.
   * Non-maintenance operational users may retrieve it for any incident.
+  * A read-only viewer may retrieve it only for an incident whose assessment is
+    approved — the history of the approved record (org model design §4.5).
   * Admin has full access.
 
 All access is enforced server-side.
@@ -18,7 +20,8 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import get_current_user
-from ..roles import is_admin, is_maintenance_only, is_operational_user
+from ..roles import is_admin, is_maintenance_only, is_operational_user, is_public_only
+from ..services import public_visibility
 from ..services import workflow_tree as workflow_tree_svc
 from . import assessments as assessments_routes
 from . import incidents as incidents_routes
@@ -26,7 +29,7 @@ from . import incidents as incidents_routes
 router = APIRouter(tags=["workflow-tree"])
 
 
-def _ensure_workflow_tree_access(user: dict, incident_row: dict) -> None:
+def _ensure_workflow_tree_access(user: dict, incident_row: dict, *, db: Session | None = None) -> None:
     if is_admin(user):
         return
     if is_maintenance_only(user):
@@ -36,6 +39,15 @@ def _ensure_workflow_tree_access(user: dict, incident_row: dict) -> None:
         return
     if is_operational_user(user):
         # Broad read for any non-maintenance operational user.
+        return
+    if is_public_only(user):
+        # The viewer's branch: the tree of an APPROVED record only, and 404
+        # rather than 403 so an in-flight incident cannot be distinguished from
+        # one that does not exist. ``db`` is optional only so no existing call
+        # site breaks; without it a viewer is refused outright.
+        if db is None:
+            raise HTTPException(status_code=403, detail="Not allowed to view this incident")
+        public_visibility.ensure_public_incident(db, user, int(incident_row["id"]))
         return
     raise HTTPException(status_code=403, detail="Not allowed to view this incident")
 
@@ -50,7 +62,7 @@ def get_incident_workflow_tree(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     incident = dict(incident)
-    _ensure_workflow_tree_access(user, incident)
+    _ensure_workflow_tree_access(user, incident, db=db)
 
     assessment = assessments_routes._get_assessment_for_incident(db, incident_id)
     if assessment is not None:

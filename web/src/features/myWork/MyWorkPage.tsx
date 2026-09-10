@@ -38,6 +38,13 @@ function timestamp(value: string | null | undefined) {
  *
  * Every request carries its own `.catch(() => [])`: one failing queue — or a
  * failing /incidents call — must never blank the whole page.
+ *
+ * Who gets here is decided by the ROUTE (`WORK_QUEUE_ROLE_NAMES` in App.tsx),
+ * not by this component: a read-only viewer is refused the route and sent to
+ * Records. The `hasWorkQueue` branch below stays as a second line of defence for
+ * an account whose roles change while the page is open — it is no longer the
+ * only thing standing between a viewer and a work queue, and the server refuses
+ * a viewer's `?queue=` request with a 400 regardless (org model design §8).
  */
 export default function MyWorkPage() {
   const { me } = useAuth();

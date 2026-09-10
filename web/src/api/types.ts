@@ -1,7 +1,10 @@
 /**
- * Account profile metadata (`users.metadata_json`). `office_code` is
- * load-bearing in routing v2: a chief or senior engineer without one can
- * neither be assigned nor review.
+ * Account profile metadata (`users.metadata_json`) — a LEGACY MIRROR, never the
+ * source. The org record (`UserOrg`, below) is where a person's office, branch
+ * and classification live; the server re-renders these three keys from it so a
+ * reader that has not migrated yet still resolves an office. No client writes
+ * an org fact into `metadata`: org edits go to `PUT /admin/users/{id}/org`
+ * (org model design §3.2).
  */
 export type UserMetadata = {
   office_code?: string | null;
@@ -9,7 +12,50 @@ export type UserMetadata = {
   district?: string | null;
 };
 
-export type Me = { id: number; email: string; full_name?: string; roles: string[]; metadata?: UserMetadata };
+/** Availability is RENDERED beside a name — never used to filter or reorder a picker. */
+export type OrgAvailability = "AVAILABLE" | "ROTATION_OUT" | "ACTING_ELSEWHERE" | "UNAVAILABLE";
+
+/**
+ * Where a person sits in the organization, resolved server-side
+ * (`org_user_profiles` first, the `metadata_json` mirror second). Every field is
+ * nullable: an account created before the org model has no profile row, and an
+ * office with no branches has no branch to name.
+ */
+export type UserOrg = {
+  office_id?: number | null;
+  office_code?: string | null;
+  office_name?: string | null;
+  office_short_name?: string | null;
+  office_unit_number?: string | null;
+  office_is_active?: boolean | null;
+  branch_id?: number | null;
+  branch_letter?: string | null;
+  branch_name?: string | null;
+  branch_is_active?: boolean | null;
+  home_city?: string | null;
+  home_district?: string | null;
+  classification_code?: string | null;
+  classification_marker?: string | null;
+  position_number?: string | null;
+  job_title?: string | null;
+  level_code?: string | null;
+  supervisor_user_id?: number | null;
+  availability?: OrgAvailability | null;
+  available_from?: string | null;
+  available_until?: string | null;
+  source?: string | null;
+  has_profile?: boolean | null;
+};
+
+export type Me = {
+  id: number;
+  email: string;
+  full_name?: string;
+  roles: string[];
+  /** Legacy mirror; read `org` for anything organizational. */
+  metadata?: UserMetadata;
+  org?: UserOrg | null;
+};
 
 export type AdminUser = {
   id: number;
@@ -17,7 +63,10 @@ export type AdminUser = {
   full_name: string;
   is_active: boolean;
   roles: string[];
+  /** Legacy mirror; read `org` for anything organizational. */
   metadata?: UserMetadata;
+  /** Present only where the endpoint carries it; the admin page fetches the record per account otherwise. */
+  org?: UserOrg | null;
 };
 
 export type Submission = {

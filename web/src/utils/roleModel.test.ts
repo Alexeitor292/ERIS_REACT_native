@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ASSESSMENT_READ_ROLE_NAMES,
   CANONICAL,
   OPERATIONAL_ROLE_NAMES,
+  RECORD_READ_ROLE_NAMES,
+  WORKFORCE_ROLE_NAMES,
+  WORK_QUEUE_ROLE_NAMES,
   canAssignEngineer,
   canAssignSeniorEngineer,
   canDelegateBranch,
@@ -16,7 +20,10 @@ import {
   isEngineer,
   isMaintenanceOnly,
   isOperationalUser,
+  isPublicOnly,
   isSeniorEngineer,
+  isViewer,
+  landingPathFor,
   roleLabel,
 } from "./roleModel.ts";
 
@@ -29,6 +36,7 @@ const BRANCH_CHIEF = ["GEOTECH_BRANCH_CHIEF"];
 const COORDINATOR = ["MAINTENANCE_COORDINATOR"];
 const LEGACY_REVIEWER = ["REVIEWER"];
 const MAINTENANCE = ["MAINTENANCE_FIELD_WORKER"];
+const VIEWER = ["CALTRANS_VIEWER"];
 
 test("the senior engineer is a canonical operational role with no legacy alias", () => {
   assert.deepEqual([...CANONICAL.GEOTECH_SENIOR_ENGINEER], ["GEOTECH_SENIOR_ENGINEER"]);
@@ -102,6 +110,56 @@ test("a senior engineer may file an incident report; a coordinator may not", () 
   assert.equal(canReportIncident(COORDINATOR), false);
   assert.equal(canReportIncident(OFFICE_CHIEF), false);
   assert.equal(canReportIncident(BRANCH_CHIEF), false);
+});
+
+test("the viewer is a third category and never an operational role", () => {
+  // The operational switch is state-blind — it grants drafts and queues — so a
+  // read-only viewer inside it would be handed every in-flight record.
+  assert.equal(OPERATIONAL_ROLE_NAMES.includes("CALTRANS_VIEWER" as never), false);
+  assert.equal(WORK_QUEUE_ROLE_NAMES.includes("CALTRANS_VIEWER" as never), false);
+  assert.equal(WORKFORCE_ROLE_NAMES.includes("CALTRANS_VIEWER" as never), false);
+  assert.deepEqual([...CANONICAL.CALTRANS_VIEWER], ["CALTRANS_VIEWER"]);
+
+  assert.equal(isOperationalUser(VIEWER), false);
+  assert.equal(isMaintenanceOnly(VIEWER), false);
+  assert.equal(hasWorkQueue(VIEWER), false);
+  assert.equal(isViewer(VIEWER), true);
+  assert.equal(isPublicOnly(VIEWER), true);
+  assert.equal(landingPathFor(VIEWER), "/incidents");
+
+  // No workflow affordance anywhere.
+  for (const helper of [canTriage, canDelegateBranch, canAssignSeniorEngineer, canAssignEngineer, isAssessmentAuthor, canReportIncident, isAdmin]) {
+    assert.equal(helper(VIEWER), false, `${helper.name} should be closed to a viewer`);
+  }
+  assert.equal(roleLabel("CALTRANS_VIEWER"), "Viewer");
+});
+
+test("a viewer who also holds an operational role keeps that role's access", () => {
+  const chiefAndViewer = [...OFFICE_CHIEF, ...VIEWER];
+  assert.equal(isPublicOnly(chiefAndViewer), false);
+  assert.equal(isViewer(chiefAndViewer), true);
+  assert.equal(isOperationalUser(chiefAndViewer), true);
+  assert.equal(hasWorkQueue(chiefAndViewer), true);
+  assert.equal(canDelegateBranch(chiefAndViewer), true);
+  assert.equal(landingPathFor(chiefAndViewer), "/my-work");
+  // A reporter granted Viewer is likewise not narrowed to the public record.
+  assert.equal(isPublicOnly([...MAINTENANCE, ...VIEWER]), false);
+  assert.equal(isPublicOnly([]), false);
+  assert.equal(isPublicOnly(undefined), false);
+});
+
+test("the record route gates admit the viewer and the operational surface does not", () => {
+  const admits = (names: readonly string[], roles: string[]) => roles.some((role) => names.includes(role));
+  assert.equal(admits(ASSESSMENT_READ_ROLE_NAMES, VIEWER), true);
+  assert.equal(admits(RECORD_READ_ROLE_NAMES, VIEWER), true);
+  assert.equal(admits(OPERATIONAL_ROLE_NAMES, VIEWER), false);
+  assert.equal(admits(WORK_QUEUE_ROLE_NAMES, VIEWER), false);
+  assert.equal(admits(WORKFORCE_ROLE_NAMES, VIEWER), false);
+  // A maintenance reporter reaches a record but not an assessment: the server
+  // refuses them assessments, so the client must not offer them either.
+  assert.equal(admits(RECORD_READ_ROLE_NAMES, MAINTENANCE), true);
+  assert.equal(admits(ASSESSMENT_READ_ROLE_NAMES, MAINTENANCE), false);
+  assert.equal(admits(ASSESSMENT_READ_ROLE_NAMES, STAFF), true);
 });
 
 test("maintenance-only accounts stay out of the operational surface", () => {

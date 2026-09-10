@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import hashlib
 
-from .deps import get_current_user, require_roles
+from .deps import deny_public_only, require_roles
 from .db import get_db
 from .storage import put_object_bytes, make_object_key
 from .config import settings
@@ -265,7 +265,10 @@ def list_submissions_page(
     before_id: int | None = Query(default=None, ge=1),
     status_filter: str | None = Query(default=None, alias="status"),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    # A second, photo-centric submission list. The narrowed GET /submissions is
+    # the viewer's list; this one keeps the legacy operational visibility rules
+    # and is on the deny list (org model design §4.5).
+    user=Depends(deny_public_only),
 ):
     """Cursor-paginated submission worklist preserving the legacy visibility rules."""
     params: dict[str, object] = {"limit_plus_one": limit + 1}

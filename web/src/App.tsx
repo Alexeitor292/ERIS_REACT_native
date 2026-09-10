@@ -4,6 +4,9 @@ import SubmissionsPage from "./pages/SubmissionsPage";
 import SubmissionDetailPage from "./pages/SubmissionDetailPage";
 import SubmissionPhotoEvidencePage from "./pages/SubmissionPhotoEvidencePage";
 import AdminUsersPage from "./pages/AdminUsersPage";
+import AdminOfficesPage from "./features/admin/org/AdminOfficesPage";
+import AdminBranchesPage from "./features/admin/org/AdminBranchesPage";
+import AdminCoveragePage from "./features/admin/org/AdminCoveragePage";
 import RoadInventoryPage from "./pages/RoadInventoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
@@ -17,8 +20,30 @@ import NotFoundPage from "./pages/NotFoundPage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import RoleRoute from "./auth/RoleRoute";
-import { hasWorkQueue, OPERATIONAL_ROLE_NAMES } from "./utils/roleModel";
+import {
+  ASSESSMENT_READ_ROLE_NAMES,
+  landingPathFor,
+  OPERATIONAL_ROLE_NAMES,
+  RECORD_READ_ROLE_NAMES,
+  WORKFORCE_ROLE_NAMES,
+  WORK_QUEUE_ROLE_NAMES,
+} from "./utils/roleModel";
 
+/**
+ * Route gates, in three bands.
+ *
+ *  - OPERATIONAL: the working surface — Mission Center, Event Groups, GIS Tools.
+ *    A read-only viewer sees none of it: it is full of work in flight.
+ *  - ASSESSMENT_READ / RECORD_READ: the record surface. The viewer belongs here,
+ *    and the server narrows what they get to APPROVED records; the gate only
+ *    decides which pages open at all.
+ *  - WORK_QUEUE: My Work. A viewer has no queue, so the route refuses them
+ *    rather than showing them an empty one.
+ *
+ * `/my-work`, `/mission-center` and `/submissions/:id` carried no role gate at
+ * all before the org model — they were `ProtectedRoute`-only, which meant "any
+ * account that happens to be signed in" (org model design §8).
+ */
 export default function App() {
   return (
     <AuthProvider>
@@ -29,17 +54,17 @@ export default function App() {
           <Route
             path="/my-work"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...WORK_QUEUE_ROLE_NAMES]}>
                 <MyWorkPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
             path="/submissions"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...WORKFORCE_ROLE_NAMES]}>
                 <SubmissionsPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
@@ -79,7 +104,7 @@ export default function App() {
           <Route
             path="/assessments"
             element={
-              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
+              <RoleRoute roles={[...ASSESSMENT_READ_ROLE_NAMES]}>
                 <AssessmentsPage />
               </RoleRoute>
             }
@@ -87,7 +112,7 @@ export default function App() {
           <Route
             path="/assessments/:id"
             element={
-              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
+              <RoleRoute roles={[...ASSESSMENT_READ_ROLE_NAMES]}>
                 <AssessmentsPage />
               </RoleRoute>
             }
@@ -95,25 +120,25 @@ export default function App() {
           <Route
             path="/mission-center"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <MissionCenterPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
             path="/mission-center/:gid"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <MissionCenterPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
             path="/mission-center/:gid/:iid"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <MissionCenterPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
@@ -124,20 +149,23 @@ export default function App() {
               </RoleRoute>
             }
           />
+          {/* Photos are part of the approved record (owner decision 4), and this
+              page only reads — the correction write lives on the map panel and is
+              refused server-side — so a viewer belongs here. */}
           <Route
             path="/submissions/:id/photo-evidence"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...RECORD_READ_ROLE_NAMES]}>
                 <SubmissionPhotoEvidencePage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
             path="/submissions/:id"
             element={
-              <ProtectedRoute>
+              <RoleRoute roles={[...RECORD_READ_ROLE_NAMES]}>
                 <SubmissionDetailPage />
-              </ProtectedRoute>
+              </RoleRoute>
             }
           />
           <Route
@@ -145,6 +173,30 @@ export default function App() {
             element={
               <RoleRoute roles={["ADMIN"]}>
                 <AdminUsersPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/admin/org/offices"
+            element={
+              <RoleRoute roles={["ADMIN"]}>
+                <AdminOfficesPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/admin/org/branches"
+            element={
+              <RoleRoute roles={["ADMIN"]}>
+                <AdminBranchesPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/admin/org/coverage"
+            element={
+              <RoleRoute roles={["ADMIN"]}>
+                <AdminCoveragePage />
               </RoleRoute>
             }
           />
@@ -171,10 +223,14 @@ export default function App() {
   );
 }
 
-/** Roles with a work queue land on My Work; maintenance reporters land on their incidents. */
+/**
+ * Roles with a work queue land on My Work; maintenance reporters and read-only
+ * viewers land on their incidents — a viewer has no Home and no queue, so
+ * Records opening on Incidents is their destination.
+ */
 function HomeRedirect() {
   const { me } = useAuth();
-  return <Navigate to={hasWorkQueue(me?.roles) ? "/my-work" : "/incidents"} replace />;
+  return <Navigate to={landingPathFor(me?.roles)} replace />;
 }
 
 function LegacyProjectRedirect() {

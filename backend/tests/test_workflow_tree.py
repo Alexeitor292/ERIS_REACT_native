@@ -53,6 +53,9 @@ def tokens(client_db):
         "engineer": _login(client_db, "engineer@local"),
         "reviewer": _login(client_db, "reviewer@local"),
         "senior_engineer": _login(client_db, "seniorengineer@local"),
+        # The org model's read-only viewer: no operational role at all, so the
+        # tree is readable only where the record is public.
+        "viewer": _login(client_db, "viewer@local"),
     }
 
 
@@ -541,3 +544,68 @@ class TestAccess:
         any_incident = _create_incident(client_db, tokens["admin"], district="04")
         resp = client_db.get(f"/incidents/{any_incident}/workflow-tree")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# 11: the read-only viewer's branch of _ensure_workflow_tree_access
+# ---------------------------------------------------------------------------
+
+
+class TestViewerAccess:
+    """A viewer reads the tree of an APPROVED record, and nothing else.
+
+    The tree is the record's whole history — who routed it, to whom, and when —
+    so it follows the same rule as the assessment itself: public once approved,
+    invisible until then. Invisible means 404, not 403: a 403 would confirm that
+    an in-flight incident exists and let a viewer enumerate work by probing ids.
+    """
+
+    def _approved_incident(self, client_db, tokens, ids) -> int:
+        incident_id, aid = _drive_to_submitted(client_db, tokens, ids)
+        approved = client_db.post(
+            f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(tokens["branchchief"])
+        )
+        assert approved.status_code == 200, approved.text
+        return incident_id
+
+    def test_viewer_reads_the_tree_of_an_approved_record(self, client_db, tokens, ids):
+        incident_id = self._approved_incident(client_db, tokens, ids)
+        tree = _tree(client_db, tokens["viewer"], incident_id)
+        # The whole history, not a redacted version: the same nodes an
+        # operational reader gets.
+        assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "COMPLETED"
+        review = _node(tree, "ASSESSMENT_REVIEW")
+        assert review["status"] == "COMPLETED"
+        assert review["role"] == "GEOTECH_BRANCH_CHIEF"
+        assert review["user"]["user_id"] == ids["branchchief"]
+
+    def test_viewer_gets_404_before_approval(self, client_db, tokens, ids):
+        incident_id, _aid = _drive_to_submitted(client_db, tokens, ids)
+        resp = client_db.get(f"/incidents/{incident_id}/workflow-tree", headers=_auth(tokens["viewer"]))
+        assert resp.status_code == 404, f"{resp.status_code} {resp.text}"
+
+    def test_viewer_gets_404_on_an_incident_with_no_assessment_at_all(self, client_db, tokens):
+        fresh = _create_incident(client_db, tokens["admin"], district="04")
+        resp = client_db.get(f"/incidents/{fresh}/workflow-tree", headers=_auth(tokens["viewer"]))
+        assert resp.status_code == 404, f"{resp.status_code} {resp.text}"
+
+    def test_viewer_gets_404_on_an_incident_that_does_not_exist(self, client_db, tokens):
+        # The same answer as an in-flight record, which is the point: the two
+        # must be indistinguishable.
+        resp = client_db.get("/incidents/99999999/workflow-tree", headers=_auth(tokens["viewer"]))
+        assert resp.status_code == 404
+
+    def test_a_call_site_that_passes_no_session_refuses_the_viewer(self):
+        # `db` is optional on the helper only so no existing call site breaks.
+        # Without a session the viewer's branch cannot check whether the record
+        # is public, so it refuses rather than guessing.
+        import pytest as _pytest
+        from fastapi import HTTPException
+
+        from app.routes.workflow_tree import _ensure_workflow_tree_access
+
+        with _pytest.raises(HTTPException) as excinfo:
+            _ensure_workflow_tree_access(
+                {"id": 1, "roles": ["CALTRANS_VIEWER"]}, {"id": 1, "reporter_user_id": 2}
+            )
+        assert excinfo.value.status_code == 403

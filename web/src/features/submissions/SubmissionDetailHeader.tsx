@@ -19,6 +19,12 @@ type Props = {
    * approve/return decisions happen there — the server refuses them here.
    */
   assessmentLinked?: boolean;
+  /**
+   * Hide the links that lead into the operational surface (Mission Center).
+   * A read-only viewer is refused those routes, and a link that bounces the
+   * reader back to where they came from is worse than no link.
+   */
+  hideOperationalLinks?: boolean;
   submitLabel?: string;
   onRefresh: () => void;
   onSaveDraft: () => void;
@@ -50,6 +56,7 @@ export default function SubmissionDetailHeader({
   canEdit,
   canDelete,
   assessmentLinked = false,
+  hideOperationalLinks = false,
   submitLabel = "Submit for review",
   onRefresh,
   onSaveDraft,
@@ -130,7 +137,7 @@ export default function SubmissionDetailHeader({
                 Incident #{context.incident_id}
               </Link>
             ) : null}
-            {context?.event_group_id != null && context?.incident_id != null ? (
+            {context?.event_group_id != null && context?.incident_id != null && !hideOperationalLinks ? (
               <Link to={`/mission-center/${context.event_group_id}/${context.incident_id}`} className="text-[11px] font-semibold text-[var(--brand)] hover:underline">View on map</Link>
             ) : null}
           </div>

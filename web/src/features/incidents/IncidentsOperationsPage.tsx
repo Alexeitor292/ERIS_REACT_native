@@ -7,7 +7,7 @@ import type { Incident, IncidentStatus } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import AppShell from "../../ui/AppShell";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileValue, normalizeRouteValue } from "../../utils/precision";
-import { canReportIncident, isOperationalUser } from "../../utils/roleModel";
+import { canReportIncident, isOperationalUser, isPublicOnly } from "../../utils/roleModel";
 import { AssessmentStateBadge } from "../assessments/AssessmentDetailPanel";
 import { submissionIdsOf } from "../assessments/assessmentModel";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
@@ -49,6 +49,13 @@ type Tab = "records" | "intake";
  *   "Awaiting intake"   — field reports not yet part of the record (triage pending).
  * Triage, routing, and assignment actions live in My Work. Filing a new report is
  * intake, not workflow, so reporting roles keep the "New incident" panel.
+ *
+ * For a read-only VIEWER this is the whole application, and it is a different
+ * page: "Awaiting intake" is not rendered at all — an untriaged field report is
+ * exactly the material that is not public — and every row shown has an approved
+ * assessment behind it. The server already narrows both the incident list and
+ * the classification rows; the client stops asking for what it may not have and
+ * stops offering routes the viewer cannot follow (org model design §4.5, §8).
  */
 export default function IncidentsOperationsPage() {
   const { me } = useAuth();
@@ -57,6 +64,7 @@ export default function IncidentsOperationsPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
   const operational = isOperationalUser(me?.roles);
+  const viewer = isPublicOnly(me?.roles);
 
   const [items, setItems] = useState<Incident[]>([]);
   const [classifications, setClassifications] = useState<Record<number, IncidentClassification>>({});
@@ -78,11 +86,17 @@ export default function IncidentsOperationsPage() {
     try {
       const response = await api<{ items: Incident[] }>("/incidents?limit=1000");
       const nextItems = response.items ?? [];
+      // Both calls are isolated: they share one Promise.all inside one try, so a
+      // failure in either used to blank the page and show an error instead of
+      // the incidents that had already loaded. Neither is essential to the row.
       const [classificationResponse, assessmentResponse] = await Promise.all([
         nextItems.length
           ? api<IncidentClassificationQueryResponse>("/incident-classifications/query", { method: "POST", body: JSON.stringify({ incident_ids: nextItems.map((incident) => incident.id) }) })
+            .catch(() => ({ items: [] } as IncidentClassificationQueryResponse))
           : Promise.resolve({ items: [] } as IncidentClassificationQueryResponse),
-        operational ? listAssessments({ limit: 1000 }).catch(() => ({ items: [] as Assessment[] })) : Promise.resolve({ items: [] as Assessment[] }),
+        // A viewer fetches assessments too — theirs are the approved ones, and
+        // without them every public row would read "No assessment".
+        operational || viewer ? listAssessments({ limit: 1000 }).catch(() => ({ items: [] as Assessment[] })) : Promise.resolve({ items: [] as Assessment[] }),
       ]);
       setItems(nextItems);
       setClassifications(Object.fromEntries((classificationResponse.items ?? []).map((classification) => [classification.incident_id, classification])));
@@ -104,12 +118,12 @@ export default function IncidentsOperationsPage() {
     if (highlightId == null) return;
     const target = items.find((incident) => incident.id === highlightId);
     if (!target) return;
-    setTab(target.current_stage === "COORDINATOR_REVIEW" ? "intake" : "records");
+    if (!viewer) setTab(target.current_stage === "COORDINATOR_REVIEW" ? "intake" : "records");
     const timer = window.setTimeout(() => {
       rowRefs.current[highlightId]?.scrollIntoView({ block: "center", behavior: "smooth" });
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [highlightId, items]);
+  }, [highlightId, items, viewer]);
 
   const intakeCount = useMemo(() => items.filter((incident) => incident.current_stage === "COORDINATOR_REVIEW").length, [items]);
 
@@ -118,6 +132,10 @@ export default function IncidentsOperationsPage() {
     return items.filter((incident) => {
       const intake = incident.current_stage === "COORDINATOR_REVIEW";
       if (tab === "intake" ? !intake : intake) return false;
+      // The server already returns only public incidents to a viewer; this keeps
+      // a row without a loaded assessment from rendering as "No assessment" on a
+      // page whose whole premise is that every row has one.
+      if (viewer && !assessmentsByIncident[incident.id]) return false;
       if (statusFilter !== "ALL" && incident.status !== statusFilter) return false;
       if (unclaimedOnly && incident.assignment) return false;
       if (!needle) return true;
@@ -127,7 +145,7 @@ export default function IncidentsOperationsPage() {
         .toLowerCase()
         .includes(needle);
     });
-  }, [items, query, statusFilter, tab, unclaimedOnly]);
+  }, [assessmentsByIncident, items, query, statusFilter, tab, unclaimedOnly, viewer]);
 
   function addPendingFiles(files: FileList | null) {
     if (!files?.length) return;
@@ -218,10 +236,14 @@ export default function IncidentsOperationsPage() {
     <AppShell title="Incidents">
       <div className="grid gap-4 p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-[var(--line)]">
-            {tabButton("records", `Incident records (${items.length - intakeCount})`)}
-            {tabButton("intake", `Awaiting intake (${intakeCount})`)}
-          </div>
+          {/* "Awaiting intake" is not rendered for a viewer at all. An empty or
+              disabled tab would still tell them how much untriaged work exists. */}
+          {viewer ? null : (
+            <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-[var(--line)]">
+              {tabButton("records", `Incident records (${items.length - intakeCount})`)}
+              {tabButton("intake", `Awaiting intake (${intakeCount})`)}
+            </div>
+          )}
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, county, route, or description" className="min-w-[220px] flex-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "ALL" | IncidentStatus)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
             <option value="ALL">All statuses</option>
@@ -229,11 +251,15 @@ export default function IncidentsOperationsPage() {
             <option value="IN_PROGRESS">In progress</option>
             <option value="RESOLVED">Resolved</option>
           </select>
-          <label className="inline-flex items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
-            <input type="checkbox" checked={unclaimedOnly} onChange={(event) => setUnclaimedOnly(event.target.checked)} />
-            Unclaimed only
-          </label>
-          <span className="text-xs text-muted">{visible.length} of {items.length} incidents</span>
+          {/* "Unclaimed" is a workflow question — who has picked this up — and a
+              viewer has no stake in it. */}
+          {viewer ? null : (
+            <label className="inline-flex items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
+              <input type="checkbox" checked={unclaimedOnly} onChange={(event) => setUnclaimedOnly(event.target.checked)} />
+              Unclaimed only
+            </label>
+          )}
+          <span className="text-xs text-muted">{visible.length} of {viewer ? visible.length : items.length} {viewer ? "approved records" : "incidents"}</span>
           <div className="ml-auto flex gap-2">
             {canReportIncident(me?.roles) ? (
               <button type="button" onClick={() => setCreatePanelOpen((open) => !open)} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95">
@@ -258,7 +284,13 @@ export default function IncidentsOperationsPage() {
           />
         ) : null}
 
-        {tab === "intake" ? (
+        {viewer ? (
+          // Never points a viewer at My Work: they have no queue, and the route
+          // refuses them.
+          <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
+            Approved records only. An incident appears here once its assessment has been approved; work still in progress is not part of the record yet.
+          </div>
+        ) : tab === "intake" ? (
           <div className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_8%,transparent)] px-3 py-2 text-sm">
             <b>These field reports are not yet part of the ERIS incident record.</b> They were reported from the field and are waiting for a Maintenance Coordinator to review them, decide their Event Group, and accept them into the system — done from the coordinator's <Link to="/my-work" className="font-medium text-[var(--brand)] hover:underline">My Work</Link> queue.
           </div>
@@ -279,13 +311,14 @@ export default function IncidentsOperationsPage() {
                 <th className="px-3 py-3">Incident</th>
                 <th className="px-3 py-3">Location</th>
                 <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Assignment</th>
+                {/* Who is working on it is workflow, not record: a viewer does not get it. */}
+                {viewer ? null : <th className="px-3 py-3">Assignment</th>}
                 <th className="px-3 py-3">Assessment / Submission</th>
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
-                <tr><td className="px-3 py-8 text-center text-sm text-muted" colSpan={6}>{busy ? "Loading incidents…" : "No incidents match the current filters."}</td></tr>
+                <tr><td className="px-3 py-8 text-center text-sm text-muted" colSpan={viewer ? 5 : 6}>{busy ? "Loading incidents…" : viewer ? "No approved records match the current filters." : "No incidents match the current filters."}</td></tr>
               ) : visible.map((incident) => {
                 const assessment = assessmentsByIncident[incident.id];
                 const submissionIds = assessment ? submissionIdsOf(assessment) : (incident.linked_submission_id ? [incident.linked_submission_id] : []);
@@ -301,15 +334,16 @@ export default function IncidentsOperationsPage() {
                     <td className="px-3 py-3 text-sm">
                       <div className="font-semibold">{incident.title || `Incident #${incident.id}`}</div>
                       <IncidentClassificationText classification={classifications[incident.id]} />
-                      {incident.event_group_id != null ? <div className="mt-1 text-[11px]"><Link to={`/event-groups/${incident.event_group_id}`} className="text-[var(--brand)] hover:underline">Event Group #{incident.event_group_id}</Link></div> : null}
+                      {incident.event_group_id != null && !viewer ? <div className="mt-1 text-[11px]"><Link to={`/event-groups/${incident.event_group_id}`} className="text-[var(--brand)] hover:underline">Event Group #{incident.event_group_id}</Link></div> : null}
                     </td>
                     <td className="px-3 py-3 text-sm text-muted">
                       <div className="tabular-nums">{formatCoordinate(incident.latitude)}, {formatCoordinate(incident.longitude)}</div>
                       <div className="mt-0.5 text-xs">{eventGroupLocationLabel(incident)}</div>
-                      {incident.event_group_id != null ? <div className="mt-1 text-xs"><Link to={`/mission-center/${incident.event_group_id}/${incident.id}`} className="text-[var(--brand)] hover:underline">View on map</Link></div> : null}
+                      {/* Mission Center is an operational surface; a viewer is refused the route. */}
+                      {incident.event_group_id != null && !viewer ? <div className="mt-1 text-xs"><Link to={`/mission-center/${incident.event_group_id}/${incident.id}`} className="text-[var(--brand)] hover:underline">View on map</Link></div> : null}
                     </td>
                     <td className="px-3 py-3 text-sm"><IncidentStatusBadge status={incident.status} /></td>
-                    <td className="px-3 py-3 text-sm text-muted">{incident.assignment ? incident.assignment.assignee_name || incident.assignment.assignee_email : "Unassigned"}</td>
+                    {viewer ? null : <td className="px-3 py-3 text-sm text-muted">{incident.assignment ? incident.assignment.assignee_name || incident.assignment.assignee_email : "Unassigned"}</td>}
                     <td className="px-3 py-3 text-sm">
                       {assessment ? (
                         <div className="flex flex-wrap items-center gap-1.5"><Link to={`/assessments/${assessment.id}`} className="font-semibold text-[var(--brand)] hover:underline">AS #{assessment.id}</Link><AssessmentStateBadge state={assessment.state} routingPath={assessment.routing_path} mini /></div>

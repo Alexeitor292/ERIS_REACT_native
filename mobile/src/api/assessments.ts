@@ -39,6 +39,17 @@ export type Assessment = {
   district: string | null;
   office_code: string | null;
   office_override_reason: string | null;
+  /**
+   * The routing SNAPSHOT: the office and branch NAME as they read when this
+   * assessment was routed. Render these and fall back to `office_code` only when
+   * they are null (a row routed before the organization model). A later rename
+   * or a retired branch therefore cannot rewrite what a historical record says.
+   */
+  routed_office_id: number | null;
+  routed_office_name: string | null;
+  routed_branch_id: number | null;
+  routed_branch_name: string | null;
+  routed_branch_letter: string | null;
   routing_path: AssessmentRoutingPath | null;
   branch_chief_user_id: number | null;
   /**
@@ -101,11 +112,74 @@ export type RoutingPreview = {
   source: "routing_table" | "legacy_fallback" | "none";
 };
 
+/**
+ * One person in a picker, as all three option endpoints now return them: who
+ * they are, where they sit, how much work they hold, and whether they are
+ * around. Matching the web contract exactly (design §5).
+ *
+ * The two counts and `availability` are ANNOTATION, never ranking: nothing here
+ * names a default and no client may sort, filter or hide on them — a person
+ * marked `ROTATION_OUT` is rendered with their return date, not removed.
+ */
 export type RoutingUserOption = {
   id: number;
   email: string;
   full_name: string;
+  /** Legacy three-key mirror, kept on the wire for one release. */
   metadata?: Record<string, unknown>;
+  office_code: string | null;
+  office_name: string | null;
+  branch_id: number | null;
+  branch_letter: string | null;
+  branch_name: string | null;
+  home_city: string | null;
+  home_district: string | null;
+  open_assessment_count: number;
+  awaiting_action_count: number;
+  /** AVAILABLE | ROTATION_OUT | ACTING_ELSEWHERE | UNAVAILABLE. */
+  availability: string | null;
+  available_from: string | null;
+  available_until: string | null;
+  /** Set so a person whose branch has since been retired still renders. */
+  branch_is_active: boolean | null;
+  /** The group this item belongs to; `groups[]` carries the heading. */
+  group_key: string;
+  /** Only the assignment directory returns these. */
+  roles?: string[];
+};
+
+/** A picker heading: a branch, a location, or the trailing "not recorded" tail. */
+export type RoutingUserGroup = {
+  group_key: string;
+  label: string;
+  branch_id: number | null;
+  branch_letter: string | null;
+  branch_name: string | null;
+  home_city?: string | null;
+  home_district?: string | null;
+  districts_covered?: string[];
+  /** A branch that exists but takes no new work is returned, not omitted. */
+  accepts_assignments?: boolean;
+  is_active?: boolean;
+  /** The Staff directory orders the caller's own branch first. */
+  is_own_branch?: boolean;
+};
+
+export type RoutingOptions = {
+  assessment_id: number;
+  office_code: string | null;
+  office?: {
+    id: number;
+    code: string;
+    name: string | null;
+    short_name?: string | null;
+    unit_number?: string | null;
+    home_city: string | null;
+    home_district: string | null;
+    is_active: boolean;
+  } | null;
+  groups: RoutingUserGroup[];
+  items: RoutingUserOption[];
 };
 
 export function listAssessments(
@@ -148,9 +222,19 @@ export function triageIncident(
   return apiFetch(`/incidents/${incidentId}/triage`, { method: "POST", token, body });
 }
 
+/** The branch chiefs an office chief may hand this assessment to. */
 export function getAssessmentBranchOptions(token: string, assessmentId: number) {
-  return apiFetch<{ assessment_id: number; office_code: string | null; items: RoutingUserOption[] }>(
-    `/assessments/${assessmentId}/branch-options`,
+  return apiFetch<RoutingOptions>(`/assessments/${assessmentId}/branch-options`, { token });
+}
+
+/**
+ * The Staff members the branch chief may assign, grouped own-branch-first by the
+ * server. This replaces typing a raw user id: with branches in play, a number
+ * typed by hand is the single most likely way to assign the wrong person.
+ */
+export function getAssessmentEngineerOptions(token: string, assessmentId: number) {
+  return apiFetch<RoutingOptions & { kind: string }>(
+    `/admin/assessment-assignment-options/${assessmentId}?kind=ENGINEER`,
     { token }
   );
 }
@@ -163,7 +247,12 @@ export function delegateBranch(token: string, assessmentId: number, branchChiefU
   });
 }
 
-/** Assign a Staff member; `assign-engineer` is the deployed endpoint name. */
+/**
+ * Assign a Staff member; `assign-engineer` is the deployed endpoint name.
+ *
+ * The server refuses a Staff member from another OFFICE outright, and accepts
+ * one from another BRANCH only with a reason — which is what `notes` carries.
+ */
 export function assignAssessmentEngineer(token: string, assessmentId: number, engineerUserId: number, notes?: string) {
   return apiFetch<{ assessment: Assessment }>(`/assessments/${assessmentId}/assign-engineer`, {
     method: "POST",

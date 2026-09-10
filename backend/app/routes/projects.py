@@ -232,10 +232,13 @@ def _generated_project_title(incident: dict) -> str:
     return f"Incident #{int(incident['id'])} Project" + (f" · {location}" if location else "")
 
 
-def _ensure_manage_scope(user: dict, incident_or_project: dict) -> None:
+def _ensure_manage_scope(user: dict, incident_or_project: dict, *, db: Session | None = None) -> None:
+    # ``db`` lets the district come from the caller's org profile (with
+    # users.metadata_json as the mirror fallback) rather than from the mirror
+    # alone — one resolver, one answer (services/org_directory).
     if is_admin(user):
         return
-    incidents_routes._ensure_incident_district_access(user, incident_or_project.get("district"))
+    incidents_routes._ensure_incident_district_access(user, incident_or_project.get("district"), db=db)
 
 
 @router.get("/projects")
@@ -312,7 +315,7 @@ def update_project(
     row = _project_row(db, project_id)
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
-    _ensure_manage_scope(user, dict(row))
+    _ensure_manage_scope(user, dict(row), db=db)
 
     sets: list[str] = []
     params: dict[str, object] = {"pid": project_id}
@@ -350,7 +353,7 @@ def incident_project_context(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
     project = None
     if incident.get("project_id") is not None:
         project_row = _project_row(db, int(incident["project_id"]))
@@ -375,7 +378,7 @@ def nearby_projects_for_incident(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
 
     lat = float(incident["latitude"])
     lon = float(incident["longitude"])
@@ -430,7 +433,7 @@ def associate_incident_project(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
     if str(incident["status"]).upper() == "RESOLVED" and not is_admin(user):
         raise HTTPException(status_code=409, detail="Only an administrator may regroup a resolved incident")
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW" and not is_admin(user):

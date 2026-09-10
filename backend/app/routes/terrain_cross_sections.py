@@ -12,9 +12,19 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import get_current_user
+from ..deps import require_roles
+from ..roles import OPERATIONAL_ROLES
 
 router = APIRouter(prefix="/terrain-cross-sections", tags=["terrain-cross-sections"])
+
+# Every route on this router is operational-only, matching the client gate that
+# already exists on the page (web/src/App.tsx). Until the org model these six
+# routes carried NO role guard at all, and three of them are writes that
+# authorized nothing beyond being logged in: POST /projects inserted straight
+# into caltrans_projects, POST "" inserted a cross section, and PUT /{id}
+# rewrote one after checking only that the project was ACTIVE. A read-only
+# CALTRANS_VIEWER account would have been a writer on day one (design §4.5).
+CROSS_SECTION_ROLES = sorted(OPERATIONAL_ROLES)
 
 
 class ProjectCreateRequest(BaseModel):
@@ -262,7 +272,7 @@ def list_cross_section_projects(
     status_filter: Literal["ACTIVE", "INACTIVE", "ARCHIVED", "ALL"] = Query(default="ACTIVE", alias="status"),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_roles(CROSS_SECTION_ROLES)),
 ):
     where = []
     params: dict[str, Any] = {"limit": limit}
@@ -304,7 +314,7 @@ def list_cross_section_projects(
 def create_manual_cross_section_project(
     payload: ProjectCreateRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_roles(CROSS_SECTION_ROLES)),
 ):
     project_key = str(uuid.uuid4())
     result = db.execute(
@@ -338,7 +348,7 @@ def create_manual_cross_section_project(
 def list_project_cross_sections(
     project_id: int,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_roles(CROSS_SECTION_ROLES)),
 ):
     project = _project_row(db, project_id)
     if not project:
@@ -373,7 +383,7 @@ def list_project_cross_sections(
 def get_cross_section(
     cross_section_id: int,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_roles(CROSS_SECTION_ROLES)),
 ):
     row = _cross_section_row(db, cross_section_id)
     if not row:
@@ -385,7 +395,7 @@ def get_cross_section(
 def create_cross_section(
     payload: CrossSectionSaveRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(require_roles(CROSS_SECTION_ROLES)),
 ):
     project = _project_row(db, payload.project_id)
     if not project or project["status"] != "ACTIVE":
@@ -430,7 +440,7 @@ def update_cross_section(
     cross_section_id: int,
     payload: CrossSectionUpdateRequest,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_roles(CROSS_SECTION_ROLES)),
 ):
     existing = _cross_section_row(db, cross_section_id)
     if not existing:

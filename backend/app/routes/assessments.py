@@ -36,6 +36,7 @@ from ..db import get_db
 from ..deps import get_current_user, require_roles
 from ..roles import (
     ADMIN,
+    CALTRANS_VIEWER,
     GEOTECH_BRANCH_CHIEF,
     GEOTECH_OFFICE_CHIEF,
     GISA_AUTHOR_ROLES,
@@ -47,6 +48,7 @@ from ..roles import (
     is_admin,
     is_maintenance_only,
     is_operational_user,
+    is_public_only,
 )
 from ..schemas.common import (
     AssessmentAssignEngineerRequest,
@@ -60,7 +62,8 @@ from ..schemas.common import (
     IncidentTriageRequest,
 )
 from ..services import notifications as notifications_svc
-from ..services import office_routing
+from ..services import org_directory
+from ..services import public_visibility
 from ..services import workflow_tree as workflow_tree_svc
 from ..user_metadata import normalize_office_code
 from . import incidents as incidents_routes
@@ -81,6 +84,12 @@ ASSESSMENT_AUTHOR_ROLES = GISA_AUTHOR_ROLES
 # membership as the old ASSIGN_REVIEWER_ROLES.
 ASSIGN_CONSULTED_ROLES = expand_roles(GEOTECH_OFFICE_CHIEF, GEOTECH_BRANCH_CHIEF) + [ADMIN]
 OPERATIONAL_READ_ROLES = sorted(OPERATIONAL_ROLES)
+# The three assessment READS a viewer may reach. CALTRANS_VIEWER is deliberately
+# NOT in OPERATIONAL_ROLES (it is state-blind, design §4.1), so the public list is
+# a separate guard and every handler behind it applies scope_public /
+# ensure_public_assessment. The option endpoints and every write keep
+# OPERATIONAL_READ_ROLES and the role lists they already have.
+PUBLIC_READ_ROLES = sorted(set(OPERATIONAL_READ_ROLES) | {CALTRANS_VIEWER})
 
 ASSESSMENT_STATES = {
     "PENDING_OFFICE_DELEGATION",
@@ -132,7 +141,13 @@ def _review_owner(row: dict) -> dict | None:
     return None
 
 
-def _serialize_assessment(row: dict, submission_ids: list[int] | None = None, *, user: dict | None = None) -> dict:
+def _serialize_assessment(
+    row: dict,
+    submission_ids: list[int] | None = None,
+    *,
+    user: dict | None = None,
+    db: Session | None = None,
+) -> dict:
     """Serialize an assessment row.
 
     ``submission_id`` stays the latest/primary technical submission for backward
@@ -158,7 +173,10 @@ def _serialize_assessment(row: dict, submission_ids: list[int] | None = None, *,
         assigned_user_kind = (
             "SENIOR_ENGINEER" if routing_path == ROUTE_SENIOR_ENGINEER else "STAFF"
         )
-    can_review = bool(user) and _review_authority(None, row, user)[0] and row["state"] == "SUBMITTED"
+    # ``db`` is passed wherever the caller has one so the can_review HINT is
+    # computed from the same org record the endpoint's own authority check uses;
+    # without it the caller's office falls back to the metadata mirror.
+    can_review = bool(user) and _review_authority(db, row, user)[0] and row["state"] == "SUBMITTED"
     return {
         "id": int(row["id"]),
         "assessment_uuid": row["assessment_uuid"],
@@ -168,6 +186,16 @@ def _serialize_assessment(row: dict, submission_ids: list[int] | None = None, *,
         "district": row.get("district"),
         "office_code": row.get("office_code"),
         "office_override_reason": row.get("office_override_reason"),
+        # The routing SNAPSHOT: the office and branch NAME as they read when this
+        # assessment was routed. Clients render these and fall back to the live
+        # record only when they are NULL (a pre-migration row, or a branch route
+        # taken before the org model landed). A later rename or a retired branch
+        # therefore cannot rewrite what a historical record says (design §3.5).
+        "routed_office_id": int(row["routed_office_id"]) if row.get("routed_office_id") is not None else None,
+        "routed_office_name": row.get("routed_office_name"),
+        "routed_branch_id": int(row["routed_branch_id"]) if row.get("routed_branch_id") is not None else None,
+        "routed_branch_name": row.get("routed_branch_name"),
+        "routed_branch_letter": row.get("routed_branch_letter"),
         "routing_path": routing_path,
         "branch_chief_user_id": int(row["branch_chief_user_id"]) if row.get("branch_chief_user_id") is not None else None,
         "assigned_engineer_user_id": assigned_user_id,
@@ -208,6 +236,8 @@ _ASSESSMENT_COLUMNS = """
   a.assigned_engineer_user_id, a.state, a.triage_disposition, a.notes,
   a.created_by_user_id, a.office_delegated_at, a.engineer_assigned_at,
   a.submitted_at, a.review_requested_at, a.approved_at, a.finalized_at,
+  a.routed_office_id, a.routed_office_name,
+  a.routed_branch_id, a.routed_branch_name, a.routed_branch_letter,
   a.created_at, a.updated_at
 """
 
@@ -264,7 +294,7 @@ def _assessment_payload(db: Session, assessment_id: int, user: dict | None = Non
     assessment = _get_assessment(db, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    return _serialize_assessment(assessment, _submission_ids_for(db, assessment), user=user)
+    return _serialize_assessment(assessment, _submission_ids_for(db, assessment), user=user, db=db)
 
 
 def _link_assessment_submission(db: Session, *, assessment_id: int, submission_id: int, actor_user_id: int) -> None:
@@ -417,9 +447,10 @@ def _review_authority(db: Session | None, assessment: dict, user: dict) -> tuple
     SENIOR_ENGINEER_ASSIGNED event.
 
     Returns ``(allowed, reason)``; the reason is the 403 body and the serialized
-    hint, so the two can never drift apart. ``db`` is accepted (and unused) so
-    the signature reads like the other assessment helpers and a future rule that
-    needs a query does not force every call site to change.
+    hint, so the two can never drift apart. ``db`` is now USED — it resolves the
+    caller's office from the org record — and stays optional: with ``None`` the
+    caller's office comes from the org record already resolved on this request,
+    or from the ``metadata_json`` mirror.
     """
     if is_admin(user):
         return True, "Admin"
@@ -433,7 +464,11 @@ def _review_authority(db: Session | None, assessment: dict, user: dict) -> tuple
         )
         return allowed, "Only the branch chief this assessment was handed to can review it"
     if routing_path == ROUTE_SENIOR_ENGINEER:
-        user_office = normalize_office_code((user.get("metadata") or {}).get("office_code"))
+        # The caller's office comes from the org record (org_user_profiles, with
+        # users.metadata_json as the mirror fallback) — the ONLY change routing v2
+        # authority takes from the org model. ``db`` is None on the serializer
+        # path, where the request user's already-resolved org record answers.
+        user_office = incidents_routes._caller_office_code(user, db)
         assessment_office = normalize_office_code(assessment.get("office_code"))
         # Explicit falsy guard on BOTH offices, not a chained `!= ''`:
         # normalize_office_code returns None (never '') for blank input, so
@@ -462,7 +497,7 @@ def assessment_routing_preview(
 ):
     """Coordinator-facing preview of the destination GeoTech office for a
     district, so the calculated routing is visible before triage."""
-    return office_routing.routing_preview(db, district)
+    return org_directory.routing_preview(db, district)
 
 
 # ---------------------------------------------------------------------------
@@ -480,7 +515,7 @@ def triage_incident(
     incident = incidents_routes._incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    incidents_routes._ensure_incident_district_access(user, incident.get("district"))
+    incidents_routes._ensure_incident_district_access(user, incident.get("district"), db=db)
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be triaged")
     # Triage is the single coordinator decision point: only allowed while the
@@ -614,8 +649,10 @@ def _triage_assessment_required(
 
     # Resolve destination office: configurable routing, with optional audited
     # override (coordinator/admin only, which the guard already enforces).
-    resolved = office_routing.routing_preview(db, district)
+    resolved = org_directory.routing_preview(db, district)
     office_code = resolved.get("office_code")
+    office_id = resolved.get("office_id")
+    office_name = resolved.get("office_name")
     override_reason = None
     if payload.office_code_override:
         override = normalize_office_code(payload.office_code_override)
@@ -625,6 +662,12 @@ def _triage_assessment_required(
             raise HTTPException(status_code=400, detail="override_reason is required when overriding routing")
         office_code = override
         override_reason = payload.override_reason.strip()
+        # The snapshot follows the OVERRIDE, not the calculated office. An
+        # override that names an office ERIS does not know still routes on the
+        # code, exactly as before; it simply has no name to freeze.
+        override_office = org_directory.office_by_code(db, override)
+        office_id = override_office["id"] if override_office else None
+        office_name = override_office.get("name") if override_office else None
 
     if not office_code:
         raise HTTPException(
@@ -642,11 +685,13 @@ def _triage_assessment_required(
                 INSERT INTO assessments (
                   assessment_uuid, incident_id, district, office_code,
                   office_routed_from_district, office_override_reason,
+                  routed_office_id, routed_office_name,
                   state, triage_disposition, notes, created_by_user_id,
                   office_delegated_at
                 ) VALUES (
                   :uuid, :iid, :district, :office_code,
                   :routed_from, :override_reason,
+                  :office_id, :office_name,
                   'PENDING_OFFICE_DELEGATION', 'ASSESSMENT_REQUIRED', :notes, :actor,
                   NULL
                 )
@@ -659,6 +704,9 @@ def _triage_assessment_required(
                 "office_code": office_code,
                 "routed_from": resolved.get("district"),
                 "override_reason": override_reason,
+                # Frozen HERE, at the moment of routing, and never recomputed.
+                "office_id": office_id,
+                "office_name": office_name,
                 "notes": notes,
                 "actor": actor_id,
             },
@@ -672,13 +720,23 @@ def _triage_assessment_required(
                 UPDATE assessments
                 SET office_code = :office_code,
                     office_override_reason = COALESCE(:override_reason, office_override_reason),
+                    routed_office_id = :office_id,
+                    routed_office_name = :office_name,
                     triage_disposition = 'ASSESSMENT_REQUIRED',
                     state = CASE WHEN state = 'PENDING_OFFICE_DELEGATION' THEN state ELSE state END,
                     updated_at = NOW()
                 WHERE id = :aid
                 """
             ),
-            {"office_code": office_code, "override_reason": override_reason, "aid": assessment_id},
+            {
+                "office_code": office_code,
+                "override_reason": override_reason,
+                # Re-triage re-routes, so the snapshot moves WITH office_code —
+                # the pair must never disagree about where this work went.
+                "office_id": office_id,
+                "office_name": office_name,
+                "aid": assessment_id,
+            },
         )
 
     # Keep the legacy incident stage machine in sync: route to office chief.
@@ -896,14 +954,17 @@ def list_assessments(
     queue: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(OPERATIONAL_READ_ROLES)),
+    user=Depends(require_roles(PUBLIC_READ_ROLES)),
 ):
-    """Broad read for non-maintenance operational users.
+    """Broad read for non-maintenance operational users, plus the public record.
 
     Optional ``queue`` narrows to the caller's work queue (design §5.5):
     ``office_chief`` | ``office_chief_review`` | ``branch_chief`` |
     ``branch_chief_review`` | ``assignee`` | ``engineer`` (alias of ``assignee``)
     | ``reviewer`` (a permanent per-path alias, see below).
+
+    A read-only viewer gets the same list narrowed to APPROVED/FINALIZED rows and
+    no queue at all (org model design §4.5).
     """
     # Defense in depth: maintenance-only users must never reach broad data even
     # if a future role mix slips past the guard.
@@ -912,6 +973,14 @@ def list_assessments(
 
     params: dict[str, object] = {"limit": limit}
     where: list[str] = []
+    # A viewer has no work anywhere, so every queue value is a 403-shaped
+    # request answered as a 400: the parameter is meaningless for this account,
+    # not forbidden for this record. 400 before the state filter so the message
+    # is the same whatever else was asked for.
+    if is_public_only(user):
+        if (queue or "").strip():
+            raise HTTPException(status_code=400, detail="Viewers have no work queue")
+        public_visibility.scope_public(user, where, params)
     if state:
         s = state.strip().upper()
         if s not in ASSESSMENT_STATES:
@@ -926,13 +995,13 @@ def list_assessments(
     if q == "office_chief":
         # To route: nothing has been chosen yet.
         where.append("a.state = 'PENDING_OFFICE_DELEGATION'")
-        _scope_office(user, where, params)
+        _scope_office(user, where, params, db=db)
     elif q == "office_chief_review":
         # To review, senior engineer route. STRICT office scoping: an office
         # chief with no office_code can review nothing (§4.1), so their queue
         # must be empty rather than every office's.
         where.append(f"a.state = 'SUBMITTED' AND a.routing_path = '{ROUTE_SENIOR_ENGINEER}'")
-        _scope_office(user, where, params, strict=True)
+        _scope_office(user, where, params, strict=True, db=db)
     elif q == "branch_chief":
         # To assign a Staff member. The old `OR branch_chief_user_id IS NULL`
         # clause is gone: a NULL branch chief now means the senior engineer
@@ -942,7 +1011,7 @@ def list_assessments(
         if not is_admin(user):
             where.append("a.branch_chief_user_id = :me")
             params["me"] = int(user["id"])
-        _scope_office(user, where, params)
+        _scope_office(user, where, params, db=db)
     elif q == "branch_chief_review":
         # To review, branch route. Identity already narrows it, so office
         # scoping stays permissive.
@@ -950,7 +1019,7 @@ def list_assessments(
         if not is_admin(user):
             where.append("a.branch_chief_user_id = :me")
             params["me"] = int(user["id"])
-        _scope_office(user, where, params)
+        _scope_office(user, where, params, db=db)
     elif q in ("assignee", "engineer"):
         # Everything assigned to me, on either route: both store the assignee in
         # assigned_engineer_user_id (§3.2). No state filter, no office scope —
@@ -967,7 +1036,7 @@ def list_assessments(
         if is_admin(user):
             where.append("a.state = 'SUBMITTED'")
         else:
-            my_office = normalize_office_code((user.get("metadata") or {}).get("office_code"))
+            my_office = incidents_routes._caller_office_code(user, db)
             senior_engineer_half = "0"
             if has_canonical_role(user, GEOTECH_OFFICE_CHIEF) and my_office:
                 # Strict on the senior engineer half: an unscoped chief matches nothing.
@@ -1002,11 +1071,13 @@ def list_assessments(
         primary = item.get("submission_id")
         if primary is not None and int(primary) not in ids:
             ids = [*ids, int(primary)]
-        serialized.append(_serialize_assessment(item, ids, user=user))
+        serialized.append(_serialize_assessment(item, ids, user=user, db=db))
     return {"items": serialized, "requested_by_user_id": int(user["id"])}
 
 
-def _scope_office(user: dict, where: list[str], params: dict, *, strict: bool = False) -> None:
+def _scope_office(
+    user: dict, where: list[str], params: dict, *, strict: bool = False, db: Session | None = None
+) -> None:
     """Optionally narrow office-scoped queues to the caller's office. Admins are
     not scoped.
 
@@ -1017,10 +1088,13 @@ def _scope_office(user: dict, where: list[str], params: dict, *, strict: bool = 
     ``strict=True`` is for the REVIEW queues (design §5.5). Review became
     office-scoped in v2, so a chief with no ``office_code`` can review nothing:
     their review queue must be empty (``1=0``), never every office's.
+
+    The office comes from the org record (``org_user_profiles`` first, the
+    ``metadata_json`` mirror second) when ``db`` is given.
     """
     if is_admin(user):
         return
-    office = normalize_office_code((user.get("metadata") or {}).get("office_code"))
+    office = incidents_routes._caller_office_code(user, db)
     if office:
         if strict:
             # An office-less assessment has no office chief to review it either.
@@ -1036,15 +1110,18 @@ def _scope_office(user: dict, where: list[str], params: dict, *, strict: bool = 
 def get_assessment(
     assessment_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(OPERATIONAL_READ_ROLES)),
+    user=Depends(require_roles(PUBLIC_READ_ROLES)),
 ):
     if is_maintenance_only(user):
         raise HTTPException(status_code=403, detail="Maintenance field workers cannot view assessments")
     assessment = _get_assessment(db, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
+    # 404 for a viewer on anything in flight — same answer as "no such id", so
+    # ids cannot be probed (design §4.3).
+    public_visibility.ensure_public_assessment(user, assessment)
     return {
-        "assessment": _serialize_assessment(assessment, _submission_ids_for(db, assessment), user=user),
+        "assessment": _serialize_assessment(assessment, _submission_ids_for(db, assessment), user=user, db=db),
         "assignments": _active_assignments(db, assessment_id),
         "events": _assessment_events(db, assessment_id, int(assessment["incident_id"])),
     }
@@ -1054,16 +1131,17 @@ def get_assessment(
 def get_assessment_for_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(OPERATIONAL_READ_ROLES)),
+    user=Depends(require_roles(PUBLIC_READ_ROLES)),
 ):
     if is_maintenance_only(user):
         raise HTTPException(status_code=403, detail="Maintenance field workers cannot view assessments")
     assessment = _get_assessment_for_incident(db, incident_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="No assessment for this incident")
+    public_visibility.ensure_public_assessment(user, assessment)
     assessment_id = int(assessment["id"])
     return {
-        "assessment": _serialize_assessment(assessment, _submission_ids_for(db, assessment), user=user),
+        "assessment": _serialize_assessment(assessment, _submission_ids_for(db, assessment), user=user, db=db),
         "assignments": _active_assignments(db, assessment_id),
         "events": _assessment_events(db, assessment_id, incident_id),
     }
@@ -1074,23 +1152,51 @@ def get_assessment_for_incident(
 # ---------------------------------------------------------------------------
 
 
+def _picker_office_payload(db: Session, office_code: str | None) -> dict | None:
+    """The office header a picker renders above its groups."""
+    office = org_directory.office_by_code(db, office_code)
+    if not office:
+        return None
+    return {
+        "id": office["id"],
+        "code": office["code"],
+        "name": office.get("name"),
+        "short_name": office.get("short_name"),
+        "unit_number": office.get("unit_number"),
+        "home_city": office.get("home_city"),
+        "home_district": office.get("home_district"),
+        "is_active": office["is_active"],
+    }
+
+
 @router.get("/assessments/{assessment_id}/branch-options")
 def assessment_branch_options(
     assessment_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     user=Depends(require_roles(OFFICE_CHIEF_ROLES)),
 ):
+    """The branch chiefs this office chief may hand the assessment to.
+
+    Grouped by branch, annotated with location and two workload counts, and
+    ordered by the office's own branch order — never by load. Nothing in this
+    payload names a default, a recommendation or a selection: the hand-off is a
+    deliberate human choice (owner decision 7, design §5).
+    """
     assessment = _get_assessment(db, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
     office_code = assessment.get("office_code")
-    incidents_routes._ensure_incident_office_access(user, office_code)
+    incidents_routes._ensure_incident_office_access(user, office_code, db=db)
+    people = incidents_routes._routing_user_options_for(
+        db=db, assignment_type="BRANCH_CHIEF", office_code=office_code
+    )
+    groups, items = incidents_routes._picker_payload_by_branch(db, people, office_code)
     return {
         "assessment_id": assessment_id,
         "office_code": office_code,
-        "items": incidents_routes._routing_user_options_for(
-            db=db, assignment_type="BRANCH_CHIEF", office_code=office_code
-        ),
+        "office": _picker_office_payload(db, office_code),
+        "groups": groups,
+        "items": items,
     }
 
 
@@ -1144,7 +1250,7 @@ def delegate_branch(
         )
 
     office_code = assessment.get("office_code")
-    incidents_routes._ensure_incident_office_access(user, office_code)
+    incidents_routes._ensure_incident_office_access(user, office_code, db=db)
     incident_id = int(assessment["incident_id"])
 
     allowed = set(
@@ -1163,6 +1269,17 @@ def delegate_branch(
     )
     to_state = "PENDING_ENGINEER_ASSIGNMENT" if first_handoff else assessment["state"]
 
+    # The BRANCH half of the routing snapshot: the branch this work was handed
+    # to, named as it reads today. Taken from the receiving chief's org record,
+    # so it is NULL until an admin records that chief's branch — which is exactly
+    # why the hand-off picker groups a branch-less chief under "Branch not
+    # recorded" instead of hiding them. Re-delegating to a chief in another
+    # branch re-stamps it; the assessment's branch is whoever currently owns it.
+    receiving_org = org_directory.resolve_user_org(db, int(payload.branch_chief_user_id))
+    branch_id = receiving_org.get("branch_id")
+    branch_name = receiving_org.get("branch_name")
+    branch_letter = receiving_org.get("branch_letter")
+
     try:
         notes = (payload.notes or "").strip() or None
         db.execute(
@@ -1171,6 +1288,9 @@ def delegate_branch(
                 UPDATE assessments
                 SET routing_path = 'BRANCH',
                     branch_chief_user_id = :bc,
+                    routed_branch_id = :branch_id,
+                    routed_branch_name = :branch_name,
+                    routed_branch_letter = :branch_letter,
                     state = CASE WHEN state = 'PENDING_OFFICE_DELEGATION'
                                  THEN 'PENDING_ENGINEER_ASSIGNMENT' ELSE state END,
                     office_delegated_at = NOW(),
@@ -1178,7 +1298,13 @@ def delegate_branch(
                 WHERE id = :aid
                 """
             ),
-            {"bc": int(payload.branch_chief_user_id), "aid": assessment_id},
+            {
+                "bc": int(payload.branch_chief_user_id),
+                "branch_id": branch_id,
+                "branch_name": branch_name,
+                "branch_letter": branch_letter,
+                "aid": assessment_id,
+            },
         )
         if first_handoff:
             # Keep legacy incident stage machine in sync. Only on the first
@@ -1222,6 +1348,8 @@ def delegate_branch(
                 "branch_chief_user_id": int(payload.branch_chief_user_id),
                 "previous_branch_chief_user_id": previous_branch_chief,
                 "routing_path": ROUTE_BRANCH,
+                "routed_branch_id": branch_id,
+                "routed_branch_name": branch_name,
             },
         )
         db.commit()
@@ -1248,6 +1376,8 @@ def _perform_engineer_assignment(
     notes: str | None,
     assignment_role: str = ROLE_ENGINEER,
     event_type: str = "ENGINEER_ASSIGNED",
+    out_of_branch: bool = False,
+    target_branch_id: int | None = None,
 ) -> int | None:
     """Assign (or reassign) the assessment's author.
 
@@ -1339,6 +1469,12 @@ def _perform_engineer_assignment(
         }
     else:
         event_metadata = {"engineer_user_id": engineer_user_id, "submission_id": linked_submission_id}
+        if out_of_branch:
+            # The record of a deliberate cross-branch assignment. `notes` is the
+            # reason the endpoint required; this flag is what makes it findable
+            # later without re-deriving anybody's branch from today's org data.
+            event_metadata["out_of_branch"] = True
+            event_metadata["assigned_branch_id"] = target_branch_id
     _record_event(
         db,
         incident_id=incident_id,
@@ -1385,7 +1521,56 @@ def assign_engineer(
                 detail="Only the branch chief this assessment was handed to can assign a Staff member",
             )
     office_code = assessment.get("office_code")
-    incidents_routes._ensure_incident_office_access(user, office_code)
+    incidents_routes._ensure_incident_office_access(user, office_code, db=db)
+
+    # The target check this endpoint never had. delegate_branch and
+    # assign_senior_engineer both validate that the person they name belongs to
+    # the assessment's office; assign_engineer validated state, route and the
+    # caller's identity, and then accepted ANY user id the database trigger would
+    # tolerate — including a Staff member in another office (design §5, §14.6).
+    #
+    # OFFICE: a hard refusal, matching its two siblings. A Staff member with NO
+    # recorded office is still allowed, because the Staff picker's permissive
+    # blank-office fallback survives one release (design §5) and refusing here
+    # would empty the picker in any deployment whose accounts predate the org
+    # model.
+    #
+    # BRANCH: allowed, with a reason. A chief covering a short-staffed branch is
+    # a real thing and the org model must not be the first place ERIS says no to
+    # it — but the choice is recorded on the ENGINEER_ASSIGNED event so it is
+    # visible afterwards. ``notes`` carries the reason; there is no new request
+    # field, so no client has to change to keep working.
+    notes = (payload.notes or "").strip() or None
+    target_org = org_directory.resolve_user_org(db, int(payload.engineer_user_id))
+    target_office = normalize_office_code(target_org.get("office_code"))
+    assessment_office = normalize_office_code(office_code)
+    if target_office and assessment_office and target_office != assessment_office:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected Staff member belongs to another GeoTech office",
+        )
+    assessment_branch_id = (
+        int(assessment["routed_branch_id"]) if assessment.get("routed_branch_id") is not None else None
+    )
+    if assessment_branch_id is None:
+        # No branch was frozen at hand-off (an assessment routed before the org
+        # model, or a chief whose branch nobody has recorded): fall back to the
+        # caller's own branch, which is the branch they are assigning out of.
+        assessment_branch_id = org_directory.resolve_user_org(db, user).get("branch_id")
+    target_branch_id = target_org.get("branch_id")
+    out_of_branch = bool(
+        assessment_branch_id is not None
+        and target_branch_id is not None
+        and int(assessment_branch_id) != int(target_branch_id)
+    )
+    if out_of_branch and not notes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This Staff member is in another branch. Record why in notes to "
+                "assign them anyway."
+            ),
+        )
 
     try:
         _perform_engineer_assignment(
@@ -1393,7 +1578,9 @@ def assign_engineer(
             assessment=assessment,
             engineer_user_id=int(payload.engineer_user_id),
             actor_user_id=int(user["id"]),
-            notes=(payload.notes or "").strip() or None,
+            notes=notes,
+            out_of_branch=out_of_branch,
+            target_branch_id=target_branch_id,
         )
         db.commit()
         return {"assessment": _assessment_payload(db, assessment_id, user)}
@@ -1420,18 +1607,27 @@ def assessment_senior_engineer_options(
 
     The assessment-scoped twin of ``/assessments/{id}/branch-options``: the two
     together are the office chief's two-choice route step.
+
+    Same payload shape, but grouped by HOME CITY AND DISTRICT rather than by
+    branch: a ``(Spec)`` position reports to the office chief directly, has no
+    branch, and sits away from the office home city more often than not, so a
+    branch heading would be empty for every one of them (org model design §5).
     """
     assessment = _get_assessment(db, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
     office_code = assessment.get("office_code")
-    incidents_routes._ensure_incident_office_access(user, office_code)
+    incidents_routes._ensure_incident_office_access(user, office_code, db=db)
+    people = incidents_routes._routing_user_options_for(
+        db=db, assignment_type="SENIOR_ENGINEER", office_code=office_code
+    )
+    groups, items = incidents_routes._picker_payload_by_location(people)
     return {
         "assessment_id": assessment_id,
         "office_code": office_code,
-        "items": incidents_routes._routing_user_options_for(
-            db=db, assignment_type="SENIOR_ENGINEER", office_code=office_code
-        ),
+        "office": _picker_office_payload(db, office_code),
+        "groups": groups,
+        "items": items,
     }
 
 
@@ -1463,7 +1659,7 @@ def assign_senior_engineer(
         raise HTTPException(status_code=409, detail=f"Cannot assign a senior engineer from state {assessment['state']}")
 
     office_code = assessment.get("office_code")
-    incidents_routes._ensure_incident_office_access(user, office_code)
+    incidents_routes._ensure_incident_office_access(user, office_code, db=db)
     allowed = set(
         incidents_routes._routing_users_for(
             db=db, assignment_type="SENIOR_ENGINEER", office_code=office_code
@@ -1554,7 +1750,7 @@ def add_assignment(
             status_code=400,
             detail="Reviewer assignment was retired. Review authority follows the assessment's routing path.",
         )
-    incidents_routes._ensure_incident_office_access(user, assessment.get("office_code"))
+    incidents_routes._ensure_incident_office_access(user, assessment.get("office_code"), db=db)
 
     target = db.execute(
         text("SELECT id, is_active, metadata_json FROM users WHERE id = :uid LIMIT 1"),
@@ -1626,7 +1822,7 @@ def remove_assignment(
     assessment = _get_assessment(db, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    incidents_routes._ensure_incident_office_access(user, assessment.get("office_code"))
+    incidents_routes._ensure_incident_office_access(user, assessment.get("office_code"), db=db)
     # The refusal widens from ENGINEER to the assignee row on EITHER route: the
     # author's assignment is written by assign-engineer / assign-senior-engineer and
     # must be changed there, never detached here.
@@ -1971,56 +2167,24 @@ def _site_descriptor(row: dict | None) -> str | None:
     return label or None
 
 
-def _office_location(db: Session, office_code: str | None) -> str | None:
-    """The human-readable name of a GeoTech office, or None.
+def _routed_office_name(db: Session, assessment: dict, office_code: str | None) -> str | None:
+    """The office name for the approval notice — from the SNAPSHOT first.
 
-    ``office_location`` lives on the office's own staff (``users.metadata_json``,
-    which is what ``database/init/020_seed.sql`` writes) and, for offices with a
-    routing row, on ``geotech_office_routing.office_name``. Both are consulted so
-    the email can name the office even when only one of them is populated.
+    Replaces ``_office_location``, which found an office's display name by
+    scanning the profile text of its first active member
+    (``users.metadata_json.office_location``) and then the legacy
+    ``geotech_office_routing.office_name``. That answered "whatever some member's
+    profile happens to say today", and the notification is the one place a stale
+    or wrong office name becomes permanent, because the mail has already been
+    sent. It now reads ``assessments.routed_office_name`` — the name as it read
+    when the assessment was routed — and falls back to the live ``org_offices``
+    row only for a pre-migration assessment whose snapshot is NULL (design §3.5).
     """
-    code = normalize_office_code(office_code)
-    if not code:
-        return None
-    location = db.execute(
-        text(
-            """
-            SELECT JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.office_location')) AS office_location
-            FROM users
-            WHERE COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.office_code')), '') = :office_code
-              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.office_location')) IS NOT NULL
-            ORDER BY is_active DESC, id ASC
-            LIMIT 1
-            """
-        ),
-        {"office_code": code},
-    ).scalar()
-    if location:
-        return str(location)
-    try:
-        # SAVEPOINT, not a bare try/except: this runs INSIDE the approval
-        # transaction, so a failing statement would otherwise poison the session
-        # and the next statement would raise PendingRollbackError — turning a
-        # cosmetic lookup into a failed approval. Naming the office is optional;
-        # approving is not.
-        with db.begin_nested():
-            name = db.execute(
-                text(
-                    """
-                    SELECT office_name
-                    FROM geotech_office_routing
-                    WHERE office_code = :office_code AND office_name IS NOT NULL
-                    ORDER BY is_active DESC, district ASC
-                    LIMIT 1
-                    """
-                ),
-                {"office_code": code},
-            ).scalar()
-    except Exception:
-        # Table missing (pre-migration) or transient error: the office code alone
-        # still identifies the office in the message.
-        return None
-    return str(name) if name else None
+    snapshot = assessment.get("routed_office_name")
+    if snapshot:
+        return str(snapshot)
+    office = org_directory.office_by_code(db, office_code)
+    return office.get("name") if office else None
 
 
 def _approval_notification_payload(db: Session, assessment: dict, user: dict) -> dict:
@@ -2057,7 +2221,9 @@ def _approval_notification_payload(db: Session, assessment: dict, user: dict) ->
         "routing_path": assessment.get("routing_path"),
         "district": incident.get("district") or assessment.get("district"),
         "office_code": office_code,
-        "office_location": _office_location(db, office_code),
+        # Kept under its original key: the coordinator's rendered email and the
+        # stored payload of every notice already sent both read "office_location".
+        "office_location": _routed_office_name(db, assessment, office_code),
         "route_label": _site_descriptor(incident),
         "approved_by_user_id": int(user["id"]),
         "approved_by_name": user.get("full_name") or user.get("email"),

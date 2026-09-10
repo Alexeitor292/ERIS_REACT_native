@@ -11,6 +11,7 @@ from ..db import get_db
 from ..deps import require_roles
 from . import event_groups as event_group_routes
 from . import incidents as incidents_routes
+from ..services import org_directory
 
 router = APIRouter(tags=["incidents", "event-groups"])
 
@@ -89,7 +90,7 @@ def discard_provisional_incident(
         if int(incident["reporter_user_id"]) != int(user["id"]):
             raise HTTPException(status_code=403, detail="Only the reporter or Maintenance Coordinator may discard this provisional Incident")
     elif "ADMIN" not in roles:
-        incidents_routes._ensure_incident_district_access(user, incident.get("district"))
+        incidents_routes._ensure_incident_district_access(user, incident.get("district"), db=db)
 
     event_group_id = int(incident["event_group_id"]) if incident.get("event_group_id") is not None else None
 
@@ -144,7 +145,7 @@ def coordinator_approve_incident(
         raise HTTPException(status_code=404, detail="Incident not found")
     incident = dict(incident)
 
-    incidents_routes._ensure_incident_district_access(user, incident.get("district"))
+    incidents_routes._ensure_incident_district_access(user, incident.get("district"), db=db)
 
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved Incidents cannot be approved")
@@ -166,7 +167,7 @@ def coordinator_approve_incident(
         else None
     )
 
-    office_code = incident.get("office_code") or incidents_routes._office_for_district(incident.get("district"))
+    office_code = incident.get("office_code") or org_directory.office_for_district(db, incident.get("district"))
     office_chief_ids = incidents_routes._routing_users_for(
         db=db,
         assignment_type="OFFICE_CHIEF",

@@ -125,6 +125,85 @@ If there are no revisions after `0001_baseline`, this is a no-op.
 
 ---
 
+## Revision history after the baseline
+
+The head is **`20260911_org_model`**. The two most recent revisions are the ones
+with operational consequences:
+
+| Revision | Down-revision | What it does | Notes |
+|---|---|---|---|
+| `20260910_routing_v2` | `20260904_assessment_subs` | Routing v2: the `GEOTECH_SENIOR_ENGINEER` role row, `assessments.routing_path`, route-aware eligibility triggers, the email outbox columns on `incident_notifications` | Creates no new table. Its backfill **raises** if a non-terminal assessment cannot be given a reviewer. |
+| **`20260911_org_model`** | `20260910_routing_v2` | The organization model: seven `org_*` tables, the office/branch snapshot on `assessments`, the `CALTRANS_VIEWER` role row, and the backfill of `org_user_profiles` from `users.metadata_json` | **Read the pre-flight below before scheduling it.** Additive and idempotent apart from two foreign keys; the backfill can refuse to run; `downgrade()` un-grants every viewer. |
+
+`20260911_org_model` in detail:
+
+- **Creates** `org_offices`, `org_office_districts`, `org_branches`,
+  `org_branch_districts`, `org_user_profiles`, `org_coordinator_coverage` and
+  `org_classifications` (`CREATE TABLE IF NOT EXISTS` throughout).
+- **Seeds structure only** — 5 offices, 17 branches, 12 office-district rows
+  migrated from `geotech_office_routing`, 0 branch-district rows, 16
+  classification rules — keyed on stable natural tuples so a re-run is a no-op
+  **even after an admin has deactivated a seeded branch**. No person is seeded.
+- **Adds** `assessments.routed_office_id`, `routed_office_name`,
+  `routed_branch_id`, `routed_branch_name`, `routed_branch_letter`, the index
+  `idx_assessment_routed_office` and two foreign keys.
+- **Inserts** the `CALTRANS_VIEWER` role row (`ON DUPLICATE KEY`).
+- **Backfills** `org_user_profiles` from `users.metadata_json`, and **raises
+  `RuntimeError`** if any active user's `office_code` matches no office.
+
+The seed in `database/init/020_seed.sql` mirrors the structure for fresh installs
+and is guarded so it no-ops on a database that has not yet run the revision.
+`backend/tests/test_seed_shape_db.py` pins every count above;
+`backend/tests/test_migration_org_model.py` covers base→head, the idempotent
+re-run, the refusing backfill and the downgrade.
+
+---
+
+## Pre-flight for `20260911_org_model` (the org model)
+
+This revision is the only one that can **refuse to run**, and it does so on
+purpose. It gives every active user an `org_user_profiles` row backfilled from
+`users.metadata_json`, and `metadata_json.office_code` is free text today — the
+admin form is an `<input list=…>` over a datalist and `normalize_office_code`
+only trims and upcases, so `WEST GEOTECH` or `W` is a realistic stored value.
+Rather than guess what such a value meant and quietly misroute a chief's review
+queue, the migration aborts with a `RuntimeError` naming the accounts.
+
+Run this **before** `alembic upgrade head` to see the list first:
+
+```sql
+SELECT u.id, u.email,
+       UPPER(TRIM(JSON_VALUE(u.metadata_json,'$.office_code'))) AS office_code
+FROM users u
+WHERE u.is_active = 1
+  AND COALESCE(TRIM(JSON_VALUE(u.metadata_json,'$.office_code')),'') <> ''
+  AND UPPER(TRIM(JSON_VALUE(u.metadata_json,'$.office_code')))
+      NOT IN ('WEST','NORTH','SOUTH','POLICY','SUPPORT')
+ORDER BY office_code, u.id;
+```
+
+An empty result means the backfill will pass. Otherwise add the office
+(`INSERT INTO org_offices …`) or correct the accounts, then upgrade. After the
+upgrade, offices are maintained in the admin UI rather than in SQL — see
+[org-model.md](org-model.md).
+
+Two more things worth knowing before you schedule the window:
+
+- **The two `assessments` foreign keys are not a no-op on re-run.** MariaDB has
+  no `ADD CONSTRAINT IF NOT EXISTS`, so `fk_assessment_routed_office` and
+  `fk_assessment_routed_branch` are each a `DROP CONSTRAINT IF EXISTS` + `ADD`
+  pair — the routing-v2 convention — which takes a metadata lock on a large, hot
+  table. Every other statement in the revision is free to repeat at any time.
+- **`downgrade()` un-grants every viewer.** It deletes the `CALTRANS_VIEWER`
+  role row, and `user_roles` rows follow by `ON DELETE CASCADE`. That is real
+  data loss for every viewer account an admin created, and a later `upgrade`
+  does not restore them. It also discards every office, branch, membership,
+  classification and coverage row entered since, plus the office/branch
+  snapshots on `assessments`; `assessments.office_code` is untouched, so routing
+  and review authority survive a downgrade.
+
+---
+
 ## Proxmox procedure
 
 ```bash

@@ -11,7 +11,14 @@ Source files:
 ## Public/Auth
 
 - `POST /auth/login`
-- `GET /auth/me`
+- `GET /auth/me` — own identity, plus an **`org` block** resolved by
+  `org_directory.resolve_user_org`: `office_id`, `office_code`, `office_name`,
+  `office_short_name`, `office_unit_number`, `office_is_active`, `branch_id`,
+  `branch_letter`, `branch_name`, `branch_is_active`, `home_city`,
+  `home_district`, `classification_code`, `classification_marker`,
+  `position_number`, `job_title`, `level_code`, `availability`,
+  `available_from`, `available_until`. The legacy `metadata` block stays beside
+  it, unchanged, as the mirror.
 - `GET /health`
 
 ## GISA Lookups
@@ -25,6 +32,73 @@ Source files:
   — the literal list does not consult `OPERATIONAL_ROLES`, so
   `GEOTECH_SENIOR_ENGINEER` is enumerated by hand; without it a
   senior-engineer-only account cannot load the map or the 3D terrain.
+
+## Organization APIs
+
+- `GET /org/offices` (any authenticated account, viewer included) — offices and
+  their branches for **labels only**: no personnel, no counts.
+- `GET /org/districts/{district}/office` — table-backed resolution with a
+  `source` of `routing_table` | `legacy_fallback` | `none`.
+
+The district→office map is `org_office_districts`. It used to live in three
+places: `incidents.OFFICE_BY_DISTRICT` (deleted, with `_office_for_district` and
+the four call sites that bypassed the service), the constant in
+`services/office_routing.py` (now re-exported from `org_directory` and reached
+only as the fallback that makes the upgrade safe before the seed is re-run), and
+the `0008` seed. `services/org_directory` is the **only** writer of
+`geotech_office_routing`, which it mirrors for one release so a rollback still
+routes correctly; a later revision drops that table.
+
+### Assignment pickers — grouped, annotated, never preselected
+
+`GET /assessments/{id}/branch-options`,
+`GET /assessments/{id}/senior-engineer-options` and
+`GET /admin/assessment-assignment-options/{id}?kind=ENGINEER` return
+`{..., groups[], items[]}` with a shared item shape. Grouping is by **branch**
+for the hand-off picker, by **home city and district** for senior engineers
+(a `(Spec)` position has no branch), and by branch with the **caller's own branch
+first** for Staff.
+
+Each item carries `id`, `full_name`, `email`, `office_code`, `office_name`,
+`branch_id`, `branch_letter`, `branch_name`, `home_city`, `home_district`,
+`group_key`, `availability`, `available_from`, `available_until`, and two counts:
+`open_assessment_count` (every non-terminal assessment they own as branch chief
+or assignee) and `awaiting_action_count` (the subset whose next action is
+theirs). Rendered as "4 open · 2 waiting on them".
+
+Contractual, and asserted by `tests/test_pickers_db.py`:
+
+- items are ordered by group, then by name — **never by load**;
+- no response carries a default, a `selected` flag or a recommendation;
+- groups come from the office's branch **rows**, so an empty branch still
+  appears; a branch deactivated since someone was placed in it is appended, never
+  dropped; a NULL-branch chief lands in a trailing `UNASSIGNED` group labelled
+  "Branch not recorded";
+- `accepts_assignments = 0` is returned **with the flag**, not omitted, so the
+  client can disable the branch with its reason;
+- `availability` is returned for rendering and is **never** used to filter or
+  reorder.
+
+## Read-only Viewer (`CALTRANS_VIEWER`)
+
+A third role category, deliberately outside `OPERATIONAL_ROLES` (that set is
+state-blind and would hand a viewer every DRAFT). An account whose ONLY role is
+`CALTRANS_VIEWER` reads the **approved record** — an assessment in `APPROVED` or
+`FINALIZED`, statewide, whole: incident, assessment, technical form, photos,
+site, history — and nothing else. A non-public record answers **404, not 403**,
+so ids cannot be probed; `/assessments?queue=` answers
+`400 "Viewers have no work queue"`. Every route carries `require_roles`,
+`deny_public_only`, or an entry in
+`services/public_visibility.VIEWER_READABLE_ROUTES` naming the in-body
+predicate; `tests/test_route_guards.py` walks the live route table to keep that
+true. A chief who ALSO holds `CALTRANS_VIEWER` keeps full chief access.
+
+## Terrain Cross Sections (`/terrain-cross-sections/*`)
+
+All six routes require an operational role (`require_roles(OPERATIONAL_ROLES)`),
+matching the client gate on that page. Three of them — `POST /projects`,
+`POST ""` and `PUT /{cross_section_id}` — previously authorized nothing beyond
+being logged in.
 
 ## Submission APIs
 
@@ -89,6 +163,33 @@ fill the form and unblocks accounts holding only the canonical
   `400 "kind=REVIEWER was retired; use CONSULTED"` — it stays in the query
   pattern on purpose, because dropping it would make FastAPI answer a bare `422`
   before the handler could explain.
+- `GET /admin/users/{user_id}/org` **(new)** — the membership record plus a
+  `role_suggestion` derived from the stored `org_classifications` rules
+- `PUT /admin/users/{user_id}/org` **(new)** — office, branch, classification,
+  location and availability as a **per-field merge** (omitted fields untouched).
+  Writes `org_user_profiles` and re-renders the `users.metadata_json` mirror in
+  one transaction, and **never writes `user_roles`**: the classification rules
+  produce a suggestion the admin acts on, not a grant.
+- `GET /admin/org/offices` · `POST /admin/org/offices` ·
+  `PATCH /admin/org/offices/{id}` · `POST /admin/org/offices/{id}/deactivate` ·
+  `PUT /admin/org/offices/{id}/districts` **(new)** — `PATCH` answers `422` for a
+  `code` field (the code is immutable: assessments and incidents join on it), the
+  districts `PUT` answers `409` **naming** the office that already serves a
+  district, and deactivate is never a delete.
+- `GET /admin/org/branches` · `POST /admin/org/branches` ·
+  `PATCH /admin/org/branches/{id}` · `PUT /admin/org/branches/{id}/districts`
+  **(new)** — `409` on a duplicate active branch letter in one office; each
+  district row carries `source` (`CHART|INFERRED|ADMIN`).
+- `GET /admin/org/classifications` · `PUT /admin/org/classifications/{id}`
+  **(new)** — the classification → role rules as data (14 `CLASS` rows + 2
+  `PATTERN` rules), addressed by id because a `PATTERN` rule has no class code.
+- `GET /admin/org/coverage` · `POST /admin/org/coverage` ·
+  `DELETE /admin/org/coverage/{id}` **(new)** — coordinator coverage, with
+  `uncovered_districts`; the DELETE deactivates the row rather than removing it.
+- `PATCH /admin/users/{user_id}` — for the cutover release this still accepts
+  `metadata.office_code` / `metadata.district` and **writes through** to
+  `org_user_profiles` in the same transaction, answering `422` for a code that
+  resolves to no office.
 - `GET /admin/notifications/undelivered` — the EMAIL outbox backlog
   (`channel='EMAIL' AND delivered_at IS NULL`), with `delivery_attempts`,
   `last_error`, `last_attempt_at` and an `is_exhausted` flag for rows past
@@ -124,17 +225,27 @@ fill the form and unblocks accounts holding only the canonical
 - `POST /incidents/{incident_id}/attachments`
 - `GET /mission-center/incidents`
 
-Routing/admin for incident ownership:
+Routing/admin for incident ownership — **retired by the organization model**.
+All three answer `410 Gone` with
+`"Routing assignments moved to /admin/org/coverage in the organization model
+release"`. The table and its rows are kept as history; coordinator coverage is
+now `org_coordinator_coverage`, edited through `/admin/org/coverage`:
 
-- `GET /incidents/routing/assignments` (ADMIN)
-- `POST /incidents/routing/assignments` (ADMIN)
-- `DELETE /incidents/routing/assignments/{assignment_id}` (ADMIN)
+- `GET /incidents/routing/assignments` (ADMIN) — **410**
+- `POST /incidents/routing/assignments` (ADMIN) — **410**
+- `DELETE /incidents/routing/assignments/{assignment_id}` (ADMIN) — **410**
 
 ## Mobile-Scoped Filtering
 
-`/incidents` and `/mission-center/incidents` support `scope=mobile` and apply role-based filtering in backend:
+`/incidents` and `/mission-center/incidents` support `scope=mobile` and apply
+role-based filtering in backend. Every branch below now matches **canonical role
+names as well as legacy ones** (`roles.has_canonical_role`) — before the
+organization model, only the Staff/senior-engineer branch did, so an account
+holding just `MAINTENANCE_COORDINATOR`, `GEOTECH_OFFICE_CHIEF` or
+`GEOTECH_BRANCH_CHIEF` fell through to `1=0` and got an empty feed.
+`_ensure_incident_scope_access` had the same defect and the same fix:
 
-- `MAINT_COORDINATOR`: district-scoped incidents (from routing assignments)
+- `MAINT_COORDINATOR`: district-scoped incidents (from `org_coordinator_coverage`)
 - `OFFICE_CHIEF`: office incidents not at coordinator-review stage
 - `BRANCH_CHIEF`: office incidents at branch/`ENGINEER_ASSIGNED`/resolved stages
 - `FIELD_WORKER` / `GEOTECH_ENGINEER` / `GEOTECH_SENIOR_ENGINEER`: only
@@ -142,6 +253,8 @@ Routing/admin for incident ownership:
   senior engineer holds the same assignment row a Staff member would, so only
   the role guard in front of the `EXISTS` had to widen.
 - `MAINTENANCE`: incidents reported by user
+- `CALTRANS_VIEWER` (only role): no mobile surface — the mobile client shows a
+  read-only notice instead of a feed
 - `ADMIN`: unrestricted
 
 ## Dev API (only when `ENV=dev`)
@@ -182,7 +295,15 @@ an account role or an assignment row. See
   `400 "Selected user is not a senior engineer for this office"`.
 - `POST /assessments/{assessment_id}/assign-engineer` — **only the branch chief
   the assessment was handed to** (`branch_chief_user_id`), or admin: `403`
-  otherwise. `409` unless `routing_path='BRANCH'`.
+  otherwise. `409` unless `routing_path='BRANCH'`. The **target** is now
+  validated too, which it never was before the organization model:
+  `400 "Selected Staff member belongs to another GeoTech office"` (a hard refusal
+  matching its two siblings; a Staff member with no recorded office is still
+  allowed while the picker's blank-office fallback survives), and
+  `400 "This Staff member is in another branch. Record why in notes to assign
+  them anyway."` — out-of-branch is **allowed with a reason**, recorded on the
+  `ENGINEER_ASSIGNED` event as `out_of_branch`. No new request field: the reason
+  travels in the existing `notes`.
 - `POST /assessments/{assessment_id}/submissions` (the assignee — Staff member
   **or** senior engineer; creates a supplemental DRAFT technical submission pre-filled
   from the incident and attaches it via `assessment_submissions`)
@@ -221,6 +342,13 @@ Assessment payloads (`GET /assessments`, `GET /assessments/{id}`,
 Assignment rows carry `is_authority`, which is **always `false`**: historical
 `REVIEWER`/`APPROVER` rows are kept as audit history and render as *"Former
 reviewer — no approval authority."*
+
+They also carry the **routing snapshot** — `routed_office_id`,
+`routed_office_name`, `routed_branch_id`, `routed_branch_name`,
+`routed_branch_letter` — written at triage and at `delegate-branch`. Clients
+render the office and branch from these, never from a hard-coded map; the frozen
+names are what stop a later rename or a retired branch from rewriting an existing
+record.
 
 `GET /submissions/{submission_id}` additionally returns `context` (`incident_id`,
 `incident_title`, `event_group_id`, `assessment_id`, `assessment_state`,

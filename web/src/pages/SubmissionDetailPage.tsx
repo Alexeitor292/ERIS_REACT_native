@@ -55,7 +55,8 @@ import {
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
-import { isAssessmentAuthor } from "../utils/roleModel";
+import { isAssessmentAuthor, isPublicOnly } from "../utils/roleModel";
+import { AccessDeniedNotice } from "../auth/AccessDenied";
 
 const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
 const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
@@ -159,6 +160,12 @@ export default function SubmissionDetailPage() {
 
   const canvas = useSubmissionDashboardLayout();
 
+  // A read-only viewer reads the APPROVED record and nothing else. The server
+  // enforces that — it answers 404 for anything in flight, so ids cannot be
+  // probed — and this flag decides what the page LOOKS like: a read view with a
+  // banner saying so, rather than an editable form with every input disabled,
+  // and the refusal surface rather than a red toast (org model design §8).
+  const viewer = isPublicOnly(me?.roles);
   // Review authority follows the linked assessment's routing path, so it is
   // decided server-side and never re-derived from a role string here.
   const canReview = data?.submission.can_review === true || data?.context?.can_review === true;
@@ -1196,6 +1203,7 @@ export default function SubmissionDetailPage() {
           canEdit={canEdit}
           canDelete={canDeleteSubmission}
           assessmentLinked={assessmentLinked}
+          hideOperationalLinks={viewer}
           submitLabel={data?.submission.status === "REJECTED" ? "Resubmit for review" : "Submit for review"}
           onRefresh={load}
           onSaveDraft={saveDraft}
@@ -1222,9 +1230,27 @@ export default function SubmissionDetailPage() {
           </div>
         ) : null}
 
-        {err && <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{err}</div>}
+        {viewer && data ? (
+          <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
+            <b>Read-only record.</b> This technical form belongs to an approved assessment
+            {data.context?.assessment_id != null ? <> — <Link to={`/assessments/${data.context.assessment_id}`} className="font-medium text-[var(--brand)] hover:underline">assessment #{data.context.assessment_id}</Link></> : null}
+            . Nothing on this page can be changed.
+          </div>
+        ) : null}
+
+        {/* A viewer's failure is a refusal, not a fault: the server answers 404
+            for a record that is not part of the public record, and a red banner
+            reading "Not found" over an empty page explains nothing. */}
+        {err && viewer && !data ? (
+          <AccessDeniedNotice
+            title="This record is not available"
+            detail="Only approved records are published. This one is either still in progress or does not exist."
+          />
+        ) : err ? (
+          <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{err}</div>
+        ) : null}
         {invalid && <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">Invalid submission id.</div>}
-        {!invalid && !data && <div className="text-sm text-muted">{busy ? "Loading..." : "No data."}</div>}
+        {!invalid && !data && !err && <div className="text-sm text-muted">{busy ? "Loading..." : "No data."}</div>}
 
         {!invalid && data && (
           <>

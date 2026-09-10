@@ -238,10 +238,13 @@ def _generated_event_group_title(incident: dict) -> str:
     return f"Incident #{int(incident['id'])} Event Group" + (f" · {location}" if location else "")
 
 
-def _ensure_manage_scope(user: dict, incident_or_group: dict) -> None:
+def _ensure_manage_scope(user: dict, incident_or_group: dict, *, db: Session | None = None) -> None:
+    # ``db`` lets the district come from the caller's org profile (with
+    # users.metadata_json as the mirror fallback) rather than from the mirror
+    # alone — one resolver, one answer (services/org_directory).
     if is_admin(user):
         return
-    incidents_routes._ensure_incident_district_access(user, incident_or_group.get("district"))
+    incidents_routes._ensure_incident_district_access(user, incident_or_group.get("district"), db=db)
 
 
 def _create_event_group_for_incident(
@@ -373,7 +376,7 @@ def update_event_group(
     row = _event_group_row(db, event_group_id)
     if not row:
         raise HTTPException(status_code=404, detail="Event Group not found")
-    _ensure_manage_scope(user, dict(row))
+    _ensure_manage_scope(user, dict(row), db=db)
 
     sets: list[str] = []
     params: dict[str, object] = {"egid": event_group_id}
@@ -411,7 +414,7 @@ def incident_event_group_context(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
     event_group = None
     if incident.get("event_group_id") is not None:
         group_row = _event_group_row(db, int(incident["event_group_id"]))
@@ -437,7 +440,7 @@ def nearby_event_groups_for_incident(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
 
     lat = float(incident["latitude"])
     lon = float(incident["longitude"])
@@ -488,7 +491,7 @@ def associate_incident_event_group(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
     if str(incident["status"]).upper() == "RESOLVED" and not is_admin(user):
         raise HTTPException(status_code=409, detail="Only an administrator may regroup a resolved Incident")
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW" and not is_admin(user):

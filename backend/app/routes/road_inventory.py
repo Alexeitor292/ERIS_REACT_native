@@ -25,7 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import get_current_user, require_roles
+from ..deps import deny_public_only, require_roles
 from ..storage import ensure_bucket_exists, put_object_bytes, object_access_url
 from ..config import settings
 from ..services.road_inventory_parser import ParseError, parse_excel
@@ -174,7 +174,7 @@ def generate_package_route(
 @router.get("/package")
 def get_current_package_route(
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(deny_public_only),
 ):
     """Return the mobile package for the currently published dataset.
 
@@ -393,7 +393,7 @@ def rollback_version(
 @router.get("/manifest")
 def get_manifest(
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(deny_public_only),
 ):
     """Return the latest published dataset version metadata.
 
@@ -454,7 +454,7 @@ def lookup(
     postmile: float = Query(..., description="Postmile value"),
     district: str | None = Query(default=None, description="District code, e.g. '03'"),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(deny_public_only),
 ):
     """Return road segments matching county + route + postmile range.
 

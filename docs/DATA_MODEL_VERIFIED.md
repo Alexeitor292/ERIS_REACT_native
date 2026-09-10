@@ -9,6 +9,75 @@ Source: `database/init/010_schema.sql` (baseline) + Alembic migrations in
 - `roles`
 - `user_roles`
 
+## Organization Domain (`20260911_org_model`)
+
+Seven additive tables. They replace three hard-coded copies of the district→office
+map and the free-text `users.metadata_json.office_code`, and they are shaped so a
+maintenance chart lands later **without a schema change**.
+
+- `org_offices` — `code` (immutable after creation; assessments and incidents
+  join on it), `org_type` (`GEOTECH|MAINTENANCE`), `unit_number`, `name` (full
+  chart name), `short_name` (conversational form), `home_city`/`home_district`/
+  `home_location_label`, `is_routing_target`, `is_active`, `sort_order`.
+  `uk_org_office_code (org_type, code)` — the code is unique *within* an org
+  type, so a future maintenance office may reuse `WEST`.
+  `uk_org_office_id_type (id, org_type)` exists only to be the parent key of the
+  composite FK below.
+- `org_office_districts` — districts an office serves, as **rows, not JSON**:
+  `office_for_district` is on the incident-creation path and needs an index,
+  which `JSON_CONTAINS` is not. `active_district_key` is a **stored generated
+  column** (`IF(is_active = 1, CONCAT(org_type, ':', RTRIM(district)), NULL)`)
+  carrying "at most one active office **of a given org type** per district" —
+  MariaDB has no partial unique index, and `UNIQUE` ignores NULLs. `RTRIM` is
+  required: MariaDB refuses a bare `CHAR` inside any generated expression
+  (error 1901). `org_type` is denormalized here and held true by
+  `fk_org_office_districts_office (office_id, org_type)`, which is
+  `ON UPDATE RESTRICT` for the same 1901 rule.
+- `org_branches` — a branch, or later a maintenance `REGION`/`AREA`/`YARD`:
+  `office_id`, `parent_branch_id`, `unit_type`, `letter` (nullable), `name`,
+  home city/district, `chief_user_id`, `accepts_assignments`, `is_active`.
+  **Two** generated keys, not one: `active_key` enforces one active letter per
+  office; `active_unit_key` enforces one active letterless unit of a given name
+  under a given parent. A single key would make the second letterless yard in an
+  office un-insertable.
+- `org_branch_districts` — districts a branch covers, each row labelled `source`
+  (`CHART|INFERRED|ADMIN`). **Seeded empty for every office**: no chart states
+  branch-to-district coverage anywhere, and the `source` column is what keeps a
+  charted fact distinguishable from a later guess.
+- `org_user_profiles` — 1:1 with `users` (PK `user_id`), not columns on `users`:
+  `0001_baseline` forbids adding columns to `010_schema.sql`, `users` is the
+  authentication hot path, and the admin `PATCH` replaces `metadata_json`
+  **wholesale** on every save — org facts kept there would be silently
+  destroyed. Holds `office_id`, `branch_id`, home city/district,
+  `classification_code`, `classification_marker`, `position_number`, `job_title`,
+  `level_code`, `supervisor_user_id`, `availability`
+  (`AVAILABLE|ROTATION_OUT|ACTING_ELSEWHERE|UNAVAILABLE`) with
+  `available_from`/`available_until`, and `source` (`MANUAL|IDP` — Entra ID
+  populates the identity fields later and must leave `MANUAL` overrides alone).
+- `org_coordinator_coverage` — district → coordinator, many-to-many, with
+  `is_primary` for a deterministic first recipient. Replaces
+  `JSON_EXTRACT(metadata_json,'$.district')` in `_routing_users_for`.
+- `org_classifications` — the classification → role rules **as data**:
+  `rule_kind` (`CLASS|PATTERN`), `class_code`, `marker`, `title_pattern`,
+  `level_code`, `title`, `eris_role` (nullable — an undecided class is stored
+  with a note rather than guessed), `is_supervisor`, `priority`. Every part of
+  the natural key is `NOT NULL` with a `''` default so the seed upsert stays
+  deterministic and re-runnable.
+
+`users.metadata_json` is now a **mirror, never the source**.
+`services/org_directory.resolve_user_org` reads the profile row first and falls
+back to the mirror when there is no row **or** the row's `office_id IS NULL`; it
+applies **no `is_active` filter**, so deactivating an office cannot revoke review
+authority on work already routed to it. Both write paths
+(`PUT /admin/users/{id}/org` and the legacy `PATCH /admin/users/{id}`) write the
+profile and re-render the mirror in one transaction.
+
+`geotech_office_routing` survives one release as a **mirror with exactly one
+writer** (`services/org_directory`), so a rollback to the previous backend still
+routes correctly. It is dropped in the **follow-up** revision
+`20260912_drop_geotech_office_routing` — not in this release — whose only job is
+that drop.
+
 ## Submission Domain
 
 - `submissions`
@@ -27,7 +96,9 @@ Source: `database/init/010_schema.sql` (baseline) + Alembic migrations in
 - `incident_locations`
 - `incident_attachments`
 - `incident_assignments` (`assignment_stage`, `assignment_mode`, `is_active`)
-- `incident_routing_assignments`
+- `incident_routing_assignments` — **kept as history, no longer read.**
+  Coordinator coverage moved to `org_coordinator_coverage`; the three
+  `/incidents/routing/assignments` endpoints answer `410`. Nothing is dropped.
 - `incident_notifications` (now also the **email outbox**: `delivery_attempts INT
   NOT NULL DEFAULT 0`, `last_error VARCHAR(255) NULL`, `last_attempt_at DATETIME
   NULL`, and `idx_inc_notify_outbox (channel, delivered_at, last_attempt_at, id)`
@@ -47,6 +118,16 @@ Source: `database/init/010_schema.sql` (baseline) + Alembic migrations in
     `SENIOR_ENGINEER` row it names a senior engineer, not a Staff member. The
     column keeps its name because renaming it is destructive; the API exposes
     `assigned_user_id` / `assigned_user_kind` instead.
+  - **Routing snapshot** (`20260911_org_model`): `routed_office_id BIGINT NULL`,
+    `routed_office_name VARCHAR(160) NULL`, `routed_branch_id BIGINT NULL`,
+    `routed_branch_name VARCHAR(160) NULL`, `routed_branch_letter VARCHAR(4)
+    NULL`, with `idx_assessment_routed_office` and the two foreign keys
+    `fk_assessment_routed_office` / `fk_assessment_routed_branch`
+    (`ON DELETE SET NULL`). The **ids** are the live link; the **names** are
+    frozen at triage and at `delegate-branch` so a later rename, a moved district
+    or a retired branch cannot rewrite what an existing record says.
+    `office_code` is untouched and remains what routing and review authority key
+    on.
   - `state` — `APPROVED` is terminal. `FINALIZED` is legacy history and
     `trg_assessment_no_new_finalize` (BEFORE UPDATE, `FOLLOWS
     trg_assessment_engineer_elig_bu`) signals `45000` on any new transition into
@@ -122,6 +203,33 @@ work, via `app/roles.py` aliasing):
 - `MAINTENANCE_FIELD_WORKER`, `MAINTENANCE_COORDINATOR`, `GEOTECH_OFFICE_CHIEF`,
   `GEOTECH_BRANCH_CHIEF`, `GEOTECH_ENGINEER`
 - `GEOTECH_SENIOR_ENGINEER` — **new in routing v2, no legacy alias**
+- `CALTRANS_VIEWER` — **new in the organization model, no legacy alias.**
+  Read-only access to approved records; deliberately *not* in
+  `OPERATIONAL_ROLES`
+
+Seeded organization structure (`020_seed.sql`, guarded so it no-ops on a database
+that has not yet run `20260911_org_model`). **Structure only — no real person
+from any org chart is seeded anywhere**; a fictional demo roster is the separate,
+explicitly-flagged `backend/scripts/seed_demo_org_roster.py`:
+
+- **5 offices** — `WEST` (59-315, Oakland D04, districts 01/04/05), `NORTH`
+  (59-323, Sacramento/Translab, `home_district` NULL, districts 02/03/06/09/10),
+  `SOUTH` (59-324, Los Angeles D07, districts 07/08/11/12), `POLICY` (59-325) and
+  `SUPPORT` (59-316). POLICY and SUPPORT are seeded `is_routing_target = 0`:
+  POLICY is shaped inversely to the design offices and has no district list, and
+  SUPPORT has no chart at all.
+- **17 branches** — WEST 6 (A–D Oakland D04, E San Luis Obispo D05, F Eureka
+  D01), NORTH 4 (Districts Branch A–D, Sacramento/Translab), SOUTH 5 (A/D Los
+  Angeles D07, B San Diego D11, C Santa Ana D12, E San Bernardino D08 with
+  `accepts_assignments = 0` — proposed and unstaffed), POLICY 2.
+- **12 `org_office_districts` rows**, migrated from `geotech_office_routing`.
+- **0 `org_branch_districts` rows** — see above.
+- **16 `org_classifications` rules** — 14 `CLASS` + 2 `PATTERN`. Class 5758
+  (Research Data Specialist II) is seeded with `eris_role` **NULL** and a note:
+  one WEST Branch D position is mid-reclassification and the owner has not
+  decided.
+
+`backend/tests/test_seed_shape_db.py` pins every one of those counts.
 
 Seeded users (dev/bootstrap):
 
@@ -140,11 +248,15 @@ Seeded users (dev/bootstrap):
   `office_code` is not assignable.
 - `reviewer@local` (legacy `REVIEWER`; kept as the proof that the role keeps
   broad read)
+- `viewer@local` (`CALTRANS_VIEWER`) — **new.** The viewer-visibility suite needs
+  an account whose *only* role is the viewer, because `is_public_only` is what
+  narrows the reads and it is false the moment any operational role is also held.
 
 All seeded users currently use the same argon2 password hash in seed (password string used in development flow).
 
 > **After upgrading an existing database, re-run `020_seed.sql`.** Migration
 > `20260910_routing_v2` deliberately seeds only the `GEOTECH_SENIOR_ENGINEER`
-> *role row*, never users — the clean base→head CI job never loads the seed, so a
-> migration assuming seeded users would silently no-op there. The seed is
-> idempotent.
+> *role row*, and `20260911_org_model` seeds only the `CALTRANS_VIEWER` role row
+> plus the office/branch **structure** — never users. The clean base→head CI job
+> never loads the seed, so a migration assuming seeded users would silently
+> no-op there. The seed is idempotent.

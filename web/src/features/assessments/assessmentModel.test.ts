@@ -5,7 +5,11 @@ import {
   BRANCH_PIPELINE,
   SENIOR_ENGINEER_PIPELINE,
   UNROUTED_PIPELINE,
+  assessmentBranchName,
   assessmentEventLabel,
+  assessmentOfficeName,
+  assessmentOrgLine,
+  officeLabel,
   assessmentPermissions,
   assessmentSearchMatch,
   assessmentStateLabel,
@@ -149,6 +153,36 @@ test("state labels are route-aware and never print a raw code", () => {
   }
 });
 
+test("office and branch render from the routing snapshot, not from a hard-coded map", () => {
+  const snapshot = {
+    office_code: "WEST",
+    routed_office_name: "Office of Geotechnical Design West",
+    routed_branch_name: "Branch C",
+    routed_branch_letter: "C",
+  };
+  assert.equal(assessmentOfficeName(snapshot), "Office of Geotechnical Design West");
+  assert.equal(assessmentBranchName(snapshot), "Branch C");
+  assert.equal(assessmentOrgLine(snapshot), "Office of Geotechnical Design West · Branch C");
+
+  // A rename in admin cannot rewrite history: the snapshot wins over the lookup.
+  const renamed = () => "Office of Geotechnical Design Bay Area";
+  assert.equal(assessmentOfficeName(snapshot, renamed), "Office of Geotechnical Design West");
+
+  // A row routed before the org model has no snapshot, so the live directory answers…
+  const legacy = { office_code: "WEST", routed_office_name: null, routed_branch_name: null, routed_branch_letter: null };
+  assert.equal(assessmentOfficeName(legacy, renamed), "Office of Geotechnical Design Bay Area");
+  // …and with no directory either, the code is shown rather than a wrong name.
+  assert.equal(assessmentOfficeName(legacy), "Office WEST");
+  assert.equal(assessmentBranchName(legacy), null);
+  assert.equal(assessmentOrgLine(legacy), "Office WEST");
+
+  // A branch with a letter but no printed name still reads as a branch.
+  assert.equal(assessmentBranchName({ ...legacy, routed_branch_letter: "F" }), "Branch F");
+  assert.equal(officeLabel(null), "Office —");
+  assert.equal(officeLabel("SOUTH", () => null), "Office SOUTH");
+  assert.equal(officeLabel("SOUTH", () => "  "), "Office SOUTH");
+});
+
 test("assignment-role and event labels rename the role, not the code", () => {
   assert.equal(assignmentRoleLabel("ENGINEER"), "Staff");
   assert.equal(assignmentRoleLabel("SENIOR_ENGINEER"), "Senior Engineer");
@@ -167,7 +201,18 @@ test("waiting-on names the route's reviewer and the assignee, and is null only w
   assert.doesNotMatch(routing?.text ?? "", /assign the engineer directly/);
 
   assert.equal(waitingOn(baseAssessment, [])?.who, "Branch Chief");
-  assert.equal(waitingOn(seniorEngineerAssessment, [])?.who, "North GeoTech Office Chief");
+  // The office is named in the sentence, from the routing SNAPSHOT when there is
+  // one — never from a hard-coded office map, which no longer exists.
+  const seniorEngineerWait = waitingOn(seniorEngineerAssessment, []);
+  assert.equal(seniorEngineerWait?.who, "Office Chief");
+  assert.match(seniorEngineerWait?.text ?? "", /Office NORTH/);
+  const snapshotWait = waitingOn(
+    { ...seniorEngineerAssessment, routed_office_name: "Office of Geotechnical Design North" },
+    [],
+  );
+  assert.match(snapshotWait?.text ?? "", /Office of Geotechnical Design North/);
+  const lookupWait = waitingOn(seniorEngineerAssessment, [], (code) => (code === "NORTH" ? "North GeoTech Office" : null));
+  assert.match(lookupWait?.text ?? "", /North GeoTech Office/);
 
   const staff = { ...historicalReviewer, id: 1, user_id: 5, assignment_role: "ENGINEER" as const, full_name: "J. Ramos" };
   assert.equal(waitingOn({ ...baseAssessment, state: "DRAFT" }, [staff])?.who, "Staff · J. Ramos");

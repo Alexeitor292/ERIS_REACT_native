@@ -6,7 +6,12 @@ from sqlalchemy import text
 # Re-export the canonical role helpers so callers can use a single import.
 # `is_operational_user`/`is_maintenance_only` understand both the new canonical
 # role names and their legacy aliases (see app/roles.py).
-from .roles import is_maintenance_only, is_operational_user  # noqa: F401
+from .roles import (  # noqa: F401
+    is_maintenance_only,
+    is_operational_user,
+    is_public_only,
+    is_public_viewer,
+)
 
 def is_admin(user: dict) -> bool:
     return "ADMIN" in user.get("roles", [])

@@ -20,7 +20,9 @@ from .roles import (
     OPERATIONAL_ROLES,
     expand_roles,
 )
-from .user_metadata import normalize_office_code, parse_user_metadata, user_metadata_json
+from .routes import incidents as incidents_routes
+from .services import org_directory
+from .user_metadata import normalize_district_code, normalize_office_code, parse_user_metadata, user_metadata_json
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -155,6 +157,72 @@ def _role_predicate_params(roles: list[str] | set[str]) -> tuple[str, dict[str, 
 # -----------------------------
 # Assessment assignment directory
 # -----------------------------
+STAFF_PICKER_NO_OFFICE_GROUP_KEY = "NO_OFFICE"
+STAFF_PICKER_NO_OFFICE_GROUP_LABEL = "Office not recorded"
+
+
+def _staff_picker_groups(items: list[dict], *, caller_branch_id: int | None) -> list[dict]:
+    """Own branch first, then the rest of the office, then the office-less tail.
+
+    "Own branch" is the CALLER's branch — a branch chief covering another branch
+    still sees their own group first, which is what the ordering is for. Beyond
+    that first group nothing is ranked: the rest follow the office's branch order
+    and names are alphabetical inside each group. No item carries a default or a
+    recommendation (owner decision 7, design §5).
+
+    The trailing "Office not recorded" group is the permissive blank-office
+    fallback made VISIBLE rather than silent. It survives one release; removing
+    it on day one would empty this picker in any deployment whose accounts have
+    no recorded office.
+    """
+    ordinals: dict[str, tuple] = {}
+    labels: dict[str, dict] = {}
+    for item in items:
+        branch_id = item.get("branch_id")
+        if branch_id is not None:
+            group_key = incidents_routes._branch_group_key(int(branch_id))
+            is_own = caller_branch_id is not None and int(branch_id) == int(caller_branch_id)
+            sort_key = (
+                0 if is_own else 1,
+                item.get("_branch_sort_order") if item.get("_branch_sort_order") is not None else 0,
+                (item.get("branch_letter") or "~"),
+                (item.get("branch_name") or "~"),
+            )
+            label = item.get("branch_name") or f"Branch {item.get('branch_letter') or ''}".strip()
+            group = {
+                "group_key": group_key,
+                "label": label,
+                "branch_id": int(branch_id),
+                "branch_letter": item.get("branch_letter"),
+                "branch_name": item.get("branch_name"),
+                "is_own_branch": is_own,
+            }
+        elif item.get("office_code"):
+            group_key = incidents_routes.PICKER_UNASSIGNED_GROUP_KEY
+            sort_key = (2, 0, "", "")
+            group = {
+                "group_key": group_key,
+                "label": incidents_routes.PICKER_UNASSIGNED_GROUP_LABEL,
+                "branch_id": None,
+                "branch_letter": None,
+                "branch_name": incidents_routes.PICKER_UNASSIGNED_GROUP_LABEL,
+                "is_own_branch": False,
+            }
+        else:
+            group_key = STAFF_PICKER_NO_OFFICE_GROUP_KEY
+            sort_key = (3, 0, "", "")
+            group = {
+                "group_key": group_key,
+                "label": STAFF_PICKER_NO_OFFICE_GROUP_LABEL,
+                "branch_id": None,
+                "branch_letter": None,
+                "branch_name": None,
+                "is_own_branch": False,
+            }
+        item["group_key"] = group_key
+        ordinals.setdefault(group_key, sort_key)
+        labels.setdefault(group_key, group)
+    return [labels[key] for key in sorted(ordinals, key=lambda k: (ordinals[k], k))]
 @router.get("/assessment-assignment-options/{assessment_id}")
 def assessment_assignment_options(
     assessment_id: int = Path(..., ge=1),
@@ -184,7 +252,9 @@ def assessment_assignment_options(
     assessment_office = normalize_office_code(assessment.get("office_code"))
     user_roles = set(user.get("roles") or [])
     if ADMIN not in user_roles:
-        user_office = normalize_office_code((user.get("metadata") or {}).get("office_code"))
+        # The caller's office comes from the org record (org_user_profiles first,
+        # the users.metadata_json mirror second), like every other office check.
+        user_office = org_directory.user_office_code(db, user)
         if not user_office or (assessment_office and user_office != assessment_office):
             raise HTTPException(status_code=403, detail="Assessment is outside your assigned office")
 
@@ -201,12 +271,22 @@ def assessment_assignment_options(
     role_placeholders, params = _role_predicate_params(eligible_roles)
     params["office_code"] = assessment_office or ""
 
+    # The candidates' offices resolve the same way the caller's does: the org
+    # profile row first, the metadata mirror second (services/org_directory).
+    office_code_sql = org_directory.USER_OFFICE_CODE_SQL
+    # "Own branch" is the CALLER's branch, resolved server-side, so a chief
+    # covering another branch still gets a correct grouping (design §5).
+    caller_branch_id = org_directory.resolve_user_org(db, user).get("branch_id")
+
     office_filter = ""
     if kind == "ENGINEER" and assessment_office:
-        office_filter = """
+        # The permissive blank-office fallback stays for one release: removing it
+        # on day one would empty this picker in any deployment whose accounts have
+        # no recorded office (design §5).
+        office_filter = f"""
           AND (
-            COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
-            OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = ''
+            {office_code_sql} = :office_code
+            OR {office_code_sql} = ''
           )
         """
     elif kind == "SENIOR_ENGINEER":
@@ -216,11 +296,11 @@ def assessment_assignment_options(
         # guard rather than a blank-office fallback. ADMIN is exempt so the
         # picker keeps its admin escape hatch, matching the ENGINEER kind's
         # `| {ADMIN}` union.
-        office_filter = """
+        office_filter = f"""
           AND (
             (
               :office_code <> ''
-              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
+              AND {office_code_sql} = :office_code
             )
             OR r.name = 'ADMIN'
           )
@@ -229,42 +309,35 @@ def assessment_assignment_options(
     rows = db.execute(
         text(
             f"""
-            SELECT DISTINCT u.id, u.email, u.full_name, u.metadata_json
+            SELECT DISTINCT u.id
             FROM users u
             JOIN user_roles ur ON ur.user_id = u.id
             JOIN roles r ON r.id = ur.role_id
+            {org_directory.USER_ORG_JOIN_SQL}
             WHERE u.is_active = 1
               AND r.name IN ({role_placeholders})
               {office_filter}
-            ORDER BY
-              CASE
-                WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
-                THEN 0 ELSE 1
-              END,
-              u.full_name ASC,
-              u.id ASC
             """
         ),
         params,
-    ).mappings().all()
+    ).scalars().all()
 
-    items = []
-    for row in rows:
-        uid = int(row["id"])
-        items.append(
-            {
-                "id": uid,
-                "email": row["email"],
-                "full_name": row["full_name"],
-                "metadata": parse_user_metadata(row.get("metadata_json")),
-                "roles": _get_user_roles(db, uid),
-            }
-        )
+    # The org annotations — branch, location, availability and the two workload
+    # counts — come from the same helper the two assessment pickers use, so all
+    # three option endpoints answer with one contract (design §5).
+    people = incidents_routes._picker_people(db, [int(uid) for uid in rows])
+    groups = _staff_picker_groups(people, caller_branch_id=caller_branch_id)
+    order = {group["group_key"]: index for index, group in enumerate(groups)}
+    people.sort(key=lambda i: (order.get(i["group_key"], len(order)), (i.get("full_name") or "").lower(), i["id"]))
+    items = [{k: v for k, v in person.items() if not k.startswith("_")} for person in people]
+    for item in items:
+        item["roles"] = _get_user_roles(db, int(item["id"]))
 
     return {
         "assessment_id": assessment_id,
         "kind": kind,
         "office_code": assessment_office,
+        "groups": groups,
         "items": items,
     }
 
@@ -468,8 +541,40 @@ def update_user(
         fields["full_name"] = body.full_name
     if body.is_active is not None:
         fields["is_active"] = 1 if body.is_active else 0
+
+    # THE CUTOVER WRITE-THROUGH (design §3.2, §13.3). This endpoint still
+    # replaces the metadata blob WHOLESALE, and that blob is now the org record's
+    # MIRROR rather than its source. Readers resolve an office from
+    # org_user_profiles first and fall back to the mirror, so an account edited
+    # only here would keep working — but a chief MOVED between offices here alone
+    # would not actually move, because the profile row would still name the old
+    # one. That gap is exactly the "chief loses their queue" window, so for this
+    # release the legacy PATCH writes BOTH, in one transaction: the office code
+    # is resolved against org_offices (422 if it names no office — a code that
+    # resolves to nothing is never stored) and written to
+    # org_user_profiles.office_id / .home_district, and the mirror is re-rendered
+    # from the profile afterwards. The next release rejects these two fields with
+    # a 422 pointing at PUT /admin/users/{id}/org.
+    profile_fields: dict[str, object] = {}
     if body.metadata is not None:
-        fields["metadata_json"] = user_metadata_json(body.metadata.model_dump())
+        metadata = body.metadata.model_dump()
+        office_code = normalize_office_code(metadata.get("office_code"))
+        if office_code:
+            office = org_directory.office_by_code(db, office_code)
+            if not office:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No GeoTech office has the code {office_code}. Add the office in "
+                        "Administration > Organization, or set the office with "
+                        "PUT /admin/users/{id}/org."
+                    ),
+                )
+            profile_fields["office_id"] = office["id"]
+        else:
+            profile_fields["office_id"] = None
+        profile_fields["home_district"] = normalize_district_code(metadata.get("district"))
+        fields["metadata_json"] = user_metadata_json(metadata)
 
     if not fields:
         return _user_with_roles(db, user_id)
@@ -479,8 +584,28 @@ def update_user(
 
     try:
         db.execute(text(f"UPDATE users SET {sets} WHERE id = :id"), fields)
+        if profile_fields:
+            columns = ["user_id"] + list(profile_fields)
+            placeholders = ", ".join(f":{column}" for column in columns)
+            updates = ", ".join(f"{column} = VALUES({column})" for column in profile_fields)
+            db.execute(
+                text(
+                    f"""
+                    INSERT INTO org_user_profiles ({", ".join(columns)})
+                    VALUES ({placeholders})
+                    ON DUPLICATE KEY UPDATE {updates}, updated_at = NOW()
+                    """
+                ),
+                {"user_id": int(user_id), **profile_fields},
+            )
+            # Re-render the mirror FROM the profile, so the two cannot drift even
+            # when only one of them was edited.
+            org_directory.mirror_metadata_from_profile(db, int(user_id))
         db.commit()
         return _user_with_roles(db, user_id)
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception:
         db.rollback()
         raise

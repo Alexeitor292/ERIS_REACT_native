@@ -8,7 +8,14 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { clearToken, getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
-import { isOperationalUser } from "@/src/utils/roleModel";
+import {
+  canReportIncident,
+  hasRole,
+  isAdmin,
+  isAssessmentAuthor,
+  isOperationalUser,
+  isPublicOnly,
+} from "@/src/utils/roleModel";
 
 export default function TabLayout() {
   const { palette, scheme, componentScale } = useUiSettings();
@@ -43,28 +50,31 @@ export default function TabLayout() {
   }, []);
 
   const roleSet = useMemo(() => new Set(roles), [roles]);
-  const isMaintenanceWorker =
-    roleSet.has("MAINTENANCE") ||
-    roleSet.has("FIELD_WORKER") ||
-    roleSet.has("ADMIN");
+  // Every gate below tests CANONICAL names through the alias map. They used to
+  // test the raw legacy strings, so an account seeded by the organization model
+  // — which holds GEOTECH_ENGINEER, not FIELD_WORKER — would lose Create,
+  // Drafts and Submissions the moment org accounts land (design §9.3).
+  //
+  // A read-only (CALTRANS_VIEWER) account holds no operational role, so it
+  // matches none of these and keeps only the read-only incident feed below.
+  const publicOnly = rolesLoaded && isPublicOnly(roles);
+  const isMaintenanceWorker = canReportIncident(roles);
   // The senior engineer fills the GISA form exactly as Staff do, so without
   // these two gates a senior-engineer-only account would see the Assessments
   // tab and nothing it links to.
-  const canSeeDraftsSubmissions =
-    rolesLoaded &&
-    (roleSet.has("FIELD_WORKER") ||
-      roleSet.has("GEOTECH_SENIOR_ENGINEER") ||
-      roleSet.has("REVIEWER") ||
-      roleSet.has("ADMIN"));
+  const canSeeDraftsSubmissions = rolesLoaded && (isAssessmentAuthor(roles) || roleSet.has("REVIEWER"));
+  // No `!rolesLoaded ||` any more: defaulting to visible flashed the tab into
+  // view for an account that must not have it, then emptied it (design §9.1).
   const canSeeIncidents =
-    !rolesLoaded ||
-    roleSet.has("MAINTENANCE") ||
-    roleSet.has("MAINT_COORDINATOR") ||
-    roleSet.has("OFFICE_CHIEF") ||
-    roleSet.has("BRANCH_CHIEF") ||
-    roleSet.has("FIELD_WORKER") ||
-    roleSet.has("GEOTECH_SENIOR_ENGINEER") ||
-    roleSet.has("ADMIN");
+    rolesLoaded &&
+    (publicOnly ||
+      isAdmin(roles) ||
+      hasRole(roles, "MAINTENANCE_FIELD_WORKER") ||
+      hasRole(roles, "MAINTENANCE_COORDINATOR") ||
+      hasRole(roles, "GEOTECH_OFFICE_CHIEF") ||
+      hasRole(roles, "GEOTECH_BRANCH_CHIEF") ||
+      hasRole(roles, "GEOTECH_ENGINEER") ||
+      hasRole(roles, "GEOTECH_SENIOR_ENGINEER"));
   // Assessments are for non-maintenance operational users only.
   const canSeeAssessments = rolesLoaded && isOperationalUser(roles);
 

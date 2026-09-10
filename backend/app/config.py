@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     POSTMILE_WHERE: str = Field(default="1=1")
     POSTMILE_SEARCH_DISTANCE_METERS: int = Field(default=120)
 
+    # Public (CALTRANS_VIEWER) visibility. "Public" is an assessment in state
+    # APPROVED or FINALIZED — the whole record, statewide (org model design §4.2).
+    # Incidents closed at triage with NO assessment (NO_ASSESSMENT_REQUIRED,
+    # DUPLICATE_OR_LINKED) are NOT public by default; this flag exists so the
+    # alternative is a settings change rather than a code change (open question 4).
+    PUBLIC_INCLUDES_CLOSED_WITHOUT_ASSESSMENT: bool = Field(default=False)
+
     # ArcGIS runtime configuration (backend-managed, no DB persistence)
     ARCGIS_RUNTIME_ENABLED: bool = Field(default=False)
     ARCGIS_API_KEY: str | None = Field(default=None)

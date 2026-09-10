@@ -12,7 +12,7 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..services.photo_metadata_export import PhotoMetadataExportUnsupported, render_corrected_jpeg
 from ..storage import get_object_bytes
-from .photo_map import _can_view_submission, _effective_capture, _photo_belongs_to_submission, router
+from .photo_map import _effective_capture, _photo_belongs_to_submission, _require_photo_map_read, router
 
 
 def _safe_export_filename(file_name: str | None, attachment_id: int) -> str:
@@ -61,8 +61,7 @@ def export_photo_with_effective_metadata(
     history each time it is requested, so a second correction can never leave a
     stale permanent derivative behind.
     """
-    if not _can_view_submission(db, user=user, submission_id=submission_id):
-        raise HTTPException(status_code=403, detail="Not allowed to view this submission photo map")
+    _require_photo_map_read(db, user=user, submission_id=submission_id)
     if not _photo_belongs_to_submission(db, submission_id=submission_id, attachment_id=attachment_id):
         raise HTTPException(status_code=404, detail="Photo attachment not found in this submission")
 

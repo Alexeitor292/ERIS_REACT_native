@@ -21,6 +21,12 @@ Routing v2 adds one more, which has NO legacy equivalent because the role is new
     GEOTECH_SENIOR_ENGINEER   -- fills assessments the office chief assigns
                                  directly, and reports back to that office chief
 
+The organization model adds a THIRD CATEGORY, which is not an operational role
+and deliberately not a member of OPERATIONAL_ROLES:
+
+    CALTRANS_VIEWER   -- read-only access to APPROVED records, statewide, with
+                         no workflow action anywhere (org model design §4)
+
 We do NOT rename existing roles or remap existing user_roles rows (that would be
 a destructive migration). Instead, every canonical role aliases to its legacy
 equivalent, and authority checks accept either name. New deployments may assign
@@ -47,6 +53,7 @@ GEOTECH_OFFICE_CHIEF = "GEOTECH_OFFICE_CHIEF"
 GEOTECH_BRANCH_CHIEF = "GEOTECH_BRANCH_CHIEF"
 GEOTECH_ENGINEER = "GEOTECH_ENGINEER"
 GEOTECH_SENIOR_ENGINEER = "GEOTECH_SENIOR_ENGINEER"
+CALTRANS_VIEWER = "CALTRANS_VIEWER"
 ADMIN = "ADMIN"
 
 # Legacy role names (still present in seeds and existing databases)
@@ -68,6 +75,11 @@ ROLE_ALIASES: dict[str, set[str]] = {
     # inventing one would make expand_roles() accept a name no database
     # contains.
     GEOTECH_SENIOR_ENGINEER: {GEOTECH_SENIOR_ENGINEER},
+    # The viewer is new too, and for the same reason has no legacy alias. The
+    # legacy REVIEWER is NOT one: REVIEWER sits inside OPERATIONAL_ROLES so that
+    # existing accounts keep broad read, which means it reads drafts — the exact
+    # opposite of what a viewer must do (design §4).
+    CALTRANS_VIEWER: {CALTRANS_VIEWER},
     ADMIN: {ADMIN},
 }
 
@@ -85,6 +97,15 @@ OPERATIONAL_ROLES: set[str] = (
     | ROLE_ALIASES[GEOTECH_SENIOR_ENGINEER]
     | {LEGACY_REVIEWER, ADMIN}
 )
+
+# Read-only public visibility. A THIRD CATEGORY, deliberately outside
+# OPERATIONAL_ROLES: that set is a single flat switch guarding roughly twelve
+# endpoint families and it is STATE-BLIND — can_view_submission returns True for
+# any operational user and list_submissions returns DRAFT rows to them — so
+# adding CALTRANS_VIEWER there would hand every viewer every draft technical form
+# in the state (design §4.1). "Approved only" is expressed per handler by
+# services/public_visibility.py instead.
+PUBLIC_VIEW_ROLES: set[str] = {CALTRANS_VIEWER}
 
 
 def expand_roles(*canonical: str) -> list[str]:
@@ -138,3 +159,23 @@ def is_maintenance_only(user: dict) -> bool:
     if roles & OPERATIONAL_ROLES:
         return False
     return bool(roles & MAINTENANCE_REPORTING_ROLES)
+
+
+def is_public_viewer(user: dict) -> bool:
+    """True if the account holds the read-only Viewer role, alone or not."""
+    return bool(user_role_set(user) & PUBLIC_VIEW_ROLES)
+
+
+def is_public_only(user: dict) -> bool:
+    """True when Viewer is the account's ONLY role — the narrowing predicate.
+
+    Mirrors ``is_maintenance_only``. It answers the composition question
+    explicitly: a chief who is ALSO granted Viewer keeps full chief access,
+    because ``require_roles`` is a union and the most permissive role always
+    wins. Every public-visibility narrowing keys on this, never on
+    ``is_public_viewer`` (design §4.1).
+    """
+    roles = user_role_set(user)
+    if roles & OPERATIONAL_ROLES or roles & MAINTENANCE_REPORTING_ROLES:
+        return False
+    return bool(roles & PUBLIC_VIEW_ROLES)

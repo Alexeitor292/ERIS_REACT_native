@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { OrgAvailability, UserMetadata } from "./types";
 
 // ---------------------------------------------------------------------------
 // Assessment Routing & Authority Model — web API client
@@ -48,6 +49,18 @@ export type Assessment = {
   district: string | null;
   office_code: string | null;
   office_override_reason: string | null;
+  /**
+   * The routing SNAPSHOT: the office and branch as they read when this
+   * assessment was routed. Render these and fall back to the live record only
+   * when they are null (a row routed before the org model), so a later rename
+   * or a retired branch cannot rewrite what a historical record says
+   * (org model design §3.5).
+   */
+  routed_office_id: number | null;
+  routed_office_name: string | null;
+  routed_branch_id: number | null;
+  routed_branch_name: string | null;
+  routed_branch_letter: string | null;
   routing_path: RoutingPath | null;
   branch_chief_user_id: number | null;
   /** Both routes store the assignee here; `assigned_user_kind` says which kind. */
@@ -120,15 +133,90 @@ export type RoutingPreview = {
   source: "routing_table" | "legacy_fallback" | "none";
 };
 
+/**
+ * A picker heading: a branch, a home city + district, or one of the two named
+ * fallbacks ("Branch not recorded", "Office not recorded"). Groups come from
+ * the office's branch ROWS, not from the people present, so an empty branch
+ * still appears and a person can never point at a heading the client was not
+ * given.
+ */
+export type PickerGroup = {
+  group_key: string;
+  label: string;
+  branch_id: number | null;
+  branch_letter: string | null;
+  branch_name: string | null;
+  home_city?: string | null;
+  home_district?: string | null;
+  districts_covered?: string[];
+  /** False on a branch that exists on the chart but is not staffed yet — rendered disabled, never omitted. */
+  accepts_assignments?: boolean;
+  is_active?: boolean;
+  /** The Staff picker only: the caller's own branch, which sorts first. */
+  is_own_branch?: boolean;
+};
+
+/**
+ * One candidate. Everything here is ANNOTATION — where they sit, how much they
+ * are carrying, whether they are around. Nothing in this payload chooses:
+ * there is no `recommended`, no `default_user_id`, and the ordering is the
+ * office's own, never load (owner decision 7).
+ */
 export type RoutingUserOption = {
   id: number;
   email: string;
   full_name: string;
-  metadata: Record<string, unknown>;
+  /** The legacy three-key mirror, still on the wire for one release. */
+  metadata: UserMetadata;
+  group_key: string;
+  office_code: string | null;
+  office_name: string | null;
+  branch_id: number | null;
+  branch_letter: string | null;
+  branch_name: string | null;
+  home_city: string | null;
+  home_district: string | null;
+  /** Every non-terminal assessment this person owns. */
+  open_assessment_count: number;
+  /** The subset whose next action is theirs — "4 open · 2 waiting on them". */
+  awaiting_action_count: number;
+  /** Rendered beside the name; never used to filter or reorder (design §5). */
+  availability: OrgAvailability;
+  available_from: string | null;
+  available_until: string | null;
+  /** So a person whose branch was retired still renders its name. */
+  branch_is_active?: boolean | null;
 };
 
 export type AssignmentUserOption = RoutingUserOption & {
   roles: string[];
+};
+
+export type PickerOffice = {
+  id: number;
+  code: string;
+  name: string | null;
+  short_name: string | null;
+  unit_number: string | null;
+  home_city: string | null;
+  home_district: string | null;
+  is_active: boolean;
+};
+
+export type RoutingOptionsResponse = {
+  assessment_id: number;
+  office_code: string | null;
+  office?: PickerOffice | null;
+  groups: PickerGroup[];
+  items: RoutingUserOption[];
+};
+
+export type AssignmentOptionsResponse = {
+  assessment_id: number;
+  kind: string;
+  office_code: string | null;
+  groups: PickerGroup[];
+  items: AssignmentUserOption[];
 };
 
 export type AssessmentQueue =
@@ -172,8 +260,8 @@ export function routingPreview(district: string): Promise<RoutingPreview> {
 export function assessmentAssignmentOptions(
   assessmentId: number,
   kind: "ENGINEER" | "SENIOR_ENGINEER" | "CONSULTED"
-): Promise<{ assessment_id: number; kind: string; office_code: string | null; items: AssignmentUserOption[] }> {
-  return api(`/admin/assessment-assignment-options/${assessmentId}?kind=${encodeURIComponent(kind)}`);
+): Promise<AssignmentOptionsResponse> {
+  return api<AssignmentOptionsResponse>(`/admin/assessment-assignment-options/${assessmentId}?kind=${encodeURIComponent(kind)}`);
 }
 
 export function triageIncident(
@@ -191,17 +279,18 @@ export function triageIncident(
   return api(`/incidents/${incidentId}/triage`, { method: "POST", body: JSON.stringify(body) });
 }
 
-export function branchOptions(
-  assessmentId: number
-): Promise<{ assessment_id: number; office_code: string | null; items: RoutingUserOption[] }> {
-  return api(`/assessments/${assessmentId}/branch-options`);
+/** The branch chiefs of this assessment's office, grouped by branch. */
+export function branchOptions(assessmentId: number): Promise<RoutingOptionsResponse> {
+  return api<RoutingOptionsResponse>(`/assessments/${assessmentId}/branch-options`);
 }
 
-/** The senior engineers of this assessment's office (the second route's picker). */
-export function seniorEngineerOptions(
-  assessmentId: number
-): Promise<{ assessment_id: number; office_code: string | null; items: RoutingUserOption[] }> {
-  return api(`/assessments/${assessmentId}/senior-engineer-options`);
+/**
+ * The senior engineers of this assessment's office (the second route's picker).
+ * Grouped by home city and district rather than branch: a `(Spec)` position has
+ * no branch and sits away from the office home city more often than not.
+ */
+export function seniorEngineerOptions(assessmentId: number): Promise<RoutingOptionsResponse> {
+  return api<RoutingOptionsResponse>(`/assessments/${assessmentId}/senior-engineer-options`);
 }
 
 /**
