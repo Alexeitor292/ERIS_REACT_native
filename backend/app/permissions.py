@@ -12,6 +12,15 @@ def is_admin(user: dict) -> bool:
     return "ADMIN" in user.get("roles", [])
 
 def is_reviewer(user: dict) -> bool:
+    """DEPRECATED — holds the legacy REVIEWER account role, nothing more.
+
+    It is NOT review authority: routing v2 derives that from the assessment's
+    routing path (see routes/assessments._review_authority), and REVIEWER keeps
+    only broad operational READ. Every read shortcut that used to call this now
+    calls is_operational_user(), which already includes REVIEWER — so an office
+    chief reviewing on the senior engineer route has the same reach a legacy
+    REVIEWER has. New code must not call this function.
+    """
     return "REVIEWER" in user.get("roles", [])
 
 def is_field_worker(user: dict) -> bool:

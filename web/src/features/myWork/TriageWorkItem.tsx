@@ -12,7 +12,8 @@ import { IncidentTriageDialog, type TriageDialogState } from "../incidents/Incid
  * Coordinator intake: a field report that is not yet part of the incident record.
  * "Start triage" opens the two-step dialog (Event Group review with map → disposition).
  * Accepting with "Assessment required" mints the permanent incident key server-side
- * and routes a new assessment to the Office Chief.
+ * and opens a GeoTech assessment for the office chief to route — to a branch chief,
+ * or directly to a senior engineer.
  */
 export default function TriageWorkItem({
   incident,
@@ -37,7 +38,7 @@ export default function TriageWorkItem({
       setDialog(null);
       await onTriaged(
         result?.assessment
-          ? `Incident #${incident.id} accepted — assessment #${result.assessment.id} routed for office delegation.`
+          ? `Incident #${incident.id} accepted — assessment #${result.assessment.id} opened and awaiting routing by the office chief.`
           : `Triage recorded for incident #${incident.id}.`,
       );
     } catch (e) {
@@ -69,7 +70,7 @@ export default function TriageWorkItem({
           <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--brand)]">Next step</span>
           <span className="text-[15px] font-semibold">Waiting on Maintenance Coordinator</span>
         </div>
-        <p className="mt-1.5 text-sm">This report has not been accepted into ERIS yet. Review the Event Group context and record the triage disposition — "Assessment required" accepts it and routes a new assessment to the Office Chief.</p>
+        <p className="mt-1.5 text-sm">This report has not been accepted into ERIS yet. Review the Event Group context and record the triage disposition — "Assessment required" accepts it and opens a GeoTech assessment for the office chief, who hands it to a branch chief or assigns a senior engineer.</p>
         <button
           type="button"
           onClick={() => setDialog({ incidentId: incident.id, disposition: "ASSESSMENT_REQUIRED", notes: "" })}

@@ -195,8 +195,12 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Unit tests (node --test)
-        run: node --experimental-strip-types --test src/components/terrainScene.test.ts src/components/caltransHighwaysLayer.test.ts
+      # The full unit suite, not a hand-picked pair: package.json's `test` script
+      # is the single list of test files, so a new suite is picked up here the
+      # moment it is added there. The two-file invocation this replaced left
+      # assessmentModel.test.ts (and every other model test) unrun in CI.
+      - name: Unit tests (npm test)
+        run: npm test
       - name: TypeScript check
         run: npx tsc -p tsconfig.json --noEmit
       - name: Production build

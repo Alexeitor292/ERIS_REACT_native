@@ -170,6 +170,17 @@ class TestSubmissions:
         assert resp.status_code == 401
 
     def test_cursor_page_preserves_field_worker_visibility(self, admin_token, client_db):
+        """A GeoTech engineer's own work is always on their cursor page.
+
+        Routing v2 widened the worklist from "admin or legacy REVIEWER" to the
+        operational role model (design §2.2): the listing now matches
+        ``can_view_submission``, which has always let any non-maintenance
+        operational user READ any technical form. FIELD_WORKER is the legacy
+        alias of GEOTECH_ENGINEER, so an engineer now sees other people's
+        submissions here too — broad visibility, narrow authority. The boundary
+        that still holds is maintenance-only reporters, who are not operational
+        users and stay scoped to what they own or were granted.
+        """
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
         unique = uuid4().hex
         field_email = f"pagination-field-{unique}@example.test"
@@ -217,7 +228,6 @@ class TestSubmissions:
             assert page.status_code == 200
             visible_ids = {int(item["id"]) for item in page.json()["items"]}
             assert field_submission_id in visible_ids
-            assert admin_submission_id not in visible_ids
         finally:
             if field_submission_id is not None and field_headers is not None:
                 client_db.delete(f"/submissions/{field_submission_id}", headers=field_headers)

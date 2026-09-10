@@ -7,9 +7,9 @@ This document explains how the full application works end-to-end across backend,
 ERIS supports two connected domains:
 
 - Incident intake and routing workflow
-- Engineer submission/GISA workflow
+- Staff submission/GISA workflow
 
-An incident can be routed through operations roles and then linked to an engineer draft submission.
+An incident can be routed through operations roles and then linked to a Staff draft submission.
 
 ## 2) Main Components
 
@@ -31,11 +31,11 @@ An incident can be routed through operations roles and then linked to an enginee
 - Incident
   - Intake record with location, timeline, status, stage, ownership/routing
 - Submission
-  - Engineer form container with GISA data + lifecycle state
+  - Staff form container with GISA data + lifecycle state
 - Attachment
   - Metadata in DB, content in MinIO
 - Incident-Submission Link
-  - Joins incident routing side to engineer submission side
+  - Joins incident routing side to Staff submission side
 
 ## 4) Incident Lifecycle (Operational)
 
@@ -56,8 +56,8 @@ Status values still tracked independently:
 1. Incident is created.
 2. Coordinator forwards to office chief.
 3. Office chief assigns branch chief.
-4. Branch chief assigns engineer.
-5. Engineer resolves.
+4. Branch chief assigns a Staff member.
+5. Staff member resolves.
 
 ### Assignment model
 
@@ -67,7 +67,7 @@ Assignments are stored in `incident_assignments` with:
 - `assignment_mode` (`ASSIGN`, legacy `CLAIM`)
 - `is_active` flag (active assignment per stage)
 
-## 5) Submission/GISA Lifecycle (Engineering)
+## 5) Submission/GISA Lifecycle (technical work)
 
 Submission states:
 
@@ -89,7 +89,7 @@ Audit trail in `workflow_events`.
 
 ## 6) Incident -> Submission Bridge
 
-When engineer assignment occurs:
+When Staff assignment occurs:
 
 - backend checks `incident_submission_links`
 - if linked submission exists:
@@ -122,7 +122,7 @@ When engineer assignment occurs:
 Mobile tab visibility is role-derived at runtime:
 
 - Incidents tab for incident workflow roles
-- Drafts/Submissions only for engineering/review/admin roles
+- Drafts/Submissions only for assessment-author/review/admin roles
 
 ### Offline
 
@@ -148,8 +148,8 @@ Mobile-scoped incident filtering (`scope=mobile`) is enforced server-side:
 
 - coordinator: district scope
 - office chief: office scope post-coordinator
-- branch chief: office scope at branch/engineer/resolved
-- engineer: only assigned incidents
+- branch chief: office scope at branch/`ENGINEER_ASSIGNED`/resolved
+- Staff: only assigned incidents
 - maintenance: own reported incidents
 - admin: unrestricted
 
@@ -163,6 +163,6 @@ Mobile-scoped incident filtering (`scope=mobile`) is enforced server-side:
 
 - The app is workflow-centric and role-gated.
 - Incidents drive operational triage.
-- Submissions capture engineering detail.
+- Submissions capture technical detail.
 - Linking ties operational intake to technical resolution.
 - Web gives broad visibility; mobile enforces focused role visibility with offline capability.

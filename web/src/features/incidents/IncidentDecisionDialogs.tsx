@@ -16,7 +16,7 @@ export type ResolveDialogState = {
 };
 
 const TRIAGE_OPTIONS: Array<{ value: TriageDisposition; label: string; description: string }> = [
-  { value: "ASSESSMENT_REQUIRED", label: "Assessment required", description: "Route the incident for geotechnical assessment using the existing district workflow." },
+  { value: "ASSESSMENT_REQUIRED", label: "Assessment required", description: "Open a GeoTech assessment for the district's office chief, who hands it to a branch chief or assigns a senior engineer." },
   { value: "NO_ASSESSMENT_REQUIRED", label: "No assessment required", description: "Record that no geotechnical assessment is required for this incident." },
   { value: "NEEDS_REPORTER_INFORMATION", label: "Needs reporter information", description: "Return the incident for additional field or reporter information." },
   { value: "DUPLICATE_OR_LINKED", label: "Duplicate or linked", description: "Record that this incident duplicates or belongs with an existing incident or record." },

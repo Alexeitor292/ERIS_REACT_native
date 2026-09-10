@@ -34,6 +34,7 @@ import {
   assessmentStateLabel,
   canAssignEngineer,
   canDelegateBranch,
+  isAdmin,
   isMaintenanceOnly,
 } from "@/src/utils/roleModel";
 
@@ -42,13 +43,14 @@ const QUEUES: { key: QueueKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "office_chief", label: "Office" },
   { key: "branch_chief", label: "Branch" },
-  { key: "engineer", label: "Engineering" },
+  { key: "engineer", label: "Staff" },
   { key: "reviewer", label: "Reviews" },
 ];
 
 export default function AssessmentsScreen() {
   const { palette } = useUiSettings();
   const [roles, setRoles] = useState<string[]>([]);
+  const [meId, setMeId] = useState<number | null>(null);
   const [queue, setQueue] = useState<QueueKey>("all");
   const [items, setItems] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,8 +67,9 @@ export default function AssessmentsScreen() {
     try {
       const token = await getToken();
       if (!token) return;
-      const me = await apiFetch<{ roles: string[] }>("/auth/me", { token });
+      const me = await apiFetch<{ id: number; roles: string[] }>("/auth/me", { token });
       setRoles(me.roles ?? []);
+      setMeId(Number.isFinite(me.id) ? Number(me.id) : null);
       const res = await listAssessments(token, queue === "all" ? {} : { queue });
       setItems(res.items);
     } catch (e) {
@@ -121,6 +124,18 @@ export default function AssessmentsScreen() {
       setBusy(false);
     }
   };
+
+  // Route- and identity-derived affordances for the open assessment. Review
+  // authority comes from the server's can_review; the assignee lives in
+  // assigned_engineer_user_id on both routes.
+  const openAssessment = detail?.assessment ?? null;
+  const isBranchRoute = openAssessment?.routing_path === "BRANCH";
+  const canSubmitThis =
+    !!openAssessment &&
+    (isAdmin(roles) ||
+      (meId != null &&
+        openAssessment.assigned_engineer_user_id != null &&
+        openAssessment.assigned_engineer_user_id === meId));
 
   if (isMaintenanceOnly(roles) && roles.length > 0) {
     return (
@@ -247,48 +262,72 @@ export default function AssessmentsScreen() {
                     <TextInput
                       value={engineerId}
                       onChangeText={setEngineerId}
+                      editable={isBranchRoute}
                       keyboardType="number-pad"
-                      placeholder="Engineer user id"
+                      placeholder="Staff user id"
                       placeholderTextColor={palette.muted}
-                      style={[styles.input, { color: palette.text, borderColor: palette.border, backgroundColor: palette.panel }]}
+                      style={[
+                        styles.input,
+                        {
+                          color: palette.text,
+                          borderColor: palette.border,
+                          backgroundColor: palette.panel,
+                          opacity: isBranchRoute ? 1 : 0.5,
+                        },
+                      ]}
                     />
                     <Pressable
-                      disabled={busy || !engineerId}
+                      disabled={busy || !engineerId || !isBranchRoute}
                       onPress={() => runAction((t) => assignAssessmentEngineer(t, detail.assessment.id, Number(engineerId), notes))}
-                      style={[styles.actionBtn, { backgroundColor: palette.primary, opacity: engineerId ? 1 : 0.5 }]}
+                      style={[
+                        styles.actionBtn,
+                        { backgroundColor: palette.primary, opacity: engineerId && isBranchRoute ? 1 : 0.5 },
+                      ]}
                     >
-                      <Text style={styles.actionText}>Assign engineer</Text>
+                      <Text style={styles.actionText}>Assign Staff member</Text>
                     </Pressable>
+                    {!isBranchRoute && (
+                      <Text style={{ color: palette.muted, fontSize: 11 }}>
+                        Staff are assigned only on the branch route.
+                      </Text>
+                    )}
                   </View>
                 )}
 
-                {(detail.assessment.state === "DRAFT" || detail.assessment.state === "REVISION_REQUESTED") && (
-                  <Pressable
-                    disabled={busy}
-                    onPress={() => runAction((t) => submitAssessment(t, detail.assessment.id, notes))}
-                    style={[styles.actionBtn, { backgroundColor: palette.primary }]}
-                  >
-                    <Text style={styles.actionText}>Submit for review</Text>
-                  </Pressable>
-                )}
+                {(detail.assessment.state === "DRAFT" || detail.assessment.state === "REVISION_REQUESTED") &&
+                  canSubmitThis && (
+                    <Pressable
+                      disabled={busy}
+                      onPress={() => runAction((t) => submitAssessment(t, detail.assessment.id, notes))}
+                      style={[styles.actionBtn, { backgroundColor: palette.primary }]}
+                    >
+                      <Text style={styles.actionText}>Submit for review</Text>
+                    </Pressable>
+                  )}
 
                 {detail.assessment.state === "SUBMITTED" && (
                   <View style={{ gap: 6 }}>
-                    <Pressable
-                      disabled={busy}
-                      onPress={() => runAction((t) => reviewAssessment(t, detail.assessment.id, "APPROVE", notes))}
-                      style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
-                    >
-                      <Text style={styles.actionText}>Approve</Text>
-                    </Pressable>
-                    <Pressable
-                      disabled={busy}
-                      onPress={() => runAction((t) => reviewAssessment(t, detail.assessment.id, "REQUEST_REVISION", notes))}
-                      style={[styles.actionBtn, { backgroundColor: "#d97706" }]}
-                    >
-                      <Text style={styles.actionText}>Request revision</Text>
-                    </Pressable>
-                    <Text style={{ color: palette.muted, fontSize: 11 }}>Assigned reviewers/approvers only (server enforced).</Text>
+                    {detail.assessment.can_review && (
+                      <>
+                        <Pressable
+                          disabled={busy}
+                          onPress={() => runAction((t) => reviewAssessment(t, detail.assessment.id, "APPROVE", notes))}
+                          style={[styles.actionBtn, { backgroundColor: "#16a34a" }]}
+                        >
+                          <Text style={styles.actionText}>Approve</Text>
+                        </Pressable>
+                        <Pressable
+                          disabled={busy}
+                          onPress={() => runAction((t) => reviewAssessment(t, detail.assessment.id, "REQUEST_REVISION", notes))}
+                          style={[styles.actionBtn, { backgroundColor: "#d97706" }]}
+                        >
+                          <Text style={styles.actionText}>Request revision</Text>
+                        </Pressable>
+                      </>
+                    )}
+                    <Text style={{ color: palette.muted, fontSize: 11 }}>
+                      Only the branch chief (or the office chief on the senior engineer route) can decide this.
+                    </Text>
                   </View>
                 )}
 

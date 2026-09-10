@@ -65,7 +65,7 @@ const EMPTY_LOOKUPS: Lookups = {
   actions: { immediate: [], follow_up: [] },
 };
 type SubmissionDetail = {
-  submission: { id: number; created_by_user_id: number; title?: string | null; status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED"; created_at: string; updated_at: string; submitted_at?: string | null; reviewed_at?: string | null; review_comment?: string | null; can_edit?: boolean; can_manage_permissions?: boolean };
+  submission: { id: number; created_by_user_id: number; title?: string | null; status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED"; created_at: string; updated_at: string; submitted_at?: string | null; reviewed_at?: string | null; review_comment?: string | null; can_edit?: boolean; can_review?: boolean; can_manage_permissions?: boolean };
   gisa: any | null;
   incident_types: string[];
   actions: { immediate: string[]; follow_up: string[] };
@@ -3872,9 +3872,10 @@ export default function SubmissionDetailScreen() {
   }, [fieldErrors.latitude, fieldErrors.longitude]);
 
   if (!token || loading || !data || !lookups || !me) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
-  const roles = new Set(me.roles || []);
   const canEdit = (data.submission.status === "DRAFT" || data.submission.status === "REJECTED") && !!data.submission.can_edit;
-  const canReview = data.submission.status === "SUBMITTED" && (roles.has("REVIEWER") || roles.has("ADMIN"));
+  // Review authority is derived by the server from the assessment's routing
+  // path; the legacy REVIEWER account role no longer confers it.
+  const canReview = data.submission.status === "SUBMITTED" && !!data.submission.can_review;
   const isDraftEntry = draftEntryStatus;
   const allAttachments = data.attachments ?? data.photos;
   const sectionAttachments = allAttachments.filter((a: any) => !!a.section_key);

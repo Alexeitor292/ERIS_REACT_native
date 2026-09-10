@@ -233,13 +233,10 @@ export async function requestIncidentRevisionByCoordinator(token: string, incide
   return apiFetch<{ incident_id: number; location_match_status: string }>(`/incidents/${incidentId}/coordinator/request-revision`, { method: "POST", token, body: { comment: comment ?? null, revision_fields: revisionFields } });
 }
 
-export async function assignIncidentToBranchChief(token: string, incidentId: number, branchChiefUserId: number) {
-  return apiFetch<{ incident_id: number; current_stage: IncidentStage }>(`/incidents/${incidentId}/office-chief/assign-branch`, { method: "POST", token, body: { branch_chief_user_id: branchChiefUserId } });
-}
-
-export async function getOfficeChiefBranchOptions(token: string, incidentId: number) {
-  return apiFetch<{ incident_id: number; office_code: string | null; items: RoutingUserOption[] }>(`/incidents/${incidentId}/office-chief/branch-options`, { token });
-}
+// Routing v2 retired the incident-stage office-chief routing endpoints
+// (/incidents/{id}/office-chief/assign-branch and .../branch-options, both 410
+// now): the office chief routes on the assessment, not the incident. The two
+// client functions that called them went with the control that used them.
 
 export async function assignIncidentToEngineer(token: string, incidentId: number, engineerUserId: number) {
   return apiFetch<{ incident_id: number; linked_submission_id: number }>(`/incidents/${incidentId}/branch-chief/assign-engineer`, { method: "POST", token, body: { engineer_user_id: engineerUserId } });

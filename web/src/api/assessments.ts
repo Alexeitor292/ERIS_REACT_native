@@ -13,6 +13,24 @@ export type AssessmentState =
   | "APPROVED"
   | "FINALIZED";
 
+/**
+ * Which of the office chief's two mutually exclusive routes this assessment
+ * took. `null` means the chief has not chosen yet; the choice is not
+ * reversible, so each route endpoint refuses once the other one was taken.
+ */
+export type RoutingPath = "BRANCH" | "SENIOR_ENGINEER";
+
+/**
+ * Who may approve or return THIS assessment. `BRANCH` names one person;
+ * `SENIOR_ENGINEER` names an office function — any active office chief of
+ * that office — so its `user_id` is null by design.
+ */
+export type ReviewOwner = {
+  kind: "BRANCH_CHIEF" | "OFFICE_CHIEF";
+  user_id: number | null;
+  office_code: string | null;
+};
+
 export type TriageDisposition =
   | "ASSESSMENT_REQUIRED"
   | "NO_ASSESSMENT_REQUIRED"
@@ -30,8 +48,16 @@ export type Assessment = {
   district: string | null;
   office_code: string | null;
   office_override_reason: string | null;
+  routing_path: RoutingPath | null;
   branch_chief_user_id: number | null;
+  /** Both routes store the assignee here; `assigned_user_kind` says which kind. */
   assigned_engineer_user_id: number | null;
+  /** Route-neutral alias of `assigned_engineer_user_id`. */
+  assigned_user_id: number | null;
+  assigned_user_kind: "STAFF" | "SENIOR_ENGINEER" | null;
+  /** Server-computed: may the signed-in caller decide this assessment now? */
+  can_review: boolean;
+  review_owner: ReviewOwner | null;
   state: AssessmentState;
   triage_disposition: TriageDisposition | null;
   notes: string | null;
@@ -49,11 +75,18 @@ export type Assessment = {
 export type AssessmentAssignment = {
   id: number;
   user_id: number;
-  assignment_role: "ENGINEER" | "REVIEWER" | "APPROVER" | "CONSULTED";
+  /**
+   * REVIEWER / APPROVER are history: routing v2 retired them and no new row can
+   * be written with either. They keep rendering, muted, with `is_authority`
+   * false. CONSULTED is the only writable assignment role.
+   */
+  assignment_role: "ENGINEER" | "SENIOR_ENGINEER" | "REVIEWER" | "APPROVER" | "CONSULTED";
   assigned_by_user_id: number;
   notes: string | null;
   email: string;
   full_name: string;
+  /** Always false in routing v2 — review authority follows the routing path. */
+  is_authority: boolean;
   created_at: string;
 };
 
@@ -98,7 +131,16 @@ export type AssignmentUserOption = RoutingUserOption & {
   roles: string[];
 };
 
-export type AssessmentQueue = "office_chief" | "branch_chief" | "engineer" | "reviewer";
+export type AssessmentQueue =
+  | "office_chief"
+  | "office_chief_review"
+  | "branch_chief"
+  | "branch_chief_review"
+  | "assignee"
+  /** Permanent alias of `assignee`. */
+  | "engineer"
+  /** Permanent per-path alias, resolved server-side against the routing path. */
+  | "reviewer";
 
 export function listAssessments(params: {
   state?: AssessmentState;
@@ -129,7 +171,7 @@ export function routingPreview(district: string): Promise<RoutingPreview> {
 
 export function assessmentAssignmentOptions(
   assessmentId: number,
-  kind: "ENGINEER" | "REVIEWER"
+  kind: "ENGINEER" | "SENIOR_ENGINEER" | "CONSULTED"
 ): Promise<{ assessment_id: number; kind: string; office_code: string | null; items: AssignmentUserOption[] }> {
   return api(`/admin/assessment-assignment-options/${assessmentId}?kind=${encodeURIComponent(kind)}`);
 }
@@ -155,19 +197,42 @@ export function branchOptions(
   return api(`/assessments/${assessmentId}/branch-options`);
 }
 
+/** The senior engineers of this assessment's office (the second route's picker). */
+export function seniorEngineerOptions(
+  assessmentId: number
+): Promise<{ assessment_id: number; office_code: string | null; items: RoutingUserOption[] }> {
+  return api(`/assessments/${assessmentId}/senior-engineer-options`);
+}
+
+/**
+ * Hand the assessment off to a branch chief. The direct-to-Staff shortcut was
+ * retired: the office chief's two choices are this and `assignSeniorEngineer`,
+ * and the server rejects an `engineer_user_id` with a 400.
+ */
 export function delegateBranch(
   assessmentId: number,
   branch_chief_user_id: number,
-  notes?: string,
-  engineer_user_id?: number | null
+  notes?: string
 ): Promise<{ assessment: Assessment }> {
   return api(`/assessments/${assessmentId}/delegate-branch`, {
     method: "POST",
-    body: JSON.stringify({ branch_chief_user_id, notes, engineer_user_id: engineer_user_id ?? null }),
+    body: JSON.stringify({ branch_chief_user_id, notes }),
   });
 }
 
-/** Engineer: add a supplemental DRAFT technical submission pre-filled from the incident. */
+/** Assign a GeoTech senior engineer directly; the assessment returns to the office chief. */
+export function assignSeniorEngineer(
+  assessmentId: number,
+  senior_engineer_user_id: number,
+  notes?: string
+): Promise<{ assessment: Assessment; submission_id: number | null }> {
+  return api(`/assessments/${assessmentId}/assign-senior-engineer`, {
+    method: "POST",
+    body: JSON.stringify({ senior_engineer_user_id, notes }),
+  });
+}
+
+/** The assignee: add a supplemental DRAFT technical submission pre-filled from the incident. */
 export function createAssessmentSubmission(
   assessmentId: number,
   notes?: string
@@ -186,9 +251,13 @@ export function assignEngineer(
   });
 }
 
+/**
+ * CONSULTED is the only writable assignment role: review authority follows the
+ * assessment's routing path, so no client can construct a reviewer assignment.
+ */
 export function addAssignment(
   assessmentId: number,
-  body: { user_id: number; assignment_role: "REVIEWER" | "APPROVER" | "CONSULTED"; notes?: string }
+  body: { user_id: number; assignment_role: "CONSULTED"; notes?: string }
 ): Promise<{ assessment_id: number; assignments: AssessmentAssignment[] }> {
   return api(`/assessments/${assessmentId}/assignments`, { method: "POST", body: JSON.stringify(body) });
 }
@@ -200,10 +269,14 @@ export function removeAssignment(
   return api(`/assessments/${assessmentId}/assignments/${assignmentId}`, { method: "DELETE" });
 }
 
-export function submitAssessment(assessmentId: number, notes?: string): Promise<{ assessment: Assessment }> {
+export function submitAssessment(
+  assessmentId: number,
+  notes?: string
+): Promise<{ assessment: Assessment; submissions_transitioned?: number[]; submissions_skipped?: number[] }> {
   return api(`/assessments/${assessmentId}/submit`, { method: "POST", body: JSON.stringify({ notes }) });
 }
 
+/** APPROVE is terminal in routing v2 — there is no finalize step after it. */
 export function reviewAssessment(
   assessmentId: number,
   action: "APPROVE" | "REQUEST_REVISION",
@@ -213,8 +286,4 @@ export function reviewAssessment(
     method: "POST",
     body: JSON.stringify({ action, notes }),
   });
-}
-
-export function finalizeAssessment(assessmentId: number, notes?: string): Promise<{ assessment: Assessment }> {
-  return api(`/assessments/${assessmentId}/finalize`, { method: "POST", body: JSON.stringify({ notes }) });
 }

@@ -30,6 +30,21 @@ class TestExpandRoles:
         expanded = set(roles.expand_roles(roles.GEOTECH_OFFICE_CHIEF, roles.GEOTECH_BRANCH_CHIEF))
         assert {"OFFICE_CHIEF", "BRANCH_CHIEF", "GEOTECH_OFFICE_CHIEF", "GEOTECH_BRANCH_CHIEF"} <= expanded
 
+    def test_senior_engineer_expands_to_itself_only(self):
+        # Routing v2's new role has NO legacy alias: inventing one would make
+        # expand_roles() accept a name no database contains.
+        assert roles.expand_roles(roles.GEOTECH_SENIOR_ENGINEER) == ["GEOTECH_SENIOR_ENGINEER"]
+
+    def test_gisa_author_roles_holds_exactly_four_names(self):
+        # Every GISA write guard uses this list, so a name added here silently
+        # widens fourteen endpoints.
+        assert set(roles.GISA_AUTHOR_ROLES) == {
+            "ADMIN",
+            "FIELD_WORKER",
+            "GEOTECH_ENGINEER",
+            "GEOTECH_SENIOR_ENGINEER",
+        }
+
 
 class TestHasCanonicalRole:
     def test_legacy_role_satisfies_canonical(self):
@@ -67,8 +82,22 @@ class TestMaintenanceVsOperational:
         assert not roles.is_maintenance_only(user)
 
     def test_reviewer_is_operational(self):
+        # REVIEWER keeps its broad READ in v2. Only its AUTHORITY is retired,
+        # and that is decided on the assessment, never from this role string.
         user = {"id": 1, "roles": ["REVIEWER"]}
         assert roles.is_operational_user(user)
+        assert not roles.is_maintenance_only(user)
+
+    def test_senior_engineer_is_operational_and_not_maintenance_only(self):
+        user = {"id": 1, "roles": ["GEOTECH_SENIOR_ENGINEER"]}
+        assert roles.is_operational_user(user)
+        assert not roles.is_maintenance_only(user)
+        assert roles.has_canonical_role(user, roles.GEOTECH_SENIOR_ENGINEER)
+        # ...and it is its own role: a senior engineer does not hold
+        # GEOTECH_ENGINEER, and Staff do not hold GEOTECH_SENIOR_ENGINEER. The
+        # two eligibility rules depend on it.
+        assert not roles.has_canonical_role(user, roles.GEOTECH_ENGINEER)
+        assert not roles.has_canonical_role({"id": 2, "roles": ["FIELD_WORKER"]}, roles.GEOTECH_SENIOR_ENGINEER)
 
     def test_admin_is_operational_not_maintenance_only(self):
         user = {"id": 1, "roles": ["ADMIN"]}
