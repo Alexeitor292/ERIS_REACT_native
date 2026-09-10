@@ -1,5 +1,5 @@
 from pathlib import Path
-from pydantic import Field, BaseModel, field_validator
+from pydantic import Field, BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[1]  # .../backend
@@ -53,6 +53,41 @@ class Settings(BaseSettings):
     JWT_SECRET: str  # REQUIRED
     JWT_ALG: str = Field(default="HS256")
     JWT_EXPIRES_MINUTES: int = Field(default=120)
+
+    # --- Outbound email for the incident-notification outbox (design §6.4) -----
+    # EMAIL IS DISABLED WHENEVER SMTP_HOST IS UNSET — the dev and CI default, and
+    # the master switch. The EMAIL notification row is still written (the audit
+    # record that a notice was due) and simply left undelivered; nothing is sent
+    # and nothing raises. SMTP_BACKLOG_MAX_AGE_HOURS then stops a relay enabled
+    # months later from flooding inboxes with history.
+    SMTP_HOST: str | None = Field(default=None)
+    SMTP_PORT: int = Field(default=587)
+    SMTP_USER: str | None = Field(default=None)
+    # No default, and never logged: notifications.py logs host/port/template code
+    # and recipient id only, never credentials or a message body.
+    SMTP_PASSWORD: str | None = Field(default=None)
+    SMTP_FROM: str = Field(default="eris-no-reply@dot.ca.gov")
+    SMTP_FROM_NAME: str = Field(default="ERIS")
+    SMTP_STARTTLS: bool = Field(default=True)
+    # Implicit TLS (port 465). Mutually exclusive with STARTTLS — validated at
+    # startup below rather than silently picking one.
+    SMTP_SSL: bool = Field(default=False)
+    # Socket timeout, so a dead relay cannot hold a background task open.
+    SMTP_TIMEOUT_S: int = Field(default=10)
+    # Bounds on ONE after-commit flush: at most this many messages, and this many
+    # wall-clock seconds. Whatever is left stays in the outbox for the sweeper,
+    # which is exactly what the outbox is for.
+    SMTP_MAX_RECIPIENTS_PER_FLUSH: int = Field(default=25)
+    SMTP_FLUSH_BUDGET_S: int = Field(default=30)
+    # Attempts before the row is a permanent failure surfaced by
+    # GET /admin/notifications/undelivered.
+    SMTP_MAX_ATTEMPTS: int = Field(default=5)
+    SMTP_BACKLOG_MAX_AGE_HOURS: int = Field(default=24)
+    # With SMTP_HOST unset, write each message as an .eml file here. Makes the
+    # send path testable in CI without a mail server.
+    MAIL_DEV_DUMP_DIR: str | None = Field(default=None)
+    # Builds the deep link in the message body.
+    WEB_BASE_URL: str = Field(default="http://localhost:5173")
 
     # Optional ArcGIS enrichment (for route/postmile lookup)
     POSTMILE_FEATURE_LAYER_URL: str | None = Field(default=None)
@@ -321,6 +356,21 @@ class Settings(BaseSettings):
                 f"OFFLINE_SCENE_ROAD_FALLBACK_SOURCE must be empty or one of {sorted(allowed)}, got {v!r}"
             )
         return s
+
+    @model_validator(mode="after")
+    def _validate_smtp_tls(self):
+        # STARTTLS upgrades a plaintext connection after EHLO; SMTP_SSL opens an
+        # implicit-TLS socket (465). Asking for both is a contradiction, so it is
+        # REJECTED at startup rather than silently resolved one way — an operator
+        # who wanted 465 and got an unencrypted 587 would never find out
+        # (design §6.4). SMTP_STARTTLS defaults to true, so implicit TLS means
+        # setting SMTP_STARTTLS=false explicitly.
+        if self.SMTP_SSL and self.SMTP_STARTTLS:
+            raise ValueError(
+                "SMTP_SSL and SMTP_STARTTLS are mutually exclusive: set SMTP_STARTTLS=false "
+                "to use implicit TLS (port 465), or SMTP_SSL=false to upgrade with STARTTLS."
+            )
+        return self
 
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

@@ -7,10 +7,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .config import settings
 from .db import get_db
 from .deps import require_roles
 from .auth import hash_password
-from .roles import ADMIN, GEOTECH_BRANCH_CHIEF, GEOTECH_ENGINEER, GEOTECH_OFFICE_CHIEF, OPERATIONAL_ROLES, expand_roles
+from .roles import (
+    ADMIN,
+    GEOTECH_BRANCH_CHIEF,
+    GEOTECH_ENGINEER,
+    GEOTECH_OFFICE_CHIEF,
+    GEOTECH_SENIOR_ENGINEER,
+    OPERATIONAL_ROLES,
+    expand_roles,
+)
 from .user_metadata import normalize_office_code, parse_user_metadata, user_metadata_json
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -149,7 +158,11 @@ def _role_predicate_params(roles: list[str] | set[str]) -> tuple[str, dict[str, 
 @router.get("/assessment-assignment-options/{assessment_id}")
 def assessment_assignment_options(
     assessment_id: int = Path(..., ge=1),
-    kind: str = Query(..., pattern="^(ENGINEER|REVIEWER)$"),
+    # REVIEWER stays IN the pattern on purpose: routing v2 retired the kind, and
+    # the handler below answers with an explanatory 400. Dropping it from the
+    # pattern would make FastAPI return a bare 422 before the handler runs and
+    # the explanation would be unreachable.
+    kind: str = Query(..., pattern="^(ENGINEER|SENIOR_ENGINEER|CONSULTED|REVIEWER)$"),
     db: Session = Depends(get_db),
     user=Depends(require_roles(ASSESSMENT_ASSIGNMENT_DIRECTORY_ROLES)),
 ):
@@ -158,6 +171,9 @@ def assessment_assignment_options(
     This exposes only names and routing metadata. Existing assessment write
     endpoints remain authoritative for every assignment action.
     """
+    if kind == "REVIEWER":
+        raise HTTPException(status_code=400, detail="kind=REVIEWER was retired; use CONSULTED")
+
     assessment = db.execute(
         text("SELECT id, office_code FROM assessments WHERE id = :aid LIMIT 1"),
         {"aid": assessment_id},
@@ -174,7 +190,12 @@ def assessment_assignment_options(
 
     if kind == "ENGINEER":
         eligible_roles = set(expand_roles(GEOTECH_ENGINEER)) | {ADMIN}
+    elif kind == "SENIOR_ENGINEER":
+        eligible_roles = set(expand_roles(GEOTECH_SENIOR_ENGINEER)) | {ADMIN}
     else:
+        # CONSULTED reproduces the previous REVIEWER behaviour: any operational
+        # user may be attached for information. CONSULTED never conferred
+        # authority, which is why it is the only writable assignment role left.
         eligible_roles = set(OPERATIONAL_ROLES)
 
     role_placeholders, params = _role_predicate_params(eligible_roles)
@@ -186,6 +207,22 @@ def assessment_assignment_options(
           AND (
             COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
             OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = ''
+          )
+        """
+    elif kind == "SENIOR_ENGINEER":
+        # STRICT office filter, unlike the ENGINEER kind above: a senior engineer with
+        # no office_code is not assignable at all, and an assessment with no
+        # office_code has no senior engineer to offer — hence the `:office_code <> ''`
+        # guard rather than a blank-office fallback. ADMIN is exempt so the
+        # picker keeps its admin escape hatch, matching the ENGINEER kind's
+        # `| {ADMIN}` union.
+        office_filter = """
+          AND (
+            (
+              :office_code <> ''
+              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
+            )
+            OR r.name = 'ADMIN'
           )
         """
 
@@ -235,6 +272,71 @@ def assessment_assignment_options(
 # -----------------------------
 # Routes (ADMIN-only)
 # -----------------------------
+@router.get("/notifications/undelivered")
+def undelivered_notifications(
+    limit: int = Query(default=200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_roles(["ADMIN"])),
+):
+    """The EMAIL outbox backlog — every notice that was due and never sent.
+
+    Email delivery is best-effort by design (design §6.3): the row is written in
+    the approval transaction and the relay is talked to afterwards, so a relay
+    that is down, a `From` domain that is refused, or a recipient with no mailbox
+    produces silence rather than an error anybody sees. This endpoint is that
+    silence made visible, and it is the rollout's acceptance signal for owner
+    decision 6: it should be empty once SMTP is enabled.
+
+    ``IN_APP`` rows are excluded: nothing delivers them, so they would be
+    permanently "undelivered" and would bury the rows that matter.
+    ``is_exhausted`` marks a row past ``SMTP_MAX_ATTEMPTS`` — no sweeper will try
+    it again, so it needs a person (design §6.6).
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT id, incident_id, recipient_user_id, channel, template_code,
+                   created_at, delivery_attempts, last_error, last_attempt_at
+            FROM incident_notifications
+            WHERE channel = 'EMAIL' AND delivered_at IS NULL
+            ORDER BY id DESC
+            LIMIT :limit
+            """
+        ),
+        {"limit": int(limit)},
+    ).mappings().all()
+    total = db.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM incident_notifications
+            WHERE channel = 'EMAIL' AND delivered_at IS NULL
+            """
+        )
+    ).scalar()
+    max_attempts = int(settings.SMTP_MAX_ATTEMPTS)
+    items = []
+    for row in rows:
+        attempts = int(row["delivery_attempts"] or 0)
+        items.append(
+            {
+                "id": int(row["id"]),
+                "incident_id": int(row["incident_id"]) if row["incident_id"] is not None else None,
+                "recipient_user_id": (
+                    int(row["recipient_user_id"]) if row["recipient_user_id"] is not None else None
+                ),
+                "channel": row["channel"],
+                "template_code": row["template_code"],
+                "created_at": row["created_at"],
+                "delivery_attempts": attempts,
+                "last_error": row["last_error"],
+                "last_attempt_at": row["last_attempt_at"],
+                "is_exhausted": attempts >= max_attempts,
+            }
+        )
+    return {"items": items, "total": int(total or 0)}
+
+
 @router.get("/roles")
 def list_roles(
     db: Session = Depends(get_db),

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { useUiSettings } from "./UiSettingsContext";
-import { hasWorkQueue, isAdmin, isOperationalUser } from "../utils/roleModel";
+import { hasWorkQueue, isAdmin, isOperationalUser, roleLabel } from "../utils/roleModel";
 
 const NAV_ICON_STROKE = 1.9;
 
@@ -154,7 +154,7 @@ export default function AppShell({ title, children, workspace = false }: { title
                 {THEME_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
             </label>
-            <div className="hidden text-right md:block"><div className="max-w-64 truncate text-sm font-medium">{displayName}</div><div className="text-xs text-muted">{me?.roles?.join(" · ") || "ERIS user"}</div></div>
+            <div className="hidden text-right md:block"><div className="max-w-64 truncate text-sm font-medium">{displayName}</div><div className="text-xs text-muted">{me?.roles?.map(roleLabel).join(" · ") || "ERIS user"}</div></div>
             <button type="button" onClick={logout} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Sign out</button>
           </div>
         </div>

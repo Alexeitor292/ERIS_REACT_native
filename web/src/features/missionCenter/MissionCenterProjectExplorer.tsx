@@ -227,7 +227,7 @@ export default function MissionCenterProjectExplorer() {
       <AppShell title="Mission Center">
         <div className="p-6">
           <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-5 text-sm text-muted">
-            Mission Center is available to ERIS operational engineering and coordination roles. Maintenance reporting accounts remain scoped to their own reports.
+            Mission Center is available to ERIS operational GeoTech and coordination roles. Maintenance reporting accounts remain scoped to their own reports.
           </div>
         </div>
       </AppShell>

@@ -8,8 +8,8 @@ Information architecture (2026-09 redesign, Claude Design handoff):
 
 - `Workspace › My Work` (`/my-work`) — the single queue of workflow steps waiting on the
   signed-in role: coordinator intake triage (Event Group review with map → disposition),
-  office-chief delegation (optionally assigning the engineer at delegation), branch-chief
-  engineer assignment, engineer draft submissions (multiple per assessment) + submit for
+  office-chief delegation (optionally assigning the Staff member at delegation), branch-chief
+  Staff assignment, Staff draft submissions (multiple per assessment) + submit for
   review, assigned-reviewer approve / request revision, office-chief finalize.
 - `Operations` — read-only record views that cross-link to each other and to My Work:
   - Mission Center (`/mission-center/:gid?/:iid?`): statewide Event Groups → group incidents →
@@ -41,7 +41,7 @@ Submission detail (`web/src/pages/SubmissionDetailPage.tsx`):
 - Measurement context shows the 3D Terrain scene only (elevation profile, road-inventory
   context, and USGS relief were removed from this view; backend data untouched).
 - Summary / Reviewer Note / Workflow History / Access Sharing are always-open cards.
-- Header actions: Save draft / Submit for review (engineer), Approve / Return for correction
+- Header actions: Save draft / Submit for review (Staff), Approve / Return for correction
   (reviewer); draft banner links the assessment and incident (`context` from the API).
 
 ## Mobile
