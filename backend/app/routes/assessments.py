@@ -1129,7 +1129,7 @@ def delegate_branch(
         raise HTTPException(
             status_code=400,
             detail=(
-                "The office chief can no longer assign staff directly. Hand off to a "
+                "The office chief no longer assigns the person who fills out the assessment directly. Hand off to a "
                 "branch chief, or assign a senior specialist with "
                 "POST /assessments/{id}/assign-specialist."
             ),
@@ -1444,7 +1444,7 @@ def assign_specialist(
     """Assign a GeoTech senior specialist directly — transition T4 (design §3.3).
 
     The office chief's other choice. The specialist fills the technical form
-    exactly as a staff engineer does and reports back to the office chief, who
+    exactly as an assessment author under a branch chief does and reports back to the office chief, who
     reviews. Reassigning the specialist from DRAFT / REVISION_REQUESTED is legal;
     switching to the branch route is not.
     """

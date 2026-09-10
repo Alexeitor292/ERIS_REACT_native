@@ -297,7 +297,7 @@ class AssessmentAssignSpecialistRequest(BaseModel):
     """Office chief assigns a GeoTech senior specialist directly.
 
     The specialist route: the specialist fills the technical form exactly as a
-    staff engineer does and reports back to the office chief, who reviews.
+    assessment author under a branch chief does and reports back to the office chief, who reviews.
     """
 
     specialist_user_id: int = Field(..., ge=1)

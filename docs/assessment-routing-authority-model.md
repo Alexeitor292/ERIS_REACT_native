@@ -170,7 +170,7 @@ assigned. **May not**: review or approve anything, including their own work; be
 assigned by a branch chief; occupy an engineer slot on a branch-route assessment
 (the database refuses — §7); route or assign anyone.
 
-Because a specialist fills the form exactly as staff do, the GISA write guards
+Because a specialist fills the form exactly as assessment authors under a branch chief do, the GISA write guards
 that were `require_roles(["FIELD_WORKER", "ADMIN"])` now use a single export:
 
 ```python
@@ -318,7 +318,7 @@ approve.
 
 `engineer_user_id` on this request is **rejected, not ignored**: it stays on
 `AssessmentDelegateBranchRequest` so an old client gets
-`400 "The office chief can no longer assign staff directly. Hand off to a branch
+`400 "The office chief no longer assigns the person who fills out the assessment directly. Hand off to a branch
 chief, or assign a senior specialist with POST /assessments/{id}/assign-specialist."`
 instead of a silent behaviour change.
 
@@ -696,7 +696,7 @@ explanatory `400`/`409`/`410`, never a 404 and never a silent no-op.
    is announced.
 
 **What to tell users.** *Office chiefs*: "You now choose one of two paths and
-cannot name a staff engineer yourself. On the branch route the case leaves you
+cannot name the person who fills out the assessment yourself. On the branch route the case leaves you
 for good; on the specialist route it comes back to you to approve." *Branch
 chiefs*: "You approve the assessments you were handed — no reviewer to assign, no
 sign-off afterwards, and you can only act on cases handed to you." *Anyone

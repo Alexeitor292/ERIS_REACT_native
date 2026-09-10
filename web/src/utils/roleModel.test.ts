@@ -60,7 +60,7 @@ test("assessment authors are the engineer, the senior specialist and admin", () 
   assert.equal(isAssessmentAuthor(BRANCH_CHIEF), false);
   assert.equal(isAssessmentAuthor(COORDINATOR), false);
   assert.equal(isAssessmentAuthor(undefined), false);
-  // isEngineer stays engineer-only: a specialist is not a staff engineer.
+  // isEngineer stays engineer-only: a specialist is not an assessment author under a branch chief.
   assert.equal(isEngineer(SPECIALIST), false);
   assert.equal(isSeniorSpecialist(ENGINEER), false);
   assert.equal(isSeniorSpecialist(SPECIALIST), true);

@@ -179,7 +179,7 @@ export function waitingOn(
     case "PENDING_OFFICE_DELEGATION":
       return {
         who: "Office Chief",
-        text: "Route this assessment: hand it off to a branch chief, or assign a senior specialist. You cannot assign a staff engineer directly.",
+        text: "Route this assessment: hand it off to a branch chief, or assign a senior specialist. You cannot assign the person who fills out the assessment directly.",
       };
     case "PENDING_ENGINEER_ASSIGNMENT":
       return {

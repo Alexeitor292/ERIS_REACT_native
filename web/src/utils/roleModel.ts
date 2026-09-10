@@ -75,7 +75,7 @@ export function isSeniorSpecialist(roles: string[] | undefined): boolean {
 }
 
 /**
- * Roles that fill a technical assessment: the staff engineer on the branch
+ * Roles that fill a technical assessment: the assessment author under a branch chief on the branch
  * route and the senior specialist on the specialist route do the same work,
  * so every author affordance is gated on this rather than on the engineer.
  */

@@ -392,7 +392,7 @@ class TestRouteExclusivity:
             headers=_auth(tokens["officechief"]),
         )
         assert resp.status_code == 400, resp.text
-        assert "can no longer assign staff directly" in resp.json()["detail"]
+        assert "no longer assigns the person who fills out the assessment directly" in resp.json()["detail"]
         # Rejected, not ignored: nothing was written.
         row = _assessment_row(case["assessment_id"])
         assert row["routing_path"] is None

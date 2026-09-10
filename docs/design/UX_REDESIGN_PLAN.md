@@ -587,7 +587,7 @@ An account holding only the legacy `REVIEWER` role gets the *For information (Co
 | Disposition | **Decision** | What happens next: send to GeoTech, close with no assessment, ask the reporter, or link and close. |
 | `assessments` | **Assessment** (case-file tab: **Who has it**) | The GeoTech work opened for an accepted report: which route it took, who it is handed to, the technical form and the approval that completes it. |
 | `submissions` / GISA | **Technical form** | The engineer's geotechnical write-up. **"GISA" appears only in Technical details.** Never "submission" for the act of sending. |
-| Delegate | **Route this assessment** | The office chief's one step, with two choices: hand off to a branch chief (who assigns the engineer and approves the result), or assign a senior specialist (who fills it and returns it to the chief). There is no third choice — a staff engineer cannot be named directly. |
+| Delegate | **Route this assessment** | The office chief's one step, with two choices: hand off to a branch chief (who assigns the engineer and approves the result), or assign a senior specialist (who fills it and returns it to the chief). There is no third choice — an assessment author under a branch chief cannot be named directly. |
 | APPROVE / REQUEST_REVISION | **Approve** / **Return for changes** | One pair of verbs everywhere — not "Request revision" here and "Return for correction" there. |
 | Approve | **Approve assessment** | The final acceptance. It completes the assessment and notifies the district coordinator; it does **not** close the incident report. |
 | Resolve | **Mark report resolved** | Closes the report itself; always shown with its reason. |
@@ -617,7 +617,7 @@ One status per object. The incident chip is **derived** from `current_stage` + `
 | Disposition | `ASSESSMENT_REQUIRED` | Sent to GeoTech for assessment | Office chief | "Report accepted as ERIS no. 24-0417 and sent to the North GeoTech Office. It has left your queue." |
 | Disposition | `NO_ASSESSMENT_REQUIRED` | Closed — no assessment needed | Nobody | "Report accepted and closed. No GeoTech assessment will be opened." |
 | Disposition | `DUPLICATE_OR_LINKED` | Linked to another report — closed | Nobody | "Linked to ERIS no. 24-0388 and closed. Both reports keep their photos and history." Nothing is deleted. |
-| Assessment | `PENDING_OFFICE_DELEGATION` | Awaiting routing | Office chief | "Route this assessment: hand it off to a branch chief, or assign a senior specialist. You cannot assign a staff engineer directly." |
+| Assessment | `PENDING_OFFICE_DELEGATION` | Awaiting routing | Office chief | "Route this assessment: hand it off to a branch chief, or assign a senior specialist. You cannot assign the person who fills out the assessment directly." |
 | Assessment | `PENDING_ENGINEER_ASSIGNMENT` | Awaiting engineer assignment | Branch chief | "Assign an engineer. Handed to you by M. Ortiz on Sep 2: *please expedite*. You will approve the finished assessment." |
 | Assessment | `DRAFT` | Engineer working — draft | The assignee | *Assignee*: "Complete the technical form, then send it for review." *Others*: "J. Doe is preparing the technical form." |
 | Assessment | `SUBMITTED` | Under review | The route's reviewer | *Branch route*: "B. Chen (GeoTech Branch Chief) is reviewing — sent Sep 5." *Specialist route*: "The North GeoTech Office chief is reviewing — sent Sep 5." *Reviewer*: "Read the technical form, then Approve or Return for changes." |

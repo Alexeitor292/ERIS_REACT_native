@@ -30,7 +30,7 @@ function timestamp(value: string | null | undefined) {
  *  - Maintenance Coordinator: field reports awaiting intake triage.
  *  - Office Chief: assessments to route (`office_chief`), and specialist-route
  *    assessments of their own office to review (`office_chief_review`).
- *  - Branch Chief: assessments handed to them to staff (`branch_chief`), and the
+ *  - Branch Chief: assessments handed to them that still need an assignee (`branch_chief`), and the
  *    same ones to approve or return once submitted (`branch_chief_review`).
  *  - Engineer or Senior Specialist: their own assessments in Draft / Revision
  *    requested (`assignee` — both routes store the assignee in the same column).

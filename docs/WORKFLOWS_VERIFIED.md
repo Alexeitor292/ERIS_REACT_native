@@ -115,7 +115,7 @@ Requested flow for implementation:
    used for the approval notice).
 8. Office Chief routes: hands off to a Branch Chief **or** assigns a GeoTech
    Senior Specialist. There is no third option — the office chief can no longer
-   name a staff engineer.
+   name the assessment's author.
 9. Branch Chief assigns the Engineer (branch route only).
 10. Coordinator is notified when the assignment is made, and again **in-app and
     by email** when the assessment is approved.
