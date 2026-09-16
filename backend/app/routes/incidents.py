@@ -473,7 +473,22 @@ def _routing_users_for(
         if not normalized_office:
             return []
         params["office_code"] = normalized_office
-        where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code")
+        normalized_user_office = (
+            "UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '')))"
+        )
+        if assignment_key in {"BRANCH_CHIEF", "SENIOR_ENGINEER"}:
+            # Accounts created before office scoping was exposed in User
+            # Administration have no office_code. Excluding those otherwise-valid
+            # users leaves the office-chief routing pickers empty and strands the
+            # assessment. Keep explicitly-scoped users isolated to their own
+            # office, but admit legacy/unscoped assignees as a compatibility
+            # fallback. Their downstream authority remains limited to the one
+            # assessment that records their identity.
+            where_parts.append(f"({normalized_user_office} = :office_code OR {normalized_user_office} = '')")
+        else:
+            # Office chiefs own every assessment in their office, so unlike a
+            # named branch/senior assignee they must always be explicitly scoped.
+            where_parts.append(f"{normalized_user_office} = :office_code")
 
     rows = db.execute(
         text(
@@ -502,6 +517,7 @@ def _routing_user_options_for(
     if not user_ids:
         return []
     params = {f"user_id_{idx}": int(user_id) for idx, user_id in enumerate(user_ids)}
+    params["option_office_code"] = normalize_office_code(office_code) or ""
     tokens = ", ".join(f":user_id_{idx}" for idx in range(len(user_ids)))
     rows = db.execute(
         text(
@@ -509,7 +525,13 @@ def _routing_user_options_for(
             SELECT id, email, full_name, metadata_json
             FROM users
             WHERE id IN ({tokens})
-            ORDER BY full_name ASC, id ASC
+            ORDER BY
+              CASE
+                WHEN UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.office_code')), ''))) = :option_office_code
+                THEN 0 ELSE 1
+              END,
+              full_name ASC,
+              id ASC
             """
         ),
         params,
