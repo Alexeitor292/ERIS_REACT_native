@@ -58,11 +58,13 @@ router = APIRouter(tags=["incidents"])
 # Who may read a field report's evidence. Built from the role sets rather than
 # spelled out, so an account holding only a canonical name (GEOTECH_OFFICE_CHIEF
 # rather than the legacy OFFICE_CHIEF) is not silently locked out the way the
-# hand-written lists elsewhere in this module lock it out. CALTRANS_VIEWER is
-# absent on purpose: a viewer reaches an approved record's files through the
-# per-attachment public gate, never through a report's own evidence list.
+# hand-written lists elsewhere in this module lock it out. CALTRANS_VIEWER is in
+# the list because the owner made the ENTIRE approved record public, photos
+# included (org model decision 4); the handler narrows a viewer to approved
+# records with public_visibility.ensure_public_incident, exactly as the incident
+# detail endpoint does.
 INCIDENT_EVIDENCE_READ_ROLES: list[str] = sorted(
-    OPERATIONAL_ROLES | MAINTENANCE_REPORTING_ROLES
+    OPERATIONAL_ROLES | MAINTENANCE_REPORTING_ROLES | {CALTRANS_VIEWER}
 )
 
 REVISION_FIELDS_ALLOWED = {
@@ -1126,6 +1128,8 @@ def _incident_with_assignment(db: Session, incident_id: int):
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
               ru.full_name AS reporter_name, ru.email AS reporter_email,
+              tu.full_name AS triage_decided_by_name,
+              rsu.full_name AS resolved_by_name,
               isl.submission_id
             FROM incidents i
             LEFT JOIN incident_assignments a
@@ -1137,6 +1141,10 @@ def _incident_with_assignment(db: Session, incident_id: int):
             -- (redesign plan B5).
             LEFT JOIN users ru
               ON ru.id = i.reporter_user_id
+            LEFT JOIN users tu
+              ON tu.id = i.triage_decided_by_user_id
+            LEFT JOIN users rsu
+              ON rsu.id = i.resolved_by_user_id
             LEFT JOIN incident_submission_links isl
               ON isl.incident_id = i.id
             WHERE i.id = :iid
@@ -1273,7 +1281,9 @@ def _serialize_incident(row: dict) -> dict:
         "updated_at": row["updated_at"],
         "resolved_at": row["resolved_at"],
         "resolved_by_user_id": row["resolved_by_user_id"],
+        "resolved_by_name": row.get("resolved_by_name"),
         "resolution_comment": row["resolution_comment"],
+        "triage_decided_by_name": row.get("triage_decided_by_name"),
         "triage_disposition": row.get("triage_disposition"),
         "triage_decided_by_user_id": int(row["triage_decided_by_user_id"]) if row.get("triage_decided_by_user_id") is not None else None,
         "triage_decided_at": row.get("triage_decided_at"),
@@ -2099,6 +2109,8 @@ def list_incidents(
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
               ru.full_name AS reporter_name, ru.email AS reporter_email,
+              tu.full_name AS triage_decided_by_name,
+              rsu.full_name AS resolved_by_name,
               isl.submission_id
             FROM incidents i
             LEFT JOIN incident_assignments a
@@ -2110,6 +2122,10 @@ def list_incidents(
             -- (redesign plan B5).
             LEFT JOIN users ru
               ON ru.id = i.reporter_user_id
+            LEFT JOIN users tu
+              ON tu.id = i.triage_decided_by_user_id
+            LEFT JOIN users rsu
+              ON rsu.id = i.resolved_by_user_id
             LEFT JOIN incident_submission_links isl
               ON isl.incident_id = i.id
             {where_sql}
@@ -2601,10 +2617,10 @@ def list_incident_attachments(
     capture metadata recorded by the device.
 
     Row-level scope is the incident's own rule (``_ensure_incident_scope_access``):
-    a maintenance field reporter sees their own report and nobody else's. The
-    guard deliberately omits CALTRANS_VIEWER — a viewer's path to an approved
-    record's files is the per-attachment gate in ``main.py``, which checks that
-    the attachment belongs to a public record.
+    a maintenance field reporter sees their own report and nobody else's. A
+    read-only viewer sees the evidence of an APPROVED record only, and gets 404
+    — not 403 — for anything in flight, so in-progress work cannot be enumerated
+    by probing ids (org model design §4.3).
     """
     incident = db.execute(
         text("SELECT id, reporter_user_id, office_code, district FROM incidents WHERE id = :iid LIMIT 1"),
@@ -2612,6 +2628,7 @@ def list_incident_attachments(
     ).mappings().first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    public_visibility.ensure_public_incident(db, user, incident_id)
     _ensure_incident_scope_access(user, dict(incident), db=db)
 
     rows = db.execute(

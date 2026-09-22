@@ -146,13 +146,16 @@ class TestScopeIsTheIncidentsOwnRule:
         resp = client_db.get("/incidents/99999999/attachments", headers=_auth(coordinator_token))
         assert resp.status_code == 404
 
-    def test_a_read_only_viewer_is_refused(self, client_db, viewer_token, report):
-        # A viewer's path to an approved record's files is the per-attachment
-        # public gate in main.py, never a report's own evidence list.
+    def test_a_viewer_cannot_see_the_evidence_of_a_report_still_in_flight(
+        self, client_db, viewer_token, report
+    ):
+        # 404, not 403: a viewer must not be able to learn that an unapproved
+        # report exists by probing ids (org model design §4.3). The approved-record
+        # half lives in test_viewer_visibility_db, which owns an approved fixture.
         resp = client_db.get(
             f"/incidents/{report['incident_id']}/attachments", headers=_auth(viewer_token)
         )
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 404, resp.text
 
 
 class TestTheReporterIsNamed:

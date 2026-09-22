@@ -357,7 +357,7 @@ export default function MissionCenterProjectExplorer() {
 
                   <div className="mt-5 flex flex-wrap gap-2">
                     {incidentGis.incident.linked_submission_id ? <Link to={`/submissions/${incidentGis.incident.linked_submission_id}`} className={btnPrimary}>Open technical submission</Link> : null}
-                    <Link to={`/incidents/${selectedIncident.id}`} className={btn}>Open in Incidents</Link>
+                    <Link to={`/incidents/${selectedIncident.id}`} className={btn}>Open incident record</Link>
                     <Link to={`/event-groups/${selectedEventGroup.id}`} className={btn}>Open Event Group</Link>
                   </div>
 

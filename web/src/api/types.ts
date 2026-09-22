@@ -359,7 +359,16 @@ export type Incident = {
   updated_at: string;
   resolved_at: string | null;
   resolved_by_user_id: number | null;
+  resolved_by_name?: string | null;
   resolution_comment: string | null;
+  /** The coordinator's triage decision. Null until the report has been triaged. */
+  triage_disposition?: string | null;
+  triage_notes?: string | null;
+  triage_decided_by_user_id?: number | null;
+  triage_decided_by_name?: string | null;
+  triage_decided_at?: string | null;
+  duplicate_of_incident_id?: number | null;
+  duplicate_of_location_id?: number | null;
   linked_submission_id: number | null;
   road_inventory_context: RoadInventoryIncidentContext | null;
   assignment: IncidentAssignment | null;

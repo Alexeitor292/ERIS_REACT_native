@@ -10,6 +10,7 @@ import AdminCoveragePage from "./features/admin/org/AdminCoveragePage";
 import RoadInventoryPage from "./pages/RoadInventoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
+import IncidentDetailPage from "./features/incidents/IncidentDetailPage";
 import AssessmentsPage from "./pages/AssessmentsPage";
 import MissionCenterPage from "./pages/MissionCenterPage";
 import EventGroupsPage from "./pages/EventGroupsPage";
@@ -79,7 +80,7 @@ export default function App() {
             path="/incidents/:id"
             element={
               <ProtectedRoute>
-                <IncidentsPage />
+                <IncidentDetailPage />
               </ProtectedRoute>
             }
           />

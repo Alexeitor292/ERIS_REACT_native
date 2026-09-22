@@ -7,16 +7,29 @@ import {
   type WorkflowTree,
 } from "../api/workflowTree";
 import ModalDialog from "../ui/ModalDialog";
+import { assessmentStateLabel } from "../features/assessments/assessmentModel";
+
+// Tones come from the theme tokens so every node reads in the light, dark and
+// coastal themes alike. The palette this replaced (text-emerald-300, text-sky-200,
+// text-amber-200 …) was tuned for a dark background and was close to invisible
+// on the light theme.
+const TONE = {
+  good: "border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_9%,var(--panel))]",
+  brand: "border-[color:color-mix(in_oklab,var(--brand)_55%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_10%,var(--panel))]",
+  warn: "border-[color:color-mix(in_oklab,var(--warn)_55%,transparent)] bg-[color:color-mix(in_oklab,var(--warn)_10%,var(--panel))]",
+  bad: "border-[color:color-mix(in_oklab,var(--bad)_50%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_9%,var(--panel))]",
+  quiet: "border-[var(--line)] bg-[var(--panel-soft)]",
+} as const;
 
 const STATUS: Record<WorkflowNodeStatus, { label: string; icon: string; cls: string; dot: string }> = {
-  COMPLETED: { label: "Completed", icon: "✓", cls: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300", dot: "bg-emerald-400" },
-  CURRENT: { label: "Current", icon: "►", cls: "border-sky-500/60 bg-sky-500/15 text-sky-200", dot: "bg-sky-400" },
-  PENDING: { label: "Pending", icon: "○", cls: "border-[var(--line)] bg-[var(--panel-soft)] text-muted", dot: "bg-slate-500" },
-  WAITING_ON_REPORTER: { label: "Waiting on reporter", icon: "⮌", cls: "border-amber-500/60 bg-amber-500/15 text-amber-200", dot: "bg-amber-400" },
-  REVISION_REQUESTED: { label: "Revision requested", icon: "↺", cls: "border-red-500/50 bg-red-500/15 text-red-200", dot: "bg-red-400" },
-  SKIPPED: { label: "Skipped", icon: "—", cls: "border-[var(--line)] bg-transparent text-muted opacity-60", dot: "bg-slate-600" },
-  TERMINAL: { label: "Terminal", icon: "■", cls: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200", dot: "bg-emerald-400" },
-  UNASSIGNED: { label: "Unassigned", icon: "?", cls: "border-amber-500/60 bg-amber-500/10 text-amber-200", dot: "bg-amber-400" },
+  COMPLETED: { label: "Done", icon: "✓", cls: TONE.good, dot: "bg-[var(--good)] text-white" },
+  CURRENT: { label: "Now", icon: "►", cls: TONE.brand, dot: "bg-[var(--brand)] text-white" },
+  PENDING: { label: "Not started yet", icon: "○", cls: TONE.quiet, dot: "bg-[var(--line)] text-[var(--ink)]" },
+  WAITING_ON_REPORTER: { label: "Waiting on the reporter", icon: "⮌", cls: TONE.warn, dot: "bg-[var(--warn)] text-white" },
+  REVISION_REQUESTED: { label: "Returned for changes", icon: "↺", cls: TONE.bad, dot: "bg-[var(--bad)] text-white" },
+  SKIPPED: { label: "Not needed", icon: "—", cls: `${TONE.quiet} opacity-70`, dot: "bg-[var(--line)] text-[var(--ink)]" },
+  TERMINAL: { label: "Closed here", icon: "■", cls: TONE.quiet, dot: "bg-[var(--muted)] text-white" },
+  UNASSIGNED: { label: "Needs someone assigned", icon: "?", cls: TONE.warn, dot: "bg-[var(--warn)] text-white" },
 };
 
 const PATH_LABEL: Record<string, string> = {
@@ -49,7 +62,7 @@ function NodeCard({ node, isCurrent }: { node: WorkflowNode; isCurrent: boolean 
     <div className={`flex-1 min-w-[180px] rounded-lg border p-3 transition ${s.cls} ${isCurrent ? "ring-2 ring-[var(--brand)] shadow-[0_6px_18px_rgba(31,94,255,0.25)]" : ""}`}>
       <button type="button" onClick={() => hasDetail && setOpen((o) => !o)} className="block w-full text-left" aria-expanded={open}>
         <div className="flex items-center gap-2">
-          <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${s.dot} text-black`}>{s.icon}</span>
+          <span aria-hidden className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${s.dot}`}>{s.icon}</span>
           <span className="text-[11px] font-semibold uppercase tracking-wide">{node.role_title}</span>
         </div>
         <div className="mt-1 text-sm font-medium leading-snug text-[var(--ink)]">{node.label}</div>
@@ -63,7 +76,6 @@ function NodeCard({ node, isCurrent }: { node: WorkflowNode; isCurrent: boolean 
           {node.notes ? <div>{node.notes}</div> : null}
           {node.linked_incident_id ? <div className="text-muted">Linked incident #{node.linked_incident_id}</div> : null}
           {node.linked_location_id ? <div className="text-muted">Linked location #{node.linked_location_id}</div> : null}
-          {node.event_type ? <div className="text-[11px] text-muted">event: {node.event_type}</div> : null}
         </div>
       ) : null}
     </div>
@@ -86,11 +98,11 @@ export function WorkflowTreeView({ tree }: { tree: WorkflowTree }) {
           <span className="text-muted">Current owner: </span>
           {owner ? <span className="font-semibold">{owner.role_title}{owner.full_name ? ` — ${owner.full_name}` : owner.user_id == null ? " — Unassigned" : ""}</span> : <span className="font-semibold">None (closed)</span>}
         </div>
-        {tree.assessment ? <span className="ml-auto text-xs text-muted">Assessment: <span className="font-semibold text-[var(--ink)]">{tree.assessment.state}</span>{tree.assessment.office_code ? ` · Office ${tree.assessment.office_code}` : ""}</span> : null}
+        {tree.assessment ? <span className="ml-auto text-xs text-muted">Assessment: <span className="font-semibold text-[var(--ink)]">{assessmentStateLabel(tree.assessment.state)}</span></span> : null}
       </div>
 
       {tree.linked_incident_id || tree.linked_location_id ? (
-        <div className="mb-3 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+        <div className="mb-3 rounded border border-[color:color-mix(in_oklab,var(--warn)_50%,transparent)] bg-[color:color-mix(in_oklab,var(--warn)_10%,var(--panel))] p-2 text-xs">
           Linked / duplicate report{tree.linked_incident_id ? ` → incident #${tree.linked_incident_id}` : ""}{tree.linked_location_id ? ` → location #${tree.linked_location_id}` : ""}
         </div>
       ) : null}
@@ -131,7 +143,7 @@ export function WorkflowTreeModal({ incidentId, onClose }: { incidentId: number;
         <h2 id="workflow-tree-dialog-title" className="text-lg font-semibold">Incident #{incidentId} — Workflow</h2>
         <button data-dialog-initial-focus="true" type="button" onClick={onClose} className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1 text-sm hover:brightness-95">Close</button>
       </div>
-      {error ? <div role="alert" className="rounded border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">{error}</div> : tree ? <WorkflowTreeView tree={tree} /> : <div className="text-sm text-muted">Loading workflow…</div>}
+      {error ? <div role="alert" className="rounded border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] p-3 text-sm text-[var(--bad)]">{error}</div> : tree ? <WorkflowTreeView tree={tree} /> : <div className="text-sm text-muted">Loading workflow…</div>}
     </ModalDialog>
   );
 }

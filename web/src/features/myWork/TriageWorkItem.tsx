@@ -10,7 +10,8 @@ import { IncidentTriageDialog, type TriageDialogState } from "../incidents/Incid
 
 /**
  * Coordinator intake: a field report that is not yet part of the incident record.
- * "Start triage" opens the two-step dialog (Event Group review with map → disposition).
+ * "Review this report" opens the three-step dialog (report and evidence → Event
+ * Group → disposition).
  * Accepting with "Assessment required" mints the permanent incident key server-side
  * and opens a GeoTech assessment for the office chief to route — to a branch chief,
  * or directly to a senior engineer.
@@ -28,7 +29,7 @@ export default function TriageWorkItem({
   const [busy, setBusy] = useState(false);
 
   async function confirm() {
-    if (!dialog) return;
+    if (!dialog?.disposition) return;
     setBusy(true);
     try {
       const result = await triageIncident(dialog.incidentId, {
@@ -73,7 +74,7 @@ export default function TriageWorkItem({
         <p className="mt-1.5 text-sm">This report has not been accepted into ERIS yet. Triage takes three steps: read the report and its evidence, say which Event Group it belongs to, then record the decision. "Assessment required" accepts it and opens a GeoTech assessment for the office chief, who hands it to a branch chief or assigns a senior engineer.</p>
         <button
           type="button"
-          onClick={() => setDialog({ incidentId: incident.id, disposition: "ASSESSMENT_REQUIRED", notes: "" })}
+          onClick={() => setDialog({ incidentId: incident.id, disposition: null, notes: "" })}
           className="mt-3 rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95"
         >
           Review this report

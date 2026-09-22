@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { listAssessments, type Assessment } from "../../api/assessments";
 import { api } from "../../api/client";
@@ -47,8 +47,10 @@ type Tab = "records" | "intake";
  * Incidents: read-only record view.
  *   "Incident records"  — reports accepted into ERIS (coordinator-approved).
  *   "Awaiting intake"   — field reports not yet part of the record (triage pending).
- * Triage, routing, and assignment actions live in My Work. Filing a new report is
- * intake, not workflow, so reporting roles keep the "New incident" panel.
+ * Each row opens the incident's own record at /incidents/:id. Triage, routing,
+ * and assignment actions live in My Work (a coordinator can also start triage
+ * from the record). Filing a new report is intake, not workflow, so reporting
+ * roles keep the "New incident" panel.
  *
  * For a read-only VIEWER this is the whole application, and it is a different
  * page: "Awaiting intake" is not rendered at all — an untriaged field report is
@@ -59,10 +61,7 @@ type Tab = "records" | "intake";
  */
 export default function IncidentsOperationsPage() {
   const { me } = useAuth();
-  const params = useParams();
-  const highlightId = params.id ? Number(params.id) : null;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
   const operational = isOperationalUser(me?.roles);
   const viewer = isPublicOnly(me?.roles);
 
@@ -112,18 +111,6 @@ export default function IncidentsOperationsPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Deep link: /incidents/:id highlights and scrolls to the row (switching tab if needed).
-  useEffect(() => {
-    if (highlightId == null) return;
-    const target = items.find((incident) => incident.id === highlightId);
-    if (!target) return;
-    if (!viewer) setTab(target.current_stage === "COORDINATOR_REVIEW" ? "intake" : "records");
-    const timer = window.setTimeout(() => {
-      rowRefs.current[highlightId]?.scrollIntoView({ block: "center", behavior: "smooth" });
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [highlightId, items, viewer]);
 
   const intakeCount = useMemo(() => items.filter((incident) => incident.current_stage === "COORDINATOR_REVIEW").length, [items]);
 
@@ -322,17 +309,11 @@ export default function IncidentsOperationsPage() {
               ) : visible.map((incident) => {
                 const assessment = assessmentsByIncident[incident.id];
                 const submissionIds = assessment ? submissionIdsOf(assessment) : (incident.linked_submission_id ? [incident.linked_submission_id] : []);
-                const highlighted = highlightId === incident.id;
                 return (
-                  <tr
-                    key={incident.id}
-                    ref={(element) => { rowRefs.current[incident.id] = element; }}
-                    className="border-b border-[var(--line)]/60 align-top last:border-b-0"
-                    style={highlighted ? { background: "color-mix(in oklab, var(--brand) 7%, var(--panel))", boxShadow: "inset 3px 0 0 var(--brand)" } : undefined}
-                  >
-                    <td className="px-3 py-3 text-sm font-semibold tabular-nums">#{incident.id}</td>
+                  <tr key={incident.id} className="border-b border-[var(--line)]/60 align-top last:border-b-0">
+                    <td className="px-3 py-3 text-sm font-semibold tabular-nums"><Link to={`/incidents/${incident.id}`} className="hover:text-[var(--brand)] hover:underline">#{incident.id}</Link></td>
                     <td className="px-3 py-3 text-sm">
-                      <div className="font-semibold">{incident.title || `Incident #${incident.id}`}</div>
+                      <Link to={`/incidents/${incident.id}`} className="font-semibold text-[var(--ink)] hover:text-[var(--brand)] hover:underline">{incident.title || `Incident #${incident.id}`}</Link>
                       <IncidentClassificationText classification={classifications[incident.id]} />
                       {incident.event_group_id != null && !viewer ? <div className="mt-1 text-[11px]"><Link to={`/event-groups/${incident.event_group_id}`} className="text-[var(--brand)] hover:underline">Event Group #{incident.event_group_id}</Link></div> : null}
                     </td>

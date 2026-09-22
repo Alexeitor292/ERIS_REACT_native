@@ -216,6 +216,16 @@ class TestTheApprovedRecordIsReadable:
         assert resp.status_code == 200, resp.text
         assert int(resp.json()["incident"]["id"]) == approved["incident_id"]
 
+    def test_the_incident_evidence_list(self, client_db, tokens, approved):
+        # The dedicated incident page lists the report's evidence; a viewer on an
+        # approved record must get that list (owner decision 4: the entire
+        # approved record is public, photos included), not a 403.
+        resp = client_db.get(
+            f"/incidents/{approved['incident_id']}/attachments", headers=_auth(tokens["viewer"])
+        )
+        assert resp.status_code == 200, resp.text
+        assert isinstance(resp.json()["items"], list)
+
     def test_the_incident_list_and_the_mission_center_list(self, client_db, tokens, approved):
         for path in ("/incidents", "/mission-center/incidents"):
             resp = client_db.get(path, headers=_auth(tokens["viewer"]))
