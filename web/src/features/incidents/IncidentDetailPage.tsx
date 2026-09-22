@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import {
-  getAssessmentForIncident,
-  triageIncident,
-  type AssessmentDetail,
-} from "../../api/assessments";
+import { getAssessmentForIncident, type AssessmentDetail } from "../../api/assessments";
 import { api } from "../../api/client";
 import type { Incident } from "../../api/types";
 import { getWorkflowTree, type WorkflowTree } from "../../api/workflowTree";
@@ -26,7 +22,7 @@ import {
 } from "../assessments/assessmentModel";
 import type { EventGroupDetailResponse } from "../eventGroups/eventGroupTypes";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
-import { IncidentTriageDialog, type TriageDialogState } from "./IncidentDecisionDialogs";
+import { IncidentTriageDialog } from "./IncidentDecisionDialogs";
 import {
   EvidenceGallery,
   Fact,
@@ -101,8 +97,7 @@ export default function IncidentDetailPage() {
   const [assessment, setAssessment] = useState<AssessmentLoad>({ kind: "loading" });
   const [tree, setTree] = useState<WorkflowTree | null>(null);
   const [eventGroupTitle, setEventGroupTitle] = useState<string | null>(null);
-  const [triage, setTriage] = useState<TriageDialogState | null>(null);
-  const [triageBusy, setTriageBusy] = useState(false);
+  const [triageOpen, setTriageOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const evidence = useIncidentEvidence(validId ? incidentId : null);
 
@@ -161,26 +156,6 @@ export default function IncidentDetailPage() {
     return () => { cancelled = true; };
   }, [operational, eventGroupId]);
 
-  async function confirmTriage() {
-    if (!triage?.disposition) return;
-    setTriageBusy(true);
-    try {
-      const result = await triageIncident(triage.incidentId, {
-        disposition: triage.disposition,
-        notes: triage.notes.trim() || undefined,
-      }) as { assessment?: { id: number } } | undefined;
-      setTriage(null);
-      setNotice(result?.assessment
-        ? `Report accepted. Assessment #${result.assessment.id} is open and waiting for the office chief to route it.`
-        : `Decision recorded: ${dispositionLabel(triage.disposition)}.`);
-      setReloadKey((key) => key + 1);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "The triage decision could not be recorded.");
-    } finally {
-      setTriageBusy(false);
-    }
-  }
-
   const title = incident?.title?.trim() || (validId ? `Incident #${incidentId}` : "Incident");
   const offerTriage = Boolean(incident && canTriage(roles) && isAwaitingTriage(incident));
   const revision = incident ? revisionRequest(incident) : null;
@@ -221,11 +196,11 @@ export default function IncidentDetailPage() {
               {offerTriage ? (
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:color-mix(in_oklab,var(--brand)_40%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,var(--panel))] px-3 py-2.5">
                   <p className="min-w-0 text-sm">
-                    <b>This report is waiting for your review.</b> Read it and its evidence, say which Event Group it belongs to, then record the decision.
+                    <b>This report is waiting for your review.</b> Read it and its evidence, then decide what happens to it.
                   </p>
                   <button
                     type="button"
-                    onClick={() => { setNotice(null); setTriage({ incidentId: incident.id, disposition: null, notes: "" }); }}
+                    onClick={() => { setNotice(null); setTriageOpen(true); }}
                     className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95"
                   >
                     Review this report
@@ -289,7 +264,7 @@ export default function IncidentDetailPage() {
                       </div>
                     ) : (
                       <p className="text-sm text-muted">
-                        {isAwaitingTriage(incident) ? "Not grouped yet. The coordinator chooses its Event Group during triage." : "This report is not part of an Event Group."}
+                        {isAwaitingTriage(incident) ? "Not grouped yet. If the coordinator sends it for assessment, they choose its Event Group then." : "Not part of an Event Group. Only reports sent for assessment are grouped."}
                       </p>
                     )}
                   </Panel>
@@ -336,13 +311,11 @@ export default function IncidentDetailPage() {
         )}
       </div>
 
-      {triage ? (
+      {triageOpen && incident ? (
         <IncidentTriageDialog
-          state={triage}
-          busy={triageBusy}
-          onChange={setTriage}
-          onClose={() => setTriage(null)}
-          onConfirm={confirmTriage}
+          incidentId={incident.id}
+          onClose={() => setTriageOpen(false)}
+          onDone={(message) => { setTriageOpen(false); setNotice(message); setReloadKey((key) => key + 1); }}
         />
       ) : null}
     </AppShell>
@@ -356,7 +329,7 @@ function CoordinatorDecision({ incident }: { incident: Incident }) {
       <p className="text-sm text-muted">
         {isWaitingOnReporter(incident)
           ? "The coordinator sent this report back to the reporter before recording a decision. It returns to the coordinator once the reporter updates it."
-          : "Not decided yet. A Maintenance Coordinator reviews the report, chooses its Event Group, and records whether a GeoTech assessment is needed."}
+          : "Not decided yet. A Maintenance Coordinator reviews the report and decides whether it needs a GeoTech assessment."}
       </p>
     );
   }

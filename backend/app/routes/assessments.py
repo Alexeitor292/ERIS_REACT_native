@@ -66,6 +66,7 @@ from ..services import org_directory
 from ..services import public_visibility
 from ..services import workflow_tree as workflow_tree_svc
 from ..user_metadata import normalize_office_code
+from . import event_groups as event_groups_routes
 from . import incidents as incidents_routes
 
 router = APIRouter(tags=["assessments"])
@@ -532,8 +533,35 @@ def triage_incident(
     notes = (payload.notes or "").strip() or None
     actor_id = int(user["id"])
 
+    # Only a report that goes on to GeoTech work needs an Event Group: a report
+    # closed at triage, or sent back to its reporter, is not a site anyone
+    # tracks. Naming one for any other decision is refused rather than ignored.
+    if payload.event_group is not None and disposition != "ASSESSMENT_REQUIRED":
+        raise HTTPException(
+            status_code=400,
+            detail="An Event Group is chosen only when the report needs an assessment",
+        )
+
     try:
         if disposition == "ASSESSMENT_REQUIRED":
+            if payload.event_group is not None:
+                # Same transaction as the decision: if routing fails below, the
+                # report is left ungrouped rather than grouped but undecided.
+                event_groups_routes.apply_incident_event_group(
+                    db,
+                    incident=event_groups_routes._incident_row(db, incident_id),
+                    actor_user_id=actor_id,
+                    mode=payload.event_group.mode,
+                    event_group_id=payload.event_group.event_group_id,
+                    title=payload.event_group.title,
+                    description=payload.event_group.description,
+                    notes=notes,
+                )
+            elif incident.get("event_group_id") is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Choose the Event Group this report belongs to before sending it for assessment",
+                )
             result = _triage_assessment_required(db, incident, user, payload, notes)
         elif disposition == "NO_ASSESSMENT_REQUIRED":
             result = _triage_no_assessment(db, incident, actor_id, notes)

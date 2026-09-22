@@ -481,6 +481,97 @@ def nearby_event_groups_for_incident(
     return {"incident": _incident_summary(incident), "radius_m": radius_m, "items": items}
 
 
+def apply_incident_event_group(
+    db: Session,
+    *,
+    incident: dict,
+    actor_user_id: int,
+    mode: str,
+    event_group_id: int | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Put ``incident`` in an Event Group — an existing open one, or a new one.
+
+    Does NOT commit: the association endpoint commits it on its own, and triage
+    commits it together with the "assessment required" decision, so a triage
+    that fails leaves the report ungrouped instead of half-decided. Returns the
+    target group id and whether it was created or changed.
+    """
+    incident_id = int(incident["id"])
+    old_event_group_id = int(incident["event_group_id"]) if incident.get("event_group_id") is not None else None
+    mode = mode.upper()
+
+    if mode == "EXISTING":
+        if event_group_id is None:
+            raise HTTPException(status_code=400, detail="event_group_id is required for EXISTING mode")
+        target_row = _event_group_row(db, int(event_group_id))
+        if not target_row:
+            raise HTTPException(status_code=404, detail="Event Group not found")
+        if str(target_row["status"]).upper() != "OPEN":
+            raise HTTPException(status_code=409, detail="Only an open Event Group can accept an Incident")
+        target_event_group_id = int(event_group_id)
+        created = False
+    elif mode == "CREATE_NEW":
+        target_event_group_id = _create_event_group_for_incident(
+            db,
+            incident=incident,
+            actor_user_id=actor_user_id,
+            title=title,
+            description=description,
+            notes=notes,
+        )
+        created = True
+    else:
+        raise HTTPException(status_code=400, detail="mode must be EXISTING or CREATE_NEW")
+
+    if old_event_group_id == target_event_group_id:
+        return {"event_group_id": target_event_group_id, "created": created, "changed": False}
+
+    if old_event_group_id is not None:
+        _record_event_group_event(
+            db,
+            event_group_id=old_event_group_id,
+            incident_id=incident_id,
+            actor_user_id=actor_user_id,
+            event_type="INCIDENT_MOVED_OUT",
+            notes=notes,
+            metadata={"to_event_group_id": target_event_group_id},
+        )
+
+    db.execute(
+        text("UPDATE incidents SET event_group_id = :egid, updated_at = NOW() WHERE id = :iid"),
+        {"egid": target_event_group_id, "iid": incident_id},
+    )
+
+    _record_event_group_event(
+        db,
+        event_group_id=target_event_group_id,
+        incident_id=incident_id,
+        actor_user_id=actor_user_id,
+        event_type="INCIDENT_LINKED" if old_event_group_id is None else "INCIDENT_MOVED_IN",
+        notes=notes,
+        metadata={"from_event_group_id": old_event_group_id, "mode": mode},
+    )
+
+    if old_event_group_id is not None:
+        db.execute(
+            text(
+                """
+                UPDATE event_groups eg
+                SET eg.status = 'ARCHIVED', eg.updated_at = NOW()
+                WHERE eg.id = :old_egid
+                  AND eg.source = 'LEGACY_BACKFILL'
+                  AND NOT EXISTS (SELECT 1 FROM incidents i WHERE i.event_group_id = eg.id)
+                """
+            ),
+            {"old_egid": old_event_group_id},
+        )
+
+    return {"event_group_id": target_event_group_id, "created": created, "changed": True}
+
+
 @router.post("/incidents/{incident_id}/event-group-association")
 def associate_incident_event_group(
     payload: IncidentEventGroupAssociationRequest,
@@ -497,89 +588,23 @@ def associate_incident_event_group(
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW" and not is_admin(user):
         raise HTTPException(status_code=409, detail="Event Group association is managed during coordinator review")
 
-    old_event_group_id = int(incident["event_group_id"]) if incident.get("event_group_id") is not None else None
-    mode = payload.mode.upper()
-    actor_id = int(user["id"])
-    notes = (payload.notes or "").strip() or None
-
     try:
-        if mode == "EXISTING":
-            if payload.event_group_id is None:
-                raise HTTPException(status_code=400, detail="event_group_id is required for EXISTING mode")
-            target_row = _event_group_row(db, int(payload.event_group_id))
-            if not target_row:
-                raise HTTPException(status_code=404, detail="Event Group not found")
-            if str(target_row["status"]).upper() != "OPEN":
-                raise HTTPException(status_code=409, detail="Only an open Event Group can accept an Incident")
-            target_event_group_id = int(payload.event_group_id)
-            created = False
-        else:
-            target_event_group_id = _create_event_group_for_incident(
-                db,
-                incident=incident,
-                actor_user_id=actor_id,
-                title=payload.title,
-                description=payload.description,
-                notes=notes,
-            )
-            created = True
-
-        if old_event_group_id == target_event_group_id:
-            db.commit()
-            return {
-                "incident_id": incident_id,
-                "event_group": _serialize_event_group(dict(_event_group_row(db, target_event_group_id))),
-                "created": created,
-                "changed": False,
-            }
-
-        if old_event_group_id is not None:
-            _record_event_group_event(
-                db,
-                event_group_id=old_event_group_id,
-                incident_id=incident_id,
-                actor_user_id=actor_id,
-                event_type="INCIDENT_MOVED_OUT",
-                notes=notes,
-                metadata={"to_event_group_id": target_event_group_id},
-            )
-
-        db.execute(
-            text("UPDATE incidents SET event_group_id = :egid, updated_at = NOW() WHERE id = :iid"),
-            {"egid": target_event_group_id, "iid": incident_id},
-        )
-
-        _record_event_group_event(
+        outcome = apply_incident_event_group(
             db,
-            event_group_id=target_event_group_id,
-            incident_id=incident_id,
-            actor_user_id=actor_id,
-            event_type="INCIDENT_LINKED" if old_event_group_id is None else "INCIDENT_MOVED_IN",
-            notes=notes,
-            metadata={"from_event_group_id": old_event_group_id, "mode": mode},
+            incident=incident,
+            actor_user_id=int(user["id"]),
+            mode=payload.mode,
+            event_group_id=payload.event_group_id,
+            title=payload.title,
+            description=payload.description,
+            notes=(payload.notes or "").strip() or None,
         )
-
-        if old_event_group_id is not None:
-            db.execute(
-                text(
-                    """
-                    UPDATE event_groups eg
-                    SET eg.status = 'ARCHIVED', eg.updated_at = NOW()
-                    WHERE eg.id = :old_egid
-                      AND eg.source = 'LEGACY_BACKFILL'
-                      AND NOT EXISTS (SELECT 1 FROM incidents i WHERE i.event_group_id = eg.id)
-                    """
-                ),
-                {"old_egid": old_event_group_id},
-            )
-
         db.commit()
-        target = _event_group_row(db, target_event_group_id)
         return {
             "incident_id": incident_id,
-            "event_group": _serialize_event_group(dict(target)),
-            "created": created,
-            "changed": True,
+            "event_group": _serialize_event_group(dict(_event_group_row(db, outcome["event_group_id"]))),
+            "created": outcome["created"],
+            "changed": outcome["changed"],
         }
     except HTTPException:
         db.rollback()

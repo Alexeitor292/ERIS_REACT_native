@@ -90,7 +90,8 @@ export function isAwaitingTriage(incident: DetailIncident): boolean {
     && String(incident.status || "").toUpperCase() !== "RESOLVED";
 }
 
-const REVISION_FIELD_LABELS: Record<string, string> = {
+/** The fields a reporter can be asked to correct — the server's REVISION_FIELDS_ALLOWED. */
+export const REVISION_FIELD_LABELS: Record<string, string> = {
   district: "District",
   county: "County",
   route: "Route",
@@ -101,6 +102,19 @@ const REVISION_FIELD_LABELS: Record<string, string> = {
   first_occurred_at: "When it occurred",
   description: "Description",
 };
+
+/** The same fields as choices for the coordinator, in the order the reporter filled them in. */
+export const REVISION_FIELD_OPTIONS: ReadonlyArray<{ code: string; label: string }> = [
+  "description",
+  "first_observed_at",
+  "first_occurred_at",
+  "district",
+  "county",
+  "route",
+  "post_mile",
+  "latitude",
+  "longitude",
+].map((code) => ({ code, label: REVISION_FIELD_LABELS[code] }));
 
 export type RevisionRequest = { fields: string[]; comment: string | null };
 

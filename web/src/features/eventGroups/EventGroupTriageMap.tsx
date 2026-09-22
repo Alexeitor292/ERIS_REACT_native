@@ -25,7 +25,7 @@ const ACTIVE_INCIDENT_COLOR: [number, number, number, number] = [211, 47, 47, 0.
 const RESOLVED_INCIDENT_COLOR: [number, number, number, number] = [100, 116, 139, 0.92];
 
 /**
- * Map beside the Event Group review step of coordinator triage: the new report,
+ * Map in the Event Group panel of coordinator triage: the new report,
  * every nearby open Event Group (click to select), and the selected group's
  * existing incidents so the coordinator can judge whether it belongs there.
  */

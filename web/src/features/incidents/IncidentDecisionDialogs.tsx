@@ -1,28 +1,14 @@
 import { useState, type ReactNode } from "react";
 
-import type { TriageDisposition } from "../../api/assessments";
 import ModalDialog from "../../ui/ModalDialog";
-import EventGroupAssociationDialog from "../eventGroups/EventGroupAssociationDialog";
 import ReportReviewDialog from "./ReportReviewDialog";
-
-export type TriageDialogState = {
-  incidentId: number;
-  /** Null until the coordinator chooses one; nothing is chosen for them. */
-  disposition: TriageDisposition | null;
-  notes: string;
-};
+import TriageDecisionDialog from "./TriageDecisionDialog";
+import { newTriageDraft } from "./triageDecisionModel";
 
 export type ResolveDialogState = {
   incidentId: number;
   comment: string;
 };
-
-const TRIAGE_OPTIONS: Array<{ value: TriageDisposition; label: string; description: string }> = [
-  { value: "ASSESSMENT_REQUIRED", label: "Assessment required", description: "Open a GeoTech assessment for the district's office chief, who hands it to a branch chief or assigns a senior engineer." },
-  { value: "NO_ASSESSMENT_REQUIRED", label: "No assessment required", description: "Record that no geotechnical assessment is required for this incident." },
-  { value: "NEEDS_REPORTER_INFORMATION", label: "Needs reporter information", description: "Return the incident for additional field or reporter information." },
-  { value: "DUPLICATE_OR_LINKED", label: "Duplicate or linked", description: "Record that this incident duplicates or belongs with an existing incident or record." },
-];
 
 const inputClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
 
@@ -63,79 +49,28 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 /**
  * Coordinator triage, in the order the decision is actually made:
  *
- *   1. REVIEW       — read the report and look at the evidence.
- *   2. EVENT_GROUP  — say which real-world event it belongs to.
- *   3. DECISION     — record the disposition.
+ *   1. REVIEW    — read the report and look at the evidence.
+ *   2. DECISION  — choose what happens to it. Only "Assessment required" asks
+ *                  which Event Group it belongs to, in a panel that slides in
+ *                  beside the decision.
  *
- * The review step exists because the coordinator used to be asked where a
- * report belonged before they had seen a single photo of it. Every step can be
- * stepped back through, and no disposition is preselected.
+ * The draft lives here so stepping back to the report and forward again keeps
+ * every choice. Nothing is saved until the decision is confirmed, and then the
+ * decision and its Event Group are saved together.
  */
-type TriageStep = "REVIEW" | "EVENT_GROUP" | "DECISION";
-
-export function IncidentTriageDialog({ state, busy, onChange, onClose, onConfirm }: {
-  state: TriageDialogState;
-  busy: boolean;
-  onChange: (next: TriageDialogState) => void;
+export function IncidentTriageDialog({ incidentId, onClose, onDone }: {
+  incidentId: number;
   onClose: () => void;
-  onConfirm: () => void;
+  /** Called once the decision is saved, with a sentence saying what happened. */
+  onDone: (message: string) => void | Promise<void>;
 }) {
-  const [step, setStep] = useState<TriageStep>("REVIEW");
-  const selected = TRIAGE_OPTIONS.find((option) => option.value === state.disposition);
+  const [step, setStep] = useState<"REVIEW" | "DECISION">("REVIEW");
+  const [draft, setDraft] = useState(() => newTriageDraft(incidentId));
 
   if (step === "REVIEW") {
-    return (
-      <ReportReviewDialog
-        incidentId={state.incidentId}
-        onClose={onClose}
-        onContinue={() => setStep("EVENT_GROUP")}
-      />
-    );
+    return <ReportReviewDialog incidentId={incidentId} onClose={onClose} onContinue={() => setStep("DECISION")} />;
   }
-
-  if (step === "EVENT_GROUP") {
-    return (
-      <EventGroupAssociationDialog
-        incidentId={state.incidentId}
-        onClose={onClose}
-        onBack={() => setStep("REVIEW")}
-        onContinueToTriage={() => setStep("DECISION")}
-      />
-    );
-  }
-
-  return (
-    <DialogShell
-      titleId="incident-triage-dialog-title"
-      title={`Step 3 of 3 · Record the decision`}
-      description="You have reviewed the report and confirmed its Event Group. Record the disposition; the incident classification stays unassigned until the on-site assessment determines it, and the permanent ERIS number is minted only when you accept the report."
-      busy={busy}
-      onClose={onClose}
-    >
-      <div className="grid gap-4">
-        <div className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_42%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_9%,transparent)] px-3 py-2 text-sm text-[var(--good)]">
-          Event Group decision recorded for this coordinator review.
-        </div>
-        <Field label="Disposition">
-          <select data-dialog-initial-focus="true" className={inputClass} value={state.disposition ?? ""} onChange={(event) => onChange({ ...state, disposition: (event.target.value || null) as TriageDisposition | null })}>
-            <option value="" disabled>Choose a disposition…</option>
-            {TRIAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </Field>
-        <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">{selected?.description ?? "Choose what happens to this report. Nothing is selected for you."}</div>
-        <Field label="Decision notes">
-          <textarea rows={4} className={inputClass} value={state.notes} onChange={(event) => onChange({ ...state, notes: event.target.value })} placeholder="Add context that should be preserved in the incident timeline." />
-        </Field>
-        <div className="flex justify-between gap-2">
-          <button type="button" onClick={() => setStep("EVENT_GROUP")} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Back to Event Group</button>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
-            <button type="button" onClick={onConfirm} disabled={busy || !state.disposition} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">{busy ? "Recording…" : "Record triage decision"}</button>
-          </div>
-        </div>
-      </div>
-    </DialogShell>
-  );
+  return <TriageDecisionDialog draft={draft} onChange={setDraft} onBack={() => setStep("REVIEW")} onClose={onClose} onDone={onDone} />;
 }
 
 export function IncidentResolveDialog({ state, busy, onChange, onClose, onConfirm }: {

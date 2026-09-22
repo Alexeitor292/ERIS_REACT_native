@@ -255,6 +255,15 @@ TriageDisposition = Literal[
 ]
 
 
+class TriageEventGroupChoice(BaseModel):
+    """The Event Group an ASSESSMENT_REQUIRED report joins, saved with the decision."""
+
+    mode: Literal["EXISTING", "CREATE_NEW"]
+    event_group_id: int | None = Field(default=None, ge=1)
+    title: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+
+
 class IncidentTriageRequest(BaseModel):
     """Coordinator triage decision for an incident report."""
 
@@ -268,6 +277,9 @@ class IncidentTriageRequest(BaseModel):
     # DUPLICATE_OR_LINKED: the incident/location this report duplicates or links to.
     target_incident_id: int | None = Field(default=None, ge=1)
     target_location_id: int | None = Field(default=None, ge=1)
+    # ASSESSMENT_REQUIRED only: the Event Group, committed in the same
+    # transaction as the decision. Omitted when the report is already grouped.
+    event_group: TriageEventGroupChoice | None = None
 
 
 class AssessmentDelegateBranchRequest(BaseModel):

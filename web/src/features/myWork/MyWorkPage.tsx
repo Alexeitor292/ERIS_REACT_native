@@ -210,7 +210,6 @@ export default function MyWorkPage() {
                 <TriageWorkItem
                   incident={selected.incident}
                   onTriaged={async (message) => { setNotice(message); setSelectedId(null); await refresh(); }}
-                  onError={setError}
                 />
               ) : detail && detail.assessment.id === selected.assessment.id ? (
                 <AssessmentDetailPanel detail={detail} submissionsById={submissionsById} mode="work" onChanged={refresh} onError={setError} />

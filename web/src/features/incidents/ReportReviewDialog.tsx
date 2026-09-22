@@ -23,7 +23,7 @@ import { readinessChecks } from "./reportReviewModel";
  * The coordinator used to reach the Event Group map having seen only a title,
  * a location line and a description — never the photos, never who filed it.
  * This step puts the evidence first and asks nothing; "Continue" is the only
- * decision it offers, and no disposition is preselected anywhere downstream.
+ * decision it offers, and no disposition is preselected in the next step.
  * The same parts render the dedicated incident page, so a report looks the same
  * in both places.
  */
@@ -68,10 +68,10 @@ export default function ReportReviewDialog({
     >
       <div className="flex items-start justify-between gap-4 border-b border-[var(--line)] px-5 py-4">
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Step 1 of 3 · Review the report</div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Step 1 of 2 · Review the report</div>
           <h2 id="report-review-title" className="mt-0.5 truncate text-base font-semibold">{incident?.title || `Field report #${incidentId}`}</h2>
           <p id="report-review-description" className="mt-1 max-w-3xl text-[13px] text-muted">
-            Read what was reported and look at the evidence. Decide whether this is a real incident before ERIS asks where it belongs.
+            Read what was reported and look at the evidence. Decide whether this is a real incident before you record what happens to it.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -133,10 +133,10 @@ export default function ReportReviewDialog({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] px-5 py-3">
-        <span className="text-[12px] text-muted">Next: choose the Event Group, then record the decision.</span>
+        <span className="text-[12px] text-muted">Next: decide what happens to this report.</span>
         <div className="flex gap-2">
           <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
-          <button type="button" onClick={onContinue} disabled={busy || !incident} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">Continue to Event Group</button>
+          <button type="button" onClick={onContinue} disabled={busy || !incident} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">Continue to the decision</button>
         </div>
       </div>
     </ModalDialog>
