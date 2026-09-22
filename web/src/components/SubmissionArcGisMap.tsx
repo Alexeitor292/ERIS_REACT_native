@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import esriConfig from "@arcgis/core/config";
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
@@ -9,6 +9,8 @@ import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import Point from "@arcgis/core/geometry/Point";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
+import Extent from "@arcgis/core/geometry/Extent";
+import Viewpoint from "@arcgis/core/Viewpoint";
 import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 import Home from "@arcgis/core/widgets/Home";
 import Locate from "@arcgis/core/widgets/Locate";
@@ -25,6 +27,8 @@ import Expand from "@arcgis/core/widgets/Expand";
 import { Maximize2, X } from "lucide-react";
 import { appConfig } from "../config";
 import { caltransHighwaysLayerConfig } from "./caltransHighwaysLayer";
+import { fitMapView } from "./fitMapView";
+import { comfortableExtent, coordinatePositions, geoJsonPositions, type LonLat } from "./mapFit";
 import type { PhotoEvidence } from "../features/submissions/photoEvidenceApi";
 import {
   headingWedgeRing,
@@ -118,7 +122,8 @@ export default function SubmissionArcGisMap({
   const viewRef = useRef<MapView | null>(null);
   const layerRef = useRef<GraphicsLayer | null>(null);
   const photoLayerRef = useRef<GraphicsLayer | null>(null);
-  const autoCenteredRef = useRef(false);
+  const homeRef = useRef<Home | null>(null);
+  const fitKeyRef = useRef<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -150,6 +155,7 @@ export default function SubmissionArcGisMap({
     });
 
     const home = new Home({ view });
+    homeRef.current = home;
     const locate = new Locate({ view });
     const compass = new Compass({ view });
     const scaleBar = new ScaleBar({ view, unit: "dual" });
@@ -254,41 +260,12 @@ export default function SubmissionArcGisMap({
       subscriptions.forEach((sub) => sub.remove());
       layerRef.current = null;
       photoLayerRef.current = null;
+      homeRef.current = null;
+      fitKeyRef.current = null;
       viewRef.current = null;
       view.destroy();
     };
   }, [editable, onGeometryChange]);
-
-  const contentExtent = useCallback(() => {
-    const overlays = layerRef.current?.fullExtent ?? null;
-    const photos = photoLayerRef.current?.fullExtent ?? null;
-    if (overlays && photos) return overlays.clone().union(photos);
-    return overlays ?? photos;
-  }, []);
-
-  const goToRecordedLocation = useCallback(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    if (
-      location &&
-      typeof location.latitude === "number" &&
-      typeof location.longitude === "number" &&
-      !Number.isNaN(location.latitude) &&
-      !Number.isNaN(location.longitude)
-    ) {
-      view
-        .goTo({
-          center: [location.longitude, location.latitude],
-          zoom: 16,
-        })
-        .catch(() => {});
-      return;
-    }
-    const ext = contentExtent();
-    if (ext) {
-      view.goTo(ext.expand(1.35)).catch(() => {});
-    }
-  }, [location, contentExtent]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -333,17 +310,6 @@ export default function SubmissionArcGisMap({
       return looksMercator ? SpatialReference.WebMercator : SpatialReference.WGS84;
     };
 
-    const goToIfPossible = (geometry: any) => {
-      const ext = geometry?.extent;
-      if (ext) {
-        view.goTo(ext.expand(1.5)).catch(() => {});
-        return;
-      }
-      if (geometry?.type === "point") {
-        view.goTo({ center: geometry, zoom: 15 }).catch(() => {});
-      }
-    };
-
     const addPolygon = (rings: any) => {
       const sr = inferSpatialReference(rings);
       const polygon = new Polygon({
@@ -362,7 +328,6 @@ export default function SubmissionArcGisMap({
       });
 
       graphicsLayer.add(graphic);
-      goToIfPossible(polygon);
     };
 
     const addLineString = (paths: any) => {
@@ -381,7 +346,6 @@ export default function SubmissionArcGisMap({
         } as any,
       });
       graphicsLayer.add(graphic);
-      goToIfPossible(line);
     };
 
     const addPoint = (coordinates: any) => {
@@ -405,15 +369,11 @@ export default function SubmissionArcGisMap({
       graphicsLayer.add(graphic);
       const k = pointKey(coordinates);
       if (k) geometryPoints.add(k);
-      goToIfPossible(point);
     };
-
-    let addedAnyGeometry = false;
 
     if (t === "polygon") {
       const rings = geojson.coordinates;
       if (Array.isArray(rings) && rings.length) addPolygon(rings);
-      addedAnyGeometry = true;
     }
 
     if (t === "multipolygon") {
@@ -422,31 +382,26 @@ export default function SubmissionArcGisMap({
         polygons.forEach((poly: any) => {
           if (Array.isArray(poly) && poly.length) addPolygon(poly);
         });
-        addedAnyGeometry = polygons.length > 0;
       }
     }
 
     if (t === "linestring") {
       const path = geojson.coordinates;
       if (path?.length) addLineString(path);
-      addedAnyGeometry = true;
     }
 
     if (t === "multilinestring") {
       const paths = geojson.coordinates;
       if (paths?.length) addLineString(paths);
-      addedAnyGeometry = true;
     }
 
     if (t === "point") {
       addPoint(geojson.coordinates);
-      addedAnyGeometry = true;
     }
 
     if (t === "multipoint") {
       if (Array.isArray(geojson.coordinates)) {
         geojson.coordinates.forEach((p: any) => addPoint(p));
-        addedAnyGeometry = geojson.coordinates.length > 0;
       }
     }
 
@@ -473,20 +428,7 @@ export default function SubmissionArcGisMap({
         graphicsLayer.add(locationGraphic);
       }
     }
-
-    const extent = contentExtent();
-    if (extent) {
-      view.goTo(extent.expand(1.35)).catch(() => {});
-    } else if (
-      !addedAnyGeometry &&
-      hasLocationPoint &&
-      location &&
-      typeof location.latitude === "number" &&
-      typeof location.longitude === "number"
-    ) {
-      view.goTo({ center: [location.longitude, location.latitude], zoom: 16 }).catch(() => {});
-    }
-  }, [geojson, location, contentExtent]);
+  }, [geojson, location]);
 
   // Field photo evidence: a marker per mapped photo plus a camera-heading wedge when the
   // heading passed the backend quality gate (camera_heading_deg non-null).
@@ -542,24 +484,47 @@ export default function SubmissionArcGisMap({
         }),
       );
     }
+  }, [photoEvidence]);
 
-    const extent = contentExtent();
-    if (extent) view.goTo(extent.expand(1.35)).catch(() => {});
-  }, [photoEvidence, contentExtent]);
+  // Where the map looks: the recorded point, the saved geometry and every mapped
+  // photo with its camera wedge, with room around them — and Home returns there.
+  // It used to fit each layer's `fullExtent`, which for a GraphicsLayer is the
+  // whole world, so the map opened on five continents with the site a dot in
+  // California. Fitted once per change to what is on record; a shape drawn in
+  // an editable map is not a reason to move the view out from under the drawer.
+  const latitude = typeof location?.latitude === "number" && Number.isFinite(location.latitude) ? location.latitude : null;
+  const longitude = typeof location?.longitude === "number" && Number.isFinite(location.longitude) ? location.longitude : null;
+  const fitKey = useMemo(() => {
+    const point = latitude != null && longitude != null ? `${latitude.toFixed(6)},${longitude.toFixed(6)}` : "";
+    const photos = (photoEvidence ?? [])
+      .filter((photo) => typeof photo.latitude === "number" && typeof photo.longitude === "number")
+      .map((photo) => photo.attachment_id)
+      .join(",");
+    return `${point}|${photos}|${editable ? "" : JSON.stringify(geojson ?? null)}`;
+  }, [latitude, longitude, photoEvidence, geojson, editable]);
 
   useEffect(() => {
-    if (autoCenteredRef.current) return;
-    if (
-      location &&
-      typeof location.latitude === "number" &&
-      typeof location.longitude === "number" &&
-      !Number.isNaN(location.latitude) &&
-      !Number.isNaN(location.longitude)
-    ) {
-      autoCenteredRef.current = true;
-      goToRecordedLocation();
+    const view = viewRef.current;
+    if (!view || fitKeyRef.current === fitKey) return;
+    const points: LonLat[] = geoJsonPositions(geojson);
+    if (latitude != null && longitude != null) points.push({ latitude, longitude });
+    for (const photo of photoEvidence ?? []) {
+      if (typeof photo.latitude !== "number" || typeof photo.longitude !== "number") continue;
+      points.push({ latitude: photo.latitude, longitude: photo.longitude });
+      if (photo.camera_heading_deg != null) {
+        points.push(...coordinatePositions(headingWedgeRing(photo.latitude, photo.longitude, photo.camera_heading_deg)));
+      }
     }
-  }, [location, goToRecordedLocation]);
+    const extent = comfortableExtent(points, { minSpanM: 400, padding: 0.3 });
+    if (!extent) return;
+    // The first fit of a freshly opened map has nothing to animate from.
+    const first = fitKeyRef.current === null;
+    fitKeyRef.current = fitKey;
+    fitMapView(view, extent, { animate: !first });
+    if (homeRef.current) {
+      homeRef.current.viewpoint = new Viewpoint({ targetGeometry: new Extent({ ...extent, spatialReference: { wkid: 4326 } }) });
+    }
+  }, [fitKey, geojson, latitude, longitude, photoEvidence]);
 
   useEffect(() => {
     const view = viewRef.current;

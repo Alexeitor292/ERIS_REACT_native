@@ -17,6 +17,8 @@ import BasemapGallery from "@arcgis/core/widgets/BasemapGallery";
 import LayerList from "@arcgis/core/widgets/LayerList";
 import Expand from "@arcgis/core/widgets/Expand";
 
+import { fitMapView } from "../../components/fitMapView";
+import { comfortableExtent, coordinatePositions, geoJsonPositions, type LonLat, type LonLatExtent } from "../../components/mapFit";
 import { basemapForTheme, useThemeBasemap } from "../../components/mapTheme";
 import { headingWedgeRing, PHOTO_HEADING_WEDGE_FILL_ALPHA, themeColor, withAlpha } from "../../components/photoEvidenceGraphics";
 import type { IncidentClassification } from "../incidents/incidentClassification";
@@ -25,13 +27,27 @@ import type { ProjectDetailResponse, ProjectSummary } from "../projects/projectT
 import { projectLocationLabel } from "../projects/projectTypes";
 import { cameraDirectionEndpoint, type MissionCenterIncidentGis, type MissionCenterMode } from "./missionCenterGisModel";
 
-const CALIFORNIA_EXTENT = new Extent({
-  xmin: -124.482003,
-  ymin: 32.528832,
-  xmax: -114.131211,
-  ymax: 42.009518,
-  spatialReference: { wkid: 4326 },
-});
+const CALIFORNIA_BOUNDS: LonLatExtent = { xmin: -124.482003, ymin: 32.528832, xmax: -114.131211, ymax: 42.009518 };
+const CALIFORNIA_EXTENT = new Extent({ ...CALIFORNIA_BOUNDS, spatialReference: { wkid: 4326 } });
+
+/** An Event Group with its reports at one spot still opens on about a kilometre of road. */
+const EVENT_GROUP_MIN_SPAN_M = 1000;
+/** One report's evidence — pin, photos, camera wedges, saved geometry — in at least 400 m. */
+const INCIDENT_MIN_SPAN_M = 400;
+
+/** Every position one report's evidence occupies on the map, wedge tips included. */
+function incidentEvidencePositions(gis: MissionCenterIncidentGis): LonLat[] {
+  const points: LonLat[] = [{ longitude: gis.incident.longitude, latitude: gis.incident.latitude }, ...geoJsonPositions(gis.geometry)];
+  for (const photo of gis.photos) {
+    if (photo.latitude == null || photo.longitude == null) continue;
+    points.push({ longitude: photo.longitude, latitude: photo.latitude });
+    if (photo.camera_heading_deg != null) {
+      points.push(...coordinatePositions(headingWedgeRing(photo.latitude, photo.longitude, photo.camera_heading_deg)));
+      points.push(cameraDirectionEndpoint(photo.latitude, photo.longitude, photo.camera_heading_deg, 60));
+    }
+  }
+  return points;
+}
 
 export type MissionCenterMapHandle = {
   /** Center on a mapped photo and open its popup. Returns false when the photo is not on the map. */
@@ -134,6 +150,7 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
   const onSelectProjectRef = useRef(onSelectProject);
   const onSelectIncidentRef = useRef(onSelectIncident);
   const modeRef = useRef(mode);
+  const fitKeyRef = useRef<string | null>(null);
   const apiKey = String((import.meta as any)?.env?.VITE_ARCGIS_API_KEY ?? "");
 
   useEffect(() => { onSelectProjectRef.current = onSelectProject; }, [onSelectProject]);
@@ -218,6 +235,7 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
       clickHandle.remove();
       view.destroy();
       viewRef.current = null;
+      fitKeyRef.current = null;
       projectLayerRef.current = null;
       incidentLayerRef.current = null;
       geometryLayerRef.current = null;
@@ -259,7 +277,6 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
       });
     });
     layer.addMany(graphics);
-    view.goTo(CALIFORNIA_EXTENT, { duration: 0 }).catch(() => {});
   }, [mode, projects, selectedProjectId]);
 
   useEffect(() => {
@@ -299,20 +316,13 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
       });
     });
     layer.addMany(graphics);
-
-    if (mode === "PROJECT") {
-      if (graphics.length > 0) view.goTo(graphics, { duration: 0 }).catch(() => {});
-      else view.goTo({ center: [projectDetail.project.centroid_longitude, projectDetail.project.centroid_latitude], zoom: 13 }, { duration: 0 }).catch(() => {});
-    }
   }, [classifications, mode, projectDetail, selectedIncidentId]);
 
   useEffect(() => {
     const geometryLayer = geometryLayerRef.current;
     const photoLayer = photoLayerRef.current;
     const directionLayer = directionLayerRef.current;
-    const incidentLayer = incidentLayerRef.current;
-    const view = viewRef.current;
-    if (!geometryLayer || !photoLayer || !directionLayer || !view) return;
+    if (!geometryLayer || !photoLayer || !directionLayer) return;
 
     geometryLayer.removeAll();
     photoLayer.removeAll();
@@ -357,18 +367,39 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
       }));
     }
 
-    const allGraphics = [
-      ...(incidentLayer?.graphics.toArray() ?? []),
-      ...geometryGraphics,
-      ...photoLayer.graphics.toArray(),
-      ...directionLayer.graphics.toArray(),
-    ];
-    if (allGraphics.length > 1) {
-      view.goTo(allGraphics, { duration: 0 }).catch(() => {});
-    } else {
-      view.goTo({ center: [incidentGis.incident.longitude, incidentGis.incident.latitude], zoom: 17 }, { duration: 0 }).catch(() => {});
-    }
   }, [incidentGis, mode]);
+
+  // Where the map looks follows the selection, once per selection: all of
+  // California, every report in the chosen Event Group, or everything one report
+  // left on the map. Refreshes never move it — the group list reloads every
+  // minute and classifications arrive after the reports — so a map the reader
+  // has panned stays where they put it until they choose something else.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    let key: string;
+    let extent: LonLatExtent | null;
+    if (mode === "PROJECTS") {
+      key = "all";
+      extent = CALIFORNIA_BOUNDS;
+    } else if (mode === "PROJECT" && projectDetail) {
+      key = `group:${projectDetail.project.id}:${projectDetail.incidents.map((incident) => incident.id).join(",")}`;
+      const points = projectDetail.incidents.length
+        ? projectDetail.incidents
+        : [{ longitude: projectDetail.project.centroid_longitude, latitude: projectDetail.project.centroid_latitude }];
+      extent = comfortableExtent(points, { minSpanM: EVENT_GROUP_MIN_SPAN_M, padding: 0.25 });
+    } else if (mode === "INCIDENT" && incidentGis) {
+      key = `incident:${incidentGis.incident.id}`;
+      extent = comfortableExtent(incidentEvidencePositions(incidentGis), { minSpanM: INCIDENT_MIN_SPAN_M, padding: 0.3 });
+    } else {
+      return;
+    }
+    if (!extent || fitKeyRef.current === key) return;
+    // The first fit of a new map has nothing to animate from.
+    const first = fitKeyRef.current === null;
+    fitKeyRef.current = key;
+    fitMapView(view, extent, { animate: !first });
+  }, [mode, projectDetail, incidentGis]);
 
   return (
     <div className="map-stack-guard overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
