@@ -126,11 +126,18 @@ export default function EventGroupTriageMap({ incident, groups, selectedGroupId,
 
   return (
     <div className="map-stack-guard overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
-      <div ref={divRef} style={{ height }} aria-label="Nearby Event Groups map" />
+      <div ref={divRef} style={{ height }} aria-label={groups.length ? "Nearby Event Groups map" : "Location of the report"} />
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs text-muted">
-        <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full border-2 border-white bg-[var(--bad)] shadow-[0_0_0_1px_var(--line)]" /> New incident</span>
-        <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full bg-[rgb(30,96,255)]" /> Open Event Group — click to select</span>
-        {selectedGroup ? <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2 w-2 rotate-45 bg-[rgb(211,47,47)]" /> {selectedGroup.title}'s incidents ({selectedIncidents.length})</span> : <span>Select an Event Group to preview its existing incidents.</span>}
+        <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full border-2 border-white bg-[var(--bad)] shadow-[0_0_0_1px_var(--line)]" /> {groups.length ? "New incident" : "Where the report was filed"}</span>
+        {/* Only the Event Group step has groups to explain. Showing this legend
+            on the report review, where the map carries one pin, described a
+            selection the coordinator was not being asked to make. */}
+        {groups.length ? (
+          <>
+            <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full bg-[rgb(30,96,255)]" /> Open Event Group — click to select</span>
+            {selectedGroup ? <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2 w-2 rotate-45 bg-[rgb(211,47,47)]" /> {selectedGroup.title}'s incidents ({selectedIncidents.length})</span> : <span>Select an Event Group to preview its existing incidents.</span>}
+          </>
+        ) : null}
       </div>
     </div>
   );

@@ -30,8 +30,14 @@ function formatWhen(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? String(value) : dateTimeFormatter.format(date);
 }
 
+/**
+ * ERIS clears a report's classification on insert — `trg_incident_identity_bi`
+ * sets `incident_type` to NULL — because the type is decided by the on-site
+ * assessment, not by the reporter. Saying "not stated by the reporter" would
+ * blame them for a rule of the system.
+ */
 function incidentTypeLabel(raw: string | null): string {
-  if (!raw) return "Not stated by the reporter";
+  if (!raw) return "Not classified yet — the on-site assessment decides it";
   return raw.replace(/_/g, " ").toLowerCase().replace(/(^|\s)\S/g, (match) => match.toUpperCase());
 }
 
@@ -211,7 +217,12 @@ export default function ReportReviewDialog({
                               >
                                 <img src={photo.download_url} alt={photo.file_name} loading="lazy" className="h-28 w-full object-cover" />
                                 <span className="grid gap-0.5 px-2 pb-2">
-                                  <span className="truncate text-[11px] font-medium">{formatWhen(photo.captured_at)}</span>
+                                  {/* The file name is the fallback, never a bare
+                                      dash: a photo whose device recorded no
+                                      capture time still has to be identifiable. */}
+                                  <span className="truncate text-[11px] font-medium">
+                                    {photo.captured_at ? formatWhen(photo.captured_at) : photo.file_name}
+                                  </span>
                                   <span className="truncate text-[11px] text-muted">
                                     {far === null ? "No position recorded" : distanceLabel(far)}
                                   </span>
@@ -242,7 +253,7 @@ export default function ReportReviewDialog({
               <Panel title="What was reported">
                 <div className="grid gap-3">
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Fact label="Reported as" value={incidentTypeLabel(incident.incident_type)} />
+                    <Fact label="Classification" value={incidentTypeLabel(incident.incident_type)} />
                     <Fact label="Filed by" value={incident.reporter_name || `User #${incident.reporter_user_id}`} />
                     <Fact label="First seen" value={<span className="tabular-nums">{formatWhen(incident.first_observed_at)}</span>} />
                     <Fact label="Filed" value={<span className="tabular-nums">{formatWhen(incident.created_at)}</span>} />
