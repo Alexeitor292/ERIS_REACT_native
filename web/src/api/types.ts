@@ -280,6 +280,25 @@ export type SubmissionWorkflowContext = {
   can_review?: boolean;
 };
 
+/** One file the reporter attached to a field report (GET /incidents/{id}/attachments). */
+export type IncidentAttachment = {
+  attachment_id: number;
+  kind: "PHOTO" | "VIDEO" | "DOC" | "SKETCH" | string;
+  file_name: string;
+  mime_type: string;
+  file_size_bytes: number | null;
+  uploaded_at: string | null;
+  /** When the device recorded the capture, not when it was uploaded. */
+  captured_at: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  horizontal_accuracy_m: number | null;
+  camera_heading_deg: number | null;
+  heading_reference: string | null;
+  location_source: string | null;
+  download_url: string;
+};
+
 export type RoadInventoryIncidentContext = {
   dataset_version_id: number;
   segment_id: number;
@@ -333,6 +352,9 @@ export type Incident = {
   incident_key?: string | null;
   status: IncidentStatus;
   reporter_user_id: number;
+  /** Who filed the report. Null on rows served by a query that predates the join. */
+  reporter_name?: string | null;
+  reporter_email?: string | null;
   created_at: string;
   updated_at: string;
   resolved_at: string | null;

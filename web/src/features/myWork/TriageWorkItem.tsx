@@ -70,13 +70,13 @@ export default function TriageWorkItem({
           <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--brand)]">Next step</span>
           <span className="text-[15px] font-semibold">Waiting on Maintenance Coordinator</span>
         </div>
-        <p className="mt-1.5 text-sm">This report has not been accepted into ERIS yet. Review the Event Group context and record the triage disposition — "Assessment required" accepts it and opens a GeoTech assessment for the office chief, who hands it to a branch chief or assigns a senior engineer.</p>
+        <p className="mt-1.5 text-sm">This report has not been accepted into ERIS yet. Triage takes three steps: read the report and its evidence, say which Event Group it belongs to, then record the decision. "Assessment required" accepts it and opens a GeoTech assessment for the office chief, who hands it to a branch chief or assigns a senior engineer.</p>
         <button
           type="button"
           onClick={() => setDialog({ incidentId: incident.id, disposition: "ASSESSMENT_REQUIRED", notes: "" })}
           className="mt-3 rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95"
         >
-          Start triage
+          Review this report
         </button>
       </section>
 

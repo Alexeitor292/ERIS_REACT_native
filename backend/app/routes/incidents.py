@@ -22,6 +22,8 @@ from ..roles import (
     GISA_AUTHOR_ROLES,
     MAINTENANCE_COORDINATOR,
     MAINTENANCE_FIELD_WORKER,
+    MAINTENANCE_REPORTING_ROLES,
+    OPERATIONAL_ROLES,
     expand_roles,
     has_canonical_role,
     is_maintenance_only,
@@ -41,7 +43,7 @@ from ..schemas.common import (
     IncidentLocationLinkRequest,
     RoadInventoryIncidentContext,
 )
-from ..storage import make_object_key, put_object_bytes
+from ..storage import make_object_key, object_access_url, put_object_bytes
 from ..user_metadata import normalize_district_code, normalize_office_code, normalize_profile_text, parse_user_metadata
 
 router = APIRouter(tags=["incidents"])
@@ -53,6 +55,16 @@ router = APIRouter(tags=["incidents"])
 # services/org_directory.office_for_district(db, district), which reads the
 # admin-editable org_office_districts rows and keeps the legacy constant as its
 # documented fallback (design §13.5).
+# Who may read a field report's evidence. Built from the role sets rather than
+# spelled out, so an account holding only a canonical name (GEOTECH_OFFICE_CHIEF
+# rather than the legacy OFFICE_CHIEF) is not silently locked out the way the
+# hand-written lists elsewhere in this module lock it out. CALTRANS_VIEWER is
+# absent on purpose: a viewer reaches an approved record's files through the
+# per-attachment public gate, never through a report's own evidence list.
+INCIDENT_EVIDENCE_READ_ROLES: list[str] = sorted(
+    OPERATIONAL_ROLES | MAINTENANCE_REPORTING_ROLES
+)
+
 REVISION_FIELDS_ALLOWED = {
     "district",
     "county",
@@ -1113,12 +1125,18 @@ def _incident_with_assignment(db: Session, incident_id: int):
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
+              ru.full_name AS reporter_name, ru.email AS reporter_email,
               isl.submission_id
             FROM incidents i
             LEFT JOIN incident_assignments a
               ON a.incident_id = i.id AND a.assignment_stage = 'ENGINEER' AND a.is_active = 1
             LEFT JOIN users u
               ON u.id = a.assignee_user_id
+            -- The reporter by name. Coordinator triage has to say who filed a
+            -- report before it can be judged, and "User #7" is not an answer
+            -- (redesign plan B5).
+            LEFT JOIN users ru
+              ON ru.id = i.reporter_user_id
             LEFT JOIN incident_submission_links isl
               ON isl.incident_id = i.id
             WHERE i.id = :iid
@@ -1249,6 +1267,8 @@ def _serialize_incident(row: dict) -> dict:
         "incident_key": row.get("incident_key"),
         "status": row["status"],
         "reporter_user_id": int(row["reporter_user_id"]),
+        "reporter_name": row.get("reporter_name"),
+        "reporter_email": row.get("reporter_email"),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "resolved_at": row["resolved_at"],
@@ -2078,12 +2098,18 @@ def list_incidents(
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
+              ru.full_name AS reporter_name, ru.email AS reporter_email,
               isl.submission_id
             FROM incidents i
             LEFT JOIN incident_assignments a
               ON a.incident_id = i.id AND a.assignment_stage = 'ENGINEER' AND a.is_active = 1
             LEFT JOIN users u
               ON u.id = a.assignee_user_id
+            -- The reporter by name. Coordinator triage has to say who filed a
+            -- report before it can be judged, and "User #7" is not an answer
+            -- (redesign plan B5).
+            LEFT JOIN users ru
+              ON ru.id = i.reporter_user_id
             LEFT JOIN incident_submission_links isl
               ON isl.incident_id = i.id
             {where_sql}
@@ -2557,6 +2583,86 @@ def mission_center_incident_feed(
         ],
         "requested_by_user_id": user["id"],
     }
+
+
+@router.get("/incidents/{incident_id}/attachments")
+def list_incident_attachments(
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(INCIDENT_EVIDENCE_READ_ROLES)),
+):
+    """Everything the reporter attached to a field report, with access URLs.
+
+    Coordinator triage could not see the evidence before this endpoint existed:
+    the only read path for a report's files was the Mission Center map, which
+    returns ``kind = 'PHOTO'`` rows alone, so a report whose evidence was a video
+    or a document looked empty. A coordinator is being asked whether a report is
+    a real incident, so they get every attachment, in upload order, with the
+    capture metadata recorded by the device.
+
+    Row-level scope is the incident's own rule (``_ensure_incident_scope_access``):
+    a maintenance field reporter sees their own report and nobody else's. The
+    guard deliberately omits CALTRANS_VIEWER — a viewer's path to an approved
+    record's files is the per-attachment gate in ``main.py``, which checks that
+    the attachment belongs to a public record.
+    """
+    incident = db.execute(
+        text("SELECT id, reporter_user_id, office_code, district FROM incidents WHERE id = :iid LIMIT 1"),
+        {"iid": incident_id},
+    ).mappings().first()
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    _ensure_incident_scope_access(user, dict(incident), db=db)
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              ia.attachment_id, ia.kind, ia.sort_order,
+              a.file_name, a.mime_type, a.file_size_bytes,
+              a.storage_bucket, a.storage_key, a.uploaded_at,
+              COALESCE(cm.captured_at, a.captured_at) AS captured_at,
+              cm.latitude, cm.longitude, cm.horizontal_accuracy_m,
+              cm.camera_heading_deg, cm.heading_reference, cm.location_source
+            FROM incident_attachments ia
+            JOIN attachments a ON a.id = ia.attachment_id
+            LEFT JOIN attachment_capture_metadata cm ON cm.attachment_id = a.id
+            WHERE ia.incident_id = :iid
+            ORDER BY ia.sort_order ASC, ia.attachment_id ASC
+            """
+        ),
+        {"iid": incident_id},
+    ).mappings().all()
+
+    items = []
+    for row in rows:
+        items.append(
+            {
+                "attachment_id": int(row["attachment_id"]),
+                "kind": row["kind"],
+                "file_name": row["file_name"],
+                "mime_type": row["mime_type"],
+                "file_size_bytes": int(row["file_size_bytes"]) if row["file_size_bytes"] is not None else None,
+                "uploaded_at": row["uploaded_at"],
+                "captured_at": row["captured_at"],
+                "latitude": float(row["latitude"]) if row["latitude"] is not None else None,
+                "longitude": float(row["longitude"]) if row["longitude"] is not None else None,
+                "horizontal_accuracy_m": (
+                    float(row["horizontal_accuracy_m"]) if row["horizontal_accuracy_m"] is not None else None
+                ),
+                "camera_heading_deg": (
+                    float(row["camera_heading_deg"]) if row["camera_heading_deg"] is not None else None
+                ),
+                "heading_reference": row["heading_reference"],
+                "location_source": row["location_source"],
+                "download_url": object_access_url(
+                    str(row["storage_bucket"] or settings.MINIO_BUCKET),
+                    str(row["storage_key"]),
+                    expires_seconds=900,
+                ),
+            }
+        )
+    return {"incident_id": incident_id, "items": items}
 
 
 @router.post("/incidents/{incident_id}/attachments")

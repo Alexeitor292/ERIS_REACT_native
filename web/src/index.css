@@ -18,6 +18,9 @@
   --brand-ink: #0e4c6a;
   --good: #1d9d5d;
   --bad: #d14b54;
+  /* Attention, not error: the coordinator review marks facts worth weighing. */
+  --warn: #d97a1a;
+  --warn-text: #8f4a05;
   --shadow: 0 4px 12px rgba(17, 24, 39, 0.06);
   --bg-glow-a: transparent;
   --bg-glow-b: transparent;
@@ -35,6 +38,8 @@
   --brand-ink: #e4f0ff;
   --good: #47c983;
   --bad: #f46a76;
+  --warn: #f0a24a;
+  --warn-text: #ffc27a;
   --shadow: 0 22px 46px rgba(0, 0, 0, 0.32);
   --bg-glow-a: color-mix(in oklab, var(--brand) 24%, transparent);
   --bg-glow-b: color-mix(in oklab, var(--accent) 20%, transparent);
@@ -52,6 +57,8 @@
   --brand-ink: #063e42;
   --good: #137a57;
   --bad: #b6454d;
+  --warn: #b26a12;
+  --warn-text: #7a4408;
   --shadow: 0 14px 32px rgba(6, 62, 66, 0.13);
   --bg-glow-a: color-mix(in oklab, var(--brand) 20%, transparent);
   --bg-glow-b: color-mix(in oklab, var(--accent) 18%, transparent);

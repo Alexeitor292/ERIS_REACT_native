@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import type { TriageDisposition } from "../../api/assessments";
 import ModalDialog from "../../ui/ModalDialog";
 import EventGroupAssociationDialog from "../eventGroups/EventGroupAssociationDialog";
+import ReportReviewDialog from "./ReportReviewDialog";
 
 export type TriageDialogState = {
   incidentId: number;
@@ -58,6 +59,19 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</span>{children}</label>;
 }
 
+/**
+ * Coordinator triage, in the order the decision is actually made:
+ *
+ *   1. REVIEW       — read the report and look at the evidence.
+ *   2. EVENT_GROUP  — say which real-world event it belongs to.
+ *   3. DECISION     — record the disposition.
+ *
+ * The review step exists because the coordinator used to be asked where a
+ * report belonged before they had seen a single photo of it. Every step can be
+ * stepped back through, and no disposition is preselected.
+ */
+type TriageStep = "REVIEW" | "EVENT_GROUP" | "DECISION";
+
 export function IncidentTriageDialog({ state, busy, onChange, onClose, onConfirm }: {
   state: TriageDialogState;
   busy: boolean;
@@ -65,15 +79,26 @@ export function IncidentTriageDialog({ state, busy, onChange, onClose, onConfirm
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const [eventGroupReviewComplete, setEventGroupReviewComplete] = useState(false);
+  const [step, setStep] = useState<TriageStep>("REVIEW");
   const selected = TRIAGE_OPTIONS.find((option) => option.value === state.disposition);
 
-  if (!eventGroupReviewComplete) {
+  if (step === "REVIEW") {
+    return (
+      <ReportReviewDialog
+        incidentId={state.incidentId}
+        onClose={onClose}
+        onContinue={() => setStep("EVENT_GROUP")}
+      />
+    );
+  }
+
+  if (step === "EVENT_GROUP") {
     return (
       <EventGroupAssociationDialog
         incidentId={state.incidentId}
         onClose={onClose}
-        onContinueToTriage={() => setEventGroupReviewComplete(true)}
+        onBack={() => setStep("REVIEW")}
+        onContinueToTriage={() => setStep("DECISION")}
       />
     );
   }
@@ -81,8 +106,8 @@ export function IncidentTriageDialog({ state, busy, onChange, onClose, onConfirm
   return (
     <DialogShell
       titleId="incident-triage-dialog-title"
-      title={`Triage incident #${state.incidentId}`}
-      description="Event Group context is confirmed. Record the coordinator disposition; incident classification remains unassigned until the on-site assessment determines it. The permanent Incident key is minted only when the coordinator approves and forwards the Incident."
+      title={`Step 3 of 3 · Record the decision`}
+      description="You have reviewed the report and confirmed its Event Group. Record the disposition; the incident classification stays unassigned until the on-site assessment determines it, and the permanent ERIS number is minted only when you accept the report."
       busy={busy}
       onClose={onClose}
     >
@@ -100,7 +125,7 @@ export function IncidentTriageDialog({ state, busy, onChange, onClose, onConfirm
           <textarea rows={4} className={inputClass} value={state.notes} onChange={(event) => onChange({ ...state, notes: event.target.value })} placeholder="Add context that should be preserved in the incident timeline." />
         </Field>
         <div className="flex justify-between gap-2">
-          <button type="button" onClick={() => setEventGroupReviewComplete(false)} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Review Event Group again</button>
+          <button type="button" onClick={() => setStep("EVENT_GROUP")} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Back to Event Group</button>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
             <button type="button" onClick={onConfirm} disabled={busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">{busy ? "Recording…" : "Record triage decision"}</button>

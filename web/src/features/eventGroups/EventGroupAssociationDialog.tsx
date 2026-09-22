@@ -50,18 +50,25 @@ function generatedTitle(incident: EventGroupIncidentSummary | undefined): string
 const inputClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal normal-case text-[var(--ink)] outline-none focus:ring-2 focus:ring-[var(--brand)]";
 
 /**
- * Step 1 of coordinator triage: confirm the Event Group context. Nearby open groups
- * are listed by distance beside a map that shows the new report, the groups, and
- * the selected group's existing incidents. "Starts its own event" creates a new
- * Event Group. The decision is saved before the disposition step.
+ * Step 2 of coordinator triage: say which real-world event this report belongs
+ * to. Nearby open groups are listed by distance beside a map showing the new
+ * report, the groups, and the selected group's existing incidents. "Starts its
+ * own event" creates a new Event Group.
+ *
+ * It is step 2, not step 1, because a coordinator cannot say where a report
+ * belongs before they have read it: ReportReviewDialog comes first and the
+ * evidence is on screen by the time this question is put.
  */
 export default function EventGroupAssociationDialog({
   incidentId,
   onClose,
+  onBack,
   onContinueToTriage,
 }: {
   incidentId: number;
   onClose: () => void;
+  /** Back to the report review. Absent when the dialog is opened on its own. */
+  onBack?: () => void;
   onContinueToTriage: (incidentId: number) => void;
 }) {
   const [context, setContext] = useState<ContextResponse | null>(null);
@@ -164,8 +171,9 @@ export default function EventGroupAssociationDialog({
     >
       <div className="flex items-start justify-between gap-4 border-b border-[var(--line)] px-5 py-4">
         <div>
-          <h2 id="event-group-association-title" className="text-base font-semibold">Event Group review — incident #{incidentId}</h2>
-          <p id="event-group-association-description" className="mt-1 max-w-3xl text-[13px] text-muted">Confirm shared-event context before triage. Accepting the report records the Event Group decision and enters the incident into ERIS.</p>
+          {onBack ? <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Step 2 of 3 · Where it belongs</div> : null}
+          <h2 id="event-group-association-title" className="mt-0.5 text-base font-semibold">Event Group review — incident #{incidentId}</h2>
+          <p id="event-group-association-description" className="mt-1 max-w-3xl text-[13px] text-muted">An Event Group is one real-world event or site; several reports can belong to it. Pick the group this report belongs to, or start a new one.</p>
         </div>
         <button type="button" onClick={onClose} disabled={busy} aria-label="Close dialog" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-sm font-semibold hover:bg-[var(--panel-soft)] disabled:opacity-50">×</button>
       </div>
@@ -232,9 +240,14 @@ export default function EventGroupAssociationDialog({
         )}
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-[var(--line)] px-5 py-3">
-        <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
-        <button type="button" onClick={() => onContinueToTriage(incidentId)} disabled={!decisionSaved || busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">Continue to triage</button>
+      <div className="flex items-center justify-between gap-2 border-t border-[var(--line)] px-5 py-3">
+        {onBack ? (
+          <button type="button" onClick={onBack} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Back to the report</button>
+        ) : <span />}
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={() => onContinueToTriage(incidentId)} disabled={!decisionSaved || busy} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">Continue to the decision</button>
+        </div>
       </div>
     </ModalDialog>
   );
