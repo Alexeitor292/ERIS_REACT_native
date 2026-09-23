@@ -39,6 +39,8 @@ import {
   assignmentRoleLabel,
   humanizeCode,
   isActionable,
+  stepOwnership,
+  workActionLabel,
   latestSubmissionId,
   officeLabel,
   pipelineFor,
@@ -244,6 +246,8 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
     [assessment, callerOffice, flags, me?.id],
   );
   const actionable = isActionable(permissions);
+  const ownership = stepOwnership(flags, me?.id, callerOffice, assessment);
+  const stepInRole = flags.admin ? "an administrator" : flags.officeChief ? "office chief" : flags.branchChief ? "branch chief" : "your role";
   const submissionIds = submissionIdsOf(assessment);
   const latestId = latestSubmissionId(assessment);
 
@@ -407,7 +411,9 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
         </div>
       ) : (
         <section
-          className="rounded-xl border p-4"
+          id="assessment-next-step"
+          tabIndex={-1}
+          className="rounded-xl border p-4 outline-none"
           style={{
             borderColor: `color-mix(in oklab, ${revision ? "var(--bad)" : "var(--brand)"} 40%, transparent)`,
             background: `color-mix(in oklab, ${revision ? "var(--bad)" : "var(--brand)"} 6%, var(--panel))`,
@@ -420,9 +426,27 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
           <p className="mt-1.5 text-sm">{next.text}</p>
 
           {mode === "record" ? (
-            actionable
-              ? <Link to={`/my-work?assessment=${assessment.id}`} className={`${btnPrimary} mt-3 inline-block`}>This step is yours — act on it in My Work</Link>
-              : <p className="mt-2.5 text-[13px] text-muted">Actions for this step are performed from My Work by the responsible role.</p>
+            ownership === "NONE" ? (
+              <p className="mt-2.5 text-[13px] text-muted">Actions for this step are performed from My Work by the responsible role.</p>
+            ) : (
+              // The buttons go to the action itself: the form to fill out, or
+              // this assessment opened in My Work with its step in view.
+              <div className="mt-3 grid gap-2">
+                <p className="text-[13px]">
+                  {ownership === "MINE"
+                    ? <b>This step is yours.</b>
+                    : <>This step isn&rsquo;t yours. As {stepInRole} you can also act on it.</>}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {permissions.submit && latestId != null ? (
+                    <Link to={`/submissions/${latestId}`} className={btnPrimary}>Fill out submission #{latestId}</Link>
+                  ) : null}
+                  <Link to={`/my-work?assessment=${assessment.id}`} className={permissions.submit && latestId != null ? btn : btnPrimary}>
+                    {workActionLabel(assessment.state, permissions, submissionIds.length > 0)} in My Work
+                  </Link>
+                </div>
+              </div>
+            )
           ) : !actionable ? (
             <p className="mt-2.5 text-[13px] text-muted">No actions for your role on this step.</p>
           ) : (

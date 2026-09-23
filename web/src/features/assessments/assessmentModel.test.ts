@@ -11,6 +11,8 @@ import {
   assessmentOrgLine,
   officeLabel,
   assessmentPermissions,
+  stepOwnership,
+  workActionLabel,
   assessmentSearchMatch,
   assessmentStateLabel,
   assessmentStateLabelFor,
@@ -350,4 +352,36 @@ test("submission id helpers prefer the join list and fall back to the legacy id"
   assert.deepEqual(submissionIdsOf(legacy), [42]);
   assert.equal(latestSubmissionId(legacy), 42);
   assert.equal(latestSubmissionId({ submission_id: null, submission_ids: [] }), null);
+});
+
+test("a step is yours only when it names you; a power over it is stepping in", () => {
+  const seDraft = { ...seniorEngineerAssessment, state: "DRAFT" as const };
+  // The senior engineer the draft is assigned to.
+  assert.equal(stepOwnership({ ...noRoles, seniorEngineer: true }, 5, "NORTH", seDraft), "MINE");
+  // An administrator and the office chief may act on it, but it is not theirs.
+  assert.equal(stepOwnership({ ...noRoles, admin: true }, 99, null, seDraft), "CAN_STEP_IN");
+  assert.equal(stepOwnership({ ...noRoles, officeChief: true }, 3, "NORTH", seDraft), "CAN_STEP_IN");
+  // Anyone else has nothing to do.
+  assert.equal(stepOwnership({ ...noRoles, engineer: true }, 6, "NORTH", seDraft), "NONE");
+
+  const unrouted = { ...baseAssessment, state: "PENDING_OFFICE_DELEGATION" as const, routing_path: null };
+  assert.equal(stepOwnership({ ...noRoles, officeChief: true }, 3, "north", unrouted), "MINE");
+  assert.equal(stepOwnership({ ...noRoles, officeChief: true }, 3, "WEST", unrouted), "CAN_STEP_IN");
+
+  assert.equal(stepOwnership({ ...noRoles, branchChief: true }, 8, "NORTH", baseAssessment), "MINE", "the branch chief it was handed to reviews it");
+  assert.equal(stepOwnership({ ...noRoles, admin: true }, 99, null, baseAssessment), "CAN_STEP_IN");
+  assert.equal(stepOwnership({ ...noRoles, officeChief: true }, 3, "NORTH", seniorEngineerAssessment), "MINE", "the office chief reviews the senior engineer route");
+});
+
+test("the record's button names the action it leads to", () => {
+  const seDraft = { ...seniorEngineerAssessment, state: "DRAFT" as const };
+  const author = assessmentPermissions({ ...noRoles, seniorEngineer: true }, 5, "NORTH", seDraft);
+  assert.equal(workActionLabel("DRAFT", author, true), "Send it for review");
+  assert.equal(workActionLabel("DRAFT", author, false), "Start the technical submission");
+  const chief = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "NORTH", seDraft);
+  assert.equal(workActionLabel("DRAFT", chief, true), "Change who has it");
+  const unrouted = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "NORTH", { ...baseAssessment, state: "PENDING_OFFICE_DELEGATION", routing_path: null });
+  assert.equal(workActionLabel("PENDING_OFFICE_DELEGATION", unrouted, false), "Route it");
+  const reviewer = assessmentPermissions({ ...noRoles, branchChief: true }, 8, "NORTH", baseAssessment);
+  assert.equal(workActionLabel("SUBMITTED", reviewer, true), "Review it");
 });

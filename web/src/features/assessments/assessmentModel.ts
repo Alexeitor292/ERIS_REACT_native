@@ -382,6 +382,66 @@ export function assessmentPermissions(
   };
 }
 
+/**
+ * Whether the step an assessment is waiting on is the caller's own, or one they
+ * may only step in on.
+ *
+ *   MINE         — the step names them: the assignee of a draft, the office
+ *                  chief of an unrouted assessment's office, the branch chief it
+ *                  was handed to, the reviewer its route names.
+ *   CAN_STEP_IN  — they hold a power over it without being who it waits on: an
+ *                  administrator, or an office chief who could reassign a
+ *                  senior engineer's draft.
+ *   NONE         — nothing for them to do.
+ *
+ * "This step is yours" is said only for MINE; saying it to anyone who merely
+ * could act sent administrators to a My Work queue the step was never in.
+ */
+export type StepOwnership = "MINE" | "CAN_STEP_IN" | "NONE";
+
+export function stepOwnership(
+  flags: RoleFlags,
+  userId: number | null | undefined,
+  officeCode: string | null | undefined,
+  assessment: PermissionAssessment,
+): StepOwnership {
+  if (!isActionable(assessmentPermissions(flags, userId, officeCode, assessment))) return "NONE";
+  const isAssignee = userId != null && assessment.assigned_engineer_user_id === userId;
+  const isNamedBranchChief = userId != null && assessment.branch_chief_user_id === userId;
+  const callerOffice = normalizeOfficeCode(officeCode);
+  const assessmentOffice = normalizeOfficeCode(assessment.office_code);
+  const officeMatches = !!callerOffice && !!assessmentOffice && callerOffice === assessmentOffice;
+  const route = assessment.routing_path;
+  switch (assessment.state) {
+    case "DRAFT":
+    case "REVISION_REQUESTED":
+      return isAssignee ? "MINE" : "CAN_STEP_IN";
+    case "PENDING_OFFICE_DELEGATION":
+      return flags.officeChief && officeMatches ? "MINE" : "CAN_STEP_IN";
+    case "PENDING_ENGINEER_ASSIGNMENT":
+      return flags.branchChief && isNamedBranchChief ? "MINE" : "CAN_STEP_IN";
+    case "SUBMITTED":
+      return (route === "BRANCH" && flags.branchChief && isNamedBranchChief)
+        || (route === "SENIOR_ENGINEER" && flags.officeChief && officeMatches)
+        ? "MINE"
+        : "CAN_STEP_IN";
+    default:
+      return "CAN_STEP_IN";
+  }
+}
+
+/**
+ * What the button on the assessment record says it will do in My Work — the
+ * action itself, not "act on it". Most specific power first.
+ */
+export function workActionLabel(state: AssessmentState | string, permissions: AssessmentPermissions, hasSubmission: boolean): string {
+  if (permissions.submit) return hasSubmission ? "Send it for review" : "Start the technical submission";
+  if (permissions.review) return "Review it";
+  if (permissions.assignEngineer) return state === "PENDING_ENGINEER_ASSIGNMENT" ? "Assign Staff" : "Reassign Staff";
+  if (permissions.delegate || permissions.assignSeniorEngineer) return state === "PENDING_OFFICE_DELEGATION" ? "Route it" : "Change who has it";
+  return "Open it";
+}
+
 export function isActionable(permissions: AssessmentPermissions): boolean {
   return (
     permissions.delegate
