@@ -266,6 +266,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const [seniorEngineerId, setSeniorEngineerId] = useState<number | null>(null);
   const [engineerId, setEngineerId] = useState<number | null>(null);
   const [consultedId, setConsultedId] = useState("");
+  const [routingOptionsLoading, setRoutingOptionsLoading] = useState(false);
 
   const resetPickers = () => {
     setBranchChiefId(null); setSeniorEngineerId(null); setEngineerId(null); setConsultedId("");
@@ -312,6 +313,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   useEffect(() => {
     let cancelled = false;
     const requests: Array<Promise<void>> = [];
+    setRoutingOptionsLoading(activeRoute != null);
     if (activeRoute === "BRANCH") {
       requests.push(branchOptions(assessment.id).then((response) => {
         if (!cancelled) setBranchList({ groups: response.groups ?? [], items: response.items ?? [] });
@@ -327,7 +329,9 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
         if (!cancelled) setEngineerOptions({ groups: response.groups ?? [], items: response.items ?? [] });
       }));
     } else setEngineerOptions(EMPTY_OPTIONS);
-    Promise.all(requests).catch((error) => { if (!cancelled) onError(error instanceof Error ? error.message : "Failed to load assignment options."); });
+    Promise.all(requests)
+      .catch((error) => { if (!cancelled) onError(error instanceof Error ? error.message : "Failed to load assignment options."); })
+      .finally(() => { if (!cancelled) setRoutingOptionsLoading(false); });
     return () => { cancelled = true; };
   }, [activeRoute, assessment.id, onError, showAssignEngineer]);
 
@@ -506,7 +510,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                             items={branchList.items}
                             value={branchChiefId}
                             onChange={setBranchChiefId}
-                            emptyMessage="No branch chief is recorded for this office yet. Add one under Administration › Branches."
+                            emptyMessage={routingOptionsLoading ? "Loading branch chiefs…" : "No branch chief is recorded for this office yet. Place one in this office's tree under Organization."}
                           />
                           <button type="button" disabled={busy || branchChiefId == null} className={btnPrimary} onClick={() => run(() => delegateBranch(assessment.id, Number(branchChiefId), notes.trim() || undefined))}>
                             {assessment.routing_path === "BRANCH" ? "Hand to this branch chief" : "Hand off"}
@@ -521,7 +525,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                             items={seniorEngineerList.items}
                             value={seniorEngineerId}
                             onChange={setSeniorEngineerId}
-                            emptyMessage="No Senior Specialist is recorded for this office."
+                            emptyMessage={routingOptionsLoading ? "Loading Senior Specialists…" : "No Senior Specialist is recorded for this office yet. Place one in this office's tree under Organization."}
                           />
                           <button type="button" disabled={busy || seniorEngineerId == null} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign Senior Specialist</button>
                         </div>

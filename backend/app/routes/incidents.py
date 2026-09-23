@@ -522,7 +522,19 @@ def _routing_users_for(
         if not normalized_office:
             return []
         params["office_code"] = normalized_office
-        where_parts.append(f"{org_directory.USER_OFFICE_CODE_SQL} = :office_code")
+        office_sql = org_directory.USER_OFFICE_CODE_SQL
+        if assignment_key in {"BRANCH_CHIEF", "SENIOR_ENGINEER"}:
+            # Accounts created before office scoping have no office at all.
+            # Excluding those otherwise-valid users leaves the office chief's
+            # routing pickers empty and strands the assessment, so a named
+            # branch chief or senior specialist with NO office is admitted as a
+            # compatibility fallback (PR #125); one scoped to another office is
+            # not. Their authority stays limited to the assessment that names them.
+            where_parts.append(f"({office_sql} = :office_code OR {office_sql} = '')")
+        else:
+            # Office chiefs own every assessment in their office, so unlike a
+            # named branch/senior assignee they must always be explicitly scoped.
+            where_parts.append(f"{office_sql} = :office_code")
 
     rows = db.execute(
         text(
@@ -641,7 +653,7 @@ def _picker_workload_counts(db: Session, user_ids: list[int]) -> dict[int, dict[
     }
 
 
-def _picker_people(db: Session, user_ids: list[int]) -> list[dict]:
+def _picker_people(db: Session, user_ids: list[int], *, office_code: str | None = None) -> list[dict]:
     """The picker's item rows: identity, where they sit, and their two counts.
 
     ONE query for the org facts rather than ``resolve_user_org`` per person: a
@@ -657,6 +669,7 @@ def _picker_people(db: Session, user_ids: list[int]) -> list[dict]:
     if not user_ids:
         return []
     params = {f"user_id_{idx}": int(user_id) for idx, user_id in enumerate(user_ids)}
+    params["option_office_code"] = normalize_office_code(office_code) or ""
     tokens = ", ".join(f":user_id_{idx}" for idx in range(len(user_ids)))
     rows = db.execute(
         text(
@@ -676,7 +689,10 @@ def _picker_people(db: Session, user_ids: list[int]) -> list[dict]:
             {org_directory.USER_ORG_JOIN_SQL}
               LEFT JOIN org_branches ob ON ob.id = oup.branch_id
             WHERE u.id IN ({tokens})
-            ORDER BY u.full_name ASC, u.id ASC
+            ORDER BY
+              CASE WHEN {org_directory.USER_OFFICE_CODE_SQL} = :option_office_code THEN 0 ELSE 1 END,
+              u.full_name ASC,
+              u.id ASC
             """
         ),
         params,
@@ -910,7 +926,7 @@ def _routing_user_options_for(
     client that has not adopted the typed org fields keeps working.
     """
     user_ids = _routing_users_for(db=db, assignment_type=assignment_type, district=district, office_code=office_code)
-    return _picker_people(db, user_ids)
+    return _picker_people(db, user_ids, office_code=office_code)
 
 
 # The caller's district and office come from services/org_directory, which reads

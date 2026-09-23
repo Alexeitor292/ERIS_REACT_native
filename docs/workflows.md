@@ -84,6 +84,10 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
 
    Either way the assessment moves to `DRAFT` and the incident to
    `ENGINEER_ASSIGNED`. The database refuses an assignee without the right role.
+   Both pickers list the office's own people first. An account with no office
+   recorded at all (created before office scoping) is still offered, so an old
+   account cannot strand an assessment; one placed in another office never is.
+   Office chiefs always need an office, since their authority covers it whole.
 2. **The author fills the technical form** (the GISA form: site, measurements,
    photos, sketches, actions, memos) and submits it (`SUBMITTED`). On the web
    the form's location map has a **Site areas** toolbar: draw areas as

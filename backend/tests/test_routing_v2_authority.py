@@ -26,8 +26,9 @@ _RUN = uuid.uuid4().hex[:8]
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: the seeded cast, plus the two accounts the matrix needs and the
-# seed does not have (a SECOND branch chief, and an office chief with no office)
+# Fixtures: the seeded cast, plus the accounts the matrix needs and the seed
+# does not have (a SECOND branch chief, an office chief with no office, and
+# legacy routing candidates created before office scoping was exposed)
 # ---------------------------------------------------------------------------
 
 
@@ -61,9 +62,9 @@ def tokens(client_db, admin_token, senior_engineer_token):
 
 @pytest.fixture(scope="module")
 def extra_users(client_db, tokens):
-    """A second WEST branch chief and an office chief with NO office_code.
+    """Extra scoped and legacy-unscoped routing users.
 
-    Both are deactivated on teardown so they cannot leak into another module's
+    All are deactivated on teardown so they cannot leak into another module's
     routing lookups, notification recipients or pickers.
     """
     headers = _auth(tokens["admin"])
@@ -102,6 +103,34 @@ def extra_users(client_db, tokens):
         "Zzz Unscoped Office Chief",
         ["OFFICE_CHIEF"],
         None,
+    )
+    _create(
+        "branchchief_no_office",
+        f"rv2-branchchief-no-office-{_RUN}@example.test",
+        "Zzz Legacy Unscoped Branch Chief",
+        ["BRANCH_CHIEF"],
+        None,
+    )
+    _create(
+        "senior_engineer_no_office",
+        f"rv2-senior-engineer-no-office-{_RUN}@example.test",
+        "Zzz Legacy Unscoped Senior Engineer",
+        ["SENIOR_SPECIALIST"],
+        None,
+    )
+    _create(
+        "branchchief_other_office",
+        f"rv2-branchchief-south-{_RUN}@example.test",
+        "Zzz South Branch Chief",
+        ["BRANCH_CHIEF"],
+        {"office_code": "SOUTH"},
+    )
+    _create(
+        "senior_engineer_other_office",
+        f"rv2-senior-engineer-south-{_RUN}@example.test",
+        "Zzz South Senior Engineer",
+        ["SENIOR_SPECIALIST"],
+        {"office_code": "SOUTH"},
     )
     yield created
     for record in created.values():
@@ -397,6 +426,53 @@ class TestRouteExclusivity:
         row = _assessment_row(case["assessment_id"])
         assert row["routing_path"] is None
         assert row["state"] == "PENDING_OFFICE_DELEGATION"
+
+    def test_legacy_unscoped_branch_chief_is_listed_and_assignable(
+        self, client_db, tokens, extra_users
+    ):
+        case = _triaged(client_db, tokens)
+        aid = case["assessment_id"]
+        legacy = extra_users["branchchief_no_office"]
+
+        options = client_db.get(
+            f"/assessments/{aid}/branch-options", headers=_auth(tokens["officechief"])
+        )
+        assert options.status_code == 200, options.text
+        option_ids = {int(item["id"]) for item in options.json()["items"]}
+        assert legacy["id"] in option_ids
+        assert extra_users["branchchief_other_office"]["id"] not in option_ids
+
+        routed = client_db.post(
+            f"/assessments/{aid}/delegate-branch",
+            json={"branch_chief_user_id": legacy["id"]},
+            headers=_auth(tokens["officechief"]),
+        )
+        assert routed.status_code == 200, routed.text
+        assert routed.json()["assessment"]["branch_chief_user_id"] == legacy["id"]
+
+    def test_legacy_unscoped_senior_engineer_is_listed_and_assignable(
+        self, client_db, tokens, extra_users
+    ):
+        case = _triaged(client_db, tokens)
+        aid = case["assessment_id"]
+        legacy = extra_users["senior_engineer_no_office"]
+
+        options = client_db.get(
+            f"/assessments/{aid}/senior-engineer-options",
+            headers=_auth(tokens["officechief"]),
+        )
+        assert options.status_code == 200, options.text
+        option_ids = {int(item["id"]) for item in options.json()["items"]}
+        assert legacy["id"] in option_ids
+        assert extra_users["senior_engineer_other_office"]["id"] not in option_ids
+
+        routed = client_db.post(
+            f"/assessments/{aid}/assign-senior-engineer",
+            json={"senior_engineer_user_id": legacy["id"]},
+            headers=_auth(tokens["officechief"]),
+        )
+        assert routed.status_code == 200, routed.text
+        assert routed.json()["assessment"]["assigned_engineer_user_id"] == legacy["id"]
 
     def test_assign_senior_engineer_after_the_branch_route_is_409(self, client_db, tokens, ids):
         case = _branch_routed(client_db, tokens, ids)

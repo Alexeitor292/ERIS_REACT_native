@@ -294,17 +294,17 @@ def assessment_assignment_options(
           )
         """
     elif kind == "SENIOR_ENGINEER":
-        # STRICT office filter, unlike the ENGINEER kind above: a Senior Specialist with
-        # no office_code is not assignable at all, and an assessment with no
-        # office_code has no Senior Specialist to offer — hence the `:office_code <> ''`
-        # guard rather than a blank-office fallback. ADMIN is exempt so the
-        # picker keeps its admin escape hatch, matching the ENGINEER kind's
+        # Prefer the assessment's office, while keeping accounts created before
+        # office scoping assignable (PR #125): a Senior Specialist with NO office
+        # is offered, one scoped to a different office is not. An assessment with
+        # no office has no Senior Specialist to offer. ADMIN is exempt so the
+        # picker keeps its recovery escape hatch, matching the ENGINEER kind's
         # `| {ADMIN}` union.
         office_filter = f"""
           AND (
             (
               :office_code <> ''
-              AND {office_code_sql} = :office_code
+              AND ({office_code_sql} = :office_code OR {office_code_sql} = '')
             )
             OR r.name = 'ADMIN'
           )
@@ -321,6 +321,10 @@ def assessment_assignment_options(
             WHERE u.is_active = 1
               AND r.name IN ({role_placeholders})
               {office_filter}
+            ORDER BY
+              CASE WHEN {office_code_sql} = :office_code THEN 0 ELSE 1 END,
+              u.full_name ASC,
+              u.id ASC
             """
         ),
         params,
