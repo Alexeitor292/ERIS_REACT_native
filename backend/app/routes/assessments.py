@@ -531,13 +531,13 @@ def triage_incident(
     notes = (payload.notes or "").strip() or None
     actor_id = int(user["id"])
 
-    # Only a report that goes on to GeoTech work needs an Event Group: a report
+    # Only a report that goes on to GeoTech work needs an Incident Group: a report
     # closed at triage, or sent back to its reporter, is not a site anyone
     # tracks. Naming one for any other decision is refused rather than ignored.
     if payload.event_group is not None and disposition != "ASSESSMENT_REQUIRED":
         raise HTTPException(
             status_code=400,
-            detail="An Event Group is chosen only when the report needs an assessment",
+            detail="An Incident Group is chosen only when the report needs an assessment",
         )
 
     try:
@@ -558,7 +558,7 @@ def triage_incident(
             elif incident.get("event_group_id") is None:
                 raise HTTPException(
                     status_code=409,
-                    detail="Choose the Event Group this report belongs to before sending it for assessment",
+                    detail="Choose the Incident Group this report belongs to before sending it for assessment",
                 )
             result = _triage_assessment_required(db, incident, user, payload, notes)
         elif disposition == "NO_ASSESSMENT_REQUIRED":
@@ -831,7 +831,7 @@ def _triage_no_assessment(db: Session, incident: dict, actor_id: int, notes: str
     )
     # Not an assessment, so it never enters the incident record: no ERIS
     # number (the identity trigger mints none for a close at triage) and no
-    # Event Group, even one the old triage flow picked beforehand.
+    # Incident Group, even one the old triage flow picked beforehand.
     event_groups_routes.remove_incident_from_event_group(
         db, incident_id=incident_id, actor_user_id=actor_id, notes="Closed at triage — no assessment required."
     )
@@ -897,7 +897,7 @@ def _triage_needs_info(
         db, incident_id=incident_id, disposition="NEEDS_REPORTER_INFORMATION", actor_id=actor_id, notes=notes
     )
     # A temporary field report until the coordinator decides again: not in the
-    # record, so not in an Event Group either.
+    # record, so not in an Incident Group either.
     event_groups_routes.remove_incident_from_event_group(
         db, incident_id=incident_id, actor_user_id=actor_id, notes="Sent back to the reporter before a decision."
     )
@@ -947,7 +947,7 @@ def _triage_duplicate(
         duplicate_of_location_id=target_location_id,
     )
     # A duplicate never enters the incident record: the link to the report it
-    # repeats is kept in duplicate_of_incident_id, not through an Event Group.
+    # repeats is kept in duplicate_of_incident_id, not through an Incident Group.
     event_groups_routes.remove_incident_from_event_group(
         db, incident_id=incident_id, actor_user_id=actor_id, notes="Closed at triage — duplicate or linked."
     )

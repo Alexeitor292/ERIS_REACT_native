@@ -53,7 +53,7 @@ const TABS: Tab[] = [
   },
   {
     key: "record_of_event_notes",
-    label: "Record of events",
+    label: "Record of incidents",
     icon: <History size={15} />,
     kind: "record",
     description: "Earlier incidents at this location in the incident record: recurrences of this failure, and other types.",
@@ -83,7 +83,7 @@ type Props = {
 
 /**
  * The form's memos: one dedicated view per memo behind a single tab bar. The
- * written memos are full documents; Record of events and Maintenance history
+ * written memos are full documents; Record of incidents and Maintenance history
  * show what the system knows about the site, with room for notes.
  */
 export default function MemosPanel(props: Props) {
@@ -145,7 +145,7 @@ export default function MemosPanel(props: Props) {
       notes: props.notes[key],
       onNotesChange: (value: string) => props.onNotesChange(key, value),
       editable: props.editable,
-      notesLabel: tab.kind === "record" ? "Notes on earlier events" : "Notes on maintenance",
+      notesLabel: tab.kind === "record" ? "Notes on earlier incidents" : "Notes on maintenance",
     };
     return tab.kind === "record" ? <RecordOfEventsView {...view} /> : <MaintenanceHistoryView {...view} />;
   };

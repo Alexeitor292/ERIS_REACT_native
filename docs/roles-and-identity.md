@@ -13,7 +13,7 @@ Seven work roles and the Administrator. One code each, with no aliases.
 | Code | Name | What it is for |
 | --- | --- | --- |
 | `MAINTENANCE_CREW` | Maintenance Crew | Files field reports from the road. Sees only their own reports. No assessments. |
-| `MAINTENANCE_COORDINATOR` | Maintenance Coordinator | Triages field reports in the districts they cover and runs Event Groups. Only "Assessment required" puts a report on the record. |
+| `MAINTENANCE_COORDINATOR` | Maintenance Coordinator | Triages field reports in the districts they cover and runs Incident Groups. Only "Assessment required" puts a report on the record. |
 | `OFFICE_CHIEF` | Office Chief | Routes their GeoTech office's assessments: hands one to a branch chief, or assigns a Senior Specialist directly. Reviews the Senior Specialist route. |
 | `BRANCH_CHIEF` | Branch Chief | Assigns Staff to the assessments handed to their branch, and reviews the branch route. |
 | `SENIOR_SPECIALIST` | Senior Specialist | Fills the assessments an office chief assigns directly. |

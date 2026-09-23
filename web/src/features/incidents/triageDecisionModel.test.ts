@@ -25,7 +25,7 @@ test("a new draft has nothing chosen and cannot be recorded", () => {
   assert.equal(triageRequestBody(fresh), null);
 });
 
-test("only an assessment asks for an Event Group", () => {
+test("only an assessment asks for an Incident Group", () => {
   assert.equal(needsEventGroup("ASSESSMENT_REQUIRED"), true);
   for (const option of TRIAGE_OPTIONS.filter((o) => o.value !== "ASSESSMENT_REQUIRED")) {
     assert.equal(needsEventGroup(option.value), false, option.value);
@@ -33,9 +33,9 @@ test("only an assessment asks for an Event Group", () => {
   assert.equal(needsEventGroup(null), false);
 });
 
-test("an assessment waits for its Event Group, then sends it with the decision", () => {
+test("an assessment waits for its Incident Group, then sends it with the decision", () => {
   const pending = draft({ disposition: "ASSESSMENT_REQUIRED" });
-  assert.equal(triageBlocker(pending), "Choose its Event Group, or start a new one.");
+  assert.equal(triageBlocker(pending), "Choose its Incident Group, or start a new one.");
 
   assert.deepEqual(
     triageRequestBody({ ...pending, eventGroup: { mode: "EXISTING", eventGroupId: 7 }, notes: "  Slope failing.  " }),

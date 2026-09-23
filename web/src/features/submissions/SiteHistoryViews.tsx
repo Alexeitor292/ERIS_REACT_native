@@ -124,8 +124,8 @@ function RecordItem({ item }: { item: RecordEvent }) {
         <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden />{distanceLabel(item.distance_m, item.same_location)}</span>
         <span>{recordStandingLabel(item.stage, item.assessment?.state ?? null)}</span>
         {item.event_group ? (
-          <Link to={`/event-groups/${item.event_group.id}`} className="hover:underline">
-            Event Group: {item.event_group.title ?? `#${item.event_group.id}`}
+          <Link to={`/incident-groups/${item.event_group.id}`} className="hover:underline">
+            Incident Group: {item.event_group.title ?? `#${item.event_group.id}`}
           </Link>
         ) : null}
       </div>

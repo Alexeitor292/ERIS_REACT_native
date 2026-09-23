@@ -1,6 +1,6 @@
 /**
  * What a maintenance coordinator needs in front of them to judge a field report
- * before any Event Group question is asked.
+ * before any Incident Group question is asked.
  *
  * Dependency-free on purpose: `node --test` runs this file directly under
  * `--experimental-strip-types`, so nothing here may import a component, an API

@@ -436,13 +436,13 @@ def associate_incident_project(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     _ensure_manage_scope(user, incident, db=db)
-    # The legacy "Project" name for an Event Group follows the same rule: only a
+    # The legacy "Project" name for an Incident Group follows the same rule: only a
     # report sent for assessment is in the record, and it is grouped by that
     # triage decision — never here beforehand.
     if event_groups_routes.is_outside_record(incident):
         raise HTTPException(
             status_code=409,
-            detail="A report joins an Event Group when the coordinator sends it for assessment",
+            detail="A report joins an Incident Group when the coordinator sends it for assessment",
         )
     if not is_admin(user):
         raise HTTPException(status_code=409, detail="Only an administrator may regroup a report in the incident record")

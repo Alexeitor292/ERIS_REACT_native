@@ -1,4 +1,4 @@
-"""Event Group / permanent Incident identity integration tests."""
+"""Incident Group / permanent Incident identity integration tests."""
 
 from uuid import uuid4
 
@@ -88,12 +88,12 @@ def test_incident_is_root_and_approval_mints_permanent_identity(client_db, admin
 
     _link_location(client_db, coordinator_headers, incident_id)
 
-    # No Event Group is chosen. Approval must create one by default and mint the
+    # No Incident Group is chosen. Approval must create one by default and mint the
     # permanent Incident identity in the same transaction.
     approved = client_db.post(
         f"/incidents/{incident_id}/coordinator/approve",
         headers=coordinator_headers,
-        json={"comment": "No existing Event Group applies; approve as a new event."},
+        json={"comment": "No existing Incident Group applies; approve as a new event."},
     )
     assert approved.status_code == 200, approved.text
     body = approved.json()
@@ -189,7 +189,7 @@ def test_multiple_incidents_share_event_group_attribute_without_sharing_identity
     regrouped = client_db.post(
         f"/incidents/{second_id}/event-group-association",
         headers=admin_headers,
-        json={"mode": "CREATE_NEW", "title": f"Replacement Event Group {unique}"},
+        json={"mode": "CREATE_NEW", "title": f"Replacement Incident Group {unique}"},
     )
     assert regrouped.status_code == 200, regrouped.text
     refreshed = client_db.get(f"/incidents/{second_id}/event-group-context", headers=admin_headers)

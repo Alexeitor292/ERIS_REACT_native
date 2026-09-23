@@ -2255,7 +2255,7 @@ def get_submission(
     photo_items = [dict(a) for a in attachments if str(a["kind"]).upper() == "PHOTO"]
 
     # Workflow context: the incident this technical form belongs to, its
-    # assessment, and the incident's Event Group — so the web detail view can
+    # assessment, and the incident's Incident Group — so the web detail view can
     # cross-link without extra round trips. A submission is attached either as
     # the incident's primary link or as a supplemental assessment submission.
     context_row = db.execute(text("""

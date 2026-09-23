@@ -45,7 +45,7 @@ function generatedTitle(context: IncidentProjectContext | null) {
   const incident = context?.incident;
   if (!incident) return "";
   const parts = [incident.route ? `Route ${incident.route}` : null, incident.post_mile ? `PM ${incident.post_mile}` : null, incident.county || null].filter(Boolean);
-  return parts.length ? `${parts.join(" · ")} Event Group` : `Incident #${incident.id} Event Group`;
+  return parts.length ? `${parts.join(" · ")} Incident Group` : `Incident #${incident.id} Incident Group`;
 }
 
 export default function IncidentProjectReviewModal({ incidentId, visible, onClose, onAssociated }: Props) {
@@ -90,7 +90,7 @@ export default function IncidentProjectReviewModal({ incidentId, visible, onClos
       }
       setTitle((current) => current || generatedTitle(nextContext));
     } catch (e: any) {
-      setError(String(e?.message ?? "Failed to load Event Group context."));
+      setError(String(e?.message ?? "Failed to load Incident Group context."));
     } finally {
       setBusy(false);
     }
@@ -120,7 +120,7 @@ export default function IncidentProjectReviewModal({ incidentId, visible, onClos
   async function associate() {
     if (!incidentId || !context?.can_change_association) return;
     if (mode === "EXISTING" && !selectedId) {
-      setError("Select an existing Event Group first.");
+      setError("Select an existing Incident Group first.");
       return;
     }
     const token = await getToken();
@@ -139,11 +139,11 @@ export default function IncidentProjectReviewModal({ incidentId, visible, onClos
           ? { mode, project_id: selectedId!, notes: notes.trim() || null }
           : { mode, title: title.trim(), description: description.trim() || null, notes: notes.trim() || null },
       );
-      setNotice(result.created ? "Event Group created and Incident associated." : "Incident associated with the selected Event Group.");
+      setNotice(result.created ? "Incident Group created and Incident associated." : "Incident associated with the selected Incident Group.");
       await load(radiusMiles);
       await onAssociated();
     } catch (e: any) {
-      setError(String(e?.message ?? "Failed to associate Event Group."));
+      setError(String(e?.message ?? "Failed to associate Incident Group."));
     } finally {
       setBusy(false);
     }
@@ -156,8 +156,8 @@ export default function IncidentProjectReviewModal({ incidentId, visible, onClos
           <View style={[styles.header, { borderColor: palette.border }]}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.eyebrow, { color: palette.muted }]}>Coordinator review</Text>
-              <Text style={[styles.title, { color: palette.text }]}>Event Group for Incident #{incidentId ?? ""}</Text>
-              <Text style={[styles.subtitle, { color: palette.muted }]}>Event Groups provide shared context. The Incident remains its own historical record and receives its permanent key only when coordinator approval advances it.</Text>
+              <Text style={[styles.title, { color: palette.text }]}>Incident Group for Incident #{incidentId ?? ""}</Text>
+              <Text style={[styles.subtitle, { color: palette.muted }]}>Incident Groups provide shared context. The Incident remains its own historical record and receives its permanent key only when coordinator approval advances it.</Text>
             </View>
             <Pressable onPress={onClose} style={[styles.smallButton, { borderColor: palette.border }]}><Text style={{ color: palette.text, fontWeight: "700" }}>Close</Text></Pressable>
           </View>
@@ -166,20 +166,20 @@ export default function IncidentProjectReviewModal({ incidentId, visible, onClos
             {error ? <View style={[styles.message, { borderColor: palette.danger }]}><Text style={{ color: palette.danger }}>{error}</Text></View> : null}
             {notice ? <View style={[styles.message, { borderColor: palette.primary }]}><Text style={{ color: palette.text }}>{notice}</Text></View> : null}
 
-            {!context ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={{ color: palette.muted }}>Loading Event Group context…</Text></View> : (
+            {!context ? <View style={styles.loading}><ActivityIndicator color={palette.primary} /><Text style={{ color: palette.muted }}>Loading Incident Group context…</Text></View> : (
               <>
                 <View style={[styles.card, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
                   <Text style={{ color: palette.text, fontWeight: "800" }}>Incident #{context.incident.id}</Text>
                   <Text style={{ color: palette.muted, marginTop: 4 }}>{locationLabel(context.incident)}</Text>
-                  <Text style={{ color: palette.text, marginTop: 8, fontWeight: "700" }}>Current Event Group: {context.project?.title ?? "Not assigned"}</Text>
+                  <Text style={{ color: palette.text, marginTop: 8, fontWeight: "700" }}>Current Incident Group: {context.project?.title ?? "Not assigned"}</Text>
                 </View>
 
                 <View style={styles.radiusRow}>
                   {[5, 10, 25, 50].map((radius) => <Pressable key={radius} disabled={busy} onPress={() => { setRadiusMiles(radius); load(radius).catch(() => {}); }} style={[styles.radiusButton, { borderColor: radiusMiles === radius ? palette.primary : palette.border }]}><Text style={{ color: radiusMiles === radius ? palette.primary : palette.text, fontWeight: "700" }}>{radius} mi</Text></Pressable>)}
                 </View>
 
-                <Text style={[styles.sectionTitle, { color: palette.text }]}>Nearby open Event Groups</Text>
-                {groups.length === 0 ? <View style={[styles.card, { borderColor: palette.border }]}><Text style={{ color: palette.muted }}>No open Event Groups were found. Create a new one for this Incident.</Text></View> : groups.map((group) => {
+                <Text style={[styles.sectionTitle, { color: palette.text }]}>Nearby open Incident Groups</Text>
+                {groups.length === 0 ? <View style={[styles.card, { borderColor: palette.border }]}><Text style={{ color: palette.muted }}>No open Incident Groups were found. Create a new one for this Incident.</Text></View> : groups.map((group) => {
                   const isSelected = mode === "EXISTING" && selectedId === group.id;
                   return <Pressable key={group.id} onPress={() => { setMode("EXISTING"); setSelectedId(group.id); }} style={[styles.card, { borderColor: isSelected ? palette.primary : palette.border, backgroundColor: palette.panelSoft }]}><View style={styles.row}><View style={{ flex: 1 }}><Text style={{ color: palette.text, fontWeight: "800" }}>{group.title}</Text><Text style={{ color: palette.muted, marginTop: 3 }}>{locationLabel(group)}</Text><Text style={{ color: palette.muted, marginTop: 3 }}>{group.incident_count} associated Incident{group.incident_count === 1 ? "" : "s"}</Text></View><Text style={{ color: palette.primary, fontWeight: "800" }}>{milesFromMeters(group.nearest_distance_m)}</Text></View></Pressable>;
                 })}
@@ -189,12 +189,12 @@ export default function IncidentProjectReviewModal({ incidentId, visible, onClos
                   <Pressable onPress={() => setMode("CREATE_NEW")} style={[styles.modeButton, { borderColor: mode === "CREATE_NEW" ? palette.primary : palette.border }]}><Text style={{ color: mode === "CREATE_NEW" ? palette.primary : palette.text, fontWeight: "800" }}>New group</Text></Pressable>
                 </View>
 
-                {mode === "EXISTING" ? <View style={[styles.card, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}><Text style={{ color: palette.muted, fontWeight: "700" }}>Selected Event Group</Text><Text style={{ color: palette.text, fontWeight: "800", marginTop: 4 }}>{selected?.title ?? "Select a group above"}</Text></View> : <View style={{ gap: 8 }}><Text style={[styles.fieldLabel, { color: palette.muted }]}>EVENT GROUP TITLE</Text><TextInput value={title} onChangeText={setTitle} style={[styles.input, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} /><Text style={[styles.fieldLabel, { color: palette.muted }]}>DESCRIPTION</Text><TextInput value={description} onChangeText={setDescription} multiline style={[styles.input, styles.multiline, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} /></View>}
+                {mode === "EXISTING" ? <View style={[styles.card, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}><Text style={{ color: palette.muted, fontWeight: "700" }}>Selected Incident Group</Text><Text style={{ color: palette.text, fontWeight: "800", marginTop: 4 }}>{selected?.title ?? "Select a group above"}</Text></View> : <View style={{ gap: 8 }}><Text style={[styles.fieldLabel, { color: palette.muted }]}>INCIDENT GROUP TITLE</Text><TextInput value={title} onChangeText={setTitle} style={[styles.input, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} /><Text style={[styles.fieldLabel, { color: palette.muted }]}>DESCRIPTION</Text><TextInput value={description} onChangeText={setDescription} multiline style={[styles.input, styles.multiline, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} /></View>}
 
                 <Text style={[styles.fieldLabel, { color: palette.muted }]}>COORDINATOR NOTE</Text>
                 <TextInput value={notes} onChangeText={setNotes} multiline style={[styles.input, styles.multiline, { borderColor: palette.border, color: palette.text, backgroundColor: palette.panelSoft }]} />
 
-                <Pressable disabled={busy || !context.can_change_association || (mode === "EXISTING" && !selectedId)} onPress={associate} style={[styles.primaryButton, { backgroundColor: palette.primary, opacity: busy ? 0.55 : 1 }]}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : mode === "CREATE_NEW" ? "Create Event Group and associate" : "Use selected Event Group"}</Text></Pressable>
+                <Pressable disabled={busy || !context.can_change_association || (mode === "EXISTING" && !selectedId)} onPress={associate} style={[styles.primaryButton, { backgroundColor: palette.primary, opacity: busy ? 0.55 : 1 }]}><Text style={styles.primaryButtonText}>{busy ? "Saving…" : mode === "CREATE_NEW" ? "Create Incident Group and associate" : "Use selected Incident Group"}</Text></Pressable>
               </>
             )}
           </ScrollView>

@@ -66,14 +66,14 @@ function NavGroup({ label, collapsed, children }: { label: string; collapsed?: b
 /**
  * Information architecture:
  *   Workspace › My Work (role-gated actions)
- *   Operations › Mission Center / Event Groups / Incidents / Assessments (read-only records;
+ *   Operations › Mission Center / Incident Groups / Incidents / Assessments (read-only records;
  *               submissions live inside assessments and have no nav item of their own)
  *   GIS Tools › Terrain Cross Sections
  *   Administration › Users / Offices / Branches / Coverage / Road Inventory
  *   Account › Settings
  *
  * A read-only viewer gets ONE destination plus Settings: Records, opening on
- * Incidents. No Workspace, no Mission Center, no Event Groups, no GIS Tools —
+ * Incidents. No Workspace, no Mission Center, no Incident Groups, no GIS Tools —
  * every one of those is work in flight, which is not the public record (org
  * model design §8, §11).
  */
@@ -104,7 +104,7 @@ function useNavSections(): NavSection[] {
 
   const operations: NavEntry[] = [];
   if (operational) operations.push({ to: "/mission-center", label: "Mission Center", icon: MapIcon });
-  if (operational) operations.push({ to: "/event-groups", label: "Event Groups", icon: Layers });
+  if (operational) operations.push({ to: "/incident-groups", label: "Incident Groups", icon: Layers });
   operations.push({ to: "/incidents", label: "Incidents", icon: TriangleAlert });
   if (operational) operations.push({ to: "/assessments", label: "Assessments", icon: ClipboardCheck, alsoActive: ["/submissions"] });
   sections.push({ label: "Operations", items: operations });

@@ -68,7 +68,7 @@ type AssessmentLoad =
 /**
  * The incident record: one page with everything ERIS holds about a report —
  * what the field worker filed and the evidence they attached, where it is and
- * what road it is on, what the coordinator decided, the Event Group it joined,
+ * what road it is on, what the coordinator decided, the Incident Group it joined,
  * the GeoTech assessment behind it, and where it stands now.
  *
  * Before this page, `/incidents/:id` only highlighted a row in the Incidents
@@ -145,7 +145,7 @@ export default function IncidentDetailPage() {
     return () => { cancelled = true; };
   }, [incidentId, validId, viewer, maintenanceOnly, reloadKey]);
 
-  // The Event Group record is operational-only on the server; nobody else asks.
+  // The Incident Group record is operational-only on the server; nobody else asks.
   const eventGroupId = incident?.event_group_id ?? null;
   useEffect(() => {
     setEventGroupTitle(null);
@@ -257,19 +257,19 @@ export default function IncidentDetailPage() {
                 </Panel>
 
                 {operational ? (
-                  <Panel title="Event Group">
+                  <Panel title="Incident Group">
                     {incident.event_group_id != null ? (
                       <div className="grid gap-1.5 text-sm">
-                        <Link to={`/event-groups/${incident.event_group_id}`} className={link}>{eventGroupTitle || `Event Group #${incident.event_group_id}`}</Link>
+                        <Link to={`/incident-groups/${incident.event_group_id}`} className={link}>{eventGroupTitle || `Incident Group #${incident.event_group_id}`}</Link>
                         <span className="text-[13px] text-muted">The real-world event this report was grouped under, with every other report about it.</span>
                       </div>
                     ) : (
                       <p className="text-sm text-muted">
                         {isAwaitingTriage(incident)
-                          ? "Not grouped yet. If the coordinator sends it for assessment, they choose its Event Group then."
+                          ? "Not grouped yet. If the coordinator sends it for assessment, they choose its Incident Group then."
                           : isClosedAtTriage(incident)
-                            ? "Not part of an Event Group. It was closed at triage, so it never entered ERIS."
-                            : "Not part of an Event Group. Only reports sent for assessment are grouped."}
+                            ? "Not part of an Incident Group. It was closed at triage, so it never entered ERIS."
+                            : "Not part of an Incident Group. Only reports sent for assessment are grouped."}
                       </p>
                     )}
                   </Panel>

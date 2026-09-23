@@ -92,7 +92,7 @@ const btn = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 
 const btnPrimary = "rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95";
 
 /**
- * Mission Center: statewide Event Groups → a group's incidents → one incident's GIS
+ * Mission Center: statewide Incident Groups → a group's incidents → one incident's GIS
  * evidence. Deep-linkable as /mission-center/:gid/:iid; the evidence list and the map
  * stay in sync (clicking a photo row focuses it on the map).
  */
@@ -142,13 +142,13 @@ export default function MissionCenterProjectExplorer() {
         const page = await api<MissionCenterEventGroupPage>(`/mission-center/event-groups?${query.toString()}`);
         all.push(...(page.items ?? []));
         if (!page.has_more || page.next_cursor == null) break;
-        if (page.next_cursor === cursor) throw new Error("Event Group map pagination did not advance.");
+        if (page.next_cursor === cursor) throw new Error("Incident Group map pagination did not advance.");
         cursor = page.next_cursor;
       }
       setEventGroups(all);
       setLastUpdatedAt(new Date());
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load statewide Event Group GIS data.");
+      setError(e?.message ?? "Failed to load statewide Incident Group GIS data.");
     } finally {
       setLoadingGroups(false);
     }
@@ -179,7 +179,7 @@ export default function MissionCenterProjectExplorer() {
           setClassifications({});
         }
       } catch (e: any) {
-        if (!cancelled) { setError(e?.message ?? "Failed to load Event Group details."); setEventGroupDetail(null); }
+        if (!cancelled) { setError(e?.message ?? "Failed to load Incident Group details."); setEventGroupDetail(null); }
       } finally {
         if (!cancelled) setLoadingDetail(false);
       }
@@ -240,7 +240,7 @@ export default function MissionCenterProjectExplorer() {
         {mode === "PROJECTS" ? (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5">
             <div className="grid max-w-[560px] flex-[1_1_340px] grid-cols-[minmax(220px,1fr)_auto] gap-2">
-              <input value={eventGroupSearch} onChange={(event) => setEventGroupSearch(event.target.value)} placeholder="Search Event Groups — county, route, post mile…" className="min-w-0 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+              <input value={eventGroupSearch} onChange={(event) => setEventGroupSearch(event.target.value)} placeholder="Search Incident Groups — county, route, post mile…" className="min-w-0 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
               <select value={eventGroupStatus} onChange={(event) => setEventGroupStatus(event.target.value as "ALL" | EventGroupStatus)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
                 <option value="ALL">All statuses</option>
                 <option value="OPEN">Open</option>
@@ -249,7 +249,7 @@ export default function MissionCenterProjectExplorer() {
               </select>
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-2.5 text-xs text-muted">
-              <span>{summary.groups} Event Groups · {summary.openGroups} open · {summary.incidents} Incidents · {summary.activeIncidents} active</span>
+              <span>{summary.groups} Incident Groups · {summary.openGroups} open · {summary.incidents} Incidents · {summary.activeIncidents} active</span>
               <span className="opacity-50">·</span>
               <span>{lastUpdatedAt ? `Updated ${dateTimeFormatter.format(lastUpdatedAt)}` : "Not refreshed yet"}</span>
               <button type="button" onClick={() => loadEventGroups()} disabled={loadingGroups} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--panel-soft)] disabled:opacity-50">{loadingGroups ? "Refreshing…" : "Refresh"}</button>
@@ -257,9 +257,9 @@ export default function MissionCenterProjectExplorer() {
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5 text-[13px]">
-            <Link to="/mission-center" className="font-semibold text-[var(--brand)] hover:underline">California Event Groups</Link>
+            <Link to="/mission-center" className="font-semibold text-[var(--brand)] hover:underline">California Incident Groups</Link>
             <span className="text-muted">›</span>
-            {mode === "INCIDENT" && selectedEventGroup ? <Link to={`/mission-center/${selectedEventGroup.id}`} className="font-semibold text-[var(--brand)] hover:underline">{selectedEventGroup.title}</Link> : <b className="font-semibold">{selectedEventGroup?.title ?? `Event Group #${selectedEventGroupId}`}</b>}
+            {mode === "INCIDENT" && selectedEventGroup ? <Link to={`/mission-center/${selectedEventGroup.id}`} className="font-semibold text-[var(--brand)] hover:underline">{selectedEventGroup.title}</Link> : <b className="font-semibold">{selectedEventGroup?.title ?? `Incident Group #${selectedEventGroupId}`}</b>}
             {mode === "INCIDENT" ? <><span className="text-muted">›</span><b className="font-semibold">Incident #{selectedIncidentId}</b></> : null}
             {selectedEventGroup ? <span className="ml-auto text-xs text-muted">{eventGroupLocationLabel(selectedEventGroup)}</span> : null}
           </div>
@@ -287,15 +287,15 @@ export default function MissionCenterProjectExplorer() {
             {mode === "PROJECTS" ? (
               <>
                 <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] p-4">
-                  <div className="text-[17px] font-semibold">Event Groups</div>
+                  <div className="text-[17px] font-semibold">Incident Groups</div>
                   <div className="mt-0.5 text-xs text-muted">{visibleGroups.length.toLocaleString()} shown on map</div>
                 </div>
                 <div className="flex-1 overflow-auto p-3">
                   <div className="grid gap-2">
-                    {visibleGroups.length === 0 ? <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">{loadingGroups ? "Loading Event Groups…" : "No Event Groups match the current filters."}</div> : visibleGroups.map((group) => (
+                    {visibleGroups.length === 0 ? <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">{loadingGroups ? "Loading Incident Groups…" : "No Incident Groups match the current filters."}</div> : visibleGroups.map((group) => (
                       <button key={group.id} type="button" onClick={() => goTo(group.id)} className="block w-full rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 text-left hover:border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] hover:bg-[var(--panel-soft)]">
                         <div className="flex items-start justify-between gap-2"><div className="font-semibold leading-snug">{group.title}</div><StatusPill label={eventGroupStatusLabel(group.status)} tone={group.status === "OPEN" ? "good" : "neutral"} /></div>
-                        <div className="mt-1 text-xs text-muted">Event Group #{group.id} · {eventGroupLocationLabel(group)}</div>
+                        <div className="mt-1 text-xs text-muted">Incident Group #{group.id} · {eventGroupLocationLabel(group)}</div>
                         <div className="mt-2 text-xs text-muted">{group.incident_count} associated Incident{group.incident_count === 1 ? "" : "s"} · {group.open_incident_count} active</div>
                       </button>
                     ))}
@@ -307,13 +307,13 @@ export default function MissionCenterProjectExplorer() {
             {mode !== "PROJECTS" && mode !== "INCIDENT" && selectedEventGroup ? (
               <>
                 <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] p-4">
-                  <button type="button" onClick={() => goTo(null)} className="mb-3 rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-[11px] font-semibold hover:bg-[var(--panel-soft)]">← All California Event Groups</button>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Selected Event Group</div>
+                  <button type="button" onClick={() => goTo(null)} className="mb-3 rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-[11px] font-semibold hover:bg-[var(--panel-soft)]">← All California Incident Groups</button>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Selected Incident Group</div>
                   <div className="mt-1 text-[17px] font-semibold leading-snug">{selectedEventGroup.title}</div>
-                  <div className="mt-1 text-sm text-muted">Event Group #{selectedEventGroup.id} · {eventGroupLocationLabel(selectedEventGroup)}</div>
+                  <div className="mt-1 text-sm text-muted">Incident Group #{selectedEventGroup.id} · {eventGroupLocationLabel(selectedEventGroup)}</div>
                   <div className="mt-3 flex flex-wrap gap-2"><StatusPill label={eventGroupStatusLabel(selectedEventGroup.status)} tone={selectedEventGroup.status === "OPEN" ? "good" : "neutral"} /><StatusPill label={`${selectedEventGroup.incident_count} incidents`} /><StatusPill label={`${selectedEventGroup.open_incident_count} active`} tone={selectedEventGroup.open_incident_count > 0 ? "bad" : "good"} /></div>
                   {selectedEventGroup.description ? <p className="mt-3 text-sm text-muted">{selectedEventGroup.description}</p> : null}
-                  <Link to={`/event-groups/${selectedEventGroup.id}`} className={`${btn} mt-3.5 block text-center`}>Open full Event Group workspace</Link>
+                  <Link to={`/incident-groups/${selectedEventGroup.id}`} className={`${btn} mt-3.5 block text-center`}>Open full Incident Group workspace</Link>
                 </div>
                 <div className="flex-1 overflow-auto p-3">
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Associated Incidents</div>
@@ -323,7 +323,7 @@ export default function MissionCenterProjectExplorer() {
                       <div className="mt-1 text-xs text-muted">{eventGroupLocationLabel(incident)}</div>
                       <div className="mt-2 text-xs font-medium">{classificationLabel(classifications[incident.id])}</div>
                     </button>
-                  ))}</div> : <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">No Incidents are associated with this Event Group.</div>}
+                  ))}</div> : <div className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-4 text-sm text-muted">No Incidents are associated with this Incident Group.</div>}
                 </div>
               </>
             ) : null}
@@ -331,7 +331,7 @@ export default function MissionCenterProjectExplorer() {
             {mode === "INCIDENT" && selectedIncident && incidentGis && selectedEventGroup ? (
               <>
                 <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] p-4">
-                  <button type="button" onClick={() => goTo(selectedEventGroup.id)} className="mb-3 rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-[11px] font-semibold hover:bg-[var(--panel-soft)]">← Event Group Incidents</button>
+                  <button type="button" onClick={() => goTo(selectedEventGroup.id)} className="mb-3 rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-[11px] font-semibold hover:bg-[var(--panel-soft)]">← Incident Group Incidents</button>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Incident GIS Evidence</div>
                   <div className="mt-1 text-[17px] font-semibold leading-snug">#{selectedIncident.id} {selectedIncident.title || "Incident"}</div>
                   <div className="mt-2 flex flex-wrap gap-2"><StatusPill label={incidentStatusLabel(selectedIncident.status)} tone={selectedIncident.status === "RESOLVED" ? "good" : "bad"} /><StatusPill label={classificationLabel(selectedClassification)} tone={selectedClassification?.confirmed ? "good" : "neutral"} /></div>
@@ -358,7 +358,7 @@ export default function MissionCenterProjectExplorer() {
                   <div className="mt-5 flex flex-wrap gap-2">
                     {incidentGis.incident.linked_submission_id ? <Link to={`/submissions/${incidentGis.incident.linked_submission_id}`} className={btnPrimary}>Open technical submission</Link> : null}
                     <Link to={`/incidents/${selectedIncident.id}`} className={btn}>Open incident record</Link>
-                    <Link to={`/event-groups/${selectedEventGroup.id}`} className={btn}>Open Event Group</Link>
+                    <Link to={`/incident-groups/${selectedEventGroup.id}`} className={btn}>Open Incident Group</Link>
                   </div>
 
                   <div className="mt-5 border-t border-[var(--line)] pt-4">
@@ -387,8 +387,8 @@ export default function MissionCenterProjectExplorer() {
               </>
             ) : null}
 
-            {mode !== "PROJECTS" && !selectedEventGroup ? <div className="p-4 text-sm text-muted">{loadingDetail ? "Loading Event Group…" : `Event Group #${selectedEventGroupId} was not found.`}</div> : null}
-            {mode === "PROJECT" && selectedIncidentId != null && !loadingEvidence && !incidentGis ? <div className="border-t border-[var(--line)] p-4 text-sm text-muted">Incident #{selectedIncidentId} is not part of this Event Group or has no GIS evidence.</div> : null}
+            {mode !== "PROJECTS" && !selectedEventGroup ? <div className="p-4 text-sm text-muted">{loadingDetail ? "Loading Incident Group…" : `Incident Group #${selectedEventGroupId} was not found.`}</div> : null}
+            {mode === "PROJECT" && selectedIncidentId != null && !loadingEvidence && !incidentGis ? <div className="border-t border-[var(--line)] p-4 text-sm text-muted">Incident #{selectedIncidentId} is not part of this Incident Group or has no GIS evidence.</div> : null}
           </aside>
         </div>
       </div>

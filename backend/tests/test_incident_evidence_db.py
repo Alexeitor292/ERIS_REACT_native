@@ -4,7 +4,7 @@ Before ``GET /incidents/{id}/attachments`` existed there was no way for a
 maintenance coordinator to see what a reporter had attached: the only read path
 for a report's files was the Mission Center map, which returns ``kind = 'PHOTO'``
 rows alone, so a report whose evidence was a video or a document looked empty.
-The coordinator was then asked which Event Group the report belonged to — a
+The coordinator was then asked which Incident Group the report belonged to — a
 judgement about a real-world event — with none of the evidence in front of them.
 
 These tests pin the three properties the triage review depends on: every kind of

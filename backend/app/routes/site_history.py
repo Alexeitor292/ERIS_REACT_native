@@ -2,7 +2,7 @@
 
 Two lists, for whoever is writing the assessment:
 
-* **Record of events** — earlier incidents *in the incident record* (they have an
+* **Record of incidents** — earlier incidents *in the incident record* (they have an
   ERIS number) at the same place. Each is marked as a recurrence of the same
   type of incident, a different type, or not yet classified.
 * **Maintenance history** — maintenance reports at the same place that never

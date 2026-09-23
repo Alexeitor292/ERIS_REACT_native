@@ -62,14 +62,14 @@ _LEGACY_PERMANENT_INCIDENT_CLEANUP_MODULES = {
 def _called_from_legacy_permanent_incident_test() -> bool:
     """Return True only for direct SQL issued by legacy DB test modules.
 
-    The Event Group migration intentionally makes coordinator-approved Incidents
+    The Incident Group migration intentionally makes coordinator-approved Incidents
     permanent. Several older integration tests still use a hard DELETE as their
     fixture teardown. Rewriting only those direct test cleanup statements keeps
     the production trigger fully exercised while allowing their surrounding
     cleanup transactions (notably offline-scene job cleanup) to commit.
 
     FastAPI request handling runs in worker threads and therefore does not inherit
-    the direct test call stack. Event Group identity tests are intentionally not in
+    the direct test call stack. Incident Group identity tests are intentionally not in
     this compatibility set, so their hard-delete refusal coverage remains real.
     """
     frame = inspect.currentframe()

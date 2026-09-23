@@ -198,6 +198,10 @@ Release notes that need action:
   title: every incident is named District-County-Route-PostMile - MM/DD/YY (the
   day it was first observed), e.g. `04-MRN-001-12.300 - 09/22/26`. The
   migration renames existing incidents the same way, replacing typed titles.
+- **Incident Groups** (`20260928_incident_groups`). Event Groups are now called
+  Incident Groups everywhere people read them; the page moved to
+  `/incident-groups` and old `/event-groups` links redirect. Group titles saved
+  with "Event Group" in them are renamed. API paths and tables are unchanged.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

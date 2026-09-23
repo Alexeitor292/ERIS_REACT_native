@@ -172,7 +172,7 @@ an account that sits in no office tree and on no district list is a guest.
   history — **statewide**, and nothing else. Anything in flight is invisible:
   the record answers *not found*, so ids cannot be probed.
 - Their web navigation is **Incidents, Assessments and Settings**, landing on
-  Incidents. No My Work, no Mission Center, no Event Groups, no Terrain, no
+  Incidents. No My Work, no Mission Center, no Incident Groups, no Terrain, no
   administration, and no "Report an incident".
 - There is no mobile guest surface. A guest who signs in to ERIS Mobile is told
   the app is for field and office staff and to use ERIS on the web.

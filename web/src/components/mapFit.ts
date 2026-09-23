@@ -3,7 +3,7 @@
  *
  * ArcGIS's shortcuts do not give that. `view.goTo(point)` — or `goTo` of
  * several graphics at the same spot — only re-centres at the current zoom, so a
- * one-report Event Group stayed at state level. `goTo(graphics)` fits them edge
+ * one-report Incident Group stayed at state level. `goTo(graphics)` fits them edge
  * to edge, under the map's own buttons. And a GraphicsLayer's `fullExtent` is
  * the whole world (Layer's default, never recomputed from its graphics), so
  * fitting to it zoomed a submission's map out to the five continents.

@@ -53,7 +53,7 @@ const TAB_STANDING: Record<Tab, RecordStanding> = {
 /**
  * Incidents: read-only record view.
  *   "Incident records"  — reports sent for assessment: the only way a report
- *                         enters ERIS, gets its number and joins an Event Group.
+ *                         enters ERIS, gets its number and joins an Incident Group.
  *   "Awaiting intake"   — field reports awaiting the coordinator, or back with
  *                         their reporter; temporary until the coordinator decides.
  *   "Closed at triage"  — no assessment needed, or a duplicate: kept so the
@@ -295,7 +295,7 @@ export default function IncidentsOperationsPage() {
           </div>
         ) : tab === "closed" ? (
           <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
-            <b className="text-[var(--ink)]">These field reports were closed at triage</b> — no assessment was needed, or they repeat another report. They never entered the ERIS incident record: no ERIS number, no Event Group, not on the Mission Center. They are kept so each decision can be traced.
+            <b className="text-[var(--ink)]">These field reports were closed at triage</b> — no assessment was needed, or they repeat another report. They never entered the ERIS incident record: no ERIS number, no Incident Group, not on the Mission Center. They are kept so each decision can be traced.
           </div>
         ) : (
           <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
@@ -331,7 +331,7 @@ export default function IncidentsOperationsPage() {
                     <td className="px-3 py-3 text-sm">
                       <Link to={`/incidents/${incident.id}`} className="font-semibold text-[var(--ink)] hover:text-[var(--brand)] hover:underline">{incident.title || `Incident #${incident.id}`}</Link>
                       <IncidentClassificationText classification={classifications[incident.id]} />
-                      {incident.event_group_id != null && !viewer ? <div className="mt-1 text-[11px]"><Link to={`/event-groups/${incident.event_group_id}`} className="text-[var(--brand)] hover:underline">Event Group #{incident.event_group_id}</Link></div> : null}
+                      {incident.event_group_id != null && !viewer ? <div className="mt-1 text-[11px]"><Link to={`/incident-groups/${incident.event_group_id}`} className="text-[var(--brand)] hover:underline">Incident Group #{incident.event_group_id}</Link></div> : null}
                     </td>
                     <td className="px-3 py-3 text-sm text-muted">
                       <div className="tabular-nums">{formatCoordinate(incident.latitude)}, {formatCoordinate(incident.longitude)}</div>

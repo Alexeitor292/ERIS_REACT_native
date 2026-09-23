@@ -30,7 +30,7 @@ import { cameraDirectionEndpoint, type MissionCenterIncidentGis, type MissionCen
 const CALIFORNIA_BOUNDS: LonLatExtent = { xmin: -124.482003, ymin: 32.528832, xmax: -114.131211, ymax: 42.009518 };
 const CALIFORNIA_EXTENT = new Extent({ ...CALIFORNIA_BOUNDS, spatialReference: { wkid: 4326 } });
 
-/** An Event Group with its reports at one spot still opens on about a kilometre of road. */
+/** An Incident Group with its reports at one spot still opens on about a kilometre of road. */
 const EVENT_GROUP_MIN_SPAN_M = 1000;
 /** One report's evidence — pin, photos, camera wedges, saved geometry — in at least 400 m. */
 const INCIDENT_MIN_SPAN_M = 400;
@@ -124,7 +124,7 @@ function geoJsonToGraphics(geometry: Record<string, unknown> | null): Graphic[] 
 }
 
 /**
- * Three-level GIS drill: statewide Event Groups → a group's incidents → one incident's
+ * Three-level GIS drill: statewide Incident Groups → a group's incidents → one incident's
  * saved geometry and field photos with camera-heading wedges. Theme-aware basemap and
  * an imperative `focusPhoto` so the evidence list can drive the map.
  */
@@ -180,8 +180,8 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
     if (apiKey) esriConfig.apiKey = apiKey;
     if (!divRef.current) return;
 
-    const projectLayer = new GraphicsLayer({ title: "Event Groups" });
-    const incidentLayer = new GraphicsLayer({ title: "Event Group incidents" });
+    const projectLayer = new GraphicsLayer({ title: "Incident Groups" });
+    const incidentLayer = new GraphicsLayer({ title: "Incident Group incidents" });
     const geometryLayer = new GraphicsLayer({ title: "Saved incident geometry" });
     const directionLayer = new GraphicsLayer({ title: "Camera headings" });
     const photoLayer = new GraphicsLayer({ title: "Field photos" });
@@ -271,8 +271,8 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
           outline: { color: selected ? [255, 255, 255, 1] : [15, 23, 42, 0.9], width: selected ? 3 : 1.5 },
         } as any,
         popupTemplate: {
-          title: "Event Group #{projectId} · {title}",
-          content: "<strong>Status:</strong> {status}<br/><strong>Location:</strong> {location}<br/><strong>Incidents:</strong> {incidents}<br/><strong>Active:</strong> {active}<br/><br/>Click the marker to inspect this Event Group.",
+          title: "Incident Group #{projectId} · {title}",
+          content: "<strong>Status:</strong> {status}<br/><strong>Location:</strong> {location}<br/><strong>Incidents:</strong> {incidents}<br/><strong>Active:</strong> {active}<br/><br/>Click the marker to inspect this Incident Group.",
         } as any,
       });
     });
@@ -370,7 +370,7 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
   }, [incidentGis, mode]);
 
   // Where the map looks follows the selection, once per selection: all of
-  // California, every report in the chosen Event Group, or everything one report
+  // California, every report in the chosen Incident Group, or everything one report
   // left on the map. Refreshes never move it — the group list reloads every
   // minute and classifications arrive after the reports — so a map the reader
   // has panned stays where they put it until they choose something else.
@@ -403,9 +403,9 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
 
   return (
     <div className="map-stack-guard overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
-      <div ref={divRef} style={{ height }} aria-label="Mission Center Event Group and Incident GIS explorer" />
+      <div ref={divRef} style={{ height }} aria-label="Mission Center Incident Group and Incident GIS explorer" />
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs text-muted">
-        {mode === "PROJECTS" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[rgb(30,96,255)]" /> Event Group</span><span>Marker size reflects active Incident activity.</span></> : null}
+        {mode === "PROJECTS" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[rgb(30,96,255)]" /> Incident Group</span><span>Marker size reflects active Incident activity.</span></> : null}
         {mode === "PROJECT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rotate-45 rounded-[2px] bg-[rgb(211,47,47)]" /> Active Incident</span><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[rgb(100,116,139)]" /> Resolved Incident</span></> : null}
         {mode === "INCIDENT" ? <><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[var(--accent)]" /> Field photo</span><span className="inline-flex items-center gap-2"><span className="inline-block h-3 w-4 rounded-r-full bg-[var(--accent)] opacity-40" /> Camera heading</span><span className="inline-flex items-center gap-2"><span className="h-3 w-5 border-2 border-[rgb(30,96,255)] bg-[rgba(30,96,255,0.15)]" /> Saved geometry</span></> : null}
       </div>

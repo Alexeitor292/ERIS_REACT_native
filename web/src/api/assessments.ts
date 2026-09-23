@@ -274,7 +274,7 @@ export function triageIncident(
     revision_fields?: string[];
     target_incident_id?: number;
     target_location_id?: number;
-    /** Assessment required only: the Event Group, saved in the same transaction. */
+    /** Assessment required only: the Incident Group, saved in the same transaction. */
     event_group?: { mode: "EXISTING"; event_group_id: number } | { mode: "CREATE_NEW"; title?: string; description?: string };
   }
 ): Promise<unknown> {

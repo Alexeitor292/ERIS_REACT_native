@@ -21,9 +21,9 @@ class IncidentCoordinatorApprovalRequest(BaseModel):
     """Approve a provisional Incident and make its identity historical.
 
     event_group_id is optional on purpose:
-    - supplied: approve into that existing open Event Group
+    - supplied: approve into that existing open Incident Group
     - omitted with an existing Incident event_group_id: keep that prior decision
-    - omitted with no Event Group: ERIS creates a new Event Group automatically
+    - omitted with no Incident Group: ERIS creates a new Incident Group automatically
     """
 
     event_group_id: int | None = Field(default=None, ge=1)
@@ -184,16 +184,16 @@ def coordinator_approve_incident(
         if requested_event_group_id is not None:
             target = event_group_routes._event_group_row(db, int(requested_event_group_id))
             if not target:
-                raise HTTPException(status_code=404, detail="Event Group not found")
+                raise HTTPException(status_code=404, detail="Incident Group not found")
             target_dict = dict(target)
             event_group_routes._ensure_manage_scope(user, target_dict)
             if str(target_dict["status"]).upper() != "OPEN":
-                raise HTTPException(status_code=409, detail="Only an open Event Group can accept an Incident")
+                raise HTTPException(status_code=409, detail="Only an open Incident Group can accept an Incident")
             target_event_group_id = int(requested_event_group_id)
         elif old_event_group_id is not None:
             target = event_group_routes._event_group_row(db, old_event_group_id)
             if not target or str(target["status"]).upper() != "OPEN":
-                raise HTTPException(status_code=409, detail="The Incident's selected Event Group is not open")
+                raise HTTPException(status_code=409, detail="The Incident's selected Incident Group is not open")
             target_event_group_id = old_event_group_id
         else:
             target_event_group_id = event_group_routes._create_event_group_for_incident(

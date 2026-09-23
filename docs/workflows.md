@@ -1,6 +1,6 @@
 # Workflows
 
-How work moves through ERIS: from a field report, through triage, into an Event
+How work moves through ERIS: from a field report, through triage, into an Incident
 Group and an assessment, to approval. Role names are those in
 [roles-and-identity.md](roles-and-identity.md); organization data (offices,
 branches, district coverage) is maintained as described in
@@ -15,7 +15,7 @@ postmile with county, or latitude and longitude. Each is converted to the others
 through the public Caltrans postmile layer.
 
 A new report is **provisional**: stage `COORDINATOR_REVIEW`, no ERIS number, not
-in any Event Group, and not part of the incident record, the Event Groups page or
+in any Incident Group, and not part of the incident record, the Incident Groups page or
 the Mission Center. Until triage, its reporter (or the coordinator, or an
 administrator) may discard it.
 
@@ -26,18 +26,18 @@ administrator) reviews it and makes one decision (`POST /incidents/{id}/triage`)
 
 | Decision | Result |
 | --- | --- |
-| **Assessment required** | The report **enters the incident record**. The coordinator attaches it to an open Event Group nearby, or starts a new one. The report receives its permanent ERIS number, an assessment is created for the GeoTech office that serves the district, and the stage becomes `OFFICE_CHIEF_REVIEW`. |
-| **No assessment required** | Closed at triage (stage `RESOLVED`). Kept with its decision and history, but with no ERIS number and no Event Group, and it never appears in the record or the Mission Center. |
+| **Assessment required** | The report **enters the incident record**. The coordinator attaches it to an open Incident Group nearby, or starts a new one. The report receives its permanent ERIS number, an assessment is created for the GeoTech office that serves the district, and the stage becomes `OFFICE_CHIEF_REVIEW`. |
+| **No assessment required** | Closed at triage (stage `RESOLVED`). Kept with its decision and history, but with no ERIS number and no Incident Group, and it never appears in the record or the Mission Center. |
 | **Duplicate or linked** | Closed at triage the same way, linked to the report it duplicates. |
-| **Needs reporter information** | Sent back to the reporter. It stays provisional, is taken out of any Event Group, and returns to the coordinator when the reporter answers. |
+| **Needs reporter information** | Sent back to the reporter. It stays provisional, is taken out of any Incident Group, and returns to the coordinator when the reporter answers. |
 
-Only "Assessment required" asks for an Event Group. The database refuses to move
-a report out of triage without an Event Group and an ERIS number, except when it
+Only "Assessment required" asks for an Incident Group. The database refuses to move
+a report out of triage without an Incident Group and an ERIS number, except when it
 is closed at triage, and refuses ever to change an ERIS number.
 
-## 3. Event Groups
+## 3. Incident Groups
 
-An Event Group gathers the reports caused by one event, such as a storm that
+An Incident Group gathers the reports caused by one event, such as a storm that
 damaged several slopes on one route.
 
 - A report belongs to **at most one** group. New groups are started from a
@@ -50,11 +50,11 @@ damaged several slopes on one route.
 - Coordinators and administrators edit a group's title and description. Moving a
   report that is already in the record to another group is for administrators
   only.
-- The **Mission Center** shows every Event Group holding at least one report in
+- The **Mission Center** shows every Incident Group holding at least one report in
   the record, with its reports on the map; selecting a group or a report zooms
   the map to fit it.
 
-The older `/projects` endpoints still answer, as views over Event Groups, for
+The older `/projects` endpoints still answer, as views over Incident Groups, for
 older clients.
 
 ## 4. Assessments
@@ -117,7 +117,7 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
      replace, print). The server stores each memo
      sanitized, next to a plain-text copy used by the PDF and the mobile app.
      Two more tabs show the site's history (`GET /submissions/{id}/site-history`,
-     operational roles): **Record of events** lists earlier incidents in the
+     operational roles): **Record of incidents** lists earlier incidents in the
      record within 150 m, marked as a recurrence of the same type or a
      different type; **Maintenance history** lists maintenance reports there
      that never entered the record, with the coordinator's decision. Both keep

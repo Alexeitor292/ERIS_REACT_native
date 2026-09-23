@@ -280,7 +280,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
     setBranchChiefId(null); setSeniorEngineerId(null); setEngineerId(null); setConsultedId("");
   }, [assessment.id, assessment.state, assessment.routing_path]);
 
-  // Incident title / Event Group for cross-links (incident payload carries event_group_id).
+  // Incident title / Incident Group for cross-links (incident payload carries event_group_id).
   useEffect(() => {
     let cancelled = false;
     api<{ incident: Incident & { event_group_id?: number | null } }>(`/incidents/${assessment.incident_id}`)
@@ -399,7 +399,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
         <div className="mt-3 flex flex-wrap gap-2">
           <Link to={`/incidents/${assessment.incident_id}`} className={btn}>Open incident</Link>
           {context.eventGroupId != null ? <Link to={`/mission-center/${context.eventGroupId}/${assessment.incident_id}`} className={btn}>View on map</Link> : null}
-          {context.eventGroupId != null ? <Link to={`/event-groups/${context.eventGroupId}`} className={btn}>Event Group #{context.eventGroupId}</Link> : null}
+          {context.eventGroupId != null ? <Link to={`/incident-groups/${context.eventGroupId}`} className={btn}>Incident Group #{context.eventGroupId}</Link> : null}
         </div>
         <Pipeline assessment={assessment} />
         {assessment.office_override_reason ? <div className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-[13px]"><b>Routing override:</b> {assessment.office_override_reason}</div> : null}

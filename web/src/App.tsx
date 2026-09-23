@@ -32,7 +32,7 @@ import {
 /**
  * Route gates, in three bands.
  *
- *  - OPERATIONAL: the working surface — Mission Center, Event Groups, GIS Tools.
+ *  - OPERATIONAL: the working surface — Mission Center, Incident Groups, GIS Tools.
  *    A read-only viewer sees none of it: it is full of work in flight.
  *  - ASSESSMENT_READ / RECORD_READ: the record surface. The viewer belongs here,
  *    and the server narrows what they get to APPROVED records; the gate only
@@ -85,7 +85,7 @@ export default function App() {
             }
           />
           <Route
-            path="/event-groups"
+            path="/incident-groups"
             element={
               <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <EventGroupsPage />
@@ -93,14 +93,17 @@ export default function App() {
             }
           />
           <Route
-            path="/event-groups/:id"
+            path="/incident-groups/:id"
             element={
               <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <EventGroupDetailPage />
               </RoleRoute>
             }
           />
-          <Route path="/projects" element={<Navigate to="/event-groups" replace />} />
+          {/* Old addresses: Event Groups were renamed Incident Groups. */}
+          <Route path="/event-groups" element={<Navigate to="/incident-groups" replace />} />
+          <Route path="/event-groups/:id" element={<LegacyProjectRedirect />} />
+          <Route path="/projects" element={<Navigate to="/incident-groups" replace />} />
           <Route path="/projects/:id" element={<LegacyProjectRedirect />} />
           <Route
             path="/assessments"
@@ -225,5 +228,5 @@ function HomeRedirect() {
 
 function LegacyProjectRedirect() {
   const { id } = useParams();
-  return <Navigate to={`/event-groups/${id ?? ""}`} replace />;
+  return <Navigate to={`/incident-groups/${id ?? ""}`} replace />;
 }

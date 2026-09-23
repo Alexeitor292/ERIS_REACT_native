@@ -3,7 +3,7 @@
 | Document | Read it to |
 | --- | --- |
 | [architecture.md](architecture.md) | Understand the parts of ERIS, how a request is handled, the data model, and what each role sees in the web and mobile apps. |
-| [workflows.md](workflows.md) | Follow a report from the field through triage, Event Groups and the assessment to approval. |
+| [workflows.md](workflows.md) | Follow a report from the field through triage, Incident Groups and the assessment to approval. |
 | [roles-and-identity.md](roles-and-identity.md) | See the eight roles, the per-record permits, sign-in and Entra ID readiness, and the mock accounts. |
 | [organization.md](organization.md) | Maintain offices, branches, district coverage and where people sit (administrators). |
 | [configuration.md](configuration.md) | Look up any setting of the backend, worker, server stack, web or mobile app. |
