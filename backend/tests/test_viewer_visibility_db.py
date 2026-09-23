@@ -640,12 +640,12 @@ def _names_the_viewer(route: APIRoute) -> bool:
 def _mounted_routes() -> list[tuple[str, str]]:
     from unittest.mock import patch
 
+    from tests.route_table import api_routes
+
     with patch("app.main.check_migration_head"):
         from app.main import app
     out: list[tuple[str, str]] = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in api_routes(app):
         if _names_the_viewer(route):
             continue
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):

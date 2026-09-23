@@ -14,6 +14,8 @@ the incident's own rule rather than a new one.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 pytestmark = pytest.mark.db
@@ -37,6 +39,16 @@ def coordinator_token(client_db):
 @pytest.fixture(scope="module")
 def reporter_token(client_db):
     return _login(client_db, "mock.maintenance.crew@dot.ca.gov")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _no_object_store():
+    """Uploads and download links stand in for MinIO, which CI's DB job does not run."""
+    with patch("app.routes.incidents.put_object_bytes"), patch(
+        "app.routes.incidents.object_access_url",
+        side_effect=lambda bucket, object_key, expires_seconds=900: f"https://storage.test/{bucket}/{object_key}",
+    ):
+        yield
 
 
 @pytest.fixture(scope="module")

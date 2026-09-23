@@ -38,9 +38,11 @@ from app.services.public_visibility import VIEWER_READABLE_ROUTES
 
 @pytest.fixture(scope="module")
 def app_routes():
+    from tests.route_table import api_routes
+
     with patch("app.main.check_migration_head"):
         from app.main import app
-    return [route for route in app.routes if isinstance(route, APIRoute)]
+    return api_routes(app)
 
 
 def _guards(route: APIRoute) -> set[str]:
