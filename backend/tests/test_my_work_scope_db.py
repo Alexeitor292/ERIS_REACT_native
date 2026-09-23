@@ -59,6 +59,8 @@ def reports(client_db, cast):
             headers=crew,
         )
         assert resp.status_code == 200, resp.text
+        # The typed title is ignored: reports are named by where and when.
+        assert resp.json()["incident"]["title"] == f"{district}-{county}-{route.zfill(3)}-10.000 - 09/22/26"
         ids[district] = resp.json()["incident"]["id"]
     return ids
 

@@ -194,6 +194,10 @@ Release notes that need action:
   known) is listed at the top of each tab; place them there. The Offices,
   Branches and Coverage pages redirect to it, and Users keeps only accounts and
   the Administrator switch.
+- **Incident names** (`20260927_incident_names`). Reporters no longer type a
+  title: every incident is named District-County-Route-PostMile - MM/DD/YY (the
+  day it was first observed), e.g. `04-MRN-001-12.300 - 09/22/26`. The
+  migration renames existing incidents the same way, replacing typed titles.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

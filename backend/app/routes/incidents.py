@@ -32,6 +32,7 @@ from ..roles import (
     is_public_only,
 )
 from ..services import org_directory
+from ..services.incident_name import incident_name
 from ..services import public_visibility
 from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
 from ..schemas.common import (
@@ -1664,11 +1665,12 @@ def create_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
-    title = (payload.title or "").strip() or None
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
     route = normalize_route(payload.route)
     post_mile = normalize_post_mile(payload.post_mile)
+    # Named by where and when, not by a typed title (any title sent is ignored).
+    title = incident_name(district=district, county=county, route=route, post_mile=post_mile, observed_at=payload.first_observed_at)
     latitude = round_coordinate(payload.latitude)
     longitude = round_coordinate(payload.longitude)
     if not (district and county and route and post_mile):
@@ -2070,7 +2072,7 @@ def maintenance_resubmit_incident(
             ),
             {
                 "iid": incident_id,
-                "title": (payload.title or "").strip() or None,
+                "title": incident_name(district=district, county=county, route=route, post_mile=post_mile, observed_at=payload.first_observed_at),
                 "incident_type": (payload.incident_type or "").strip() or None,
                 "description": (payload.description or "").strip() or None,
                 "lat": latitude,

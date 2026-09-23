@@ -190,7 +190,6 @@ export default function IncidentsOperationsPage() {
       const created = await api<{ incident: Incident }>("/incidents", {
         method: "POST",
         body: JSON.stringify({
-          title: form.title.trim(),
           description: form.description.trim() || null,
           first_observed_at: form.first_observed_at,
           first_occurred_at: form.first_occurred_at.trim() || null,
