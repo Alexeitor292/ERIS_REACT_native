@@ -903,7 +903,11 @@ export default function SubmissionDetailPage() {
   );
 
   const canvasCards = data ? (
-    <div ref={canvas.containerRef} className={`min-w-0 overflow-x-auto ${canvas.fullscreen ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
+    // The canvas is as tall as its cards, so outside full screen it never scrolls
+    // vertically: a scrollbar coming and going would change its width, reflow the
+    // cards, change their heights and bring the scrollbar back, without end. In
+    // full screen it scrolls, with the scrollbar's room always kept.
+    <div ref={canvas.containerRef} className={`min-w-0 overflow-x-auto ${canvas.fullscreen ? "min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" : "overflow-y-hidden"}`}>
       <div style={canvas.canvasStyle} className="eris-canvas-grid rounded-md">
         <CanvasCard {...cardProps("report_header")}>
           <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 @2xl:grid-cols-4">
