@@ -56,6 +56,7 @@ import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 import { isAssessmentAuthor, isPublicOnly } from "../utils/roleModel";
+import SavedLayoutsMenu from "../features/submissions/SavedLayoutsMenu";
 import { AccessDeniedNotice } from "../auth/AccessDenied";
 
 const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
@@ -793,6 +794,9 @@ export default function SubmissionDetailPage() {
         <span className="hidden text-[11px] text-muted md:inline">Drag a card by its header · resize from the edges</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {!viewer ? (
+          <SavedLayoutsMenu layout={canvas.layout} applyLayout={canvas.applyLayout} buttonClassName={toolbarButton} />
+        ) : null}
         {canvas.custom ? (
           <button type="button" onClick={canvas.tidy} className={toolbarButton} title="Return to the auto-fit flow, keeping this reading order">
             <LayoutGrid size={13} strokeWidth={2} aria-hidden />
@@ -819,7 +823,7 @@ export default function SubmissionDetailPage() {
 
   const canvasCards = data ? (
     <div ref={canvas.containerRef} className={`min-w-0 overflow-x-auto ${canvas.fullscreen ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
-      <div style={canvas.canvasStyle} className="rounded-md">
+      <div style={canvas.canvasStyle} className="eris-canvas-grid rounded-md">
         <CanvasCard {...cardProps("report_header")}>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
             <div>

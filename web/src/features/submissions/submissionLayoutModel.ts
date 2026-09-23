@@ -99,8 +99,18 @@ export function isWideCard(id: DashboardCardId) {
   return DASHBOARD_WIDE_CARD_IDS.includes(id);
 }
 
-export function defaultCardWidth(id: DashboardCardId, columns: number) {
-  return isWideCard(id) && columns >= 2 ? DASHBOARD_CARD_WIDTH * 2 + DASHBOARD_LAYOUT_GAP : DASHBOARD_CARD_WIDTH;
+/**
+ * Auto-fit columns share the whole canvas: the column count comes from the target
+ * card width, then the columns stretch to fill what is left over.
+ */
+export function autoFitColumnWidth(containerWidth: number, columns: number) {
+  if (!Number.isFinite(containerWidth) || containerWidth <= 0) return DASHBOARD_CARD_WIDTH;
+  const available = containerWidth - DASHBOARD_LAYOUT_GAP * (columns + 1);
+  return clamp(Math.floor(available / columns), DASHBOARD_MIN_CARD_WIDTH, DASHBOARD_MAX_CARD_WIDTH);
+}
+
+export function defaultCardWidth(id: DashboardCardId, columns: number, columnWidth = DASHBOARD_CARD_WIDTH) {
+  return isWideCard(id) && columns >= 2 ? columnWidth * 2 + DASHBOARD_LAYOUT_GAP : columnWidth;
 }
 
 export function buildDefaultCanvasLayout(): DashboardCanvasLayout {
@@ -112,7 +122,7 @@ export function buildDefaultCanvasLayout(): DashboardCanvasLayout {
 /**
  * Skyline flow: each card goes into the shortest column (a wide card into the shortest
  * adjacent pair). Heights come from the stored sizes so a user's height adjustments are
- * preserved when tidying; widths are always the column width in auto mode.
+ * preserved when tidying; widths are always the stretched column width in auto mode.
  */
 export function flowDashboardCards(
   order: readonly DashboardCardId[],
@@ -120,13 +130,15 @@ export function flowDashboardCards(
   containerWidth: number,
 ): FlowedLayout {
   const columns = autoFitColumnCount(containerWidth);
+  const columnWidth = autoFitColumnWidth(containerWidth, columns);
+  const stride = columnWidth + DASHBOARD_LAYOUT_GAP;
   const columnBottoms = Array.from({ length: columns }, () => DASHBOARD_LAYOUT_GAP);
   const positions = {} as Record<DashboardCardId, DashboardCardPosition>;
   const flowedSizes = {} as Record<DashboardCardId, DashboardCardLayout>;
 
   for (const id of order) {
     const span = isWideCard(id) && columns >= 2 ? 2 : 1;
-    const width = defaultCardWidth(id, columns);
+    const width = defaultCardWidth(id, columns, columnWidth);
     const height = clamp(sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height, DASHBOARD_MIN_CARD_HEIGHT, DASHBOARD_MAX_CARD_HEIGHT);
 
     let bestColumn = 0;
@@ -140,14 +152,14 @@ export function flowDashboardCards(
       }
     }
 
-    const x = DASHBOARD_LAYOUT_GAP + bestColumn * DASHBOARD_COLUMN_STRIDE;
+    const x = DASHBOARD_LAYOUT_GAP + bestColumn * stride;
     positions[id] = { x, y: bestTop };
     flowedSizes[id] = { width, height };
     for (let offset = 0; offset < span; offset += 1) columnBottoms[bestColumn + offset] = bestTop + height + DASHBOARD_LAYOUT_GAP;
   }
 
   const height = order.length ? Math.max(...columnBottoms) : DASHBOARD_LAYOUT_GAP * 2;
-  const width = DASHBOARD_LAYOUT_GAP + columns * DASHBOARD_COLUMN_STRIDE;
+  const width = DASHBOARD_LAYOUT_GAP + columns * stride;
   return { positions, sizes: flowedSizes, width, height, columns };
 }
 
@@ -237,4 +249,17 @@ export function readStoredCanvasLayout(storage: Pick<Storage, "getItem"> | null 
 
 export function serializeCanvasLayout(layout: DashboardCanvasLayout) {
   return JSON.stringify({ version: 2, custom: layout.custom, order: layout.order, sizes: layout.sizes, positions: layout.positions });
+}
+
+/** Free plane kept below the lowest card, so there is always room to drag a card down. */
+export const CANVAS_FREE_SPACE_BELOW = 96;
+
+/** The plain object stored for a saved layout (same shape as the local copy). */
+export function layoutSnapshot(layout: DashboardCanvasLayout): Record<string, unknown> {
+  return JSON.parse(serializeCanvasLayout(layout));
+}
+
+/** True when two arrangements would render the same (after normalizing either side). */
+export function sameCanvasLayout(a: unknown, b: unknown) {
+  return serializeCanvasLayout(normalizeCanvasLayout(a)) === serializeCanvasLayout(normalizeCanvasLayout(b));
 }

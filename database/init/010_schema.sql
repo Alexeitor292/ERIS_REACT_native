@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS user_external_identities (
     CONSTRAINT chk_user_external_identities_provider CHECK (provider IN ('ENTRA_ID'))
 ) ENGINE=InnoDB;
 
+-- A person's saved screen layouts (today: the GISA sheet's cards). Presentation only.
+CREATE TABLE IF NOT EXISTS user_saved_layouts (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    scope VARCHAR(40) NOT NULL,
+    name VARCHAR(80) NOT NULL,
+    layout_json JSON NOT NULL,
+    is_default TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_saved_layout_name UNIQUE (user_id, scope, name),
+    CONSTRAINT fk_user_saved_layout_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT chk_user_saved_layout_scope CHECK (scope IN ('submission_canvas'))
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS roles (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(64) NOT NULL UNIQUE,

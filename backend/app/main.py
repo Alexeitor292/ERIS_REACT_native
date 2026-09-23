@@ -36,6 +36,7 @@ from .routes import assessments as assessments_routes
 from .routes.assessments import router as assessments_router
 from .routes.workflow_tree import router as workflow_tree_router
 from .routes.org import router as org_router
+from .routes.user_layouts import router as user_layouts_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
 from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
@@ -113,6 +114,7 @@ app.include_router(road_inventory_router)
 # The organization as data: /org/* for labels, /admin/org/* for the admin who
 # owns them (org model design §7).
 app.include_router(org_router)
+app.include_router(user_layouts_router)
 
 app.add_middleware(
     CORSMiddleware,

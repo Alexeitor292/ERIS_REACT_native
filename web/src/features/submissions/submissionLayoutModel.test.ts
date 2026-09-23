@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   autoFitColumnCount,
+  autoFitColumnWidth,
   buildDefaultCanvasLayout,
   CANVAS_CARD_IDS,
   cardsOverlap,
@@ -32,9 +33,11 @@ test("auto-flow spans the report header across two columns and never overlaps ca
   const layout = buildDefaultCanvasLayout();
   const flowed = flowDashboardCards(layout.order, layout.sizes, 1700);
   assert.equal(flowed.columns, 3);
-  assert.equal(flowed.sizes.report_header.width, 1052);
+  // Three columns stretched across 1700px: floor((1700 - 4 * 12) / 3) = 550.
+  assert.equal(flowed.sizes.distribution.width, 550);
+  assert.equal(flowed.sizes.report_header.width, 550 * 2 + 12);
   assert.deepEqual(flowed.positions.report_header, { x: 12, y: 12 });
-  assert.equal(flowed.sizes.distribution.width, 520);
+  assert.equal(flowed.width, 12 + 3 * 562);
 
   const ids = layout.order;
   for (let i = 0; i < ids.length; i += 1) {
@@ -52,7 +55,7 @@ test("single column flow stacks every card full width in order", () => {
   const layout = buildDefaultCanvasLayout();
   const flowed = flowDashboardCards(layout.order, layout.sizes, 700);
   assert.equal(flowed.columns, 1);
-  assert.equal(flowed.sizes.report_header.width, 520);
+  assert.equal(flowed.sizes.report_header.width, 700 - 24);
   let expectedY = 12;
   for (const id of layout.order) {
     assert.deepEqual(flowed.positions[id], { x: 12, y: expectedY });
@@ -90,4 +93,14 @@ test("reading storage ignores malformed or legacy values", () => {
   assert.equal(readStoredCanvasLayout(storage).custom, false);
   stored.set(DASHBOARD_LAYOUT_V2_KEY, "not json");
   assert.equal(readStoredCanvasLayout(storage).custom, false);
+});
+
+test("auto-fit columns fill the canvas instead of leaving a gutter", () => {
+  const layout = buildDefaultCanvasLayout();
+  for (const width of [1197, 1400, 1600, 2400]) {
+    const flowed = flowDashboardCards(layout.order, layout.sizes, width);
+    assert.ok(width - flowed.width < flowed.columns + 12, `${width}px leaves ${width - flowed.width}px unused`);
+  }
+  // Before the canvas is measured, cards keep the target width.
+  assert.equal(autoFitColumnWidth(0, 1), 520);
 });

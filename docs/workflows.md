@@ -122,6 +122,12 @@ assessment instead.
 A form's author can grant named people **reader** or **editor** permits on that
 one form (see [roles-and-identity.md](roles-and-identity.md#special-permits)).
 
+On the web, the form's GISA sheet is a canvas: its cards flow across the full
+width by default, and can be dragged and resized. The browser remembers the last
+arrangement. **Layouts** saves an arrangement by name on the person's account
+(`/me/layouts`), so it follows them to any computer; the starred one is the
+layout every form opens with.
+
 ## 7. Photos
 
 Photos carry the phone's position and heading when they were taken. The **site
