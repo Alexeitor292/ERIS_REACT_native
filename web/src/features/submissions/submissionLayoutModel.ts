@@ -70,8 +70,11 @@ export const DASHBOARD_CARD_WIDTH = 520;
 export const DASHBOARD_COLUMN_STRIDE = DASHBOARD_CARD_WIDTH + DASHBOARD_LAYOUT_GAP;
 export const DASHBOARD_WIDE_CARD_IDS: readonly DashboardCardId[] = ["report_header"];
 
-/** Card ids rendered on the canvas. `location` moved into the Location hero. */
-export const CANVAS_CARD_IDS: readonly DashboardCardId[] = DASHBOARD_DEFAULT_ORDER.filter((id) => id !== "location");
+/**
+ * Card ids rendered on the canvas. `location` moved into the Location hero and
+ * `measurements` into its own section under the canvas.
+ */
+export const CANVAS_CARD_IDS: readonly DashboardCardId[] = DASHBOARD_DEFAULT_ORDER.filter((id) => id !== "location" && id !== "measurements");
 
 export type DashboardCanvasLayout = {
   custom: boolean;

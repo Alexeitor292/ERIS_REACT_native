@@ -26,6 +26,7 @@ test("auto-fit column count follows max(1, floor((width - 12) / 532))", () => {
 
 test("the location card no longer lives on the canvas", () => {
   assert.equal(CANVAS_CARD_IDS.includes("location"), false);
+  assert.equal(CANVAS_CARD_IDS.includes("measurements"), false);
   assert.equal(CANVAS_CARD_IDS[0], "report_header");
 });
 

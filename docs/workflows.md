@@ -90,8 +90,16 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    polygons or rectangles, click one to reshape, move, rotate or delete it, and
    see each area's size in square metres and acres. Areas save as the form's
    geometry the moment they change (one area as a GeoJSON Polygon, several as a
-   MultiPolygon), the same geometry the mobile app draws. The form's lower half
-   has three parts:
+   MultiPolygon), the same geometry the mobile app draws. Below the GISA
+   sheet, **Measurements** puts the 3D terrain beside the landslide sketch and
+   its fields (H, α, Wd, Ld, Hs, β, Lr, Wr). **Measure** samples Esri World
+   Elevation (the finest resolution that covers the whole area) inside a drawn
+   area and in a band around it, in the browser. It then proposes β and α
+   (planes fitted inside and around), Ld along the fall line, Wd across it, and
+   H (the area's relief, 2nd to 98th percentile). Proposals fill empty fields,
+   or one field at a time. Nothing is saved until the author saves the draft.
+   Hs, Lr and Wr stay field measurements. The rest of the lower half has three
+   parts:
    - **Actions:** checklists of immediate and follow-up actions.
    - **Memos:** one tab each for Observations, Geotechnical assessment,
      Recommendations and Sketch notes, written in a word processor with a

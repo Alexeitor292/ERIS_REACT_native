@@ -18,10 +18,15 @@ export default function SubmissionMeasurementContext({
   submissionId,
   gisa,
   onReload,
+  geometryJson,
+  height = 460,
 }: {
   submissionId: number;
   gisa: Gisa | null;
   onReload: () => Promise<void>;
+  /** The areas as currently drawn on the location map; defaults to the saved geometry. */
+  geometryJson?: unknown;
+  height?: number;
 }) {
   const [terrainFetching, setTerrainFetching] = useState(false);
   const [terrainError, setTerrainError] = useState<string | null>(null);
@@ -80,7 +85,7 @@ export default function SubmissionMeasurementContext({
           fallback={
             <div
               className="flex items-center justify-center rounded-lg border border-[var(--line)] bg-[#0f172a]/80 text-center"
-              style={{ height: 460 }}
+              style={{ height }}
             >
               <div className="text-xs text-white/85">
                 <div className="mx-auto mb-2 h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -92,7 +97,8 @@ export default function SubmissionMeasurementContext({
           <InteractiveTerrainScene
             location={{ latitude: gisa?.latitude ?? null, longitude: gisa?.longitude ?? null }}
             terrain={terrain}
-            geometryJson={(gisa?.geometry_json as Record<string, unknown> | null) ?? null}
+            geometryJson={((geometryJson !== undefined ? geometryJson : gisa?.geometry_json) as Record<string, unknown> | null) ?? null}
+            height={height}
             route={gisa?.route ?? null}
             postMile={gisa?.post_mile ?? null}
             county={gisa?.county ?? null}

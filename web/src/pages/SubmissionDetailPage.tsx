@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ClipboardList, GripVertical, LayoutGrid, ListChecks, Maximize2, Minimize2, NotebookPen, RotateCcw, ShieldCheck, Siren } from "lucide-react";
+import { ClipboardList, GripVertical, LayoutGrid, ListChecks, Maximize2, Minimize2, NotebookPen, RotateCcw, Ruler, ShieldCheck, Siren } from "lucide-react";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
 import AppShell from "../ui/AppShell";
@@ -9,6 +9,7 @@ import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHead
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
 import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
 import SubmissionMeasurementContext from "../features/submissions/SubmissionMeasurementContext";
+import SiteMeasurementsPanel, { MEASURE_KEYS, type MeasureValues } from "../features/submissions/SiteMeasurementsPanel";
 import SubmissionLocationHero from "../features/submissions/SubmissionLocationHero";
 import SubmissionLibrary from "../features/submissions/SubmissionLibrary";
 import SubmissionSectionAttachmentsDialog, { SectionAttachmentsButton } from "../features/submissions/SubmissionSectionAttachmentsDialog";
@@ -1188,31 +1189,6 @@ export default function SubmissionDetailPage() {
             </div>
           ) : null}
         </CanvasCard>
-
-        <CanvasCard
-          {...cardProps("measurements")}
-          tools={
-            <SubmissionMeasurementContext
-              submissionId={data.submission.id}
-              gisa={data.gisa}
-              onReload={load}
-            />
-          }
-        >
-          <div className="rounded border border-[var(--line)] bg-[var(--panel-soft)] p-2">
-            <img src="/measurement/landslide.png" alt="Landslide measurement reference with symbols H, alpha, Wd, Ld, Hs, beta, Lr, Wr" className="max-h-64 w-full object-contain" />
-          </div>
-          <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-            <div><label className={label}>Slope Height, ft (H)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_slope_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_slope_height_ft:e.target.value}))} /></div>
-            <div><label className={label}>Original Slope, deg (alpha)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_original_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_original_slope_deg:e.target.value}))} /></div>
-            <div><label className={label}>Landslide Width, ft (Wd)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_width_ft:e.target.value}))} /></div>
-            <div><label className={label}>Landslide Length, ft (Ld)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_length_ft:e.target.value}))} /></div>
-            <div><label className={label}>Main Scarp Height, ft (Hs)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_main_scarp_height_ft} onChange={(e)=>setDraft((d)=>({...d,measure_main_scarp_height_ft:e.target.value}))} /></div>
-            <div><label className={label}>Landslide Slope, deg (beta)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_landslide_slope_deg} onChange={(e)=>setDraft((d)=>({...d,measure_landslide_slope_deg:e.target.value}))} /></div>
-            <div><label className={label}>Length of Roadway Encroached, ft (Lr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_length_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_length_ft:e.target.value}))} /></div>
-            <div><label className={label}>Width of Roadway Encroached, ft (Wr)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.measure_roadway_width_ft} onChange={(e)=>setDraft((d)=>({...d,measure_roadway_width_ft:e.target.value}))} /></div>
-          </div>
-        </CanvasCard>
       </div>
       {canvas.draggingId && canvas.dragPointer ? (
         <div
@@ -1325,6 +1301,33 @@ export default function SubmissionDetailPage() {
                 {canvasCards}
               </section>
             )}
+
+            {data ? (
+              <section id="measurements-section" className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <SectionHeading
+                    icon={<Ruler size={16} />}
+                    title="Measurements"
+                    subtitle="The slide's dimensions, taken in the field or measured from the terrain under the area drawn on the map."
+                  />
+                  <SectionAttachmentsButton
+                    count={sectionCount(CARD_SECTION_KEYS.measurements)}
+                    onClick={() => openSectionAttachments(DASHBOARD_CARD_TITLES.measurements, CARD_SECTION_KEYS.measurements)}
+                  />
+                </div>
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+                    <SubmissionMeasurementContext submissionId={data.submission.id} gisa={data.gisa} onReload={load} geometryJson={geom} height={560} />
+                  </div>
+                  <SiteMeasurementsPanel
+                    values={Object.fromEntries(MEASURE_KEYS.map((key) => [key, draft[key]])) as MeasureValues}
+                    onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+                    geojson={geom}
+                    canEdit={canEdit}
+                  />
+                </div>
+              </section>
+            ) : null}
 
             <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
               <SectionHeading icon={<ListChecks size={16} />} title="Actions" subtitle="What was done to make the site safe, and the work that should follow." />
