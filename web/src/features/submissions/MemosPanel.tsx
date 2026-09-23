@@ -132,6 +132,7 @@ export default function MemosPanel(props: Props) {
           onChange={(html) => props.onMemoChange(key, html)}
           editable={props.editable}
           placeholder={tab.placeholder ?? ""}
+          documentTitle={tab.label}
           tall={tall}
         />
       );

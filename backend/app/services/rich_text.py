@@ -26,7 +26,7 @@ MAX_MIRROR_CHARS = 60_000
 _TAGS = {
     "p", "br", "h1", "h2", "h3", "h4", "strong", "b", "em", "i", "u", "s", "strike", "mark", "span",
     "a", "ul", "ol", "li", "blockquote", "pre", "code", "hr", "sub", "sup",
-    "table", "thead", "tbody", "tr", "th", "td", "colgroup", "col",
+    "table", "thead", "tbody", "tr", "th", "td", "colgroup", "col", "div",
 }
 _STYLED = {"p", "h1", "h2", "h3", "h4", "span", "mark", "td", "th", "li"}
 _ATTRIBUTES: dict[str, set[str]] = {tag: {"style"} for tag in _STYLED}
@@ -36,7 +36,13 @@ _ATTRIBUTES["th"] = {"style", "colspan", "rowspan", "colwidth"}
 _ATTRIBUTES["col"] = {"style", "span"}
 _ATTRIBUTES["mark"] = {"style", "data-color"}
 _ATTRIBUTES["ol"] = {"start"}
-_STYLE_PROPERTIES = {"color", "background-color", "text-align", "font-size", "font-family", "line-height", "width", "min-width"}
+# Checklists: <ul data-type="taskList"><li data-type="taskItem" data-checked="true">.
+_ATTRIBUTES["ul"] = {"data-type"}
+_ATTRIBUTES["li"] = {"style", "data-type", "data-checked"}
+_STYLE_PROPERTIES = {
+    "color", "background-color", "text-align", "font-size", "font-family", "line-height",
+    "margin-left", "width", "min-width",
+}
 _URL_SCHEMES = {"http", "https", "mailto"}
 
 
@@ -64,18 +70,24 @@ class _TextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
-        self._list_stack: list[list[int] | None] = []
+        self._list_stack: list[list[int] | str | None] = []
         # Just wrote a list marker: the item's first block stays on its line.
         self._after_marker = False
 
     def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
         if tag in ("ul", "ol"):
-            start = dict(attrs).get("start")
-            self._list_stack.append([int(start) if start and start.isdigit() else 1] if tag == "ol" else None)
+            start = attributes.get("start")
+            if tag == "ol":
+                self._list_stack.append([int(start) if start and start.isdigit() else 1])
+            else:
+                self._list_stack.append("task" if attributes.get("data-type") == "taskList" else None)
         elif tag == "li":
             self._newline()
             counter = self._list_stack[-1] if self._list_stack else None
-            if counter is None:
+            if counter == "task":
+                self.parts.append("☑ " if attributes.get("data-checked") == "true" else "☐ ")
+            elif counter is None:
                 self.parts.append("• ")
             else:
                 self.parts.append(f"{counter[0]}. ")

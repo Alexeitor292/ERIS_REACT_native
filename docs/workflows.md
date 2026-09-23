@@ -89,8 +89,10 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    the form's lower half has three parts:
    - **Actions:** checklists of immediate and follow-up actions.
    - **Memos:** one tab each for Observations, Geotechnical assessment,
-     Recommendations and Sketch notes, written in a word-processor with
-     headings, lists, colors, tables and links. The server stores each memo
+     Recommendations and Sketch notes, written in a word processor with a
+     Word-style ribbon (fonts, sizes, colors, styles, lists and checklists,
+     indent and spacing, tables with merge and shading, symbols, find and
+     replace, print). The server stores each memo
      sanitized, next to a plain-text copy used by the PDF and the mobile app.
      Two more tabs show the site's history (`GET /submissions/{id}/site-history`,
      operational roles): **Record of events** lists earlier incidents in the
