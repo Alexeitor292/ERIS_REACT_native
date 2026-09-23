@@ -1035,9 +1035,11 @@ def list_assessments(
 
     q = (queue or "").strip().lower()
     if q == "office_chief":
-        # To route: nothing has been chosen yet.
+        # To route: nothing has been chosen yet. STRICT, like review: a chief can
+        # route only their own office's assessments, so showing another office's
+        # (or an office-less one) would only lead to "outside your office".
         where.append("a.state = 'PENDING_OFFICE_DELEGATION'")
-        _scope_office(user, where, params, db=db)
+        _scope_office(user, where, params, strict=True, db=db)
     elif q == "office_chief_review":
         # To review, Senior Specialist route. STRICT office scoping: an office
         # chief with no office_code can review nothing (§4.1), so their queue

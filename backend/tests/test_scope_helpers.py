@@ -31,10 +31,28 @@ from app import roles
 from app.routes import incidents as incidents_routes
 
 
-class _UnusedSession:
-    """A session that must not be touched: every branch here reads the cache."""
+class _Rows:
+    def __init__(self, values):
+        self._values = values
 
-    def execute(self, *args, **kwargs):  # pragma: no cover - a failure path
+    def scalars(self):
+        return self
+
+    def all(self):
+        return list(self._values)
+
+
+class _UnusedSession:
+    """A session that answers ONE question, the districts on the person's
+    coordinator lists (``covered``, empty by default); every other query fails,
+    because every other branch reads the org record cached on the request."""
+
+    def __init__(self, covered=()):
+        self.covered = covered
+
+    def execute(self, statement, *args, **kwargs):
+        if "FROM org_coordinator_coverage" in str(statement):
+            return _Rows(self.covered)
         raise AssertionError("_mobile_scope_filters queried the database for a cached org")
 
     def begin_nested(self):  # pragma: no cover - a failure path
@@ -138,8 +156,8 @@ class TestIncidentScopeAccess:
 # ---------------------------------------------------------------------------
 
 
-def _filters(user):
-    return incidents_routes._mobile_scope_filters(_UnusedSession(), user)
+def _filters(user, covered=()):
+    return incidents_routes._mobile_scope_filters(_UnusedSession(covered), user)
 
 
 class TestMobileScopeFilters:
@@ -148,9 +166,17 @@ class TestMobileScopeFilters:
         where, params = _filters(_user(role, district="04"))
         assert where != ["1=0"], "a canonically-named coordinator fell through to an empty feed"
         assert "COORDINATOR_REVIEW" in where[0]
-        assert params["coord_district"] == "04"
+        assert params["coord_district_0"] == "04"
         # The four district spellings the free-text column actually holds.
-        assert params["coord_district_plain"] == "4"
+        assert params["coord_district_0p"] == "4"
+
+    def test_the_districts_on_their_lists_count_too(self):
+        # A coordinator on District 5's list with District 4 at home triages both.
+        where, params = _filters(_user(roles.MAINTENANCE_COORDINATOR, district="04"), covered=["5"])
+        assert sorted(v for k, v in params.items() if k.startswith("coord_district_") and not k.endswith("p")) == ["04", "05"]
+        # On a list, with no home district at all, is enough.
+        where, params = _filters(_user(roles.MAINTENANCE_COORDINATOR, district=None), covered=["11"])
+        assert where != ["1=0"] and params["coord_district_0"] == "11"
 
     @pytest.mark.parametrize("role", OFFICE_CHIEF)
     def test_office_chief_gets_an_office_filter(self, role):
@@ -221,5 +247,5 @@ class TestMobileScopeFilters:
         user["roles"] = [roles.MAINTENANCE_COORDINATOR, roles.OFFICE_CHIEF]
         where, params = _filters(user)
         assert " OR " in where[0]
-        assert params["coord_district"] == "04"
+        assert params["coord_district_0"] == "04"
         assert params["office_chief_office"] == "WEST"

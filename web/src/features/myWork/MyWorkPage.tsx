@@ -94,7 +94,8 @@ export default function MyWorkPage() {
       if (isAdmin(roles)) requests.push(queue({ state: "SUBMITTED" }));
 
       const triagePromise: Promise<Incident[]> = canTriage(roles)
-        ? api<{ items: Incident[] }>("/incidents?limit=1000")
+        // The server's triage queue: only reports in the districts this person covers.
+        ? api<{ items: Incident[] }>("/incidents?queue=triage&limit=1000")
           .then((r) => (r.items ?? []).filter((i) => i.current_stage === "COORDINATOR_REVIEW" && i.status !== "RESOLVED"))
           .catch(() => [])
         : Promise.resolve([]);
