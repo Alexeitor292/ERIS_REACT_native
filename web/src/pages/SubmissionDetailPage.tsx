@@ -54,7 +54,7 @@ import {
   getCaliforniaStatePlaneZone,
 } from "../utils/californiaCoordinateSystem";
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
-import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
+import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyCodeFromNameOrCode, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 import { isAssessmentAuthor, isOperationalUser, isPublicOnly } from "../utils/roleModel";
 import ActionChecklist from "../features/submissions/ActionChecklist";
@@ -1399,6 +1399,7 @@ export default function SubmissionDetailPage() {
                     onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
                     geojson={geom}
                     canEdit={canEdit}
+                    road={{ county: countyCodeFromNameOrCode(draft.county), route: draft.route, postMile: draft.post_mile, district: draft.district }}
                   />
                 </div>
               </section>

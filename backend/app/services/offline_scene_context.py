@@ -1356,7 +1356,7 @@ def dedupe_line_features(features, *, precision: int = 6) -> list:
 
 def fetch_arcgis_line_layer(
     layer_url: str, bounds: dict, *, timeout_s: int, session=None, out_fields: str = "",
-    keep_props=None, trusted: dict | None = None,
+    keep_props=None, trusted: dict | None = None, where: str = "1=1",
 ) -> list:
     """Query ONE ArcGIS REST line layer (`<layer_url>/query`) intersecting `bounds`.
     Works for BOTH `MapServer/<id>` and `FeatureServer/<id>`. Requests WGS84 (4326) and
@@ -1373,7 +1373,7 @@ def fetch_arcgis_line_layer(
     last_err = None
     for fmt in ("geojson", "json"):  # prefer GeoJSON; fall back to Esri JSON
         params = {
-            "where": "1=1", "geometry": bbox, "geometryType": "esriGeometryEnvelope",
+            "where": where, "geometry": bbox, "geometryType": "esriGeometryEnvelope",
             "inSR": "4326", "outSR": "4326", "spatialRel": "esriSpatialRelIntersects",
             "outFields": out_fields, "returnGeometry": "true", "f": fmt,
         }

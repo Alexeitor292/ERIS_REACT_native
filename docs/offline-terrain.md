@@ -93,6 +93,12 @@ and postmile) that phones use offline to describe a site's road.
    and look up segments offline. Online, any signed-in non-Guest can query
    `GET /road-inventory/lookup`.
 
+The technical form's roadway measurement reads the same published inventory
+through `GET /road-inventory/roadway-context`: lanes, outside shoulders and
+median from the named columns, and traveled way (`THY_LT/RT_TRAV_WAY_WIDTH_AMT`),
+inside shoulders and highway group from the columns the import keeps in
+`raw_json`. Left and right are relative to increasing postmile.
+
 An import runs inside the API process. If the API restarts mid-import, the job
 stays `processing` and the file must be uploaded again.
 

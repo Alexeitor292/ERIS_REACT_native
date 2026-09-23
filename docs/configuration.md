@@ -119,6 +119,21 @@ county, route and postmile) and the road bearing for a technical form. Unset,
 those return no postmile data. The web and mobile apps' own location forms query
 the public Caltrans postmile layer directly and do not depend on these.
 
+### Roadway encroachment (technical form)
+
+The technical form's **Roadway encroachment** measurement (Lr and Wr) rebuilds the
+road from a centerline and the road inventory. The server fetches the centerline;
+nothing needs credentials.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ROADWAY_CENTERLINE_SOURCE` | `caltrans_shn` | `caltrans_shn` (Caltrans SHN Lines, keyed by county, route and postmile like the inventory), `census_tigerweb` or `caltrans_crs`. |
+| `ROADWAY_SHN_LINES_URL` | public Caltrans SHN Lines layer | Change only to use a mirror. |
+| `ROADWAY_FETCH_TIMEOUT_S` | `20` | Per-request timeout for the centerline source. |
+
+`census_tigerweb` uses `OFFLINE_SCENE_TIGERWEB_BASE_URL` and `caltrans_crs` uses
+`OFFLINE_SCENE_CALTRANS_ROADS_URL`.
+
 ### Offline 3D terrain packages
 
 These govern the offline-scene worker (see [offline-terrain.md](offline-terrain.md)).

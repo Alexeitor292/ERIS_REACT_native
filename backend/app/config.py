@@ -205,6 +205,16 @@ class Settings(BaseSettings):
     )
     OFFLINE_SCENE_TIGERWEB_LAYERS: str = Field(default="2,6,8")
 
+    # --- Roadway encroachment (technical form measurements) ---
+    # The centerline the web measures Lr and Wr against, joined with the road inventory's
+    # cross-section: caltrans_shn (Caltrans SHN Lines, keyed by route, county and
+    # postmile like the inventory) | census_tigerweb | caltrans_crs. Server-side fetch.
+    ROADWAY_CENTERLINE_SOURCE: str = Field(default="caltrans_shn")
+    ROADWAY_SHN_LINES_URL: str = Field(
+        default="https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/SHN_Lines/FeatureServer/0"
+    )
+    ROADWAY_FETCH_TIMEOUT_S: int = Field(default=20, ge=1, le=120)
+
     # --- Caltrans CRS Functional Classification (OPTIONAL freeway/expressway road context) ---
     # Public, credential-free Caltrans ArcGIS Feature Service. Active ONLY when
     # OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs (explicit selection). Worker-side fetch only —
@@ -333,6 +343,15 @@ class Settings(BaseSettings):
         from .services.offline_scene_context import normalize_road_source
 
         return normalize_road_source(v)
+
+    @field_validator("ROADWAY_CENTERLINE_SOURCE")
+    @classmethod
+    def _validate_roadway_centerline_source(cls, v):
+        value = str(v or "").strip().lower()
+        allowed = ("caltrans_shn", "census_tigerweb", "caltrans_crs")
+        if value not in allowed:
+            raise ValueError(f"ROADWAY_CENTERLINE_SOURCE must be one of {', '.join(allowed)}")
+        return value
 
     @field_validator("OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES")
     @classmethod
