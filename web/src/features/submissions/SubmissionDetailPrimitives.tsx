@@ -50,7 +50,7 @@ export function SubmissionDetailCard({
     <section className={`flex min-w-0 flex-col rounded-xl border border-[var(--line)] bg-[var(--panel)] ${className}`}>
       <header className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--line)]/70 px-4 py-3">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">{title}</div>
+          <div className="text-sm font-semibold">{title}</div>
           {subtitle ? <div className="mt-0.5 text-xs text-muted">{subtitle}</div> : null}
         </div>
         {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}

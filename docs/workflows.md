@@ -85,7 +85,21 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    Either way the assessment moves to `DRAFT` and the incident to
    `ENGINEER_ASSIGNED`. The database refuses an assignee without the right role.
 2. **The author fills the technical form** (the GISA form: site, measurements,
-   photos, sketches, actions) and submits it (`SUBMITTED`).
+   photos, sketches, actions, memos) and submits it (`SUBMITTED`). On the web
+   the form's lower half has three parts:
+   - **Actions:** checklists of immediate and follow-up actions.
+   - **Memos:** one tab each for Observations, Geotechnical assessment,
+     Recommendations and Sketch notes, written in a word-processor with
+     headings, lists, colors, tables and links. The server stores each memo
+     sanitized, next to a plain-text copy used by the PDF and the mobile app.
+     Two more tabs show the site's history (`GET /submissions/{id}/site-history`,
+     operational roles): **Record of events** lists earlier incidents in the
+     record within 150 m, marked as a recurrence of the same type or a
+     different type; **Maintenance history** lists maintenance reports there
+     that never entered the record, with the coordinator's decision. Both keep
+     a notes field.
+   - **Review and record:** where the form stands, the reviewer's note, its
+     history and who it is shared with.
 3. **The reviewer decides.** On the branch route that is the Branch Chief named
    on the assessment; on the Senior Specialist route, an Office Chief of the
    assessment's office. No other role and no assignment grants review authority.

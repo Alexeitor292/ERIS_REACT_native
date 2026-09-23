@@ -556,6 +556,10 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
     elevation_terrain_source VARCHAR(64) NULL,
     elevation_terrain_checked_at DATETIME NULL,
     elevation_terrain_error TEXT NULL,
+    observations_notes_html MEDIUMTEXT NULL,
+    geotechnical_assessment_notes_html MEDIUMTEXT NULL,
+    recommendations_notes_html MEDIUMTEXT NULL,
+    sketchpad_notes_html MEDIUMTEXT NULL,
 
     -- Section P: Audit metadata
     updated_by_user_id BIGINT NULL,

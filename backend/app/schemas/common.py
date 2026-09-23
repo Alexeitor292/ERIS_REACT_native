@@ -136,6 +136,12 @@ class GisaDraftPatch(BaseModel):
     recommendations_notes: str | None = None
     sketchpad_notes: str | None = None
     observations_notes: str | None = None
+    # Formatted versions of four memos (sanitized HTML). Saving one also
+    # rewrites its plain-text field above from it (services/rich_text.py).
+    observations_notes_html: str | None = None
+    geotechnical_assessment_notes_html: str | None = None
+    recommendations_notes_html: str | None = None
+    sketchpad_notes_html: str | None = None
     geometry_json: dict | None = None
 
 

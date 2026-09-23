@@ -29,7 +29,7 @@ export default function SubmissionAccessSharing({
 
   return (
     <SubmissionDetailCard
-      title="Access Sharing"
+      title="Access sharing"
       subtitle="Grant read access to this submission without changing ownership or edit permissions."
     >
       <label className="block">

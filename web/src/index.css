@@ -163,3 +163,82 @@ body {
   background-position: 11px 11px;
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--line) 80%, transparent);
 }
+
+/* ---- Memo editor: a page on a desk -------------------------------------- */
+.eris-memo-tabs { scrollbar-width: none; }
+.eris-memo-tabs::-webkit-scrollbar { display: none; }
+
+.eris-memo-desk {
+  background: color-mix(in oklab, var(--panel-soft) 70%, var(--bg));
+  padding: 24px 16px;
+}
+.eris-memo-page {
+  max-width: 820px;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--ink) 8%, transparent), 0 8px 24px color-mix(in oklab, var(--ink) 6%, transparent);
+  padding: 40px 48px;
+}
+@media (max-width: 640px) {
+  .eris-memo-page { padding: 24px 18px; }
+}
+.eris-memo-page .ProseMirror {
+  min-height: 320px;
+  outline: none;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.65;
+}
+.eris-memo-page--tall .ProseMirror { min-height: 60vh; }
+.eris-memo-page .ProseMirror > * + * { margin-top: 0.6em; }
+.eris-memo-page .ProseMirror h1 { font-size: 1.6rem; font-weight: 700; line-height: 1.25; margin-top: 1em; }
+.eris-memo-page .ProseMirror h2 { font-size: 1.3rem; font-weight: 700; line-height: 1.3; margin-top: 0.9em; }
+.eris-memo-page .ProseMirror h3 { font-size: 1.1rem; font-weight: 600; line-height: 1.35; margin-top: 0.8em; }
+.eris-memo-page .ProseMirror > :first-child { margin-top: 0; }
+.eris-memo-page .ProseMirror ul { list-style: disc; padding-left: 1.5em; }
+.eris-memo-page .ProseMirror ol { list-style: decimal; padding-left: 1.6em; }
+.eris-memo-page .ProseMirror li > p { margin: 0.15em 0; }
+.eris-memo-page .ProseMirror blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 0.1em 0 0.1em 0.9em;
+  color: var(--muted);
+}
+.eris-memo-page .ProseMirror a { color: var(--accent); text-decoration: underline; }
+.eris-memo-page .ProseMirror hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
+.eris-memo-page .ProseMirror mark { border-radius: 2px; padding: 0 2px; color: inherit; }
+.eris-memo-page .ProseMirror code { background: var(--panel-soft); border-radius: 4px; padding: 0 4px; font-size: 0.9em; }
+.eris-memo-page .ProseMirror table { border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0.8em 0; }
+.eris-memo-page .ProseMirror td,
+.eris-memo-page .ProseMirror th {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  vertical-align: top;
+  position: relative;
+}
+.eris-memo-page .ProseMirror th { background: var(--panel-soft); font-weight: 600; text-align: left; }
+.eris-memo-page .ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  pointer-events: none;
+}
+.eris-memo-page .ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.eris-memo-page .ProseMirror.resize-cursor { cursor: col-resize; }
+.eris-memo-page .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

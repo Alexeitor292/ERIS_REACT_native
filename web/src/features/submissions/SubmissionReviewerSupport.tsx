@@ -25,7 +25,7 @@ export default function SubmissionReviewerSupport({
 }) {
   return (
     <>
-      <SubmissionDetailCard title="Reviewer Note" subtitle={canReview ? "Recorded with the approval or return decision." : "Read-only — the decision belongs to this assessment's reviewer."}>
+      <SubmissionDetailCard title="Reviewer note" subtitle={canReview ? "Recorded with the approval or return decision." : "Read-only — the decision belongs to this assessment's reviewer."}>
         <label className="block">
           <span className="sr-only">Reviewer note</span>
           <textarea
@@ -39,21 +39,22 @@ export default function SubmissionReviewerSupport({
         </label>
       </SubmissionDetailCard>
 
-      <SubmissionDetailCard title={`Workflow History (${workflowEvents.length})`} subtitle="Every status transition recorded for this submission.">
+      <SubmissionDetailCard title={`Workflow history (${workflowEvents.length})`} subtitle="Every status transition recorded for this submission.">
         {workflowEvents.length === 0 ? (
           <div className="text-sm text-muted">No workflow events have been recorded.</div>
         ) : (
-          <ol className="space-y-2">
+          <ol className="relative space-y-2 border-l-2 border-[var(--line)] pl-4">
             {workflowEvents.map((event) => {
               const transition = workflowTransitionLabel(event);
               const rawEventType = event.event_type.trim().toUpperCase();
               return (
-                <li key={event.id} className="rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-sm">
+                <li key={event.id} className="relative rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3 text-sm">
+                  <span className="absolute -left-[23px] top-4 h-3 w-3 rounded-full border-2 border-[var(--panel)] bg-[var(--accent)]" aria-hidden />
                   <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                     <div>
                       <div className="font-semibold">{workflowEventLabel(rawEventType)}</div>
                       <div className="mt-0.5 text-xs text-muted">
-                        Event <span className="font-mono">{rawEventType}</span> · Actor user #{event.actor_user_id}
+                        By user #{event.actor_user_id}
                       </div>
                     </div>
                     <time dateTime={event.created_at} title={event.created_at} className="text-xs text-muted">

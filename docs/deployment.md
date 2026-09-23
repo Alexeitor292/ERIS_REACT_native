@@ -182,6 +182,10 @@ Release notes that need action:
     'mc alias set eris http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc anonymous set none eris/eris-uploads'
   ```
 
+- **Saved layouts and formatted memos** (`20260924_user_saved_layouts`,
+  `20260925_gisa_rich_memos`). Additive only; `alembic upgrade head` applies
+  them. The backend image gains the `nh3` HTML sanitizer, which `dc build`
+  installs.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

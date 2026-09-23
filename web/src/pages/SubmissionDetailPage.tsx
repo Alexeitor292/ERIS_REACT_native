@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { GripVertical, LayoutGrid, Maximize2, Minimize2, RotateCcw } from "lucide-react";
+import { ClipboardList, GripVertical, LayoutGrid, ListChecks, Maximize2, Minimize2, NotebookPen, RotateCcw, ShieldCheck, Siren } from "lucide-react";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
 import AppShell from "../ui/AppShell";
@@ -55,7 +55,11 @@ import {
 import { buildSubmissionDisplayTitle } from "../utils/submissionLabel";
 import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNameFromNameOrCode, districtForCounty, routesForDistrictCounty } from "../utils/caltransLookups";
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
-import { isAssessmentAuthor, isPublicOnly } from "../utils/roleModel";
+import { isAssessmentAuthor, isOperationalUser, isPublicOnly } from "../utils/roleModel";
+import ActionChecklist from "../features/submissions/ActionChecklist";
+import MemosPanel from "../features/submissions/MemosPanel";
+import SubmissionRecordCard from "../features/submissions/SubmissionRecordCard";
+import { chooseMemoContent, RICH_MEMO_KEYS, type RichMemoKey } from "../features/submissions/memoContentModel";
 import SavedLayoutsMenu from "../features/submissions/SavedLayoutsMenu";
 import { AccessDeniedNotice } from "../auth/AccessDenied";
 
@@ -65,14 +69,30 @@ const chip = "rounded-full border px-2.5 py-1 text-xs";
 const ynChip = (active: boolean) => (active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]");
 const toolbarButton = "inline-flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-1.5 text-xs font-medium hover:brightness-95 disabled:opacity-60";
 
-const NOTES_FIELDS: Array<{ key: keyof typeof NOTES_SECTION_KEYS; label: string; rows: number }> = [
-  { key: "observations_notes", label: "Observations", rows: 3 },
-  { key: "record_of_event_notes", label: "Record of Event", rows: 2 },
-  { key: "maintenance_history_notes", label: "Maintenance History", rows: 2 },
-  { key: "geotechnical_assessment_notes", label: "Geotechnical Assessment", rows: 2 },
-  { key: "recommendations_notes", label: "Recommendations", rows: 2 },
-  { key: "sketchpad_notes", label: "Sketchpad", rows: 2 },
-];
+/** Text of a formatted memo, for the page's plain-text copy of it. */
+const memoText = (html: string) =>
+  html ? new DOMParser().parseFromString(html, "text/html").body.textContent ?? "" : "";
+
+const EMPTY_MEMOS: Record<RichMemoKey, string> = {
+  observations_notes: "",
+  geotechnical_assessment_notes: "",
+  recommendations_notes: "",
+  sketchpad_notes: "",
+};
+
+function SectionHeading({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
+  return (
+    <div className="mb-4 flex items-start gap-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color:color-mix(in_oklab,var(--accent)_14%,var(--panel))] text-[var(--accent)]" aria-hidden>
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <h2 className="text-base font-semibold leading-tight">{title}</h2>
+        <p className="text-xs text-muted">{subtitle}</p>
+      </div>
+    </div>
+  );
+}
 
 type CanvasCardProps = {
   id: DashboardCardId;
@@ -140,6 +160,7 @@ export default function SubmissionDetailPage() {
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [inc, setInc] = useState<string[]>([]);
   const [imm, setImm] = useState<string[]>([]);
+  const [memos, setMemos] = useState<Record<RichMemoKey, string>>(EMPTY_MEMOS);
   const [fol, setFol] = useState<string[]>([]);
   const [districtContacts, setDistrictContacts] = useState<DistrictContact[]>([]);
   const [openDistrictContactIds, setOpenDistrictContactIds] = useState<Record<string, boolean>>({});
@@ -328,6 +349,15 @@ export default function SubmissionDetailPage() {
         Object.fromEntries(loadedDistrictContacts.map((contact) => [contact.id, false]))
       );
       setInc(d.incident_types ?? []);
+      setMemos(
+        Object.fromEntries(
+          RICH_MEMO_KEYS.map((key) => {
+            const html = (gisa as Record<string, unknown>)[`${key}_html`] as string | null | undefined;
+            const plain = (gisa as Record<string, unknown>)[key] as string | null | undefined;
+            return [key, chooseMemoContent(html, plain, memoText(html ?? ""))];
+          }),
+        ) as Record<RichMemoKey, string>,
+      );
       setImm(d.actions?.immediate ?? []);
       setFol(d.actions?.follow_up ?? []);
       const loadedCanManageSharing = d.submission.can_manage_permissions === true;
@@ -376,6 +406,8 @@ export default function SubmissionDetailPage() {
       measure_slope_height_ft: nf(draft.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: nf(draft.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: nf(draft.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: nf(draft.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: nf(draft.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: nf(draft.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: nf(draft.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: nf(draft.measure_roadway_width_ft, "Roadway width"),
       record_of_event_notes: nt(draft.record_of_event_notes), maintenance_history_notes: nt(draft.maintenance_history_notes), geotechnical_assessment_notes: nt(draft.geotechnical_assessment_notes), recommendations_notes: nt(draft.recommendations_notes), sketchpad_notes: nt(draft.sketchpad_notes),
       observations_notes: nt(draft.observations_notes), geometry_json: geometry,
+      observations_notes_html: memos.observations_notes, geotechnical_assessment_notes_html: memos.geotechnical_assessment_notes,
+      recommendations_notes_html: memos.recommendations_notes, sketchpad_notes_html: memos.sketchpad_notes,
     })});
     await api(`/submissions/${sid}/gisa/incident-types`, { method: "PUT", body: JSON.stringify({ items: incidentItems }) });
     await api(`/submissions/${sid}/gisa/actions`, { method: "PUT", body: JSON.stringify({ immediate: imm, follow_up: fol }) });
@@ -1294,42 +1326,67 @@ export default function SubmissionDetailPage() {
               </section>
             )}
 
-            <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--brand)]">Notes and actions</div>
-              <fieldset disabled={!canEdit} className="contents">
-                <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))]">
-                  {NOTES_FIELDS.map((field) => {
-                    const keys = NOTES_SECTION_KEYS[field.key];
-                    const count = sectionCount(keys);
-                    return (
-                      <div key={field.key} className="min-w-0">
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                          <label className={`${label} mb-0`} htmlFor={`notes-${field.key}`}>{field.label}</label>
-                          <SectionAttachmentsButton count={count} onClick={() => openSectionAttachments(field.label, keys)} />
-                        </div>
-                        <textarea
-                          id={`notes-${field.key}`}
-                          className={input}
-                          rows={field.rows}
-                          value={draft[field.key]}
-                          onChange={(e) => setDraft((d) => ({ ...d, [field.key]: e.target.value }))}
-                        />
-                      </div>
-                    );
-                  })}
-                  <div className="min-w-0">
-                    <label className={label} htmlFor="notes-geometry-json">Geometry JSON</label>
-                    <textarea id="notes-geometry-json" className={`${input} font-mono text-xs`} rows={4} placeholder='{"type":"Point","coordinates":[...]}' value={draft.geometry_json} onChange={(e)=>setDraft((d)=>({...d,geometry_json:e.target.value}))} />
-                  </div>
-                </div>
-                <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
-                  <div><div className={label}>Immediate actions</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.immediate??[]).map((x)=><button key={x.code} type="button" onClick={()=>setImm((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${imm.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
-                  <div><div className={label}>Follow-up actions</div><div className="mt-1 flex flex-wrap gap-1">{(lookups?.actions?.follow_up??[]).map((x)=><button key={x.code} type="button" onClick={()=>setFol((p)=>tog(p,x.code))} className={`rounded-full border px-2 py-1 text-xs ${fol.includes(x.code)?"border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_16%,transparent)] text-[var(--brand)]":"border-[var(--line)] bg-[var(--panel)] text-[var(--ink)]"}`}>{x.label}</button>)}</div></div>
-                </div>
-              </fieldset>
+            <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
+              <SectionHeading icon={<ListChecks size={16} />} title="Actions" subtitle="What was done to make the site safe, and the work that should follow." />
+              <div className="grid gap-4 xl:grid-cols-2">
+                <ActionChecklist
+                  title="Immediate actions"
+                  description="Taken, or needed now, to make the site safe."
+                  icon={<Siren size={16} />}
+                  accent="#d97706"
+                  options={lookups?.actions?.immediate ?? []}
+                  selected={imm}
+                  onToggle={(code) => setImm((p) => tog(p, code))}
+                  onClear={() => setImm([])}
+                  editable={canEdit}
+                />
+                <ActionChecklist
+                  title="Follow-up actions"
+                  description="Investigation, design and repair to plan next."
+                  icon={<ClipboardList size={16} />}
+                  accent="var(--accent)"
+                  options={lookups?.actions?.follow_up ?? []}
+                  selected={fol}
+                  onToggle={(code) => setFol((p) => tog(p, code))}
+                  onClear={() => setFol([])}
+                  editable={canEdit}
+                />
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
+              <SectionHeading icon={<NotebookPen size={16} />} title="Memos" subtitle="The written record of this assessment, and what is known about the site." />
+              <MemosPanel
+                submissionId={data.submission.id}
+                memos={memos}
+                onMemoChange={(key, html) => {
+                  setMemos((current) => ({ ...current, [key]: html }));
+                  setDraft((d) => ({ ...d, [key]: memoText(html) }));
+                }}
+                notes={{ record_of_event_notes: draft.record_of_event_notes, maintenance_history_notes: draft.maintenance_history_notes }}
+                onNotesChange={(key, value) => setDraft((d) => ({ ...d, [key]: value }))}
+                editable={canEdit}
+                showSiteHistory={isOperationalUser(me?.roles)}
+                attachmentCount={(key) => sectionCount(NOTES_SECTION_KEYS[key])}
+                onOpenAttachments={(key, title) => openSectionAttachments(title, NOTES_SECTION_KEYS[key])}
+                attachmentsButton={(count, onClick) => <SectionAttachmentsButton count={count} onClick={onClick} />}
+              />
+              <details className="mt-4 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2">
+                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">Advanced: geometry JSON</summary>
+                <textarea
+                  id="notes-geometry-json"
+                  aria-label="Geometry JSON"
+                  className={`${input} mt-2 font-mono text-xs`}
+                  rows={4}
+                  disabled={!canEdit}
+                  placeholder='{"type":"Point","coordinates":[...]}'
+                  value={draft.geometry_json}
+                  onChange={(e) => setDraft((d) => ({ ...d, geometry_json: e.target.value }))}
+                />
+              </details>
               {/* A linked form is sent for review on its assessment, which carries its own note. */}
               {canEdit && !assessmentLinked ? (
-                <div className="mt-3 border-t border-[var(--line)] pt-3">
+                <div className="mt-4 border-t border-[var(--line)] pt-3">
                   <label className={label} htmlFor="submit-comment">Submit comment (optional)</label>
                   <textarea id="submit-comment" className={input} rows={2} placeholder="Included with the submission when you submit for review from the header" value={submitNote} onChange={(e)=>setSubmitNote(e.target.value)} />
                 </div>
@@ -1338,16 +1395,18 @@ export default function SubmissionDetailPage() {
 
             <SubmissionLibrary attachments={data.attachments} resolver={resolver} />
 
+            <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
+              <SectionHeading icon={<ShieldCheck size={16} />} title="Review and record" subtitle="Where this form stands, the reviewer's note, its history and who can see it." />
             <SubmissionDetailCardGrid>
-              <SubmissionDetailCard title="Summary" subtitle="Record identity and lifecycle timestamps.">
-                <R l="Descriptor" v={descriptor} />
-                <R l="Submission ID" v={data.submission.id} />
-                <R l="Created" v={data.submission.created_at} />
-                <R l="Updated" v={data.submission.updated_at} />
-                <R l="Submitted" v={data.submission.submitted_at} />
-                <R l="Reviewed" v={data.submission.reviewed_at} />
-                <R l="Status" v={data.submission.status} />
-              </SubmissionDetailCard>
+              <SubmissionRecordCard
+                descriptor={descriptor}
+                submissionId={data.submission.id}
+                status={data.submission.status}
+                createdAt={data.submission.created_at ?? null}
+                updatedAt={data.submission.updated_at ?? null}
+                submittedAt={data.submission.submitted_at ?? null}
+                reviewedAt={data.submission.reviewed_at ?? null}
+              />
 
               {/* On a linked form the reviewer note is recorded with the assessment's decision. */}
               <SubmissionReviewerSupport
@@ -1370,6 +1429,7 @@ export default function SubmissionDetailPage() {
                 />
               ) : null}
             </SubmissionDetailCardGrid>
+            </section>
           </>
         )}
       </div>

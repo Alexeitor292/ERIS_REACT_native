@@ -37,10 +37,12 @@ from .routes.assessments import router as assessments_router
 from .routes.workflow_tree import router as workflow_tree_router
 from .routes.org import router as org_router
 from .routes.user_layouts import router as user_layouts_router
+from .routes.site_history import router as site_history_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
 from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
 from .services import public_visibility
+from .services import rich_text as rich_text_svc
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
 from .schemas.common import (
@@ -115,6 +117,7 @@ app.include_router(road_inventory_router)
 # owns them (org model design §7).
 app.include_router(org_router)
 app.include_router(user_layouts_router)
+app.include_router(site_history_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -636,6 +639,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           measure_main_scarp_height_ft, measure_landslide_slope_deg, measure_roadway_length_ft, measure_roadway_width_ft,
           record_of_event_notes, maintenance_history_notes, geotechnical_assessment_notes, recommendations_notes, sketchpad_notes,
           observations_notes, geometry_json,
+          observations_notes_html, geotechnical_assessment_notes_html, recommendations_notes_html, sketchpad_notes_html,
           road_inventory_dataset_version_id, road_inventory_segment_id,
           road_inventory_snapshot_json, road_inventory_match_method, road_inventory_checked_at,
           elevation_profile_json, elevation_profile_source, elevation_profile_checked_at,
@@ -2566,6 +2570,20 @@ def patch_gisa(
     # `distribution_code` / `highway_status_code` must allow explicit clear.
     # Clients send null when user deselects a chip; dropping null here prevents
     # unselect from persisting and causes stale values to reappear on reload.
+
+    # A formatted memo is stored sanitized, and its plain-text field is rewritten
+    # from it so the PDF, the submit checks and the mobile app stay in step.
+    for html_key in ("observations_notes_html", "geotechnical_assessment_notes_html", "recommendations_notes_html", "sketchpad_notes_html"):
+        if html_key not in provided:
+            continue
+        try:
+            clean_html = rich_text_svc.sanitize_memo_html(provided[html_key])
+        except ValueError:
+            raise HTTPException(status_code=413, detail="That memo is too large to save")
+        plain = rich_text_svc.memo_plain_text(clean_html)
+        # An editor emptied by the user still sends "<p></p>": that clears the memo.
+        provided[html_key] = clean_html if plain else None
+        provided[html_key.removesuffix("_html")] = plain
 
     if "geometry_json" in provided and provided["geometry_json"] is not None:
         provided["geometry_json"] = json.dumps(provided["geometry_json"])
