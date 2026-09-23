@@ -135,9 +135,10 @@ Seeded users (dev/bootstrap):
 - `officechief@local` (office `WEST`)
 - `branchchief@local` (office `WEST`)
 - `engineer@local`
-- `seniorengineer@local` (office `WEST`) — **new.** Office-scoped on purpose:
-  the senior engineer picker filters strictly, so a senior engineer without an
-  `office_code` is not assignable.
+- `seniorengineer@local` (office `WEST`) — **new.** Office-scoped on purpose so
+  it is preferred for WEST work. Legacy senior-engineer accounts without an
+  `office_code` remain assignable, while accounts explicitly scoped to another
+  office are excluded.
 - `reviewer@local` (legacy `REVIEWER`; kept as the proof that the role keeps
   broad read)
 

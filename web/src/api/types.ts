@@ -1,7 +1,8 @@
 /**
- * Account profile metadata (`users.metadata_json`). `office_code` is
- * load-bearing in routing v2: a chief or senior engineer without one can
- * neither be assigned nor review.
+ * Account profile metadata (`users.metadata_json`). `office_code` keeps
+ * routing local and is required for office-wide chief authority. Legacy
+ * branch-chief and senior-engineer accounts without one can still receive a
+ * named assignment so existing workflows are not stranded.
  */
 export type UserMetadata = {
   office_code?: string | null;

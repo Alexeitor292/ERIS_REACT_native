@@ -160,7 +160,7 @@ No new grants should be made.
 | Property | Value |
 | --- | --- |
 | Code / label | `GEOTECH_SENIOR_ENGINEER` / "GeoTech Senior Engineer" |
-| Scoping | Office, via `users.metadata_json.$.office_code`, normalized by `normalize_office_code` — identical to chiefs. A senior engineer with **no** `office_code` is **not assignable**: the picker filters strictly (unlike the ENGINEER kind, which admits blank offices). |
+| Scoping | Office, via `users.metadata_json.$.office_code`, normalized by `normalize_office_code`. Matching-office candidates are preferred; legacy branch chiefs and senior engineers created without an `office_code` remain assignable so pre-scoping accounts cannot strand the workflow. A candidate explicitly scoped to another office is never offered. Office chiefs still require an office because their authority covers the office rather than one named assignment. |
 | Operational read | Yes — in `OPERATIONAL_ROLES`, so `is_operational_user()` is true and `is_maintenance_only()` false. |
 
 **May**: be assigned by an office chief of their own office; own and edit the

@@ -205,22 +205,24 @@ def assessment_assignment_options(
     if kind == "ENGINEER" and assessment_office:
         office_filter = """
           AND (
-            COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
-            OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = ''
+            UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), ''))) = :office_code
+            OR TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '')) = ''
           )
         """
     elif kind == "SENIOR_ENGINEER":
-        # STRICT office filter, unlike the ENGINEER kind above: a senior engineer with
-        # no office_code is not assignable at all, and an assessment with no
-        # office_code has no senior engineer to offer — hence the `:office_code <> ''`
-        # guard rather than a blank-office fallback. ADMIN is exempt so the
-        # picker keeps its admin escape hatch, matching the ENGINEER kind's
-        # `| {ADMIN}` union.
+        # Prefer the assessment's office, while keeping accounts created before
+        # office scoping was added assignable. Explicitly-scoped users from a
+        # different office remain excluded. ADMIN is exempt so the picker keeps
+        # its recovery escape hatch, matching the ENGINEER kind's `| {ADMIN}`
+        # union.
         office_filter = """
           AND (
             (
               :office_code <> ''
-              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
+              AND (
+                UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), ''))) = :office_code
+                OR TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '')) = ''
+              )
             )
             OR r.name = 'ADMIN'
           )
@@ -238,7 +240,7 @@ def assessment_assignment_options(
               {office_filter}
             ORDER BY
               CASE
-                WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '') = :office_code
+                WHEN UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), ''))) = :office_code
                 THEN 0 ELSE 1
               END,
               u.full_name ASC,

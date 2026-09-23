@@ -200,6 +200,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const [seniorEngineerId, setSeniorEngineerId] = useState("");
   const [engineerId, setEngineerId] = useState("");
   const [consultedId, setConsultedId] = useState("");
+  const [routingOptionsLoading, setRoutingOptionsLoading] = useState(false);
 
   const resetPickers = () => {
     setBranchChiefId(""); setSeniorEngineerId(""); setEngineerId(""); setConsultedId("");
@@ -243,13 +244,16 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   useEffect(() => {
     let cancelled = false;
     const requests: Array<Promise<void>> = [];
+    setRoutingOptionsLoading(activeRoute != null);
     if (activeRoute === "BRANCH") requests.push(branchOptions(assessment.id).then((response) => { if (!cancelled) setBranchList(response.items ?? []); }));
     else setBranchList([]);
     if (activeRoute === "SENIOR_ENGINEER") requests.push(seniorEngineerOptions(assessment.id).then((response) => { if (!cancelled) setSeniorEngineerList(response.items ?? []); }));
     else setSeniorEngineerList([]);
     if (showAssignEngineer) requests.push(assessmentAssignmentOptions(assessment.id, "ENGINEER").then((response) => { if (!cancelled) setEngineerOptions(response.items ?? []); }));
     else setEngineerOptions([]);
-    Promise.all(requests).catch((error) => { if (!cancelled) onError(error instanceof Error ? error.message : "Failed to load assignment options."); });
+    Promise.all(requests)
+      .catch((error) => { if (!cancelled) onError(error instanceof Error ? error.message : "Failed to load assignment options."); })
+      .finally(() => { if (!cancelled) setRoutingOptionsLoading(false); });
     return () => { cancelled = true; };
   }, [activeRoute, assessment.id, onError, showAssignEngineer]);
 
@@ -383,22 +387,28 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                     <>
                       <p className="text-[13px]">{ROUTE_CHOICES.find((choice) => choice.value === activeRoute)?.consequence}</p>
                       {activeRoute === "BRANCH" ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <select className={select} value={branchChiefId} onChange={(event) => setBranchChiefId(event.target.value)}>
-                            <option value="">Select branch chief…</option>
-                            {branchList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
-                          </select>
-                          <button type="button" disabled={busy || !branchChiefId} className={btnPrimary} onClick={() => run(() => delegateBranch(assessment.id, Number(branchChiefId), notes.trim() || undefined))}>
-                            {assessment.routing_path === "BRANCH" ? "Hand to this branch chief" : "Hand off"}
-                          </button>
+                        <div className="grid gap-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select className={select} disabled={routingOptionsLoading || branchList.length === 0} value={branchChiefId} onChange={(event) => setBranchChiefId(event.target.value)}>
+                              <option value="">{routingOptionsLoading ? "Loading branch chiefs…" : branchList.length === 0 ? "No eligible branch chiefs" : "Select branch chief…"}</option>
+                              {branchList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
+                            </select>
+                            <button type="button" disabled={busy || !branchChiefId} className={btnPrimary} onClick={() => run(() => delegateBranch(assessment.id, Number(branchChiefId), notes.trim() || undefined))}>
+                              {assessment.routing_path === "BRANCH" ? "Hand to this branch chief" : "Hand off"}
+                            </button>
+                          </div>
+                          {!routingOptionsLoading && branchList.length === 0 ? <p className="text-xs text-[var(--bad)]">No active branch-chief account is available. Ask an administrator to assign the Branch Chief role.</p> : null}
                         </div>
                       ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <select className={select} value={seniorEngineerId} onChange={(event) => setSeniorEngineerId(event.target.value)}>
-                            <option value="">Select senior engineer…</option>
-                            {seniorEngineerList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
-                          </select>
-                          <button type="button" disabled={busy || !seniorEngineerId} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign senior engineer</button>
+                        <div className="grid gap-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select className={select} disabled={routingOptionsLoading || seniorEngineerList.length === 0} value={seniorEngineerId} onChange={(event) => setSeniorEngineerId(event.target.value)}>
+                              <option value="">{routingOptionsLoading ? "Loading senior engineers…" : seniorEngineerList.length === 0 ? "No eligible senior engineers" : "Select senior engineer…"}</option>
+                              {seniorEngineerList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
+                            </select>
+                            <button type="button" disabled={busy || !seniorEngineerId} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign senior engineer</button>
+                          </div>
+                          {!routingOptionsLoading && seniorEngineerList.length === 0 ? <p className="text-xs text-[var(--bad)]">No active senior-engineer account is available. Ask an administrator to assign the Senior Engineer role.</p> : null}
                         </div>
                       )}
                     </>

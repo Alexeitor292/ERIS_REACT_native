@@ -13,7 +13,7 @@ const OFFICE_OPTIONS: Array<{ code: string; label: string }> = [
   { code: "SOUTH", label: "South GeoTech Office" },
 ];
 
-const OFFICE_HELPER = "Chiefs and senior engineers are scoped to an office; without one they cannot be assigned or review.";
+const OFFICE_HELPER = "Set an office to keep routing local. Legacy unscoped branch chiefs and senior engineers remain assignable, but office chiefs need an office to own or review work.";
 
 function normalizeOffice(value: string) {
   const trimmed = value.trim();
@@ -149,8 +149,8 @@ export default function AdminUsersOperationsPage() {
           full_name: fullName.trim(),
           password,
           roles: newRoles,
-          // Office scoping is load-bearing: a chief or senior engineer with no
-          // office_code can neither be assigned nor review.
+          // Office scoping keeps assignment choices local and is required for
+          // an office chief to own or review office-scoped work.
           metadata: office ? { office_code: office } : undefined,
         }),
       });
