@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import require_roles
 from ..roles import ADMIN, MAINTENANCE_COORDINATOR, OPERATIONAL_ROLES, expand_roles, is_admin
+from . import event_groups as event_groups_routes
 from . import incidents as incidents_routes
 
 router = APIRouter(tags=["projects"])
@@ -42,7 +43,8 @@ def _incident_row(db: Session, incident_id: int) -> dict | None:
               i.location_id, i.first_observed_at, i.first_occurred_at,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.office_code, i.current_stage, i.status, i.reporter_user_id,
-              i.created_at, i.updated_at, i.resolved_at, i.resolved_by_user_id
+              i.created_at, i.updated_at, i.resolved_at, i.resolved_by_user_id,
+              i.incident_key, i.triage_disposition
             FROM incidents i
             WHERE i.id = :iid
             LIMIT 1
@@ -434,10 +436,16 @@ def associate_incident_project(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     _ensure_manage_scope(user, incident, db=db)
-    if str(incident["status"]).upper() == "RESOLVED" and not is_admin(user):
-        raise HTTPException(status_code=409, detail="Only an administrator may regroup a resolved incident")
-    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW" and not is_admin(user):
-        raise HTTPException(status_code=409, detail="Project association is managed during coordinator review")
+    # The legacy "Project" name for an Event Group follows the same rule: only a
+    # report sent for assessment is in the record, and it is grouped by that
+    # triage decision — never here beforehand.
+    if event_groups_routes.is_outside_record(incident):
+        raise HTTPException(
+            status_code=409,
+            detail="A report joins an Event Group when the coordinator sends it for assessment",
+        )
+    if not is_admin(user):
+        raise HTTPException(status_code=409, detail="Only an administrator may regroup a report in the incident record")
 
     old_project_id = int(incident["project_id"]) if incident.get("project_id") is not None else None
     mode = payload.mode.upper()

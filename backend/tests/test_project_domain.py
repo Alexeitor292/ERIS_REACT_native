@@ -160,14 +160,19 @@ def test_multiple_incidents_share_event_group_attribute_without_sharing_identity
     second = _create_incident(client_db, admin_headers, title=f"Shared B {unique}", post_mile="2.10")
     second_id = int(second["id"])
     _link_location(client_db, coordinator_headers, second_id)
-    association = client_db.post(
+    # A report is grouped by the decision that accepts it, never beforehand.
+    early = client_db.post(
         f"/incidents/{second_id}/event-group-association",
         headers=coordinator_headers,
         json={"mode": "EXISTING", "event_group_id": group_id},
     )
-    assert association.status_code == 200, association.text
+    assert early.status_code == 409, early.text
 
-    approved_second = client_db.post(f"/incidents/{second_id}/coordinator/approve", headers=coordinator_headers, json={})
+    approved_second = client_db.post(
+        f"/incidents/{second_id}/coordinator/approve",
+        headers=coordinator_headers,
+        json={"event_group_id": group_id},
+    )
     assert approved_second.status_code == 200, approved_second.text
     second_body = approved_second.json()
     assert int(second_body["incident"]["event_group_id"]) == group_id

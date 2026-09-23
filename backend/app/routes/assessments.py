@@ -831,6 +831,12 @@ def _triage_no_assessment(db: Session, incident: dict, actor_id: int, notes: str
     _set_incident_triage(
         db, incident_id=incident_id, disposition="NO_ASSESSMENT_REQUIRED", actor_id=actor_id, notes=notes
     )
+    # Not an assessment, so it never enters the incident record: no ERIS
+    # number (the identity trigger mints none for a close at triage) and no
+    # Event Group, even one the old triage flow picked beforehand.
+    event_groups_routes.remove_incident_from_event_group(
+        db, incident_id=incident_id, actor_user_id=actor_id, notes="Closed at triage — no assessment required."
+    )
     _close_incident_at_triage(
         db,
         incident_id=incident_id,
@@ -892,6 +898,11 @@ def _triage_needs_info(
     _set_incident_triage(
         db, incident_id=incident_id, disposition="NEEDS_REPORTER_INFORMATION", actor_id=actor_id, notes=notes
     )
+    # A temporary field report until the coordinator decides again: not in the
+    # record, so not in an Event Group either.
+    event_groups_routes.remove_incident_from_event_group(
+        db, incident_id=incident_id, actor_user_id=actor_id, notes="Sent back to the reporter before a decision."
+    )
     _record_event(
         db,
         incident_id=incident_id,
@@ -936,6 +947,11 @@ def _triage_duplicate(
         notes=notes,
         duplicate_of_incident_id=target_incident_id,
         duplicate_of_location_id=target_location_id,
+    )
+    # A duplicate never enters the incident record: the link to the report it
+    # repeats is kept in duplicate_of_incident_id, not through an Event Group.
+    event_groups_routes.remove_incident_from_event_group(
+        db, incident_id=incident_id, actor_user_id=actor_id, notes="Closed at triage — duplicate or linked."
     )
     target_desc = []
     if target_incident_id is not None:

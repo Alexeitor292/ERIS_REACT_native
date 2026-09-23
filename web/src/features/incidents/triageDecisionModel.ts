@@ -42,22 +42,22 @@ export const TRIAGE_OPTIONS: ReadonlyArray<{ value: TriageDispositionCode; label
   {
     value: "ASSESSMENT_REQUIRED",
     label: "Assessment required",
-    description: "Accept the report and open a GeoTech assessment. You also say which Event Group it belongs to.",
+    description: "Accept the report into ERIS and open a GeoTech assessment. You also say which Event Group it belongs to.",
   },
   {
     value: "NO_ASSESSMENT_REQUIRED",
     label: "No assessment required",
-    description: "Accept the report and close it. No geotechnical work follows.",
+    description: "Close the report. It does not enter ERIS and no geotechnical work follows.",
   },
   {
     value: "NEEDS_REPORTER_INFORMATION",
     label: "Needs more from the reporter",
-    description: "Send it back with what to correct. It comes back to you once they update it.",
+    description: "Send it back with what to correct. It stays a field report and comes back to you once they update it.",
   },
   {
     value: "DUPLICATE_OR_LINKED",
     label: "Duplicate of another report",
-    description: "Close it and link it to the report it repeats.",
+    description: "Close it and link it to the report it repeats. It does not enter ERIS.",
   },
 ];
 

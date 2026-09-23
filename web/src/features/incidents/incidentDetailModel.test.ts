@@ -6,7 +6,9 @@ import {
   dispositionMeaning,
   incidentNumberLabel,
   isAwaitingTriage,
+  isClosedAtTriage,
   isWaitingOnReporter,
+  recordStanding,
   revisionRequest,
   workflowPositionLabel,
   workflowPositionTone,
@@ -44,11 +46,11 @@ test("triage is offered only for a fresh report awaiting the coordinator", () =>
 test("a closed report names why it was closed", () => {
   assert.equal(
     workflowPositionLabel(incident({ status: "RESOLVED", current_stage: "RESOLVED", triage_disposition: "NO_ASSESSMENT_REQUIRED" })),
-    "Closed — no assessment needed",
+    "Closed at triage — no assessment needed",
   );
   assert.equal(
     workflowPositionLabel(incident({ status: "RESOLVED", current_stage: "RESOLVED", triage_disposition: "DUPLICATE_OR_LINKED" })),
-    "Closed — linked to another report",
+    "Closed at triage — duplicate",
   );
   assert.equal(workflowPositionTone(incident({ status: "RESOLVED", current_stage: "RESOLVED" })), "done");
 });
@@ -80,6 +82,28 @@ test("there is no revision request unless the report is actually waiting on the 
 });
 
 test("the report's number is its ERIS number once accepted, and says it has none before", () => {
-  assert.equal(incidentNumberLabel({ incident_key: "24-0417" }, 9), "ERIS no. 24-0417");
-  assert.match(incidentNumberLabel({ incident_key: null }, 9), /^Field report #9 — not yet accepted/);
+  assert.equal(incidentNumberLabel(incident({ incident_key: "24-0417", current_stage: "OFFICE_CHIEF_REVIEW", status: "IN_PROGRESS", triage_disposition: "ASSESSMENT_REQUIRED" }), 9), "ERIS no. 24-0417");
+  assert.match(incidentNumberLabel(incident(), 9), /^Field report #9 — not yet accepted/);
+});
+
+test("only a report sent for assessment is in the incident record", () => {
+  const accepted = incident({ incident_key: "k", current_stage: "ENGINEER_ASSIGNED", status: "IN_PROGRESS", triage_disposition: "ASSESSMENT_REQUIRED" });
+  const finished = incident({ incident_key: "k", current_stage: "RESOLVED", status: "RESOLVED", triage_disposition: "ASSESSMENT_REQUIRED" });
+  const noAssessment = incident({ current_stage: "RESOLVED", status: "RESOLVED", triage_disposition: "NO_ASSESSMENT_REQUIRED" });
+  const duplicate = incident({ current_stage: "RESOLVED", status: "RESOLVED", triage_disposition: "DUPLICATE_OR_LINKED" });
+  const waiting = incident({ location_match_status: "NEEDS_REVISION", triage_disposition: "NEEDS_REPORTER_INFORMATION" });
+
+  assert.equal(recordStanding(accepted), "RECORD");
+  assert.equal(recordStanding(finished), "RECORD", "a finished assessment stays in the record");
+  assert.equal(recordStanding(noAssessment), "CLOSED_AT_TRIAGE");
+  assert.equal(recordStanding(duplicate), "CLOSED_AT_TRIAGE");
+  assert.equal(recordStanding(waiting), "FIELD_REPORT", "waiting on the reporter is temporary, not in the record");
+  assert.equal(recordStanding(incident()), "FIELD_REPORT");
+  assert.equal(isClosedAtTriage(waiting), false);
+});
+
+test("a report closed before this rule keeps its stored number out of sight", () => {
+  const legacy = incident({ incident_key: "4f63-legacy", current_stage: "RESOLVED", status: "RESOLVED", triage_disposition: "NO_ASSESSMENT_REQUIRED" });
+  assert.equal(incidentNumberLabel(legacy, 12), "Field report #12 — closed at triage, not entered into ERIS");
+  assert.doesNotMatch(incidentNumberLabel(legacy, 12), /4f63/);
 });

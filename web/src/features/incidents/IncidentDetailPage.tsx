@@ -39,6 +39,7 @@ import {
   dispositionMeaning,
   incidentNumberLabel,
   isAwaitingTriage,
+  isClosedAtTriage,
   isWaitingOnReporter,
   revisionRequest,
   workflowPositionLabel,
@@ -264,7 +265,11 @@ export default function IncidentDetailPage() {
                       </div>
                     ) : (
                       <p className="text-sm text-muted">
-                        {isAwaitingTriage(incident) ? "Not grouped yet. If the coordinator sends it for assessment, they choose its Event Group then." : "Not part of an Event Group. Only reports sent for assessment are grouped."}
+                        {isAwaitingTriage(incident)
+                          ? "Not grouped yet. If the coordinator sends it for assessment, they choose its Event Group then."
+                          : isClosedAtTriage(incident)
+                            ? "Not part of an Event Group. It was closed at triage, so it never entered ERIS."
+                            : "Not part of an Event Group. Only reports sent for assessment are grouped."}
                       </p>
                     )}
                   </Panel>
@@ -343,7 +348,14 @@ function CoordinatorDecision({ incident }: { incident: Incident }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <Fact label="Decided by" value={incident.triage_decided_by_name || (incident.triage_decided_by_user_id ? `User #${incident.triage_decided_by_user_id}` : "Not recorded")} />
         <Fact label="Decided" value={<span className="tabular-nums">{formatWhen(incident.triage_decided_at)}</span>} />
-        <Fact label="ERIS number" value={incident.incident_key ? <span className="tabular-nums">{incident.incident_key}</span> : <span className="text-muted">None — only an accepted report gets one</span>} />
+        <Fact
+          label="ERIS number"
+          value={isClosedAtTriage(incident)
+            ? <span className="text-muted">None — closed at triage, it did not enter ERIS</span>
+            : incident.incident_key
+              ? <span className="tabular-nums">{incident.incident_key}</span>
+              : <span className="text-muted">None — only a report sent for assessment gets one</span>}
+        />
         {incident.duplicate_of_incident_id != null ? (
           <Fact label="Linked to" value={<Link to={`/incidents/${incident.duplicate_of_incident_id}`} className={link}>Incident #{incident.duplicate_of_incident_id}</Link>} />
         ) : incident.duplicate_of_location_id != null ? (

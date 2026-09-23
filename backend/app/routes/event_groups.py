@@ -43,7 +43,8 @@ def _incident_row(db: Session, incident_id: int) -> dict | None:
               i.location_id, i.first_observed_at, i.first_occurred_at,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.office_code, i.current_stage, i.status, i.reporter_user_id,
-              i.created_at, i.updated_at, i.resolved_at, i.resolved_by_user_id
+              i.created_at, i.updated_at, i.resolved_at, i.resolved_by_user_id,
+              i.triage_disposition
             FROM incidents i
             WHERE i.id = :iid
             LIMIT 1
@@ -425,7 +426,8 @@ def incident_event_group_context(
         "event_group": event_group,
         "requires_event_group_decision": event_group is None,
         "is_permanent": incident.get("incident_key") is not None,
-        "can_change_association": str(incident["current_stage"]).upper() == "COORDINATOR_REVIEW" or is_admin(user),
+        # A report outside the record is grouped by the triage decision itself.
+        "can_change_association": is_admin(user) and not is_outside_record(incident),
     }
 
 
@@ -572,6 +574,79 @@ def apply_incident_event_group(
     return {"event_group_id": target_event_group_id, "created": created, "changed": True}
 
 
+CLOSED_AT_TRIAGE_DISPOSITIONS = frozenset({"NO_ASSESSMENT_REQUIRED", "DUPLICATE_OR_LINKED"})
+
+
+def is_outside_record(incident: dict) -> bool:
+    """A report that is not in the incident record, and so in no Event Group.
+
+    Only "Assessment required" enters the record. A report still awaiting (or
+    back awaiting) the coordinator's decision is a temporary field report, and
+    one closed at triage never entered at all.
+    """
+    if str(incident.get("current_stage") or "").upper() == "COORDINATOR_REVIEW" and incident.get("incident_key") is None:
+        return True
+    return str(incident.get("triage_disposition") or "").upper() in CLOSED_AT_TRIAGE_DISPOSITIONS
+
+
+def remove_incident_from_event_group(
+    db: Session,
+    *,
+    incident_id: int,
+    actor_user_id: int | None,
+    notes: str | None,
+) -> int | None:
+    """Take a report out of its Event Group, if it is in one. Does NOT commit.
+
+    Used when a triage decision keeps the report out of the record. A group left
+    with no reports is archived, so it stops appearing as a site on the Event
+    Groups page and the Mission Center. Returns the group it left, or None.
+    """
+    row = db.execute(
+        text("SELECT event_group_id FROM incidents WHERE id = :iid"),
+        {"iid": incident_id},
+    ).mappings().first()
+    if not row or row["event_group_id"] is None:
+        return None
+    old_event_group_id = int(row["event_group_id"])
+    _record_event_group_event(
+        db,
+        event_group_id=old_event_group_id,
+        incident_id=incident_id,
+        actor_user_id=actor_user_id,
+        event_type="INCIDENT_MOVED_OUT",
+        notes=notes,
+        metadata={"to_event_group_id": None, "reason": "outside_record"},
+    )
+    db.execute(
+        text("UPDATE incidents SET event_group_id = NULL, updated_at = NOW() WHERE id = :iid"),
+        {"iid": incident_id},
+    )
+    archived = db.execute(
+        text(
+            """
+            UPDATE event_groups eg
+            SET eg.status = 'ARCHIVED', eg.updated_at = NOW()
+            WHERE eg.id = :egid
+              AND eg.status <> 'ARCHIVED'
+              AND NOT EXISTS (SELECT 1 FROM incidents i WHERE i.event_group_id = eg.id)
+            """
+        ),
+        {"egid": old_event_group_id},
+    )
+    if archived.rowcount:
+        _record_event_group_event(
+            db,
+            event_group_id=old_event_group_id,
+            incident_id=None,
+            actor_user_id=actor_user_id,
+            event_type="EVENT_GROUP_UPDATED",
+            notes="Archived: no reports in the incident record remain in this Event Group.",
+            metadata={"status": "ARCHIVED"},
+        )
+    return old_event_group_id
+
+
 @router.post("/incidents/{incident_id}/event-group-association")
 def associate_incident_event_group(
     payload: IncidentEventGroupAssociationRequest,
@@ -583,10 +658,16 @@ def associate_incident_event_group(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     _ensure_manage_scope(user, incident, db=db)
-    if str(incident["status"]).upper() == "RESOLVED" and not is_admin(user):
-        raise HTTPException(status_code=409, detail="Only an administrator may regroup a resolved Incident")
-    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW" and not is_admin(user):
-        raise HTTPException(status_code=409, detail="Event Group association is managed during coordinator review")
+    # Only a report in the incident record belongs to an Event Group, and it
+    # joins one when the coordinator sends it for assessment — the group is
+    # chosen in that triage request, not here beforehand.
+    if is_outside_record(incident):
+        raise HTTPException(
+            status_code=409,
+            detail="A report joins an Event Group when the coordinator sends it for assessment",
+        )
+    if not is_admin(user):
+        raise HTTPException(status_code=409, detail="Only an administrator may regroup a report in the incident record")
 
     try:
         outcome = apply_incident_event_group(

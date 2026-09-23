@@ -17,24 +17,51 @@ export type DetailIncident = {
   triage_disposition?: string | null;
 };
 
+/**
+ * Only "Assessment required" enters the incident record. The other decisions
+ * keep the report out: closed at triage for good, or held as a temporary field
+ * report while the reporter answers.
+ */
 const DISPOSITION_LABELS: Record<string, { label: string; meaning: string }> = {
   ASSESSMENT_REQUIRED: {
     label: "Sent to GeoTech for assessment",
-    meaning: "The coordinator accepted the report and opened a GeoTech assessment.",
+    meaning: "The coordinator accepted the report into ERIS and opened a GeoTech assessment.",
   },
   NO_ASSESSMENT_REQUIRED: {
     label: "Closed — no assessment needed",
-    meaning: "The coordinator accepted the report and decided no geotechnical assessment is required.",
+    meaning: "The coordinator decided no geotechnical assessment is required. The report was closed and did not enter ERIS.",
   },
   NEEDS_REPORTER_INFORMATION: {
     label: "Sent back to the reporter",
-    meaning: "The coordinator asked the reporter for more information before deciding.",
+    meaning: "The coordinator asked the reporter for more information. It stays a field report until the coordinator decides.",
   },
   DUPLICATE_OR_LINKED: {
-    label: "Linked to another report — closed",
-    meaning: "The coordinator found this report duplicates or belongs with an existing one.",
+    label: "Closed — duplicate of another report",
+    meaning: "The coordinator found it repeats another report. It was closed and did not enter ERIS.",
   },
 };
+
+const CLOSED_AT_TRIAGE = new Set(["NO_ASSESSMENT_REQUIRED", "DUPLICATE_OR_LINKED"]);
+
+/** Closed by the coordinator's decision, so never part of the incident record. */
+export function isClosedAtTriage(incident: DetailIncident): boolean {
+  const closed = String(incident.status || "").toUpperCase() === "RESOLVED" || String(incident.current_stage || "").toUpperCase() === "RESOLVED";
+  return closed && CLOSED_AT_TRIAGE.has(String(incident.triage_disposition || "").toUpperCase());
+}
+
+/**
+ * Where a report stands against the incident record:
+ *   RECORD           — sent for assessment, so in ERIS: numbered and grouped;
+ *   FIELD_REPORT     — awaiting the coordinator, or back with its reporter;
+ *   CLOSED_AT_TRIAGE — closed by the decision, kept but never entered.
+ */
+export type RecordStanding = "RECORD" | "FIELD_REPORT" | "CLOSED_AT_TRIAGE";
+
+export function recordStanding(incident: DetailIncident): RecordStanding {
+  if (isClosedAtTriage(incident)) return "CLOSED_AT_TRIAGE";
+  if (String(incident.current_stage || "").toUpperCase() === "COORDINATOR_REVIEW" && !incident.incident_key) return "FIELD_REPORT";
+  return "RECORD";
+}
 
 export function dispositionLabel(code: string | null | undefined): string {
   if (!code) return "Not decided yet";
@@ -55,8 +82,8 @@ export function workflowPositionLabel(incident: DetailIncident): string {
   const stage = String(incident.current_stage || "").toUpperCase();
   const status = String(incident.status || "").toUpperCase();
   if (status === "RESOLVED" || stage === "RESOLVED") {
-    if (incident.triage_disposition === "NO_ASSESSMENT_REQUIRED") return "Closed — no assessment needed";
-    if (incident.triage_disposition === "DUPLICATE_OR_LINKED") return "Closed — linked to another report";
+    if (incident.triage_disposition === "NO_ASSESSMENT_REQUIRED") return "Closed at triage — no assessment needed";
+    if (incident.triage_disposition === "DUPLICATE_OR_LINKED") return "Closed at triage — duplicate";
     return "Resolved";
   }
   if (stage === "COORDINATOR_REVIEW") {
@@ -134,8 +161,13 @@ export function revisionRequest(incident: DetailIncident): RevisionRequest | nul
   return { fields, comment };
 }
 
-/** The report's permanent identity, or the plain statement that it has none yet. */
-export function incidentNumberLabel(incident: Pick<DetailIncident, "incident_key">, id: number): string {
+/**
+ * The report's permanent identity, or the plain statement that it has none. A
+ * report closed at triage before this rule took effect may still carry a
+ * number in the database; it never entered the record, so it is not shown.
+ */
+export function incidentNumberLabel(incident: DetailIncident, id: number): string {
+  if (isClosedAtTriage(incident)) return `Field report #${id} — closed at triage, not entered into ERIS`;
   return incident.incident_key ? `ERIS no. ${incident.incident_key}` : `Field report #${id} — not yet accepted, no ERIS number`;
 }
 

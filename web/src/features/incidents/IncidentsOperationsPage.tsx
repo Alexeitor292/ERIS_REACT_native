@@ -12,6 +12,7 @@ import { AssessmentStateBadge } from "../assessments/AssessmentDetailPanel";
 import { submissionIdsOf } from "../assessments/assessmentModel";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
 import IncidentCreatePanel from "./IncidentCreatePanel";
+import { recordStanding, type RecordStanding } from "./incidentDetailModel";
 import type { IncidentClassification, IncidentClassificationQueryResponse } from "./incidentClassification";
 import { classificationLabel, classificationStateLabel } from "./incidentClassification";
 import {
@@ -41,12 +42,22 @@ function IncidentClassificationText({ classification }: { classification: Incide
   );
 }
 
-type Tab = "records" | "intake";
+type Tab = "records" | "intake" | "closed";
+
+const TAB_STANDING: Record<Tab, RecordStanding> = {
+  records: "RECORD",
+  intake: "FIELD_REPORT",
+  closed: "CLOSED_AT_TRIAGE",
+};
 
 /**
  * Incidents: read-only record view.
- *   "Incident records"  — reports accepted into ERIS (coordinator-approved).
- *   "Awaiting intake"   — field reports not yet part of the record (triage pending).
+ *   "Incident records"  — reports sent for assessment: the only way a report
+ *                         enters ERIS, gets its number and joins an Event Group.
+ *   "Awaiting intake"   — field reports awaiting the coordinator, or back with
+ *                         their reporter; temporary until the coordinator decides.
+ *   "Closed at triage"  — no assessment needed, or a duplicate: kept so the
+ *                         decision can be traced, but never part of the record.
  * Each row opens the incident's own record at /incidents/:id. Triage, routing,
  * and assignment actions live in My Work (a coordinator can also start triage
  * from the record). Filing a new report is intake, not workflow, so reporting
@@ -112,13 +123,16 @@ export default function IncidentsOperationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const intakeCount = useMemo(() => items.filter((incident) => incident.current_stage === "COORDINATOR_REVIEW").length, [items]);
+  const standingCounts = useMemo(() => {
+    const counts: Record<RecordStanding, number> = { RECORD: 0, FIELD_REPORT: 0, CLOSED_AT_TRIAGE: 0 };
+    for (const incident of items) counts[recordStanding(incident)] += 1;
+    return counts;
+  }, [items]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return items.filter((incident) => {
-      const intake = incident.current_stage === "COORDINATOR_REVIEW";
-      if (tab === "intake" ? !intake : intake) return false;
+      if (recordStanding(incident) !== TAB_STANDING[tab]) return false;
       // The server already returns only public incidents to a viewer; this keeps
       // a row without a loaded assessment from rendering as "No assessment" on a
       // page whose whole premise is that every row has one.
@@ -213,7 +227,7 @@ export default function IncidentsOperationsPage() {
     <button
       type="button"
       onClick={() => setTab(key)}
-      className={`whitespace-nowrap px-4 py-2 text-sm font-semibold ${key === "intake" ? "border-l border-[var(--line)]" : ""} ${tab === key ? "bg-[var(--brand)] text-white" : "bg-[var(--panel)] text-[var(--ink)] hover:bg-[var(--panel-soft)]"}`}
+      className={`whitespace-nowrap px-4 py-2 text-sm font-semibold ${key !== "records" ? "border-l border-[var(--line)]" : ""} ${tab === key ? "bg-[var(--brand)] text-white" : "bg-[var(--panel)] text-[var(--ink)] hover:bg-[var(--panel-soft)]"}`}
     >
       {label}
     </button>
@@ -227,8 +241,9 @@ export default function IncidentsOperationsPage() {
               disabled tab would still tell them how much untriaged work exists. */}
           {viewer ? null : (
             <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-[var(--line)]">
-              {tabButton("records", `Incident records (${items.length - intakeCount})`)}
-              {tabButton("intake", `Awaiting intake (${intakeCount})`)}
+              {tabButton("records", `Incident records (${standingCounts.RECORD})`)}
+              {tabButton("intake", `Awaiting intake (${standingCounts.FIELD_REPORT})`)}
+              {tabButton("closed", `Closed at triage (${standingCounts.CLOSED_AT_TRIAGE})`)}
             </div>
           )}
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, county, route, or description" className="min-w-[220px] flex-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
@@ -279,7 +294,11 @@ export default function IncidentsOperationsPage() {
           </div>
         ) : tab === "intake" ? (
           <div className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_8%,transparent)] px-3 py-2 text-sm">
-            <b>These field reports are not yet part of the ERIS incident record.</b> They were reported from the field and are waiting for a Maintenance Coordinator to review them, decide their Event Group, and accept them into the system — done from the coordinator's <Link to="/my-work" className="font-medium text-[var(--brand)] hover:underline">My Work</Link> queue.
+            <b>These field reports are not part of the ERIS incident record.</b> They are waiting for a Maintenance Coordinator to decide what happens to them, or for their reporter to add what the coordinator asked for. Only a report sent for assessment enters the record — decided from the coordinator's <Link to="/my-work" className="font-medium text-[var(--brand)] hover:underline">My Work</Link> queue.
+          </div>
+        ) : tab === "closed" ? (
+          <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
+            <b className="text-[var(--ink)]">These field reports were closed at triage</b> — no assessment was needed, or they repeat another report. They never entered the ERIS incident record: no ERIS number, no Event Group, not on the Mission Center. They are kept so each decision can be traced.
           </div>
         ) : (
           <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
