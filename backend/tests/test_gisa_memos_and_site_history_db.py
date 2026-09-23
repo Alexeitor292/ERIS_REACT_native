@@ -90,16 +90,17 @@ class TestSiteHistory:
         assert resp.status_code == 200, resp.text
         return int(resp.json()["incident"]["id"])
 
-    def test_it_splits_the_record_from_maintenance_history_and_marks_recurrence(self, client_db, staff, form):
+    def test_one_list_with_each_incidents_maintenance_under_it(self, client_db, staff, form):
         crew = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
         coordinator = _login(client_db, "mock.coordinator.d01@dot.ca.gov")
         in_record = self._report(client_db, crew, "Earlier slide")
         closed = self._report(client_db, crew, "Debris on shoulder")
+        repeat = self._report(client_db, crew, "Same slide again")
         far_away = self._report(client_db, crew, "Somewhere else", latitude=38.60, longitude=-122.80)
 
         accepted = client_db.post(
             f"/incidents/{in_record}/triage",
-            json={"disposition": "ASSESSMENT_REQUIRED", "event_group": {"mode": "CREATE_NEW"}},
+            json={"disposition": "ASSESSMENT_REQUIRED", "notes": "Send it to geotech.", "event_group": {"mode": "CREATE_NEW"}},
             headers={**coordinator, **UNGROUPED},
         )
         assert accepted.status_code == 200, accepted.text
@@ -109,37 +110,64 @@ class TestSiteHistory:
             headers={**coordinator, **UNGROUPED},
         )
         assert declined.status_code == 200, declined.text
+        duplicate = client_db.post(
+            f"/incidents/{repeat}/triage",
+            json={"disposition": "DUPLICATE_OR_LINKED", "target_incident_id": in_record, "notes": "Already in."},
+            headers={**coordinator, **UNGROUPED},
+        )
+        assert duplicate.status_code == 200, duplicate.text
 
-        history = client_db.get(f"/submissions/{form}/site-history", headers=staff)
-        assert history.status_code == 200, history.text
-        body = history.json()
-        record_ids = [item["incident_id"] for item in body["record_of_events"]]
-        maintenance_ids = [item["incident_id"] for item in body["maintenance_history"]]
-        assert in_record in record_ids and closed not in record_ids
-        assert closed in maintenance_ids and in_record not in maintenance_ids
-        assert far_away not in record_ids + maintenance_ids
-
-        entry = next(item for item in body["maintenance_history"] if item["incident_id"] == closed)
-        assert entry["outcome"] == "NO_ASSESSMENT_REQUIRED"
-        assert entry["coordinator_notes"] == "Cleared by the crew."
-        assert entry["distance_m"] is not None and entry["distance_m"] < 1
-
-        # Recurrence: give the earlier incident a form with a type, then match it.
+        # The earlier incident's technical form, with its actions and a type.
         from app.db import engine
 
         other = client_db.post("/submissions", json={"title": "Earlier form"}, headers=staff)
         other_id = int(other.json()["submission_id"])
         staff_id = client_db.get("/auth/me", headers=staff).json()["id"]
+        coordinator_id = client_db.get("/auth/me", headers=coordinator).json()["id"]
         with engine.begin() as conn:
             conn.execute(
                 text("INSERT INTO incident_submission_links (incident_id, submission_id, linked_by_user_id) VALUES (:i, :s, :u)"),
                 {"i": in_record, "s": other_id, "u": staff_id},
             )
+            # A note the coordinator left in the incident's history.
+            conn.execute(
+                text("INSERT INTO assessment_events (incident_id, actor_user_id, event_type, notes) VALUES (:i, :u, 'COMMENT', :n)"),
+                {"i": in_record, "u": coordinator_id, "n": "Crew cleared the ditch on 9/21."},
+            )
+        actions = {"immediate": ["REMOVE_DEBRIS", "CLOSE_HIGHWAY_SHOULDER"], "follow_up": ["ROUTINE_VISUAL_MONITOR"]}
+        assert client_db.put(f"/submissions/{other_id}/gisa/actions", json=actions, headers=staff).status_code == 200
+
+        history = client_db.get(f"/submissions/{form}/site-history", headers=staff)
+        assert history.status_code == 200, history.text
+        items = {item["incident_id"]: item for item in history.json()["incidents"]}
+        assert in_record in items and closed in items
+        assert far_away not in items
+        assert repeat not in items  # shown under the incident it duplicates
+
+        earlier = items[in_record]
+        assert earlier["in_record"] is True and earlier["outcome"] is None
+        upkeep = earlier["maintenance"]
+        assert upkeep["report"]["description"] == "Seen from the shoulder."
+        assert upkeep["triage"]["disposition"] == "ASSESSMENT_REQUIRED"
+        assert upkeep["triage"]["notes"] == "Send it to geotech."
+        assert [a["label"] for a in upkeep["immediate_actions"]] == ["Close highway shoulder", "Remove landslide debris"]
+        assert [a["label"] for a in upkeep["follow_up_actions"]] == ["Routine visual monitor"]
+        assert [n["text"] for n in upkeep["notes"]] == ["Crew cleared the ditch on 9/21."]
+        assert [d["incident_id"] for d in upkeep["also_reported"]] == [repeat]
+        assert upkeep["also_reported"][0]["coordinator_notes"] == "Already in."
+
+        outside = items[closed]
+        assert outside["in_record"] is False and outside["outcome"] == "NO_ASSESSMENT_REQUIRED"
+        assert outside["maintenance"]["triage"]["notes"] == "Cleared by the crew."
+        assert outside["maintenance"]["immediate_actions"] == []
+        assert outside["distance_m"] is not None and outside["distance_m"] < 1
+
+        # Recurrence: the earlier incident's form has a type; match it.
         assert client_db.put(f"/submissions/{other_id}/gisa/incident-types", json={"items": ["SLIDE"]}, headers=staff).status_code == 200
 
         def relation():
-            items = client_db.get(f"/submissions/{form}/site-history", headers=staff).json()["record_of_events"]
-            return next(item for item in items if item["incident_id"] == in_record)["relation"]
+            listed = client_db.get(f"/submissions/{form}/site-history", headers=staff).json()["incidents"]
+            return next(item for item in listed if item["incident_id"] == in_record)["relation"]
 
         assert relation() == "UNCLASSIFIED"
         client_db.put(f"/submissions/{form}/gisa/incident-types", json={"items": ["SLIDE"]}, headers=staff)

@@ -7,6 +7,7 @@ import {
   memoSignature,
   plainTextToMemoHtml,
   recordStandingLabel,
+  hasMaintenanceRecord,
   summarizeRecord,
 } from "./memoContentModel.ts";
 
@@ -44,6 +45,18 @@ test("labels for the site history", () => {
   assert.equal(recordStandingLabel("OFFICE_CHIEF_REVIEW", "PENDING_OFFICE_DELEGATION"), "Awaiting office routing");
   assert.deepEqual(
     summarizeRecord([{ relation: "SAME_TYPE" }, { relation: "SAME_TYPE" }, { relation: "DIFFERENT_TYPE" }]),
-    { total: 3, recurrences: 2, differentType: 1, unclassified: 0 },
+    { total: 3, recurrences: 2, differentType: 1, unclassified: 0, outsideRecord: 0 },
   );
+  assert.deepEqual(
+    summarizeRecord([{ relation: "SAME_TYPE", in_record: true }, { relation: "UNCLASSIFIED", in_record: false }]),
+    { total: 2, recurrences: 1, differentType: 0, unclassified: 0, outsideRecord: 1 },
+  );
+});
+
+test("maintenance counts as a record once it did or wrote something beyond the report", () => {
+  const empty = { triage: null, immediate_actions: [], follow_up_actions: [], notes: [], also_reported: [] };
+  assert.equal(hasMaintenanceRecord(empty), false);
+  assert.equal(hasMaintenanceRecord({ ...empty, triage: { notes: null } }), false);
+  assert.equal(hasMaintenanceRecord({ ...empty, triage: { notes: "Cleared." } }), true);
+  assert.equal(hasMaintenanceRecord({ ...empty, follow_up_actions: [{ code: "ROUTINE_VISUAL_MONITOR" }] }), true);
 });

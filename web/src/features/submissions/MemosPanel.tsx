@@ -1,19 +1,20 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { BookOpenText, ClipboardCheck, Eye, History, Lightbulb, Maximize2, PencilRuler, Wrench, X } from "lucide-react";
+import { BookOpenText, ClipboardCheck, Eye, History, Lightbulb, Maximize2, PencilRuler, X } from "lucide-react";
 
 import { getSiteHistory, type SiteHistory } from "../../api/siteHistory";
 import type { RichMemoKey } from "./memoContentModel";
 import RichMemoEditor from "./RichMemoEditor";
-import { MaintenanceHistoryView, RecordOfEventsView } from "./SiteHistoryViews";
+import { RecordOfIncidentsView, type SiteNotesField } from "./SiteHistoryViews";
 
 type HistoryKey = "record_of_event_notes" | "maintenance_history_notes";
-export type MemoTabKey = RichMemoKey | HistoryKey;
+/** Maintenance history now lives inside Record of incidents; it has no tab of its own. */
+export type MemoTabKey = RichMemoKey | "record_of_event_notes";
 
 type Tab = {
   key: MemoTabKey;
   label: string;
   icon: ReactNode;
-  kind: "document" | "record" | "maintenance";
+  kind: "document" | "record";
   description: string;
   placeholder?: string;
 };
@@ -56,14 +57,7 @@ const TABS: Tab[] = [
     label: "Record of incidents",
     icon: <History size={15} />,
     kind: "record",
-    description: "Earlier incidents at this location in the incident record: recurrences of this failure, and other types.",
-  },
-  {
-    key: "maintenance_history_notes",
-    label: "Maintenance history",
-    icon: <Wrench size={15} />,
-    kind: "maintenance",
-    description: "What maintenance crews reported here, and what was decided.",
+    description: "Earlier incidents at this location, each with its maintenance: what the crew reported, what the coordinator decided, the actions taken and the notes left.",
   },
 ];
 
@@ -83,8 +77,9 @@ type Props = {
 
 /**
  * The form's memos: one dedicated view per memo behind a single tab bar. The
- * written memos are full documents; Record of incidents and Maintenance history
- * show what the system knows about the site, with room for notes.
+ * written memos are full documents; Record of incidents shows what the system
+ * knows about the site — each earlier incident with its maintenance under it —
+ * with room for notes.
  */
 export default function MemosPanel(props: Props) {
   const [active, setActive] = useState<MemoTabKey>("observations_notes");
@@ -118,9 +113,7 @@ export default function MemosPanel(props: Props) {
     };
   }, [focus]);
 
-  const counts: Partial<Record<MemoTabKey, number>> = history
-    ? { record_of_event_notes: history.record_of_events.length, maintenance_history_notes: history.maintenance_history.length }
-    : {};
+  const counts: Partial<Record<MemoTabKey, number>> = history ? { record_of_event_notes: history.incidents.length } : {};
 
   const body = (tall: boolean) => {
     if (tab.kind === "document") {
@@ -137,17 +130,32 @@ export default function MemosPanel(props: Props) {
         />
       );
     }
-    const key = tab.key as HistoryKey;
-    const view = {
-      history: props.showSiteHistory ? history : null,
-      loading: props.showSiteHistory && historyLoading,
-      error: props.showSiteHistory ? historyError : null,
-      notes: props.notes[key],
-      onNotesChange: (value: string) => props.onNotesChange(key, value),
-      editable: props.editable,
-      notesLabel: tab.kind === "record" ? "Notes on earlier incidents" : "Notes on maintenance",
-    };
-    return tab.kind === "record" ? <RecordOfEventsView {...view} /> : <MaintenanceHistoryView {...view} />;
+    const notes: SiteNotesField[] = [
+      {
+        key: "record_of_event_notes",
+        label: "Notes on earlier incidents",
+        value: props.notes.record_of_event_notes,
+        onChange: (value) => props.onNotesChange("record_of_event_notes", value),
+      },
+    ];
+    // Written while maintenance history had its own tab: kept in view until cleared.
+    if (props.notes.maintenance_history_notes.trim()) {
+      notes.push({
+        key: "maintenance_history_notes",
+        label: "Notes on maintenance",
+        value: props.notes.maintenance_history_notes,
+        onChange: (value) => props.onNotesChange("maintenance_history_notes", value),
+      });
+    }
+    return (
+      <RecordOfIncidentsView
+        history={props.showSiteHistory ? history : null}
+        loading={props.showSiteHistory && historyLoading}
+        error={props.showSiteHistory ? historyError : null}
+        editable={props.editable}
+        notes={notes}
+      />
+    );
   };
 
   const header = (

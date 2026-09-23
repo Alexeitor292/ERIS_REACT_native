@@ -50,7 +50,8 @@ export const CARD_SECTION_KEYS: Partial<Record<DashboardCardId, readonly string[
 
 export const NOTES_SECTION_KEYS = {
   observations_notes: ["observation", "observations"],
-  record_of_event_notes: ["record_of_event"],
+  // One tab now holds both: files filed under maintenance history show there too.
+  record_of_event_notes: ["record_of_event", "maintenance_history"],
   maintenance_history_notes: ["maintenance_history"],
   geotechnical_assessment_notes: ["geotechnical_assessment"],
   recommendations_notes: ["recommendations"],

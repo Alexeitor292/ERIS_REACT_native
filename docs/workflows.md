@@ -116,12 +116,15 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
      indent and spacing, tables with merge and shading, symbols, find and
      replace, print). The server stores each memo
      sanitized, next to a plain-text copy used by the PDF and the mobile app.
-     Two more tabs show the site's history (`GET /submissions/{id}/site-history`,
-     operational roles): **Record of incidents** lists earlier incidents in the
-     record within 150 m, marked as a recurrence of the same type or a
-     different type; **Maintenance history** lists maintenance reports there
-     that never entered the record, with the coordinator's decision. Both keep
-     a notes field.
+     One more tab, **Record of incidents**, shows the site's history
+     (`GET /submissions/{id}/site-history`, operational roles): every earlier
+     report within 150 m, newest first. Incidents in the record are marked as a
+     recurrence of the same type or a different type; reports that never
+     entered it (closed at triage, awaiting triage) are marked as such. Under
+     each one is its maintenance: what the crew reported, the coordinator's
+     decision and notes, the immediate and follow-up actions on its technical
+     forms, notes the maintenance team left in its history, and later reports
+     closed as duplicates of it. The tab keeps a notes field.
    - **Review and record:** where the form stands, the reviewer's note, its
      history and who it is shared with.
 3. **The reviewer decides.** On the branch route that is the Branch Chief named
