@@ -22,12 +22,13 @@ import LayerList from "@arcgis/core/widgets/LayerList";
 import Legend from "@arcgis/core/widgets/Legend";
 import Measurement from "@arcgis/core/widgets/Measurement";
 import CoordinateConversion from "@arcgis/core/widgets/CoordinateConversion";
-import Sketch from "@arcgis/core/widgets/Sketch";
+import SketchViewModel from "@arcgis/core/widgets/Sketch/SketchViewModel";
 import Expand from "@arcgis/core/widgets/Expand";
-import { Maximize2, X } from "lucide-react";
+import { Maximize2, MousePointerClick, Pentagon, RectangleHorizontal, Redo2, Trash2, Undo2, X } from "lucide-react";
 import { appConfig } from "../config";
 import { caltransHighwaysLayerConfig } from "./caltransHighwaysLayer";
 import { fitMapView } from "./fitMapView";
+import { areasFromGeoJson, areasSummary, geoJsonFromAreas, type AreaRings } from "./siteAreasModel";
 import { comfortableExtent, coordinatePositions, geoJsonPositions, type LonLat } from "./mapFit";
 import type { PhotoEvidence } from "../features/submissions/photoEvidenceApi";
 import {
@@ -125,6 +126,15 @@ export default function SubmissionArcGisMap({
   const homeRef = useRef<Home | null>(null);
   const fitKeyRef = useRef<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // Site areas: polygons live on their own layer so the sketch tools can edit them.
+  const areasLayerRef = useRef<GraphicsLayer | null>(null);
+  const sketchRef = useRef<SketchViewModel | null>(null);
+  // The geometry this map last reported; the prop echoing it back must not redraw
+  // (and so interrupt) the areas being edited.
+  const lastEmittedRef = useRef<string | null>(null);
+  const emitAreasRef = useRef<() => void>(() => {});
+  const [areaMode, setAreaMode] = useState<"idle" | "drawing" | "editing">("idle");
+  const [areaRings, setAreaRings] = useState<AreaRings[]>(() => areasFromGeoJson(geojson));
 
   useEffect(() => {
     esriConfig.assetsPath = "/assets";
@@ -135,6 +145,8 @@ export default function SubmissionArcGisMap({
     layerRef.current = graphicsLayer;
     const photoLayer = new GraphicsLayer({ title: "Field photo evidence" });
     photoLayerRef.current = photoLayer;
+    const areasLayer = new GraphicsLayer({ title: "Site areas" });
+    areasLayerRef.current = areasLayer;
 
     // Optional Caltrans highways layer sits BELOW the submission overlays so drawn/loaded
     // geometry always stays on top. It appears in the Layers + Legend widgets (off until
@@ -144,7 +156,7 @@ export default function SubmissionArcGisMap({
 
     const map = new Map({
       basemap: "hybrid",
-      layers: caltransLayer ? [caltransLayer, graphicsLayer, photoLayer] : [graphicsLayer, photoLayer],
+      layers: caltransLayer ? [caltransLayer, graphicsLayer, areasLayer, photoLayer] : [graphicsLayer, areasLayer, photoLayer],
     });
 
     const view = new MapView({
@@ -197,60 +209,50 @@ export default function SubmissionArcGisMap({
     view.ui.add(measurementExpand, "bottom-right");
     view.ui.add(coordinatesExpand, "bottom-right");
 
+    // Report every area on the layer as one geometry: a Polygon, a MultiPolygon, or none.
+    const emitAreas = () => {
+      const rings = areasLayer.graphics
+        .toArray()
+        .map((graphic) => toGeoJsonGeometry(graphic.geometry))
+        .filter((geometry) => geometry?.type === "Polygon")
+        .map((geometry) => geometry.coordinates as AreaRings);
+      const next = geoJsonFromAreas(rings);
+      lastEmittedRef.current = JSON.stringify(next);
+      setAreaRings(rings);
+      onGeometryChange?.(next);
+    };
+    emitAreasRef.current = emitAreas;
+
     if (editable) {
-      const sketch = new Sketch({
+      const sketch = new SketchViewModel({
         view,
-        layer: graphicsLayer,
-        availableCreateTools: ["point", "polyline", "polygon", "rectangle", "circle"],
-        creationMode: "update",
-        visibleElements: {
-          selectionTools: {
-            "lasso-selection": true,
-            "rectangle-selection": true,
-          },
-          settingsMenu: true,
-          undoRedoMenu: true,
-        },
+        layer: areasLayer,
+        polygonSymbol: AREA_SYMBOL as any,
+        updateOnGraphicClick: true,
+        defaultUpdateOptions: { tool: "reshape", toggleToolOnClick: true, enableRotation: true, enableScaling: true },
       });
-      const sketchExpand = new Expand({
-        view,
-        content: sketch,
-        expandTooltip: "Draw and edit geometry",
-      });
-      view.ui.add(sketchExpand, "bottom-right");
-
-      const currentSubmissionGraphic = () => {
-        const filtered = graphicsLayer.graphics
-          .toArray()
-          .filter((graphic) => !graphic.attributes?.__location_marker);
-        return filtered.length > 0 ? filtered[filtered.length - 1] : null;
-      };
-
+      sketchRef.current = sketch;
       subscriptions.push(
         sketch.on("create", (event: any) => {
-          if (event.state !== "complete") return;
-          const createdGraphic = event.graphic;
-          graphicsLayer.graphics.toArray().forEach((graphic) => {
-            if (graphic === createdGraphic || graphic.attributes?.__location_marker) return;
-            graphicsLayer.remove(graphic);
-          });
-          onGeometryChange?.(toGeoJsonGeometry(createdGraphic?.geometry));
-        })
-      );
-
-      subscriptions.push(
+          if (event.state === "start") setAreaMode("drawing");
+          if (event.state === "cancel") setAreaMode("idle");
+          if (event.state === "complete") {
+            event.graphic.symbol = AREA_SYMBOL as any;
+            setAreaMode("idle");
+            emitAreas();
+          }
+        }),
         sketch.on("update", (event: any) => {
-          if (event.state !== "complete") return;
-          const updatedGraphic = event.graphics?.[0] ?? currentSubmissionGraphic();
-          onGeometryChange?.(toGeoJsonGeometry(updatedGraphic?.geometry));
-        })
-      );
-
-      subscriptions.push(
+          if (event.state === "start") setAreaMode("editing");
+          if (event.state === "complete") {
+            setAreaMode("idle");
+            if (!event.aborted) emitAreas();
+          }
+        }),
         sketch.on("delete", () => {
-          const remaining = currentSubmissionGraphic();
-          onGeometryChange?.(toGeoJsonGeometry(remaining?.geometry));
-        })
+          setAreaMode("idle");
+          emitAreas();
+        }),
       );
     }
 
@@ -263,6 +265,9 @@ export default function SubmissionArcGisMap({
       homeRef.current = null;
       fitKeyRef.current = null;
       viewRef.current = null;
+      sketchRef.current?.destroy();
+      sketchRef.current = null;
+      areasLayerRef.current = null;
       view.destroy();
     };
   }, [editable, onGeometryChange]);
@@ -274,6 +279,13 @@ export default function SubmissionArcGisMap({
     if (!view || !graphicsLayer) return;
 
     graphicsLayer.removeAll();
+    const areasLayer = areasLayerRef.current;
+    const echo = lastEmittedRef.current !== null && lastEmittedRef.current === JSON.stringify(geojson ?? null);
+    if (areasLayer && !echo) {
+      sketchRef.current?.cancel();
+      areasLayer.removeAll();
+      setAreaRings(areasFromGeoJson(geojson));
+    }
 
     const hasLocationPoint =
       location != null &&
@@ -311,6 +323,7 @@ export default function SubmissionArcGisMap({
     };
 
     const addPolygon = (rings: any) => {
+      if (echo || !areasLayer) return;
       const sr = inferSpatialReference(rings);
       const polygon = new Polygon({
         rings,
@@ -320,14 +333,9 @@ export default function SubmissionArcGisMap({
       const graphic = new Graphic({
         geometry: polygon,
         attributes: { __submission_geometry: true },
-        symbol: {
-          type: "simple-fill",
-          color: [220, 38, 38, 0.14],
-          outline: { width: 2, color: [220, 38, 38, 0.95] },
-        } as any,
+        symbol: AREA_SYMBOL as any,
       });
-
-      graphicsLayer.add(graphic);
+      areasLayer.add(graphic);
     };
 
     const addLineString = (paths: any) => {
@@ -552,6 +560,66 @@ export default function SubmissionArcGisMap({
   // "Expand map" opens a modal at roughly two thirds of the viewport height.
   const mapHeight = expanded ? "66vh" : height;
 
+  const sketchAction = (action: (sketch: SketchViewModel) => void) => () => {
+    const sketch = sketchRef.current;
+    if (sketch) action(sketch);
+  };
+  const clearAreas = () => {
+    if (!areaRings.length || !window.confirm("Remove every area drawn on this form?")) return;
+    sketchRef.current?.cancel();
+    areasLayerRef.current?.removeAll();
+    emitAreasRef.current();
+  };
+  const areaToolbar = (
+    <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1.5 text-xs">
+      <span className="font-semibold uppercase tracking-wide text-muted">Site areas</span>
+      {editable ? (
+        <>
+          <AreaButton label="Draw area" active={areaMode === "drawing"} onClick={sketchAction((sk) => sk.create("polygon"))}>
+            <Pentagon size={14} /> Draw area
+          </AreaButton>
+          <AreaButton label="Draw rectangle" onClick={sketchAction((sk) => sk.create("rectangle"))}>
+            <RectangleHorizontal size={14} /> Rectangle
+          </AreaButton>
+          {areaMode !== "idle" ? (
+            <>
+              <AreaButton label="Undo" onClick={sketchAction((sk) => sk.undo())}><Undo2 size={14} /></AreaButton>
+              <AreaButton label="Redo" onClick={sketchAction((sk) => sk.redo())}><Redo2 size={14} /></AreaButton>
+            </>
+          ) : null}
+          {areaMode === "editing" ? (
+            <AreaButton label="Delete the selected area" danger onClick={sketchAction((sk) => sk.delete())}>
+              <Trash2 size={14} /> Delete area
+            </AreaButton>
+          ) : null}
+          {areaMode === "idle" && areaRings.length ? (
+            <AreaButton label="Remove every area" onClick={clearAreas}>
+              <Trash2 size={14} /> Clear all
+            </AreaButton>
+          ) : null}
+          {areaMode !== "idle" ? (
+            <AreaButton label="Finish (Esc cancels)" onClick={sketchAction((sk) => sk.complete())}>
+              Done
+            </AreaButton>
+          ) : null}
+        </>
+      ) : null}
+      <span className="ml-auto text-muted" aria-live="polite">
+        {areaMode === "drawing" ? (
+          "Click to add corners · double-click to finish · Esc cancels"
+        ) : areaMode === "editing" ? (
+          "Drag corners to reshape · click the area again to move, rotate or scale"
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            {editable && areaRings.length ? <MousePointerClick size={12} aria-hidden /> : null}
+            {areasSummary(areaRings)}
+            {editable && areaRings.length ? " · click an area to edit it" : ""}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+
   return (
     <div className={expanded ? "fixed inset-0 z-50 flex items-center justify-center p-3" : "map-stack-guard"}>
       {expanded ? (
@@ -575,6 +643,8 @@ export default function SubmissionArcGisMap({
         aria-modal={expanded ? true : undefined}
         aria-label={expanded ? "Expanded submission map" : undefined}
       >
+        {areaToolbar}
+        <div className="relative">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -591,7 +661,47 @@ export default function SubmissionArcGisMap({
           className="map-stack-guard"
           style={{ width: "100%", height: mapHeight, borderRadius: expanded ? 10 : 12, overflow: "hidden" }}
         />
+        </div>
       </div>
     </div>
+  );
+}
+
+const AREA_SYMBOL = {
+  type: "simple-fill",
+  color: [220, 38, 38, 0.16],
+  outline: { width: 2, color: [220, 38, 38, 0.95] },
+};
+
+function AreaButton({
+  label,
+  active = false,
+  danger = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 font-medium transition-colors ${
+        active
+          ? "border-[var(--accent)] bg-[color:color-mix(in_oklab,var(--accent)_14%,var(--panel))] text-[var(--accent)]"
+          : danger
+            ? "border-[var(--line)] bg-[var(--panel)] text-[var(--bad)] hover:border-[var(--bad)]"
+            : "border-[var(--line)] bg-[var(--panel)] hover:border-[var(--accent)]"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

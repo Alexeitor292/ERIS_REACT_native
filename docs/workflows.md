@@ -86,7 +86,12 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    `ENGINEER_ASSIGNED`. The database refuses an assignee without the right role.
 2. **The author fills the technical form** (the GISA form: site, measurements,
    photos, sketches, actions, memos) and submits it (`SUBMITTED`). On the web
-   the form's lower half has three parts:
+   the form's location map has a **Site areas** toolbar: draw areas as
+   polygons or rectangles, click one to reshape, move, rotate or delete it, and
+   see each area's size in square metres and acres. Areas save as the form's
+   geometry the moment they change (one area as a GeoJSON Polygon, several as a
+   MultiPolygon), the same geometry the mobile app draws. The form's lower half
+   has three parts:
    - **Actions:** checklists of immediate and follow-up actions.
    - **Memos:** one tab each for Observations, Geotechnical assessment,
      Recommendations and Sketch notes, written in a word processor with a
