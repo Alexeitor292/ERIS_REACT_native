@@ -174,7 +174,7 @@ class Settings(BaseSettings):
     # the packaged terrain grid at cross-section time). Degrades gracefully.
     OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED: bool = Field(default=True)
     # none | eris_internal | arcgis_feature_service | census_tigerweb | caltrans_crs
-    # See docs/adr-offline-road-context-source.md. `none` packages NO road context;
+    # See docs/decisions/adr-offline-road-context-source.md. `none` packages NO road context;
     # census_tigerweb is the credential-free DEVELOPMENT road-snap source (public U.S.
     # Census TIGERweb); arcgis_feature_service is a generic authorized ArcGIS/Enterprise
     # centerline layer; caltrans_crs is the OPTIONAL Caltrans freeway/expressway road
@@ -213,7 +213,7 @@ class Settings(BaseSettings):
     # it does not establish that a feature is Caltrans-owned or a State Route, and a filtered
     # subset must never be described as "the state highway system". Road CONTEXT only — not
     # survey/engineering-grade centerline. See offline_scene_caltrans.py and
-    # docs/adr-offline-road-context-source.md.
+    # docs/decisions/adr-offline-road-context-source.md.
     OFFLINE_SCENE_CALTRANS_ROADS_URL: str = Field(
         default="https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0"
     )
@@ -239,7 +239,7 @@ class Settings(BaseSettings):
     # LOCALLY ALONG THE ROUTE, never globally by route name or mere proximity — where two
     # primary carriageways share one corridor, and derives a midpoint centerline so the map
     # can show ONE selectable yellow line. Additive: legacy packages are unaffected.
-    # See docs/adr-divided-highway-corridor-pairing.md for the design + thresholds.
+    # See docs/decisions/adr-divided-highway-corridor-pairing.md for the design + thresholds.
     OFFLINE_SCENE_DIVIDED_PAIRING_ENABLED: bool = Field(default=True)
     OFFLINE_SCENE_PAIR_SAMPLE_INTERVAL_M: float = Field(default=10.0)   # deterministic resampling step
     OFFLINE_SCENE_PAIR_WINDOW_M: float = Field(default=120.0)           # moving longitudinal window

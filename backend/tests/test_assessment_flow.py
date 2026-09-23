@@ -18,7 +18,7 @@ full lifecycle here:
 APPROVED is terminal on both: there is no sign-off step, and no reviewer is
 ever appointed. The negative matrix lives in test_routing_v2_authority.py.
 
-Maps to the required test matrix (docs/assessment-routing-authority-model.md):
+The test matrix it covers:
   1  Maintenance Crew member creates + sees only own reports
   2  Maintenance Crew member cannot read others' incidents/assessments
   3  coordinator can triage + route

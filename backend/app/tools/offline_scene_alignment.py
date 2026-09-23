@@ -25,7 +25,7 @@ Contract:
 IMPORTANT (interpretation): this tool measures the internal consistency of the PACKAGE's
 coordinates against the PACKAGE's imagery. It cannot declare that the imagery's visible
 pavement centrelines are authoritative, and it is not a survey. See
-docs/adr-offline-road-context-source.md.
+docs/decisions/adr-offline-road-context-source.md.
 """
 
 from __future__ import annotations

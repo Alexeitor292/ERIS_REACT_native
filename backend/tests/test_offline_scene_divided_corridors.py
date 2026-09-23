@@ -462,7 +462,7 @@ class TestThresholdValidation:
         )
         assert stats["pairing"]["midpoint_tolerance_m"] == 2.5
         # documented in the ADR
-        adr = (Path(__file__).resolve().parents[2] / "docs" / "adr-divided-highway-corridor-pairing.md").read_text(encoding="utf-8")
+        adr = (Path(__file__).resolve().parents[2] / "docs" / "decisions" / "adr-divided-highway-corridor-pairing.md").read_text(encoding="utf-8")
         assert "midpoint_tolerance_m" in adr and "OFFLINE_SCENE_PAIR_MIDPOINT_TOLERANCE_M" in adr
 
     def test_all_eleven_thresholds_are_reported_in_the_manifest_pairing_block(self):

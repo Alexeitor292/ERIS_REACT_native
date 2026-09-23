@@ -6,7 +6,7 @@ competing selection candidates. This module decides — LOCALLY ALONG THE ROUTE,
 globally by route name or mere proximity — where two primary carriageways share one
 corridor, and derives a midpoint centerline for those stretches.
 
-Design (see docs/adr-divided-highway-corridor-pairing.md):
+Design (see docs/decisions/adr-divided-highway-corridor-pairing.md):
 
   1. Resample each candidate line at a fixed interval -> stations (lon, lat, s, bearing).
   2. Per station, find a partner by MUTUAL-NEAREST + AXIAL bearing (mod 180, so antiparallel
@@ -119,7 +119,7 @@ class DuplicateSourceIdentityError(ValueError):
 @dataclass(frozen=True)
 class PairingParams:
     """Thresholds for the pairing pass. Conservative by default; all are named, validated,
-    packaged in the manifest, and tested. See docs/adr-divided-highway-corridor-pairing.md."""
+    packaged in the manifest, and tested. See docs/decisions/adr-divided-highway-corridor-pairing.md."""
 
     sample_interval_m: float = 10.0        # deterministic resampling step
     window_m: float = 120.0                # moving longitudinal window

@@ -16,7 +16,7 @@ express, and each case is a specific failure the design went looking for:
   is the test that says so.
 * **The profile backfill REFUSES rather than guesses**, naming the offending
   codes and the offending user ids, and the pre-flight SELECT documented in the
-  revision and in ``docs/MIGRATIONS.md`` returns exactly those accounts.
+  revision returns exactly those accounts.
 * **``downgrade()`` leaves ``users`` and ``assessments`` readable** — and
   un-grants every viewer, which is real data loss and must be in the release
   note.
@@ -47,7 +47,7 @@ pytestmark = pytest.mark.db
 _RUN = uuid.uuid4().hex[:8]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_MIGRATIONS_DOC = _REPO_ROOT / "docs" / "MIGRATIONS.md"
+_MIGRATIONS_DOC = _REPO_ROOT / "docs" / "deployment.md"
 
 
 # ---------------------------------------------------------------------------

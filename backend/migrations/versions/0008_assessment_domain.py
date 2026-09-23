@@ -33,7 +33,7 @@ Existing legacy roles (MAINTENANCE, MAINT_COORDINATOR, OFFICE_CHIEF,
 BRANCH_CHIEF, FIELD_WORKER, REVIEWER, ADMIN) are left untouched. The
 application maps the new canonical roles onto the legacy ones via
 app/roles.py so existing user_role rows keep working. See
-docs/assessment-routing-authority-model.md for the migration plan.
+docs/workflows.md for the workflow it introduced.
 """
 
 from alembic import op

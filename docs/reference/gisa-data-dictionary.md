@@ -1,7 +1,5 @@
 # GISA Data Dictionary (ERIS)
 
-## To Preview Dictionary in VS Code press `Ctrl+Shift+V`
-
 ## Scope
 This document lists the GISA tables and fields used in ERIS:
 - `submission_gisa` (1:1 with `submissions`)
@@ -47,6 +45,7 @@ Use this as a handoff reference for integration work.
 |---|---|---:|---|
 | `latitude` | `DECIMAL(10,7)` | No | constrained `-90..90` |
 | `longitude` | `DECIMAL(10,7)` | No | constrained `-180..180` |
+| `location_id` | `BIGINT` | No | the linked `incident_locations` row |
 
 ### Section C: Classification / operations status
 | Field | Type | Required | Notes |
@@ -55,6 +54,7 @@ Use this as a handoff reference for integration work.
 | `highway_status_code` | `VARCHAR(64)` | No | domain/app code |
 | `lanes_closed_count` | `INT` | No | constrained `>= 0` |
 | `open_highway_traffic_lanes_count` | `INT` | No | constrained `>= 0` |
+| `highway_status_cause` | `TEXT` | No | why the highway status applies |
 
 ### Section D: Pavement / ground condition
 | Field | Type | Required | Notes |
@@ -67,6 +67,7 @@ Use this as a handoff reference for integration work.
 | `settlement_in` | `DECIMAL(10,2)` | No | |
 | `bulge_in` | `DECIMAL(10,2)` | No | |
 | `indented_by_rocks` | `TINYINT` | Yes | boolean 0/1 |
+| `pavement_ground_annotation_layout_json` | `JSON` | No | positions of the labels placed on the pavement diagram |
 
 ### Section E: Failure / incident type flags
 | Field | Type | Required | Notes |
@@ -81,6 +82,7 @@ Use this as a handoff reference for integration work.
 | `failure_surficial_failure` | `TINYINT` | Yes | boolean 0/1 |
 | `failure_scoured_toe` | `TINYINT` | Yes | boolean 0/1 |
 | `failure_washout` | `TINYINT` | Yes | boolean 0/1 |
+| `incident_type_description` | `TEXT` | No | free-text description of the incident type |
 
 ### Section F: Distribution movement flags
 | Field | Type | Required | Notes |
@@ -115,6 +117,7 @@ Use this as a handoff reference for integration work.
 | `est_debris_sand_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
 | `est_debris_gravel_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
 | `est_debris_boulder_pct` | `DECIMAL(5,2)` | No | constrained `0..100` |
+| `est_rock_pct` | `DECIMAL(5,2)` | No | percentage |
 
 ### Section I: Water content/state flags
 | Field | Type | Required | Notes |
@@ -180,6 +183,25 @@ Use this as a handoff reference for integration work.
 |---|---|---:|---|
 | `observations_notes` | `TEXT` | No | |
 | `geometry_json` | `JSON` | No | optional geometry payload |
+
+### Section P: System-computed context (not entered by users)
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `road_inventory_dataset_version_id` | `BIGINT UNSIGNED` | No | road inventory version the site was matched against |
+| `road_inventory_segment_id` | `BIGINT UNSIGNED` | No | matched road segment |
+| `road_inventory_snapshot_json` | `JSON` | No | copy of the matched segment, kept even if the inventory changes |
+| `road_inventory_match_method` | `VARCHAR(32)` | No | how the segment was matched |
+| `road_inventory_checked_at` | `DATETIME` | No | when the match was made |
+| `elevation_profile_json` | `JSON` | No | USGS elevation samples across the road |
+| `elevation_profile_source` | `VARCHAR(64)` | No | elevation service used |
+| `elevation_profile_checked_at` | `DATETIME` | No | when the profile was sampled |
+| `elevation_profile_classification` | `VARCHAR(32)` | No | LEFT_HIGH, RIGHT_HIGH, BOWL, CROWN, FLAT or UNKNOWN |
+| `elevation_profile_confidence` | `FLOAT` | No | confidence of the classification |
+| `elevation_profile_error` | `TEXT` | No | last sampling error |
+| `elevation_terrain_grid_json` | `JSON` | No | road-aligned elevation grid |
+| `elevation_terrain_source` | `VARCHAR(64)` | No | elevation service used |
+| `elevation_terrain_checked_at` | `DATETIME` | No | when the grid was sampled |
+| `elevation_terrain_error` | `TEXT` | No | last sampling error |
 
 ## Table: `submission_gisa_incident_types`
 | Field | Type | Required | Notes |

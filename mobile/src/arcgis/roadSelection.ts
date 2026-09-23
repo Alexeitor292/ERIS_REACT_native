@@ -1,5 +1,5 @@
 // Pure reference logic for the ADDITIVE divided-highway selection schema packaged by the
-// worker (see docs/adr-divided-highway-corridor-pairing.md). This is the TESTED mirror of
+// worker (see docs/decisions/adr-divided-highway-corridor-pairing.md). This is the TESTED mirror of
 // the Objective-C in ErisTerrainSceneViewController.m — keep the two in lockstep.
 //
 // Contract highlights:

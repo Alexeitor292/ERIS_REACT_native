@@ -1,6 +1,6 @@
 """Tests for the census_tigerweb offline road-centerline source.
 
-Implements docs/adr-offline-road-context-source.md. No network: a FakeSession stands in
+Implements docs/decisions/adr-offline-road-context-source.md. No network: a FakeSession stands in
 for requests, so the REAL adapter code (URL building, GeoJSON/Esri parsing, per-layer
 failure tolerance, clipping, dedupe, allowlist, provenance) is exercised end-to-end.
 """

@@ -38,7 +38,7 @@ _M_PER_DEG_LAT = 111_320.0
 # --- road-source provider vocabulary (typed selection, not arbitrary strings) -------
 # The offline road provider selected by OFFLINE_SCENE_ROAD_SOURCE. `none` packages NO
 # road context (intentionally unavailable); the others are documented in
-# docs/adr-offline-road-context-source.md. Selection is always EXPLICIT — an endpoint
+# docs/decisions/adr-offline-road-context-source.md. Selection is always EXPLICIT — an endpoint
 # being reachable never activates a provider on its own.
 ROAD_SOURCE_NONE = "none"
 ROAD_SOURCE_ERIS_INTERNAL = "eris_internal"

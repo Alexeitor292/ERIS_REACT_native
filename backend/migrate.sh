@@ -18,7 +18,7 @@
 #   ./migrate.sh revision -m "add_col_x"  # create a new migration file
 #
 # Always take a mysqldump backup before running 'upgrade' on a real database.
-# See docs/MIGRATIONS.md for full procedures.
+# See docs/deployment.md for full procedures.
 
 set -euo pipefail
 

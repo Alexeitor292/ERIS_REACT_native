@@ -19,6 +19,15 @@ ENV VITE_API_BASE=$VITE_API_BASE
 ARG VITE_ARCGIS_API_KEY=""
 ENV VITE_ARCGIS_API_KEY=$VITE_ARCGIS_API_KEY
 
+# Optional public settings (see web/.env.example). Empty means: no Caltrans
+# highways overlay, the default public postmile layer, Street View in a new tab.
+ARG VITE_CALTRANS_HIGHWAYS_URL=""
+ARG VITE_CALTRANS_POSTMILE_LAYER_URL=""
+ARG VITE_GOOGLE_MAPS_EMBED_KEY=""
+ENV VITE_CALTRANS_HIGHWAYS_URL=$VITE_CALTRANS_HIGHWAYS_URL
+ENV VITE_CALTRANS_POSTMILE_LAYER_URL=$VITE_CALTRANS_POSTMILE_LAYER_URL
+ENV VITE_GOOGLE_MAPS_EMBED_KEY=$VITE_GOOGLE_MAPS_EMBED_KEY
+
 # The ArcGIS SceneView (3D terrain) bundle is large; give the build extra heap so
 # `tsc && vite build` does not OOM in the container's default Node heap.
 RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build

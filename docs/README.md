@@ -1,25 +1,19 @@
-# ERIS Documentation (Verified)
+# ERIS documentation
 
-This documentation is generated from the current repository implementation (not planned behavior).
+| Document | Read it to |
+| --- | --- |
+| [architecture.md](architecture.md) | Understand the parts of ERIS, how a request is handled, the data model, and what each role sees in the web and mobile apps. |
+| [workflows.md](workflows.md) | Follow a report from the field through triage, Event Groups and the assessment to approval. |
+| [roles-and-identity.md](roles-and-identity.md) | See the eight roles, the per-record permits, sign-in and Entra ID readiness, and the mock accounts. |
+| [organization.md](organization.md) | Maintain offices, branches, district coverage and where people sit (administrators). |
+| [configuration.md](configuration.md) | Look up any setting of the backend, worker, server stack, web or mobile app. |
+| [development.md](development.md) | Run ERIS on your machine, run the tests, and change the database schema. |
+| [deployment.md](deployment.md) | Install, update, back up and roll back a staging or production server, set up HTTPS, and release the mobile app. |
+| [offline-terrain.md](offline-terrain.md) | Understand and operate offline 3D terrain packages, the road inventory, and terrain cross sections. |
+| [offline-scene-package-operator-runbook.md](offline-scene-package-operator-runbook.md) | Follow the operator procedures for terrain packages, including hand-made `.mspk` packages. |
+| [reference/gisa-data-dictionary.md](reference/gisa-data-dictionary.md) | Look up a field of the GISA technical form. |
+| [reference/road-inventory-glossary.md](reference/road-inventory-glossary.md) | Look up a road inventory term. |
+| [decisions/](decisions/README.md) | Read why the offline terrain and road-context designs are the way they are. |
 
-- Verification date: `2026-03-04`
-- Repo root: `ERIS_REACT_native`
-
-## Contents
-
-- [Architecture](./ARCHITECTURE.md)
-- [Backend API (Verified)](./BACKEND_API_VERIFIED.md)
-- [Data Model (Verified)](./DATA_MODEL_VERIFIED.md)
-- [Clients (Web/Mobile) Verified Behavior](./CLIENTS_VERIFIED.md)
-- [Workflow Spec (As Implemented)](./WORKFLOWS_VERIFIED.md)
-- [Assessment Routing & Authority Model](./assessment-routing-authority-model.md)
-- [Organization Model — operator guide](./org-model.md)
-- [Database Migrations](./MIGRATIONS.md)
-- [Diagrams](./DIAGRAMS.md)
-- [Proxmox Deployment](./PROXMOX_DEPLOYMENT.md)
-- [UI/UX Redesign Plan](./design/UX_REDESIGN_PLAN.md)
-
-## Notes
-
-- `docs/api/openapi.yaml` is not a machine OpenAPI spec in its current form.
-- Runtime schema mutation currently exists in backend startup (`ensure_incident_runtime_schema`).
+The API's own reference is generated from the code: open `/docs` on a
+development backend (for example http://127.0.0.1:8000/docs).

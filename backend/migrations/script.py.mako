@@ -25,5 +25,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     # NOTE: MariaDB DDL is non-transactional. DROP COLUMN / DROP TABLE
     # cannot be rolled back after execution. Always take a mysqldump backup
-    # before running migrations on real databases. See docs/MIGRATIONS.md.
+    # before running migrations on real databases. See docs/deployment.md.
     ${downgrades if downgrades else "pass"}
