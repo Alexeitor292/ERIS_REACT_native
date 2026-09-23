@@ -15,13 +15,13 @@ import {
   readStoredCanvasLayout,
 } from "./submissionLayoutModel.ts";
 
-test("auto-fit column count follows max(1, floor((width - 12) / 532))", () => {
+test("auto-fit column count follows max(1, floor((width - 12) / 412))", () => {
   assert.equal(autoFitColumnCount(0), 1);
   assert.equal(autoFitColumnCount(400), 1);
-  assert.equal(autoFitColumnCount(543), 1);
-  assert.equal(autoFitColumnCount(1076), 2);
-  assert.equal(autoFitColumnCount(1608), 3);
-  assert.equal(autoFitColumnCount(1607), 2);
+  assert.equal(autoFitColumnCount(835), 1);
+  assert.equal(autoFitColumnCount(836), 2);
+  assert.equal(autoFitColumnCount(1248), 3);
+  assert.equal(autoFitColumnCount(1247), 2);
 });
 
 test("the location card no longer lives on the canvas", () => {
@@ -33,12 +33,12 @@ test("the location card no longer lives on the canvas", () => {
 test("auto-flow spans the report header across two columns and never overlaps cards", () => {
   const layout = buildDefaultCanvasLayout();
   const flowed = flowDashboardCards(layout.order, layout.sizes, 1700);
-  assert.equal(flowed.columns, 3);
-  // Three columns stretched across 1700px: floor((1700 - 4 * 12) / 3) = 550.
-  assert.equal(flowed.sizes.distribution.width, 550);
-  assert.equal(flowed.sizes.report_header.width, 550 * 2 + 12);
+  assert.equal(flowed.columns, 4);
+  // Four columns stretched across 1700px: floor((1700 - 5 * 12) / 4) = 410.
+  assert.equal(flowed.sizes.distribution.width, 410);
+  assert.equal(flowed.sizes.report_header.width, 410 * 2 + 12);
   assert.deepEqual(flowed.positions.report_header, { x: 12, y: 12 });
-  assert.equal(flowed.width, 12 + 3 * 562);
+  assert.equal(flowed.width, 12 + 4 * 422);
 
   const ids = layout.order;
   for (let i = 0; i < ids.length; i += 1) {
@@ -103,5 +103,16 @@ test("auto-fit columns fill the canvas instead of leaving a gutter", () => {
     assert.ok(width - flowed.width < flowed.columns + 12, `${width}px leaves ${width - flowed.width}px unused`);
   }
   // Before the canvas is measured, cards keep the target width.
-  assert.equal(autoFitColumnWidth(0, 1), 520);
+  assert.equal(autoFitColumnWidth(0, 1), 400);
+});
+
+test("measured cards are exactly as tall as their content", () => {
+  const layout = buildDefaultCanvasLayout();
+  const flowed = flowDashboardCards(layout.order, layout.sizes, 700, { material: 132.4, water_content: 40, distribution: 2000 });
+  assert.equal(flowed.sizes.material.height, 133);
+  // Never a sliver, never taller than the largest card.
+  assert.equal(flowed.sizes.water_content.height, 96);
+  assert.equal(flowed.sizes.distribution.height, 980);
+  // Cards not measured yet keep their stored height.
+  assert.equal(flowed.sizes.highway_status.height, layout.sizes.highway_status.height);
 });

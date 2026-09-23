@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ClipboardList, GripVertical, LayoutGrid, ListChecks, Maximize2, Minimize2, NotebookPen, RotateCcw, Ruler, ShieldCheck, Siren } from "lucide-react";
+import { ClipboardList, GripVertical, LayoutGrid, ListChecks, Maximize2, Minimize2, NotebookPen, Plus, RotateCcw, Ruler, ShieldCheck, Shrub, Siren, Sprout, Trash2, TreeDeciduous, X } from "lucide-react";
 import { api } from "../api/client";
 import type { GisaLookups, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
 import AppShell from "../ui/AppShell";
@@ -58,6 +58,7 @@ import { CALIFORNIA_COUNTIES, CALTRANS_DISTRICTS, countiesForDistrict, countyNam
 import { formatCoordinate, normalizeCoordinateValue, normalizePostMileInput, normalizePostMileValue, normalizeRouteInput, normalizeRouteValue } from "../utils/precision";
 import { isAssessmentAuthor, isOperationalUser, isPublicOnly } from "../utils/roleModel";
 import ActionChecklist from "../features/submissions/ActionChecklist";
+import { CompositionBar, DateField, FieldGroup, InlineField, NumberField, OptionTile, PanelChoice, Segmented, SliderField, Stepper } from "../features/submissions/gisaFields";
 import MemosPanel from "../features/submissions/MemosPanel";
 import SubmissionRecordCard from "../features/submissions/SubmissionRecordCard";
 import { chooseMemoContent, RICH_MEMO_KEYS, type RichMemoKey } from "../features/submissions/memoContentModel";
@@ -66,8 +67,6 @@ import { AccessDeniedNotice } from "../auth/AccessDenied";
 
 const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
 const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-2 text-sm";
-const chip = "rounded-full border px-2.5 py-1 text-xs";
-const ynChip = (active: boolean) => (active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]");
 const toolbarButton = "inline-flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2.5 py-1.5 text-xs font-medium hover:brightness-95 disabled:opacity-60";
 
 /** Text of a formatted memo, for the page's plain-text copy of it. */
@@ -80,6 +79,31 @@ const EMPTY_MEMOS: Record<RichMemoKey, string> = {
   recommendations_notes: "",
   sketchpad_notes: "",
 };
+
+const YES_NO = [{ value: "YES", label: "Yes" }, { value: "NO", label: "No" }] as const;
+const IMPACT_OPTIONS = [{ value: "MAYBE", label: "Maybe" }, { value: "IMPACTED", label: "Impacted" }] as const;
+const triValue = (value: string) => (value === "YES" || value === "NO" ? value : "");
+const triFrom = (value: string) => (value === "YES" || value === "NO" ? value : "UNKNOWN");
+const SOIL_FRACTIONS = [
+  ["est_clay_pct", "Clay", "#a0522d"],
+  ["est_silt_pct", "Silt", "#b58d5f"],
+  ["est_sand_pct", "Sand", "#d4a933"],
+  ["est_gravel_pct", "Gravel", "#78818c"],
+] as const;
+// Dry ground to flowing water, with the color the scale shows for each.
+const WATER_STEPS = [
+  ["water_dry", "Dry", "#a8793a"],
+  ["water_moist", "Moist", "#5f9a84"],
+  ["water_wet", "Wet", "#3a86c8"],
+  ["water_flowing", "Flowing", "#1f5fae"],
+] as const;
+const DISTRICT_CONTACT_FIELDS = [
+  ["first_name", "First name"],
+  ["last_name", "Last name"],
+  ["s_number", "S number"],
+  ["phone", "Phone"],
+  ["cell_phone", "Cell phone"],
+] as const;
 
 function SectionHeading({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
   return (
@@ -104,12 +128,29 @@ type CanvasCardProps = {
   onOpenAttachments: () => void;
   onDragStart: (id: DashboardCardId, event: ReactMouseEvent) => void;
   onResizeStart: (id: DashboardCardId, mode: ResizeMode, event: ReactMouseEvent) => void;
+  /** Receives the card's natural height (header plus content), so auto layout can fit it. */
+  onMeasure?: (id: DashboardCardId, height: number) => void;
   /** Rendered outside the disabled fieldset (read-only tools such as the 3D scene). */
   tools?: ReactNode;
   children: ReactNode;
 };
 
-function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpenAttachments, onDragStart, onResizeStart, tools, children }: CanvasCardProps) {
+function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpenAttachments, onDragStart, onResizeStart, onMeasure, tools, children }: CanvasCardProps) {
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  // Re-measured before paint whenever the card's width changes (content reflows), and
+  // by the observer whenever the content itself grows or shrinks.
+  const width = style.width;
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content || !onMeasure || typeof ResizeObserver === "undefined") return;
+    // +2: the card's top and bottom border.
+    const report = () => onMeasure(id, (headerRef.current?.offsetHeight ?? 0) + content.offsetHeight + 2);
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [id, onMeasure, width]);
   return (
     <div
       data-card-id={id}
@@ -117,6 +158,7 @@ function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpen
       className={`flex flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] ${dragging ? "opacity-40 shadow-2xl" : ""}`}
     >
       <div
+        ref={headerRef}
         onMouseDown={(event) => onDragStart(id, event)}
         className="flex shrink-0 cursor-grab select-none items-center justify-between gap-2 px-3 pb-2 pt-3 active:cursor-grabbing"
         title="Drag to move this card"
@@ -127,11 +169,13 @@ function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpen
         </div>
         <SectionAttachmentsButton count={attachmentCount} onClick={onOpenAttachments} />
       </div>
-      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
-        {tools}
-        <fieldset disabled={formDisabled} className="contents min-w-0">
-          {children}
-        </fieldset>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div ref={contentRef} className="@container px-3 pb-3">
+          {tools}
+          <fieldset disabled={formDisabled} className="contents min-w-0">
+            {children}
+          </fieldset>
+        </div>
       </div>
       <div data-no-drag className="absolute bottom-0 right-3 top-10 w-1.5 cursor-ew-resize" onMouseDown={(event) => onResizeStart(id, "right", event)} aria-hidden />
       <div data-no-drag className="absolute bottom-0 left-3 right-3 h-1.5 cursor-ns-resize" onMouseDown={(event) => onResizeStart(id, "bottom", event)} aria-hidden />
@@ -164,7 +208,6 @@ export default function SubmissionDetailPage() {
   const [memos, setMemos] = useState<Record<RichMemoKey, string>>(EMPTY_MEMOS);
   const [fol, setFol] = useState<string[]>([]);
   const [districtContacts, setDistrictContacts] = useState<DistrictContact[]>([]);
-  const [openDistrictContactIds, setOpenDistrictContactIds] = useState<Record<string, boolean>>({});
   const [geom, setGeom] = useState<any | null>(null);
   const [shareQuery, setShareQuery] = useState("");
   const [shareCandidates, setShareCandidates] = useState<SubmissionPermissionUser[]>([]);
@@ -346,9 +389,6 @@ export default function SubmissionDetailPage() {
         observations_notes: t(gisa.observations_notes), geometry_json: gisa.geometry_json ? JSON.stringify(gisa.geometry_json, null, 2) : "",
       });
       setDistrictContacts(loadedDistrictContacts);
-      setOpenDistrictContactIds(
-        Object.fromEntries(loadedDistrictContacts.map((contact) => [contact.id, false]))
-      );
       setInc(d.incident_types ?? []);
       setMemos(
         Object.fromEntries(
@@ -555,13 +595,6 @@ export default function SubmissionDetailPage() {
   const waterFlowingSelected = draft.water_flowing === "YES";
   const highwayLanesClosedSelected = draft.highway_status_code === "LANES_CLOSED";
   const openHighwayTrafficSelected = imm.includes("OPEN_HIGHWAY_TRAFFIC") || fol.includes("OPEN_HIGHWAY_TRAFFIC");
-  const showHighwayStatusOptions = !!(
-    draft.highway_status_cause.trim() ||
-    draft.highway_status_code ||
-    draft.lanes_closed_count ||
-    draft.open_highway_traffic_lanes_count ||
-    openHighwayTrafficSelected
-  );
   const countyOptions = draft.district ? countiesForDistrict(draft.district) : CALIFORNIA_COUNTIES;
   const routeOptions = routesForDistrictCounty(draft.district, draft.county);
 
@@ -585,7 +618,6 @@ export default function SubmissionDetailPage() {
     };
     const nextContacts = [...districtContacts, nextContact];
     syncDistrictContacts(nextContacts);
-    setOpenDistrictContactIds((prev) => ({ ...prev, [nextContact.id]: true }));
   };
   const updateDistrictContact = (
     idToUpdate: string,
@@ -598,18 +630,10 @@ export default function SubmissionDetailPage() {
     );
     syncDistrictContacts(next);
   };
-  const toggleDistrictContact = (idToToggle: string) => {
-    setOpenDistrictContactIds((prev) => ({ ...prev, [idToToggle]: !prev[idToToggle] }));
-  };
   const removeDistrictContact = (idToRemove: string) => {
     if (!canEdit) return;
     const next = districtContacts.filter((contact) => contact.id !== idToRemove);
     syncDistrictContacts(next);
-    setOpenDistrictContactIds((prev) => {
-      const updated = { ...prev };
-      delete updated[idToRemove];
-      return updated;
-    });
   };
 
   const toggleIncidentType = (option: IncidentTypeOption) => {
@@ -664,14 +688,47 @@ export default function SubmissionDetailPage() {
     }));
   };
   const selectRockSubtype = (key: "material_bedding" | "material_joints" | "material_fractures") => {
-    if (!canEdit || draft.material_rock !== "YES") return;
+    if (!canEdit) return;
     const selecting = draft[key] !== "YES";
+    // Rock and soil exclude each other: a rock detail makes the material rock.
     setDraft((prev) => ({
       ...prev,
+      material_rock: "YES",
+      material_soil: "NO",
+      est_clay_pct: "",
+      est_silt_pct: "",
+      est_sand_pct: "",
+      est_gravel_pct: "",
       material_bedding: key === "material_bedding" && selecting ? "YES" : "NO",
       material_joints: key === "material_joints" && selecting ? "YES" : "NO",
       material_fractures: key === "material_fractures" && selecting ? "YES" : "NO",
     }));
+  };
+  /** A soil fraction makes the material soil (rock and soil exclude each other). */
+  const setSoilFraction = (key: "est_clay_pct" | "est_silt_pct" | "est_sand_pct" | "est_gravel_pct", value: string) => {
+    if (!canEdit) return;
+    setDraft((prev) =>
+      value.trim() === "" || prev.material_soil === "YES"
+        ? { ...prev, [key]: value }
+        : { ...prev, [key]: value, material_soil: "YES", material_rock: "NO", material_bedding: "NO", material_joints: "NO", material_fractures: "NO" }
+    );
+  };
+  /** A crack measurement means there are cracks. */
+  const setCrackMeasure = (key: "crack_length_ft" | "crack_horizontal_in" | "crack_vertical_in" | "crack_depth_in", value: string) => {
+    if (!canEdit) return;
+    setDraft((prev) => ({ ...prev, [key]: value, ...(value.trim() !== "" ? { pavement_ground_cracks: "YES" as const } : {}) }));
+  };
+  const setWaterContent = (key: typeof baseWaterKeys[number] | "") => {
+    if (!canEdit) return;
+    setDraft((prev) => {
+      const next = { ...prev };
+      for (const k of baseWaterKeys) next[k] = k === key ? "YES" : "NO";
+      if (key !== "water_flowing") {
+        next.water_seep = "NO";
+        next.water_spring = "NO";
+      }
+      return next;
+    });
   };
   const selectSingleDrainage = (key: typeof drainageKeys[number]) => {
     if (!canEdit) return;
@@ -682,41 +739,31 @@ export default function SubmissionDetailPage() {
       return next;
     });
   };
-  const selectBaseWaterContent = (key: typeof baseWaterKeys[number]) => {
+  const selectFlowingSubtype = (key: "water_seep" | "water_spring") => {
     if (!canEdit) return;
     const selecting = draft[key] !== "YES";
-    setDraft((prev) => {
-      const next = { ...prev };
-      for (const k of baseWaterKeys) next[k] = k === key && selecting ? "YES" : "NO";
-      if (!selecting || key !== "water_flowing") {
-        next.water_seep = "NO";
-        next.water_spring = "NO";
-      }
-      return next;
-    });
-  };
-  const selectFlowingSubtype = (key: "water_seep" | "water_spring") => {
-    if (!canEdit || draft.water_flowing !== "YES") return;
-    const selecting = draft[key] !== "YES";
+    // A seep or a spring is flowing water.
     setDraft((prev) => ({
       ...prev,
+      water_dry: "NO",
+      water_moist: "NO",
+      water_wet: "NO",
+      water_flowing: "YES",
       water_seep: key === "water_seep" && selecting ? "YES" : "NO",
       water_spring: key === "water_spring" && selecting ? "YES" : "NO",
     }));
   };
-  const setImpactSelection = (
+  const setImpact = (
     impactedKey: "impact_impacted_adj_utilities" | "impact_impacted_adj_properties" | "impact_impacted_adj_structure",
     maybeKey: "impact_maybe_adj_utilities" | "impact_maybe_adj_properties" | "impact_maybe_adj_structure",
-    target: "IMPACTED" | "MAYBE"
+    target: string
   ) => {
     if (!canEdit) return;
-    if (target === "IMPACTED") {
-      const next = draft[impactedKey] === "YES" ? "UNKNOWN" : "YES";
-      setDraft((prev) => ({ ...prev, [impactedKey]: next, [maybeKey]: next === "YES" ? "UNKNOWN" : prev[maybeKey] }));
-      return;
-    }
-    const next = draft[maybeKey] === "YES" ? "UNKNOWN" : "YES";
-    setDraft((prev) => ({ ...prev, [maybeKey]: next, [impactedKey]: next === "YES" ? "UNKNOWN" : prev[impactedKey] }));
+    setDraft((prev) => ({
+      ...prev,
+      [impactedKey]: target === "IMPACTED" ? "YES" : "UNKNOWN",
+      [maybeKey]: target === "MAYBE" ? "YES" : "UNKNOWN",
+    }));
   };
   useEffect(() => {
     if (!highwayLanesClosedSelected && draft.lanes_closed_count) {
@@ -785,6 +832,7 @@ export default function SubmissionDetailPage() {
     onOpenAttachments: () => openSectionAttachments(DASHBOARD_CARD_TITLES[cardId], CARD_SECTION_KEYS[cardId]),
     onDragStart: canvas.startDrag,
     onResizeStart: canvas.startResize,
+    onMeasure: canvas.reportContentHeight,
   });
 
   const descriptor = data
@@ -858,16 +906,8 @@ export default function SubmissionDetailPage() {
     <div ref={canvas.containerRef} className={`min-w-0 overflow-x-auto ${canvas.fullscreen ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
       <div style={canvas.canvasStyle} className="eris-canvas-grid rounded-md">
         <CanvasCard {...cardProps("report_header")}>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-            <div>
-              <label className={label}>Report Date (YYYY-MM-DD)</label>
-              <input className={input} value={draft.report_date} onChange={(e)=>setDraft((d)=>({...d,report_date:e.target.value}))} />
-            </div>
-            <div>
-              <label className={label}>Date Incident Reported</label>
-              <input className={input} value={draft.date_incident_reported} onChange={(e)=>setDraft((d)=>({...d,date_incident_reported:e.target.value}))} />
-            </div>
-            <div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 @2xl:grid-cols-4">
+            <div className="min-w-0">
               <label className={label}>District</label>
               <select
                 className={input}
@@ -887,7 +927,7 @@ export default function SubmissionDetailPage() {
                 {CALTRANS_DISTRICTS.map((d) => <option key={d} value={d}>{`District ${d}`}</option>)}
               </select>
             </div>
-            <div>
+            <div className="min-w-0">
               <label className={label}>County</label>
               <select
                 className={input}
@@ -906,116 +946,112 @@ export default function SubmissionDetailPage() {
                 {countyOptions.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-            <div>
-              <label className={label}>Highway (Route)</label>
-              <select
-                className={input}
-                value={draft.route}
-                onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))}
-                disabled={!draft.district || !draft.county}
-              >
+            <div className="min-w-0">
+              <label className={label}>Highway (route)</label>
+              <select className={input} value={draft.route} onChange={(e)=>setDraft((d)=>({...d,route:e.target.value}))} disabled={!draft.district || !draft.county}>
                 <option value="">Select route</option>
                 {routeOptions.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
-            <div>
-              <label className={label}>Post Mile</label>
+            <div className="min-w-0">
+              <label className={label}>Post mile</label>
               <input className={input} value={draft.post_mile} onChange={(e)=>setDraft((d)=>({...d,post_mile:e.target.value}))} onBlur={()=>setDraft((d)=>({...d,post_mile: normalizePostMileInput(d.post_mile)}))} />
             </div>
-            <div>
+            <DateField label="Report date" value={draft.report_date} onChange={(value)=>setDraft((d)=>({...d,report_date:value}))} />
+            <DateField label="Incident reported" value={draft.date_incident_reported} onChange={(value)=>setDraft((d)=>({...d,date_incident_reported:value}))} />
+            <div className="min-w-0">
               <label className={label}>EA</label>
               <input className={input} value={draft.ea} onChange={(e)=>setDraft((d)=>({...d,ea:e.target.value}))} />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className={label}>Project ID</label>
               <input className={input} value={draft.project_id} onChange={(e)=>setDraft((d)=>({...d,project_id:e.target.value}))} />
             </div>
-            <div className="col-span-full">
-              <label className={label}>District Contacts</label>
-              {districtContacts.length === 0 ? (
-                <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
-                  No district contacts added yet.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {districtContacts.map((contact, idx) => {
-                    const isOpen = !!openDistrictContactIds[contact.id];
-                    return (
-                      <div key={contact.id} className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
-                        <button
-                          type="button"
-                          className="flex w-full items-center justify-between rounded px-1 py-1 text-left hover:bg-[var(--panel)]"
-                          onClick={() => toggleDistrictContact(contact.id)}
-                        >
-                          <span className="text-sm font-medium">{contactDisplayName(contact, idx)}</span>
-                          <span className="text-xs text-muted">{isOpen ? "v" : ">"}</span>
-                        </button>
-                        {isOpen ? (
-                          <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-                            <div><label className={label}>First Name</label><input className={input} value={contact.first_name} onChange={(e) => updateDistrictContact(contact.id, "first_name", e.target.value)} disabled={!canEdit} /></div>
-                            <div><label className={label}>Last Name</label><input className={input} value={contact.last_name} onChange={(e) => updateDistrictContact(contact.id, "last_name", e.target.value)} disabled={!canEdit} /></div>
-                            <div><label className={label}>S Number</label><input className={input} value={contact.s_number} onChange={(e) => updateDistrictContact(contact.id, "s_number", e.target.value)} disabled={!canEdit} /></div>
-                            <div><label className={label}>Phone</label><input className={input} value={contact.phone} onChange={(e) => updateDistrictContact(contact.id, "phone", e.target.value)} disabled={!canEdit} /></div>
-                            <div><label className={label}>Cell Phone</label><input className={input} value={contact.cell_phone} onChange={(e) => updateDistrictContact(contact.id, "cell_phone", e.target.value)} disabled={!canEdit} /></div>
-                            {canEdit ? (
-                              <div className="col-span-full">
-                                <button
-                                  type="button"
-                                  className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs text-[var(--bad)]"
-                                  onClick={() => removeDistrictContact(contact.id)}
-                                >
-                                  Remove Contact
-                                </button>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {draft.district_contact.trim() && districtContacts.length === 0 ? (
-                <details className="mt-2 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
-                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">
-                    Raw Contact Data
-                  </summary>
-                  <textarea
-                    className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-2 text-xs font-mono"
-                    rows={5}
-                    value={draft.district_contact}
-                    onChange={(e) => setDraft((d) => ({ ...d, district_contact: e.target.value }))}
-                    disabled={!canEdit}
-                  />
-                </details>
-              ) : null}
-              <div className="mt-2">
-                <button
-                  type="button"
-                  onClick={addDistrictContact}
-                  disabled={!canEdit}
-                  className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-1 text-xs disabled:opacity-60"
-                >
-                  Add District Contact
-                </button>
-              </div>
-            </div>
           </div>
+          <FieldGroup
+            title="District contacts"
+            className="mt-3 border-t border-[var(--line)] pt-2.5"
+            aside={
+              canEdit ? (
+                <button type="button" onClick={addDistrictContact} className="inline-flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">
+                  <Plus size={13} /> Add contact
+                </button>
+              ) : null
+            }
+          >
+            {districtContacts.length === 0 ? (
+              <p className="text-xs text-muted">No district contacts yet.</p>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="hidden gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted @2xl:grid @2xl:grid-cols-[1fr_1fr_0.8fr_1fr_1fr_1.75rem]" aria-hidden>
+                  {DISTRICT_CONTACT_FIELDS.map(([, name]) => <span key={name}>{name}</span>)}
+                  <span />
+                </div>
+                {districtContacts.map((contact, idx) => (
+                  <div
+                    key={contact.id}
+                    className="grid grid-cols-2 gap-2 rounded-lg border border-[var(--line)] p-2 @2xl:grid-cols-[1fr_1fr_0.8fr_1fr_1fr_1.75rem] @2xl:items-center @2xl:border-0 @2xl:p-0"
+                  >
+                    {DISTRICT_CONTACT_FIELDS.map(([field, name]) => (
+                      <input
+                        key={field}
+                        aria-label={`${name}, ${contactDisplayName(contact, idx)}`}
+                        title={name}
+                        placeholder={name}
+                        className={`${input} py-1.5`}
+                        value={contact[field]}
+                        onChange={(e) => updateDistrictContact(contact.id, field, e.target.value)}
+                      />
+                    ))}
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => removeDistrictContact(contact.id)}
+                        aria-label={`Remove ${contactDisplayName(contact, idx)}`}
+                        title="Remove contact"
+                        className="justify-self-end rounded p-1 text-muted hover:text-[var(--bad)]"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+            {draft.district_contact.trim() && districtContacts.length === 0 ? (
+              <details className="mt-2 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] p-2">
+                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">Raw contact data</summary>
+                <textarea
+                  className="mt-2 w-full rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-2 font-mono text-xs"
+                  rows={5}
+                  value={draft.district_contact}
+                  onChange={(e) => setDraft((d) => ({ ...d, district_contact: e.target.value }))}
+                />
+              </details>
+            ) : null}
+          </FieldGroup>
         </CanvasCard>
 
         <CanvasCard {...cardProps("distribution")}>
-          <label className={label}>Distribution</label>
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div role="radiogroup" aria-label="Distribution" className="grid grid-cols-[repeat(auto-fill,minmax(5.25rem,1fr))] gap-1.5">
             {(lookups?.distribution ?? []).map((x) => {
               const active = draft.distribution_code === x.code;
               return (
                 <button
                   key={x.code}
                   type="button"
+                  role="radio"
+                  aria-checked={active}
                   onClick={() => setDraft((d) => ({ ...d, distribution_code: active ? "" : x.code }))}
-                  className={`inline-flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${active ? "border-[var(--brand)] text-[var(--brand)]" : "border-[var(--line)] text-[var(--ink)]"}`}
+                  className={`flex min-w-0 flex-col items-center gap-1 rounded-lg border px-1 py-1.5 text-center text-[11px] font-medium leading-tight transition-colors ${
+                    active
+                      ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_12%,var(--panel))]"
+                      : "border-[var(--line)] hover:border-[color:color-mix(in_oklab,var(--brand)_60%,var(--line))]"
+                  }`}
                 >
-                  <img src={DISTRIBUTION_ICON_SRC[x.code] ?? ""} alt="" aria-hidden className="h-10 w-10 object-contain" />
+                  <span className="rounded-md bg-white p-0.5">
+                    <img src={DISTRIBUTION_ICON_SRC[x.code] ?? ""} alt="" aria-hidden className="h-8 w-8 object-contain" />
+                  </span>
                   <span>{x.label}</span>
                 </button>
               );
@@ -1024,170 +1060,209 @@ export default function SubmissionDetailPage() {
         </CanvasCard>
 
         <CanvasCard {...cardProps("highway_status")}>
-          <div className="mb-3">
-            <label className={label}>Cause Of Highway Status</label>
-            <input
-              type="text"
-              className={input}
-              value={draft.highway_status_cause}
-              onChange={(e) => setDraft((d) => ({ ...d, highway_status_cause: e.target.value }))}
-              disabled={!canEdit}
-              placeholder="Describe the cause before choosing a highway status"
-            />
-          </div>
-          {showHighwayStatusOptions ? (
-            <>
-              <label className={label}>Highway Status</label>
-              <div className="mb-2 flex flex-wrap gap-2">
+          <div className="space-y-2.5">
+            <div>
+              <label className={label}>Cause</label>
+              <input
+                type="text"
+                className={input}
+                value={draft.highway_status_cause}
+                onChange={(e) => setDraft((d) => ({ ...d, highway_status_cause: e.target.value }))}
+                placeholder="What is affecting the highway"
+              />
+            </div>
+            <FieldGroup title="Status">
+              <div role="radiogroup" aria-label="Highway status" className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-1.5">
                 {(lookups?.highway_status ?? []).map((x) => {
                   const active = draft.highway_status_code === x.code;
                   return (
-                    <button key={x.code} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))} className={`${chip} ${ynChip(active)}`}>
+                    <OptionTile key={x.code} kind="radio" active={active} onClick={() => canEdit && setDraft((d) => ({ ...d, highway_status_code: active ? "" : x.code }))}>
                       {x.label}
-                    </button>
+                    </OptionTile>
                   );
                 })}
               </div>
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
+            </FieldGroup>
+            {highwayLanesClosedSelected || openHighwayTrafficSelected ? (
+              <div className="space-y-2 rounded-lg bg-[var(--panel-soft)] p-2.5">
                 {highwayLanesClosedSelected ? (
-                  <div>
-                    <label className={label}>Lane(s) Closed Count</label>
-                    <select className={input} value={draft.lanes_closed_count} onChange={(e)=>setDraft((d)=>({...d,lanes_closed_count:e.target.value}))}>
-                      <option value="">Select lanes closed</option>
-                      {LANES_CLOSED_OPTIONS.map((v) => <option key={`lanes-closed-${v}`} value={v}>{v}</option>)}
-                    </select>
-                  </div>
+                  <InlineField label="Lanes closed">
+                    <Segmented
+                      label="Lanes closed"
+                      options={LANES_CLOSED_OPTIONS.map((v) => ({ value: v, label: v }))}
+                      value={draft.lanes_closed_count}
+                      onChange={(value) => setDraft((d) => ({ ...d, lanes_closed_count: value }))}
+                    />
+                  </InlineField>
                 ) : null}
                 {openHighwayTrafficSelected ? (
-                  <div>
-                    <label className={label}>Open Highway Traffic Lanes</label>
-                    <input type="number" step="1" inputMode="numeric" className={input} value={draft.open_highway_traffic_lanes_count} onChange={(e)=>setDraft((d)=>({...d,open_highway_traffic_lanes_count:e.target.value}))} />
-                  </div>
+                  <InlineField label="Lanes open to traffic">
+                    <Stepper label="Lanes open to traffic" value={draft.open_highway_traffic_lanes_count} onChange={(value) => setDraft((d) => ({ ...d, open_highway_traffic_lanes_count: value }))} />
+                  </InlineField>
                 ) : null}
               </div>
-            </>
-          ) : (
-            <div className="text-xs text-muted">Enter the cause above to reveal the highway status options.</div>
-          )}
+            ) : null}
+          </div>
         </CanvasCard>
 
         <CanvasCard {...cardProps("incident_type")}>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-1.5">
             {INCIDENT_TYPE_OPTIONS.map((option) => (
-              <button
-                key={option.code}
-                type="button"
-                onClick={() => toggleIncidentType(option)}
-                className={`${chip} text-left ${ynChip(inc.includes(option.code) || (!!option.key && draft[option.key] === "YES"))}`}
-              >
+              <OptionTile key={option.code} active={inc.includes(option.code) || (!!option.key && draft[option.key] === "YES")} onClick={() => toggleIncidentType(option)}>
                 {option.label}
-              </button>
+              </OptionTile>
             ))}
           </div>
-          <div className="mt-3">
-            <label className={label}>Incident Type Description</label>
+          <div className="mt-2.5">
+            <label className={label}>Description</label>
             <textarea
-              className={`${input} min-h-24`}
+              className={`${input} min-h-20`}
               value={draft.incident_type_description}
               onChange={(e) => setDraft((d) => ({ ...d, incident_type_description: e.target.value }))}
-              disabled={!canEdit}
             />
           </div>
         </CanvasCard>
 
         <CanvasCard {...cardProps("material")}>
-          <div className="mb-2 flex gap-2">
-            <button type="button" onClick={() => selectMaterialPrimary("material_rock")} className={`${chip} ${ynChip(materialRockSelected)}`}>Rock</button>
-            <button type="button" onClick={() => selectMaterialPrimary("material_soil")} className={`${chip} ${ynChip(materialSoilSelected)}`}>Soil</button>
+          <div role="radiogroup" aria-label="Material" className="grid items-start gap-2 @xl:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)]">
+            <PanelChoice title="Rock" active={materialRockSelected} onSelect={() => selectMaterialPrimary("material_rock")}>
+              <div role="radiogroup" aria-label="Rock structure" className="grid grid-cols-3 gap-1.5 @xl:grid-cols-1">
+                {([["material_bedding", "Bedding"], ["material_joints", "Joints"], ["material_fractures", "Fractures"]] as const).map(([key, text]) => (
+                  <OptionTile key={key} kind="radio" active={draft[key] === "YES"} onClick={() => selectRockSubtype(key)}>
+                    {text}
+                  </OptionTile>
+                ))}
+              </div>
+            </PanelChoice>
+            <PanelChoice title="Soil" active={materialSoilSelected} onSelect={() => selectMaterialPrimary("material_soil")}>
+              <div className="space-y-1.5">
+                {SOIL_FRACTIONS.map(([key, text, color]) => (
+                  <SliderField key={key} label={text} color={color} value={draft[key]} onChange={(value) => setSoilFraction(key, value)} />
+                ))}
+              </div>
+              <CompositionBar parts={SOIL_FRACTIONS.map(([key, text, color]) => ({ label: text, value: draft[key], color }))} />
+            </PanelChoice>
           </div>
-          {materialRockSelected ? (
-            <div className="mb-2 flex flex-wrap gap-2">
-              <button type="button" onClick={() => selectRockSubtype("material_bedding")} className={`${chip} ${ynChip(draft.material_bedding === "YES")}`}>Bedding</button>
-              <button type="button" onClick={() => selectRockSubtype("material_joints")} className={`${chip} ${ynChip(draft.material_joints === "YES")}`}>Joints</button>
-              <button type="button" onClick={() => selectRockSubtype("material_fractures")} className={`${chip} ${ynChip(draft.material_fractures === "YES")}`}>Fractures</button>
-            </div>
-          ) : null}
-          {materialSoilSelected ? (
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-              <div><label className={label}>Clay Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_clay_pct} onChange={(e)=>setDraft((d)=>({...d,est_clay_pct:e.target.value}))} /></div>
-              <div><label className={label}>Silt Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_silt_pct} onChange={(e)=>setDraft((d)=>({...d,est_silt_pct:e.target.value}))} /></div>
-              <div><label className={label}>Sand Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_sand_pct} onChange={(e)=>setDraft((d)=>({...d,est_sand_pct:e.target.value}))} /></div>
-              <div><label className={label}>Gravel Est %</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.est_gravel_pct} onChange={(e)=>setDraft((d)=>({...d,est_gravel_pct:e.target.value}))} /></div>
-            </div>
-          ) : null}
         </CanvasCard>
 
         <CanvasCard {...cardProps("pavement_ground_status")}>
-          <label className={label}>Pavement/Ground Cracks</label>
-          <div className="mb-2 flex gap-2">
-            {(["YES", "NO"] as const).map((c) => (
-              <button key={`crack-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, pavement_ground_cracks: c }))} className={`${chip} ${ynChip(draft.pavement_ground_cracks === c)}`}>
-                {c}
-              </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-            {draft.pavement_ground_cracks === "YES" ? (
-              <>
-                <div><label className={label}>Length (feet)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_length_ft} onChange={(e)=>setDraft((d)=>({...d,crack_length_ft:e.target.value}))} /></div>
-                <div><label className={label}>Horizontal Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_horizontal_in} onChange={(e)=>setDraft((d)=>({...d,crack_horizontal_in:e.target.value}))} /></div>
-                <div><label className={label}>Vertical Disp (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_vertical_in} onChange={(e)=>setDraft((d)=>({...d,crack_vertical_in:e.target.value}))} /></div>
-                <div><label className={label}>Depth of Crack (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.crack_depth_in} onChange={(e)=>setDraft((d)=>({...d,crack_depth_in:e.target.value}))} /></div>
-              </>
-            ) : null}
-            <div><label className={label}>Settlement (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.settlement_in} onChange={(e)=>setDraft((d)=>({...d,settlement_in:e.target.value}))} /></div>
-            <div><label className={label}>Bulge (inches)</label><input type="number" step="any" inputMode="decimal" className={input} value={draft.bulge_in} onChange={(e)=>setDraft((d)=>({...d,bulge_in:e.target.value}))} /></div>
-          </div>
-          <label className={`${label} mt-2`}>Indented by Rocks</label>
-          <div className="flex gap-2">
-            {(["YES", "NO"] as const).map((c) => (
-              <button key={`rock-${c}`} type="button" onClick={() => canEdit && setDraft((d) => ({ ...d, indented_by_rocks: c }))} className={`${chip} ${ynChip(draft.indented_by_rocks === c)}`}>
-                {c}
-              </button>
-            ))}
+          <div className="space-y-3">
+            <div className="grid gap-2 @lg:grid-cols-2">
+              <InlineField label="Cracks in pavement or ground">
+                <Segmented label="Cracks in pavement or ground" options={YES_NO} value={triValue(draft.pavement_ground_cracks)} onChange={(value) => setDraft((d) => ({ ...d, pavement_ground_cracks: triFrom(value) }))} />
+              </InlineField>
+              <InlineField label="Indented by rocks">
+                <Segmented label="Indented by rocks" options={YES_NO} value={triValue(draft.indented_by_rocks)} onChange={(value) => setDraft((d) => ({ ...d, indented_by_rocks: triFrom(value) }))} />
+              </InlineField>
+            </div>
+            <FieldGroup title="Crack" className={draft.pavement_ground_cracks === "NO" ? "opacity-60" : ""}>
+              <div className="grid gap-x-4 gap-y-2 @lg:grid-cols-2">
+                <NumberField label="Length" unit="ft" value={draft.crack_length_ft} onChange={(value) => setCrackMeasure("crack_length_ft", value)} />
+                <SliderField label="Depth" unit="in" max={48} step={0.5} value={draft.crack_depth_in} onChange={(value) => setCrackMeasure("crack_depth_in", value)} />
+                <SliderField label="Horizontal displacement" unit="in" max={24} step={0.25} value={draft.crack_horizontal_in} onChange={(value) => setCrackMeasure("crack_horizontal_in", value)} />
+                <SliderField label="Vertical displacement" unit="in" max={24} step={0.25} value={draft.crack_vertical_in} onChange={(value) => setCrackMeasure("crack_vertical_in", value)} />
+              </div>
+            </FieldGroup>
+            <FieldGroup title="Deformation">
+              <div className="grid gap-x-4 gap-y-2 @lg:grid-cols-2">
+                <SliderField label="Settlement" unit="in" max={48} step={0.5} value={draft.settlement_in} onChange={(value) => setDraft((d) => ({ ...d, settlement_in: value }))} />
+                <SliderField label="Bulge" unit="in" max={48} step={0.5} value={draft.bulge_in} onChange={(value) => setDraft((d) => ({ ...d, bulge_in: value }))} />
+              </div>
+            </FieldGroup>
           </div>
         </CanvasCard>
 
         <CanvasCard {...cardProps("vegetation_on_slope")}>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2">
-            <div><label className={label}>Trees Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_trees} onChange={(e)=>setDraft((d)=>({...d,vegetation_trees:e.target.value}))} /></div>
-            <div><label className={label}>Bushes/Shrubs Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_bushes_shrubs} onChange={(e)=>setDraft((d)=>({...d,vegetation_bushes_shrubs:e.target.value}))} /></div>
-            <div className="col-span-full"><label className={label}>Groundcover Coverage %</label><input type="number" step="0.01" min="0" max="100" inputMode="decimal" className={input} value={draft.vegetation_groundcover} onChange={(e)=>setDraft((d)=>({...d,vegetation_groundcover:e.target.value}))} /></div>
+          <div className="space-y-2">
+            <SliderField label="Trees" icon={<TreeDeciduous size={15} />} color="#2e7d32" value={draft.vegetation_trees} onChange={(value) => setDraft((d) => ({ ...d, vegetation_trees: value }))} />
+            <SliderField label="Bushes and shrubs" icon={<Shrub size={15} />} color="#6a9a2c" value={draft.vegetation_bushes_shrubs} onChange={(value) => setDraft((d) => ({ ...d, vegetation_bushes_shrubs: value }))} />
+            <SliderField label="Groundcover" icon={<Sprout size={15} />} color="#9a8a2e" value={draft.vegetation_groundcover} onChange={(value) => setDraft((d) => ({ ...d, vegetation_groundcover: value }))} />
           </div>
+          <p className="mt-2 text-[11px] text-muted">Share of the slope each covers. Layers overlap, so they need not add up to 100%.</p>
         </CanvasCard>
 
         <CanvasCard {...cardProps("water_drainage")}>
-          <div className="mb-2 flex flex-wrap gap-2">
-            {[["drainage_clogged_inlet", "Clogged Inlet"], ["drainage_compromised_drains", "Compromised Drains"], ["drainage_surface_runoff", "Surface Runoff"], ["drainage_torrent_surge_flood", "Torrent/Surge/Flood"]].map(([key, text]) => (
-              <button key={key} type="button" onClick={() => selectSingleDrainage(key as typeof drainageKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 gap-2">
-            {[["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"], ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"], ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"]].map(([imp, may, text]) => (
-              <div key={text} className="grid grid-cols-[auto_auto_1fr] items-center gap-2">
-                <button type="button" onClick={() => setImpactSelection(imp as any, may as any, "IMPACTED")} className={`${chip} ${ynChip(draft[imp] === "YES")}`}>Impacted</button>
-                <button type="button" onClick={() => setImpactSelection(imp as any, may as any, "MAYBE")} className={`${chip} ${ynChip(draft[may] === "YES")}`}>Maybe</button>
-                <span className="text-sm">{text}</span>
-              </div>
-            ))}
-            <div><label className={label}>Adjacent Utilities Notes</label><input className={input} value={draft.impact_adj_utilities} onChange={(e)=>setDraft((d)=>({...d,impact_adj_utilities:e.target.value}))} /></div>
-            <div><label className={label}>Adjacent Properties Notes</label><input className={input} value={draft.impact_adj_properties} onChange={(e)=>setDraft((d)=>({...d,impact_adj_properties:e.target.value}))} /></div>
-            <div><label className={label}>Adjacent Structures Notes</label><input className={input} value={draft.impact_adj_structure} onChange={(e)=>setDraft((d)=>({...d,impact_adj_structure:e.target.value}))} /></div>
-          </div>
+          <FieldGroup title="Drainage">
+            <div role="radiogroup" aria-label="Drainage" className="grid grid-cols-2 gap-1.5 @xl:grid-cols-4">
+              {([["drainage_clogged_inlet", "Clogged inlet"], ["drainage_compromised_drains", "Compromised drains"], ["drainage_surface_runoff", "Surface runoff"], ["drainage_torrent_surge_flood", "Torrent, surge or flood"]] as const).map(([key, text]) => (
+                <OptionTile key={key} kind="radio" active={draft[key] === "YES"} onClick={() => selectSingleDrainage(key)}>
+                  {text}
+                </OptionTile>
+              ))}
+            </div>
+          </FieldGroup>
+          <FieldGroup title="Adjacent impacts" className="mt-3">
+            <div className="divide-y divide-[var(--line)]">
+              {([
+                ["impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "impact_adj_utilities", "Utilities"],
+                ["impact_impacted_adj_properties", "impact_maybe_adj_properties", "impact_adj_properties", "Properties"],
+                ["impact_impacted_adj_structure", "impact_maybe_adj_structure", "impact_adj_structure", "Structures"],
+              ] as const).map(([impacted, maybe, notes, text]) => (
+                <div key={text} className="grid gap-1.5 py-2 first:pt-0 last:pb-0 @lg:grid-cols-[5.5rem_auto_minmax(0,1fr)] @lg:items-center">
+                  <span className="text-xs font-medium">{text}</span>
+                  <Segmented
+                    label={`${text} impact`}
+                    options={IMPACT_OPTIONS}
+                    value={draft[impacted] === "YES" ? "IMPACTED" : draft[maybe] === "YES" ? "MAYBE" : ""}
+                    onChange={(value) => setImpact(impacted, maybe, value)}
+                  />
+                  <input
+                    aria-label={`${text} notes`}
+                    placeholder="Notes"
+                    className={`${input} py-1.5`}
+                    value={draft[notes]}
+                    onChange={(e) => setDraft((d) => ({ ...d, [notes]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+          </FieldGroup>
         </CanvasCard>
 
         <CanvasCard {...cardProps("water_content")}>
-          <div className="mb-2 flex flex-wrap gap-2">
-            {[["water_dry", "Dry"], ["water_moist", "Moist"], ["water_wet", "Wet"], ["water_flowing", "Flowing"]].map(([key, text]) => (
-              <button key={key} type="button" onClick={() => selectBaseWaterContent(key as typeof baseWaterKeys[number])} className={`${chip} ${ynChip(draft[key] === "YES")}`}>{text}</button>
-            ))}
-          </div>
-          {waterFlowingSelected ? (
-            <div className="mb-2 flex gap-2">
-              <button type="button" onClick={() => selectFlowingSubtype("water_seep")} className={`${chip} ${ynChip(draft.water_seep === "YES")}`}>Seep</button>
-              <button type="button" onClick={() => selectFlowingSubtype("water_spring")} className={`${chip} ${ynChip(draft.water_spring === "YES")}`}>Spring</button>
-            </div>
-          ) : null}
+          {(() => {
+            const index = WATER_STEPS.findIndex(([key]) => draft[key] === "YES");
+            return (
+              <>
+                <div className="mb-0.5 flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium">How wet is the ground</span>
+                  <span className="inline-flex items-center gap-1 text-sm font-semibold" style={index >= 0 ? { color: WATER_STEPS[index][2] } : undefined}>
+                    {index >= 0 ? WATER_STEPS[index][1] : <span className="text-xs font-normal text-muted">Not recorded</span>}
+                    {index >= 0 && canEdit ? (
+                      <button type="button" onClick={() => setWaterContent("")} aria-label="Clear water content" title="Clear" className="rounded p-0.5 text-muted hover:text-[var(--ink)]">
+                        <X size={13} />
+                      </button>
+                    ) : null}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={WATER_STEPS.length - 1}
+                  step={1}
+                  aria-label="Water content"
+                  aria-valuetext={index >= 0 ? WATER_STEPS[index][1] : "Not recorded"}
+                  value={Math.max(0, index)}
+                  onChange={(e) => setWaterContent(WATER_STEPS[Number(e.target.value)][0])}
+                  className={`eris-range eris-range--water ${index < 0 ? "is-empty" : ""}`}
+                  style={index >= 0 ? ({ "--range-color": WATER_STEPS[index][2] } as CSSProperties) : undefined}
+                />
+                <div className="mt-0.5 flex justify-between text-[11px]">
+                  {WATER_STEPS.map(([key, text], i) => (
+                    <button key={key} type="button" onClick={() => setWaterContent(key)} className={i === index ? "font-semibold" : "text-muted hover:text-[var(--ink)]"}>
+                      {text}
+                    </button>
+                  ))}
+                </div>
+                <FieldGroup title="Flowing from" className="mt-2.5">
+                  <div role="radiogroup" aria-label="Flowing water source" className="grid grid-cols-2 gap-1.5">
+                    <OptionTile kind="radio" active={draft.water_seep === "YES"} onClick={() => selectFlowingSubtype("water_seep")}>Seep</OptionTile>
+                    <OptionTile kind="radio" active={draft.water_spring === "YES"} onClick={() => selectFlowingSubtype("water_spring")}>Spring</OptionTile>
+                  </div>
+                </FieldGroup>
+              </>
+            );
+          })()}
         </CanvasCard>
       </div>
       {canvas.draggingId && canvas.dragPointer ? (

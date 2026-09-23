@@ -22,6 +22,8 @@ export type DashboardCardPosition = { x: number; y: number };
 export const DASHBOARD_MIN_CARD_WIDTH = 320;
 export const DASHBOARD_MAX_CARD_WIDTH = 1600;
 export const DASHBOARD_MIN_CARD_HEIGHT = 150;
+/** A card fitted to its content may be shorter than one a person resizes. */
+export const DASHBOARD_MIN_FITTED_HEIGHT = 96;
 export const DASHBOARD_MAX_CARD_HEIGHT = 980;
 export const DASHBOARD_LAYOUT_GAP = 12;
 
@@ -66,7 +68,7 @@ export const DASHBOARD_CARD_TITLES: Record<DashboardCardId, string> = {
  * still contained the removed Location card) are ignored.
  */
 export const DASHBOARD_LAYOUT_V2_KEY = "eris_submission_layout_v2";
-export const DASHBOARD_CARD_WIDTH = 520;
+export const DASHBOARD_CARD_WIDTH = 400;
 export const DASHBOARD_COLUMN_STRIDE = DASHBOARD_CARD_WIDTH + DASHBOARD_LAYOUT_GAP;
 export const DASHBOARD_WIDE_CARD_IDS: readonly DashboardCardId[] = ["report_header"];
 
@@ -124,13 +126,15 @@ export function buildDefaultCanvasLayout(): DashboardCanvasLayout {
 
 /**
  * Skyline flow: each card goes into the shortest column (a wide card into the shortest
- * adjacent pair). Heights come from the stored sizes so a user's height adjustments are
- * preserved when tidying; widths are always the stretched column width in auto mode.
+ * adjacent pair). Each card is as tall as its content (`fitHeights`, measured by the
+ * page), falling back to the stored size until it has been measured; widths are always
+ * the stretched column width in auto mode.
  */
 export function flowDashboardCards(
   order: readonly DashboardCardId[],
   sizes: Record<DashboardCardId, DashboardCardLayout>,
   containerWidth: number,
+  fitHeights: Partial<Record<DashboardCardId, number>> = {},
 ): FlowedLayout {
   const columns = autoFitColumnCount(containerWidth);
   const columnWidth = autoFitColumnWidth(containerWidth, columns);
@@ -142,7 +146,10 @@ export function flowDashboardCards(
   for (const id of order) {
     const span = isWideCard(id) && columns >= 2 ? 2 : 1;
     const width = defaultCardWidth(id, columns, columnWidth);
-    const height = clamp(sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height, DASHBOARD_MIN_CARD_HEIGHT, DASHBOARD_MAX_CARD_HEIGHT);
+    const fitted = fitHeights[id];
+    const height = fitted != null
+      ? clamp(Math.ceil(fitted), DASHBOARD_MIN_FITTED_HEIGHT, DASHBOARD_MAX_CARD_HEIGHT)
+      : clamp(sizes[id]?.height ?? DASHBOARD_DEFAULT_SIZES[id].height, DASHBOARD_MIN_CARD_HEIGHT, DASHBOARD_MAX_CARD_HEIGHT);
 
     let bestColumn = 0;
     let bestTop = Number.POSITIVE_INFINITY;

@@ -253,3 +253,107 @@ body {
   height: 0;
   pointer-events: none;
 }
+
+/* GISA sheet sliders. --fill is the filled share of the track; --range-color
+   its color. An empty slider (nothing recorded yet) shows a grey thumb. */
+.eris-range {
+  --fill: 0%;
+  --range-color: var(--brand);
+  --range-track: color-mix(in oklab, var(--line) 85%, var(--panel));
+  display: block;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.eris-range:focus-visible {
+  outline: none;
+}
+.eris-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--range-color) 0 var(--fill), var(--range-track) var(--fill) 100%);
+}
+.eris-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--range-track);
+}
+.eris-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--range-color);
+}
+.eris-range::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border: 3px solid var(--range-color);
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.3);
+  transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+  -webkit-appearance: none;
+}
+.eris-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 3px solid var(--range-color);
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.3);
+}
+.eris-range:not(:disabled):hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.eris-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--range-color) 30%, transparent);
+}
+.eris-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--range-color) 30%, transparent);
+}
+.eris-range.is-empty::-webkit-slider-thumb {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  box-shadow: none;
+}
+.eris-range.is-empty::-moz-range-thumb {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  box-shadow: none;
+}
+.eris-range.is-empty::-moz-range-progress {
+  background: transparent;
+}
+.eris-range:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* Water content: an ordinal scale from dry ground to flowing water. */
+.eris-range--water {
+  --range-color: #2f7fc1;
+}
+.eris-range--water::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #c9a46a, #9dbfb0 34%, #4f97cf 67%, #1f5fae);
+}
+.eris-range--water::-moz-range-track {
+  background: linear-gradient(to right, #c9a46a, #9dbfb0 34%, #4f97cf 67%, #1f5fae);
+}
+.eris-range--water::-moz-range-progress {
+  background: transparent;
+}
+/* Vendor pseudo-elements in one selector list void the whole rule, so one rule each. */
+.eris-range--water.is-empty::-webkit-slider-runnable-track {
+  background: var(--range-track);
+}
+.eris-range--water.is-empty::-moz-range-track {
+  background: var(--range-track);
+}
+@media (prefers-reduced-motion: reduce) {
+  .eris-range::-webkit-slider-thumb {
+    transition: none;
+  }
+}

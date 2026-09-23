@@ -152,7 +152,13 @@ A form's author can grant named people **reader** or **editor** permits on that
 one form (see [roles-and-identity.md](roles-and-identity.md#special-permits)).
 
 On the web, the form's GISA sheet is a canvas: its cards flow across the full
-width by default, and can be dragged and resized. The browser remembers the last
+width by default (about 400 px per column), each as tall as its content, and
+can be dragged and resized. Every option is visible up front: picking a detail
+picks what it belongs to (a rock structure makes the material rock, a soil
+fraction makes it soil, a crack measurement records cracks, a seep or spring
+records flowing water). Percentages, crack and deformation inches, the water
+content scale and the slope angles are sliders, each with a box for exact
+values. The browser remembers the last
 arrangement. **Layouts** saves an arrangement by name on the person's account
 (`/me/layouts`), so it follows them to any computer; the starred one is the
 layout every form opens with.

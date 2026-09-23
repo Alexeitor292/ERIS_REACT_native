@@ -95,7 +95,14 @@ export function useSubmissionDashboardLayout() {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [resize, setResize] = useState<ResizeState | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  // Each card's natural height (header and content), reported by the card itself;
+  // the auto layout sizes cards to it, so none carries empty space or scrolls.
+  const [contentHeights, setContentHeights] = useState<Partial<Record<DashboardCardId, number>>>({});
   const persistReadyRef = useRef(false);
+
+  const reportContentHeight = useCallback((id: DashboardCardId, height: number) => {
+    setContentHeights((previous) => (Math.abs((previous[id] ?? -10) - height) < 1 ? previous : { ...previous, [id]: height }));
+  }, []);
 
   useLayoutEffect(() => {
     const element = containerElement;
@@ -149,9 +156,9 @@ export function useSubmissionDashboardLayout() {
       }
       return { positions, sizes };
     }
-    const flowed = flowDashboardCards(layout.order, layout.sizes, effectiveWidth);
+    const flowed = flowDashboardCards(layout.order, layout.sizes, effectiveWidth, contentHeights);
     return { positions: flowed.positions, sizes: flowed.sizes };
-  }, [layout, effectiveWidth]);
+  }, [layout, effectiveWidth, contentHeights]);
 
   const bounds = useMemo(() => canvasContentBounds(CANVAS_CARD_IDS, rendered.positions, rendered.sizes), [rendered]);
 
@@ -285,7 +292,8 @@ export function useSubmissionDashboardLayout() {
         width: `${size.width}px`,
         height: `${size.height}px`,
         zIndex: dragging ? 20 : 1,
-        transition: drag || resize ? "none" : "left 160ms ease-out, top 160ms ease-out, width 160ms ease-out, height 160ms ease-out",
+        // Sizes change at once, so a card fitted to its content is measured at its final width.
+        transition: drag || resize ? "none" : "left 160ms ease-out, top 160ms ease-out",
       };
     },
     [rendered, drag, resize],
@@ -310,6 +318,7 @@ export function useSubmissionDashboardLayout() {
     cardIds: CANVAS_CARD_IDS,
     cardStyle,
     canvasStyle,
+    reportContentHeight,
     startDrag,
     startResize,
     draggingId: drag?.active ? drag.id : null,

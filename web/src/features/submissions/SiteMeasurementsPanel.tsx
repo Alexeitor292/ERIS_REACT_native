@@ -1,6 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Check, Info, Loader2, MapPinned, Mountain } from "lucide-react";
 
+import { SliderField } from "./gisaFields";
+
 import { areasFromGeoJson, formatArea, polygonAreaSqM } from "../../components/siteAreasModel";
 import {
   bearingLabel,
@@ -289,10 +291,21 @@ export default function SiteMeasurementsPanel({
                 const matches = suggestion != null && sameNumber(values[field.key], suggestion);
                 return (
                   <div key={field.key} className="min-w-0">
+                    {field.unit === "°" ? (
+                      // Angles: a 0-90° slider, the box beside it for exact values.
+                      <SliderField
+                        label={<><SymbolBadge>{field.symbol}</SymbolBadge>{field.name}</>}
+                        name={field.name}
+                        unit="°"
+                        max={90}
+                        step={0.5}
+                        value={values[field.key]}
+                        onChange={(value) => onChange({ [field.key]: value })}
+                      />
+                    ) : (
+                    <>
                     <label htmlFor={`measure-${field.key}`} className="mb-1 flex items-baseline gap-2 text-xs font-medium">
-                      <span className="inline-flex min-w-8 justify-center rounded-md bg-[color:color-mix(in_oklab,var(--accent)_14%,var(--panel))] px-1.5 py-0.5 font-serif text-sm italic leading-none text-[var(--accent)]">
-                        {field.symbol}
-                      </span>
+                      <SymbolBadge>{field.symbol}</SymbolBadge>
                       {field.name}
                     </label>
                     <div className="relative">
@@ -307,6 +320,8 @@ export default function SiteMeasurementsPanel({
                       />
                       <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted">{field.unit}</span>
                     </div>
+                    </>
+                    )}
                     {suggestion != null ? (
                       matches ? (
                         <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--good)]">
@@ -341,6 +356,14 @@ export default function SiteMeasurementsPanel({
         ))}
       </div>
     </div>
+  );
+}
+
+function SymbolBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="mr-0.5 inline-flex min-w-8 justify-center rounded-md bg-[color:color-mix(in_oklab,var(--accent)_14%,var(--panel))] px-1.5 py-0.5 font-serif text-sm italic leading-none text-[var(--accent)]">
+      {children}
+    </span>
   );
 }
 
