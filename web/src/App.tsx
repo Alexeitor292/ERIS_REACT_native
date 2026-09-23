@@ -18,6 +18,7 @@ import EventGroupDetailPage from "./pages/EventGroupDetailPage";
 import TerrainCrossSectionsPage from "./pages/TerrainCrossSectionsPage";
 import MyWorkPage from "./features/myWork/MyWorkPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import AppErrorBoundary from "./components/AppErrorBoundary";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import RoleRoute from "./auth/RoleRoute";
@@ -49,6 +50,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <AppErrorBoundary>
         <Routes>
           <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
           <Route path="/login" element={<LoginPage />} />
@@ -219,6 +221,7 @@ export default function App() {
           />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+        </AppErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
   );
