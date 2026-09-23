@@ -1,6 +1,7 @@
-import type { ChangeEvent, ReactNode, RefObject } from "react";
+import { useState, type ChangeEvent, type DragEvent, type ReactNode, type RefObject } from "react";
+import { Paperclip, X } from "lucide-react";
 
-import { formatCoordinate, normalizePostMileInput, normalizeRouteInput } from "../../utils/precision";
+import IncidentLocationInput from "./IncidentLocationInput";
 import { formatFileSize, type IncidentCreateForm, type PendingIncidentUpload } from "./incidentUiModel";
 
 type Props = {
@@ -15,19 +16,34 @@ type Props = {
   onCreate: () => void;
 };
 
-const inputClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
+const inputClass = "w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
 
-function Field({ label, required = false, children }: { label: string; required?: boolean; children: ReactNode }) {
+function Field({ label, required = false, hint, children }: { label: string; required?: boolean; hint?: string; children: ReactNode }) {
   return (
-    <label className="grid gap-1.5 text-sm">
+    <label className="grid gap-1.5">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-        {label}{required ? " *" : ""}
+        {label}{required ? <span className="text-[var(--bad)]" aria-hidden> *</span> : null}
+        {hint ? <span className="ml-1.5 font-normal normal-case tracking-normal">{hint}</span> : null}
       </span>
       {children}
     </label>
   );
 }
 
+/** What still stands between the form and a report, in words for the footer. */
+export function createBlocker(form: IncidentCreateForm): string | null {
+  if (!form.title.trim()) return "Give the report a title.";
+  if (!form.first_observed_at.trim()) return "Say when it was first seen.";
+  if (!form.location) return "Place it — on the map, by route and post mile, or by coordinates.";
+  return null;
+}
+
+/**
+ * Report an incident from a desktop: what was seen on the left, where it is on
+ * the right. The location is placed on a map (the desktop's stand-in for the
+ * phone's GPS), or entered by route and post mile, or by coordinates, and is
+ * resolved against Caltrans the phone's way before the report can be filed.
+ */
 export default function IncidentCreatePanel({
   form,
   pendingFiles,
@@ -39,148 +55,106 @@ export default function IncidentCreatePanel({
   onCancel,
   onCreate,
 }: Props) {
-  const setField = (key: keyof IncidentCreateForm, value: string) => onFormChange({ ...form, [key]: value });
+  const [dragging, setDragging] = useState(false);
+  const setField = <K extends keyof IncidentCreateForm>(key: K, value: IncidentCreateForm[K]) => onFormChange({ ...form, [key]: value });
+  const blocker = createBlocker(form);
+
+  function onDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setDragging(false);
+    if (!busy) onFiles(event.dataTransfer.files);
+  }
 
   return (
-    <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 md:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Create incident</h2>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
-            Record what maintenance observed and where it occurred. The incident remains unclassified until the on-site assessment determines its incident type.
+    <section aria-labelledby="create-incident-title" className="rounded-xl border border-[var(--line)] bg-[var(--panel)]">
+      <div className="flex items-start justify-between gap-4 border-b border-[var(--line)] px-5 py-4">
+        <div className="min-w-0">
+          <h2 id="create-incident-title" className="text-base font-semibold">Report an incident</h2>
+          <p className="mt-0.5 text-[13px] text-muted">
+            What was seen and where. It goes to the district's Maintenance Coordinator, who decides what happens next. The incident type is left for the on-site assessment.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={busy}
-          className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50"
-        >
-          Cancel
+        <button type="button" onClick={onCancel} disabled={busy} aria-label="Close the report form" className="rounded-md border border-[var(--line)] p-1.5 hover:bg-[var(--panel-soft)] disabled:opacity-50">
+          <X size={16} aria-hidden />
         </button>
       </div>
 
-      <div className="mt-4 rounded-lg border border-[color:color-mix(in_oklab,var(--brand)_30%,var(--line))] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))] px-3 py-2 text-sm">
-        <span className="font-semibold">Classification:</span> <span className="text-muted">Unclassified · assigned after field assessment</span>
-      </div>
-
-      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Field label="Title" required>
-          <input className={inputClass} value={form.title} onChange={(event) => setField("title", event.target.value)} />
-        </Field>
-        <div className="md:col-span-1 xl:col-span-2">
-          <Field label="Description">
-            <textarea className={`${inputClass} min-h-20 w-full`} value={form.description} onChange={(event) => setField("description", event.target.value)} />
+      <div className="grid gap-6 px-5 py-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div className="grid content-start gap-4">
+          <Field label="Title" required>
+            <input className={inputClass} value={form.title} onChange={(event) => setField("title", event.target.value)} placeholder="e.g. Rockfall on the northbound shoulder" />
           </Field>
-        </div>
-        <Field label="First observed" required>
-          <input type="datetime-local" className={inputClass} value={form.first_observed_at} onChange={(event) => setField("first_observed_at", event.target.value)} />
-        </Field>
-        <Field label="First occurred">
-          <input type="datetime-local" className={inputClass} value={form.first_occurred_at} onChange={(event) => setField("first_occurred_at", event.target.value)} />
-        </Field>
-        <div className="hidden xl:block" />
-        <Field label="Latitude" required>
-          <input
-            type="number"
-            step="0.000001"
-            inputMode="decimal"
-            className={inputClass}
-            value={form.latitude}
-            onChange={(event) => setField("latitude", event.target.value)}
-            onBlur={() => setField("latitude", formatCoordinate(form.latitude))}
-          />
-        </Field>
-        <Field label="Longitude" required>
-          <input
-            type="number"
-            step="0.000001"
-            inputMode="decimal"
-            className={inputClass}
-            value={form.longitude}
-            onChange={(event) => setField("longitude", event.target.value)}
-            onBlur={() => setField("longitude", formatCoordinate(form.longitude))}
-          />
-        </Field>
-        <Field label="District">
-          <input className={inputClass} value={form.district} onChange={(event) => setField("district", event.target.value)} />
-        </Field>
-        <Field label="County">
-          <input className={inputClass} value={form.county} onChange={(event) => setField("county", event.target.value)} />
-        </Field>
-        <Field label="Route">
-          <input
-            className={inputClass}
-            value={form.route}
-            onChange={(event) => setField("route", event.target.value)}
-            onBlur={() => setField("route", normalizeRouteInput(form.route))}
-          />
-        </Field>
-        <Field label="Post mile">
-          <input
-            className={inputClass}
-            value={form.post_mile}
-            onChange={(event) => setField("post_mile", event.target.value)}
-            onBlur={() => setField("post_mile", normalizePostMileInput(form.post_mile))}
-          />
-        </Field>
-      </div>
-
-      <div className="mt-5 grid gap-2 border-t border-[var(--line)] pt-4">
-        <label className="text-xs font-semibold uppercase tracking-wide text-muted">Supporting files</label>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          disabled={busy}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => onFiles(event.currentTarget.files)}
-          className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-[var(--panel-soft)] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[var(--ink)]"
-        />
-        <div className="text-xs text-muted">Add photos, videos, PDFs, CAD, or other supporting evidence.</div>
-        {pendingFiles.length > 0 ? (
-          <div className="grid gap-1.5">
-            {pendingFiles.map((pending, index) => {
-              const sizeLabel = formatFileSize(pending.file.size);
-              return (
-                <div
-                  key={`${pending.file.name}-${pending.file.lastModified}-${index}`}
-                  className="flex items-center justify-between gap-3 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate font-semibold">{pending.file.name}</div>
-                    <div className="text-xs text-muted">{sizeLabel ? `${pending.kind} · ${sizeLabel}` : pending.kind}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveFile(index)}
-                    disabled={busy}
-                    className="rounded border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs hover:bg-[var(--panel-soft)] disabled:opacity-60"
-                  >
-                    Remove
-                  </button>
-                </div>
-              );
-            })}
+          <Field label="What was seen">
+            <textarea
+              rows={5}
+              className={`${inputClass} resize-y`}
+              value={form.description}
+              onChange={(event) => setField("description", event.target.value)}
+              placeholder="What it looks like, how big, whether a lane is affected, and anything that has changed since it was first seen."
+            />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="First seen" required>
+              <input type="datetime-local" className={inputClass} value={form.first_observed_at} onChange={(event) => setField("first_observed_at", event.target.value)} />
+            </Field>
+            <Field label="Occurred" hint="if known">
+              <input type="datetime-local" className={inputClass} value={form.first_occurred_at} onChange={(event) => setField("first_occurred_at", event.target.value)} />
+            </Field>
           </div>
-        ) : null}
+
+          <div className="grid gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Photos and files</span>
+            <label
+              onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={`flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-3 py-3 text-sm ${dragging ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]" : "border-[var(--line)] hover:bg-[var(--panel-soft)]"}`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                disabled={busy}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => onFiles(event.currentTarget.files)}
+                className="sr-only"
+              />
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--panel-soft)] text-muted"><Paperclip size={16} aria-hidden /></span>
+              <span className="min-w-0">
+                <span className="block font-semibold">Add photos, videos or documents</span>
+                <span className="block text-xs text-muted">Drop them here, or click to choose.</span>
+              </span>
+            </label>
+            {pendingFiles.length > 0 ? (
+              <ul className="grid gap-1.5">
+                {pendingFiles.map((pending, index) => {
+                  const sizeLabel = formatFileSize(pending.file.size);
+                  return (
+                    <li key={`${pending.file.name}-${pending.file.lastModified}-${index}`} className="flex items-center justify-between gap-3 rounded-md border border-[var(--line)] px-3 py-1.5 text-sm">
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{pending.file.name}</span>
+                        <span className="block text-xs text-muted">{sizeLabel ? `${pending.kind.toLowerCase()} · ${sizeLabel}` : pending.kind.toLowerCase()}</span>
+                      </span>
+                      <button type="button" onClick={() => onRemoveFile(index)} disabled={busy} aria-label={`Remove ${pending.file.name}`} className="rounded p-1 text-muted hover:bg-[var(--panel-soft)] hover:text-[var(--ink)] disabled:opacity-60">
+                        <X size={14} aria-hidden />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+
+        <IncidentLocationInput value={form.location} onChange={(location) => setField("location", location)} disabled={busy} />
       </div>
 
-      <div className="mt-5 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={busy}
-          className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50"
-        >
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--line)] px-5 py-3">
+        <span aria-live="polite" className="mr-auto text-[12px] text-muted">{blocker}</span>
+        <button type="button" onClick={onCancel} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">
           Cancel
         </button>
-        <button
-          type="button"
-          onClick={onCreate}
-          disabled={busy}
-          className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-60"
-        >
-          {busy ? "Creating…" : "Create incident"}
+        <button type="button" onClick={onCreate} disabled={busy || Boolean(blocker)} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50">
+          {busy ? "Sending…" : "Send report"}
         </button>
       </div>
     </section>

@@ -1,31 +1,25 @@
 import type { IncidentStatus } from "../../api/types";
+import type { ResolvedIncidentLocation } from "./incidentLocationModel";
 
+/**
+ * A report being written on the web. The location is one resolved value —
+ * coordinates and District / County / Route / Post mile together, as Caltrans
+ * gave them — never six loose fields that can disagree with each other.
+ */
 export type IncidentCreateForm = {
   title: string;
-  incident_type: string;
   description: string;
   first_observed_at: string;
   first_occurred_at: string;
-  latitude: string;
-  longitude: string;
-  district: string;
-  county: string;
-  route: string;
-  post_mile: string;
+  location: ResolvedIncidentLocation | null;
 };
 
 export const EMPTY_INCIDENT_FORM: IncidentCreateForm = {
   title: "",
-  incident_type: "",
   description: "",
   first_observed_at: "",
   first_occurred_at: "",
-  latitude: "",
-  longitude: "",
-  district: "",
-  county: "",
-  route: "",
-  post_mile: "",
+  location: null,
 };
 
 export type IncidentAttachmentKind = "PHOTO" | "VIDEO" | "DOC" | "SKETCH";

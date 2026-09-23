@@ -6,12 +6,12 @@ import { api } from "../../api/client";
 import type { Incident, IncidentStatus } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import AppShell from "../../ui/AppShell";
-import { formatCoordinate, normalizeCoordinateValue, normalizePostMileValue, normalizeRouteValue } from "../../utils/precision";
+import { formatCoordinate } from "../../utils/precision";
 import { canReportIncident, isOperationalUser, isPublicOnly } from "../../utils/roleModel";
 import { AssessmentStateBadge } from "../assessments/AssessmentDetailPanel";
 import { submissionIdsOf } from "../assessments/assessmentModel";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
-import IncidentCreatePanel from "./IncidentCreatePanel";
+import IncidentCreatePanel, { createBlocker } from "./IncidentCreatePanel";
 import { recordStanding, type RecordStanding } from "./incidentDetailModel";
 import type { IncidentClassification, IncidentClassificationQueryResponse } from "./incidentClassification";
 import { classificationLabel, classificationStateLabel } from "./incidentClassification";
@@ -179,11 +179,9 @@ export default function IncidentsOperationsPage() {
 
   async function createIncident() {
     setNotice(null);
-    if (!form.title.trim()) { setError("Incident title is required."); return; }
-    if (!form.first_observed_at.trim()) { setError("First observed date/time is required."); return; }
-    const latitude = normalizeCoordinateValue(form.latitude);
-    const longitude = normalizeCoordinateValue(form.longitude);
-    if (latitude == null || longitude == null) { setError("Latitude and longitude must be valid numbers."); return; }
+    const blocker = createBlocker(form);
+    const location = form.location;
+    if (blocker || !location) { setError(blocker ?? "Place the incident first."); return; }
 
     setBusy(true);
     setError(null);
@@ -196,12 +194,12 @@ export default function IncidentsOperationsPage() {
           description: form.description.trim() || null,
           first_observed_at: form.first_observed_at,
           first_occurred_at: form.first_occurred_at.trim() || null,
-          latitude,
-          longitude,
-          district: form.district.trim() || null,
-          county: form.county.trim() || null,
-          route: normalizeRouteValue(form.route),
-          post_mile: normalizePostMileValue(form.post_mile),
+          latitude: location.latitude,
+          longitude: location.longitude,
+          district: location.district,
+          county: location.county,
+          route: location.route,
+          post_mile: location.post_mile,
         }),
       });
       const uploadFailures = await uploadPendingIncidentFiles(created.incident.id);
@@ -265,7 +263,7 @@ export default function IncidentsOperationsPage() {
           <div className="ml-auto flex gap-2">
             {canReportIncident(me?.roles) ? (
               <button type="button" onClick={() => setCreatePanelOpen((open) => !open)} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95">
-                {createPanelOpen ? "Close report" : "New incident"}
+                {createPanelOpen ? "Close the form" : "Report an incident"}
               </button>
             ) : null}
             <button type="button" onClick={load} disabled={busy} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{busy ? "Refreshing…" : "Refresh"}</button>
