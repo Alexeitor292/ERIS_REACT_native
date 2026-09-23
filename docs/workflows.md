@@ -60,7 +60,7 @@ older clients.
 ## 4. Assessments
 
 Each assessment is routed to the GeoTech office that serves the report's
-district (**Administration › Offices**). The office and branch names are frozen
+district (set on the **Organization** page). The office and branch names are frozen
 on the assessment when it is routed, so renaming or restructuring the
 organization never rewrites history.
 

@@ -93,8 +93,8 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
    ```
 
    `--sso-only` creates an account without a password, for Entra ID sign-in once
-   it is enabled. Everyone else is added from **Administration › Users**, where
-   their roles and organization placement are set.
+   it is enabled. Everyone else is added from **Administration › Users** and
+   then placed on the **Organization** page, which gives them their role.
 
 6. **Start everything:**
 
@@ -186,6 +186,14 @@ Release notes that need action:
   `20260925_gisa_rich_memos`). Additive only; `alembic upgrade head` applies
   them. The backend image gains the `nh3` HTML sanitizer, which `dc build`
   installs.
+- **Roles from the organization tree** (`20260926_org_tree`). Adds
+  `org_user_profiles.tree_position` and `org_district_crew`, and places everyone
+  who already holds a role (GeoTech roles into their office's tree, coordinators
+  and crew at their home district). Nobody's roles change on deploy. After it,
+  open **Organization**: anybody it could not place (no office or district
+  known) is listed at the top of each tab; place them there. The Offices,
+  Branches and Coverage pages redirect to it, and Users keeps only accounts and
+  the Administrator switch.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

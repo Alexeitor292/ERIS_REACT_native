@@ -61,7 +61,7 @@ can only be assigned to someone who holds the right role.
 | Area | Tables |
 | --- | --- |
 | Accounts | `users`, `roles`, `user_roles`, `user_external_identities` (Entra ID links), `role_consolidation_audit`, `user_saved_layouts` (each person's saved screen layouts) |
-| Organization | `org_offices`, `org_office_districts`, `org_branches`, `org_branch_districts`, `org_user_profiles`, `org_coordinator_coverage`, `org_classifications`; `geotech_office_routing` is kept as a mirror of the office-district map |
+| Organization | `org_offices`, `org_office_districts`, `org_branches`, `org_branch_districts`, `org_user_profiles` (with each person's `tree_position`), `org_coordinator_coverage`, `org_district_crew`, `org_classifications`; `geotech_office_routing` is kept as a mirror of the office-district map |
 | Incidents | `incidents`, `incident_locations`, `incident_assignments`, `incident_routing_assignments`, `incident_attachments`, `incident_submission_links`, `incident_notifications` (in-app and email notices), `workflow_events` |
 | Event Groups | `event_groups`, `event_group_events`; the views `projects` and `project_events` keep the older `/projects` API working |
 | Assessments | `assessments`, `assessment_assignments`, `assessment_events`, `assessment_submissions` |
@@ -80,9 +80,9 @@ Each role sees only what it can use:
 | Role | Navigation |
 | --- | --- |
 | Maintenance Crew | Incidents (their own reports, and "Report an incident"), Settings |
-| Maintenance Coordinator, Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Event Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. |
+| Maintenance Coordinator, Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Event Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. Office chiefs also get My office, and branch chiefs My branch (their part of the organization tree). |
 | Guest | Incidents and Assessments (approved records only), Settings |
-| Administrator | Everything above, plus Users, Offices, Branches, Coverage and Road Inventory |
+| Administrator | Everything above, plus Users, Organization (every office tree and the maintenance lists) and Road Inventory |
 
 Work roles land on **My Work**, the list of steps waiting on them; Maintenance
 Crew and Guests land on **Incidents**. The routes and their role gates are in

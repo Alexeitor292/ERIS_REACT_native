@@ -4,9 +4,7 @@ import SubmissionsPage from "./pages/SubmissionsPage";
 import SubmissionDetailPage from "./pages/SubmissionDetailPage";
 import SubmissionPhotoEvidencePage from "./pages/SubmissionPhotoEvidencePage";
 import AdminUsersPage from "./pages/AdminUsersPage";
-import AdminOfficesPage from "./features/admin/org/AdminOfficesPage";
-import AdminBranchesPage from "./features/admin/org/AdminBranchesPage";
-import AdminCoveragePage from "./features/admin/org/AdminCoveragePage";
+import OrganizationPage from "./features/admin/org/OrganizationPage";
 import RoadInventoryPage from "./pages/RoadInventoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import IncidentsPage from "./pages/IncidentsPage";
@@ -180,29 +178,17 @@ export default function App() {
             }
           />
           <Route
-            path="/admin/org/offices"
+            path="/organization"
             element={
-              <RoleRoute roles={["ADMIN"]}>
-                <AdminOfficesPage />
+              <RoleRoute roles={["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF"]}>
+                <OrganizationPage />
               </RoleRoute>
             }
           />
-          <Route
-            path="/admin/org/branches"
-            element={
-              <RoleRoute roles={["ADMIN"]}>
-                <AdminBranchesPage />
-              </RoleRoute>
-            }
-          />
-          <Route
-            path="/admin/org/coverage"
-            element={
-              <RoleRoute roles={["ADMIN"]}>
-                <AdminCoveragePage />
-              </RoleRoute>
-            }
-          />
+          {/* The Offices, Branches and Coverage pages became the Organization page. */}
+          <Route path="/admin/org/offices" element={<Navigate to="/organization" replace />} />
+          <Route path="/admin/org/branches" element={<Navigate to="/organization" replace />} />
+          <Route path="/admin/org/coverage" element={<Navigate to="/organization?tab=maintenance" replace />} />
           <Route
             path="/admin/road-inventory"
             element={

@@ -1,13 +1,11 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { Fragment, useState, type ReactNode } from "react";
 import {
-  Building2,
   ClipboardCheck,
-  GitBranch,
   Inbox,
   Layers,
   Map as MapIcon,
-  MapPinned,
+  Network,
   Mountain,
   PanelLeftClose,
   PanelLeftOpen,
@@ -114,14 +112,17 @@ function useNavSections(): NavSection[] {
   if (operational) {
     sections.push({ label: "GIS Tools", items: [{ to: "/gis/terrain-cross-sections", label: "Terrain Cross Sections", icon: Mountain }] });
   }
+  const held = roles ?? [];
+  if (!admin && (held.includes("OFFICE_CHIEF") || held.includes("BRANCH_CHIEF"))) {
+    // Chiefs manage their own part of their office's tree.
+    sections.push({ label: "Team", items: [{ to: "/organization", label: held.includes("OFFICE_CHIEF") ? "My office" : "My branch", icon: Network }] });
+  }
   if (admin) {
     sections.push({
       label: "Administration",
       items: [
         { to: "/admin/users", label: "Users", icon: Users },
-        { to: "/admin/org/offices", label: "Offices", icon: Building2 },
-        { to: "/admin/org/branches", label: "Branches", icon: GitBranch },
-        { to: "/admin/org/coverage", label: "Coverage", icon: MapPinned },
+        { to: "/organization", label: "Organization", icon: Network },
         { to: "/admin/road-inventory", label: "Road Inventory", icon: Route },
       ],
     });

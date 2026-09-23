@@ -357,3 +357,67 @@ body {
     transition: none;
   }
 }
+
+/* Organization trees. Children hang from a bus line under their parent: each
+   node draws its own stub up to the bus and its own share of the bus, so the
+   line always spans exactly from the first child to the last. */
+.org-tree {
+  --org-line: color-mix(in oklab, var(--line) 55%, var(--ink) 45%);
+}
+.org-stem {
+  width: 0;
+  height: 1.25rem;
+  margin-inline: auto;
+  border-left: 2px solid var(--org-line);
+}
+.org-children {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 1.25rem;
+}
+.org-children > .org-node {
+  position: relative;
+  padding-inline: 0.5rem;
+}
+.org-children > .org-node::before {
+  content: "";
+  position: absolute;
+  top: -1.25rem;
+  left: 50%;
+  height: 1.25rem;
+  border-left: 2px solid var(--org-line);
+}
+.org-children > .org-node::after {
+  content: "";
+  position: absolute;
+  top: -1.25rem;
+  left: 0;
+  right: 0;
+  border-top: 2px solid var(--org-line);
+}
+.org-children > .org-node:first-child::after {
+  left: 50%;
+}
+.org-children > .org-node:last-child::after {
+  right: 50%;
+}
+.org-children > .org-node:only-child::after {
+  display: none;
+}
+/* Staff hang off a rail under their branch chief. */
+.org-rail {
+  margin-left: 1.1rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--org-line);
+}
+.org-rail > * {
+  position: relative;
+}
+.org-rail > *::before {
+  content: "";
+  position: absolute;
+  top: 1.1rem;
+  left: -0.9rem;
+  width: 0.7rem;
+  border-top: 2px solid var(--org-line);
+}

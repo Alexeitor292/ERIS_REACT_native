@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import get_db
 from .deps import require_roles
+from .services import org_tree
 from .auth import hash_password
 from .roles import (
     ADMIN,
@@ -455,6 +456,7 @@ def list_users(
             {"limit": int(limit)},
         ).mappings().all()
 
+    places = org_tree.places_for_users(db, [int(r["id"]) for r in rows])
     items: list[dict] = []
     for r in rows:
         uid = int(r["id"])
@@ -466,6 +468,8 @@ def list_users(
                 "is_active": bool(int(r["is_active"])),
                 "metadata": parse_user_metadata(r.get("metadata_json")),
                 "roles": _get_user_roles(db, uid),
+                # Where they sit, which is where their roles come from.
+                "places": places.get(uid, []),
             }
         )
 
@@ -519,7 +523,11 @@ def create_user(
         user_id = int(res.lastrowid)
 
         if body.roles:
+            # Tooling and tests may still grant roles directly; the web app does not.
             _set_roles(db, user_id, body.roles)
+        else:
+            # A new account sits nowhere yet: its roles follow from where it is placed.
+            org_tree.sync_roles(db, user_id)
 
         db.commit()
         return _user_with_roles(db, user_id)

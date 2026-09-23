@@ -18,8 +18,17 @@ Seven work roles and the Administrator. One code each, with no aliases.
 | `BRANCH_CHIEF` | Branch Chief | Assigns Staff to the assessments handed to their branch, and reviews the branch route. |
 | `SENIOR_SPECIALIST` | Senior Specialist | Fills the assessments an office chief assigns directly. |
 | `STAFF` | Staff | Fills the assessments a branch chief assigns, and can file field reports. |
-| `GUEST` | Guest | Read-only. Sees approved and finalized records statewide. No work queue, no workflow step and no mobile surface. |
-| `ADMIN` | Administrator | Accounts, roles, the organization model and configuration. Passes every workflow gate, and is not a work role. |
+| `GUEST` | Guest | Read-only. Sees approved and finalized records statewide. No work queue, no workflow step and no mobile surface. Anyone placed nowhere is a guest. |
+| `ADMIN` | Administrator | Accounts, the organization model and configuration. Passes every workflow gate, and is not a work role. |
+
+**Where a person sits decides their work role** (`services/org_tree.py`): the top of an
+office tree is Office Chief, leading a branch Branch Chief, a leaf under the office chief
+Senior Specialist, under a branch Staff, a district's coordinator list Maintenance
+Coordinator and its crew list Maintenance Crew; placed nowhere, Guest. Every change of
+place rewrites the person's `user_roles` at once, so the guards below keep reading
+`user_roles` unchanged. Administrator is the only role granted directly (Administration ›
+Users). The page, who may edit which part, and the migration that placed existing
+accounts are in [organization.md](organization.md).
 
 Rules that hold across the system:
 
@@ -58,9 +67,10 @@ Per-record grants sit beside the roles and never widen them:
 ## Accounts and sign-in
 
 **Entra ID authenticates; ERIS authorizes.** Caltrans' Microsoft Entra ID will
-prove who is signing in, and nothing more. Roles and organization placement
-(office, branch, districts covered) are assigned in ERIS by an administrator.
-No Entra group, app role or claim grants either.
+prove who is signing in, and nothing more. Roles follow from organization
+placement in ERIS (the Organization page, edited by administrators and, for their
+own part of their office, by office and branch chiefs). No Entra group, app role or
+claim grants either.
 
 The database is ready for that. Migration `20260923_entra_identity` makes three
 changes:
