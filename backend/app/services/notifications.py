@@ -192,6 +192,16 @@ def _dump_eml(message: EmailMessage, directory: Path) -> Path:
     return path
 
 
+def is_mock_address(address: str | None) -> bool:
+    """A seeded mock account: ``mock.<anything>@<domain>``.
+
+    The development and test accounts live at ``mock.*@dot.ca.gov`` — the real
+    Caltrans domain — so a live relay must never be handed one.
+    """
+    local, _, _ = (address or "").strip().lower().partition("@")
+    return local.startswith("mock.")
+
+
 def send_email(to: str, subject: str, body: str) -> None:
     """Send one message. RAISES on failure; the caller records the attempt.
 
@@ -210,6 +220,11 @@ def send_email(to: str, subject: str, body: str) -> None:
             raise RuntimeError("email is disabled (SMTP_HOST unset)")
         _dump_eml(message, directory)
         return
+
+    if is_mock_address(address):
+        # Recorded as a failed attempt like any refusal, so the row stops
+        # retrying and the outbox keeps the audit trail.
+        raise ValueError("mock account: never sent through a live relay")
 
     host = str(settings.SMTP_HOST).strip()
     port = int(settings.SMTP_PORT)

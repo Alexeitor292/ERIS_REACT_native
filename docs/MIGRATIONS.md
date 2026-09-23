@@ -8,7 +8,8 @@ after the initial baseline.
 | Layer | Purpose |
 |---|---|
 | `database/init/010_schema.sql` | Authoritative bootstrap schema for **fresh installs**. Defines the initial 19 tables as of baseline commit `ce447ab`. Prefer adding post-baseline schema only via Alembic. If a column is *also* declared here (e.g. `submission_gisa.elevation_terrain_*`), the corresponding migration **must** use `ADD COLUMN IF NOT EXISTS` so the fresh-init → `stamp 0001` → `upgrade head` path stays conflict-free. |
-| `database/init/020_seed.sql` | Dev/bootstrap seed data (roles + local users). Idempotent; safe to re-run. |
+| `database/init/020_seed.sql` | Bootstrap seed: the roles and the organization structure. **No accounts.** Idempotent. |
+| `database/dev/030_mock_accounts.sql` | Development and test mock accounts (`mock.*@dot.ca.gov`, password "password"). Never loaded into production. |
 | `backend/migrations/versions/` | Alembic revisions. All schema changes **after** the baseline live here. |
 | `backend/app/main.py` `startup()` | Calls `check_migration_head()` — fails fast if DB is not at Alembic head. No DDL is executed. |
 
@@ -55,6 +56,13 @@ For a brand-new environment (new Docker volume, new server):
    docker compose --env-file .env.example -f docker-compose.yml up -d
    ```
 
+   **Development only:** load the mock accounts now, before the migrations
+   (`20260911_org_model` builds org profiles and coordinator coverage from the
+   accounts it finds), from the repo root:
+   ```bash
+   docker exec -i eris_mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' < database/dev/030_mock_accounts.sql
+   ```
+
 2. Start the backend at least once so the runtime shims run and confirm no
    errors. Then stop it.
 
@@ -69,7 +77,15 @@ For a brand-new environment (new Docker volume, new server):
    alembic upgrade head
    ```
 
-5. Start the backend normally.
+5. **Production:** create the first administrator (from `backend/`, or with
+   `docker compose ... exec backend` on the server). `database/init` creates no
+   accounts. The command prompts for the password; `--sso-only` creates an
+   account that signs in through Entra ID only:
+   ```bash
+   python -m app.tools.create_admin --email jane.doe@dot.ca.gov --name "Jane Doe"
+   ```
+
+6. Start the backend normally.
 
 ---
 
@@ -127,13 +143,16 @@ If there are no revisions after `0001_baseline`, this is a no-op.
 
 ## Revision history after the baseline
 
-The head is **`20260911_org_model`**. The two most recent revisions are the ones
-with operational consequences:
+The head is **`20260923_entra_identity`**. The most recent revisions are the
+ones with operational consequences:
 
 | Revision | Down-revision | What it does | Notes |
 |---|---|---|---|
 | `20260910_routing_v2` | `20260904_assessment_subs` | Routing v2: the `GEOTECH_SENIOR_ENGINEER` role row, `assessments.routing_path`, route-aware eligibility triggers, the email outbox columns on `incident_notifications` | Creates no new table. Its backfill **raises** if a non-terminal assessment cannot be given a reviewer. |
 | **`20260911_org_model`** | `20260910_routing_v2` | The organization model: seven `org_*` tables, the office/branch snapshot on `assessments`, the `CALTRANS_VIEWER` role row, and the backfill of `org_user_profiles` from `users.metadata_json` | **Read the pre-flight below before scheduling it.** Additive and idempotent apart from two foreign keys; the backfill can refuse to run; `downgrade()` un-grants every viewer. |
+| `20260922_triage_close_ungrouped` | `20260911_org_model` | Only a report sent for assessment enters the incident record: the identity trigger mints no ERIS number and demands no Event Group for a report closed at triage | Takes reports closed at triage out of their Event Groups once, recording each move; archives a group left empty. |
+| `20260923_roles_consolidated` | `20260922_triage_close_ungrouped` | Seven roles and the Administrator, one code each: maps every grant off the retired codes, re-points classification rules, re-creates the six eligibility triggers with the new codes | Keeps every retired grant in `role_consolidation_audit`; `downgrade()` restores them exactly. See [roles-and-identity.md](roles-and-identity.md). |
+| **`20260923_entra_identity`** | `20260923_roles_consolidated` | Entra ID readiness, authentication only: `users.password_hash` nullable, `users.last_login_at`, the `user_external_identities` table | Schema only; no sign-in flow is switched on. `downgrade()` gives password-less accounts an unusable hash. |
 
 `20260911_org_model` in detail:
 

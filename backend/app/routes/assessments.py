@@ -13,11 +13,11 @@ endpoints; the legacy incident endpoints remain for backward compatibility.
 
 Authority model: broad visibility, narrow authority.
   * Any non-maintenance operational user may READ assessments (server enforced).
-  * Maintenance field workers cannot read assessments at all (no operational
+  * Maintenance Crew members cannot read assessments at all (no operational
     role -> require_roles guard rejects them).
   * Write actions are gated by organization role AND, for review, by the
     assessment's own ROUTING PATH, verified server-side: on the branch route
-    only the branch chief it was handed to may review; on the senior engineer
+    only the branch chief it was handed to may review; on the Senior Specialist
     route only an office chief of that assessment's office may. Neither the
     legacy REVIEWER role nor a REVIEWER/APPROVER assignment row confers any
     authority (routing v2, design §4).
@@ -36,15 +36,13 @@ from ..db import get_db
 from ..deps import get_current_user, require_roles
 from ..roles import (
     ADMIN,
-    CALTRANS_VIEWER,
-    GEOTECH_BRANCH_CHIEF,
-    GEOTECH_OFFICE_CHIEF,
+    GUEST,
+    BRANCH_CHIEF,
+    OFFICE_CHIEF,
     GISA_AUTHOR_ROLES,
-    LEGACY_REVIEWER,
     MAINTENANCE_COORDINATOR,
     OPERATIONAL_ROLES,
-    expand_roles,
-    has_canonical_role,
+    has_role,
     is_admin,
     is_maintenance_only,
     is_operational_user,
@@ -72,25 +70,25 @@ from . import incidents as incidents_routes
 router = APIRouter(tags=["assessments"])
 
 # Guard role lists (canonical + legacy aliases).
-TRIAGE_ROLES = expand_roles(MAINTENANCE_COORDINATOR) + [ADMIN]
-OFFICE_CHIEF_ROLES = expand_roles(GEOTECH_OFFICE_CHIEF) + [ADMIN]
-BRANCH_CHIEF_ROLES = expand_roles(GEOTECH_BRANCH_CHIEF) + [ADMIN]
+TRIAGE_ROLES = [MAINTENANCE_COORDINATOR] + [ADMIN]
+OFFICE_CHIEF_ROLES = [OFFICE_CHIEF] + [ADMIN]
+BRANCH_CHIEF_ROLES = [BRANCH_CHIEF] + [ADMIN]
 # Authoring the assessment (fill / submit / add a supplemental) is open to the
-# senior engineer as well as to Staff — on the senior engineer route the senior
+# Senior Specialist as well as to Staff — on the Senior Specialist route the senior
 # engineer IS the assignee (design §2.1, §5.2). The identity check inside each
 # endpoint stays the real gate.
 ASSESSMENT_AUTHOR_ROLES = GISA_AUTHOR_ROLES
 # CONSULTED is the only writable assignment role in v2: review authority follows
 # the routing path, so nobody "adds a reviewer" any more (design §4.2). Same
 # membership as the old ASSIGN_REVIEWER_ROLES.
-ASSIGN_CONSULTED_ROLES = expand_roles(GEOTECH_OFFICE_CHIEF, GEOTECH_BRANCH_CHIEF) + [ADMIN]
+ASSIGN_CONSULTED_ROLES = [OFFICE_CHIEF, BRANCH_CHIEF] + [ADMIN]
 OPERATIONAL_READ_ROLES = sorted(OPERATIONAL_ROLES)
-# The three assessment READS a viewer may reach. CALTRANS_VIEWER is deliberately
+# The three assessment READS a viewer may reach. GUEST is deliberately
 # NOT in OPERATIONAL_ROLES (it is state-blind, design §4.1), so the public list is
 # a separate guard and every handler behind it applies scope_public /
 # ensure_public_assessment. The option endpoints and every write keep
 # OPERATIONAL_READ_ROLES and the role lists they already have.
-PUBLIC_READ_ROLES = sorted(set(OPERATIONAL_READ_ROLES) | {CALTRANS_VIEWER})
+PUBLIC_READ_ROLES = sorted(set(OPERATIONAL_READ_ROLES) | {GUEST})
 
 ASSESSMENT_STATES = {
     "PENDING_OFFICE_DELEGATION",
@@ -224,7 +222,7 @@ def _serialize_assessment(
 # assessment out of it, so a column added here is available everywhere.
 #
 # NOTE ``assigned_engineer_user_id`` holds the assignee on BOTH routes: on a
-# ``routing_path = 'SENIOR_ENGINEER'`` row it names a senior engineer, not an
+# ``routing_path = 'SENIOR_ENGINEER'`` row it names a Senior Specialist, not an
 # engineer. The column keeps its (now partly misleading) name because renaming
 # it is destructive and would force a second branch into every reader — the
 # queue SQL, the submit identity check, ``idx_assessment_engineer``,
@@ -440,11 +438,11 @@ def _review_authority(db: Session | None, assessment: dict, user: dict) -> tuple
     Replaces the assignment-based ``_has_active_review_authority``: an active
     REVIEWER/APPROVER assignment row confers nothing in v2, and neither does the
     legacy REVIEWER account role. On the branch route authority belongs to the
-    one branch chief the assessment was handed to; on the senior engineer route
+    one branch chief the assessment was handed to; on the Senior Specialist route
     it belongs to the OFFICE — any active office chief whose ``office_code``
     matches the assessment's — because offices have more than one chief and
     binding to a person would strand the assessment whenever that person is away.
-    Who assigned the senior engineer is preserved in the
+    Who assigned the Senior Specialist is preserved in the
     SENIOR_ENGINEER_ASSIGNED event.
 
     Returns ``(allowed, reason)``; the reason is the 403 body and the serialized
@@ -461,7 +459,7 @@ def _review_authority(db: Session | None, assessment: dict, user: dict) -> tuple
         allowed = (
             branch_chief_user_id is not None
             and int(branch_chief_user_id) == int(user["id"])
-            and has_canonical_role(user, GEOTECH_BRANCH_CHIEF)
+            and has_role(user, BRANCH_CHIEF)
         )
         return allowed, "Only the branch chief this assessment was handed to can review it"
     if routing_path == ROUTE_SENIOR_ENGINEER:
@@ -476,7 +474,7 @@ def _review_authority(db: Session | None, assessment: dict, user: dict) -> tuple
         # `a == b != ''` would be satisfied by None == None and would hand review
         # of an office-less assessment to any unscoped chief.
         allowed = (
-            has_canonical_role(user, GEOTECH_OFFICE_CHIEF)
+            has_role(user, OFFICE_CHIEF)
             and bool(user_office)
             and bool(assessment_office)
             and user_office == assessment_office
@@ -1013,7 +1011,7 @@ def list_assessments(
     # Defense in depth: maintenance-only users must never reach broad data even
     # if a future role mix slips past the guard.
     if is_maintenance_only(user):
-        raise HTTPException(status_code=403, detail="Maintenance field workers cannot list assessments")
+        raise HTTPException(status_code=403, detail="Maintenance Crew members cannot list assessments")
 
     params: dict[str, object] = {"limit": limit}
     where: list[str] = []
@@ -1023,7 +1021,7 @@ def list_assessments(
     # is the same whatever else was asked for.
     if is_public_only(user):
         if (queue or "").strip():
-            raise HTTPException(status_code=400, detail="Viewers have no work queue")
+            raise HTTPException(status_code=400, detail="Guests have no work queue")
         public_visibility.scope_public(user, where, params)
     if state:
         s = state.strip().upper()
@@ -1041,14 +1039,14 @@ def list_assessments(
         where.append("a.state = 'PENDING_OFFICE_DELEGATION'")
         _scope_office(user, where, params, db=db)
     elif q == "office_chief_review":
-        # To review, senior engineer route. STRICT office scoping: an office
+        # To review, Senior Specialist route. STRICT office scoping: an office
         # chief with no office_code can review nothing (§4.1), so their queue
         # must be empty rather than every office's.
         where.append(f"a.state = 'SUBMITTED' AND a.routing_path = '{ROUTE_SENIOR_ENGINEER}'")
         _scope_office(user, where, params, strict=True, db=db)
     elif q == "branch_chief":
         # To assign a Staff member. The old `OR branch_chief_user_id IS NULL`
-        # clause is gone: a NULL branch chief now means the senior engineer
+        # clause is gone: a NULL branch chief now means the Senior Specialist
         # route or an unrouted assessment, neither of which belongs in a branch
         # chief's assignment queue.
         where.append(f"a.state = 'PENDING_ENGINEER_ASSIGNMENT' AND a.routing_path = '{ROUTE_BRANCH}'")
@@ -1082,8 +1080,8 @@ def list_assessments(
         else:
             my_office = incidents_routes._caller_office_code(user, db)
             senior_engineer_half = "0"
-            if has_canonical_role(user, GEOTECH_OFFICE_CHIEF) and my_office:
-                # Strict on the senior engineer half: an unscoped chief matches nothing.
+            if has_role(user, OFFICE_CHIEF) and my_office:
+                # Strict on the Senior Specialist half: an unscoped chief matches nothing.
                 senior_engineer_half = f"(a.routing_path = '{ROUTE_SENIOR_ENGINEER}' AND a.office_code = :my_office)"
                 params["my_office"] = my_office
             where.append(
@@ -1157,7 +1155,7 @@ def get_assessment(
     user=Depends(require_roles(PUBLIC_READ_ROLES)),
 ):
     if is_maintenance_only(user):
-        raise HTTPException(status_code=403, detail="Maintenance field workers cannot view assessments")
+        raise HTTPException(status_code=403, detail="Maintenance Crew members cannot view assessments")
     assessment = _get_assessment(db, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
@@ -1178,7 +1176,7 @@ def get_assessment_for_incident(
     user=Depends(require_roles(PUBLIC_READ_ROLES)),
 ):
     if is_maintenance_only(user):
-        raise HTTPException(status_code=403, detail="Maintenance field workers cannot view assessments")
+        raise HTTPException(status_code=403, detail="Maintenance Crew members cannot view assessments")
     assessment = _get_assessment_for_incident(db, incident_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="No assessment for this incident")
@@ -1275,13 +1273,13 @@ def delegate_branch(
         raise HTTPException(status_code=404, detail="Assessment not found")
     if payload.engineer_user_id is not None:
         # Rejected, not ignored: an old client gets an explanation instead of a
-        # silent behaviour change. Office chiefs assign senior engineers only;
+        # silent behaviour change. Office chiefs assign Senior Specialists only;
         # branch chiefs assign Staff only.
         raise HTTPException(
             status_code=400,
             detail=(
                 "The office chief cannot assign Staff directly. Hand off to a "
-                "branch chief, or assign a senior engineer with "
+                "branch chief, or assign a Senior Specialist with "
                 "POST /assessments/{id}/assign-senior-engineer."
             ),
         )
@@ -1290,7 +1288,7 @@ def delegate_branch(
     if assessment.get("routing_path") == ROUTE_SENIOR_ENGINEER:
         raise HTTPException(
             status_code=409,
-            detail="This assessment was assigned to a senior engineer; the branch route is not available.",
+            detail="This assessment was assigned to a Senior Specialist; the branch route is not available.",
         )
 
     office_code = assessment.get("office_code")
@@ -1433,8 +1431,8 @@ def _perform_engineer_assignment(
 
     ``assignment_role`` is the assessment-level assignment role written to
     ``assessment_assignments`` — ``ENGINEER`` on the branch route,
-    ``SENIOR_ENGINEER`` on the senior engineer route. Both the deactivation of the
-    prior row and the insert are scoped to it, so reassigning a senior engineer
+    ``SENIOR_ENGINEER`` on the Senior Specialist route. Both the deactivation of the
+    prior row and the insert are scoped to it, so reassigning a Senior Specialist
     retires the previous SENIOR_ENGINEER row instead of leaving two rows
     active for ``idx_assessment_assign_lookup`` to return. The incident-level
     stage assignment stays ``ENGINEER`` on both routes.
@@ -1503,8 +1501,8 @@ def _perform_engineer_assignment(
     )
     incidents_routes._notify_coordinator_engineer_assigned(db=db, incident_id=incident_id)
     if assignment_role == ROLE_SENIOR_ENGINEER:
-        # There is no column recording WHO assigned the senior engineer, and the
-        # senior engineer route's review authority is the office rather than the
+        # There is no column recording WHO assigned the Senior Specialist, and the
+        # Senior Specialist route's review authority is the office rather than the
         # assigner (design §4.1), so this event is the only record of it.
         event_metadata = {
             "senior_engineer_user_id": engineer_user_id,
@@ -1547,7 +1545,7 @@ def assign_engineer(
         raise HTTPException(status_code=409, detail=f"Cannot assign a Staff member from state {assessment['state']}")
     routing_path = assessment.get("routing_path")
     if routing_path == ROUTE_SENIOR_ENGINEER:
-        raise HTTPException(status_code=409, detail="This assessment took the senior engineer route")
+        raise HTTPException(status_code=409, detail="This assessment took the Senior Specialist route")
     if routing_path != ROUTE_BRANCH:
         raise HTTPException(
             status_code=409,
@@ -1637,7 +1635,7 @@ def assign_engineer(
 
 
 # ---------------------------------------------------------------------------
-# Office chief: assign a senior engineer directly (the second route)
+# Office chief: assign a Senior Specialist directly (the second route)
 # ---------------------------------------------------------------------------
 
 
@@ -1647,7 +1645,7 @@ def assessment_senior_engineer_options(
     db: Session = Depends(get_db),
     user=Depends(require_roles(OFFICE_CHIEF_ROLES)),
 ):
-    """The senior engineers this office chief may assign (design §5.1).
+    """The Senior Specialists this office chief may assign (design §5.1).
 
     The assessment-scoped twin of ``/assessments/{id}/branch-options``: the two
     together are the office chief's two-choice route step.
@@ -1682,11 +1680,11 @@ def assign_senior_engineer(
     db: Session = Depends(get_db),
     user=Depends(require_roles(OFFICE_CHIEF_ROLES)),
 ):
-    """Assign a GeoTech senior engineer directly — transition T4 (design §3.3).
+    """Assign a Senior Specialist directly — transition T4 (design §3.3).
 
-    The office chief's other choice. The senior engineer fills the technical
+    The office chief's other choice. The Senior Specialist fills the technical
     form exactly as a Staff member under a branch chief does, and reports back to
-    the office chief, who reviews. Reassigning the senior engineer from DRAFT /
+    the office chief, who reviews. Reassigning the Senior Specialist from DRAFT /
     REVISION_REQUESTED is legal; switching to the branch route is not.
     """
     assessment = _get_assessment(db, assessment_id)
@@ -1697,10 +1695,10 @@ def assign_senior_engineer(
     if assessment.get("routing_path") == ROUTE_BRANCH:
         raise HTTPException(
             status_code=409,
-            detail="This assessment was handed off to a branch chief; the senior engineer route is not available.",
+            detail="This assessment was handed off to a branch chief; the Senior Specialist route is not available.",
         )
     if assessment["state"] not in {"PENDING_OFFICE_DELEGATION", "DRAFT", "REVISION_REQUESTED"}:
-        raise HTTPException(status_code=409, detail=f"Cannot assign a senior engineer from state {assessment['state']}")
+        raise HTTPException(status_code=409, detail=f"Cannot assign a Senior Specialist from state {assessment['state']}")
 
     office_code = assessment.get("office_code")
     incidents_routes._ensure_incident_office_access(user, office_code, db=db)
@@ -1710,7 +1708,7 @@ def assign_senior_engineer(
         )
     )
     if int(payload.senior_engineer_user_id) not in allowed:
-        raise HTTPException(status_code=400, detail="Selected user is not a senior engineer for this office")
+        raise HTTPException(status_code=400, detail="Selected user is not a Senior Specialist for this office")
 
     try:
         notes = (payload.notes or "").strip() or None
@@ -1720,7 +1718,7 @@ def assign_senior_engineer(
         # the incident_assignments row that _assign_incident writes, and that
         # write is the first thing _perform_engineer_assignment does. Reordering
         # these two statements would silently apply the ENGINEER rule to a
-        # senior engineer and reject a valid assignment (design §7.3).
+        # Senior Specialist and reject a valid assignment (design §7.3).
         db.execute(
             text(
                 """
@@ -1971,7 +1969,7 @@ def create_assessment_submission(
 
     The draft is pre-filled from the incident (district / county / route /
     post mile / coordinates) and owned by the assessment's assignee — the Staff
-    member on the branch route, the senior engineer on the senior engineer route.
+    member on the branch route, the Senior Specialist on the Senior Specialist route.
     The incident's primary ``incident_submission_links`` row is left untouched;
     the new form is attached through ``assessment_submissions`` and becomes the
     latest draft.
@@ -2040,7 +2038,7 @@ def create_assessment_submission(
 def _reviewer_recipients(db: Session, assessment: dict) -> list[int]:
     """The user ids that should be told an assessment is waiting for review.
 
-    Branch route: the one branch chief it was handed to. Senior engineer route: every
+    Branch route: the one branch chief it was handed to. Senior Specialist route: every
     active office chief of the assessment's office, because authority there is
     the office function rather than one person (design §4.1, §6.1).
     """
@@ -2071,7 +2069,7 @@ def submit_assessment(
     assessment = _get_assessment(db, assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    # Only the assignee (Staff or senior engineer), or admin, may submit.
+    # Only the assignee (Staff or Senior Specialist), or admin, may submit.
     if not is_admin(user) and (
         assessment.get("assigned_engineer_user_id") is None
         or int(assessment["assigned_engineer_user_id"]) != int(user["id"])
@@ -2177,12 +2175,12 @@ def _role_title(role_code: str) -> str:
 
 def _approver_role_title(assessment: dict, user: dict) -> str:
     routing_path = assessment.get("routing_path")
-    if routing_path == ROUTE_BRANCH and has_canonical_role(user, GEOTECH_BRANCH_CHIEF):
-        return _role_title(GEOTECH_BRANCH_CHIEF)
-    if routing_path == ROUTE_SENIOR_ENGINEER and has_canonical_role(user, GEOTECH_OFFICE_CHIEF):
-        return _role_title(GEOTECH_OFFICE_CHIEF)
-    for candidate in (GEOTECH_OFFICE_CHIEF, GEOTECH_BRANCH_CHIEF):
-        if has_canonical_role(user, candidate):
+    if routing_path == ROUTE_BRANCH and has_role(user, BRANCH_CHIEF):
+        return _role_title(BRANCH_CHIEF)
+    if routing_path == ROUTE_SENIOR_ENGINEER and has_role(user, OFFICE_CHIEF):
+        return _role_title(OFFICE_CHIEF)
+    for candidate in (OFFICE_CHIEF, BRANCH_CHIEF):
+        if has_role(user, candidate):
             return _role_title(candidate)
     if is_admin(user):
         return _ADMIN_ROLE_TITLE
@@ -2489,7 +2487,7 @@ def finalize_assessment(
     """410 Gone.
 
     Nothing new enters FINALIZED: approval by the branch chief (branch route) or
-    the office chief (senior engineer route) completes the assessment, and the
+    the office chief (Senior Specialist route) completes the assessment, and the
     database enforces it through ``trg_assessment_no_new_finalize``. Existing
     FINALIZED rows stay valid, readable and filterable history.
 
@@ -2500,6 +2498,6 @@ def finalize_assessment(
         status_code=410,
         detail=(
             "Assessment finalization was retired: approval by the branch chief (branch route) "
-            "or the office chief (senior engineer route) completes the assessment."
+            "or the office chief (Senior Specialist route) completes the assessment."
         ),
     )

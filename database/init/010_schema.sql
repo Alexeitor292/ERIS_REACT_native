@@ -10,15 +10,40 @@ SET NAMES utf8mb4;
 -- USERS / ROLES
 -- ============================================================
 
+-- password_hash is NULL for an account that signs in only through Entra ID
+-- single sign-on (migration 20260923_entra_identity).
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     email VARCHAR(255) NOT NULL UNIQUE,
     full_name VARCHAR(255) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NULL,
     metadata_json JSON NULL,
     is_active TINYINT NOT NULL DEFAULT 1,
+    last_login_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- An account's Entra ID identity: authentication only. Roles and org placement
+-- are assigned in ERIS, never taken from Entra (migration 20260923_entra_identity).
+-- Keyed on the directory (tid) and object ID (oid); the email and UPN are kept
+-- only as they read at link time and never identify anyone.
+CREATE TABLE IF NOT EXISTS user_external_identities (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    tenant_id CHAR(36) NOT NULL,
+    object_id CHAR(36) NOT NULL,
+    user_principal_name VARCHAR(255) NULL,
+    email_at_link VARCHAR(255) NULL,
+    linked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    linked_by_user_id BIGINT NULL,
+    last_login_at DATETIME NULL,
+    CONSTRAINT fk_user_external_identities_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_user_external_identities_linked_by FOREIGN KEY (linked_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT uq_user_external_identities_subject UNIQUE (provider, tenant_id, object_id),
+    CONSTRAINT uq_user_external_identities_user_provider UNIQUE (user_id, provider),
+    CONSTRAINT chk_user_external_identities_provider CHECK (provider IN ('ENTRA_ID'))
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS roles (

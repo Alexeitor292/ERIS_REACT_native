@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import get_db
 from .deps import require_roles
+from .roles import ADMIN
 
 router = APIRouter(prefix="/dev", tags=["dev"])
 
@@ -22,12 +23,12 @@ def _require_dev():
 @router.post("/seed-test-submission")
 def seed_test_submission(
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["ADMIN", "REVIEWER"])),
+    user=Depends(require_roles([ADMIN])),
 ):
     """
     DEV ONLY:
     Creates a single submission with a workflow event.
-    Restricted to ADMIN/REVIEWER in dev.
+    Restricted to ADMIN in dev.
     """
     _require_dev()
 

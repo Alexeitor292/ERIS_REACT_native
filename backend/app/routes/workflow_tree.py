@@ -4,7 +4,7 @@ GET /incidents/{incident_id}/workflow-tree returns a derived, server-authoritati
 workflow map for an incident (see services/workflow_tree.py). It reuses the
 existing read helpers and the broad-visibility / narrow-authority access model:
 
-  * Maintenance field workers may retrieve the tree only for their OWN reports.
+  * Maintenance Crew members may retrieve the tree only for their OWN reports.
   * Non-maintenance operational users may retrieve it for any incident.
   * A read-only viewer may retrieve it only for an incident whose assessment is
     approved — the history of the approved record (org model design §4.5).
@@ -33,7 +33,7 @@ def _ensure_workflow_tree_access(user: dict, incident_row: dict, *, db: Session 
     if is_admin(user):
         return
     if is_maintenance_only(user):
-        # Maintenance field workers: own reports only.
+        # Maintenance Crew members: own reports only.
         if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):
             raise HTTPException(status_code=403, detail="You can only view your own incident reports")
         return

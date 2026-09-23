@@ -1,5 +1,10 @@
 # Incident Workflow Tree
 
+> **Role codes.** This document predates `20260923_roles_consolidated` and uses the
+> role codes of its time (`GEOTECH_*`, `CALTRANS_VIEWER`, "senior engineer", ...).
+> The current roles, and how each retired code maps to one, are in
+> [roles-and-identity.md](roles-and-identity.md).
+
 A visual, auditable workflow map for every incident. It lets a user open an
 incident and immediately see where it is in the process, who has completed their
 part, who currently owns the next action, who is assigned but has not acted, what

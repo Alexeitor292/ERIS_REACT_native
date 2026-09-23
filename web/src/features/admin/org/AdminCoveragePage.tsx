@@ -13,7 +13,7 @@ import {
   type OrgOfficeRecord,
 } from "../../../api/org";
 import type { AdminUser } from "../../../api/types";
-import { CANONICAL, roleLabel } from "../../../utils/roleModel";
+import { ROLES, roleLabel } from "../../../utils/roleModel";
 import {
   OrgAdminShell,
   OrgChip,
@@ -42,7 +42,7 @@ import {
  * A coordinator may cover several districts; the rows are a set, not a field.
  */
 
-const COORDINATOR_ROLES = new Set<string>(CANONICAL.MAINTENANCE_COORDINATOR);
+const COORDINATOR_ROLES = new Set<string>([ROLES.MAINTENANCE_COORDINATOR]);
 
 export default function AdminCoveragePage() {
   const [coverage, setCoverage] = useState<OrgCoverageDistrict[]>([]);

@@ -6,13 +6,13 @@ Run with: pytest -m db
 Covers the required matrix:
   1  new report before triage
   2  branch route (hand-off -> engineer -> branch chief review -> approved)
-  2b senior engineer route (direct assignment -> senior engineer -> office chief review)
+  2b Senior Specialist route (direct assignment -> Senior Specialist -> office chief review)
   3  needs-reporter-information loop
   4  no-assessment-required terminal
   5  duplicate/linked terminal with linked target
   6  revision-requested path (review NOT marked completed)
   7  correct current-owner resolution (asserted throughout)
-  8  maintenance field worker cannot read another user's tree
+  8  Maintenance Crew member cannot read another user's tree
   9  operational users get broad workflow data
  10  historical nodes keep the original actor after reassignment
 """
@@ -45,17 +45,17 @@ def _me_id(client_db, token: str) -> int:
 @pytest.fixture(scope="module")
 def tokens(client_db):
     return {
-        "admin": _login(client_db, "admin@local"),
-        "maintenance": _login(client_db, "maintenance@local"),
-        "coordinator": _login(client_db, "coordinator@local"),
-        "officechief": _login(client_db, "officechief@local"),
-        "branchchief": _login(client_db, "branchchief@local"),
-        "engineer": _login(client_db, "engineer@local"),
-        "reviewer": _login(client_db, "reviewer@local"),
-        "senior_engineer": _login(client_db, "seniorengineer@local"),
+        "admin": _login(client_db, "mock.admin@dot.ca.gov"),
+        "maintenance": _login(client_db, "mock.maintenance.crew@dot.ca.gov"),
+        "coordinator": _login(client_db, "mock.coordinator.d01@dot.ca.gov"),
+        "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
+        "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
+        "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
+        "other_staff": _login(client_db, "mock.staff.2@dot.ca.gov"),
+        "senior_engineer": _login(client_db, "mock.senior.specialist@dot.ca.gov"),
         # The org model's read-only viewer: no operational role at all, so the
         # tree is readable only where the record is public.
-        "viewer": _login(client_db, "viewer@local"),
+        "viewer": _login(client_db, "mock.guest@dot.ca.gov"),
     }
 
 
@@ -147,7 +147,7 @@ class TestAssessmentRequiredPath:
         assert tree["path_type"] == "ASSESSMENT_REQUIRED"
         assert _node(tree, "COORDINATOR_TRIAGE")["status"] == "COMPLETED"
         assert _node(tree, "OFFICE_DELEGATION")["status"] == "CURRENT"
-        assert tree["current_owner"]["role"] == "GEOTECH_OFFICE_CHIEF"
+        assert tree["current_owner"]["role"] == "OFFICE_CHIEF"
 
         # Office chief delegates to branch chief.
         d = client_db.post(
@@ -160,7 +160,7 @@ class TestAssessmentRequiredPath:
         assert _node(tree, "OFFICE_DELEGATION")["status"] == "COMPLETED"
         assert _node(tree, "BRANCH_ASSIGNMENT")["status"] == "CURRENT"
         assert _node(tree, "BRANCH_ASSIGNMENT")["user"]["user_id"] == ids["branchchief"]
-        assert tree["current_owner"]["role"] == "GEOTECH_BRANCH_CHIEF"
+        assert tree["current_owner"]["role"] == "BRANCH_CHIEF"
 
         # Branch chief assigns engineer.
         client_db.post(
@@ -183,8 +183,8 @@ class TestAssessmentRequiredPath:
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "COMPLETED"
         review_node = _node(tree, "ASSESSMENT_REVIEW")
         assert review_node["status"] == "CURRENT"
-        assert review_node["role"] == "GEOTECH_BRANCH_CHIEF"
-        assert review_node["role_title"] == "GeoTech Branch Chief"
+        assert review_node["role"] == "BRANCH_CHIEF"
+        assert review_node["role_title"] == "Branch Chief"
         assert review_node["user"]["user_id"] == ids["branchchief"]
         assert tree["current_owner"]["user_id"] == ids["branchchief"]
         # The retired reviewer/approver pseudo-role is gone from the tree
@@ -213,7 +213,7 @@ class TestAssessmentRequiredPath:
 
 
 # ---------------------------------------------------------------------------
-# 2b: the senior engineer route
+# 2b: the Senior Specialist route
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +223,7 @@ class TestSeniorEngineerRoutePath:
         incident_id = _create_incident(client_db, admin, district="04", county="Marin", route="1")
         r = client_db.post(
             f"/incidents/{incident_id}/triage",
-            json={"disposition": "ASSESSMENT_REQUIRED", "notes": "senior engineer route"},
+            json={"disposition": "ASSESSMENT_REQUIRED", "notes": "Senior Specialist route"},
             headers=_auth(admin),
         )
         assert r.status_code == 200, r.text
@@ -246,8 +246,8 @@ class TestSeniorEngineerRoutePath:
         assert _node(tree, "BRANCH_ASSIGNMENT")["status"] == "SKIPPED"
         work = _node(tree, "ENGINEER_ASSESSMENT")
         assert work["status"] == "CURRENT"
-        assert work["role"] == "GEOTECH_SENIOR_ENGINEER"
-        assert work["role_title"] == "GeoTech Senior Engineer"
+        assert work["role"] == "SENIOR_SPECIALIST"
+        assert work["role_title"] == "Senior Specialist"
         assert work["user"]["user_id"] == ids["senior_engineer"]
 
         submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(spec))
@@ -255,8 +255,8 @@ class TestSeniorEngineerRoutePath:
         tree = _tree(client_db, admin, incident_id)
         review_node = _node(tree, "ASSESSMENT_REVIEW")
         assert review_node["status"] == "CURRENT"
-        assert review_node["role"] == "GEOTECH_OFFICE_CHIEF"
-        assert review_node["role_title"] == "GeoTech Office Chief"
+        assert review_node["role"] == "OFFICE_CHIEF"
+        assert review_node["role_title"] == "Office Chief"
         assert "REVIEWER_APPROVER" not in {n["role"] for n in tree["nodes"]}
 
         approved = client_db.post(
@@ -269,7 +269,7 @@ class TestSeniorEngineerRoutePath:
         assert "FINALIZATION" not in [n["key"] for n in tree["nodes"]]
         resolution = _node(tree, "RESOLUTION")
         assert resolution["status"] == "CURRENT"
-        assert resolution["role"] == "GEOTECH_SENIOR_ENGINEER"
+        assert resolution["role"] == "SENIOR_SPECIALIST"
         assert resolution["user"]["user_id"] == ids["senior_engineer"]
 
         # And once they close it out, the terminal label names the approval —
@@ -308,8 +308,8 @@ class TestNeedsInfoLoop:
         triage = _node(tree, "COORDINATOR_TRIAGE")
         assert triage["status"] == "WAITING_ON_REPORTER"
         assert tree["overall_status"] == "WAITING_ON_REPORTER"
-        # The bottleneck owner is the reporter (maintenance field worker).
-        assert tree["current_owner"]["role"] == "MAINTENANCE_FIELD_WORKER"
+        # The bottleneck owner is the reporter (Maintenance Crew member).
+        assert tree["current_owner"]["role"] == "MAINTENANCE_CREW"
         assert tree["current_owner"]["user_id"] == ids["maintenance"]
         # Downstream not falsely advanced.
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "PENDING"
@@ -433,7 +433,7 @@ class TestRevisionRequested:
         # Review must NOT be marked completed while revisions are pending.
         assert _node(tree, "ASSESSMENT_REVIEW")["status"] != "COMPLETED"
         assert tree["overall_status"] == "REVISION_REQUESTED"
-        assert tree["current_owner"]["role"] == "GEOTECH_ENGINEER"
+        assert tree["current_owner"]["role"] == "STAFF"
         assert tree["current_owner"]["user_id"] == ids["engineer"]
 
 
@@ -445,7 +445,7 @@ class TestRevisionRequested:
         tree = _tree(client_db, tokens["admin"], incident_id)
         review = _node(tree, "ASSESSMENT_REVIEW")
         assert review["status"] == "CURRENT"
-        assert review["role"] == "GEOTECH_OFFICE_CHIEF"
+        assert review["role"] == "OFFICE_CHIEF"
         assert _node(tree, "BRANCH_ASSIGNMENT")["status"] == "SKIPPED"
 
         returned = client_db.post(
@@ -458,8 +458,8 @@ class TestRevisionRequested:
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "REVISION_REQUESTED"
         assert _node(tree, "ASSESSMENT_REVIEW")["status"] != "COMPLETED"
         assert tree["overall_status"] == "REVISION_REQUESTED"
-        assert tree["current_owner"]["role"] == "GEOTECH_SENIOR_ENGINEER"
-        assert tree["current_owner"]["role_title"] == "GeoTech Senior Engineer"
+        assert tree["current_owner"]["role"] == "SENIOR_SPECIALIST"
+        assert tree["current_owner"]["role_title"] == "Senior Specialist"
         assert tree["current_owner"]["user_id"] == ids["senior_engineer"]
 
 
@@ -494,13 +494,13 @@ class TestLegacyFinalization:
         tree = _tree(client_db, tokens["admin"], incident_id)
         finalization = _node(tree, "FINALIZATION")
         assert finalization["status"] == "COMPLETED"
-        assert finalization["role"] == "GEOTECH_OFFICE_CHIEF"
+        assert finalization["role"] == "OFFICE_CHIEF"
         assert finalization["label"] == "Assessment signed off (legacy)"
 
 
 class TestHistoricalActor:
     def test_completed_node_keeps_original_actor_after_reassignment(self, client_db, tokens, ids):
-        # Engineer E1 (engineer@local) submits; then reassign engineer to E2 (admin).
+        # Engineer E1 (mock.staff@dot.ca.gov) submits; then reassign engineer to E2 (admin).
         incident_id, aid = _drive_to_submitted(client_db, tokens, ids)
         # Reassign the engineer while SUBMITTED (assign-engineer is allowed pre-approval).
         resp = client_db.post(
@@ -536,7 +536,7 @@ class TestAccess:
 
     def test_operational_users_get_broad_access(self, client_db, tokens):
         any_incident = _create_incident(client_db, tokens["admin"], district="08", county="San Bernardino", route="15")
-        for who in ("reviewer", "engineer", "officechief"):
+        for who in ("other_staff", "engineer", "officechief"):
             resp = client_db.get(f"/incidents/{any_incident}/workflow-tree", headers=_auth(tokens[who]))
             assert resp.status_code == 200, f"{who} got {resp.status_code}"
 
@@ -576,7 +576,7 @@ class TestViewerAccess:
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "COMPLETED"
         review = _node(tree, "ASSESSMENT_REVIEW")
         assert review["status"] == "COMPLETED"
-        assert review["role"] == "GEOTECH_BRANCH_CHIEF"
+        assert review["role"] == "BRANCH_CHIEF"
         assert review["user"]["user_id"] == ids["branchchief"]
 
     def test_viewer_gets_404_before_approval(self, client_db, tokens, ids):
@@ -606,6 +606,6 @@ class TestViewerAccess:
 
         with _pytest.raises(HTTPException) as excinfo:
             _ensure_workflow_tree_access(
-                {"id": 1, "roles": ["CALTRANS_VIEWER"]}, {"id": 1, "reporter_user_id": 2}
+                {"id": 1, "roles": ["GUEST"]}, {"id": 1, "reporter_user_id": 2}
             )
         assert excinfo.value.status_code == 403

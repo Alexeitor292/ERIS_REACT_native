@@ -16,7 +16,7 @@ import {
 } from "../../../api/org";
 import type { AdminUser, UserOrg } from "../../../api/types";
 import AppShell from "../../../ui/AppShell";
-import { CANONICAL, roleLabel } from "../../../utils/roleModel";
+import { ROLES, roleLabel } from "../../../utils/roleModel";
 import PasswordResetDialog from "./PasswordResetDialog";
 
 /**
@@ -42,7 +42,7 @@ import PasswordResetDialog from "./PasswordResetDialog";
  *    while any one of them was working.
  */
 
-const ORG_ROLE_NAMES = new Set<string>([...CANONICAL.GEOTECH_ENGINEER, ...CANONICAL.GEOTECH_BRANCH_CHIEF]);
+const ORG_ROLE_NAMES = new Set<string>([ROLES.STAFF, ROLES.BRANCH_CHIEF]);
 
 /** Accounts whose work depends on a branch: Staff are assigned inside one, chiefs lead one. */
 function needsBranch(user: AdminUser): boolean {
@@ -434,7 +434,7 @@ export default function AdminUsersOperationsPage() {
                   <option value="">Not recorded</option>
                   {offices.map((office) => <option key={office.id} value={office.id}>{office.name || office.code}</option>)}
                 </select>
-                <span className="text-[11px] text-muted">Chiefs and senior engineers are scoped to an office; without one they can neither be assigned nor review.</span>
+                <span className="text-[11px] text-muted">Chiefs and Senior Specialists are scoped to an office; without one they can neither be assigned nor review.</span>
               </label>
               <label className="grid gap-1.5">
                 <span className="text-xs font-semibold uppercase tracking-wide text-muted">Branch</span>

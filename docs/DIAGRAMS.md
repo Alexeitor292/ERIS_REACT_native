@@ -65,15 +65,15 @@ sequenceDiagram
 flowchart TD
   R[User Roles] --> A{ADMIN?}
   A -- yes --> ALL[All incidents]
-  A -- no --> B{MAINTENANCE?}
+  A -- no --> B{MAINTENANCE_CREW?}
   B -- yes --> OWN[Reporter owns]
-  B -- no --> C{MAINT_COORDINATOR?}
+  B -- no --> C{MAINTENANCE_COORDINATOR?}
   C -- yes --> DIST[District scoped]
   C -- no --> D{OFFICE_CHIEF?}
   D -- yes --> OFF[Office scoped, post-coordinator]
   D -- no --> E{BRANCH_CHIEF?}
   E -- yes --> BR[Office scoped branch/engineer/resolved]
-  E -- no --> F{FIELD_WORKER?}
-  F -- yes --> ENG[Engineer active assignment only]
+  E -- no --> F{STAFF or SENIOR_SPECIALIST?}
+  F -- yes --> ENG[Active ENGINEER-stage assignment only]
   F -- no --> NONE[No mobile incidents]
 ```

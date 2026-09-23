@@ -488,7 +488,7 @@ def retiring_branch(client_db, admin_token, west_office_id):
             "email": email,
             "full_name": f"Zzz Retiring Branch Chief {_RUN}",
             "password": "org-model-test-password",
-            "roles": ["GEOTECH_BRANCH_CHIEF"],
+            "roles": ["BRANCH_CHIEF"],
             "metadata": {"office_code": "WEST", "office_location": "West Office"},
         },
         headers=_auth(admin_token),

@@ -102,12 +102,12 @@ test("each route has its own ladder and an unrouted assessment has one step", ()
 test("ladder step names carry the role names, never \"engineer\" for Staff", () => {
   assert.equal(BRANCH_PIPELINE[1].label, "Staff assignment");
   assert.equal(BRANCH_PIPELINE[2].owner, "Assigned Staff");
-  assert.equal(SENIOR_ENGINEER_PIPELINE[0].label, "Senior engineer assignment");
-  assert.equal(SENIOR_ENGINEER_PIPELINE[1].owner, "Senior Engineer");
-  // The senior engineer is the only "engineer" either ladder may name.
+  assert.equal(SENIOR_ENGINEER_PIPELINE[0].label, "Senior Specialist assignment");
+  assert.equal(SENIOR_ENGINEER_PIPELINE[1].owner, "Senior Specialist");
+  // The Senior Specialist is the only "engineer" either ladder may name.
   for (const step of [...BRANCH_PIPELINE, ...SENIOR_ENGINEER_PIPELINE]) {
     for (const text of [step.label, step.owner ?? ""]) {
-      if (/engineer/i.test(text)) assert.match(text, /senior engineer/i, `"${text}" calls the Staff role an engineer`);
+      if (/engineer/i.test(text)) assert.match(text, /Senior Specialist/i, `"${text}" calls the Staff role an engineer`);
     }
   }
 });
@@ -187,19 +187,19 @@ test("office and branch render from the routing snapshot, not from a hard-coded 
 
 test("assignment-role and event labels rename the role, not the code", () => {
   assert.equal(assignmentRoleLabel("ENGINEER"), "Staff");
-  assert.equal(assignmentRoleLabel("SENIOR_ENGINEER"), "Senior Engineer");
+  assert.equal(assignmentRoleLabel("SENIOR_ENGINEER"), "Senior Specialist");
   assert.equal(assignmentRoleLabel("CONSULTED"), "Consulted");
   // Anything the server adds later still renders readably.
   assert.equal(assignmentRoleLabel("SOMETHING_NEW"), "Something New");
   assert.equal(assessmentEventLabel("ENGINEER_ASSIGNED"), "Staff assigned");
-  assert.equal(assessmentEventLabel("SENIOR_ENGINEER_ASSIGNED"), "Senior engineer assigned");
+  assert.equal(assessmentEventLabel("SENIOR_ENGINEER_ASSIGNED"), "Senior Specialist assigned");
   assert.equal(assessmentEventLabel("OFFICE_DELEGATED"), "Office Delegated");
 });
 
 test("waiting-on names the route's reviewer and the assignee, and is null only when complete", () => {
   const routing = waitingOn({ state: "PENDING_OFFICE_DELEGATION", routing_path: null, office_code: "NORTH" }, []);
   assert.equal(routing?.who, "Office Chief");
-  assert.match(routing?.text ?? "", /hand it off to a branch chief, or assign a senior engineer/);
+  assert.match(routing?.text ?? "", /hand it off to a branch chief, or assign a Senior Specialist/);
   assert.doesNotMatch(routing?.text ?? "", /assign the engineer directly/);
 
   assert.equal(waitingOn(baseAssessment, [])?.who, "Branch Chief");
@@ -221,11 +221,11 @@ test("waiting-on names the route's reviewer and the assignee, and is null only w
   const seniorEngineer = { ...staff, assignment_role: "SENIOR_ENGINEER" as const, full_name: "S. Ruiz" };
   assert.equal(
     waitingOn({ ...seniorEngineerAssessment, state: "DRAFT" }, [seniorEngineer])?.who,
-    "Senior Engineer · S. Ruiz",
+    "Senior Specialist · S. Ruiz",
   );
   // Nobody assigned yet: the placeholder names the role of the route.
   assert.equal(waitingOn({ ...baseAssessment, state: "DRAFT" }, [])?.who, "Assigned Staff");
-  assert.equal(waitingOn({ ...seniorEngineerAssessment, state: "DRAFT" }, [])?.who, "Assigned Senior Engineer");
+  assert.equal(waitingOn({ ...seniorEngineerAssessment, state: "DRAFT" }, [])?.who, "Assigned Senior Specialist");
   assert.match(
     waitingOn({ ...baseAssessment, state: "PENDING_ENGINEER_ASSIGNMENT" }, [])?.text ?? "",
     /Assign a Staff member/,
@@ -250,7 +250,7 @@ test("branch review authority is identity bound to the named branch chief", () =
   assert.equal(assessmentPermissions({ ...noRoles, admin: true }, 99, "", baseAssessment).review, true);
 });
 
-test("senior engineer review is office bound with an explicit falsy guard", () => {
+test("Senior Specialist review is office bound with an explicit falsy guard", () => {
   const chief = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "north", seniorEngineerAssessment);
   assert.equal(chief.review, true);
   const wrongOffice = assessmentPermissions({ ...noRoles, officeChief: true }, 3, "WEST", seniorEngineerAssessment);
@@ -316,7 +316,7 @@ test("the office chief has exactly two routing choices, and each closes the othe
   assert.equal(seniorEngineerTaken.delegate, false);
   assert.equal(seniorEngineerTaken.assignSeniorEngineer, true);
 
-  // Re-delegation still works from SUBMITTED; the senior engineer route is closed there.
+  // Re-delegation still works from SUBMITTED; the Senior Specialist route is closed there.
   const submitted = assessmentPermissions(chief, 3, "NORTH", baseAssessment);
   assert.equal(submitted.delegate, true);
   assert.equal(submitted.assignSeniorEngineer, false);
@@ -356,7 +356,7 @@ test("submission id helpers prefer the join list and fall back to the legacy id"
 
 test("a step is yours only when it names you; a power over it is stepping in", () => {
   const seDraft = { ...seniorEngineerAssessment, state: "DRAFT" as const };
-  // The senior engineer the draft is assigned to.
+  // The Senior Specialist the draft is assigned to.
   assert.equal(stepOwnership({ ...noRoles, seniorEngineer: true }, 5, "NORTH", seDraft), "MINE");
   // An administrator and the office chief may act on it, but it is not theirs.
   assert.equal(stepOwnership({ ...noRoles, admin: true }, 99, null, seDraft), "CAN_STEP_IN");
@@ -370,7 +370,7 @@ test("a step is yours only when it names you; a power over it is stepping in", (
 
   assert.equal(stepOwnership({ ...noRoles, branchChief: true }, 8, "NORTH", baseAssessment), "MINE", "the branch chief it was handed to reviews it");
   assert.equal(stepOwnership({ ...noRoles, admin: true }, 99, null, baseAssessment), "CAN_STEP_IN");
-  assert.equal(stepOwnership({ ...noRoles, officeChief: true }, 3, "NORTH", seniorEngineerAssessment), "MINE", "the office chief reviews the senior engineer route");
+  assert.equal(stepOwnership({ ...noRoles, officeChief: true }, 3, "NORTH", seniorEngineerAssessment), "MINE", "the office chief reviews the Senior Specialist route");
 });
 
 test("the record's button names the action it leads to", () => {

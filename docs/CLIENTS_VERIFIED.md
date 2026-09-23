@@ -50,8 +50,8 @@ Source: `mobile/app/(tabs)/_layout.tsx`, `mobile/app/(tabs)/*`, `mobile/src/offl
 
 Current tab behavior:
 
-- `Incidents` tab shown for workflow roles (`MAINTENANCE`, `MAINT_COORDINATOR`, `OFFICE_CHIEF`, `BRANCH_CHIEF`, `FIELD_WORKER`, `ADMIN`)
-- `Drafts` + `Submissions` tabs only for (`FIELD_WORKER`, `REVIEWER`, `ADMIN`)
+- `Incidents` tab shown for every work role (`MAINTENANCE_CREW`, `MAINTENANCE_COORDINATOR`, `OFFICE_CHIEF`, `BRANCH_CHIEF`, `SENIOR_SPECIALIST`, `STAFF`, `ADMIN`); a `GUEST`-only account sees a read-only notice pointing to the web
+- `Drafts` + `Submissions` tabs only for assessment authors (`STAFF`, `SENIOR_SPECIALIST`, `ADMIN`)
 - Mission Center tab removed from active mobile tabs.
 
 Incidents mobile API calls request `scope=mobile` for backend-filtered visibility.

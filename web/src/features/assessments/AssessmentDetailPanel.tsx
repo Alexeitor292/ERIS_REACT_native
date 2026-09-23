@@ -25,7 +25,7 @@ import type { Incident, Submission } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { SubmissionStatusBadge } from "../submissions/SubmissionDetailPrimitives";
 import { buildSubmissionDisplayTitle } from "../../utils/submissionLabel";
-import { canAssignEngineer, canDelegateBranch, isAdmin, isEngineer, isSeniorEngineer } from "../../utils/roleModel";
+import { canAssignEngineer, canDelegateBranch, isAdmin, isSeniorSpecialist, isStaff } from "../../utils/roleModel";
 import PersonPicker from "./PersonPicker";
 import { branchLabelOf, isOutOfBranchChoice, placeLabel, selectedPerson, buildPickerSections } from "./personPickerModel";
 import {
@@ -129,7 +129,7 @@ export function AssessmentStateBadge({ state, routingPath = null, mini = false }
   );
 }
 
-/** The ladder this assessment actually walks — branch, senior engineer, or not yet routed. */
+/** The ladder this assessment actually walks — branch, Senior Specialist, or not yet routed. */
 export function Pipeline({ assessment }: { assessment: Pick<AssessmentDetail["assessment"], "state" | "routing_path"> }) {
   const steps = pipelineFor(assessment);
   const current = pipelineIndex(assessment);
@@ -193,8 +193,8 @@ const ROUTE_CHOICES: Array<{ value: RoutingPath; label: string; consequence: str
   },
   {
     value: "SENIOR_ENGINEER",
-    label: "Assign a senior engineer",
-    consequence: "The senior engineer fills the assessment and returns it to you for approval.",
+    label: "Assign a Senior Specialist",
+    consequence: "The Senior Specialist fills the assessment and returns it to you for approval.",
   },
 ];
 
@@ -231,8 +231,8 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
       admin: isAdmin(roles),
       officeChief: canDelegateBranch(roles),
       branchChief: canAssignEngineer(roles),
-      engineer: isEngineer(roles),
-      seniorEngineer: isSeniorEngineer(roles),
+      engineer: isStaff(roles),
+      seniorEngineer: isSeniorSpecialist(roles),
     }),
     [roles],
   );
@@ -515,15 +515,15 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           <PersonPicker
-                            label="Senior engineer"
-                            placeholder="Select senior engineer…"
+                            label="Senior Specialist"
+                            placeholder="Select Senior Specialist…"
                             groups={seniorEngineerList.groups}
                             items={seniorEngineerList.items}
                             value={seniorEngineerId}
                             onChange={setSeniorEngineerId}
-                            emptyMessage="No senior engineer is recorded for this office."
+                            emptyMessage="No Senior Specialist is recorded for this office."
                           />
-                          <button type="button" disabled={busy || seniorEngineerId == null} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign senior engineer</button>
+                          <button type="button" disabled={busy || seniorEngineerId == null} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign Senior Specialist</button>
                         </div>
                       )}
                     </>

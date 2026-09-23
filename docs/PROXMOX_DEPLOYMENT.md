@@ -103,6 +103,22 @@ docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.p
 
 Skip this step on subsequent deploys — it is needed only once per database.
 
+## 5b) Create the first administrator (new database only)
+
+`database/init` creates the roles and the organization structure, and **no
+accounts**: the development mock accounts (`database/dev/`) are never loaded on a
+server. Create the first administrator with a real work address. The command
+prompts twice for the password (at least 12 characters):
+
+```bash
+docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml \
+  exec backend python -m app.tools.create_admin --email jane.doe@dot.ca.gov --name "Jane Doe"
+```
+
+Add `--sso-only` for an account that will sign in through Entra ID only, once
+that is enabled. Everyone else is added from the admin pages, where their roles
+and org placement are assigned. See [roles-and-identity.md](roles-and-identity.md).
+
 ## 6) Verify
 
 ```bash
@@ -147,6 +163,13 @@ docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.p
 docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml \
   exec backend alembic current
 ```
+
+**The role consolidation (`20260923_roles_consolidated`)** moves every account
+onto the seven roles and the Administrator in one step. The server reads roles
+from the database on every request, so nobody has to sign in again, and every
+retired grant is kept in `role_consolidation_audit`. Ship the matching mobile
+build with it: an older build gates its tabs on the retired codes and hides them
+from every account until it is updated.
 
 ## Notes
 

@@ -1,6 +1,6 @@
 """What a read-only Viewer may see: the approved record, and nothing else.
 
-``CALTRANS_VIEWER`` is a THIRD CATEGORY, not an operational role (design §4.1).
+``GUEST`` is a THIRD CATEGORY, not an operational role (design §4.1).
 ``roles.OPERATIONAL_ROLES`` is a flat, STATE-BLIND switch — ``can_view_submission``
 returns True for every operational user and ``list_submissions`` hands them DRAFT
 rows — so "approved only" cannot be expressed by adding a name to a role list.

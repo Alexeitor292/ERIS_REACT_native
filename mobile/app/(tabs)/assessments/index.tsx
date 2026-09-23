@@ -357,7 +357,7 @@ export default function AssessmentsScreen() {
                       </>
                     )}
                     <Text style={{ color: palette.muted, fontSize: 11 }}>
-                      Only the branch chief (or the office chief on the senior engineer route) can decide this.
+                      Only the branch chief (or the office chief on the Senior Specialist route) can decide this.
                     </Text>
                   </View>
                 )}

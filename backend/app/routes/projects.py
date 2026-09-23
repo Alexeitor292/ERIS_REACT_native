@@ -11,14 +11,14 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import require_roles
-from ..roles import ADMIN, MAINTENANCE_COORDINATOR, OPERATIONAL_ROLES, expand_roles, is_admin
+from ..roles import ADMIN, MAINTENANCE_COORDINATOR, OPERATIONAL_ROLES, is_admin
 from . import event_groups as event_groups_routes
 from . import incidents as incidents_routes
 
 router = APIRouter(tags=["projects"])
 
 PROJECT_READ_ROLES = sorted(OPERATIONAL_ROLES)
-PROJECT_MANAGE_ROLES = sorted(set(expand_roles(MAINTENANCE_COORDINATOR, ADMIN)))
+PROJECT_MANAGE_ROLES = sorted(set([MAINTENANCE_COORDINATOR, ADMIN]))
 
 
 class IncidentProjectAssociationRequest(BaseModel):

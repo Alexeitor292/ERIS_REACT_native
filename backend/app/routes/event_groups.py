@@ -11,13 +11,13 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import require_roles
-from ..roles import ADMIN, MAINTENANCE_COORDINATOR, OPERATIONAL_ROLES, expand_roles, is_admin
+from ..roles import ADMIN, MAINTENANCE_COORDINATOR, OPERATIONAL_ROLES, is_admin
 from . import incidents as incidents_routes
 
 router = APIRouter(tags=["event-groups"])
 
 EVENT_GROUP_READ_ROLES = sorted(OPERATIONAL_ROLES)
-EVENT_GROUP_MANAGE_ROLES = sorted(set(expand_roles(MAINTENANCE_COORDINATOR, ADMIN)))
+EVENT_GROUP_MANAGE_ROLES = sorted(set([MAINTENANCE_COORDINATOR, ADMIN]))
 
 
 class IncidentEventGroupAssociationRequest(BaseModel):

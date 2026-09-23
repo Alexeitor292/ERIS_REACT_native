@@ -16,8 +16,8 @@
 > (migration `20260911_org_model`): the district → GeoTech office map is no
 > longer hard-coded, coordinator coverage is a table rather than a JSON key, and
 > each assessment freezes the office and branch **names** it was routed to. A
-> read-only **Viewer** role (`CALTRANS_VIEWER`) reads approved records and takes
-> part in no workflow step at all. Operator guide:
+> read-only **Guest** role (`GUEST`) reads approved records and takes part in no
+> workflow step at all. Roles as of `20260923_roles_consolidated`; see [roles-and-identity.md](roles-and-identity.md). Operator guide:
 > [org-model.md](org-model.md).
 
 ## Submission Workflow
@@ -175,26 +175,22 @@ Additional target data behavior:
 
 When `scope=mobile`:
 
-- Maintenance reporter sees own incidents.
+- Maintenance Crew member sees own incidents.
 - Coordinator sees district-scoped incidents.
 - Office chief sees office-scoped incidents after coordinator review.
 - Branch chief sees office incidents at branch/`ENGINEER_ASSIGNED`/resolved stages.
-- Staff **and senior engineers** see only incidents assigned to them — both
+- Staff **and Senior Specialists** see only incidents assigned to them — both
   hold the same active `ENGINEER`-stage assignment row.
-- A **Viewer** gets no mobile surface: the Incidents tab renders "ERIS Mobile is
+- A **Guest** gets no mobile surface: the Incidents tab renders "ERIS Mobile is
   for field and office staff. Your account has read-only access — please use ERIS
-  on the web," rather than the empty list a viewer used to land on.
+  on the web," rather than the empty list a guest used to land on.
 
-Every one of those branches now matches **canonical role names as well as legacy
-ones** (`roles.has_canonical_role`). Before the organization model, an account
-holding only `MAINTENANCE_COORDINATOR`, `GEOTECH_OFFICE_CHIEF` or
-`GEOTECH_BRANCH_CHIEF` matched no branch of `_mobile_scope_filters`, fell through
-to `1=0`, and got an **empty feed** — and got no district or office narrowing at
-all on incident detail.
+Each role has exactly one code, and a branch matches only that code; a role
+with no district or office recorded falls through to `1=0` and reads nothing.
 
-## Read-Only Viewer (`CALTRANS_VIEWER`)
+## Guest (`GUEST`, read-only)
 
-A viewer has **no workflow step**: nothing is ever assigned to them, they appear
+A guest has **no workflow step**: nothing is ever assigned to them, they appear
 in no picker and in no notification recipient list, and they hold no authority
 anywhere. What they read is the **approved record** — an assessment in
 `APPROVED` or `FINALIZED`, statewide, whole: incident, assessment, technical
@@ -202,19 +198,19 @@ form, photos, site and history.
 
 - Anything in flight — new, in triage, `DRAFT`, `SUBMITTED`,
   `REVISION_REQUESTED` — answers **404, not 403**, so ids cannot be probed.
-- `GET /assessments?queue=` answers `400 "Viewers have no work queue"`.
+- `GET /assessments?queue=` answers `400 "Guests have no work queue"`.
 - Incidents closed at triage with **no** assessment are not public by default
-  (`PUBLIC_INCLUDES_CLOSED_WITHOUT_ASSESSMENT = False`), so a viewer's incident
+  (`PUBLIC_INCLUDES_CLOSED_WITHOUT_ASSESSMENT = False`), so a guest's incident
   count is legitimately smaller than the operational one.
-- A chief who is *also* granted Viewer keeps full chief access: the narrowing
-  applies only when Viewer is the account's only role.
+- A chief who is *also* granted Guest keeps full chief access: the narrowing
+  applies only when Guest is the account's only role.
 
-Web navigation for a viewer is **one destination plus Settings** — Records,
+Web navigation for a guest is **one destination plus Settings** — Records,
 opening on Incidents. No Home, no queues, no Map, no Terrain, no admin.
 
 ### Target Role Visibility (minimum-screen approach)
 
-- MAINTENANCE: only two tabs
+- MAINTENANCE_CREW: only two tabs
   - Create Incident
   - Track Incidents
 - Other roles should only receive role-specific tabs/actions needed for their step in workflow.

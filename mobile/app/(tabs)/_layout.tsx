@@ -10,11 +10,10 @@ import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
 import {
   canReportIncident,
-  hasRole,
-  isAdmin,
   isAssessmentAuthor,
   isOperationalUser,
   isPublicOnly,
+  isWorkforceUser,
 } from "@/src/utils/roleModel";
 
 export default function TabLayout() {
@@ -49,32 +48,22 @@ export default function TabLayout() {
     };
   }, []);
 
-  const roleSet = useMemo(() => new Set(roles), [roles]);
-  // Every gate below tests CANONICAL names through the alias map. They used to
-  // test the raw legacy strings, so an account seeded by the organization model
-  // — which holds GEOTECH_ENGINEER, not FIELD_WORKER — would lose Create,
-  // Drafts and Submissions the moment org accounts land (design §9.3).
+  // Every gate below tests the role codes through the shared role model, never
+  // a raw string (design §9.3).
   //
-  // A read-only (CALTRANS_VIEWER) account holds no operational role, so it
-  // matches none of these and keeps only the read-only incident feed below.
+  // A read-only (Guest) account holds no operational role, so it matches none
+  // of these and keeps only the read-only incident feed below.
   const publicOnly = rolesLoaded && isPublicOnly(roles);
   const isMaintenanceWorker = canReportIncident(roles);
-  // The senior engineer fills the GISA form exactly as Staff do, so without
-  // these two gates a senior-engineer-only account would see the Assessments
-  // tab and nothing it links to.
-  const canSeeDraftsSubmissions = rolesLoaded && (isAssessmentAuthor(roles) || roleSet.has("REVIEWER"));
+  // The Senior Specialist fills the GISA form exactly as Staff do, so without
+  // these two gates a Senior Specialist would see the Assessments tab and
+  // nothing it links to.
+  const canSeeDraftsSubmissions = rolesLoaded && isAssessmentAuthor(roles);
   // No `!rolesLoaded ||` any more: defaulting to visible flashed the tab into
   // view for an account that must not have it, then emptied it (design §9.1).
   const canSeeIncidents =
     rolesLoaded &&
-    (publicOnly ||
-      isAdmin(roles) ||
-      hasRole(roles, "MAINTENANCE_FIELD_WORKER") ||
-      hasRole(roles, "MAINTENANCE_COORDINATOR") ||
-      hasRole(roles, "GEOTECH_OFFICE_CHIEF") ||
-      hasRole(roles, "GEOTECH_BRANCH_CHIEF") ||
-      hasRole(roles, "GEOTECH_ENGINEER") ||
-      hasRole(roles, "GEOTECH_SENIOR_ENGINEER"));
+    (publicOnly || isWorkforceUser(roles));
   // Assessments are for non-maintenance operational users only.
   const canSeeAssessments = rolesLoaded && isOperationalUser(roles);
 

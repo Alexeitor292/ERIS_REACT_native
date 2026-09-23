@@ -33,7 +33,7 @@ function timestamp(value: string | null | undefined) {
  *    assessments of their own office to review (`office_chief_review`).
  *  - Branch Chief: assessments handed to them that still need an assignee (`branch_chief`), and the
  *    same ones to approve or return once submitted (`branch_chief_review`).
- *  - Staff or Senior Engineer: their own assessments in Draft / Revision
+ *  - Staff or Senior Specialist: their own assessments in Draft / Revision
  *    requested (`assignee` — both routes store the assignee in the same column).
  *  - Admin: every submitted assessment, matching the server's review bypass.
  *
@@ -121,7 +121,7 @@ export default function MyWorkPage() {
 
   // Deep link from an assessment record or its technical form: ?assessment=<id>.
   // The assessment opens even when none of the caller's queues holds it — an
-  // administrator stepping in, an office chief reassigning a senior engineer —
+  // administrator stepping in, an office chief reassigning a Senior Specialist —
   // instead of falling back to whatever sits first in the list.
   const requested = searchParams.get("assessment");
   useEffect(() => {

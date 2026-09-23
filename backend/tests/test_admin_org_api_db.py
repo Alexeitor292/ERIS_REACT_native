@@ -7,7 +7,7 @@ Two rules are load-bearing here, and both are easy to break by accident.
 the argument: the NORTH office chief position is vacant and filled out of class,
 and a SOUTH senior specialist is OOC-covered for eight months, so an admin must
 be able to grant a role that contradicts a stored classification. A save that
-"helpfully" granted GEOTECH_BRANCH_CHIEF because the classification said 3161
+"helpfully" granted BRANCH_CHIEF because the classification said 3161
 (Sup) would be an authority change made by a form field. The test therefore
 compares the account's role rows byte for byte across the save.
 
@@ -69,7 +69,7 @@ def staff_user(client_db, admin_token):
             "email": email,
             "full_name": f"Zzz Org Model Staff {_RUN}",
             "password": "org-model-test-password",
-            "roles": ["GEOTECH_ENGINEER"],
+            "roles": ["STAFF"],
             "metadata": {"office_code": "WEST", "office_location": "West Office"},
         },
         headers=_auth(admin_token),
@@ -107,13 +107,13 @@ class TestClassificationSuggestsAndNeverGrants:
         )
         assert resp.status_code == 200, resp.text
         suggestion = resp.json()["role_suggestion"]
-        assert suggestion["suggested_role"] == "GEOTECH_BRANCH_CHIEF"
+        assert suggestion["suggested_role"] == "BRANCH_CHIEF"
         assert suggestion["matches_granted"] is False
         assert suggestion["rule_kind"] == "CLASS"
         # The whole point of matches_granted: the admin UI renders
         # "Classification 3161 (Sup) suggests Branch Chief — this account holds
         # Staff" and a human decides.
-        assert "GEOTECH_ENGINEER" in suggestion["granted_roles"]
+        assert "STAFF" in suggestion["granted_roles"]
 
         # BYTE-IDENTICAL. Not "still has Staff" — nothing was added, removed or
         # re-keyed.
@@ -128,7 +128,7 @@ class TestClassificationSuggestsAndNeverGrants:
         assert org["job_title"] == "Senior TE (Sup)"
         assert org["source"] == "MANUAL"
         # ...and reading it back suggests the same thing it suggested on save.
-        assert resp.json()["role_suggestion"]["suggested_role"] == "GEOTECH_BRANCH_CHIEF"
+        assert resp.json()["role_suggestion"]["suggested_role"] == "BRANCH_CHIEF"
         assert resp.json()["role_suggestion"]["matches_granted"] is False
 
     @pytest.mark.parametrize("typed", ["(Sup)", "sup", " SUP "])
@@ -142,7 +142,7 @@ class TestClassificationSuggestsAndNeverGrants:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["org"]["classification_marker"] == "SUP"
-        assert resp.json()["role_suggestion"]["suggested_role"] == "GEOTECH_BRANCH_CHIEF"
+        assert resp.json()["role_suggestion"]["suggested_role"] == "BRANCH_CHIEF"
 
     def test_the_marker_is_read_out_of_the_job_title_when_the_field_is_empty(
         self, client_db, admin_token, staff_user
@@ -162,17 +162,15 @@ class TestClassificationSuggestsAndNeverGrants:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["org"]["classification_marker"] is None
-        assert resp.json()["role_suggestion"]["suggested_role"] == "GEOTECH_BRANCH_CHIEF"
+        assert resp.json()["role_suggestion"]["suggested_role"] == "BRANCH_CHIEF"
 
     def test_matches_granted_is_true_when_the_account_holds_the_suggested_role(
         self, client_db, admin_token
     ):
-        # branchchief@local holds the LEGACY name BRANCH_CHIEF. The comparison
-        # goes through ROLE_ALIASES, so a legacy grant satisfies a canonical
-        # suggestion — otherwise every pre-org-model account would read as
-        # "does not match" forever.
+        # mock.branch.chief@dot.ca.gov holds BRANCH_CHIEF, the very code the
+        # classification suggests — one code per role, so a plain comparison.
         user_id = int(
-            _rows("SELECT id FROM users WHERE email = 'branchchief@local'")[0]["id"]
+            _rows("SELECT id FROM users WHERE email = 'mock.branch.chief@dot.ca.gov'")[0]["id"]
         )
         before = _role_rows(user_id)
         current = client_db.get(f"/admin/users/{user_id}/org", headers=_auth(admin_token)).json()["org"]
@@ -184,7 +182,7 @@ class TestClassificationSuggestsAndNeverGrants:
             )
             assert resp.status_code == 200, resp.text
             suggestion = resp.json()["role_suggestion"]
-            assert suggestion["suggested_role"] == "GEOTECH_BRANCH_CHIEF"
+            assert suggestion["suggested_role"] == "BRANCH_CHIEF"
             assert suggestion["matches_granted"] is True
             assert _role_rows(user_id) == before
         finally:
@@ -296,6 +294,48 @@ class TestUserOrgRecord:
         )[0]["office_location"]
         assert location == "West Office"
 
+    def test_removing_someone_from_their_office_takes_the_office_away(
+        self, client_db, admin_token, staff_user, offices
+    ):
+        # A NULL profile office falls back to the mirror, so a mirror that kept
+        # the old office would hand it straight back: the person would keep that
+        # office's cases, pickers and review scope after an admin removed them.
+        from app.db import SessionLocal
+        from app.services import org_directory
+
+        placed = client_db.put(
+            f"/admin/users/{staff_user['id']}/org",
+            json={"office_id": int(offices["SOUTH"]["id"]), "home_district": "07"},
+            headers=_auth(admin_token),
+        )
+        assert placed.status_code == 200, placed.text
+        try:
+            cleared = client_db.put(
+                f"/admin/users/{staff_user['id']}/org",
+                json={"office_id": None, "home_district": None},
+                headers=_auth(admin_token),
+            )
+            assert cleared.status_code == 200, cleared.text
+            db = SessionLocal()
+            try:
+                org = org_directory.resolve_user_org(db, staff_user["id"], use_cache=False)
+            finally:
+                db.close()
+            assert org["office_id"] is None and org["office_code"] is None
+            assert org["home_district"] is None
+            mirrored = _rows(
+                "SELECT JSON_VALUE(metadata_json, '$.office_code') AS office_code, "
+                "JSON_VALUE(metadata_json, '$.district') AS district FROM users WHERE id = :uid",
+                {"uid": staff_user["id"]},
+            )[0]
+            assert mirrored == {"office_code": None, "district": None}
+        finally:
+            client_db.put(
+                f"/admin/users/{staff_user['id']}/org",
+                json={"office_id": int(offices["WEST"]["id"]), "home_district": None},
+                headers=_auth(admin_token),
+            )
+
     def test_availability_is_recorded_with_its_dates(self, client_db, admin_token, staff_user):
         resp = client_db.put(
             f"/admin/users/{staff_user['id']}/org",
@@ -320,7 +360,7 @@ class TestUserOrgRecord:
         ).status_code == 404
 
     def test_only_admins_may_read_or_write_an_org_record(self, client_db, staff_user):
-        for email in ("officechief@local", "engineer@local"):
+        for email in ("mock.office.chief@dot.ca.gov", "mock.staff@dot.ca.gov"):
             token = client_db.post(
                 "/auth/login", json={"email": email, "password": "password"}
             ).json()["access_token"]
@@ -525,11 +565,11 @@ class TestClassificationAdmin:
         try:
             resp = client_db.put(
                 f"/admin/org/classifications/{rule['id']}",
-                json={"eris_role": "GEOTECH_ENGINEER"},
+                json={"eris_role": "STAFF"},
                 headers=_auth(admin_token),
             )
             assert resp.status_code == 200, resp.text
-            assert resp.json()["classification"]["eris_role"] == "GEOTECH_ENGINEER"
+            assert resp.json()["classification"]["eris_role"] == "STAFF"
         finally:
             client_db.put(
                 f"/admin/org/classifications/{rule['id']}",

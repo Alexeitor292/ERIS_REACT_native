@@ -21,8 +21,8 @@ all, eleven of them writes. The exhaustive class at the bottom of this module
 walks the LIVE route table and refuses to let that be true again: every route not
 on the reviewed allow list is called as a viewer and must be refused.
 
-Requires a live MariaDB at Alembic head with database/init/020_seed.sql applied
-(the org model adds viewer@local). Run with: pytest -m db
+Requires a live MariaDB at Alembic head with database/dev/030_mock_accounts.sql
+loaded. Run with: pytest -m db
 """
 
 from __future__ import annotations
@@ -69,9 +69,9 @@ def tokens(client_db, admin_token, viewer_token):
     return {
         "admin": admin_token,
         "viewer": viewer_token,
-        "officechief": _login(client_db, "officechief@local"),
-        "branchchief": _login(client_db, "branchchief@local"),
-        "engineer": _login(client_db, "engineer@local"),
+        "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
+        "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
+        "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
     }
 
 
@@ -476,7 +476,7 @@ class TestAViewerHasNoQueue:
         # 400, not 403: the parameter is MEANINGLESS for this account, not
         # forbidden for this record.
         assert resp.status_code == 400, f"{queue}: {resp.status_code} {resp.text}"
-        assert resp.json()["detail"] == "Viewers have no work queue"
+        assert resp.json()["detail"] == "Guests have no work queue"
 
     def test_the_refusal_comes_before_any_other_filter(self, client_db, tokens):
         resp = client_db.get(
@@ -484,7 +484,7 @@ class TestAViewerHasNoQueue:
             headers=_auth(tokens["viewer"]),
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["detail"] == "Viewers have no work queue"
+        assert resp.json()["detail"] == "Guests have no work queue"
 
     def test_asking_for_a_non_public_state_returns_nothing_rather_than_the_rows(
         self, client_db, tokens, in_flight
@@ -506,7 +506,7 @@ class TestAViewerIsNeverNotified:
         The mechanism, written down so a later recipient query cannot quietly
         break it: every recipient list resolves through ``_routing_users_for``,
         whose candidate roles come from ``_ROUTING_ROLE_NAMES`` — coordinator,
-        office chief, branch chief, senior engineer — and none of them is the
+        office chief, branch chief, Senior Specialist — and none of them is the
         viewer. ``_approval_coordinator_recipients`` adds only the triaging
         coordinator's own id.
         """
@@ -569,7 +569,7 @@ class TestViewerCombinesRatherThanNarrows:
                 "email": email,
                 "full_name": f"Zzz Chief And Viewer {_RUN}",
                 "password": "org-model-test-password",
-                "roles": ["GEOTECH_OFFICE_CHIEF", "CALTRANS_VIEWER"],
+                "roles": ["OFFICE_CHIEF", "GUEST"],
                 "metadata": {"office_code": "WEST", "office_location": "West Office"},
             },
             headers=_auth(tokens["admin"]),
@@ -580,8 +580,8 @@ class TestViewerCombinesRatherThanNarrows:
         client_db.patch(
             f"/admin/users/{user_id}", json={"is_active": False}, headers=_auth(tokens["admin"])
         )
-        # The grant goes too: viewer@local is meant to be the only account
-        # holding CALTRANS_VIEWER, and test_seed_shape_db.py says so.
+        # The grant goes too: mock.guest@dot.ca.gov is meant to be the only account
+        # holding GUEST, and test_seed_shape_db.py says so.
         _exec("DELETE FROM user_roles WHERE user_id = :uid", {"uid": user_id})
 
     def test_they_still_read_work_in_flight(self, client_db, chief_plus_viewer, in_flight):
@@ -617,7 +617,7 @@ class TestViewerCombinesRatherThanNarrows:
 
 
 def _names_the_viewer(route: APIRoute) -> bool:
-    """True when the route's own ``require_roles`` list admits CALTRANS_VIEWER.
+    """True when the route's own ``require_roles`` list admits GUEST.
 
     Design §4.5's allow table has two halves and this is the second one: these
     routes DO carry a role list, the viewer's name is in it, and the row set is
@@ -629,7 +629,7 @@ def _names_the_viewer(route: APIRoute) -> bool:
         dependency = stack.pop()
         for cell in getattr(dependency.call, "__closure__", None) or ():
             contents = cell.cell_contents
-            if isinstance(contents, (list, set, tuple)) and "CALTRANS_VIEWER" in {
+            if isinstance(contents, (list, set, tuple)) and "GUEST" in {
                 str(value) for value in contents
             }:
                 return True

@@ -27,15 +27,13 @@ Source files:
 
 ## ArcGIS Runtime Config
 
-- `GET /arcgis/runtime-config`
-  (`MAINTENANCE|FIELD_WORKER|MAINT_COORDINATOR|OFFICE_CHIEF|BRANCH_CHIEF|REVIEWER|GEOTECH_SENIOR_ENGINEER|ADMIN`)
-  — the literal list does not consult `OPERATIONAL_ROLES`, so
-  `GEOTECH_SENIOR_ENGINEER` is enumerated by hand; without it a
-  senior-engineer-only account cannot load the map or the 3D terrain.
+- `GET /arcgis/runtime-config` (every role) — the guest included, because the
+  base map is what renders an approved record's location; the config grants no
+  data by itself.
 
 ## Organization APIs
 
-- `GET /org/offices` (any authenticated account, viewer included) — offices and
+- `GET /org/offices` (any authenticated account, guest included) — offices and
   their branches for **labels only**: no personnel, no counts.
 - `GET /org/districts/{district}/office` — table-backed resolution with a
   `source` of `routing_table` | `legacy_fallback` | `none`.
@@ -79,19 +77,21 @@ Contractual, and asserted by `tests/test_pickers_db.py`:
 - `availability` is returned for rendering and is **never** used to filter or
   reorder.
 
-## Read-only Viewer (`CALTRANS_VIEWER`)
+## Guest (`GUEST`, read-only)
+
+Roles as of `20260923_roles_consolidated`; see [roles-and-identity.md](roles-and-identity.md).
 
 A third role category, deliberately outside `OPERATIONAL_ROLES` (that set is
-state-blind and would hand a viewer every DRAFT). An account whose ONLY role is
-`CALTRANS_VIEWER` reads the **approved record** — an assessment in `APPROVED` or
+state-blind and would hand a guest every DRAFT). An account whose ONLY role is
+`GUEST` reads the **approved record** — an assessment in `APPROVED` or
 `FINALIZED`, statewide, whole: incident, assessment, technical form, photos,
 site, history — and nothing else. A non-public record answers **404, not 403**,
 so ids cannot be probed; `/assessments?queue=` answers
-`400 "Viewers have no work queue"`. Every route carries `require_roles`,
+`400 "Guests have no work queue"`. Every route carries `require_roles`,
 `deny_public_only`, or an entry in
 `services/public_visibility.VIEWER_READABLE_ROUTES` naming the in-body
 predicate; `tests/test_route_guards.py` walks the live route table to keep that
-true. A chief who ALSO holds `CALTRANS_VIEWER` keeps full chief access.
+true. A chief who ALSO holds `GUEST` keeps full chief access.
 
 ## Terrain Cross Sections (`/terrain-cross-sections/*`)
 
@@ -126,17 +126,14 @@ being logged in.
   one Submit per piece of work. Unlinked legacy submissions are unchanged.
 - `POST /submissions/{submission_id}/review` — **`409` when the form is attached
   to an assessment**, pointing at `POST /assessments/{aid}/review`; otherwise
-  **admin only**. The legacy `REVIEWER` account role no longer decides anything
-  here.
+  **admin only**.
 - `POST /submissions/{submission_id}/approve` — as above
 - `POST /submissions/{submission_id}/reject` — as above
 
 The GISA write guards (`POST /submissions`, title/geometry/gisa/incident-types/
 actions patches, delete, share/unshare, permissions, notify-coordinator, submit)
-use `GISA_AUTHOR_ROLES` = `ADMIN|FIELD_WORKER|GEOTECH_ENGINEER|GEOTECH_SENIOR_ENGINEER`
-instead of the old literal `FIELD_WORKER|ADMIN`. This lets a senior engineer
-fill the form and unblocks accounts holding only the canonical
-`GEOTECH_ENGINEER` name.
+use `GISA_AUTHOR_ROLES` = `STAFF|SENIOR_SPECIALIST|ADMIN`: the two roles that
+fill a technical assessment, and the administrator.
 
 ## Attachment APIs
 
@@ -238,23 +235,20 @@ now `org_coordinator_coverage`, edited through `/admin/org/coverage`:
 ## Mobile-Scoped Filtering
 
 `/incidents` and `/mission-center/incidents` support `scope=mobile` and apply
-role-based filtering in backend. Every branch below now matches **canonical role
-names as well as legacy ones** (`roles.has_canonical_role`) — before the
-organization model, only the Staff/senior-engineer branch did, so an account
-holding just `MAINTENANCE_COORDINATOR`, `GEOTECH_OFFICE_CHIEF` or
-`GEOTECH_BRANCH_CHIEF` fell through to `1=0` and got an empty feed.
-`_ensure_incident_scope_access` had the same defect and the same fix:
+role-based filtering in backend (`_mobile_scope_filters`; incident detail
+applies the same narrowing in `_ensure_incident_scope_access`). Several roles
+union rather than override, and a role with no district or office recorded
+reads nothing:
 
-- `MAINT_COORDINATOR`: district-scoped incidents (from `org_coordinator_coverage`)
+- `MAINTENANCE_COORDINATOR`: district-scoped incidents (from `org_coordinator_coverage`)
 - `OFFICE_CHIEF`: office incidents not at coordinator-review stage
 - `BRANCH_CHIEF`: office incidents at branch/`ENGINEER_ASSIGNED`/resolved stages
-- `FIELD_WORKER` / `GEOTECH_ENGINEER` / `GEOTECH_SENIOR_ENGINEER`: only
-  incidents where an `ENGINEER`-stage assignment is active for the user. The
-  senior engineer holds the same assignment row a Staff member would, so only
-  the role guard in front of the `EXISTS` had to widen.
-- `MAINTENANCE`: incidents reported by user
-- `CALTRANS_VIEWER` (only role): no mobile surface — the mobile client shows a
-  read-only notice instead of a feed
+- `STAFF` / `SENIOR_SPECIALIST`: only incidents where an `ENGINEER`-stage
+  assignment is active for the user. The Senior Specialist holds the same
+  assignment row a Staff member would.
+- `MAINTENANCE_CREW`: incidents reported by user
+- `GUEST` (only role): no mobile surface — the mobile client shows a read-only
+  notice instead of a feed
 - `ADMIN`: unrestricted
 
 ## Dev API (only when `ENV=dev`)

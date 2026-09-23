@@ -14,18 +14,20 @@ from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_roles
 from ..roles import (
-    CALTRANS_VIEWER,
-    GEOTECH_BRANCH_CHIEF,
-    GEOTECH_ENGINEER,
-    GEOTECH_OFFICE_CHIEF,
-    GEOTECH_SENIOR_ENGINEER,
+    ADMIN,
+    ALL_ROLE_NAMES,
+    FIELD_REPORTING_ROLES,
+    GUEST,
+    BRANCH_CHIEF,
+    STAFF,
+    OFFICE_CHIEF,
+    SENIOR_SPECIALIST,
     GISA_AUTHOR_ROLES,
     MAINTENANCE_COORDINATOR,
-    MAINTENANCE_FIELD_WORKER,
+    MAINTENANCE_CREW,
     MAINTENANCE_REPORTING_ROLES,
     OPERATIONAL_ROLES,
-    expand_roles,
-    has_canonical_role,
+    has_role,
     is_maintenance_only,
     is_public_only,
 )
@@ -56,15 +58,15 @@ router = APIRouter(tags=["incidents"])
 # admin-editable org_office_districts rows and keeps the legacy constant as its
 # documented fallback (design §13.5).
 # Who may read a field report's evidence. Built from the role sets rather than
-# spelled out, so an account holding only a canonical name (GEOTECH_OFFICE_CHIEF
+# spelled out, so an account holding only a canonical name (OFFICE_CHIEF
 # rather than the legacy OFFICE_CHIEF) is not silently locked out the way the
-# hand-written lists elsewhere in this module lock it out. CALTRANS_VIEWER is in
+# hand-written lists elsewhere in this module lock it out. GUEST is in
 # the list because the owner made the ENTIRE approved record public, photos
 # included (org model decision 4); the handler narrows a viewer to approved
 # records with public_visibility.ensure_public_incident, exactly as the incident
 # detail endpoint does.
 INCIDENT_EVIDENCE_READ_ROLES: list[str] = sorted(
-    OPERATIONAL_ROLES | MAINTENANCE_REPORTING_ROLES | {CALTRANS_VIEWER}
+    OPERATIONAL_ROLES | MAINTENANCE_REPORTING_ROLES | {GUEST}
 )
 
 REVISION_FIELDS_ALLOWED = {
@@ -470,13 +472,13 @@ def _location_timeline(
 
 # Routing lookups match the canonical role name AND its legacy alias. Matching
 # only the legacy name (the pre-v2 behaviour) made a user who holds just
-# MAINTENANCE_COORDINATOR or GEOTECH_OFFICE_CHIEF invisible to routing and to
+# MAINTENANCE_COORDINATOR or OFFICE_CHIEF invisible to routing and to
 # every notification it drives. SENIOR_ENGINEER has no legacy alias.
 _ROUTING_ROLE_NAMES: dict[str, list[str]] = {
-    "DISTRICT_COORDINATOR": expand_roles(MAINTENANCE_COORDINATOR),
-    "OFFICE_CHIEF": expand_roles(GEOTECH_OFFICE_CHIEF),
-    "BRANCH_CHIEF": expand_roles(GEOTECH_BRANCH_CHIEF),
-    "SENIOR_ENGINEER": expand_roles(GEOTECH_SENIOR_ENGINEER),
+    "DISTRICT_COORDINATOR": [MAINTENANCE_COORDINATOR],
+    "OFFICE_CHIEF": [OFFICE_CHIEF],
+    "BRANCH_CHIEF": [BRANCH_CHIEF],
+    "SENIOR_ENGINEER": [SENIOR_SPECIALIST],
 }
 
 
@@ -956,23 +958,23 @@ def _ensure_incident_office_access(user: dict, office_code: str | None, *, db: S
 def _ensure_incident_scope_access(user: dict, incident_row: dict, *, db: Session | None = None) -> None:
     """Narrow incident detail to the caller's district or office.
 
-    The role tests are CANONICAL (``has_canonical_role``), not the raw legacy
+    The role tests are CANONICAL (``has_role``), not the raw legacy
     strings they used to be. An account holding only ``MAINTENANCE_COORDINATOR``,
-    ``GEOTECH_OFFICE_CHIEF`` or ``GEOTECH_BRANCH_CHIEF`` — which is what the org
+    ``OFFICE_CHIEF`` or ``BRANCH_CHIEF`` — which is what the org
     model and every new deployment issue — matched none of the old strings and
     therefore got NO narrowing at all: the reverse of the intended bug, an
     unscoped read rather than a refusal (design §5, B20).
     """
     if "ADMIN" in set(user.get("roles") or []):
         return
-    # Maintenance field workers may only read their own reports.
+    # Maintenance Crew members may only read their own reports.
     if is_maintenance_only(user):
         if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):
             raise HTTPException(status_code=403, detail="You can only view your own incident reports")
         return
-    if has_canonical_role(user, MAINTENANCE_COORDINATOR):
+    if has_role(user, MAINTENANCE_COORDINATOR):
         _ensure_incident_district_access(user, incident_row.get("district"), db=db)
-    if has_canonical_role(user, GEOTECH_OFFICE_CHIEF) or has_canonical_role(user, GEOTECH_BRANCH_CHIEF):
+    if has_role(user, OFFICE_CHIEF) or has_role(user, BRANCH_CHIEF):
         office_code = incident_row.get("office_code")
         if not office_code and db is not None:
             office_code = org_directory.office_for_district(db, incident_row.get("district"))
@@ -1178,7 +1180,7 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
     params: dict[str, object] = {"mobile_uid": uid}
     org = org_directory.resolve_user_org(db, user)
 
-    if has_canonical_role(user, MAINTENANCE_COORDINATOR):
+    if has_role(user, MAINTENANCE_COORDINATOR):
         district_code = _normalized_district_code(org.get("home_district"))
         if district_code:
             params["coord_district"] = district_code
@@ -1192,7 +1194,7 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
                 "))"
             )
 
-    if has_canonical_role(user, GEOTECH_OFFICE_CHIEF):
+    if has_role(user, OFFICE_CHIEF):
         office_code = normalize_office_code(org.get("office_code"))
         if office_code:
             params["office_chief_office"] = office_code
@@ -1200,7 +1202,7 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
                 "(i.office_code = :office_chief_office AND i.location_id IS NOT NULL AND i.current_stage IN ('OFFICE_CHIEF_REVIEW','BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
             )
 
-    if has_canonical_role(user, GEOTECH_BRANCH_CHIEF):
+    if has_role(user, BRANCH_CHIEF):
         office_code = normalize_office_code(org.get("office_code"))
         if office_code:
             params["branch_chief_office"] = office_code
@@ -1208,17 +1210,17 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
                 "(i.office_code = :branch_chief_office AND i.location_id IS NOT NULL AND i.current_stage IN ('BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
             )
 
-    # The senior engineer holds the SAME active ENGINEER-stage assignment row as
-    # a Staff member does (the senior engineer route reuses stage ENGINEER), so
+    # The Senior Specialist holds the SAME active ENGINEER-stage assignment row as
+    # a Staff member does (the Senior Specialist route reuses stage ENGINEER), so
     # the EXISTS below is correct for them unchanged — only the role guard in
     # front of it has to widen, or a senior-engineer-only account sees no
     # incidents at all.
-    if has_canonical_role(user, GEOTECH_ENGINEER) or has_canonical_role(user, GEOTECH_SENIOR_ENGINEER):
+    if has_role(user, STAFF) or has_role(user, SENIOR_SPECIALIST):
         role_filters.append(
             "EXISTS (SELECT 1 FROM incident_assignments ia WHERE ia.incident_id = i.id AND ia.assignment_stage = 'ENGINEER' AND ia.is_active = 1 AND ia.assignee_user_id = :mobile_uid)"
         )
 
-    if has_canonical_role(user, MAINTENANCE_FIELD_WORKER):
+    if has_role(user, MAINTENANCE_CREW):
         role_filters.append("i.reporter_user_id = :mobile_uid")
 
     if not role_filters:
@@ -1618,7 +1620,7 @@ def _notify_coordinator_engineer_assigned(*, db: Session, incident_id: int) -> N
 def create_incident(
     payload: IncidentCreate,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     title = (payload.title or "").strip() or None
     district = _normalize_text(payload.district)
@@ -1718,7 +1720,7 @@ def list_incident_location_candidates(
     incident_id: int = Path(..., ge=1),
     limit: int = Query(default=8, ge=1, le=20),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -1753,7 +1755,7 @@ def get_incident_location_timeline(
     # endpoint returns every incident at a site regardless of state, so the role
     # alone would hand a viewer exactly the in-flight work the rest of §4.5
     # hides (design §4.5).
-    user=Depends(require_roles(["MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", CALTRANS_VIEWER, "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, OFFICE_CHIEF, BRANCH_CHIEF, GUEST, ADMIN])),
 ):
     return _location_timeline(
         db=db,
@@ -1768,7 +1770,7 @@ def link_incident_location(
     payload: IncidentLocationLinkRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -1853,7 +1855,7 @@ def coordinator_request_revision(
     payload: IncidentRequestRevision,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -1907,7 +1909,7 @@ def maintenance_resubmit_incident(
     payload: IncidentCreate,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -2058,12 +2060,12 @@ def list_incidents(
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
     # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
-    # so GEOTECH_SENIOR_ENGINEER has to be added by hand: without it a
+    # so SENIOR_SPECIALIST has to be added by hand: without it a
     # senior-engineer-only account is 403'd from the incident behind their own
-    # assessment. CALTRANS_VIEWER is here for the opposite reason — it is NOT an
+    # assessment. GUEST is here for the opposite reason — it is NOT an
     # operational role — and the row predicate below is what makes the addition
     # safe (design §4.5).
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_ENGINEER", CALTRANS_VIEWER, "ADMIN"])),
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     params: dict[str, object] = {"limit": limit}
     where_parts: list[str] = []
@@ -2082,7 +2084,7 @@ def list_incidents(
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
-    # Broad visibility, narrow authority: maintenance field workers are scoped
+    # Broad visibility, narrow authority: Maintenance Crew members are scoped
     # to their OWN reports server-side regardless of the requested scope. This
     # is enforced here (not only in the mobile filter) so the WebUI cannot be
     # used to enumerate statewide incidents.
@@ -2143,12 +2145,12 @@ def get_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
-    # so GEOTECH_SENIOR_ENGINEER has to be added by hand: without it a
+    # so SENIOR_SPECIALIST has to be added by hand: without it a
     # senior-engineer-only account is 403'd from the incident behind their own
-    # assessment. CALTRANS_VIEWER is here for the opposite reason — it is NOT an
+    # assessment. GUEST is here for the opposite reason — it is NOT an
     # operational role — and ensure_public_incident below is what makes the
     # addition safe (design §4.5).
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_ENGINEER", CALTRANS_VIEWER, "ADMIN"])),
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     row = _incident_with_assignment(db, incident_id)
     if not row:
@@ -2165,7 +2167,7 @@ def get_incident(
 def claim_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     raise HTTPException(status_code=409, detail="Claim is disabled. Incidents must follow coordinator/office/branch workflow.")
 
@@ -2192,7 +2194,7 @@ def assign_incident(
             detail="Choose or create a Project for this Incident before engineering assignment.",
         )
     # Admin recovery tool, but never a way around the routing decision: on the
-    # senior engineer route the assignee is a senior engineer chosen by the
+    # Senior Specialist route the assignee is a Senior Specialist chosen by the
     # office chief, and dropping a Staff member into the incident's ENGINEER
     # stage here would contradict the assessment and trip the route-aware
     # eligibility trigger with a database message instead of an explanation
@@ -2210,7 +2212,7 @@ def assign_incident(
     if senior_engineer_route:
         raise HTTPException(
             status_code=409,
-            detail="This incident's assessment was assigned to a senior engineer",
+            detail="This incident's assessment was assigned to a Senior Specialist",
         )
 
     try:
@@ -2237,7 +2239,7 @@ def coordinator_forward_incident(
     payload: IncidentCoordinatorForwardRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -2320,7 +2322,7 @@ def coordinator_forward_incident(
 def office_chief_branch_options(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["OFFICE_CHIEF", "ADMIN"])),
+    user=Depends(require_roles([OFFICE_CHIEF, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -2365,7 +2367,7 @@ def office_chief_assign_branch(
     payload: IncidentAssignBranchChiefRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["OFFICE_CHIEF", "ADMIN"])),
+    user=Depends(require_roles([OFFICE_CHIEF, ADMIN])),
 ):
     """410 Gone — hand off on the assessment (design §5.3)."""
     raise HTTPException(status_code=410, detail=_LEGACY_ROUTING_RETIRED_DETAIL)
@@ -2376,7 +2378,7 @@ def branch_chief_assign_engineer(
     payload: IncidentAssignEngineerRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["BRANCH_CHIEF", "ADMIN"])),
+    user=Depends(require_roles([BRANCH_CHIEF, ADMIN])),
 ):
     """410 Gone — assign the Staff member on the assessment (design §5.3)."""
     raise HTTPException(status_code=410, detail=_LEGACY_ROUTING_RETIRED_DETAIL)
@@ -2475,9 +2477,9 @@ def resolve_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     # The real gate is the identity check below (assignee_user_id == user.id).
-    # On the senior engineer route the senior engineer IS the incident's active
-    # ENGINEER-stage assignee, so a literal ["FIELD_WORKER", "ADMIN"] would 403
-    # them before that check ever ran. Resolution policy is unchanged: it stays
+    # On the Senior Specialist route the Senior Specialist IS the incident's active
+    # ENGINEER-stage assignee, so a Staff-only guard would 403 them before that
+    # check ever ran. Resolution policy is unchanged: it stays
     # with the assignee.
     user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
@@ -2488,7 +2490,7 @@ def resolve_incident(
     if not ("ADMIN" in set(user["roles"]) or (assignee_user_id is not None and int(assignee_user_id) == int(user["id"]))):
         raise HTTPException(
             status_code=403,
-            detail="Only the assignee (Staff or senior engineer) or admin can resolve",
+            detail="Only the assignee (Staff or Senior Specialist) or admin can resolve",
         )
     try:
         db.execute(
@@ -2532,11 +2534,11 @@ def mission_center_incident_feed(
     scope: str | None = Query(default=None),
     db: Session = Depends(get_db),
     # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
-    # so GEOTECH_SENIOR_ENGINEER has to be added by hand: without it a
+    # so SENIOR_SPECIALIST has to be added by hand: without it a
     # senior-engineer-only account is 403'd from the incident behind their own
-    # assessment. CALTRANS_VIEWER carries the same public row predicate as
+    # assessment. GUEST carries the same public row predicate as
     # GET /incidents (design §4.5).
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_ENGINEER", CALTRANS_VIEWER, "ADMIN"])),
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     where_parts: list[str] = []
     params: dict[str, object] = {}
@@ -2545,7 +2547,7 @@ def mission_center_incident_feed(
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
-    # Maintenance field workers only ever see their own reports (server-side).
+    # Maintenance Crew members only ever see their own reports (server-side).
     if is_maintenance_only(user):
         where_parts.append("i.reporter_user_id = :self_uid")
         params["self_uid"] = int(user["id"])
@@ -2688,7 +2690,7 @@ async def upload_incident_attachment(
     file: UploadFile = File(...),
     kind: str = Query(default="PHOTO", max_length=16),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     incident = db.execute(
         text(

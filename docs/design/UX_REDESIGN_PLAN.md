@@ -1,4 +1,10 @@
 # ERIS UI/UX Redesign Plan
+
+> **Role codes.** This document predates `20260923_roles_consolidated` and uses the
+> role codes of its time (`GEOTECH_*`, `CALTRANS_VIEWER`, "senior engineer", ...).
+> The current roles, and how each retired code maps to one, are in
+> [../roles-and-identity.md](../roles-and-identity.md).
+
 **Caltrans Emergency Response Information System — web client** · v1.1 final (revised against the build-readiness critique) · **+ organization-model addendum** (the Viewer persona in §4, the Viewer row in §5.4, the office/branch snapshot in §7.5, §7.22 Admin — Organization, the vocabulary rows and two-name rule in §9.1, B7 and B17–B21 in §11, and open questions 6 and 14–16 in §13 — all from [`docs/org-model.md`](../org-model.md) and its design)
 Synthesised from four design proposals, three direction-neutral specs and four judge reviews, grounded in live DOM measurements of `main @ 727024e`. Every code claim in this document names the file and line it came from.
 

@@ -7,13 +7,13 @@ decision 6). That leaves a demo with an empty picker: correct, and useless for
 showing anyone what the org model does.
 
 This script fills that gap with people who plainly do not exist. Every account is
-at ``@example.invalid`` (RFC 2606 reserves ``.invalid``, so the address can never
-be delivered anywhere), every name is unambiguously invented, every position
-number uses the reserved ``9xx`` sequence so it cannot collide with a real one,
-and every profile row carries ``source = 'MANUAL'`` and ``notes = 'demo'`` so one
-DELETE finds them all:
+a mock address, ``mock.demo.<name>@dot.ca.gov`` — the ``mock.`` prefix is what
+keeps the notification service from ever handing one to a live relay — every
+name is unambiguously invented, every position number uses the reserved ``9xx``
+sequence so it cannot collide with a real one, and every profile row carries
+``source = 'MANUAL'`` and ``notes = 'demo'`` so one DELETE finds them all:
 
-    DELETE FROM users WHERE email LIKE '%@example.invalid';
+    DELETE FROM users WHERE email LIKE 'mock.demo.%@dot.ca.gov';
 
 Two guards, both deliberate: the flag has to be typed out in full, and the script
 refuses outright when ``ENV`` is ``production``. It is idempotent — an account
@@ -27,8 +27,8 @@ Usage, from ``backend/``::
     python scripts/seed_demo_org_roster.py --remove --i-understand-this-is-demo-data
 
 The roster follows the design's enumeration (design §10): four office chiefs, six
-branch chiefs, four senior specialists, eight Staff, one coordinator per WEST
-district, one maintenance field reporter and one viewer. That is 27 accounts —
+branch chiefs, four Senior Specialists, eight Staff, one coordinator per WEST
+district, one Maintenance Crew member and one Guest. That is 27 accounts —
 the design's summary line says "twenty-four", which does not match its own
 enumeration; the enumeration is what is implemented here, and the count is
 printed at the end so nobody has to guess.
@@ -49,20 +49,20 @@ from app.auth import hash_password  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
 from app.roles import (  # noqa: E402
-    ADMIN,
-    GEOTECH_BRANCH_CHIEF,
-    GEOTECH_ENGINEER,
-    GEOTECH_OFFICE_CHIEF,
-    GEOTECH_SENIOR_ENGINEER,
+    BRANCH_CHIEF,
+    GUEST,
     MAINTENANCE_COORDINATOR,
-    MAINTENANCE_FIELD_WORKER,
+    MAINTENANCE_CREW,
+    OFFICE_CHIEF,
+    SENIOR_SPECIALIST,
+    STAFF,
 )
 from app.services import org_directory  # noqa: E402
 from app.user_metadata import user_metadata_json  # noqa: E402
 
-DEMO_DOMAIN = "example.invalid"
+DEMO_DOMAIN = "dot.ca.gov"
+DEMO_PREFIX = "mock.demo."
 DEMO_NOTE = "demo"
-CALTRANS_VIEWER = "CALTRANS_VIEWER"
 
 # name, role, office code, branch letter (None = no branch), home city,
 # home district, classification code, marker, level, position sequence (9xx)
@@ -73,44 +73,44 @@ CALTRANS_VIEWER = "CALTRANS_VIEWER"
 # reproducing anything from them.
 _ROSTER: list[tuple] = [
     # -- Office chiefs: 3155 Supervising TE, level M09 -----------------------
-    ("Ada Kessler", GEOTECH_OFFICE_CHIEF, "WEST", None, "Oakland", "04", "3155", None, "M09", 901),
-    ("Bo Nakamura", GEOTECH_OFFICE_CHIEF, "NORTH", None, "Sacramento", None, "3155", None, "M09", 902),
-    ("Cleo Ferrand", GEOTECH_OFFICE_CHIEF, "SOUTH", None, "Los Angeles", "07", "3155", None, "M09", 903),
-    ("Dov Ilyushin", GEOTECH_OFFICE_CHIEF, "POLICY", None, "Sacramento", None, "3155", None, "M09", 904),
+    ("Ada Kessler", OFFICE_CHIEF, "WEST", None, "Oakland", "04", "3155", None, "M09", 901),
+    ("Bo Nakamura", OFFICE_CHIEF, "NORTH", None, "Sacramento", None, "3155", None, "M09", 902),
+    ("Cleo Ferrand", OFFICE_CHIEF, "SOUTH", None, "Los Angeles", "07", "3155", None, "M09", 903),
+    ("Dov Ilyushin", OFFICE_CHIEF, "POLICY", None, "Sacramento", None, "3155", None, "M09", 904),
     # -- Branch chiefs: (Sup)-marked Senior TE / EG, level S09 --------------
-    ("Esme Varga", GEOTECH_BRANCH_CHIEF, "WEST", "A", "Oakland", "04", "3161", "SUP", "S09", 911),
-    ("Faris Odum", GEOTECH_BRANCH_CHIEF, "WEST", "C", "Oakland", "04", "3751", "SUP", "S09", 912),
-    ("Greta Lindqvist", GEOTECH_BRANCH_CHIEF, "WEST", "F", "Eureka", "01", "3161", "SUP", "S09", 913),
-    ("Hana Bertoli", GEOTECH_BRANCH_CHIEF, "SOUTH", "B", "San Diego", "11", "3161", "SUP", "S09", 914),
-    ("Ivo Mkhize", GEOTECH_BRANCH_CHIEF, "SOUTH", "C", "Santa Ana", "12", "3751", "SUP", "S09", 915),
-    ("Juno Alvarado", GEOTECH_BRANCH_CHIEF, "NORTH", "B", "Sacramento", None, "3161", "SUP", "S09", 916),
+    ("Esme Varga", BRANCH_CHIEF, "WEST", "A", "Oakland", "04", "3161", "SUP", "S09", 911),
+    ("Faris Odum", BRANCH_CHIEF, "WEST", "C", "Oakland", "04", "3751", "SUP", "S09", 912),
+    ("Greta Lindqvist", BRANCH_CHIEF, "WEST", "F", "Eureka", "01", "3161", "SUP", "S09", 913),
+    ("Hana Bertoli", BRANCH_CHIEF, "SOUTH", "B", "San Diego", "11", "3161", "SUP", "S09", 914),
+    ("Ivo Mkhize", BRANCH_CHIEF, "SOUTH", "C", "Santa Ana", "12", "3751", "SUP", "S09", 915),
+    ("Juno Alvarado", BRANCH_CHIEF, "NORTH", "B", "Sacramento", None, "3161", "SUP", "S09", 916),
     # -- Senior specialists: (Spec), no branch, often away from home city ---
-    ("Kai Lindstrom", GEOTECH_SENIOR_ENGINEER, "WEST", None, "San Luis Obispo", "05", "3161", "SPEC", "R09", 921),
-    ("Lena Osei", GEOTECH_SENIOR_ENGINEER, "NORTH", None, "Redding", "02", "3751", "SPEC", "R09", 922),
-    ("Mika Ferreira", GEOTECH_SENIOR_ENGINEER, "SOUTH", None, "San Bernardino", "08", "3375", "SPEC", "R09", 923),
-    ("Nils Auberon", GEOTECH_SENIOR_ENGINEER, "POLICY", None, "Sacramento", None, "3185", "SPEC", "R09", 924),
+    ("Kai Lindstrom", SENIOR_SPECIALIST, "WEST", None, "San Luis Obispo", "05", "3161", "SPEC", "R09", 921),
+    ("Lena Osei", SENIOR_SPECIALIST, "NORTH", None, "Redding", "02", "3751", "SPEC", "R09", 922),
+    ("Mika Ferreira", SENIOR_SPECIALIST, "SOUTH", None, "San Bernardino", "08", "3375", "SPEC", "R09", 923),
+    ("Nils Auberon", SENIOR_SPECIALIST, "POLICY", None, "Sacramento", None, "3185", "SPEC", "R09", 924),
     # -- Staff: everyone under a branch chief -------------------------------
-    ("Orla Petrosyan", GEOTECH_ENGINEER, "WEST", "A", "Oakland", "04", "3135", None, "R09", 931),
-    ("Pax Redgrave", GEOTECH_ENGINEER, "WEST", "A", "Orinda", "04", "3756", None, "R09", 932),
-    ("Quill Baptiste", GEOTECH_ENGINEER, "WEST", "C", "Oakland", "04", "3175", None, "R11", 933),
-    ("Rina Solheim", GEOTECH_ENGINEER, "WEST", "F", "Eureka", "01", "3135", None, "R09", 934),
-    ("Soren Achebe", GEOTECH_ENGINEER, "SOUTH", "B", "San Diego", "11", "3135", None, "R09", 935),
-    ("Tova Marchetti", GEOTECH_ENGINEER, "SOUTH", "C", "Santa Ana", "12", "3381", None, "R11", 936),
-    ("Ues Kowalczyk", GEOTECH_ENGINEER, "NORTH", "B", "Sacramento", None, "3756", None, "R09", 937),
-    ("Vero Tanaka", GEOTECH_ENGINEER, "NORTH", "B", "Sacramento", None, "3135", None, "R09", 938),
+    ("Orla Petrosyan", STAFF, "WEST", "A", "Oakland", "04", "3135", None, "R09", 931),
+    ("Pax Redgrave", STAFF, "WEST", "A", "Orinda", "04", "3756", None, "R09", 932),
+    ("Quill Baptiste", STAFF, "WEST", "C", "Oakland", "04", "3175", None, "R11", 933),
+    ("Rina Solheim", STAFF, "WEST", "F", "Eureka", "01", "3135", None, "R09", 934),
+    ("Soren Achebe", STAFF, "SOUTH", "B", "San Diego", "11", "3135", None, "R09", 935),
+    ("Tova Marchetti", STAFF, "SOUTH", "C", "Santa Ana", "12", "3381", None, "R11", 936),
+    ("Ues Kowalczyk", STAFF, "NORTH", "B", "Sacramento", None, "3756", None, "R09", 937),
+    ("Vero Tanaka", STAFF, "NORTH", "B", "Sacramento", None, "3135", None, "R09", 938),
     # -- Maintenance: one coordinator per district WEST serves, one reporter -
     ("Wren Oduya", MAINTENANCE_COORDINATOR, None, None, "Eureka", "01", None, None, None, 941),
     ("Xan Belova", MAINTENANCE_COORDINATOR, None, None, "Oakland", "04", None, None, None, 942),
     ("Yara Quintero", MAINTENANCE_COORDINATOR, None, None, "San Luis Obispo", "05", None, None, None, 943),
-    ("Zeno Halloran", MAINTENANCE_FIELD_WORKER, None, None, "Oakland", "04", None, None, None, 944),
-    # -- Viewer: read-only, statewide, no org link --------------------------
-    ("Ines Vanterpool", CALTRANS_VIEWER, None, None, None, None, "5393", None, "R01", 951),
+    ("Zeno Halloran", MAINTENANCE_CREW, None, None, "Oakland", "04", None, None, None, 944),
+    # -- Guest: read-only, statewide, no org link --------------------------
+    ("Ines Vanterpool", GUEST, None, None, None, None, "5393", None, "R01", 951),
 ]
 
 
 def _email_for(full_name: str) -> str:
     slug = full_name.lower().replace(" ", ".")
-    return f"{slug}@{DEMO_DOMAIN}"
+    return f"{DEMO_PREFIX}{slug}@{DEMO_DOMAIN}"
 
 
 def _position_number(office_code: str | None, class_code: str | None, sequence: int) -> str | None:
@@ -126,7 +126,7 @@ def _position_number(office_code: str | None, class_code: str | None, sequence: 
 def _remove(db) -> int:
     result = db.execute(
         text("DELETE FROM users WHERE email LIKE :pattern"),
-        {"pattern": f"%@{DEMO_DOMAIN}"},
+        {"pattern": f"{DEMO_PREFIX}%@{DEMO_DOMAIN}"},
     )
     db.commit()
     return int(result.rowcount or 0)
@@ -225,7 +225,7 @@ def _seed(db, password: str) -> int:
         # A branch chief who is nobody's chief demonstrates nothing, so the demo
         # data — and ONLY the demo data — names one per branch. The structural
         # seed never does: roles are never bound to named people (decision 8).
-        if role == GEOTECH_BRANCH_CHIEF and branch_id is not None:
+        if role == BRANCH_CHIEF and branch_id is not None:
             db.execute(
                 text("UPDATE org_branches SET chief_user_id = :uid WHERE id = :bid"),
                 {"uid": user_id, "bid": int(branch_id)},
@@ -279,7 +279,7 @@ def main() -> int:
     parser.add_argument(
         "--remove",
         action="store_true",
-        help=f"delete every @{DEMO_DOMAIN} account instead of seeding",
+        help=f"delete every {DEMO_PREFIX}*@{DEMO_DOMAIN} account instead of seeding",
     )
     args = parser.parse_args()
 
@@ -289,7 +289,7 @@ def main() -> int:
     if not args.acknowledged:
         print(
             "REFUSING: pass --i-understand-this-is-demo-data. Every account this "
-            f"creates is fictional and lives at @{DEMO_DOMAIN}.",
+            f"creates is fictional and lives at {DEMO_PREFIX}*@{DEMO_DOMAIN}.",
             file=sys.stderr,
         )
         return 2
@@ -298,13 +298,13 @@ def main() -> int:
     try:
         if args.remove:
             removed = _remove(db)
-            print(f"Removed {removed} demo account(s) at @{DEMO_DOMAIN}.")
+            print(f"Removed {removed} demo account(s) at {DEMO_PREFIX}*@{DEMO_DOMAIN}.")
             return 0
         seeded = _seed(db, args.password)
         print(
-            f"Seeded {seeded} fictional account(s) at @{DEMO_DOMAIN} "
+            f"Seeded {seeded} fictional account(s) at {DEMO_PREFIX}*@{DEMO_DOMAIN} "
             f"(password: {args.password!r}). Remove them with --remove, or:\n"
-            f"  DELETE FROM users WHERE email LIKE '%@{DEMO_DOMAIN}';"
+            f"  DELETE FROM users WHERE email LIKE '{DEMO_PREFIX}%@{DEMO_DOMAIN}';"
         )
         return 0
     finally:

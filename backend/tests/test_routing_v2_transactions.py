@@ -44,9 +44,9 @@ def _me_id(client_db, token: str) -> int:
 def tokens(client_db, admin_token):
     return {
         "admin": admin_token,
-        "officechief": _login(client_db, "officechief@local"),
-        "branchchief": _login(client_db, "branchchief@local"),
-        "engineer": _login(client_db, "engineer@local"),
+        "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
+        "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
+        "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
     }
 
 

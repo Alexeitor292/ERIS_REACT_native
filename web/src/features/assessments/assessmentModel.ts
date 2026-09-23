@@ -7,8 +7,8 @@ import type { Submission } from "../../api/types";
  *
  * Routing v2: every assessment takes exactly one of two routes, recorded in
  * `routing_path`. The branch route runs office chief → branch chief → Staff
- * member → the same branch chief's approval; the senior engineer route runs
- * office chief → senior engineer → that office's chief approval. Approval is
+ * member → the same branch chief's approval; the Senior Specialist route runs
+ * office chief → Senior Specialist → that office's chief approval. Approval is
  * terminal.
  */
 
@@ -38,10 +38,10 @@ export const BRANCH_PIPELINE: PipelineStep[] = [
   { key: "approved", label: "Approved", owner: null },
 ];
 
-/** Office chief assigns a senior engineer and approves the result personally. */
+/** Office chief assigns a Senior Specialist and approves the result personally. */
 export const SENIOR_ENGINEER_PIPELINE: PipelineStep[] = [
-  { key: "senior_engineer", label: "Senior engineer assignment", owner: "Office Chief" },
-  { key: "assessment", label: "Assessment", owner: "Senior Engineer" },
+  { key: "senior_engineer", label: "Senior Specialist assignment", owner: "Office Chief" },
+  { key: "assessment", label: "Assessment", owner: "Senior Specialist" },
   { key: "review", label: "Review", owner: "Office Chief" },
   { key: "approved", label: "Approved", owner: null },
 ];
@@ -171,7 +171,7 @@ export function assessmentOfficeName(assessment: SnapshotAssessment, lookup?: Of
   return officeLabel(assessment.office_code, lookup);
 }
 
-/** The branch NAME this assessment was handed to, or null on the senior engineer route. */
+/** The branch NAME this assessment was handed to, or null on the Senior Specialist route. */
 export function assessmentBranchName(assessment: SnapshotAssessment): string | null {
   const name = (assessment.routed_branch_name ?? "").trim();
   if (name) return name;
@@ -207,7 +207,7 @@ export function normalizeOfficeCode(value: string | null | undefined): string | 
  */
 const ASSIGNMENT_ROLE_LABELS: Record<string, string> = {
   ENGINEER: "Staff",
-  SENIOR_ENGINEER: "Senior Engineer",
+  SENIOR_ENGINEER: "Senior Specialist",
   CONSULTED: "Consulted",
   REVIEWER: "Reviewer",
   APPROVER: "Approver",
@@ -220,7 +220,7 @@ export function assignmentRoleLabel(role: string): string {
 /** Assessment history rows: same rule, for the event codes the server writes. */
 const EVENT_TYPE_LABELS: Record<string, string> = {
   ENGINEER_ASSIGNED: "Staff assigned",
-  SENIOR_ENGINEER_ASSIGNED: "Senior engineer assigned",
+  SENIOR_ENGINEER_ASSIGNED: "Senior Specialist assigned",
 };
 
 export function assessmentEventLabel(eventType: string): string {
@@ -248,13 +248,13 @@ export function waitingOn(
   const authorLabel = author
     ? `${assignmentRoleLabel(author.assignment_role)} · ${author.full_name}`
     : seniorEngineerRoute
-      ? "Assigned Senior Engineer"
+      ? "Assigned Senior Specialist"
       : "Assigned Staff";
   switch (assessment.state) {
     case "PENDING_OFFICE_DELEGATION":
       return {
         who: "Office Chief",
-        text: "Route this assessment: hand it off to a branch chief, or assign a senior engineer. You cannot assign Staff directly.",
+        text: "Route this assessment: hand it off to a branch chief, or assign a Senior Specialist. You cannot assign Staff directly.",
       };
     case "PENDING_ENGINEER_ASSIGNMENT":
       return {
@@ -391,7 +391,7 @@ export function assessmentPermissions(
  *                  was handed to, the reviewer its route names.
  *   CAN_STEP_IN  — they hold a power over it without being who it waits on: an
  *                  administrator, or an office chief who could reassign a
- *                  senior engineer's draft.
+ *                  Senior Specialist's draft.
  *   NONE         — nothing for them to do.
  *
  * "This step is yours" is said only for MINE; saying it to anyone who merely

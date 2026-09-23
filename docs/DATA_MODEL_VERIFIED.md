@@ -5,9 +5,20 @@ Source: `database/init/010_schema.sql` (baseline) + Alembic migrations in
 
 ## Core Identity
 
-- `users`
-- `roles`
+- `users` — `password_hash` is nullable (an account without one signs in through
+  Entra ID only) and `last_login_at` records the last sign-in
+  (`20260923_entra_identity`)
+- `roles` — the seven work roles and `ADMIN`, one code each
+  (`20260923_roles_consolidated`)
 - `user_roles`
+- `user_external_identities` — links an account to its Entra ID identity,
+  keyed on `(provider, tenant_id, object_id)`; unique per identity and per
+  account. It carries no role and no org field: Entra authenticates, ERIS
+  assigns roles and org placement (`20260923_entra_identity`)
+- `role_consolidation_audit` — every grant of a retired role code, kept by
+  `20260923_roles_consolidated` for tracing and for its downgrade
+
+See [roles-and-identity.md](roles-and-identity.md).
 
 ## Organization Domain (`20260911_org_model`)
 
@@ -146,9 +157,10 @@ that drop.
 
 The six eligibility triggers from `20260817_engineer_assignment_eligibility` are
 dropped and re-created **route-aware**: on `routing_path='SENIOR_ENGINEER'` the
-target must hold `GEOTECH_SENIOR_ENGINEER` or `ADMIN`; otherwise the original
-`GEOTECH_ENGINEER`/`FIELD_WORKER` (Staff) rule applies, with its message
-verbatim.
+target must hold `SENIOR_SPECIALIST` or `ADMIN`; otherwise the Staff rule
+(`STAFF` or `ADMIN`) applies. (Routing v2 wrote these with the codes of the
+time; `20260923_roles_consolidated` re-created them with the current codes and
+messages.)
 `trg_incident_engineer_elig_bi/bu` decides which rule to apply from
 `EXISTS (SELECT 1 FROM assessments a WHERE a.incident_id = NEW.incident_id AND
 a.routing_path='SENIOR_ENGINEER')`, which is single-valued only because of
@@ -194,18 +206,15 @@ completing if any non-terminal assessment cannot be given a reviewer.
 
 ## Seed Data (`020_seed.sql`)
 
-Seeded roles — legacy names, then the canonical Assessment-model names (both
-work, via `app/roles.py` aliasing):
+Seeded roles — seven work roles and the Administrator, one code each
+(`MAINTENANCE_CREW`, `MAINTENANCE_COORDINATOR`, `OFFICE_CHIEF`, `BRANCH_CHIEF`,
+`SENIOR_SPECIALIST`, `STAFF`, `GUEST`, `ADMIN`). `GUEST` is read-only access to
+approved records and deliberately *not* in `OPERATIONAL_ROLES`.
 
-- `FIELD_WORKER`, `MAINTENANCE`, `MAINT_COORDINATOR`, `OFFICE_CHIEF`,
-  `BRANCH_CHIEF`, `REVIEWER` (**deprecated** — broad read only, no authority),
-  `ADMIN`
-- `MAINTENANCE_FIELD_WORKER`, `MAINTENANCE_COORDINATOR`, `GEOTECH_OFFICE_CHIEF`,
-  `GEOTECH_BRANCH_CHIEF`, `GEOTECH_ENGINEER`
-- `GEOTECH_SENIOR_ENGINEER` — **new in routing v2, no legacy alias**
-- `CALTRANS_VIEWER` — **new in the organization model, no legacy alias.**
-  Read-only access to approved records; deliberately *not* in
-  `OPERATIONAL_ROLES`
+`database/init/` creates **no accounts**: it is MariaDB's first-boot init,
+which production shares, and `test_first_boot_init_creates_no_account` keeps it
+that way. A production database gets its first administrator from
+`python -m app.tools.create_admin`.
 
 Seeded organization structure (`020_seed.sql`, guarded so it no-ops on a database
 that has not yet run `20260911_org_model`). **Structure only — no real person
@@ -231,32 +240,27 @@ explicitly-flagged `backend/scripts/seed_demo_org_roster.py`:
 
 `backend/tests/test_seed_shape_db.py` pins every one of those counts.
 
-Seeded users (dev/bootstrap):
+Mock accounts (development and test only) are
+`database/dev/030_mock_accounts.sql`, loaded after `020_seed.sql` and never into
+production. All use the password "password", and each holds one role:
 
-- `admin@local`
-- `maintenance@local`
-- `coordinator@local` (district `01`)
-- `coordinator04@local` (district `04`) — **new.** Every assessment fixture
-  creates district-`04` incidents, so without this account the
-  "approval notifies the coordinator" assertions would pass vacuously against an
-  empty recipient list.
-- `officechief@local` (office `WEST`)
-- `branchchief@local` (office `WEST`)
-- `engineer@local`
-- `seniorengineer@local` (office `WEST`) — **new.** Office-scoped on purpose:
-  the senior engineer picker filters strictly, so a senior engineer without an
-  `office_code` is not assignable.
-- `reviewer@local` (legacy `REVIEWER`; kept as the proof that the role keeps
-  broad read)
-- `viewer@local` (`CALTRANS_VIEWER`) — **new.** The viewer-visibility suite needs
-  an account whose *only* role is the viewer, because `is_public_only` is what
-  narrows the reads and it is false the moment any operational role is also held.
+- `mock.admin@dot.ca.gov` — `ADMIN` only: an account that could act as every
+  role would hide a missing guard in any test that signs in as it
+- `mock.maintenance.crew@dot.ca.gov`
+- `mock.coordinator.d01@dot.ca.gov` (district `01`)
+- `mock.coordinator.d04@dot.ca.gov` (district `04`) — every assessment fixture
+  creates district-`04` incidents, so without this account the "approval
+  notifies the coordinator" assertions would pass vacuously
+- `mock.office.chief@dot.ca.gov` (office `WEST`)
+- `mock.branch.chief@dot.ca.gov` (office `WEST`)
+- `mock.senior.specialist@dot.ca.gov` (office `WEST`) — office-scoped on
+  purpose: the Senior Specialist picker filters strictly
+- `mock.staff@dot.ca.gov`, `mock.staff.2@dot.ca.gov` — the second is an
+  operational bystander with no authority over the first one's assessment
+- `mock.guest@dot.ca.gov` (`GUEST`, no office, no district) — the guest suite
+  needs an account whose *only* role is Guest, because `is_public_only` is what
+  narrows the reads
 
-All seeded users currently use the same argon2 password hash in seed (password string used in development flow).
-
-> **After upgrading an existing database, re-run `020_seed.sql`.** Migration
-> `20260910_routing_v2` deliberately seeds only the `GEOTECH_SENIOR_ENGINEER`
-> *role row*, and `20260911_org_model` seeds only the `CALTRANS_VIEWER` role row
-> plus the office/branch **structure** — never users. The clean base→head CI job
-> never loads the seed, so a migration assuming seeded users would silently
-> no-op there. The seed is idempotent.
+> The seed and the mock accounts are idempotent. On an existing development
+> database, re-run them after migrating if the tests report a missing account.
+> Never run either against production.

@@ -24,8 +24,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not row or int(row["is_active"]) != 1:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not verify_password(payload.password, row["password_hash"]):
+    # An account without a password signs in through single sign-on only. It
+    # gets the same answer as a wrong password, so this endpoint never tells a
+    # caller which accounts exist or how they sign in.
+    if not row["password_hash"] or not verify_password(payload.password, row["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    db.execute(text("UPDATE users SET last_login_at = NOW(), updated_at = updated_at WHERE id = :id"), {"id": int(row["id"])})
+    db.commit()
 
     token = create_access_token(
         subject=str(int(row["id"])),

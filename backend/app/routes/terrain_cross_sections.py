@@ -23,7 +23,7 @@ router = APIRouter(prefix="/terrain-cross-sections", tags=["terrain-cross-sectio
 # authorized nothing beyond being logged in: POST /projects inserted straight
 # into caltrans_projects, POST "" inserted a cross section, and PUT /{id}
 # rewrote one after checking only that the project was ACTIVE. A read-only
-# CALTRANS_VIEWER account would have been a writer on day one (design §4.5).
+# GUEST account would have been a writer on day one (design §4.5).
 CROSS_SECTION_ROLES = sorted(OPERATIONAL_ROLES)
 
 

@@ -177,9 +177,10 @@ class TestUpgradeApplied:
         assert {"uk_org_branch_active_letter", "uk_org_branch_active_unit"} <= names
 
     def test_the_viewer_role_row_exists(self, client_db):
-        assert int(
-            _rows("SELECT COUNT(*) AS n FROM roles WHERE name = 'CALTRANS_VIEWER'")[0]["n"]
-        ) == 1
+        # This revision seeded CALTRANS_VIEWER; at head it is GUEST, which
+        # 20260923_roles_consolidated moved every holder onto.
+        assert int(_rows("SELECT COUNT(*) AS n FROM roles WHERE name = 'GUEST'")[0]["n"]) == 1
+        assert int(_rows("SELECT COUNT(*) AS n FROM roles WHERE name = 'CALTRANS_VIEWER'")[0]["n"]) == 0
 
     def test_the_legacy_routing_table_survives_for_one_release(self, client_db):
         # It is kept so a rollback to the previous backend still routes;
@@ -255,9 +256,12 @@ class TestReRunIsANoOp:
             ).scalar()
             assert name == f"West, renamed by an admin {_RUN}"
 
+    # _seed_viewer_role is not here: 20260923_roles_consolidated turned its
+    # CALTRANS_VIEWER row into GUEST, so re-running this revision's step against
+    # a database at head would re-create a retired role, not change nothing.
     @pytest.mark.parametrize(
         "step",
-        ["_seed_viewer_role", "_backfill_office_districts", "_backfill_assessment_snapshots"],
+        ["_backfill_office_districts", "_backfill_assessment_snapshots"],
     )
     def test_each_one_time_backfill_changes_nothing_the_second_time(
         self, client_db, org_model_revision, step

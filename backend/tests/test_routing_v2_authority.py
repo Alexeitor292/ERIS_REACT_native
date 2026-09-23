@@ -11,8 +11,8 @@ reason T2 accepts re-delegation from any non-terminal branch-route state: a
 departed or deactivated branch chief must never strand a SUBMITTED assessment
 with no supported repair.
 
-Requires a live MariaDB at Alembic head with database/init/020_seed.sql applied
-(routing v2 adds seniorengineer@local). Run with: pytest -m db
+Requires a live MariaDB at Alembic head with database/dev/030_mock_accounts.sql
+loaded. Run with: pytest -m db
 """
 
 import uuid
@@ -52,10 +52,10 @@ def tokens(client_db, admin_token, senior_engineer_token):
     return {
         "admin": admin_token,
         "senior_engineer": senior_engineer_token,
-        "officechief": _login(client_db, "officechief@local"),
-        "branchchief": _login(client_db, "branchchief@local"),
-        "engineer": _login(client_db, "engineer@local"),
-        "reviewer": _login(client_db, "reviewer@local"),
+        "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
+        "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
+        "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
+        "other_staff": _login(client_db, "mock.staff.2@dot.ca.gov"),
     }
 
 
@@ -93,14 +93,14 @@ def extra_users(client_db, tokens):
         "branchchief2",
         f"rv2-branchchief2-{_RUN}@example.test",
         "Zzz Second Branch Chief",
-        ["GEOTECH_BRANCH_CHIEF"],
+        ["BRANCH_CHIEF"],
         {"office_code": "WEST", "office_location": "West Office"},
     )
     _create(
         "chief_no_office",
         f"rv2-chief-no-office-{_RUN}@example.test",
         "Zzz Unscoped Office Chief",
-        ["GEOTECH_OFFICE_CHIEF"],
+        ["OFFICE_CHIEF"],
         None,
     )
     yield created
@@ -282,17 +282,17 @@ class TestReviewAuthority:
                   (assessment_id, user_id, assignment_role, assigned_by_user_id, notes)
                 VALUES (:aid, :uid, :role, :by, 'legacy row')
                 """,
-                {"aid": aid, "uid": ids["reviewer"], "role": role, "by": ids["officechief"]},
+                {"aid": aid, "uid": ids["other_staff"], "role": role, "by": ids["officechief"]},
             )
 
         review = client_db.post(
             f"/assessments/{aid}/review",
             json={"action": "APPROVE"},
-            headers=_auth(tokens["reviewer"]),
+            headers=_auth(tokens["other_staff"]),
         )
         assert review.status_code == 403, review.text
 
-        detail = client_db.get(f"/assessments/{aid}", headers=_auth(tokens["reviewer"]))
+        detail = client_db.get(f"/assessments/{aid}", headers=_auth(tokens["other_staff"]))
         assert detail.status_code == 200
         legacy = [a for a in detail.json()["assignments"] if a["assignment_role"] in ("REVIEWER", "APPROVER")]
         assert len(legacy) == 2, "the audit trail is never rewritten to remove a permission"
@@ -305,7 +305,7 @@ class TestReviewAuthority:
         case = _branch_submitted(client_db, tokens, ids)
         resp = client_db.post(
             f"/assessments/{case['assessment_id']}/assignments",
-            json={"user_id": ids["reviewer"], "assignment_role": "REVIEWER"},
+            json={"user_id": ids["other_staff"], "assignment_role": "REVIEWER"},
             headers=_auth(tokens["officechief"]),
         )
         # The request schema narrows to CONSULTED, so FastAPI answers 422 before
@@ -314,7 +314,7 @@ class TestReviewAuthority:
         assert resp.status_code in (400, 422), resp.text
         consulted = client_db.post(
             f"/assessments/{case['assessment_id']}/assignments",
-            json={"user_id": ids["reviewer"], "assignment_role": "CONSULTED"},
+            json={"user_id": ids["other_staff"], "assignment_role": "CONSULTED"},
             headers=_auth(tokens["officechief"]),
         )
         assert consulted.status_code == 200, consulted.text
@@ -370,7 +370,7 @@ class TestReviewAuthority:
         # assessment could only reach through direct SQL — and prove the NULL
         # branch of the rule denies everyone but admin.
         _sql("UPDATE assessments SET state = 'SUBMITTED' WHERE id = :aid", {"aid": aid})
-        for who in ("officechief", "branchchief", "reviewer"):
+        for who in ("officechief", "branchchief", "other_staff"):
             resp = client_db.post(
                 f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(tokens[who])
             )
@@ -417,7 +417,7 @@ class TestRouteExclusivity:
             headers=_auth(tokens["officechief"]),
         )
         assert resp.status_code == 409, resp.text
-        assert "assigned to a senior engineer" in resp.json()["detail"]
+        assert "assigned to a Senior Specialist" in resp.json()["detail"]
         assert _assessment_row(case["assessment_id"])["routing_path"] == "SENIOR_ENGINEER"
 
     def test_assign_engineer_on_a_senior_engineer_route_is_409(self, client_db, tokens, ids):
@@ -428,8 +428,8 @@ class TestRouteExclusivity:
             headers=_auth(tokens["branchchief"]),
         )
         assert resp.status_code == 409, resp.text
-        assert "senior engineer route" in resp.json()["detail"]
-        # The senior engineer is still the assignee.
+        assert "Senior Specialist route" in resp.json()["detail"]
+        # The Senior Specialist is still the assignee.
         assert _assessment_row(case["assessment_id"])["assigned_engineer_user_id"] == ids["senior_engineer"]
 
     def test_assign_engineer_before_any_route_is_409(self, client_db, tokens, ids):
@@ -536,7 +536,7 @@ class TestSubmissionLevelConflicts:
     def test_reviewing_a_linked_form_points_at_the_assessment(self, client_db, tokens, ids):
         case = _branch_submitted(client_db, tokens, ids)
         sid = case["submission_id"]
-        for token_key in ("admin", "reviewer", "branchchief"):
+        for token_key in ("admin", "other_staff", "branchchief"):
             resp = client_db.post(
                 f"/submissions/{sid}/review",
                 json={"decision": "APPROVE"},
@@ -559,7 +559,7 @@ class TestSubmissionLevelConflicts:
         assert chief.json()["context"]["can_review"] is True
         assert chief.json()["submission"]["can_review"] is True
         # The legacy REVIEWER account reads everything and decides nothing.
-        legacy = client_db.get(f"/submissions/{sid}", headers=_auth(tokens["reviewer"]))
+        legacy = client_db.get(f"/submissions/{sid}", headers=_auth(tokens["other_staff"]))
         assert legacy.status_code == 200
         assert legacy.json()["submission"]["can_review"] is False
 
@@ -580,7 +580,7 @@ class TestSubmissionLevelConflicts:
         _sql("UPDATE submissions SET status = 'SUBMITTED' WHERE id = :sid", {"sid": sid})
         # The legacy REVIEWER role no longer decides even here: admin only.
         denied = client_db.post(
-            f"/submissions/{sid}/review", json={"decision": "APPROVE"}, headers=_auth(tokens["reviewer"])
+            f"/submissions/{sid}/review", json={"decision": "APPROVE"}, headers=_auth(tokens["other_staff"])
         )
         assert denied.status_code == 403, denied.text
         allowed = client_db.post(

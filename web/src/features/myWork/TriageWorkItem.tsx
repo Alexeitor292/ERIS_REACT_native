@@ -13,7 +13,7 @@ import { IncidentTriageDialog } from "../incidents/IncidentDecisionDialogs";
  * decision. Only "Assessment required" asks which Event Group the report belongs
  * to; accepting it mints the permanent incident key server-side and opens a
  * GeoTech assessment for the office chief to route — to a branch chief, or
- * directly to a senior engineer.
+ * directly to a Senior Specialist.
  */
 export default function TriageWorkItem({
   incident,
@@ -46,7 +46,7 @@ export default function TriageWorkItem({
           <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--brand)]">Next step</span>
           <span className="text-[15px] font-semibold">Waiting on Maintenance Coordinator</span>
         </div>
-        <p className="mt-1.5 text-sm">This report has not been accepted into ERIS yet. Read the report and its evidence, then decide what happens to it. "Assessment required" accepts it, asks which Event Group it belongs to, and opens a GeoTech assessment for the office chief, who hands it to a branch chief or assigns a senior engineer.</p>
+        <p className="mt-1.5 text-sm">This report has not been accepted into ERIS yet. Read the report and its evidence, then decide what happens to it. "Assessment required" accepts it, asks which Event Group it belongs to, and opens a GeoTech assessment for the office chief, who hands it to a branch chief or assigns a Senior Specialist.</p>
         <button
           type="button"
           onClick={() => setOpen(true)}

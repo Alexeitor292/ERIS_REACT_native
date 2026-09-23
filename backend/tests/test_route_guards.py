@@ -7,7 +7,7 @@ carrying no ``require_roles`` at all — 36 authenticated-only, three
 unauthenticated — and eleven of the 39 were writes. Three of those writes
 authorized nothing beyond being logged in: ``POST /terrain-cross-sections/projects``,
 ``POST /terrain-cross-sections`` and ``PUT /terrain-cross-sections/{id}`` would
-have made a read-only ``CALTRANS_VIEWER`` account a writer on day one.
+have made a read-only ``GUEST`` account a writer on day one.
 
 This module is what makes the claim TRUE rather than asserted. It walks the live
 route table and requires every route to be in exactly one of three groups:
@@ -284,7 +284,7 @@ class TestTheAllowListCoversTheViewersRecord:
     )
     def test_the_role_listed_reads_name_the_viewer_in_their_role_list(self, app_routes, method, path):
         # The other half of the allow list: these routes DO carry a role list,
-        # and CALTRANS_VIEWER was added to it. The row set is then narrowed in
+        # and GUEST was added to it. The row set is then narrowed in
         # the handler. Both halves are needed — neither one alone expresses
         # "this role, and only approved rows".
         route = _find(app_routes, method, path)
@@ -297,4 +297,67 @@ class TestTheAllowListCoversTheViewersRecord:
                 if isinstance(cell.cell_contents, (list, set)):
                     names |= {str(value) for value in cell.cell_contents}
             stack.extend(dependency.dependencies)
-        assert "CALTRANS_VIEWER" in names, f"{method} {path} does not admit the viewer"
+        assert "GUEST" in names, f"{method} {path} does not admit the viewer"
+
+
+# ---------------------------------------------------------------------------
+# One code per role (20260923_roles_consolidated)
+# ---------------------------------------------------------------------------
+
+RETIRED_ROLE_CODES = {
+    "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
+    "GEOTECH_BRANCH_CHIEF", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_ENGINEER",
+    "FIELD_WORKER", "CALTRANS_VIEWER",
+}
+
+
+def _required_roles(route: APIRoute) -> list[set[str]]:
+    """The role list of every require_roles guard in a route's dependency tree."""
+    import inspect
+
+    found: list[set[str]] = []
+    stack = list(route.dependant.dependencies)
+    while stack:
+        dependency = stack.pop()
+        call = dependency.call
+        if getattr(call, "__qualname__", "").startswith("require_roles."):
+            found.append(set(inspect.getclosurevars(call).nonlocals["required"]))
+        stack.extend(dependency.dependencies)
+    return found
+
+
+class TestGuardsNameOnlyRealRoles:
+    def test_every_guard_names_only_roles_that_exist(self, app_routes):
+        from app.roles import ALL_ROLES
+
+        unknown = []
+        for route in app_routes:
+            for required in _required_roles(route):
+                if not required:
+                    unknown.append(f"{route.path}: an empty role list admits nobody")
+                for role in sorted(required - set(ALL_ROLES)):
+                    unknown.append(f"{sorted(route.methods)} {route.path}: {role}")
+        assert not unknown, "Guards naming a role ERIS does not have:\n  " + "\n  ".join(unknown)
+
+    def test_the_census_found_role_lists_to_check(self, app_routes):
+        assert sum(len(_required_roles(route)) for route in app_routes) > 100
+
+    def test_no_retired_role_code_survives_in_backend_code(self):
+        """Comments may name the old codes as history; no string may."""
+        import io
+        import pathlib
+        import tokenize
+
+        app_dir = pathlib.Path(__file__).resolve().parents[1] / "app"
+        hits = []
+        for path in sorted(app_dir.rglob("*.py")):
+            tokens = tokenize.generate_tokens(io.StringIO(path.read_text(encoding="utf-8")).readline)
+            for token in tokens:
+                if token.type != tokenize.STRING:
+                    continue
+                if token.string.lstrip("rRbBuUfF").startswith(('"""', "'''")):
+                    continue  # docstrings are prose
+                for code in RETIRED_ROLE_CODES:
+                    if code in token.string:
+                        hits.append(f"{path.relative_to(app_dir)}:{token.start[0]}: {code}")
+        assert not hits, "Retired role codes still used in code:\n  " + "\n  ".join(hits)

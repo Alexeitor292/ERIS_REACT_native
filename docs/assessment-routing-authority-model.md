@@ -1,5 +1,10 @@
 # Assessment Routing & Authority Model
 
+> **Role codes.** This document predates `20260923_roles_consolidated` and uses the
+> role codes of its time (`GEOTECH_*`, `CALTRANS_VIEWER`, "senior engineer", ...).
+> The current roles, and how each retired code maps to one, are in
+> [roles-and-identity.md](roles-and-identity.md).
+
 This document describes the **Assessment** domain layer added on top of the
 existing incident + GISA-backed submission workflow, the District → GeoTech
 Office routing mechanism, the **two-path routing model** (routing v2), and the

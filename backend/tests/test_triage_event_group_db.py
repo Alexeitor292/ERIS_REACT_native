@@ -42,17 +42,17 @@ def _login(client_db, email: str) -> str:
 
 @pytest.fixture(scope="module")
 def coordinator_token(client_db):
-    return _login(client_db, "coordinator@local")
+    return _login(client_db, "mock.coordinator.d01@dot.ca.gov")
 
 
 @pytest.fixture(scope="module")
 def reporter_token(client_db):
-    return _login(client_db, "maintenance@local")
+    return _login(client_db, "mock.maintenance.crew@dot.ca.gov")
 
 
 @pytest.fixture
 def new_report(client_db, reporter_token):
-    """A fresh district-01 report awaiting triage — coordinator@local's district."""
+    """A fresh district-01 report awaiting triage — mock.coordinator.d01@dot.ca.gov's district."""
 
     def make(title: str = "Triage fixture") -> int:
         resp = client_db.post(

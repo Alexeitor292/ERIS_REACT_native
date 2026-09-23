@@ -13,12 +13,12 @@ from .deps import require_roles
 from .auth import hash_password
 from .roles import (
     ADMIN,
-    GEOTECH_BRANCH_CHIEF,
-    GEOTECH_ENGINEER,
-    GEOTECH_OFFICE_CHIEF,
-    GEOTECH_SENIOR_ENGINEER,
+    ALL_ROLES,
+    BRANCH_CHIEF,
+    STAFF,
+    OFFICE_CHIEF,
+    SENIOR_SPECIALIST,
     OPERATIONAL_ROLES,
-    expand_roles,
 )
 from .routes import incidents as incidents_routes
 from .services import org_directory
@@ -26,7 +26,7 @@ from .user_metadata import normalize_district_code, normalize_office_code, parse
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-ASSESSMENT_ASSIGNMENT_DIRECTORY_ROLES = expand_roles(GEOTECH_OFFICE_CHIEF, GEOTECH_BRANCH_CHIEF) + [ADMIN]
+ASSESSMENT_ASSIGNMENT_DIRECTORY_ROLES = [OFFICE_CHIEF, BRANCH_CHIEF] + [ADMIN]
 
 
 # -----------------------------
@@ -64,7 +64,10 @@ class ResetPasswordIn(BaseModel):
 # Helpers
 # -----------------------------
 def _get_all_roles(db: Session) -> list[str]:
-    return db.execute(text("SELECT name FROM roles ORDER BY name")).scalars().all()
+    """Every role, in the order the role model presents them (app/roles.py)."""
+    order = {name: index for index, name in enumerate(ALL_ROLES)}
+    names = db.execute(text("SELECT name FROM roles")).scalars().all()
+    return sorted(names, key=lambda name: (order.get(name, len(order)), name))
 
 
 def _ensure_roles_exist(db: Session, roles: list[str]) -> None:
@@ -259,9 +262,9 @@ def assessment_assignment_options(
             raise HTTPException(status_code=403, detail="Assessment is outside your assigned office")
 
     if kind == "ENGINEER":
-        eligible_roles = set(expand_roles(GEOTECH_ENGINEER)) | {ADMIN}
+        eligible_roles = set([STAFF]) | {ADMIN}
     elif kind == "SENIOR_ENGINEER":
-        eligible_roles = set(expand_roles(GEOTECH_SENIOR_ENGINEER)) | {ADMIN}
+        eligible_roles = set([SENIOR_SPECIALIST]) | {ADMIN}
     else:
         # CONSULTED reproduces the previous REVIEWER behaviour: any operational
         # user may be attached for information. CONSULTED never conferred
@@ -290,9 +293,9 @@ def assessment_assignment_options(
           )
         """
     elif kind == "SENIOR_ENGINEER":
-        # STRICT office filter, unlike the ENGINEER kind above: a senior engineer with
+        # STRICT office filter, unlike the ENGINEER kind above: a Senior Specialist with
         # no office_code is not assignable at all, and an assessment with no
-        # office_code has no senior engineer to offer — hence the `:office_code <> ''`
+        # office_code has no Senior Specialist to offer — hence the `:office_code <> ''`
         # guard rather than a blank-office fallback. ADMIN is exempt so the
         # picker keeps its admin escape hatch, matching the ENGINEER kind's
         # `| {ADMIN}` union.

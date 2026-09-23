@@ -178,16 +178,16 @@ def org(client_db, admin_token, offices):
     # ...and a third that accepts nothing, like SOUTH's proposed Branch E.
     branch_w = _branch("W", "Branch W", 960, accepts_assignments=False)
 
-    chief_y = _person("chiefy", "GEOTECH_BRANCH_CHIEF", branch_id=branch_y, full_name=f"Zzz Chief Yankee {_RUN}")
-    chief_x = _person("chiefx", "GEOTECH_BRANCH_CHIEF", branch_id=branch_x, full_name=f"Zzz Chief Xray {_RUN}")
-    chief_none = _person("chiefnone", "GEOTECH_BRANCH_CHIEF", full_name=f"Zzz Chief Nobranch {_RUN}")
-    staff_y = _person("staffy", "GEOTECH_ENGINEER", branch_id=branch_y, full_name=f"Zzz Staff Yankee {_RUN}")
-    staff_x = _person("staffx", "GEOTECH_ENGINEER", branch_id=branch_x, full_name=f"Zzz Staff Xray {_RUN}")
-    # A rotated-out senior engineer, with a home city of their own: a (Spec)
+    chief_y = _person("chiefy", "BRANCH_CHIEF", branch_id=branch_y, full_name=f"Zzz Chief Yankee {_RUN}")
+    chief_x = _person("chiefx", "BRANCH_CHIEF", branch_id=branch_x, full_name=f"Zzz Chief Xray {_RUN}")
+    chief_none = _person("chiefnone", "BRANCH_CHIEF", full_name=f"Zzz Chief Nobranch {_RUN}")
+    staff_y = _person("staffy", "STAFF", branch_id=branch_y, full_name=f"Zzz Staff Yankee {_RUN}")
+    staff_x = _person("staffx", "STAFF", branch_id=branch_x, full_name=f"Zzz Staff Xray {_RUN}")
+    # A rotated-out Senior Specialist, with a home city of their own: a (Spec)
     # position sits away from the office home city more often than not.
     senior = _person(
         "senior",
-        "GEOTECH_SENIOR_ENGINEER",
+        "SENIOR_SPECIALIST",
         full_name=f"Zzz Senior Rotated {_RUN}",
         home_city="San Luis Obispo",
         home_district="05",
@@ -535,7 +535,7 @@ class TestPickerEligibility:
         offered = {int(item["id"]) for item in payload["items"]}
         assert org["chief_y"]["id"] in offered
         assert org["staff_y"]["id"] not in offered, "a Staff member is not a hand-off target"
-        assert org["senior"]["id"] not in offered, "a senior engineer is the OTHER route"
+        assert org["senior"]["id"] not in offered, "a Senior Specialist is the OTHER route"
         # Everyone offered is in the assessment's office.
         assert {item["office_code"] for item in payload["items"]} == {"WEST"}
 

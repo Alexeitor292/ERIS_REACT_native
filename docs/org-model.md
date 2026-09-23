@@ -1,5 +1,10 @@
 # The ERIS Organization Model — operator guide
 
+> **Role codes.** This document predates `20260923_roles_consolidated` and uses the
+> role codes of its time (`GEOTECH_*`, `CALTRANS_VIEWER`, "senior engineer", ...).
+> The current roles, and how each retired code maps to one, are in
+> [roles-and-identity.md](roles-and-identity.md).
+
 Who is in which office and branch, which districts an office serves, who
 coordinates each district, and what a civil-service classification implies about
 an ERIS role. All of it is **data an administrator edits in ERIS**, not constants

@@ -115,20 +115,26 @@ class TestSeededCounts:
         assert counts == {"CLASS": 14, "PATTERN": 2}
 
     def test_exactly_one_viewer_role_row(self, client_db):
-        assert int(_scalar("SELECT COUNT(*) FROM roles WHERE name = 'CALTRANS_VIEWER'")) == 1
+        assert int(_scalar("SELECT COUNT(*) FROM roles WHERE name = 'GUEST'")) == 1
         # ...and it is a role row, not a grant: the migration seeds the role and
         # nobody holds it until an admin grants it. Among ACTIVE accounts the dev
-        # seed's viewer@local is the one exception, and it is the only one.
+        # seed's mock.guest@dot.ca.gov is the one exception, and it is the only one.
+        # An account the role consolidation turned from the retired REVIEWER
+        # into a Guest is the migration's doing, not the seed's.
         holders = _rows(
             """
             SELECT u.email FROM user_roles ur
               JOIN roles r ON r.id = ur.role_id
               JOIN users u ON u.id = ur.user_id
-             WHERE r.name = 'CALTRANS_VIEWER' AND u.is_active = 1
+             WHERE r.name = 'GUEST' AND u.is_active = 1
+               AND NOT EXISTS (
+                 SELECT 1 FROM role_consolidation_audit a
+                  WHERE a.user_id = u.id AND a.old_role = 'REVIEWER'
+               )
              ORDER BY u.email
             """
         )
-        assert [row["email"] for row in holders] == ["viewer@local"]
+        assert [row["email"] for row in holders] == ["mock.guest@dot.ca.gov"]
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +303,7 @@ class TestTheTwoSeedSourcesAgree:
             assert int(row["accepts_assignments"]) == accepts_assignments
             assert int(row["sort_order"]) == sort_order
 
-    def test_every_classification_rule_matches_the_revision(self, client_db, org_model_revision):
+    def test_every_classification_rule_matches_the_revision(self, client_db, org_model_revision, roles_consolidation_revision):
         stored = {
             (row["rule_kind"], row["class_code"], row["marker"], row["title_pattern"], row["level_code"]): row
             for row in _rows(
@@ -313,6 +319,8 @@ class TestTheTwoSeedSourcesAgree:
              is_supervisor, priority, _notes) in org_model_revision._CLASSIFICATIONS:
             row = stored[(rule_kind, class_code, marker, title_pattern, level_code)]
             assert row["title"] == title
-            assert row["eris_role"] == eris_role
+            # The revision seeded the codes of its day; 20260923 moved them.
+            expected_role = None if eris_role == "REVIEWER" else roles_consolidation_revision.ROLE_MAP.get(eris_role, eris_role)
+            assert row["eris_role"] == expected_role
             assert int(row["is_supervisor"]) == is_supervisor
             assert int(row["priority"]) == priority

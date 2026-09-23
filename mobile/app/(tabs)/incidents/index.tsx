@@ -37,8 +37,9 @@ import {
   canTriage,
   hasRole,
   isAdmin as isAdminRoles,
-  isEngineer,
   isPublicOnly,
+  isStaff,
+  ROLES,
 } from "@/src/utils/roleModel";
 import { enrichPointFromArcgisClient } from "@/src/utils/arcgisEnrichment";
 import IncidentWorkflowTree from "@/src/components/IncidentWorkflowTree";
@@ -497,25 +498,21 @@ export default function IncidentsTabScreen() {
     return cells;
   }, [calendarMonth, calendarYear]);
 
-  // Every affordance on this screen tests CANONICAL role names through the
-  // alias map. They used to test the raw legacy strings, so an account seeded by
-  // the organization model — GEOTECH_ENGINEER rather than FIELD_WORKER,
-  // GEOTECH_BRANCH_CHIEF rather than BRANCH_CHIEF — lost the incident form, the
-  // triage review and the resolve button on the largest screen mobile has
-  // (design §9.4).
+  // Every affordance on this screen tests the role codes through the shared
+  // role model, never a raw string (design §9.4).
   const roles = me?.roles;
   const isAdmin = isAdminRoles(roles);
   const canCoordinatorReview = canTriage(roles);
-  const isOfficeChiefMobile = hasRole(roles, "GEOTECH_OFFICE_CHIEF") && !isAdmin;
-  const isBranchChiefMobile = hasRole(roles, "GEOTECH_BRANCH_CHIEF") && !isAdmin;
+  const isOfficeChiefMobile = hasRole(roles, ROLES.OFFICE_CHIEF) && !isAdmin;
+  const isBranchChiefMobile = hasRole(roles, ROLES.BRANCH_CHIEF) && !isAdmin;
   const isWorker = canReportIncident(roles);
-  const canResolve = isEngineer(roles);
+  const canResolve = isStaff(roles);
   const isMaintenanceWorkerMobile =
-    (hasRole(roles, "GEOTECH_ENGINEER") || hasRole(roles, "MAINTENANCE_FIELD_WORKER")) &&
+    (hasRole(roles, ROLES.STAFF) || hasRole(roles, ROLES.MAINTENANCE_CREW)) &&
     !(
-      hasRole(roles, "MAINTENANCE_COORDINATOR") ||
-      hasRole(roles, "GEOTECH_OFFICE_CHIEF") ||
-      hasRole(roles, "GEOTECH_BRANCH_CHIEF") ||
+      hasRole(roles, ROLES.MAINTENANCE_COORDINATOR) ||
+      hasRole(roles, ROLES.OFFICE_CHIEF) ||
+      hasRole(roles, ROLES.BRANCH_CHIEF) ||
       isAdmin
     );
   const canEditIncidentInForm = editingIncidentId == null || !editingLocked;
@@ -548,9 +545,7 @@ export default function IncidentsTabScreen() {
 
       if (isAdminRoles(userRes.roles)) {
         const userList = await apiFetch<{ items: AdminUser[] }>("/admin/users", { token });
-        // Canonical too: a Staff account holding only GEOTECH_ENGINEER matched
-        // neither name here and could not be assigned anything.
-        const assignables = (userList.items ?? []).filter((u) => u.is_active && isEngineer(u.roles));
+        const assignables = (userList.items ?? []).filter((u) => u.is_active && isStaff(u.roles));
         setUsers(assignables);
       } else {
         setUsers([]);
@@ -1365,10 +1360,10 @@ export default function IncidentsTabScreen() {
       ? "Review office-routed cases in your office."
       : "Create incidents and process them through the assigned workflow.";
 
-  // A read-only (CALTRANS_VIEWER) account holds no operational role, so the
+  // A read-only (Guest) account holds no operational role, so the
   // mobile feed has nothing to show it and every affordance above is already
   // false. Say so, rather than leaving it on an empty list it cannot act on:
-  // ERIS Mobile is a field and office app, and the viewer's whole surface — the
+  // ERIS Mobile is a field and office app, and the guest's whole surface — the
   // approved record, its assessment and its photos — is on the web (design §9.1).
   if (isPublicOnly(roles)) {
     return (
@@ -1942,7 +1937,7 @@ export default function IncidentsTabScreen() {
                     </>
                   ) : null}
                   {/* Routing v2: the office chief routes on the assessment (hand off to a
-                      branch chief, or assign a senior engineer), never on the incident.
+                      branch chief, or assign a Senior Specialist), never on the incident.
                       The legacy incident-stage endpoints now return 410. */}
                   {isAdmin && item.current_stage === "ENGINEER_ASSIGNED" ? (
                     <>

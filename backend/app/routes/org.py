@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import deny_public_only, get_current_user, require_roles
-from ..roles import ADMIN, ROLE_ALIASES
+from ..roles import ADMIN, ALL_ROLES
 from ..services import org_directory
 from ..user_metadata import normalize_district_code, normalize_office_code, normalize_profile_text
 
@@ -1030,7 +1030,10 @@ def admin_update_classification(
         fields["level_code"] = (normalize_profile_text(body.level_code) or "").upper()
     if "eris_role" in provided:
         # NULL is a legitimate value: "no suggestion" is different from "no role".
-        fields["eris_role"] = (normalize_profile_text(body.eris_role) or None)
+        suggested = (normalize_profile_text(body.eris_role) or "").upper() or None
+        if suggested is not None and suggested not in ALL_ROLES:
+            raise HTTPException(status_code=400, detail=f"Unknown ERIS role: {suggested}")
+        fields["eris_role"] = suggested
     if "is_supervisor" in provided:
         fields["is_supervisor"] = 1 if body.is_supervisor else 0
     if "is_active" in provided:
@@ -1233,8 +1236,7 @@ def _role_suggestion(db: Session, user_id: int, org: dict) -> dict | None:
         ).scalars().all()
     )
     suggested = suggestion.get("suggested_role")
-    accepted = ROLE_ALIASES.get(suggested, {suggested} if suggested else set())
-    suggestion["matches_granted"] = bool(suggested) and bool(granted & accepted)
+    suggestion["matches_granted"] = bool(suggested) and suggested in granted
     suggestion["granted_roles"] = sorted(granted)
     return suggestion
 
@@ -1374,7 +1376,12 @@ def admin_put_user_org(
             ),
             params,
         )
-        org_directory.mirror_metadata_from_profile(db, int(user_id))
+        org_directory.mirror_metadata_from_profile(
+            db,
+            int(user_id),
+            clear_office="office_id" in fields and fields["office_id"] is None,
+            clear_district="home_district" in fields and fields["home_district"] is None,
+        )
         db.commit()
     except HTTPException:
         db.rollback()

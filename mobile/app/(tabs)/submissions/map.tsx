@@ -9,6 +9,7 @@ import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
 import { useUiSettings } from "../../../src/ui/UiSettingsContext";
 import { getMapPreloadBySubmission } from "../../../src/offline/mapPreload";
 import { readCachedArcgisRuntimeConfig } from "../../../src/offline/arcgisRuntimeConfig";
+import { isAssessmentAuthor } from "../../../src/utils/roleModel";
 
 type Geo = Record<string, unknown> | null;
 type Me = { id: number; roles: string[] };
@@ -168,12 +169,12 @@ export default function MapScreen() {
         getSubmission(t, submissionId) as Promise<Sub>,
         apiFetch<GeometryResp>(`/submissions/${submissionId}/geometry`, { token: t }).catch(() => null),
       ]);
-      const roles = new Set(me.roles ?? []);
-      const editable = (roles.has("FIELD_WORKER") || roles.has("ADMIN")) && sub.submission.status === "DRAFT";
+      const roles = me.roles ?? [];
+      const editable = isAssessmentAuthor(roles) && sub.submission.status === "DRAFT";
       console.log("[ArcGisDebug] launchNativeMap:auth-status", {
         editable,
         status: sub.submission.status,
-        roles: Array.from(roles),
+        roles,
       });
       if (!editable) {
         throw new Error("Only DRAFT submissions can be edited.");

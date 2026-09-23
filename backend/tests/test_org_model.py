@@ -51,17 +51,25 @@ _RULE_COLUMNS = (
 
 
 @pytest.fixture(scope="module")
-def rules(org_model_revision):
-    """``org_classifications`` as the migration seeds it, shaped like DB rows.
+def rules(org_model_revision, roles_consolidation_revision):
+    """``org_classifications`` as the migrations leave it, shaped like DB rows:
+    seeded by the org model revision, its role codes then moved onto the
+    consolidated codes by 20260923_roles_consolidated.
 
     ``id`` is the seed order, which is what the database's AUTO_INCREMENT will
     also produce; ``suggest_role_from_rules`` uses it only as the last tiebreak
     after ``priority`` and ``rule_kind``.
     """
-    return [
-        dict(zip(_RULE_COLUMNS, row), id=index, is_active=1)
-        for index, row in enumerate(org_model_revision._CLASSIFICATIONS, start=1)
-    ]
+    role_map = roles_consolidation_revision.ROLE_MAP
+    rows = []
+    for index, row in enumerate(org_model_revision._CLASSIFICATIONS, start=1):
+        record = dict(zip(_RULE_COLUMNS, row), id=index, is_active=1)
+        if record.get("eris_role") == "REVIEWER":
+            record["eris_role"] = None
+        else:
+            record["eris_role"] = role_map.get(record.get("eris_role"), record.get("eris_role"))
+        rows.append(record)
+    return rows
 
 
 def _suggest(rules, **kwargs):
@@ -131,10 +139,10 @@ class TestClassRules:
     @pytest.mark.parametrize(
         "printed_title,expected_role",
         [
-            ("Senior TE(Sup)", "GEOTECH_BRANCH_CHIEF"),
-            ("Senior TE (Sup)", "GEOTECH_BRANCH_CHIEF"),
-            ("Sr TE/Sr EG (SUP", "GEOTECH_BRANCH_CHIEF"),
-            ("Senior TE(Spec)", "GEOTECH_SENIOR_ENGINEER"),
+            ("Senior TE(Sup)", "BRANCH_CHIEF"),
+            ("Senior TE (Sup)", "BRANCH_CHIEF"),
+            ("Sr TE/Sr EG (SUP", "BRANCH_CHIEF"),
+            ("Senior TE(Spec)", "SENIOR_SPECIALIST"),
         ],
     )
     def test_class_3161_resolves_from_the_title_alone(self, rules, printed_title, expected_role):
@@ -148,19 +156,19 @@ class TestClassRules:
     @pytest.mark.parametrize(
         "class_code,marker,expected_role",
         [
-            ("3155", None, "GEOTECH_OFFICE_CHIEF"),
-            ("3161", "SUP", "GEOTECH_BRANCH_CHIEF"),
-            ("3751", "SUP", "GEOTECH_BRANCH_CHIEF"),
-            ("3161", "SPEC", "GEOTECH_SENIOR_ENGINEER"),
-            ("3751", "SPEC", "GEOTECH_SENIOR_ENGINEER"),
-            ("3375", "SPEC", "GEOTECH_SENIOR_ENGINEER"),
-            ("3185", "SPEC", "GEOTECH_SENIOR_ENGINEER"),
-            ("3135", None, "GEOTECH_ENGINEER"),
-            ("3756", None, "GEOTECH_ENGINEER"),
-            ("3175", None, "GEOTECH_ENGINEER"),
-            ("3381", None, "GEOTECH_ENGINEER"),
-            ("5393", None, "CALTRANS_VIEWER"),
-            ("1139", None, "CALTRANS_VIEWER"),
+            ("3155", None, "OFFICE_CHIEF"),
+            ("3161", "SUP", "BRANCH_CHIEF"),
+            ("3751", "SUP", "BRANCH_CHIEF"),
+            ("3161", "SPEC", "SENIOR_SPECIALIST"),
+            ("3751", "SPEC", "SENIOR_SPECIALIST"),
+            ("3375", "SPEC", "SENIOR_SPECIALIST"),
+            ("3185", "SPEC", "SENIOR_SPECIALIST"),
+            ("3135", None, "STAFF"),
+            ("3756", None, "STAFF"),
+            ("3175", None, "STAFF"),
+            ("3381", None, "STAFF"),
+            ("5393", None, "GUEST"),
+            ("1139", None, "GUEST"),
         ],
     )
     def test_every_decided_class_suggests_its_role(self, rules, class_code, marker, expected_role):
@@ -200,7 +208,7 @@ class TestPatternRules:
         # as a row is that a new discipline needs no code change.
         suggestion = _suggest(rules, class_code="9999", title="Senior Hydraulics Engineer (Spec)")
         assert suggestion is not None
-        assert suggestion["suggested_role"] == "GEOTECH_SENIOR_ENGINEER"
+        assert suggestion["suggested_role"] == "SENIOR_SPECIALIST"
         assert suggestion["rule_kind"] == "PATTERN"
 
     def test_pattern_sup_at_s09_answers_for_an_unknown_class(self, rules):
@@ -208,13 +216,13 @@ class TestPatternRules:
             rules, class_code="7777", marker="SUP", level_code="S09", title="Supervising Whatever"
         )
         assert suggestion is not None
-        assert suggestion["suggested_role"] == "GEOTECH_BRANCH_CHIEF"
+        assert suggestion["suggested_role"] == "BRANCH_CHIEF"
         assert suggestion["rule_kind"] == "PATTERN"
 
     def test_the_exact_class_row_wins_over_the_pattern_that_also_matches(self, rules):
         # 3161 (Spec) is matched by BOTH the CLASS row and the `SENIOR %` PATTERN.
         # Priority 100 before 500 is what makes the answer deterministic; a
-        # different order would still return GEOTECH_SENIOR_ENGINEER here, so the
+        # different order would still return SENIOR_SPECIALIST here, so the
         # assertion that matters is rule_kind and the rule's own title.
         suggestion = _suggest(rules, class_code="3161", title="Senior TE (Spec)")
         assert suggestion["rule_kind"] == "CLASS"
@@ -238,7 +246,7 @@ class TestPatternRules:
         retired = [dict(rule, is_active=0) if rule["class_code"] == "3155" else rule for rule in rules]
         assert _suggest(retired, class_code="3155") is None
         # ...and every other rule still answers.
-        assert _suggest(retired, class_code="3161", marker="SUP")["suggested_role"] == "GEOTECH_BRANCH_CHIEF"
+        assert _suggest(retired, class_code="3161", marker="SUP")["suggested_role"] == "BRANCH_CHIEF"
 
     def test_the_seed_holds_fourteen_class_rows_and_two_patterns(self, rules):
         assert len(rules) == 16
@@ -410,7 +418,7 @@ def _office_row(**overrides):
 
 
 def _user(**overrides):
-    user = {"id": 42, "email": "someone@local", "roles": [], "metadata": {}}
+    user = {"id": 42, "email": "mock.someone@dot.ca.gov", "roles": [], "metadata": {}}
     user.update(overrides)
     return user
 

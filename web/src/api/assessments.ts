@@ -287,7 +287,7 @@ export function branchOptions(assessmentId: number): Promise<RoutingOptionsRespo
 }
 
 /**
- * The senior engineers of this assessment's office (the second route's picker).
+ * The Senior Specialists of this assessment's office (the second route's picker).
  * Grouped by home city and district rather than branch: a `(Spec)` position has
  * no branch and sits away from the office home city more often than not.
  */
@@ -311,7 +311,7 @@ export function delegateBranch(
   });
 }
 
-/** Assign a GeoTech senior engineer directly; the assessment returns to the office chief. */
+/** Assign a Senior Specialist directly; the assessment returns to the office chief. */
 export function assignSeniorEngineer(
   assessmentId: number,
   senior_engineer_user_id: number,

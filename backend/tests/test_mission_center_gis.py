@@ -24,7 +24,7 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
     from app.routes import mission_center_gis, photo_map
 
     admin_headers = _headers(admin_token)
-    maintenance_token = _login(client_db, "maintenance@local")
+    maintenance_token = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
     maintenance_headers = _headers(maintenance_token)
     unique = uuid4().hex
 
@@ -82,7 +82,7 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
     monkeypatch.setattr(photo_map, "object_access_url", lambda *args, **kwargs: "https://example.test/incident-photo.jpg")
 
     with engine.begin() as conn:
-        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='admin@local' LIMIT 1")).scalar())
+        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='mock.admin@dot.ca.gov' LIMIT 1")).scalar())
         attachment_result = conn.execute(
             text(
                 """
@@ -151,7 +151,7 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
         ]],
     }
     with engine.begin() as conn:
-        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='admin@local' LIMIT 1")).scalar())
+        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='mock.admin@dot.ca.gov' LIMIT 1")).scalar())
         submission_result = conn.execute(
             text(
                 """

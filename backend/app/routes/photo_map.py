@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import deny_public_only, get_current_user
-from ..permissions import is_admin, is_operational_user, is_public_only, is_reviewer
+from ..permissions import is_admin, is_operational_user, is_public_only
 from ..services import public_visibility
 from ..storage import object_access_url
 
@@ -36,7 +36,7 @@ def _owns_linked_incident(db: Session, *, user_id: int, submission_id: int) -> b
 
 
 def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
-    if is_admin(user) or is_reviewer(user) or is_operational_user(user):
+    if is_admin(user) or is_operational_user(user):
         return True
     row = db.execute(text("""
         SELECT s.created_by_user_id AS owner_id,

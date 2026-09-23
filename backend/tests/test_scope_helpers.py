@@ -12,10 +12,9 @@ the org model, the admin API and every new deployment now issue:
   ``['1=0']`` tail and returned an EMPTY feed — a canonically-named coordinator
   opening the mobile app saw no incidents whatsoever.
 
-The contract this suite pins is one sentence: **a canonical name and its legacy
-equivalent produce exactly the same scope.** Every test therefore asserts the two
-against each other rather than against a hand-written expectation, so a future
-change to the narrowing rules cannot make them drift apart.
+Since 20260923_roles_consolidated each role has exactly one code, and the
+retired codes grant nothing: this suite pins that every work role gets its
+narrowing, and that a retired code gets no feed at all.
 
 No database: ``_ensure_incident_scope_access`` resolves the caller's org from the
 request user when it is given no session, and ``_mobile_scope_filters`` reads the
@@ -46,7 +45,7 @@ def _user(role: str, *, district=None, office_code=None, branch_id=None, user_id
     """A request user with its org record already resolved, as a request has."""
     return {
         "id": user_id,
-        "email": f"{role.lower()}@local",
+        "email": f"mock.{role.lower()}@dot.ca.gov",
         "roles": [role],
         "metadata": {"district": district, "office_code": office_code, "office_location": None},
         "org": {
@@ -72,10 +71,11 @@ def _incident(*, district="04", office_code="WEST", reporter_user_id=99, inciden
     }
 
 
-# The three pairs the design names. Each is (canonical, legacy).
-COORDINATOR = (roles.MAINTENANCE_COORDINATOR, roles.LEGACY_MAINT_COORDINATOR)
-OFFICE_CHIEF = (roles.GEOTECH_OFFICE_CHIEF, roles.LEGACY_OFFICE_CHIEF)
-BRANCH_CHIEF = (roles.GEOTECH_BRANCH_CHIEF, roles.LEGACY_BRANCH_CHIEF)
+# One code per role since 20260923_roles_consolidated; the retired codes grant
+# nothing (see test_a_retired_code_gets_no_feed).
+COORDINATOR = (roles.MAINTENANCE_COORDINATOR,)
+OFFICE_CHIEF = (roles.OFFICE_CHIEF,)
+BRANCH_CHIEF = (roles.BRANCH_CHIEF,)
 
 
 # ---------------------------------------------------------------------------
@@ -113,37 +113,23 @@ class TestIncidentScopeAccess:
         assert excinfo.value.status_code == 403
         assert "office" in excinfo.value.detail.lower()
 
-    @pytest.mark.parametrize("canonical,legacy", [COORDINATOR, OFFICE_CHIEF, BRANCH_CHIEF])
-    def test_canonical_and_legacy_narrow_identically(self, canonical, legacy):
-        outside = _incident(district="07", office_code="SOUTH")
-        results = []
-        for role in (canonical, legacy):
-            user = _user(role, district="04", office_code="WEST")
-            try:
-                incidents_routes._ensure_incident_scope_access(user, outside)
-                results.append("allowed")
-            except HTTPException as exc:
-                results.append(f"{exc.status_code}:{exc.detail}")
-        assert results[0] == results[1], f"{canonical} and {legacy} disagree: {results}"
-        assert results[0] != "allowed"
-
     def test_admin_is_never_narrowed(self):
         incidents_routes._ensure_incident_scope_access(
             _user("ADMIN"), _incident(district="12", office_code="SOUTH")
         )
 
     def test_a_maintenance_field_worker_reads_only_their_own_report(self):
-        user = _user(roles.MAINTENANCE_FIELD_WORKER, user_id=7)
+        user = _user(roles.MAINTENANCE_CREW, user_id=7)
         incidents_routes._ensure_incident_scope_access(user, _incident(reporter_user_id=7))
         with pytest.raises(HTTPException) as excinfo:
             incidents_routes._ensure_incident_scope_access(user, _incident(reporter_user_id=8))
         assert excinfo.value.status_code == 403
 
     def test_an_unscoped_operational_reader_is_not_narrowed(self):
-        # A senior engineer or a Staff member holds no district or office rule
+        # A Senior Specialist or a Staff member holds no district or office rule
         # here; their reach is decided by assignment, not by this helper.
         incidents_routes._ensure_incident_scope_access(
-            _user(roles.GEOTECH_SENIOR_ENGINEER), _incident(district="12", office_code="SOUTH")
+            _user(roles.SENIOR_SPECIALIST), _incident(district="12", office_code="SOUTH")
         )
 
 
@@ -181,34 +167,36 @@ class TestMobileScopeFilters:
         assert "BRANCH_CHIEF_REVIEW" in where[0]
 
     @pytest.mark.parametrize(
-        "canonical,legacy,district,office_code",
+        "role,district,office_code",
         [
-            (COORDINATOR[0], COORDINATOR[1], "04", None),
-            (OFFICE_CHIEF[0], OFFICE_CHIEF[1], None, "WEST"),
-            (BRANCH_CHIEF[0], BRANCH_CHIEF[1], None, "WEST"),
-            (roles.MAINTENANCE_FIELD_WORKER, roles.LEGACY_MAINTENANCE, None, None),
-            (roles.GEOTECH_ENGINEER, roles.LEGACY_FIELD_WORKER, None, None),
+            (roles.MAINTENANCE_COORDINATOR, "04", None),
+            (roles.OFFICE_CHIEF, None, "WEST"),
+            (roles.BRANCH_CHIEF, None, "WEST"),
+            (roles.MAINTENANCE_CREW, None, None),
+            (roles.STAFF, None, None),
         ],
     )
-    def test_canonical_and_legacy_produce_the_same_feed(self, canonical, legacy, district, office_code):
-        canonical_where, canonical_params = _filters(
-            _user(canonical, district=district, office_code=office_code)
-        )
-        legacy_where, legacy_params = _filters(_user(legacy, district=district, office_code=office_code))
-        assert canonical_where == legacy_where
-        assert canonical_params == legacy_params
-        assert canonical_where != ["1=0"]
+    def test_every_work_role_has_a_feed(self, role, district, office_code):
+        where, _ = _filters(_user(role, district=district, office_code=office_code))
+        assert where != ["1=0"]
+
+    @pytest.mark.parametrize(
+        "code",
+        ["MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF", "GEOTECH_BRANCH_CHIEF", "MAINTENANCE", "FIELD_WORKER", "GEOTECH_ENGINEER", "REVIEWER"],
+    )
+    def test_a_retired_code_gets_no_feed(self, code):
+        assert _filters(_user(code, district="04", office_code="WEST"))[0] == ["1=0"]
 
     def test_the_senior_engineer_shares_the_staff_assignment_filter(self):
-        # The senior engineer route reuses assignment stage ENGINEER, so the
+        # The Senior Specialist route reuses assignment stage ENGINEER, so the
         # EXISTS is identical; only the role guard in front of it widened.
-        staff_where, _ = _filters(_user(roles.GEOTECH_ENGINEER))
-        senior_where, _ = _filters(_user(roles.GEOTECH_SENIOR_ENGINEER))
+        staff_where, _ = _filters(_user(roles.STAFF))
+        senior_where, _ = _filters(_user(roles.SENIOR_SPECIALIST))
         assert staff_where == senior_where
         assert "assignment_stage = 'ENGINEER'" in staff_where[0]
 
     def test_a_field_worker_sees_only_their_own_reports(self):
-        where, params = _filters(_user(roles.MAINTENANCE_FIELD_WORKER, user_id=7))
+        where, params = _filters(_user(roles.MAINTENANCE_CREW, user_id=7))
         assert "i.reporter_user_id = :mobile_uid" in where[0]
         assert params["mobile_uid"] == 7
 
@@ -219,18 +207,18 @@ class TestMobileScopeFilters:
         # The ['1=0'] tail is correct HERE and only here: a chief with no office
         # recorded has no office feed to show. What the canonical fix changed is
         # that a chief WITH an office no longer lands in it.
-        assert _filters(_user(roles.GEOTECH_OFFICE_CHIEF, office_code=None))[0] == ["1=0"]
+        assert _filters(_user(roles.OFFICE_CHIEF, office_code=None))[0] == ["1=0"]
         assert _filters(_user(roles.MAINTENANCE_COORDINATOR, district=None))[0] == ["1=0"]
         assert _filters(_user("REVIEWER"))[0] == ["1=0"]
 
     def test_a_read_only_viewer_gets_no_mobile_feed(self):
         # The viewer holds no mobile role at all: the org model does not put a
         # read-only account into the field app.
-        assert _filters(_user(roles.CALTRANS_VIEWER))[0] == ["1=0"]
+        assert _filters(_user(roles.GUEST))[0] == ["1=0"]
 
     def test_several_roles_union_rather_than_override(self):
         user = _user(roles.MAINTENANCE_COORDINATOR, district="04", office_code="WEST")
-        user["roles"] = [roles.MAINTENANCE_COORDINATOR, roles.GEOTECH_OFFICE_CHIEF]
+        user["roles"] = [roles.MAINTENANCE_COORDINATOR, roles.OFFICE_CHIEF]
         where, params = _filters(user)
         assert " OR " in where[0]
         assert params["coord_district"] == "04"

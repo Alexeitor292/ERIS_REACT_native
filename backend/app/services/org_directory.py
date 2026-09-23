@@ -505,8 +505,20 @@ def user_home_district(db: Session, user_or_id: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def mirror_metadata_from_profile(db: Session, user_id: int) -> None:
+def mirror_metadata_from_profile(
+    db: Session,
+    user_id: int,
+    *,
+    clear_office: bool = False,
+    clear_district: bool = False,
+) -> None:
     """Re-render ``users.metadata_json`` from the profile row. Caller commits.
+
+    ``clear_office`` / ``clear_district``: the caller has just set that field
+    to NULL on purpose. The resolved org cannot say so — a NULL profile field
+    falls back to this very mirror — so without them removing someone from an
+    office would read the old office back and write it here again, and they
+    would keep that office's scope.
 
     The mirror exists so a partially-migrated deployment, an old client, or a
     reader this design has not moved yet cannot strand a chief's review queue. It
@@ -525,8 +537,8 @@ def mirror_metadata_from_profile(db: Session, user_id: int) -> None:
         {"uid": int(user_id)},
     ).scalar()
     metadata = parse_user_metadata(existing)
-    metadata["office_code"] = normalize_office_code(org.get("office_code"))
-    metadata["district"] = normalize_district_code(org.get("home_district"))
+    metadata["office_code"] = None if clear_office else normalize_office_code(org.get("office_code"))
+    metadata["district"] = None if clear_district else normalize_district_code(org.get("home_district"))
     db.execute(
         text("UPDATE users SET metadata_json = :metadata, updated_at = NOW() WHERE id = :uid"),
         {"metadata": user_metadata_json(metadata), "uid": int(user_id)},

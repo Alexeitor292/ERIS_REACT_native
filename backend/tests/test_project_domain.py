@@ -68,8 +68,8 @@ def test_incident_is_root_and_approval_mints_permanent_identity(client_db, admin
     office_email = f"event-office-{unique}@example.test"
 
     user_ids = [
-        _create_user(client_db, admin_headers, email=maintenance_email, password=password, roles=["MAINTENANCE"], metadata={"district": "03"}),
-        _create_user(client_db, admin_headers, email=coordinator_email, password=password, roles=["MAINT_COORDINATOR"], metadata={"district": "03"}),
+        _create_user(client_db, admin_headers, email=maintenance_email, password=password, roles=["MAINTENANCE_CREW"], metadata={"district": "03"}),
+        _create_user(client_db, admin_headers, email=coordinator_email, password=password, roles=["MAINTENANCE_COORDINATOR"], metadata={"district": "03"}),
         _create_user(client_db, admin_headers, email=office_email, password=password, roles=["OFFICE_CHIEF"], metadata={"office_code": "NORTH"}),
     ]
 
@@ -143,7 +143,7 @@ def test_multiple_incidents_share_event_group_attribute_without_sharing_identity
     office_email = f"event-share-office-{unique}@example.test"
 
     user_ids = [
-        _create_user(client_db, admin_headers, email=coordinator_email, password=password, roles=["MAINT_COORDINATOR"], metadata={"district": "03"}),
+        _create_user(client_db, admin_headers, email=coordinator_email, password=password, roles=["MAINTENANCE_COORDINATOR"], metadata={"district": "03"}),
         _create_user(client_db, admin_headers, email=office_email, password=password, roles=["OFFICE_CHIEF"], metadata={"office_code": "NORTH"}),
     ]
     coordinator_headers = _login(client_db, coordinator_email, password)

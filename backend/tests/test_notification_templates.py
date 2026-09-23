@@ -26,7 +26,7 @@ _PAYLOAD = {
     "office_location": "South Office",
     "route_label": "District 7 · Los Angeles · Route 101 · PM 12.30",
     "approved_by_name": "Sofia Ruiz",
-    "approved_by_role": "GeoTech Office Chief",
+    "approved_by_role": "Office Chief",
     "approved_at": "2026-09-10 14:02:11",
 }
 
@@ -41,7 +41,7 @@ def fixed_web_base_url(monkeypatch):
 class TestApprovedCoordinatorTemplate:
     def test_subject_and_body_match_the_documented_wording(self):
         subject, body = notifications.render(
-            "ASSESSMENT_APPROVED_COORDINATOR", _PAYLOAD, {"full_name": "Local Coordinator D04"}
+            "ASSESSMENT_APPROVED_COORDINATOR", _PAYLOAD, {"full_name": "Mock Coordinator D04"}
         )
         assert subject == (
             "ERIS INC-2026-0042 — GeoTech assessment approved "
@@ -53,7 +53,7 @@ class TestApprovedCoordinatorTemplate:
             "  Report          INC-2026-0042 — District 7 · Los Angeles · Route 101 · PM 12.30\n"
             "  District        07\n"
             "  GeoTech office  South Office (SOUTH)\n"
-            "  Approved by     Sofia Ruiz, GeoTech Office Chief\n"
+            "  Approved by     Sofia Ruiz, Office Chief\n"
             "  Approved on     2026-09-10 14:02:11\n"
             "\n"
             "The assessment is complete. No further GeoTech action is required.\n"
@@ -114,11 +114,11 @@ class TestDeliverySwitches:
         assert notifications.delivery_configured() is True
 
         subject, body = notifications.render("ASSESSMENT_APPROVED_COORDINATOR", _PAYLOAD)
-        notifications.send_email("coordinator04@local", subject, body)
+        notifications.send_email("mock.coordinator.d04@dot.ca.gov", subject, body)
         written = list(tmp_path.glob("*.eml"))
         assert len(written) == 1
         raw = written[0].read_bytes()
-        assert b"To: coordinator04@local" in raw
+        assert b"To: mock.coordinator.d04@dot.ca.gov" in raw
         assert b"Auto-Submitted: auto-generated" in raw
 
     def test_sending_with_no_relay_and_no_dump_dir_raises(self, monkeypatch):
@@ -133,6 +133,28 @@ class TestDeliverySwitches:
         monkeypatch.setattr(settings, "SMTP_HOST", "relay.example.test")
         with pytest.raises(ValueError):
             notifications.send_email("   ", "subject", "body")
+
+    def test_a_mock_account_is_never_handed_to_a_live_relay(self, monkeypatch, tmp_path):
+        # The mock accounts sit on the real dot.ca.gov domain.
+        monkeypatch.setattr(settings, "SMTP_HOST", "relay.example.test")
+
+        def _no_connection(*args, **kwargs):
+            raise AssertionError("connected to the relay for a mock account")
+
+        monkeypatch.setattr(notifications.smtplib, "SMTP", _no_connection)
+        monkeypatch.setattr(notifications.smtplib, "SMTP_SSL", _no_connection)
+        for address in ("mock.staff@dot.ca.gov", " Mock.Guest@dot.ca.gov "):
+            with pytest.raises(ValueError, match="mock account"):
+                notifications.send_email(address, "subject", "body")
+        assert notifications.is_mock_address("mock.coordinator.d04@dot.ca.gov")
+        assert not notifications.is_mock_address("jane.mockingbird@dot.ca.gov")
+        assert not notifications.is_mock_address(None)
+
+        # Without a relay the dev dump still writes them: CI keeps the whole path.
+        monkeypatch.setattr(settings, "SMTP_HOST", None)
+        monkeypatch.setattr(settings, "MAIL_DEV_DUMP_DIR", str(tmp_path))
+        notifications.send_email("mock.staff@dot.ca.gov", "subject", "body")
+        assert len(list(tmp_path.glob("*.eml"))) == 1
 
     def test_flush_after_commit_never_raises(self, monkeypatch):
         monkeypatch.setattr(settings, "SMTP_HOST", None)

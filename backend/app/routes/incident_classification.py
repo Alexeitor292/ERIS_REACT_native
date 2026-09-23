@@ -9,10 +9,9 @@ from ..constants.gisa_lookups import GISA_INCIDENT_TYPE_LUT
 from ..db import get_db
 from ..deps import require_roles
 from ..roles import (
-    CALTRANS_VIEWER,
-    MAINTENANCE_FIELD_WORKER,
+    GUEST,
+    MAINTENANCE_CREW,
     OPERATIONAL_ROLES,
-    ROLE_ALIASES,
     is_maintenance_only,
     is_public_only,
 )
@@ -20,13 +19,13 @@ from ..services import public_visibility
 
 router = APIRouter(tags=["incident-classification"])
 
-# CALTRANS_VIEWER is in the read list and the rows are filtered to public
+# GUEST is in the read list and the rows are filtered to public
 # incidents below. Without the viewer here the viewer's ONLY page cannot load:
 # IncidentsOperationsPage fires this query unconditionally inside the same
 # Promise.all as the role-gated assessments call, so a 403 sets the error banner
 # and the incident rows are never rendered (org model design §4.5, §8).
 CLASSIFICATION_READ_ROLES = sorted(
-    OPERATIONAL_ROLES | ROLE_ALIASES[MAINTENANCE_FIELD_WORKER] | {CALTRANS_VIEWER}
+    OPERATIONAL_ROLES | {MAINTENANCE_CREW, GUEST}
 )
 _LABEL_BY_CODE = {str(item["code"]): str(item["label"]) for item in GISA_INCIDENT_TYPE_LUT}
 _OFFICIAL_STATES = {"SUBMITTED", "APPROVED", "FINALIZED"}
