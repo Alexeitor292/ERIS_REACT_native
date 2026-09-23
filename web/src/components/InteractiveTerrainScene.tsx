@@ -223,8 +223,13 @@ export default function InteractiveTerrainScene({
     view.ui.add(home, "top-left");
     view.ui.add(compass, "top-left");
     return () => {
-      view.ui.remove(home);
-      view.ui.remove(compass);
+      // On unmount the view effect above cleans up first and destroys the view,
+      // which leaves `view.ui` null. Calling remove on it threw inside React's
+      // unmount and blanked the whole app.
+      if (!view.destroyed) {
+        view.ui?.remove(home);
+        view.ui?.remove(compass);
+      }
       home.destroy();
       compass.destroy();
     };

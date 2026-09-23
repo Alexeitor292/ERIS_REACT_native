@@ -19,6 +19,12 @@ type Props = {
    * approve/return decisions happen there — the server refuses them here.
    */
   assessmentLinked?: boolean;
+  /**
+   * Hide the links that lead into the operational surface (Mission Center).
+   * A read-only viewer is refused those routes, and a link that bounces the
+   * reader back to where they came from is worse than no link.
+   */
+  hideOperationalLinks?: boolean;
   submitLabel?: string;
   onRefresh: () => void;
   onSaveDraft: () => void;
@@ -50,6 +56,7 @@ export default function SubmissionDetailHeader({
   canEdit,
   canDelete,
   assessmentLinked = false,
+  hideOperationalLinks = false,
   submitLabel = "Submit for review",
   onRefresh,
   onSaveDraft,
@@ -88,6 +95,9 @@ export default function SubmissionDetailHeader({
   const backTo = context?.assessment_id != null ? `/assessments/${context.assessment_id}` : "/submissions";
   const backLabel = context?.assessment_id != null ? `Assessment #${context.assessment_id}` : "Submissions";
   const assessmentHref = context?.assessment_id != null ? `/assessments/${context.assessment_id}` : null;
+  // Sending for review, and deciding a submitted form, happen on the assessment
+  // in My Work: go straight to it there rather than to its record first.
+  const assessmentWorkHref = context?.assessment_id != null ? `/my-work?assessment=${context.assessment_id}` : null;
 
   /**
    * Who is holding a SUBMITTED form. The route decides, and a legacy form with
@@ -130,7 +140,7 @@ export default function SubmissionDetailHeader({
                 Incident #{context.incident_id}
               </Link>
             ) : null}
-            {context?.event_group_id != null && context?.incident_id != null ? (
+            {context?.event_group_id != null && context?.incident_id != null && !hideOperationalLinks ? (
               <Link to={`/mission-center/${context.event_group_id}/${context.incident_id}`} className="text-[11px] font-semibold text-[var(--brand)] hover:underline">View on map</Link>
             ) : null}
           </div>
@@ -148,9 +158,9 @@ export default function SubmissionDetailHeader({
           {canEdit ? (
             <>
               <button type="button" onClick={onSaveDraft} disabled={busy || invalid} className={btn}>Save draft</button>
-              {assessmentLinked && assessmentHref ? (
-                <Link to={assessmentHref} className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_50%,var(--line))] bg-[var(--panel)] px-3 py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))]">
-                  Send this for review on the assessment
+              {assessmentLinked && assessmentWorkHref ? (
+                <Link to={assessmentWorkHref} className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_50%,var(--line))] bg-[var(--panel)] px-3 py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))]">
+                  Send it for review in My Work
                 </Link>
               ) : (
                 <button type="button" onClick={onSubmitDraft} disabled={busy || invalid} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">{submitLabel}</button>
@@ -160,8 +170,8 @@ export default function SubmissionDetailHeader({
 
           {assessmentLinked && assessmentHref ? (
             status === "SUBMITTED" ? (
-              <Link to={assessmentHref} className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_50%,var(--line))] bg-[var(--panel)] px-3 py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))]">
-                Decide this on the assessment
+              <Link to={context?.can_review && assessmentWorkHref ? assessmentWorkHref : assessmentHref} className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_50%,var(--line))] bg-[var(--panel)] px-3 py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[color:color-mix(in_oklab,var(--brand)_8%,var(--panel))]">
+                {context?.can_review ? "Review it in My Work" : "See the review on the assessment"}
               </Link>
             ) : null
           ) : canAct ? (

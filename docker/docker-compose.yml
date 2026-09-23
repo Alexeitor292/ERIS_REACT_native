@@ -9,8 +9,10 @@ services:
       MARIADB_DATABASE: ${MARIADB_DATABASE}
       MARIADB_USER: ${MARIADB_USER}
       MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    # Localhost only by default: the backend reaches MariaDB over the compose
+    # network, so nothing else needs the port. Set MARIADB_BIND to widen it.
     ports:
-      - "3306:3306"
+      - "${MARIADB_BIND:-127.0.0.1}:3306:3306"
     volumes:
       - eris_mariadb_data:/var/lib/mysql
       - ../database/init:/docker-entrypoint-initdb.d:ro
@@ -25,7 +27,7 @@ services:
     container_name: eris_adminer
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "${ADMINER_BIND:-127.0.0.1}:8081:8080"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -40,8 +42,10 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
+      # The API must stay reachable by browsers, phones and any reverse proxy
+      # (file URLs point at it). The admin console is localhost-only by default.
       - "9800:9000"
-      - "9801:9001"
+      - "${MINIO_CONSOLE_BIND:-127.0.0.1}:9801:9001"
     volumes:
       - eris_minio_data:/data
 

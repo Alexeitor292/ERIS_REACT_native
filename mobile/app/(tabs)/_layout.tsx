@@ -8,7 +8,13 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { clearToken, getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
-import { isOperationalUser } from "@/src/utils/roleModel";
+import {
+  canReportIncident,
+  isAssessmentAuthor,
+  isOperationalUser,
+  isPublicOnly,
+  isWorkforceUser,
+} from "@/src/utils/roleModel";
 
 export default function TabLayout() {
   const { palette, scheme, componentScale } = useUiSettings();
@@ -42,29 +48,22 @@ export default function TabLayout() {
     };
   }, []);
 
-  const roleSet = useMemo(() => new Set(roles), [roles]);
-  const isMaintenanceWorker =
-    roleSet.has("MAINTENANCE") ||
-    roleSet.has("FIELD_WORKER") ||
-    roleSet.has("ADMIN");
-  // The senior engineer fills the GISA form exactly as Staff do, so without
-  // these two gates a senior-engineer-only account would see the Assessments
-  // tab and nothing it links to.
-  const canSeeDraftsSubmissions =
-    rolesLoaded &&
-    (roleSet.has("FIELD_WORKER") ||
-      roleSet.has("GEOTECH_SENIOR_ENGINEER") ||
-      roleSet.has("REVIEWER") ||
-      roleSet.has("ADMIN"));
+  // Every gate below tests the role codes through the shared role model, never
+  // a raw string (design §9.3).
+  //
+  // A read-only (Guest) account holds no operational role, so it matches none
+  // of these and keeps only the read-only incident feed below.
+  const publicOnly = rolesLoaded && isPublicOnly(roles);
+  const isMaintenanceWorker = canReportIncident(roles);
+  // The Senior Specialist fills the GISA form exactly as Staff do, so without
+  // these two gates a Senior Specialist would see the Assessments tab and
+  // nothing it links to.
+  const canSeeDraftsSubmissions = rolesLoaded && isAssessmentAuthor(roles);
+  // No `!rolesLoaded ||` any more: defaulting to visible flashed the tab into
+  // view for an account that must not have it, then emptied it (design §9.1).
   const canSeeIncidents =
-    !rolesLoaded ||
-    roleSet.has("MAINTENANCE") ||
-    roleSet.has("MAINT_COORDINATOR") ||
-    roleSet.has("OFFICE_CHIEF") ||
-    roleSet.has("BRANCH_CHIEF") ||
-    roleSet.has("FIELD_WORKER") ||
-    roleSet.has("GEOTECH_SENIOR_ENGINEER") ||
-    roleSet.has("ADMIN");
+    rolesLoaded &&
+    (publicOnly || isWorkforceUser(roles));
   // Assessments are for non-maintenance operational users only.
   const canSeeAssessments = rolesLoaded && isOperationalUser(roles);
 

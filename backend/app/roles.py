@@ -1,109 +1,109 @@
-"""Canonical organization roles + backward-compatible legacy aliasing.
+"""The ERIS roles — one code per role, no aliases.
 
-ERIS historically seeded these role names (see database/init/020_seed.sql):
+Seven work roles, as the owner named them (2026-09-22), plus the system
+administrator:
 
-    FIELD_WORKER        -- the GeoTech Staff member who completes the technical
-                           form
-    MAINTENANCE         -- the maintenance field worker who reports incidents
-    MAINT_COORDINATOR   -- maintenance coordinator (triage)
-    OFFICE_CHIEF        -- GeoTech office chief
-    BRANCH_CHIEF        -- GeoTech branch chief
-    REVIEWER            -- legacy global reviewer role (being retired)
-    ADMIN
+    MAINTENANCE_CREW          Maintenance Crew — files field reports from the
+                              road; sees only their own reports.
+    MAINTENANCE_COORDINATOR   Maintenance Coordinator — triages field reports
+                              for their district.
+    OFFICE_CHIEF              Office Chief — routes assessments of their GeoTech
+                              office, and reviews the Senior Specialist route.
+    BRANCH_CHIEF              Branch Chief — assigns Staff, and reviews the
+                              branch route.
+    SENIOR_SPECIALIST         Senior Specialist — fills assessments the office
+                              chief assigns directly.
+    STAFF                     Staff — fills the assessments a branch chief
+                              assigns; not all of them are engineers.
+    GUEST                     Guest — read-only, APPROVED records only, no
+                              workflow anywhere (org model design §4).
+    ADMIN                     Administrator — accounts, the org model and
+                              configuration; not a workflow role.
 
-The Assessment Routing & Authority Model introduces clearer canonical names:
+Migration 20260923_roles_consolidated moved every account off the earlier codes
+(MAINTENANCE, MAINTENANCE_FIELD_WORKER, MAINT_COORDINATOR, GEOTECH_*,
+FIELD_WORKER, CALTRANS_VIEWER, REVIEWER) and deleted them. Nothing here accepts
+an old code any more: a guard lists exactly the roles it admits.
 
-    MAINTENANCE_FIELD_WORKER, MAINTENANCE_COORDINATOR, GEOTECH_OFFICE_CHIEF,
-    GEOTECH_BRANCH_CHIEF, GEOTECH_ENGINEER, ADMIN
+Authentication may come from Entra ID; roles never do. Who holds which role,
+and where they sit in the organization, is assigned in ERIS by an administrator.
 
-Routing v2 adds one more, which has NO legacy equivalent because the role is new:
+Review authority is not a role: it is DERIVED FROM THE ASSESSMENT'S ROUTING
+PATH. On the branch route only the branch chief named on that assessment
+(``assessments.branch_chief_user_id``) may review; on the Senior Specialist
+route only an office chief of that assessment's office may. No assignment row
+confers any authority.
 
-    GEOTECH_SENIOR_ENGINEER   -- fills assessments the office chief assigns
-                                 directly, and reports back to that office chief
-
-We do NOT rename existing roles or remap existing user_roles rows (that would be
-a destructive migration). Instead, every canonical role aliases to its legacy
-equivalent, and authority checks accept either name. New deployments may assign
-the canonical roles; existing deployments keep working unchanged.
-
-Review authority is intentionally NOT a role here, and as of routing v2 it is not
-an assignment either: it is DERIVED FROM THE ASSESSMENT'S ROUTING PATH. On the
-branch route only the branch chief named on that assessment
-(``assessments.branch_chief_user_id``) may review; on the senior engineer route
-only an office chief of that assessment's office may. The legacy "REVIEWER"
-account role and ``assessment_assignments`` rows with role REVIEWER/APPROVER no
-longer confer any authority — REVIEWER is deprecated, kept only so existing
-accounts keep their broad operational READ, and no new grants should be made.
-New code must derive review authority from the assessment, never from a role
-string or an assignment row.
+Record-level grants sit beside the roles and never widen them: a technical
+form's reader and editor grants (``submission_visibility`` /
+``submission_editors``) let a named person see or edit that one form.
 """
 
 from __future__ import annotations
 
-# Canonical role names
-MAINTENANCE_FIELD_WORKER = "MAINTENANCE_FIELD_WORKER"
+MAINTENANCE_CREW = "MAINTENANCE_CREW"
 MAINTENANCE_COORDINATOR = "MAINTENANCE_COORDINATOR"
-GEOTECH_OFFICE_CHIEF = "GEOTECH_OFFICE_CHIEF"
-GEOTECH_BRANCH_CHIEF = "GEOTECH_BRANCH_CHIEF"
-GEOTECH_ENGINEER = "GEOTECH_ENGINEER"
-GEOTECH_SENIOR_ENGINEER = "GEOTECH_SENIOR_ENGINEER"
+OFFICE_CHIEF = "OFFICE_CHIEF"
+BRANCH_CHIEF = "BRANCH_CHIEF"
+SENIOR_SPECIALIST = "SENIOR_SPECIALIST"
+STAFF = "STAFF"
+GUEST = "GUEST"
 ADMIN = "ADMIN"
 
-# Legacy role names (still present in seeds and existing databases)
-LEGACY_MAINTENANCE = "MAINTENANCE"
-LEGACY_MAINT_COORDINATOR = "MAINT_COORDINATOR"
-LEGACY_OFFICE_CHIEF = "OFFICE_CHIEF"
-LEGACY_BRANCH_CHIEF = "BRANCH_CHIEF"
-LEGACY_FIELD_WORKER = "FIELD_WORKER"
-LEGACY_REVIEWER = "REVIEWER"
+# Every role ERIS knows, in the order they are presented.
+ALL_ROLES: tuple[str, ...] = (
+    MAINTENANCE_CREW,
+    MAINTENANCE_COORDINATOR,
+    OFFICE_CHIEF,
+    BRANCH_CHIEF,
+    SENIOR_SPECIALIST,
+    STAFF,
+    GUEST,
+    ADMIN,
+)
+ALL_ROLE_NAMES: list[str] = sorted(ALL_ROLES)
 
-# canonical -> set of names that satisfy it (canonical + legacy aliases)
-ROLE_ALIASES: dict[str, set[str]] = {
-    MAINTENANCE_FIELD_WORKER: {MAINTENANCE_FIELD_WORKER, LEGACY_MAINTENANCE},
-    MAINTENANCE_COORDINATOR: {MAINTENANCE_COORDINATOR, LEGACY_MAINT_COORDINATOR},
-    GEOTECH_OFFICE_CHIEF: {GEOTECH_OFFICE_CHIEF, LEGACY_OFFICE_CHIEF},
-    GEOTECH_BRANCH_CHIEF: {GEOTECH_BRANCH_CHIEF, LEGACY_BRANCH_CHIEF},
-    GEOTECH_ENGINEER: {GEOTECH_ENGINEER, LEGACY_FIELD_WORKER},
-    # The senior engineer is a new role: it has no legacy alias, because
-    # inventing one would make expand_roles() accept a name no database
-    # contains.
-    GEOTECH_SENIOR_ENGINEER: {GEOTECH_SENIOR_ENGINEER},
-    ADMIN: {ADMIN},
+ROLE_TITLES: dict[str, str] = {
+    MAINTENANCE_CREW: "Maintenance Crew",
+    MAINTENANCE_COORDINATOR: "Maintenance Coordinator",
+    OFFICE_CHIEF: "Office Chief",
+    BRANCH_CHIEF: "Branch Chief",
+    SENIOR_SPECIALIST: "Senior Specialist",
+    STAFF: "Staff",
+    GUEST: "Guest",
+    ADMIN: "Administrator",
 }
 
-# Maintenance field-reporting roles. These users are scoped to their own
-# incident reports and reporting views only (narrow visibility).
-MAINTENANCE_REPORTING_ROLES: set[str] = {MAINTENANCE_FIELD_WORKER, LEGACY_MAINTENANCE}
+# Field reporting. These users are scoped to their own incident reports and
+# reporting views only (narrow visibility).
+MAINTENANCE_REPORTING_ROLES: set[str] = {MAINTENANCE_CREW}
 
-# Non-maintenance operational roles. These users get broad read access to all
-# operational data (incidents, assessments, locations, timelines, ...).
-OPERATIONAL_ROLES: set[str] = (
-    ROLE_ALIASES[MAINTENANCE_COORDINATOR]
-    | ROLE_ALIASES[GEOTECH_OFFICE_CHIEF]
-    | ROLE_ALIASES[GEOTECH_BRANCH_CHIEF]
-    | ROLE_ALIASES[GEOTECH_ENGINEER]
-    | ROLE_ALIASES[GEOTECH_SENIOR_ENGINEER]
-    | {LEGACY_REVIEWER, ADMIN}
-)
+# The operational roles: broad read of operational data (incidents,
+# assessments, locations, timelines, ...).
+OPERATIONAL_ROLES: set[str] = {
+    MAINTENANCE_COORDINATOR,
+    OFFICE_CHIEF,
+    BRANCH_CHIEF,
+    STAFF,
+    SENIOR_SPECIALIST,
+    ADMIN,
+}
 
+# Read-only public visibility. A THIRD CATEGORY, deliberately outside
+# OPERATIONAL_ROLES: that set is a single flat switch guarding roughly twelve
+# endpoint families and it is STATE-BLIND — can_view_submission returns True for
+# any operational user and list_submissions returns DRAFT rows to them — so
+# adding GUEST there would hand every guest every draft technical form in the
+# state (design §4.1). "Approved only" is expressed per handler by
+# services/public_visibility.py instead.
+PUBLIC_VIEW_ROLES: set[str] = {GUEST}
 
-def expand_roles(*canonical: str) -> list[str]:
-    """Expand canonical role names into the full set of names (canonical +
-    legacy aliases) that satisfy them. Use this when building a require_roles()
-    guard so both new and legacy role names are accepted.
-    """
-    out: set[str] = set()
-    for role in canonical:
-        out |= ROLE_ALIASES.get(role, {role})
-    return sorted(out)
+# Who may file a field report: the crew on the road, Staff, and administrators.
+FIELD_REPORTING_ROLES: list[str] = [MAINTENANCE_CREW, STAFF, ADMIN]
 
-
-# Authorship of the GISA technical form. The senior engineer fills the
-# assessment form exactly as GeoTech Staff do (routing v2 decision 1),
-# so every GISA write guard accepts both — plus ADMIN. Using this list instead of
-# a literal ["FIELD_WORKER", "ADMIN"] also unblocks accounts that hold only the
-# canonical GEOTECH_ENGINEER name, which could not edit before.
-GISA_AUTHOR_ROLES: list[str] = expand_roles(GEOTECH_ENGINEER, GEOTECH_SENIOR_ENGINEER) + [ADMIN]
+# Authorship of the GISA technical form. The Senior Specialist fills the
+# assessment form exactly as Staff do (routing v2 decision 1).
+GISA_AUTHOR_ROLES: list[str] = [STAFF, SENIOR_SPECIALIST, ADMIN]
 
 
 def user_role_set(user: dict) -> set[str]:
@@ -114,22 +114,21 @@ def is_admin(user: dict) -> bool:
     return ADMIN in user_role_set(user)
 
 
-def has_canonical_role(user: dict, canonical: str) -> bool:
-    """True if the user holds the canonical role or any of its legacy aliases."""
-    return bool(user_role_set(user) & ROLE_ALIASES.get(canonical, {canonical}))
+def has_role(user: dict, role: str) -> bool:
+    return role in user_role_set(user)
 
 
-def has_any_canonical_role(user: dict, *canonical: str) -> bool:
-    return any(has_canonical_role(user, role) for role in canonical)
+def has_any_role(user: dict, *roles: str) -> bool:
+    return bool(user_role_set(user) & set(roles))
 
 
 def is_operational_user(user: dict) -> bool:
-    """Non-maintenance operational user with broad read access (or admin)."""
+    """Operational user with broad read access (or admin)."""
     return bool(user_role_set(user) & OPERATIONAL_ROLES)
 
 
 def is_maintenance_only(user: dict) -> bool:
-    """True for users whose only relevant role is maintenance field reporting.
+    """True for users whose only relevant role is Maintenance Crew.
 
     These users must be scoped to their own reports and must NOT receive broad
     operational visibility. Admins and any operational role override this.
@@ -138,3 +137,23 @@ def is_maintenance_only(user: dict) -> bool:
     if roles & OPERATIONAL_ROLES:
         return False
     return bool(roles & MAINTENANCE_REPORTING_ROLES)
+
+
+def is_public_viewer(user: dict) -> bool:
+    """True if the account holds the Guest role, alone or not."""
+    return bool(user_role_set(user) & PUBLIC_VIEW_ROLES)
+
+
+def is_public_only(user: dict) -> bool:
+    """True when Guest is the account's ONLY role — the narrowing predicate.
+
+    Mirrors ``is_maintenance_only``. It answers the composition question
+    explicitly: a chief who is ALSO granted Guest keeps full chief access,
+    because ``require_roles`` is a union and the most permissive role always
+    wins. Every public-visibility narrowing keys on this, never on
+    ``is_public_viewer`` (design §4.1).
+    """
+    roles = user_role_set(user)
+    if roles & OPERATIONAL_ROLES or roles & MAINTENANCE_REPORTING_ROLES:
+        return False
+    return bool(roles & PUBLIC_VIEW_ROLES)

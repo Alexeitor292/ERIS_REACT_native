@@ -9,15 +9,24 @@ from ..constants.gisa_lookups import GISA_INCIDENT_TYPE_LUT
 from ..db import get_db
 from ..deps import require_roles
 from ..roles import (
-    MAINTENANCE_FIELD_WORKER,
+    GUEST,
+    MAINTENANCE_CREW,
     OPERATIONAL_ROLES,
-    ROLE_ALIASES,
     is_maintenance_only,
+    is_public_only,
 )
+from ..services import public_visibility
 
 router = APIRouter(tags=["incident-classification"])
 
-CLASSIFICATION_READ_ROLES = sorted(OPERATIONAL_ROLES | ROLE_ALIASES[MAINTENANCE_FIELD_WORKER])
+# GUEST is in the read list and the rows are filtered to public
+# incidents below. Without the viewer here the viewer's ONLY page cannot load:
+# IncidentsOperationsPage fires this query unconditionally inside the same
+# Promise.all as the role-gated assessments call, so a 403 sets the error banner
+# and the incident rows are never rendered (org model design §4.5, §8).
+CLASSIFICATION_READ_ROLES = sorted(
+    OPERATIONAL_ROLES | {MAINTENANCE_CREW, GUEST}
+)
 _LABEL_BY_CODE = {str(item["code"]): str(item["label"]) for item in GISA_INCIDENT_TYPE_LUT}
 _OFFICIAL_STATES = {"SUBMITTED", "APPROVED", "FINALIZED"}
 _CONFIRMED_STATES = {"APPROVED", "FINALIZED"}
@@ -108,6 +117,16 @@ def _classification_batch(*, db: Session, user: dict, incident_ids: list[int]) -
     if len(ordered_ids) > _MAX_BATCH:
         raise HTTPException(status_code=422, detail=f"At most {_MAX_BATCH} Incident classifications may be requested at once")
 
+    if is_public_only(user):
+        # The viewer's row set: entries only for incidents whose record is
+        # public. Filtered BEFORE the query rather than after, because the
+        # "one or more Incidents were not found" 404 below would otherwise fire
+        # on a mixed batch and blank the page — and a 404 naming the batch would
+        # also tell the viewer that an id they cannot see exists.
+        ordered_ids = public_visibility.filter_public_incident_ids(db, ordered_ids)
+        if not ordered_ids:
+            return []
+
     params: dict[str, object] = {f"iid_{index}": incident_id for index, incident_id in enumerate(ordered_ids)}
     placeholders = ", ".join(f":iid_{index}" for index in range(len(ordered_ids)))
     scope_sql = ""
@@ -175,7 +194,13 @@ def get_incident_classification(
     db: Session = Depends(get_db),
     user=Depends(require_roles(CLASSIFICATION_READ_ROLES)),
 ):
-    return _classification_batch(db=db, user=user, incident_ids=[incident_id])[0]
+    items = _classification_batch(db=db, user=user, incident_ids=[incident_id])
+    if not items:
+        # Only reachable for a viewer, whose batch drops non-public incidents.
+        # 404, not 403: the single-incident answer must not confirm that an
+        # in-flight incident exists (design §4.3).
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return items[0]
 
 
 @router.post("/incident-classifications/query")

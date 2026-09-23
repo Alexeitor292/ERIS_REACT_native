@@ -4,7 +4,7 @@
 > on demand (USGS 3DEP terrain → `eristerrain` bundle) via the `offline-scene-worker`
 > service — a user just taps **Prepare offline 3D area**. No desktop GIS, no manual
 > clipping/hashing/upload. See the "automatic package generation pipeline" addendum
-> in `docs/adr-native-offline-3d-terrain-mobile.md`.
+> in `decisions/adr-native-offline-3d-terrain-mobile.md`.
 >
 > This runbook now covers **(a) one-time private bucket provisioning** (still
 > required) and **(b) the optional ADMIN manual-override path** for registering an
@@ -75,7 +75,7 @@ MINIO_ENDPOINT=http://<minio-host>:9800 MINIO_ROOT_USER=<u> MINIO_ROOT_PASSWORD=
   orphaned_objects_unresolved, dev_mode}`. Sanitized — no MinIO creds/endpoints.
   `healthy` is true when the bucket is present AND at least one worker heartbeat is
   fresh.
-- Workers write a durable heartbeat every poll (even when idle) to
+- Workers write a durable heartbeat at startup, after each job and while idle (not during a job) to
   `offline_scene_worker_heartbeats`; structured logs carry `worker_id / job_id /
   submission_id / stage / package_version`.
 - Concurrency = **worker replicas** (scale the `offline-scene-worker` service); jobs
@@ -504,7 +504,7 @@ it supports independent route alignments, so geographically separated directiona
 roadways (divided highways) can be preserved as distinct alignments with authoritative
 route/postmile references, instead of relying on ERIS's derived divided-corridor pairing.
 That work is **not** implemented here; it belongs in a separate, independently testable
-provider (tracked in `docs/adr-offline-road-context-source.md`).
+provider (tracked in `decisions/adr-offline-road-context-source.md`).
 
 **Opt-in connectivity smoke test** (NOT part of CI). The automated suite is fully
 offline (mocked HTTP). To sanity-check live reachability of the Caltrans service against

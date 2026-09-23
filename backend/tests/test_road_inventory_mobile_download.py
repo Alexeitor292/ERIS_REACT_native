@@ -23,7 +23,7 @@ def test_mobile_package_download_stays_behind_eris_auth(client_db, admin_token, 
 
     try:
         with engine.begin() as conn:
-            admin_id = int(conn.execute(text("SELECT id FROM users WHERE email='admin@local' LIMIT 1")).scalar())
+            admin_id = int(conn.execute(text("SELECT id FROM users WHERE email='mock.admin@dot.ca.gov' LIMIT 1")).scalar())
             previous = conn.execute(text("""
                 SELECT id
                 FROM road_inventory_datasets

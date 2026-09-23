@@ -76,7 +76,7 @@ def run_migrations_online() -> None:
     NOTE: MariaDB DDL is non-transactional. If a migration fails mid-way,
     applied DDL cannot be automatically rolled back. Always take a
     mysqldump backup before running upgrades on real databases.
-    See docs/MIGRATIONS.md for backup procedures.
+    See docs/deployment.md for backup procedures.
     """
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),

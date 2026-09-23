@@ -7,8 +7,8 @@ import type { Submission } from "../../api/types";
  *
  * Routing v2: every assessment takes exactly one of two routes, recorded in
  * `routing_path`. The branch route runs office chief → branch chief → Staff
- * member → the same branch chief's approval; the senior engineer route runs
- * office chief → senior engineer → that office's chief approval. Approval is
+ * member → the same branch chief's approval; the Senior Specialist route runs
+ * office chief → Senior Specialist → that office's chief approval. Approval is
  * terminal.
  */
 
@@ -38,10 +38,10 @@ export const BRANCH_PIPELINE: PipelineStep[] = [
   { key: "approved", label: "Approved", owner: null },
 ];
 
-/** Office chief assigns a senior engineer and approves the result personally. */
+/** Office chief assigns a Senior Specialist and approves the result personally. */
 export const SENIOR_ENGINEER_PIPELINE: PipelineStep[] = [
-  { key: "senior_engineer", label: "Senior engineer assignment", owner: "Office Chief" },
-  { key: "assessment", label: "Assessment", owner: "Senior Engineer" },
+  { key: "senior_engineer", label: "Senior Specialist assignment", owner: "Office Chief" },
+  { key: "assessment", label: "Assessment", owner: "Senior Specialist" },
   { key: "review", label: "Review", owner: "Office Chief" },
   { key: "approved", label: "Approved", owner: null },
 ];
@@ -135,15 +135,55 @@ export function assessmentStateLabel(state: AssessmentState | string): string {
   return assessmentStateLabelFor(state, null);
 }
 
-const OFFICE_NAMES: Record<string, string> = {
-  NORTH: "North GeoTech Office",
-  WEST: "West GeoTech Office",
-  SOUTH: "South GeoTech Office",
-};
+/**
+ * How a client turns an office CODE into a name.
+ *
+ * The three-entry hard-coded map that used to live here is gone: offices are
+ * admin-editable rows now, and a constant in a client file is a second answer
+ * that wins silently when it disagrees (owner decision 8). Names come from the
+ * assessment's own routing SNAPSHOT first — see `assessmentOfficeName` — and
+ * through this lookup, backed by `/org/offices`, only when a record predates
+ * the snapshot columns.
+ */
+export type OfficeNameLookup = (code: string | null | undefined) => string | null;
 
-export function officeLabel(code: string | null | undefined): string {
+export function officeLabel(code: string | null | undefined, lookup?: OfficeNameLookup): string {
   if (!code) return "Office —";
-  return OFFICE_NAMES[code] ?? `Office ${code}`;
+  const name = (lookup?.(code) ?? "").trim();
+  return name || `Office ${code}`;
+}
+
+export type SnapshotAssessment = Pick<
+  Assessment,
+  "office_code" | "routed_office_name" | "routed_branch_name" | "routed_branch_letter"
+>;
+
+/**
+ * The office NAME this assessment was routed to, as it read at the time.
+ *
+ * The snapshot wins over the live record on purpose: renaming an office in
+ * admin must not rewrite what a historical assessment says it was sent to
+ * (org model design §3.5).
+ */
+export function assessmentOfficeName(assessment: SnapshotAssessment, lookup?: OfficeNameLookup): string {
+  const snapshot = (assessment.routed_office_name ?? "").trim();
+  if (snapshot) return snapshot;
+  return officeLabel(assessment.office_code, lookup);
+}
+
+/** The branch NAME this assessment was handed to, or null on the Senior Specialist route. */
+export function assessmentBranchName(assessment: SnapshotAssessment): string | null {
+  const name = (assessment.routed_branch_name ?? "").trim();
+  if (name) return name;
+  const letter = (assessment.routed_branch_letter ?? "").trim();
+  return letter ? `Branch ${letter}` : null;
+}
+
+/** "Office of Geotechnical Design West · Branch C" — the record's org line. */
+export function assessmentOrgLine(assessment: SnapshotAssessment, lookup?: OfficeNameLookup): string {
+  const branch = assessmentBranchName(assessment);
+  const office = assessmentOfficeName(assessment, lookup);
+  return branch ? `${office} · ${branch}` : office;
 }
 
 export function humanizeCode(value: string | null | undefined): string {
@@ -167,7 +207,7 @@ export function normalizeOfficeCode(value: string | null | undefined): string | 
  */
 const ASSIGNMENT_ROLE_LABELS: Record<string, string> = {
   ENGINEER: "Staff",
-  SENIOR_ENGINEER: "Senior Engineer",
+  SENIOR_ENGINEER: "Senior Specialist",
   CONSULTED: "Consulted",
   REVIEWER: "Reviewer",
   APPROVER: "Approver",
@@ -180,7 +220,7 @@ export function assignmentRoleLabel(role: string): string {
 /** Assessment history rows: same rule, for the event codes the server writes. */
 const EVENT_TYPE_LABELS: Record<string, string> = {
   ENGINEER_ASSIGNED: "Staff assigned",
-  SENIOR_ENGINEER_ASSIGNED: "Senior engineer assigned",
+  SENIOR_ENGINEER_ASSIGNED: "Senior Specialist assigned",
 };
 
 export function assessmentEventLabel(eventType: string): string {
@@ -189,10 +229,17 @@ export function assessmentEventLabel(eventType: string): string {
 
 export type WaitingOn = { who: string; text: string } | null;
 
+/**
+ * The subject of `waitingOn`. The routing snapshot is optional so an event row
+ * or a filter — neither of which carries a whole assessment — can still ask.
+ */
+export type WaitingAssessment = Pick<Assessment, "state" | "routing_path" | "office_code"> & Partial<SnapshotAssessment>;
+
 /** Who the next step is waiting on, with the action the role performs. */
 export function waitingOn(
-  assessment: Pick<Assessment, "state" | "routing_path" | "office_code">,
+  assessment: WaitingAssessment,
   assignments: AssessmentAssignment[],
+  officeNames?: OfficeNameLookup,
 ): WaitingOn {
   const author = assignments.find(
     (assignment) => assignment.assignment_role === "ENGINEER" || assignment.assignment_role === "SENIOR_ENGINEER",
@@ -201,13 +248,13 @@ export function waitingOn(
   const authorLabel = author
     ? `${assignmentRoleLabel(author.assignment_role)} · ${author.full_name}`
     : seniorEngineerRoute
-      ? "Assigned Senior Engineer"
+      ? "Assigned Senior Specialist"
       : "Assigned Staff";
   switch (assessment.state) {
     case "PENDING_OFFICE_DELEGATION":
       return {
         who: "Office Chief",
-        text: "Route this assessment: hand it off to a branch chief, or assign a senior engineer. You cannot assign Staff directly.",
+        text: "Route this assessment: hand it off to a branch chief, or assign a Senior Specialist. You cannot assign Staff directly.",
       };
     case "PENDING_ENGINEER_ASSIGNMENT":
       return {
@@ -220,9 +267,22 @@ export function waitingOn(
       return { who: authorLabel, text: "Make the changes the reviewer asked for, update the submission, and resend it." };
     case "SUBMITTED":
       if (seniorEngineerRoute) {
+        // The office is named in the SENTENCE rather than glued onto the role:
+        // an office's full name ("Office of Geotechnical Design West") does not
+        // survive being suffixed with " Chief", and the snapshot only carries
+        // the full name.
+        const office = assessmentOfficeName(
+          {
+            office_code: assessment.office_code,
+            routed_office_name: assessment.routed_office_name ?? null,
+            routed_branch_name: assessment.routed_branch_name ?? null,
+            routed_branch_letter: assessment.routed_branch_letter ?? null,
+          },
+          officeNames,
+        );
         return {
-          who: `${officeLabel(assessment.office_code)} Chief`,
-          text: "An office chief of this GeoTech office reads the technical form, then approves it or returns it for changes.",
+          who: "Office Chief",
+          text: `An office chief of ${office} reads the technical form, then approves it or returns it for changes.`,
         };
       }
       if (assessment.routing_path === "BRANCH") {
@@ -322,6 +382,66 @@ export function assessmentPermissions(
   };
 }
 
+/**
+ * Whether the step an assessment is waiting on is the caller's own, or one they
+ * may only step in on.
+ *
+ *   MINE         — the step names them: the assignee of a draft, the office
+ *                  chief of an unrouted assessment's office, the branch chief it
+ *                  was handed to, the reviewer its route names.
+ *   CAN_STEP_IN  — they hold a power over it without being who it waits on: an
+ *                  administrator, or an office chief who could reassign a
+ *                  Senior Specialist's draft.
+ *   NONE         — nothing for them to do.
+ *
+ * "This step is yours" is said only for MINE; saying it to anyone who merely
+ * could act sent administrators to a My Work queue the step was never in.
+ */
+export type StepOwnership = "MINE" | "CAN_STEP_IN" | "NONE";
+
+export function stepOwnership(
+  flags: RoleFlags,
+  userId: number | null | undefined,
+  officeCode: string | null | undefined,
+  assessment: PermissionAssessment,
+): StepOwnership {
+  if (!isActionable(assessmentPermissions(flags, userId, officeCode, assessment))) return "NONE";
+  const isAssignee = userId != null && assessment.assigned_engineer_user_id === userId;
+  const isNamedBranchChief = userId != null && assessment.branch_chief_user_id === userId;
+  const callerOffice = normalizeOfficeCode(officeCode);
+  const assessmentOffice = normalizeOfficeCode(assessment.office_code);
+  const officeMatches = !!callerOffice && !!assessmentOffice && callerOffice === assessmentOffice;
+  const route = assessment.routing_path;
+  switch (assessment.state) {
+    case "DRAFT":
+    case "REVISION_REQUESTED":
+      return isAssignee ? "MINE" : "CAN_STEP_IN";
+    case "PENDING_OFFICE_DELEGATION":
+      return flags.officeChief && officeMatches ? "MINE" : "CAN_STEP_IN";
+    case "PENDING_ENGINEER_ASSIGNMENT":
+      return flags.branchChief && isNamedBranchChief ? "MINE" : "CAN_STEP_IN";
+    case "SUBMITTED":
+      return (route === "BRANCH" && flags.branchChief && isNamedBranchChief)
+        || (route === "SENIOR_ENGINEER" && flags.officeChief && officeMatches)
+        ? "MINE"
+        : "CAN_STEP_IN";
+    default:
+      return "CAN_STEP_IN";
+  }
+}
+
+/**
+ * What the button on the assessment record says it will do in My Work — the
+ * action itself, not "act on it". Most specific power first.
+ */
+export function workActionLabel(state: AssessmentState | string, permissions: AssessmentPermissions, hasSubmission: boolean): string {
+  if (permissions.submit) return hasSubmission ? "Send it for review" : "Start the technical submission";
+  if (permissions.review) return "Review it";
+  if (permissions.assignEngineer) return state === "PENDING_ENGINEER_ASSIGNMENT" ? "Assign Staff" : "Reassign Staff";
+  if (permissions.delegate || permissions.assignSeniorEngineer) return state === "PENDING_OFFICE_DELEGATION" ? "Route it" : "Change who has it";
+  return "Open it";
+}
+
 export function isActionable(permissions: AssessmentPermissions): boolean {
   return (
     permissions.delegate
@@ -332,9 +452,20 @@ export function isActionable(permissions: AssessmentPermissions): boolean {
   );
 }
 
-/** Search across the assessment and its attached technical submissions. */
+export type SearchableAssessment = Pick<
+  Assessment,
+  "id" | "incident_id" | "district" | "office_code" | "state" | "routing_path"
+> & Partial<SnapshotAssessment>;
+
+/**
+ * Search across the assessment and its attached technical submissions.
+ *
+ * The office NAME is searchable beside the code, because the name is what the
+ * rows now show: a reader who types "West" is looking at "Office of
+ * Geotechnical Design West", not at "WEST".
+ */
 export function assessmentSearchMatch(
-  assessment: Assessment,
+  assessment: SearchableAssessment,
   linkedSubmissions: Array<Pick<Submission, "id" | "district" | "county" | "route" | "post_mile" | "status">>,
   query: string,
   descriptor: (submission: Pick<Submission, "id" | "district" | "county" | "route" | "post_mile">) => string,
@@ -348,6 +479,9 @@ export function assessmentSearchMatch(
     String(assessment.incident_id),
     assessment.district,
     assessment.office_code,
+    assessment.routed_office_name,
+    assessment.routed_branch_name,
+    assessment.routed_branch_letter ? `Branch ${assessment.routed_branch_letter}` : null,
     assessmentStateLabelFor(assessment.state, assessment.routing_path),
     assessmentStateLabel(assessment.state),
     assessment.state,

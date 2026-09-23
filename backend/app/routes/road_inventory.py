@@ -25,9 +25,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import get_current_user, require_roles
+from ..deps import deny_public_only, require_roles
 from ..storage import ensure_bucket_exists, put_object_bytes, object_access_url
 from ..config import settings
+from ..services.roadway_context import centerlines as roadway_centerlines, cross_section as roadway_cross_section
 from ..services.road_inventory_parser import ParseError, parse_excel
 from ..services.road_inventory_lookup import (
     bulk_insert_segments,
@@ -174,7 +175,7 @@ def generate_package_route(
 @router.get("/package")
 def get_current_package_route(
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(deny_public_only),
 ):
     """Return the mobile package for the currently published dataset.
 
@@ -393,7 +394,7 @@ def rollback_version(
 @router.get("/manifest")
 def get_manifest(
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(deny_public_only),
 ):
     """Return the latest published dataset version metadata.
 
@@ -454,7 +455,7 @@ def lookup(
     postmile: float = Query(..., description="Postmile value"),
     district: str | None = Query(default=None, description="District code, e.g. '03'"),
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(deny_public_only),
 ):
     """Return road segments matching county + route + postmile range.
 
@@ -468,6 +469,42 @@ def lookup(
         district_code=district,
     )
     return {"segments": [_serialize_segment(s) for s in segments]}
+
+
+@router.get("/roadway-context")
+def roadway_context(
+    county: str = Query(..., description="3-letter Caltrans county code, e.g. 'MRN'"),
+    route: str = Query(..., description="Route name, e.g. '1'"),
+    postmile: float = Query(..., description="Postmile of the site"),
+    bbox: str = Query(..., description="min_lon,min_lat,max_lon,max_lat around the site (WGS84)"),
+    district: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _user=Depends(deny_public_only),
+):
+    """What the web needs to measure a slide's encroachment on the roadway: the road
+    inventory cross-section at the site and the highway's centerline around it.
+
+    Either part may be missing (no published inventory, or the centerline source is
+    down); the response says which, and the web measures with what it has.
+    """
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(v) for v in bbox.split(","))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="bbox must be min_lon,min_lat,max_lon,max_lat")
+    if not (-125.0 <= min_lon < max_lon <= -113.0 and 32.0 <= min_lat < max_lat <= 43.0):
+        raise HTTPException(status_code=422, detail="bbox must lie in California")
+    if max_lon - min_lon > 0.05 or max_lat - min_lat > 0.05:
+        raise HTTPException(status_code=422, detail="bbox is larger than a site (0.05 degrees)")
+    bounds = {"min_lon": min_lon, "min_lat": min_lat, "max_lon": max_lon, "max_lat": max_lat}
+
+    section = roadway_cross_section(db, county_code=county, route=route, postmile=postmile, district_code=district)
+    try:
+        centerline = roadway_centerlines(bounds, route=route, county_code=county)
+        centerline_error = None
+    except Exception as exc:  # noqa: BLE001 - a line source outage is reported, not raised
+        centerline = {"source": settings.ROADWAY_CENTERLINE_SOURCE, "provenance": None, "lines": []}
+        centerline_error = f"The centerline source did not answer ({str(exc)[:120]})."
+    return {"cross_section": section, "centerline": centerline, "centerline_error": centerline_error}
 
 
 # ---------------------------------------------------------------------------

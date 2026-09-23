@@ -26,4 +26,4 @@ Never run
   DB credentials are read from backend/.env via app settings.
 
 Full procedures, backup commands, and Proxmox deployment instructions:
-  docs/MIGRATIONS.md
+  docs/deployment.md

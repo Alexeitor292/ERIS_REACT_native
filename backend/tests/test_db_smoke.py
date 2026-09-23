@@ -44,7 +44,7 @@ class TestAuth:
     def test_login_returns_token(self, client_db):
         resp = client_db.post(
             "/auth/login",
-            json={"email": "admin@local", "password": "password"},
+            json={"email": "mock.admin@dot.ca.gov", "password": "password"},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -55,7 +55,7 @@ class TestAuth:
     def test_login_wrong_password_rejected(self, client_db):
         resp = client_db.post(
             "/auth/login",
-            json={"email": "admin@local", "password": "wrongpassword"},
+            json={"email": "mock.admin@dot.ca.gov", "password": "wrongpassword"},
         )
         assert resp.status_code == 401
 
@@ -66,20 +66,19 @@ class TestAuth:
         )
         assert resp.status_code == 200
         me = resp.json()
-        assert me["email"] == "admin@local"
+        assert me["email"] == "mock.admin@dot.ca.gov"
         assert "ADMIN" in me["roles"]
         assert me["id"] > 0
 
-    def test_me_all_admin_roles_present(self, admin_token, client_db):
+    def test_the_administrator_holds_only_admin(self, admin_token, client_db):
+        # Administration is not a work role: the seeded administrator holds
+        # ADMIN alone, so a test signed in as it cannot slip past a missing
+        # guard by also happening to hold the role the guard names.
         resp = client_db.get(
             "/auth/me",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        roles = set(resp.json()["roles"])
-        expected = {"ADMIN", "REVIEWER", "FIELD_WORKER", "MAINTENANCE",
-                    "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF"}
-        missing = expected - roles
-        assert not missing, f"Admin user missing roles: {missing}"
+        assert resp.json()["roles"] == ["ADMIN"]
 
     def test_me_without_token_rejected(self, client_db):
         resp = client_db.get("/auth/me")
@@ -176,7 +175,7 @@ class TestSubmissions:
         operational role model (design §2.2): the listing now matches
         ``can_view_submission``, which has always let any non-maintenance
         operational user READ any technical form. FIELD_WORKER is the legacy
-        alias of GEOTECH_ENGINEER, so an engineer now sees other people's
+        alias of STAFF, so an engineer now sees other people's
         submissions here too — broad visibility, narrow authority. The boundary
         that still holds is maintenance-only reporters, who are not operational
         users and stay scoped to what they own or were granted.
@@ -198,7 +197,7 @@ class TestSubmissions:
                     "email": field_email,
                     "full_name": "Pagination Field Worker",
                     "password": password,
-                    "roles": ["FIELD_WORKER"],
+                    "roles": ["STAFF"],
                 },
             )
             assert created_user.status_code == 201
@@ -264,7 +263,7 @@ class TestIncidents:
                 "email": f"not-engineer-{unique}@example.test",
                 "full_name": "Not An Engineer",
                 "password": "eligibility-test-password",
-                "roles": ["MAINTENANCE"],
+                "roles": ["MAINTENANCE_CREW"],
             },
         )
         assert created_user.status_code == 201
@@ -293,7 +292,7 @@ class TestIncidents:
             json={"assignee_user_id": user_id},
         )
         assert assigned.status_code == 400
-        assert "active GeoTech engineer or admin" in str(assigned.json().get("detail", ""))
+        assert "active Staff member or administrator" in str(assigned.json().get("detail", ""))
 
         client_db.patch(
             f"/admin/users/{user_id}",
@@ -311,7 +310,7 @@ class TestIncidents:
                 "email": f"legacy-engineer-{unique}@example.test",
                 "full_name": "Legacy GeoTech Engineer",
                 "password": "eligibility-test-password",
-                "roles": ["FIELD_WORKER"],
+                "roles": ["STAFF"],
             },
         )
         assert created_user.status_code == 201

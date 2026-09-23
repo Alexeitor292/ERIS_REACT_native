@@ -43,6 +43,9 @@ def mission_center_event_groups(
             LEFT JOIN incidents i ON i.event_group_id = eg.id
             {where}
             GROUP BY eg.id
+            -- A group is a site only while a report in the incident record is in
+            -- it; an emptied group has nothing to show on the map.
+            HAVING COUNT(i.id) > 0
             ORDER BY eg.id ASC
             LIMIT :limit
             """

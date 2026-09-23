@@ -21,7 +21,7 @@ def test_submission_owner_can_manage_scoped_sharing_without_admin_directory(clie
                 "email": f"sharing-owner-{unique}@example.test",
                 "full_name": "Sharing Contract Owner",
                 "password": password,
-                "roles": ["FIELD_WORKER"],
+                "roles": ["STAFF"],
             },
         )
         assert owner.status_code == 201
@@ -34,7 +34,7 @@ def test_submission_owner_can_manage_scoped_sharing_without_admin_directory(clie
                 "email": f"sharing-reader-{unique}@example.test",
                 "full_name": "Sharing Contract Reader",
                 "password": password,
-                "roles": ["MAINTENANCE"],
+                "roles": ["MAINTENANCE_CREW"],
             },
         )
         assert candidate.status_code == 201

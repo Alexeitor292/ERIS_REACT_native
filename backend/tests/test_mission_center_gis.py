@@ -24,7 +24,7 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
     from app.routes import mission_center_gis, photo_map
 
     admin_headers = _headers(admin_token)
-    maintenance_token = _login(client_db, "maintenance@local")
+    maintenance_token = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
     maintenance_headers = _headers(maintenance_token)
     unique = uuid4().hex
 
@@ -46,17 +46,23 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
     assert created.status_code == 200, created.text
     incident_id = int(created.json()["incident"]["id"])
 
+    # A report reaches the Mission Center only by being sent for assessment,
+    # which is also what places it in its Event Group (the legacy "Project").
     associated = client_db.post(
-        f"/incidents/{incident_id}/project-association",
-        headers=admin_headers,
+        f"/incidents/{incident_id}/triage",
+        headers={**admin_headers, "X-ERIS-Test-Preserve-Projectless": "1"},
         json={
-            "mode": "CREATE_NEW",
-            "title": f"Mission Center Project {unique}",
-            "description": "Statewide GIS test Project",
+            "disposition": "ASSESSMENT_REQUIRED",
+            "event_group": {
+                "mode": "CREATE_NEW",
+                "title": f"Mission Center Project {unique}",
+                "description": "Statewide GIS test Project",
+            },
         },
     )
     assert associated.status_code == 200, associated.text
-    project_id = int(associated.json()["project"]["id"])
+    with engine.begin() as conn:
+        project_id = int(conn.execute(text("SELECT project_id FROM incidents WHERE id = :iid"), {"iid": incident_id}).scalar())
 
     # Maintenance reporting accounts do not get statewide operational GIS access.
     assert client_db.get("/mission-center/projects", headers=maintenance_headers).status_code == 403
@@ -76,7 +82,7 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
     monkeypatch.setattr(photo_map, "object_access_url", lambda *args, **kwargs: "https://example.test/incident-photo.jpg")
 
     with engine.begin() as conn:
-        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='admin@local' LIMIT 1")).scalar())
+        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='mock.admin@dot.ca.gov' LIMIT 1")).scalar())
         attachment_result = conn.execute(
             text(
                 """
@@ -145,7 +151,7 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
         ]],
     }
     with engine.begin() as conn:
-        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='admin@local' LIMIT 1")).scalar())
+        admin_user_id = int(conn.execute(text("SELECT id FROM users WHERE email='mock.admin@dot.ca.gov' LIMIT 1")).scalar())
         submission_result = conn.execute(
             text(
                 """

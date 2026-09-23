@@ -38,7 +38,7 @@ From backend/ directory:
   alembic stamp 0001_baseline
   alembic current               # should show: 0001_baseline (head)
 
-See docs/MIGRATIONS.md for full procedures.
+See docs/deployment.md for full procedures.
 
 --- FUTURE CHANGES ---
 

@@ -20,7 +20,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 COMPOSE_FILES = [REPO / "docker" / "docker-compose.yml", REPO / "docker" / "docker-compose.proxmox.yml"]
 RUNBOOK = REPO / "docs" / "offline-scene-package-operator-runbook.md"
-ADR = REPO / "docs" / "adr-offline-road-context-source.md"
+ADR = REPO / "docs" / "decisions" / "adr-offline-road-context-source.md"
 
 WORKER_SERVICE = "offline-scene-worker"
 # The service name the review found in the runbook. It does not exist.

@@ -11,13 +11,14 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import require_roles
-from ..roles import ADMIN, MAINTENANCE_COORDINATOR, OPERATIONAL_ROLES, expand_roles, is_admin
+from ..roles import ADMIN, MAINTENANCE_COORDINATOR, OPERATIONAL_ROLES, is_admin
+from . import event_groups as event_groups_routes
 from . import incidents as incidents_routes
 
 router = APIRouter(tags=["projects"])
 
 PROJECT_READ_ROLES = sorted(OPERATIONAL_ROLES)
-PROJECT_MANAGE_ROLES = sorted(set(expand_roles(MAINTENANCE_COORDINATOR, ADMIN)))
+PROJECT_MANAGE_ROLES = sorted(set([MAINTENANCE_COORDINATOR, ADMIN]))
 
 
 class IncidentProjectAssociationRequest(BaseModel):
@@ -42,7 +43,8 @@ def _incident_row(db: Session, incident_id: int) -> dict | None:
               i.location_id, i.first_observed_at, i.first_occurred_at,
               i.latitude, i.longitude, i.district, i.county, i.route, i.post_mile,
               i.office_code, i.current_stage, i.status, i.reporter_user_id,
-              i.created_at, i.updated_at, i.resolved_at, i.resolved_by_user_id
+              i.created_at, i.updated_at, i.resolved_at, i.resolved_by_user_id,
+              i.incident_key, i.triage_disposition
             FROM incidents i
             WHERE i.id = :iid
             LIMIT 1
@@ -232,10 +234,13 @@ def _generated_project_title(incident: dict) -> str:
     return f"Incident #{int(incident['id'])} Project" + (f" · {location}" if location else "")
 
 
-def _ensure_manage_scope(user: dict, incident_or_project: dict) -> None:
+def _ensure_manage_scope(user: dict, incident_or_project: dict, *, db: Session | None = None) -> None:
+    # ``db`` lets the district come from the caller's org profile (with
+    # users.metadata_json as the mirror fallback) rather than from the mirror
+    # alone — one resolver, one answer (services/org_directory).
     if is_admin(user):
         return
-    incidents_routes._ensure_incident_district_access(user, incident_or_project.get("district"))
+    incidents_routes._ensure_incident_district_access(user, incident_or_project.get("district"), db=db)
 
 
 @router.get("/projects")
@@ -312,7 +317,7 @@ def update_project(
     row = _project_row(db, project_id)
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
-    _ensure_manage_scope(user, dict(row))
+    _ensure_manage_scope(user, dict(row), db=db)
 
     sets: list[str] = []
     params: dict[str, object] = {"pid": project_id}
@@ -350,7 +355,7 @@ def incident_project_context(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
     project = None
     if incident.get("project_id") is not None:
         project_row = _project_row(db, int(incident["project_id"]))
@@ -375,7 +380,7 @@ def nearby_projects_for_incident(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
+    _ensure_manage_scope(user, incident, db=db)
 
     lat = float(incident["latitude"])
     lon = float(incident["longitude"])
@@ -430,11 +435,17 @@ def associate_incident_project(
     incident = _incident_row(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_manage_scope(user, incident)
-    if str(incident["status"]).upper() == "RESOLVED" and not is_admin(user):
-        raise HTTPException(status_code=409, detail="Only an administrator may regroup a resolved incident")
-    if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW" and not is_admin(user):
-        raise HTTPException(status_code=409, detail="Project association is managed during coordinator review")
+    _ensure_manage_scope(user, incident, db=db)
+    # The legacy "Project" name for an Event Group follows the same rule: only a
+    # report sent for assessment is in the record, and it is grouped by that
+    # triage decision — never here beforehand.
+    if event_groups_routes.is_outside_record(incident):
+        raise HTTPException(
+            status_code=409,
+            detail="A report joins an Event Group when the coordinator sends it for assessment",
+        )
+    if not is_admin(user):
+        raise HTTPException(status_code=409, detail="Only an administrator may regroup a report in the incident record")
 
     old_project_id = int(incident["project_id"]) if incident.get("project_id") is not None else None
     mode = payload.mode.upper()

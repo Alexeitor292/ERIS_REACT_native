@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { getAssessment, listAssessments, type Assessment, type AssessmentDetail } from "../../api/assessments";
@@ -14,7 +14,8 @@ import TriageWorkItem from "./TriageWorkItem";
 
 type WorkItem =
   | { kind: "triage"; id: string; incident: Incident; sortKey: number }
-  | { kind: "assessment"; id: string; assessment: Assessment; sortKey: number };
+  /** `outsideQueue`: opened by a link although no queue of the caller's holds it. */
+  | { kind: "assessment"; id: string; assessment: Assessment; sortKey: number; outsideQueue?: boolean };
 
 function timestamp(value: string | null | undefined) {
   const parsed = value ? Date.parse(value) : Number.NaN;
@@ -32,12 +33,19 @@ function timestamp(value: string | null | undefined) {
  *    assessments of their own office to review (`office_chief_review`).
  *  - Branch Chief: assessments handed to them that still need an assignee (`branch_chief`), and the
  *    same ones to approve or return once submitted (`branch_chief_review`).
- *  - Staff or Senior Engineer: their own assessments in Draft / Revision
+ *  - Staff or Senior Specialist: their own assessments in Draft / Revision
  *    requested (`assignee` — both routes store the assignee in the same column).
  *  - Admin: every submitted assessment, matching the server's review bypass.
  *
  * Every request carries its own `.catch(() => [])`: one failing queue — or a
  * failing /incidents call — must never blank the whole page.
+ *
+ * Who gets here is decided by the ROUTE (`WORK_QUEUE_ROLE_NAMES` in App.tsx),
+ * not by this component: a read-only viewer is refused the route and sent to
+ * Records. The `hasWorkQueue` branch below stays as a second line of defence for
+ * an account whose roles change while the page is open — it is no longer the
+ * only thing standing between a viewer and a work queue, and the server refuses
+ * a viewer's `?queue=` request with a 400 regardless (org model design §8).
  */
 export default function MyWorkPage() {
   const { me } = useAuth();
@@ -49,6 +57,9 @@ export default function MyWorkPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [linked, setLinked] = useState<Assessment | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const scrolledFor = useRef<string | null>(null);
   const { submissionsById, reloadSubmissions } = useSubmissionIndex();
 
   const load = useCallback(async () => {
@@ -102,18 +113,43 @@ export default function MyWorkPage() {
       setError(e instanceof Error ? e.message : "Failed to load your work queue.");
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   }, [roles]);
 
   useEffect(() => { void load(); }, [load]);
 
-  // Deep link from the Assessments record view: ?assessment=<id>
+  // Deep link from an assessment record or its technical form: ?assessment=<id>.
+  // The assessment opens even when none of the caller's queues holds it — an
+  // administrator stepping in, an office chief reassigning a Senior Specialist —
+  // instead of falling back to whatever sits first in the list.
+  const requested = searchParams.get("assessment");
   useEffect(() => {
-    const requested = searchParams.get("assessment");
-    if (requested && items.some((item) => item.id === `a${requested}`)) setSelectedId(`a${requested}`);
-  }, [items, searchParams]);
+    if (!requested || !loaded) return;
+    if (items.some((item) => item.id === `a${requested}`)) {
+      setLinked(null);
+      setSelectedId(`a${requested}`);
+      return;
+    }
+    let cancelled = false;
+    getAssessment(Number(requested))
+      .then((found) => {
+        if (cancelled) return;
+        setLinked(found.assessment);
+        setSelectedId(`a${found.assessment.id}`);
+      })
+      .catch(() => { if (!cancelled) setError(`Assessment #${requested} could not be opened.`); });
+    return () => { cancelled = true; };
+  }, [items, loaded, requested]);
 
-  const selected = useMemo(() => items.find((item) => item.id === selectedId) ?? items[0] ?? null, [items, selectedId]);
+  const allItems = useMemo<WorkItem[]>(
+    () => (linked && !items.some((item) => item.id === `a${linked.id}`)
+      ? [{ kind: "assessment", id: `a${linked.id}`, assessment: linked, sortKey: Number.POSITIVE_INFINITY, outsideQueue: true }, ...items]
+      : items),
+    [items, linked],
+  );
+
+  const selected = useMemo(() => allItems.find((item) => item.id === selectedId) ?? allItems[0] ?? null, [allItems, selectedId]);
 
   useEffect(() => {
     if (!selected || selected.kind !== "assessment") { setDetail(null); return; }
@@ -123,6 +159,17 @@ export default function MyWorkPage() {
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load assessment."); });
     return () => { cancelled = true; };
   }, [selected]);
+
+  // Arriving by link, bring the step to act on into view once it has loaded.
+  useEffect(() => {
+    if (!requested || !detail || detail.assessment.id !== Number(requested) || scrolledFor.current === requested) return;
+    scrolledFor.current = requested;
+    window.requestAnimationFrame(() => {
+      const step = document.getElementById("assessment-next-step");
+      step?.scrollIntoView({ block: "center", behavior: "smooth" });
+      step?.focus({ preventScroll: true });
+    });
+  }, [detail, requested]);
 
   const refresh = useCallback(async () => {
     await Promise.all([load(), reloadSubmissions()]);
@@ -155,7 +202,7 @@ export default function MyWorkPage() {
         {error ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
         {notice ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div> : null}
 
-        {items.length === 0 ? (
+        {allItems.length === 0 ? (
           <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] px-6 py-10 text-center">
             <div className="text-base font-semibold">{loading ? "Loading your queue…" : "Nothing needs your attention"}</div>
             <p className="mt-1.5 text-sm text-muted">No steps are waiting on you. Browse the records under <Link to="/assessments" className="font-medium text-[var(--brand)] hover:underline">Operations › Assessments</Link>.</p>
@@ -165,7 +212,7 @@ export default function MyWorkPage() {
             <section className="flex max-h-[860px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
               <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5 text-[13px] text-muted">{items.length} item{items.length === 1 ? "" : "s"} waiting on you</div>
               <div className="grid flex-1 content-start gap-2 overflow-auto p-2">
-                {items.map((item) => {
+                {allItems.map((item) => {
                   const active = selected?.id === item.id;
                   if (item.kind === "triage") {
                     const incident = item.incident;
@@ -184,7 +231,7 @@ export default function MyWorkPage() {
                       </button>
                     );
                   }
-                  return (
+                  const card = (
                     <AssessmentRailCard
                       key={item.id}
                       assessment={item.assessment}
@@ -194,6 +241,12 @@ export default function MyWorkPage() {
                       onClick={() => { setSelectedId(item.id); setSearchParams({}, { replace: true }); }}
                     />
                   );
+                  return item.outsideQueue ? (
+                    <div key={item.id} className="grid gap-1 border-b border-[var(--line)] pb-2">
+                      <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Opened from its record · not in your queue</span>
+                      {card}
+                    </div>
+                  ) : card;
                 })}
               </div>
             </section>
@@ -203,7 +256,6 @@ export default function MyWorkPage() {
                 <TriageWorkItem
                   incident={selected.incident}
                   onTriaged={async (message) => { setNotice(message); setSelectedId(null); await refresh(); }}
-                  onError={setError}
                 />
               ) : detail && detail.assessment.id === selected.assessment.id ? (
                 <AssessmentDetailPanel detail={detail} submissionsById={submissionsById} mode="work" onChanged={refresh} onError={setError} />

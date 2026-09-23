@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import {
   buildDefaultCanvasLayout,
   CANVAS_CARD_IDS,
+  CANVAS_FREE_SPACE_BELOW,
   cardsOverlap,
   canvasContentBounds,
   DASHBOARD_DEFAULT_SIZES,
@@ -13,6 +14,7 @@ import {
   DASHBOARD_MIN_CARD_HEIGHT,
   DASHBOARD_MIN_CARD_WIDTH,
   flowDashboardCards,
+  normalizeCanvasLayout,
   orderFromPositions,
   readStoredCanvasLayout,
   serializeCanvasLayout,
@@ -83,7 +85,9 @@ function overlapsAnother(
  * after the first drag/resize, persisted in localStorage (v2 key), plus full-screen.
  */
 export function useSubmissionDashboardLayout() {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  // A callback ref, not a ref object: the canvas mounts only once the form has
+  // loaded, after this hook's first effects, and must be measured when it does.
+  const [containerElement, containerRef] = useState<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [layout, setLayout] = useState<DashboardCanvasLayout>(() =>
     readStoredCanvasLayout(typeof window === "undefined" ? null : window.localStorage),
@@ -91,10 +95,17 @@ export function useSubmissionDashboardLayout() {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [resize, setResize] = useState<ResizeState | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  // Each card's natural height (header and content), reported by the card itself;
+  // the auto layout sizes cards to it, so none carries empty space or scrolls.
+  const [contentHeights, setContentHeights] = useState<Partial<Record<DashboardCardId, number>>>({});
   const persistReadyRef = useRef(false);
 
+  const reportContentHeight = useCallback((id: DashboardCardId, height: number) => {
+    setContentHeights((previous) => (Math.abs((previous[id] ?? -10) - height) < 1 ? previous : { ...previous, [id]: height }));
+  }, []);
+
   useLayoutEffect(() => {
-    const element = containerRef.current;
+    const element = containerElement;
     if (!element) return;
     const update = () => setContainerWidth(element.clientWidth);
     update();
@@ -105,7 +116,7 @@ export function useSubmissionDashboardLayout() {
     const observer = new ResizeObserver(() => update());
     observer.observe(element);
     return () => observer.disconnect();
-  }, [fullscreen]);
+  }, [containerElement]);
 
   useEffect(() => {
     if (!persistReadyRef.current) {
@@ -145,9 +156,9 @@ export function useSubmissionDashboardLayout() {
       }
       return { positions, sizes };
     }
-    const flowed = flowDashboardCards(layout.order, layout.sizes, effectiveWidth);
+    const flowed = flowDashboardCards(layout.order, layout.sizes, effectiveWidth, contentHeights);
     return { positions: flowed.positions, sizes: flowed.sizes };
-  }, [layout, effectiveWidth]);
+  }, [layout, effectiveWidth, contentHeights]);
 
   const bounds = useMemo(() => canvasContentBounds(CANVAS_CARD_IDS, rendered.positions, rendered.sizes), [rendered]);
 
@@ -266,6 +277,9 @@ export function useSubmissionDashboardLayout() {
 
   const reset = useCallback(() => setLayout(buildDefaultCanvasLayout()), []);
 
+  /** Replace the arrangement with a saved one (normalized, so a stale save cannot break the canvas). */
+  const applyLayout = useCallback((saved: unknown) => setLayout(normalizeCanvasLayout(saved)), []);
+
   const cardStyle = useCallback(
     (id: DashboardCardId): CSSProperties => {
       const position = rendered.positions[id];
@@ -278,7 +292,8 @@ export function useSubmissionDashboardLayout() {
         width: `${size.width}px`,
         height: `${size.height}px`,
         zIndex: dragging ? 20 : 1,
-        transition: drag || resize ? "none" : "left 160ms ease-out, top 160ms ease-out, width 160ms ease-out, height 160ms ease-out",
+        // Sizes change at once, so a card fitted to its content is measured at its final width.
+        transition: drag || resize ? "none" : "left 160ms ease-out, top 160ms ease-out",
       };
     },
     [rendered, drag, resize],
@@ -287,7 +302,8 @@ export function useSubmissionDashboardLayout() {
   const canvasStyle = useMemo<CSSProperties>(
     () => ({
       position: "relative",
-      height: `${bounds.height}px`,
+      // Room below the last card, so there is always free plane to drag onto.
+      height: `${bounds.height + CANVAS_FREE_SPACE_BELOW}px`,
       width: layout.custom ? `${Math.max(bounds.width, containerWidth)}px` : "100%",
       minWidth: "100%",
     }),
@@ -302,6 +318,7 @@ export function useSubmissionDashboardLayout() {
     cardIds: CANVAS_CARD_IDS,
     cardStyle,
     canvasStyle,
+    reportContentHeight,
     startDrag,
     startResize,
     draggingId: drag?.active ? drag.id : null,
@@ -309,6 +326,7 @@ export function useSubmissionDashboardLayout() {
     resizingId: resize?.active ? resize.id : null,
     tidy,
     reset,
+    applyLayout,
     fullscreen,
     setFullscreen,
   };

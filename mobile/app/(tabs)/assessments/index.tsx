@@ -21,6 +21,7 @@ import {
   delegateBranch,
   getAssessment,
   getAssessmentBranchOptions,
+  getAssessmentEngineerOptions,
   listAssessments,
   reviewAssessment,
   submitAssessment,
@@ -57,7 +58,11 @@ export default function AssessmentsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssessmentDetail | null>(null);
   const [branchOpts, setBranchOpts] = useState<RoutingUserOption[]>([]);
-  const [engineerId, setEngineerId] = useState("");
+  const [engineerOpts, setEngineerOpts] = useState<RoutingUserOption[]>([]);
+  // No preselect, under any data shape: the assign button stays disabled until
+  // the branch chief picks somebody, even when the office has one candidate
+  // (owner decision 7, design §5).
+  const [engineerId, setEngineerId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -88,8 +93,9 @@ export default function AssessmentsScreen() {
   const openDetail = async (id: number) => {
     setError(null);
     setNotes("");
-    setEngineerId("");
+    setEngineerId(null);
     setBranchOpts([]);
+    setEngineerOpts([]);
     try {
       const token = await getToken();
       if (!token) return;
@@ -101,6 +107,18 @@ export default function AssessmentsScreen() {
           setBranchOpts(opts.items);
         } catch {
           setBranchOpts([]);
+        }
+      }
+      if (
+        d.assessment.state === "PENDING_ENGINEER_ASSIGNMENT" &&
+        d.assessment.routing_path === "BRANCH" &&
+        canAssignEngineer(roles)
+      ) {
+        try {
+          const opts = await getAssessmentEngineerOptions(token, id);
+          setEngineerOpts(opts.items);
+        } catch {
+          setEngineerOpts([]);
         }
       }
     } catch (e) {
@@ -199,7 +217,7 @@ export default function AssessmentsScreen() {
               <StateBadge state={item.state} palette={palette} />
             </View>
             <Text style={{ color: palette.muted, fontSize: 12, marginTop: 4 }}>
-              Incident #{item.incident_id} · Office {item.office_code ?? "—"} · District {item.district ?? "—"}
+              Incident #{item.incident_id} · {officeLabel(item)} · District {item.district ?? "—"}
             </Text>
           </Pressable>
         )}
@@ -217,8 +235,12 @@ export default function AssessmentsScreen() {
                   </Pressable>
                 </View>
                 <StateBadge state={detail.assessment.state} palette={palette} />
+                {/* Office and branch by NAME, from the routing snapshot: what
+                    they read when this assessment was routed, not what they are
+                    called today (design §3.5). */}
                 <Text style={{ color: palette.muted }}>
-                  Incident #{detail.assessment.incident_id} · Office {detail.assessment.office_code ?? "—"}
+                  Incident #{detail.assessment.incident_id} · {officeLabel(detail.assessment)}
+                  {branchLabel(detail.assessment) ? ` · ${branchLabel(detail.assessment)}` : ""}
                 </Text>
                 {detail.assessment.submission_id != null && (
                   <Pressable onPress={() => router.push(`/(tabs)/submissions/${detail.assessment.submission_id}` as any)}>
@@ -248,9 +270,12 @@ export default function AssessmentsScreen() {
                           key={o.id}
                           disabled={busy}
                           onPress={() => runAction((t) => delegateBranch(t, detail.assessment.id, o.id, notes))}
-                          style={[styles.actionBtn, { backgroundColor: palette.primary }]}
+                          style={[styles.actionBtn, styles.personBtn, { backgroundColor: palette.primary }]}
                         >
-                          <Text style={styles.actionText}>{o.full_name} ({o.email})</Text>
+                          <Text style={styles.actionText}>{o.full_name}</Text>
+                          <Text style={styles.personBtnSub}>{personPlace(o)}</Text>
+                          <Text style={styles.personBtnSub}>{workloadLine(o)}</Text>
+                          {availabilityLine(o) ? <Text style={styles.personBtnSub}>{availabilityLine(o)}</Text> : null}
                         </Pressable>
                       ))
                     )}
@@ -259,37 +284,43 @@ export default function AssessmentsScreen() {
 
                 {detail.assessment.state === "PENDING_ENGINEER_ASSIGNMENT" && canAssignEngineer(roles) && (
                   <View style={{ gap: 6 }}>
-                    <TextInput
-                      value={engineerId}
-                      onChangeText={setEngineerId}
-                      editable={isBranchRoute}
-                      keyboardType="number-pad"
-                      placeholder="Staff user id"
-                      placeholderTextColor={palette.muted}
-                      style={[
-                        styles.input,
-                        {
-                          color: palette.text,
-                          borderColor: palette.border,
-                          backgroundColor: palette.panel,
-                          opacity: isBranchRoute ? 1 : 0.5,
-                        },
-                      ]}
-                    />
-                    <Pressable
-                      disabled={busy || !engineerId || !isBranchRoute}
-                      onPress={() => runAction((t) => assignAssessmentEngineer(t, detail.assessment.id, Number(engineerId), notes))}
-                      style={[
-                        styles.actionBtn,
-                        { backgroundColor: palette.primary, opacity: engineerId && isBranchRoute ? 1 : 0.5 },
-                      ]}
-                    >
-                      <Text style={styles.actionText}>Assign Staff member</Text>
-                    </Pressable>
-                    {!isBranchRoute && (
+                    {!isBranchRoute ? (
                       <Text style={{ color: palette.muted, fontSize: 11 }}>
                         Staff are assigned only on the branch route.
                       </Text>
+                    ) : (
+                      <>
+                        <Text style={{ color: palette.muted, fontSize: 12 }}>Assign a Staff member:</Text>
+                        {engineerOpts.length === 0 ? (
+                          <Text style={{ color: palette.muted }}>No Staff members are recorded for this office.</Text>
+                        ) : (
+                          engineerOpts.map((o) => (
+                            <PersonOption
+                              key={o.id}
+                              option={o}
+                              selected={engineerId === o.id}
+                              palette={palette}
+                              onPress={() => setEngineerId(o.id)}
+                            />
+                          ))
+                        )}
+                        <Pressable
+                          disabled={busy || engineerId == null}
+                          onPress={() =>
+                            engineerId != null &&
+                            runAction((t) => assignAssessmentEngineer(t, detail.assessment.id, engineerId, notes))
+                          }
+                          style={[
+                            styles.actionBtn,
+                            { backgroundColor: palette.primary, opacity: engineerId == null ? 0.5 : 1 },
+                          ]}
+                        >
+                          <Text style={styles.actionText}>Assign Staff member</Text>
+                        </Pressable>
+                        <Text style={{ color: palette.muted, fontSize: 11 }}>
+                          Assigning outside this branch is allowed — record why in the notes above.
+                        </Text>
+                      </>
                     )}
                   </View>
                 )}
@@ -326,7 +357,7 @@ export default function AssessmentsScreen() {
                       </>
                     )}
                     <Text style={{ color: palette.muted, fontSize: 11 }}>
-                      Only the branch chief (or the office chief on the senior engineer route) can decide this.
+                      Only the branch chief (or the office chief on the Senior Specialist route) can decide this.
                     </Text>
                   </View>
                 )}
@@ -356,6 +387,95 @@ export default function AssessmentsScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/** The office as it read when the assessment was routed, not its code. */
+function officeLabel(a: Assessment): string {
+  return a.routed_office_name?.trim() || a.office_code || "—";
+}
+
+/** The branch the work was handed to, by name, or null before the hand-off. */
+function branchLabel(a: Assessment): string | null {
+  const name = a.routed_branch_name?.trim();
+  if (name) return name;
+  const letter = a.routed_branch_letter?.trim();
+  return letter ? `Branch ${letter}` : null;
+}
+
+function districtLabel(district: string | null): string | null {
+  const code = district?.trim();
+  if (!code) return null;
+  return `D${code.replace(/^0+(?=\d)/, "")}`;
+}
+
+/** Office · branch · home city — where this person sits, on one line. */
+function personPlace(o: RoutingUserOption): string {
+  const branch = o.branch_name?.trim() || (o.branch_letter ? `Branch ${o.branch_letter}` : "Branch not recorded");
+  const where = [o.home_city?.trim() || null, districtLabel(o.home_district)].filter(Boolean).join(" ");
+  return [o.office_name?.trim() || o.office_code || null, branch, where || null].filter(Boolean).join(" · ");
+}
+
+/**
+ * Their two workload counts, as TEXT. Never a sort key and never a filter: the
+ * hand-off is a deliberate human choice, so the picker annotates and the person
+ * decides (owner decision 7, design §5).
+ */
+function workloadLine(o: RoutingUserOption): string {
+  return `${o.open_assessment_count} open · ${o.awaiting_action_count} waiting on them`;
+}
+
+/** "Rotation out — back 2/5/27". Rendered beside the name, never filtered out. */
+function availabilityLine(o: RoutingUserOption): string | null {
+  const state = (o.availability || "AVAILABLE").toUpperCase();
+  if (state === "AVAILABLE") return null;
+  const label =
+    state === "ROTATION_OUT"
+      ? "Rotation out"
+      : state === "ACTING_ELSEWHERE"
+        ? "Acting elsewhere"
+        : state === "UNAVAILABLE"
+          ? "Unavailable"
+          : state.replace(/_/g, " ");
+  const until = o.available_until ? new Date(o.available_until) : null;
+  return until && !Number.isNaN(until.getTime()) ? `${label} — back ${until.toLocaleDateString()}` : label;
+}
+
+/**
+ * One picker row: the name, where they sit, what they are carrying. Selecting is
+ * a separate act from assigning — nothing is preselected, and the primary button
+ * stays disabled until the chief chooses somebody.
+ */
+function PersonOption({
+  option,
+  selected,
+  palette,
+  onPress,
+}: {
+  option: RoutingUserOption;
+  selected: boolean;
+  palette: { text: string; muted: string; border: string; panel: string; panelSoft: string; primary: string };
+  onPress: () => void;
+}) {
+  const availability = availabilityLine(option);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.personOption,
+        {
+          borderColor: selected ? palette.primary : palette.border,
+          backgroundColor: selected ? palette.panelSoft : palette.panel,
+          borderWidth: selected ? 2 : 1,
+        },
+      ]}
+    >
+      <Text style={{ color: palette.text, fontWeight: "800" }}>{option.full_name}</Text>
+      <Text style={{ color: palette.muted, fontSize: 12 }}>{personPlace(option)}</Text>
+      <Text style={{ color: palette.muted, fontSize: 12 }}>{workloadLine(option)}</Text>
+      {availability ? <Text style={{ color: palette.muted, fontSize: 12 }}>{availability}</Text> : null}
+      <Text style={{ color: palette.muted, fontSize: 11 }}>{option.email}</Text>
+    </Pressable>
   );
 }
 
@@ -392,5 +512,8 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 14, minHeight: 44 },
   actionBtn: { borderRadius: 10, paddingVertical: 12, alignItems: "center" },
   actionText: { color: "#fff", fontWeight: "800" },
+  personBtn: { paddingHorizontal: 12, gap: 2 },
+  personBtnSub: { color: "#eef4ff", fontSize: 12, textAlign: "center" },
+  personOption: { borderRadius: 12, padding: 12, gap: 2 },
   eventRow: { borderWidth: 1, borderRadius: 8, padding: 8, gap: 2 },
 });

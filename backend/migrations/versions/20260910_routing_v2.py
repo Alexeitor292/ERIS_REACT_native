@@ -148,7 +148,7 @@ def upgrade() -> None:
     )
     # MariaDB has no transactional DDL, so each DROP CONSTRAINT is paired with
     # its ADD CONSTRAINT in one batch and the revision stays re-runnable if it
-    # dies between them (docs/MIGRATIONS.md).
+    # dies between them (docs/deployment.md).
     op.execute("ALTER TABLE assessments DROP CONSTRAINT IF EXISTS chk_assessment_routing_path")
     op.execute(
         """

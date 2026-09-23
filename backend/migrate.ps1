@@ -19,7 +19,7 @@ from alembic.ini and never hardcoded here.
 
 .NOTES
 Always take a mysqldump backup before running 'upgrade' on a real database.
-See docs/MIGRATIONS.md for full procedures.
+See docs/deployment.md for full procedures.
 #>
 
 param(

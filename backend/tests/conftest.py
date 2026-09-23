@@ -1,3 +1,4 @@
+import importlib.util
 import inspect
 import os
 import re
@@ -265,10 +266,10 @@ def client_db():
 
 @pytest.fixture(scope="session")
 def admin_token(client_db):
-    """JWT token for admin@local (password: 'password'). Acquired once per session."""
+    """JWT token for mock.admin@dot.ca.gov (password: 'password'). Acquired once per session."""
     resp = client_db.post(
         "/auth/login",
-        json={"email": "admin@local", "password": "password"},
+        json={"email": "mock.admin@dot.ca.gov", "password": "password"},
     )
     assert resp.status_code == 200, f"Admin login failed: {resp.status_code} {resp.text}"
     return resp.json()["access_token"]
@@ -276,22 +277,71 @@ def admin_token(client_db):
 
 @pytest.fixture(scope="session")
 def senior_engineer_token(client_db):
-    """JWT token for seniorengineer@local (password: 'password').
+    """JWT token for mock.senior.specialist@dot.ca.gov (password: 'password').
 
-    Routing v2's second route needs an office-scoped GeoTech senior engineer in
+    Routing v2's second route needs an office-scoped Senior Specialist in
     every module that exercises it. The module-scoped ``tokens`` / ``ids``
     fixtures live in tests/test_assessment_flow.py, not here, so this session
     fixture is what the routing-v2 modules (which do not import that module's
-    fixtures) share. The account comes from database/init/020_seed.sql; the
-    migration deliberately seeds only the role row, so an already-initialised
-    database needs the seed re-run.
+    fixtures) share. The account comes from database/dev/030_mock_accounts.sql.
     """
     resp = client_db.post(
         "/auth/login",
-        json={"email": "seniorengineer@local", "password": "password"},
+        json={"email": "mock.senior.specialist@dot.ca.gov", "password": "password"},
     )
     assert resp.status_code == 200, (
-        f"Senior engineer login failed: {resp.status_code} {resp.text}. "
-        "Re-run database/init/020_seed.sql — routing v2 adds seniorengineer@local."
+        f"Senior Specialist login failed: {resp.status_code} {resp.text}. "
+        "Load database/dev/030_mock_accounts.sql — it creates mock.senior.specialist@dot.ca.gov."
     )
     return resp.json()["access_token"]
+
+
+@pytest.fixture(scope="session")
+def viewer_token(client_db):
+    """JWT token for mock.guest@dot.ca.gov (password: 'password').
+
+    The org model's read-only ``GUEST``: no operational role, no
+    maintenance role, no office and no district. The account is deliberately
+    org-less — a viewer's reach is statewide and is NOT narrowed by an org link,
+    so an account carrying office metadata would hide a bug in the viewer's own
+    scoping (database/dev/030_mock_accounts.sql).
+    """
+    resp = client_db.post(
+        "/auth/login",
+        json={"email": "mock.guest@dot.ca.gov", "password": "password"},
+    )
+    assert resp.status_code == 200, (
+        f"Viewer login failed: {resp.status_code} {resp.text}. "
+        "Load database/dev/030_mock_accounts.sql — it creates mock.guest@dot.ca.gov."
+    )
+    return resp.json()["access_token"]
+
+
+@pytest.fixture(scope="session")
+def org_model_revision():
+    """The ``20260911_org_model`` Alembic revision module, loaded by path.
+
+    The seed lists (``_OFFICES``, ``_BRANCHES``, ``_CLASSIFICATIONS``) and the
+    upgrade/downgrade steps are the single source of truth for what the org model
+    installs, so the shape tests read them from the revision itself rather than
+    restating them. The module name starts with a digit and the versions
+    directory is not a package, so a plain import will not resolve it.
+    """
+    path = os.path.join(_backend_dir, "migrations", "versions", "20260911_org_model.py")
+    spec = importlib.util.spec_from_file_location("eris_tests_org_model_revision", path)
+    assert spec and spec.loader, f"cannot load the org model revision at {path}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="session")
+def roles_consolidation_revision():
+    """The ``20260923_roles_consolidated`` revision module, loaded by path: its
+    ROLE_MAP is what every older role code in a seed becomes."""
+    path = os.path.join(_backend_dir, "migrations", "versions", "20260923_roles_consolidated.py")
+    spec = importlib.util.spec_from_file_location("eris_tests_roles_consolidated_revision", path)
+    assert spec and spec.loader, f"cannot load the roles revision at {path}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import {
@@ -15,17 +15,23 @@ import {
   submitAssessment,
   type AssessmentDetail,
   type AssignmentUserOption,
+  type PickerGroup,
   type RoutingPath,
   type RoutingUserOption,
 } from "../../api/assessments";
 import { api } from "../../api/client";
+import { loadOfficeDirectory } from "../../api/org";
 import type { Incident, Submission } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { SubmissionStatusBadge } from "../submissions/SubmissionDetailPrimitives";
 import { buildSubmissionDisplayTitle } from "../../utils/submissionLabel";
-import { canAssignEngineer, canDelegateBranch, isAdmin, isEngineer, isSeniorEngineer } from "../../utils/roleModel";
+import { canAssignEngineer, canDelegateBranch, isAdmin, isSeniorSpecialist, isStaff } from "../../utils/roleModel";
+import PersonPicker from "./PersonPicker";
+import { branchLabelOf, isOutOfBranchChoice, placeLabel, selectedPerson, buildPickerSections } from "./personPickerModel";
 import {
+  assessmentBranchName,
   assessmentEventLabel,
+  assessmentOfficeName,
   assessmentPermissions,
   assessmentStateLabel,
   assessmentStateLabelFor,
@@ -33,12 +39,15 @@ import {
   assignmentRoleLabel,
   humanizeCode,
   isActionable,
+  stepOwnership,
+  workActionLabel,
   latestSubmissionId,
   officeLabel,
   pipelineFor,
   pipelineIndex,
   submissionIdsOf,
   waitingOn,
+  type OfficeNameLookup,
   type Tone,
 } from "./assessmentModel";
 
@@ -58,6 +67,53 @@ export function formatTimestamp(value: string | null | undefined) {
 
 export { officeLabel };
 
+/**
+ * The org label directory: office names for records routed before the snapshot
+ * columns existed, and which branches have since been retired.
+ *
+ * A record WITH a snapshot never takes its name from here — the name frozen
+ * onto the assessment is the historical truth, and a later rename must not
+ * rewrite it. The directory answers the other question: whether the branch that
+ * name refers to still exists, so the record can say "Branch C · Retired"
+ * rather than pretending (org model design §3.5, §8).
+ */
+export function useOrgLabels(): { officeNames: OfficeNameLookup; isRetiredBranch: (branchId: number | null | undefined) => boolean } {
+  const [names, setNames] = useState<Map<string, string>>(() => new Map());
+  const [retiredBranches, setRetiredBranches] = useState<Set<number>>(() => new Set());
+  useEffect(() => {
+    let cancelled = false;
+    loadOfficeDirectory()
+      .then((directory) => {
+        if (cancelled) return;
+        const offices = [...directory.values()];
+        setNames(new Map(offices.map((office) => [office.code, office.name || office.code])));
+        setRetiredBranches(new Set(
+          offices.flatMap((office) => (office.branches ?? []).filter((branch) => !branch.is_active).map((branch) => branch.id)),
+        ));
+      })
+      .catch(() => {
+        // Labels only: without them a legacy record shows its office CODE,
+        // which is honest, so this failure is not worth an error banner.
+      });
+    return () => { cancelled = true; };
+  }, []);
+  const officeNames = useCallback<OfficeNameLookup>((code) => (code ? names.get(code) ?? null : null), [names]);
+  const isRetiredBranch = useCallback(
+    (branchId: number | null | undefined) => branchId != null && retiredBranches.has(branchId),
+    [retiredBranches],
+  );
+  return { officeNames, isRetiredBranch };
+}
+
+/** "Retired" beside a name that is still correct history. */
+function RetiredBadge() {
+  return (
+    <span className="ml-1 rounded-full border border-[var(--line)] bg-[var(--panel-soft)] px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-muted">
+      Retired
+    </span>
+  );
+}
+
 const toneClass: Record<Tone, string> = {
   good: "border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] text-[var(--good)]",
   bad: "border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] text-[var(--bad)]",
@@ -73,7 +129,7 @@ export function AssessmentStateBadge({ state, routingPath = null, mini = false }
   );
 }
 
-/** The ladder this assessment actually walks — branch, senior engineer, or not yet routed. */
+/** The ladder this assessment actually walks — branch, Senior Specialist, or not yet routed. */
 export function Pipeline({ assessment }: { assessment: Pick<AssessmentDetail["assessment"], "state" | "routing_path"> }) {
   const steps = pipelineFor(assessment);
   const current = pipelineIndex(assessment);
@@ -127,7 +183,6 @@ function Card({ title, hint, actions, children, bodyClassName = "p-4" }: { title
 const btn = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)] disabled:cursor-not-allowed disabled:opacity-50";
 const btnPrimary = "rounded-md bg-[var(--brand)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
 const btnGood = "rounded-md bg-[var(--good)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
-const select = "min-w-0 flex-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm";
 
 /** The office chief's two mutually exclusive choices, with what each one costs them. */
 const ROUTE_CHOICES: Array<{ value: RoutingPath; label: string; consequence: string }> = [
@@ -138,8 +193,8 @@ const ROUTE_CHOICES: Array<{ value: RoutingPath; label: string; consequence: str
   },
   {
     value: "SENIOR_ENGINEER",
-    label: "Assign a senior engineer",
-    consequence: "The senior engineer fills the assessment and returns it to you for approval.",
+    label: "Assign a Senior Specialist",
+    consequence: "The Senior Specialist fills the assessment and returns it to you for approval.",
   },
 ];
 
@@ -147,6 +202,9 @@ const ROUTE_CHOICES: Array<{ value: RoutingPath; label: string; consequence: str
 function isHistoricalAssignment(role: string): boolean {
   return role === "REVIEWER" || role === "APPROVER";
 }
+
+/** A shared empty payload, so an unfetched picker and a fetched-empty one are the same shape. */
+const EMPTY_OPTIONS = { groups: [] as PickerGroup[], items: [] as never[] };
 
 export type IncidentContext = {
   incident: Incident | null;
@@ -173,42 +231,53 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
       admin: isAdmin(roles),
       officeChief: canDelegateBranch(roles),
       branchChief: canAssignEngineer(roles),
-      engineer: isEngineer(roles),
-      seniorEngineer: isSeniorEngineer(roles),
+      engineer: isStaff(roles),
+      seniorEngineer: isSeniorSpecialist(roles),
     }),
     [roles],
   );
+  // The caller's office resolves the way the server resolves it: the org record
+  // first, the legacy `metadata` mirror second. A chief whose profile moved but
+  // whose mirror did not — or the reverse, during the cutover release — must not
+  // lose their review affordance (org model design §3.2, §13.3).
+  const callerOffice = me?.org?.office_code ?? me?.metadata?.office_code;
   const permissions = useMemo(
-    () => assessmentPermissions(flags, me?.id, me?.metadata?.office_code, assessment),
-    [assessment, flags, me?.id, me?.metadata?.office_code],
+    () => assessmentPermissions(flags, me?.id, callerOffice, assessment),
+    [assessment, callerOffice, flags, me?.id],
   );
   const actionable = isActionable(permissions);
-  const next = waitingOn(assessment, assignments);
+  const ownership = stepOwnership(flags, me?.id, callerOffice, assessment);
+  const stepInRole = flags.admin ? "an administrator" : flags.officeChief ? "office chief" : flags.branchChief ? "branch chief" : "your role";
   const submissionIds = submissionIdsOf(assessment);
   const latestId = latestSubmissionId(assessment);
 
   const [context, setContext] = useState<IncidentContext>({ incident: null, eventGroupId: null });
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
-  const [branchList, setBranchList] = useState<RoutingUserOption[]>([]);
-  const [seniorEngineerList, setSeniorEngineerList] = useState<RoutingUserOption[]>([]);
-  const [engineerOptions, setEngineerOptions] = useState<AssignmentUserOption[]>([]);
+  const [branchList, setBranchList] = useState<{ groups: PickerGroup[]; items: RoutingUserOption[] }>(EMPTY_OPTIONS);
+  const [seniorEngineerList, setSeniorEngineerList] = useState<{ groups: PickerGroup[]; items: RoutingUserOption[] }>(EMPTY_OPTIONS);
+  const [engineerOptions, setEngineerOptions] = useState<{ groups: PickerGroup[]; items: AssignmentUserOption[] }>(EMPTY_OPTIONS);
   const [consultedOptions, setConsultedOptions] = useState<AssignmentUserOption[]>([]);
   const [routeChoice, setRouteChoice] = useState<RoutingPath | null>(null);
   const [consultedOpen, setConsultedOpen] = useState(false);
-  const [branchChiefId, setBranchChiefId] = useState("");
-  const [seniorEngineerId, setSeniorEngineerId] = useState("");
-  const [engineerId, setEngineerId] = useState("");
+  // `null` until a human chooses — for all three pickers, under every data
+  // shape, including a list with exactly one candidate (owner decision 7).
+  const [branchChiefId, setBranchChiefId] = useState<number | null>(null);
+  const [seniorEngineerId, setSeniorEngineerId] = useState<number | null>(null);
+  const [engineerId, setEngineerId] = useState<number | null>(null);
   const [consultedId, setConsultedId] = useState("");
   const [routingOptionsLoading, setRoutingOptionsLoading] = useState(false);
 
   const resetPickers = () => {
-    setBranchChiefId(""); setSeniorEngineerId(""); setEngineerId(""); setConsultedId("");
+    setBranchChiefId(null); setSeniorEngineerId(null); setEngineerId(null); setConsultedId("");
   };
 
+  // The three details that keep the no-preselect contract true: an empty initial
+  // value, a primary disabled until a choice, and a reset on every change of
+  // assessment, state or route.
   useEffect(() => {
     setNotes(""); setRouteChoice(null); setConsultedOpen(false);
-    setBranchChiefId(""); setSeniorEngineerId(""); setEngineerId(""); setConsultedId("");
+    setBranchChiefId(null); setSeniorEngineerId(null); setEngineerId(null); setConsultedId("");
   }, [assessment.id, assessment.state, assessment.routing_path]);
 
   // Incident title / Event Group for cross-links (incident payload carries event_group_id).
@@ -245,12 +314,21 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
     let cancelled = false;
     const requests: Array<Promise<void>> = [];
     setRoutingOptionsLoading(activeRoute != null);
-    if (activeRoute === "BRANCH") requests.push(branchOptions(assessment.id).then((response) => { if (!cancelled) setBranchList(response.items ?? []); }));
-    else setBranchList([]);
-    if (activeRoute === "SENIOR_ENGINEER") requests.push(seniorEngineerOptions(assessment.id).then((response) => { if (!cancelled) setSeniorEngineerList(response.items ?? []); }));
-    else setSeniorEngineerList([]);
-    if (showAssignEngineer) requests.push(assessmentAssignmentOptions(assessment.id, "ENGINEER").then((response) => { if (!cancelled) setEngineerOptions(response.items ?? []); }));
-    else setEngineerOptions([]);
+    if (activeRoute === "BRANCH") {
+      requests.push(branchOptions(assessment.id).then((response) => {
+        if (!cancelled) setBranchList({ groups: response.groups ?? [], items: response.items ?? [] });
+      }));
+    } else setBranchList(EMPTY_OPTIONS);
+    if (activeRoute === "SENIOR_ENGINEER") {
+      requests.push(seniorEngineerOptions(assessment.id).then((response) => {
+        if (!cancelled) setSeniorEngineerList({ groups: response.groups ?? [], items: response.items ?? [] });
+      }));
+    } else setSeniorEngineerList(EMPTY_OPTIONS);
+    if (showAssignEngineer) {
+      requests.push(assessmentAssignmentOptions(assessment.id, "ENGINEER").then((response) => {
+        if (!cancelled) setEngineerOptions({ groups: response.groups ?? [], items: response.items ?? [] });
+      }));
+    } else setEngineerOptions(EMPTY_OPTIONS);
     Promise.all(requests)
       .catch((error) => { if (!cancelled) onError(error instanceof Error ? error.message : "Failed to load assignment options."); })
       .finally(() => { if (!cancelled) setRoutingOptionsLoading(false); });
@@ -284,6 +362,17 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const assignedIds = new Set(assignments.map((assignment) => assignment.user_id));
   const availableConsulted = consultedOptions.filter((option) => !assignedIds.has(option.id));
   const revision = assessment.state === "REVISION_REQUESTED";
+  const { officeNames, isRetiredBranch } = useOrgLabels();
+  const officeName = assessmentOfficeName(assessment, officeNames);
+  const branchName = assessmentBranchName(assessment);
+  const branchRetired = isRetiredBranch(assessment.routed_branch_id);
+  // The office in "an office chief of … reviews this" comes from the snapshot,
+  // and from the live directory only for a record routed before it existed.
+  const next = waitingOn(assessment, assignments, officeNames);
+  // A Staff member from another branch is allowed WITH a recorded reason, and
+  // refused without one — so the warning appears before the refusal, not after.
+  const chosenStaff = selectedPerson(buildPickerSections(engineerOptions.groups, engineerOptions.items), engineerId);
+  const staffOutOfBranch = isOutOfBranchChoice(chosenStaff, assessment.routed_branch_id);
   const incidentTitle = context.incident?.title ? `Incident #${assessment.incident_id} · ${context.incident.title}` : `Incident #${assessment.incident_id} technical assessment`;
   const approver = [...events].reverse().find((event) => event.event_type === "APPROVED");
   const approverName = approver?.actor_name || approver?.actor_email || null;
@@ -295,7 +384,13 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Assessment #{assessment.id}</div>
             <h2 className="mt-0.5 text-lg font-semibold leading-snug">{incidentTitle}</h2>
-            <div className="mt-1 text-[13px] text-muted">{officeLabel(assessment.office_code)} · District {assessment.district ?? "—"} · Updated {formatTimestamp(assessment.updated_at)}</div>
+            {/* Office and branch by NAME, from the routing snapshot: a rename or a
+                retired branch must not rewrite what this record says (design §3.5). */}
+            <div className="mt-1 text-[13px] text-muted">
+              {officeName}
+              {branchName ? <> · {branchName}{branchRetired ? <RetiredBadge /> : null}</> : null}
+              {" · "}District {assessment.district ?? "—"} · Updated {formatTimestamp(assessment.updated_at)}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <AssessmentStateBadge state={assessment.state} routingPath={assessment.routing_path} />
@@ -320,7 +415,9 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
         </div>
       ) : (
         <section
-          className="rounded-xl border p-4"
+          id="assessment-next-step"
+          tabIndex={-1}
+          className="rounded-xl border p-4 outline-none"
           style={{
             borderColor: `color-mix(in oklab, ${revision ? "var(--bad)" : "var(--brand)"} 40%, transparent)`,
             background: `color-mix(in oklab, ${revision ? "var(--bad)" : "var(--brand)"} 6%, var(--panel))`,
@@ -333,9 +430,27 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
           <p className="mt-1.5 text-sm">{next.text}</p>
 
           {mode === "record" ? (
-            actionable
-              ? <Link to={`/my-work?assessment=${assessment.id}`} className={`${btnPrimary} mt-3 inline-block`}>This step is yours — act on it in My Work</Link>
-              : <p className="mt-2.5 text-[13px] text-muted">Actions for this step are performed from My Work by the responsible role.</p>
+            ownership === "NONE" ? (
+              <p className="mt-2.5 text-[13px] text-muted">Actions for this step are performed from My Work by the responsible role.</p>
+            ) : (
+              // The buttons go to the action itself: the form to fill out, or
+              // this assessment opened in My Work with its step in view.
+              <div className="mt-3 grid gap-2">
+                <p className="text-[13px]">
+                  {ownership === "MINE"
+                    ? <b>This step is yours.</b>
+                    : <>This step isn&rsquo;t yours. As {stepInRole} you can also act on it.</>}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {permissions.submit && latestId != null ? (
+                    <Link to={`/submissions/${latestId}`} className={btnPrimary}>Fill out submission #{latestId}</Link>
+                  ) : null}
+                  <Link to={`/my-work?assessment=${assessment.id}`} className={permissions.submit && latestId != null ? btn : btnPrimary}>
+                    {workActionLabel(assessment.state, permissions, submissionIds.length > 0)} in My Work
+                  </Link>
+                </div>
+              </div>
+            )
           ) : !actionable ? (
             <p className="mt-2.5 text-[13px] text-muted">No actions for your role on this step.</p>
           ) : (
@@ -387,28 +502,32 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                     <>
                       <p className="text-[13px]">{ROUTE_CHOICES.find((choice) => choice.value === activeRoute)?.consequence}</p>
                       {activeRoute === "BRANCH" ? (
-                        <div className="grid gap-1.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select className={select} disabled={routingOptionsLoading || branchList.length === 0} value={branchChiefId} onChange={(event) => setBranchChiefId(event.target.value)}>
-                              <option value="">{routingOptionsLoading ? "Loading branch chiefs…" : branchList.length === 0 ? "No eligible branch chiefs" : "Select branch chief…"}</option>
-                              {branchList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
-                            </select>
-                            <button type="button" disabled={busy || !branchChiefId} className={btnPrimary} onClick={() => run(() => delegateBranch(assessment.id, Number(branchChiefId), notes.trim() || undefined))}>
-                              {assessment.routing_path === "BRANCH" ? "Hand to this branch chief" : "Hand off"}
-                            </button>
-                          </div>
-                          {!routingOptionsLoading && branchList.length === 0 ? <p className="text-xs text-[var(--bad)]">No active branch-chief account is available. Ask an administrator to assign the Branch Chief role.</p> : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <PersonPicker
+                            label="Branch chief"
+                            placeholder="Select branch chief…"
+                            groups={branchList.groups}
+                            items={branchList.items}
+                            value={branchChiefId}
+                            onChange={setBranchChiefId}
+                            emptyMessage={routingOptionsLoading ? "Loading branch chiefs…" : "No branch chief is recorded for this office yet. Place one in this office's tree under Organization."}
+                          />
+                          <button type="button" disabled={busy || branchChiefId == null} className={btnPrimary} onClick={() => run(() => delegateBranch(assessment.id, Number(branchChiefId), notes.trim() || undefined))}>
+                            {assessment.routing_path === "BRANCH" ? "Hand to this branch chief" : "Hand off"}
+                          </button>
                         </div>
                       ) : (
-                        <div className="grid gap-1.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select className={select} disabled={routingOptionsLoading || seniorEngineerList.length === 0} value={seniorEngineerId} onChange={(event) => setSeniorEngineerId(event.target.value)}>
-                              <option value="">{routingOptionsLoading ? "Loading senior engineers…" : seniorEngineerList.length === 0 ? "No eligible senior engineers" : "Select senior engineer…"}</option>
-                              {seniorEngineerList.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
-                            </select>
-                            <button type="button" disabled={busy || !seniorEngineerId} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign senior engineer</button>
-                          </div>
-                          {!routingOptionsLoading && seniorEngineerList.length === 0 ? <p className="text-xs text-[var(--bad)]">No active senior-engineer account is available. Ask an administrator to assign the Senior Engineer role.</p> : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <PersonPicker
+                            label="Senior Specialist"
+                            placeholder="Select Senior Specialist…"
+                            groups={seniorEngineerList.groups}
+                            items={seniorEngineerList.items}
+                            value={seniorEngineerId}
+                            onChange={setSeniorEngineerId}
+                            emptyMessage={routingOptionsLoading ? "Loading Senior Specialists…" : "No Senior Specialist is recorded for this office yet. Place one in this office's tree under Organization."}
+                          />
+                          <button type="button" disabled={busy || seniorEngineerId == null} className={btnPrimary} onClick={() => run(() => assignSeniorEngineer(assessment.id, Number(seniorEngineerId), notes.trim() || undefined))}>Assign Senior Specialist</button>
                         </div>
                       )}
                     </>
@@ -416,15 +535,42 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                 </div>
               ) : null}
 
-              <textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional workflow notes" className="w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm" />
+              <textarea
+                rows={2}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder={staffOutOfBranch ? "Required: why this Staff member, from another branch" : "Optional workflow notes"}
+                className="w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm"
+              />
+              {showAssignEngineer && staffOutOfBranch ? (
+                <p className="text-[13px] text-[var(--bad)]">
+                  {chosenStaff?.full_name} is in {branchLabelOf(chosenStaff) ?? "another branch"}
+                  {placeLabel(chosenStaff?.home_city, chosenStaff?.home_district) ? ` (${placeLabel(chosenStaff?.home_city, chosenStaff?.home_district)})` : ""}
+                  , not {branchName ?? "this branch"}. Record why in the notes above to assign them anyway.
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 {showAssignEngineer ? (
                   <>
-                    <select className={select} value={engineerId} onChange={(event) => setEngineerId(event.target.value)}>
-                      <option value="">Select Staff member…</option>
-                      {engineerOptions.map((option) => <option key={option.id} value={option.id}>{option.full_name} · {option.email}</option>)}
-                    </select>
-                    <button type="button" disabled={busy || !engineerId} className={btnPrimary} onClick={() => run(() => assignEngineer(assessment.id, Number(engineerId), notes.trim() || undefined))}>Assign Staff member</button>
+                    {/* "Your branch" first, then the rest of the office — the ordering
+                        is the server's, and no candidate is ever chosen for the chief. */}
+                    <PersonPicker
+                      label="Staff member"
+                      placeholder="Select Staff member…"
+                      groups={engineerOptions.groups}
+                      items={engineerOptions.items}
+                      value={engineerId}
+                      onChange={setEngineerId}
+                      emptyMessage="No Staff account is recorded in this office yet."
+                    />
+                    <button
+                      type="button"
+                      disabled={busy || engineerId == null || (staffOutOfBranch && !notes.trim())}
+                      className={btnPrimary}
+                      onClick={() => run(() => assignEngineer(assessment.id, Number(engineerId), notes.trim() || undefined))}
+                    >
+                      Assign Staff member
+                    </button>
                   </>
                 ) : null}
                 {permissions.submit ? (
@@ -478,7 +624,12 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
 
       <Card
         title="Assignments"
-        hint="Review authority follows the assessment's route, never an assignment."
+        hint={
+          <>
+            {officeName}{branchName ? <> · {branchName}{branchRetired ? <RetiredBadge /> : null}</> : null}
+            {" · "}Review authority follows the assessment&apos;s route, never an assignment.
+          </>
+        }
         actions={showConsultedManagement ? (
           consultedOpen ? (
             <>
@@ -560,7 +711,16 @@ export function AssessmentRailCard({
   const inner = (
     <>
       <div className="flex items-start justify-between gap-2">
-        <div><div className="font-semibold">Assessment #{assessment.id}</div><div className="mt-0.5 text-xs text-muted">Incident #{assessment.incident_id} · {assessment.office_code ? `Office ${assessment.office_code}` : "Office —"} · D{assessment.district ?? "—"}</div></div>
+        <div>
+          <div className="font-semibold">Assessment #{assessment.id}</div>
+          {/* The office and branch NAME from the routing snapshot, not the code:
+              a rail full of "Office WEST" tells a reader nothing they can use. */}
+          <div className="mt-0.5 text-xs text-muted">
+            Incident #{assessment.incident_id} · {assessmentOfficeName(assessment)}
+            {assessmentBranchName(assessment) ? ` · ${assessmentBranchName(assessment)}` : ""}
+            {" · "}D{assessment.district ?? "—"}
+          </div>
+        </div>
         <AssessmentStateBadge state={assessment.state} routingPath={assessment.routing_path} mini />
       </div>
       <div className="mt-2 text-xs">{next ? <><span className="text-muted">Waiting on </span><b className="font-semibold">{next.who}</b></> : <span className="font-semibold text-[var(--good)]">Complete</span>}</div>

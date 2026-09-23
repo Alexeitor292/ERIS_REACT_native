@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..deps import get_current_user
-from ..permissions import is_admin, is_operational_user, is_reviewer
+from ..deps import deny_public_only, get_current_user
+from ..permissions import is_admin, is_operational_user, is_public_only
+from ..services import public_visibility
 from ..storage import object_access_url
 
 router = APIRouter(tags=["photo-map"])
@@ -20,17 +21,22 @@ _CLIENT_CORRECTION_UUID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 
 
 def _owns_linked_incident(db: Session, *, user_id: int, submission_id: int) -> bool:
+    # incidents.REPORTER_user_id, not created_by_user_id: the column has always
+    # been named that and there is no other. The old name made this query raise
+    # 1054 for any caller who is neither an editor of the submission nor an
+    # operational user — a path nothing exercised until the read-only viewer,
+    # who is by definition neither.
     return bool(db.execute(text("""
         SELECT 1
         FROM incident_submission_links l
         JOIN incidents i ON i.id=l.incident_id
-        WHERE l.submission_id=:sid AND i.created_by_user_id=:uid
+        WHERE l.submission_id=:sid AND i.reporter_user_id=:uid
         LIMIT 1
     """), {"sid": submission_id, "uid": user_id}).first())
 
 
 def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
-    if is_admin(user) or is_reviewer(user) or is_operational_user(user):
+    if is_admin(user) or is_operational_user(user):
         return True
     row = db.execute(text("""
         SELECT s.created_by_user_id AS owner_id,
@@ -41,6 +47,21 @@ def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool
     if bool(row) and (int(row["owner_id"]) == int(user["id"]) or bool(row["has_view_grant"]) or bool(row["has_edit_grant"])):
         return True
     return _owns_linked_incident(db, user_id=int(user["id"]), submission_id=submission_id)
+
+
+def _require_photo_map_read(db: Session, *, user: dict, submission_id: int) -> None:
+    """Photo-map READ permission, plus the viewer's public-record path.
+
+    ``_can_view_submission`` above is NOT widened: it also gates the correction
+    WRITE at ``PUT .../correction``, and a viewer must never reach that (org
+    model design §4.4, §4.5). A viewer gets 404, not 403, so an in-flight form
+    cannot be distinguished from a missing one.
+    """
+    if is_public_only(user):
+        public_visibility.ensure_public_submission(db, user, submission_id)
+        return
+    if not _can_view_submission(db, user=user, submission_id=submission_id):
+        raise HTTPException(status_code=403, detail="Not allowed to view this submission photo map")
 
 
 def _can_edit_submission(db: Session, *, user: dict, submission_id: int) -> bool:
@@ -77,7 +98,7 @@ def _owns_incident_photo(db: Session, *, user_id: int, submission_id: int, attac
         WHERE l.submission_id=:sid
           AND ia.attachment_id=:aid
           AND ia.kind='PHOTO'
-          AND i.created_by_user_id=:uid
+          AND i.reporter_user_id=:uid
         LIMIT 1
     """), {"sid": submission_id, "aid": attachment_id, "uid": user_id}).first())
 
@@ -295,7 +316,9 @@ def put_photo_correction(
     attachment_id: int = Path(..., ge=1),
     payload: dict = Body(...),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    # A WRITE behind a view check: deny_public_only is what keeps a viewer out,
+    # since _can_view_submission is not the gate for them (design §4.5 deny list).
+    user=Depends(deny_public_only),
 ):
     if not _can_view_submission(db, user=user, submission_id=submission_id):
         raise HTTPException(status_code=403, detail="Not allowed to view this submission photo map")
@@ -339,8 +362,7 @@ def put_photo_correction(
 
 @router.get("/submissions/{submission_id}/photo-map")
 def submission_photo_map(submission_id: int = Path(..., ge=1), db: Session = Depends(get_db), user=Depends(get_current_user)):
-    if not _can_view_submission(db, user=user, submission_id=submission_id):
-        raise HTTPException(status_code=403, detail="Not allowed to view this submission")
+    _require_photo_map_read(db, user=user, submission_id=submission_id)
     if not db.execute(text("SELECT 1 FROM submissions WHERE id=:sid LIMIT 1"), {"sid": submission_id}).first():
         raise HTTPException(status_code=404, detail="Submission not found")
 

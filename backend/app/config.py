@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     POSTMILE_WHERE: str = Field(default="1=1")
     POSTMILE_SEARCH_DISTANCE_METERS: int = Field(default=120)
 
+    # Public (GUEST) visibility. "Public" is an assessment in state
+    # APPROVED or FINALIZED — the whole record, statewide (org model design §4.2).
+    # Incidents closed at triage with NO assessment (NO_ASSESSMENT_REQUIRED,
+    # DUPLICATE_OR_LINKED) are NOT public by default; this flag exists so the
+    # alternative is a settings change rather than a code change (open question 4).
+    PUBLIC_INCLUDES_CLOSED_WITHOUT_ASSESSMENT: bool = Field(default=False)
+
     # ArcGIS runtime configuration (backend-managed, no DB persistence)
     ARCGIS_RUNTIME_ENABLED: bool = Field(default=False)
     ARCGIS_API_KEY: str | None = Field(default=None)
@@ -167,7 +174,7 @@ class Settings(BaseSettings):
     # the packaged terrain grid at cross-section time). Degrades gracefully.
     OFFLINE_SCENE_ROAD_CROSS_SECTION_ENABLED: bool = Field(default=True)
     # none | eris_internal | arcgis_feature_service | census_tigerweb | caltrans_crs
-    # See docs/adr-offline-road-context-source.md. `none` packages NO road context;
+    # See docs/decisions/adr-offline-road-context-source.md. `none` packages NO road context;
     # census_tigerweb is the credential-free DEVELOPMENT road-snap source (public U.S.
     # Census TIGERweb); arcgis_feature_service is a generic authorized ArcGIS/Enterprise
     # centerline layer; caltrans_crs is the OPTIONAL Caltrans freeway/expressway road
@@ -198,6 +205,16 @@ class Settings(BaseSettings):
     )
     OFFLINE_SCENE_TIGERWEB_LAYERS: str = Field(default="2,6,8")
 
+    # --- Roadway encroachment (technical form measurements) ---
+    # The centerline the web measures Lr and Wr against, joined with the road inventory's
+    # cross-section: caltrans_shn (Caltrans SHN Lines, keyed by route, county and
+    # postmile like the inventory) | census_tigerweb | caltrans_crs. Server-side fetch.
+    ROADWAY_CENTERLINE_SOURCE: str = Field(default="caltrans_shn")
+    ROADWAY_SHN_LINES_URL: str = Field(
+        default="https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/SHN_Lines/FeatureServer/0"
+    )
+    ROADWAY_FETCH_TIMEOUT_S: int = Field(default=20, ge=1, le=120)
+
     # --- Caltrans CRS Functional Classification (OPTIONAL freeway/expressway road context) ---
     # Public, credential-free Caltrans ArcGIS Feature Service. Active ONLY when
     # OFFLINE_SCENE_ROAD_SOURCE=caltrans_crs (explicit selection). Worker-side fetch only —
@@ -206,7 +223,7 @@ class Settings(BaseSettings):
     # it does not establish that a feature is Caltrans-owned or a State Route, and a filtered
     # subset must never be described as "the state highway system". Road CONTEXT only — not
     # survey/engineering-grade centerline. See offline_scene_caltrans.py and
-    # docs/adr-offline-road-context-source.md.
+    # docs/decisions/adr-offline-road-context-source.md.
     OFFLINE_SCENE_CALTRANS_ROADS_URL: str = Field(
         default="https://caltrans-gis.dot.ca.gov/arcgis/rest/services/CHhighway/CRS_Functional_Classification/FeatureServer/0"
     )
@@ -232,7 +249,7 @@ class Settings(BaseSettings):
     # LOCALLY ALONG THE ROUTE, never globally by route name or mere proximity — where two
     # primary carriageways share one corridor, and derives a midpoint centerline so the map
     # can show ONE selectable yellow line. Additive: legacy packages are unaffected.
-    # See docs/adr-divided-highway-corridor-pairing.md for the design + thresholds.
+    # See docs/decisions/adr-divided-highway-corridor-pairing.md for the design + thresholds.
     OFFLINE_SCENE_DIVIDED_PAIRING_ENABLED: bool = Field(default=True)
     OFFLINE_SCENE_PAIR_SAMPLE_INTERVAL_M: float = Field(default=10.0)   # deterministic resampling step
     OFFLINE_SCENE_PAIR_WINDOW_M: float = Field(default=120.0)           # moving longitudinal window
@@ -326,6 +343,15 @@ class Settings(BaseSettings):
         from .services.offline_scene_context import normalize_road_source
 
         return normalize_road_source(v)
+
+    @field_validator("ROADWAY_CENTERLINE_SOURCE")
+    @classmethod
+    def _validate_roadway_centerline_source(cls, v):
+        value = str(v or "").strip().lower()
+        allowed = ("caltrans_shn", "census_tigerweb", "caltrans_crs")
+        if value not in allowed:
+            raise ValueError(f"ROADWAY_CENTERLINE_SOURCE must be one of {', '.join(allowed)}")
+        return value
 
     @field_validator("OFFLINE_SCENE_CALTRANS_FUNCTIONAL_CLASSES")
     @classmethod

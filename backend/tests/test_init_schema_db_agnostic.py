@@ -22,9 +22,10 @@ from pathlib import Path
 
 import pytest
 
-INIT_DIR = Path(__file__).resolve().parents[2] / "database" / "init"
+DATABASE_DIR = Path(__file__).resolve().parents[2] / "database"
+INIT_DIR = DATABASE_DIR / "init"
 # Files that must be loadable into an arbitrary target database.
-DB_AGNOSTIC_FILES = ["010_schema.sql", "020_seed.sql"]
+DB_AGNOSTIC_FILES = ["init/010_schema.sql", "init/020_seed.sql", "dev/030_mock_accounts.sql"]
 
 _USE = re.compile(r"^\s*USE\s+", re.IGNORECASE)
 _CREATE_DB = re.compile(r"\bCREATE\s+DATABASE\b", re.IGNORECASE)
@@ -38,7 +39,7 @@ def _strip_sql_comment(line: str) -> str:
 
 @pytest.mark.parametrize("fname", DB_AGNOSTIC_FILES)
 def test_init_sql_is_database_agnostic(fname):
-    path = INIT_DIR / fname
+    path = DATABASE_DIR / fname
     assert path.exists(), f"authoritative init file missing: {path}"
     offenders = []
     for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -49,3 +50,20 @@ def test_init_sql_is_database_agnostic(fname):
         f"{fname} must be database-agnostic (no USE/CREATE DATABASE); the caller "
         f"selects the target DB. Offending lines: {offenders}"
     )
+
+
+_ACCOUNT_WRITE = re.compile(r"\b(INSERT|REPLACE)\b[^;]*\b(users|user_roles)\b", re.IGNORECASE | re.DOTALL)
+
+
+@pytest.mark.parametrize("path", sorted(INIT_DIR.glob("*.sql")), ids=lambda p: p.name)
+def test_first_boot_init_creates_no_account(path):
+    """database/init is MariaDB's first-boot init, and production shares it.
+
+    An account created there reaches every fresh production database with a
+    known password. The mock accounts belong in database/dev, and a production
+    database gets its first administrator from ``python -m app.tools.create_admin``.
+    """
+    code = "\n".join(_strip_sql_comment(line) for line in path.read_text(encoding="utf-8").splitlines())
+    assert not _ACCOUNT_WRITE.search(code), f"{path.name} creates an account or grants a role to one"
+    assert "$argon2" not in code, f"{path.name} carries a password hash"
+

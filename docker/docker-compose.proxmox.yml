@@ -112,7 +112,7 @@ services:
       # source) | arcgis_feature_service (generic authorized ArcGIS/Enterprise centerlines)
       # | caltrans_crs (OPTIONAL public Caltrans freeway/expressway road CONTEXT — a
       # functional classification, NOT ownership; see the caltrans vars below).
-      # See docs/adr-offline-road-context-source.md.
+      # See docs/decisions/adr-offline-road-context-source.md.
       OFFLINE_SCENE_ROADS_ENABLED: ${OFFLINE_SCENE_ROADS_ENABLED:-true}
       OFFLINE_SCENE_ROAD_SOURCE: ${OFFLINE_SCENE_ROAD_SOURCE:-eris_internal}
       OFFLINE_SCENE_ROAD_SOURCE_URL: ${OFFLINE_SCENE_ROAD_SOURCE_URL:-}
@@ -164,6 +164,9 @@ services:
         # Browser-safe, domain-restricted ArcGIS key — build-time only, never a
         # backend secret. Empty unless set in docker/.env.proxmox.
         VITE_ARCGIS_API_KEY: ${VITE_ARCGIS_API_KEY:-}
+        VITE_CALTRANS_HIGHWAYS_URL: ${VITE_CALTRANS_HIGHWAYS_URL:-}
+        VITE_CALTRANS_POSTMILE_LAYER_URL: ${VITE_CALTRANS_POSTMILE_LAYER_URL:-}
+        VITE_GOOGLE_MAPS_EMBED_KEY: ${VITE_GOOGLE_MAPS_EMBED_KEY:-}
     container_name: eris_web
     restart: unless-stopped
     ports:

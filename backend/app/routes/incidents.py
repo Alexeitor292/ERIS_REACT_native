@@ -14,15 +14,25 @@ from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_roles
 from ..roles import (
-    GEOTECH_BRANCH_CHIEF,
-    GEOTECH_OFFICE_CHIEF,
-    GEOTECH_SENIOR_ENGINEER,
+    ADMIN,
+    ALL_ROLE_NAMES,
+    FIELD_REPORTING_ROLES,
+    GUEST,
+    BRANCH_CHIEF,
+    STAFF,
+    OFFICE_CHIEF,
+    SENIOR_SPECIALIST,
     GISA_AUTHOR_ROLES,
     MAINTENANCE_COORDINATOR,
-    expand_roles,
+    MAINTENANCE_CREW,
+    MAINTENANCE_REPORTING_ROLES,
+    OPERATIONAL_ROLES,
+    has_role,
     is_maintenance_only,
+    is_public_only,
 )
-from ..services import office_routing
+from ..services import org_directory
+from ..services import public_visibility
 from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
 from ..schemas.common import (
     IncidentAssignBranchChiefRequest,
@@ -35,24 +45,30 @@ from ..schemas.common import (
     IncidentLocationLinkRequest,
     RoadInventoryIncidentContext,
 )
-from ..storage import make_object_key, put_object_bytes
+from ..storage import make_object_key, object_access_url, put_object_bytes
 from ..user_metadata import normalize_district_code, normalize_office_code, normalize_profile_text, parse_user_metadata
 
 router = APIRouter(tags=["incidents"])
-OFFICE_BY_DISTRICT: dict[str, str] = {
-    "01": "WEST",
-    "02": "NORTH",
-    "03": "NORTH",
-    "04": "WEST",
-    "05": "WEST",
-    "06": "NORTH",
-    "07": "SOUTH",
-    "08": "SOUTH",
-    "09": "NORTH",
-    "10": "NORTH",
-    "11": "SOUTH",
-    "12": "SOUTH",
-}
+# OFFICE_BY_DISTRICT and _office_for_district were deleted with the org model.
+# They were a second, admin-invisible copy of the district map that WON on the
+# four paths that used them — incident creation, resubmission, coordinator
+# forward and the office-chief branch options — so an admin moving district 05 to
+# NORTH changed nothing on exactly those paths. The answer now comes from
+# services/org_directory.office_for_district(db, district), which reads the
+# admin-editable org_office_districts rows and keeps the legacy constant as its
+# documented fallback (design §13.5).
+# Who may read a field report's evidence. Built from the role sets rather than
+# spelled out, so an account holding only a canonical name (OFFICE_CHIEF
+# rather than the legacy OFFICE_CHIEF) is not silently locked out the way the
+# hand-written lists elsewhere in this module lock it out. GUEST is in
+# the list because the owner made the ENTIRE approved record public, photos
+# included (org model decision 4); the handler narrows a viewer to approved
+# records with public_visibility.ensure_public_incident, exactly as the incident
+# detail endpoint does.
+INCIDENT_EVIDENCE_READ_ROLES: list[str] = sorted(
+    OPERATIONAL_ROLES | MAINTENANCE_REPORTING_ROLES | {GUEST}
+)
+
 REVISION_FIELDS_ALLOWED = {
     "district",
     "county",
@@ -90,13 +106,6 @@ def _location_display_name(
     if d and c and r and pm:
         return f"D{d} {c} R{r} PM {pm}"
     return " / ".join(parts)
-
-
-def _office_for_district(raw_district: str | None) -> str | None:
-    code = _normalized_district_code(raw_district)
-    if not code:
-        return None
-    return OFFICE_BY_DISTRICT.get(code)
 
 
 def _queue_incident_notifications(
@@ -301,7 +310,33 @@ def _location_timeline(
     db: Session,
     location_id: int,
     limit: int = 20,
+    public_only: bool = False,
 ) -> dict:
+    """Everything recorded at one site.
+
+    ``public_only`` is the viewer's row set (org model design §4.5): this
+    endpoint returns EVERY incident at a location, approved or not, so the
+    viewer's version filters the rows rather than simply adding a role to the
+    guard — otherwise the site history would leak the in-flight work the
+    incident list itself hides.
+    """
+    incident_public_sql = ""
+    submission_public_sql = ""
+    if public_only:
+        incident_public_sql = f" AND {public_visibility.public_incident_sql('inc')}"
+        submission_public_sql = """
+              AND EXISTS (
+                SELECT 1 FROM assessments pa
+                WHERE pa.state IN ('APPROVED','FINALIZED')
+                  AND (
+                    pa.submission_id = s.id
+                    OR EXISTS (
+                      SELECT 1 FROM assessment_submissions ps
+                      WHERE ps.assessment_id = pa.id AND ps.submission_id = s.id
+                    )
+                  )
+              )
+        """
     location_row = db.execute(
         text(
             """
@@ -329,7 +364,7 @@ def _location_timeline(
 
     incident_rows = db.execute(
         text(
-            """
+            f"""
             SELECT
               i.id,
               i.status,
@@ -354,7 +389,7 @@ def _location_timeline(
               FROM incidents inc
               LEFT JOIN incident_submission_links isl
                 ON isl.incident_id = inc.id
-              WHERE inc.location_id = :location_id
+              WHERE inc.location_id = :location_id{incident_public_sql}
               ORDER BY inc.first_observed_at DESC, inc.id DESC
               LIMIT :limit
             ) i
@@ -366,7 +401,7 @@ def _location_timeline(
 
     submission_rows = db.execute(
         text(
-            """
+            f"""
             SELECT
               s.id,
               s.status,
@@ -380,7 +415,7 @@ def _location_timeline(
             FROM submissions s
             JOIN submission_gisa g
               ON g.submission_id = s.id
-            WHERE g.location_id = :location_id
+            WHERE g.location_id = :location_id{submission_public_sql}
             ORDER BY s.created_at DESC, s.id DESC
             LIMIT :limit
             """
@@ -437,13 +472,13 @@ def _location_timeline(
 
 # Routing lookups match the canonical role name AND its legacy alias. Matching
 # only the legacy name (the pre-v2 behaviour) made a user who holds just
-# MAINTENANCE_COORDINATOR or GEOTECH_OFFICE_CHIEF invisible to routing and to
+# MAINTENANCE_COORDINATOR or OFFICE_CHIEF invisible to routing and to
 # every notification it drives. SENIOR_ENGINEER has no legacy alias.
 _ROUTING_ROLE_NAMES: dict[str, list[str]] = {
-    "DISTRICT_COORDINATOR": expand_roles(MAINTENANCE_COORDINATOR),
-    "OFFICE_CHIEF": expand_roles(GEOTECH_OFFICE_CHIEF),
-    "BRANCH_CHIEF": expand_roles(GEOTECH_BRANCH_CHIEF),
-    "SENIOR_ENGINEER": expand_roles(GEOTECH_SENIOR_ENGINEER),
+    "DISTRICT_COORDINATOR": [MAINTENANCE_COORDINATOR],
+    "OFFICE_CHIEF": [OFFICE_CHIEF],
+    "BRANCH_CHIEF": [BRANCH_CHIEF],
+    "SENIOR_ENGINEER": [SENIOR_SPECIALIST],
 }
 
 
@@ -467,28 +502,39 @@ def _routing_users_for(
         if not district_code:
             return []
         params["district"] = district_code
-        where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.district')), '') = :district")
+        # Coverage rows FIRST, the org profile / metadata mirror second. The
+        # table is what makes multi-district coverage expressible (design §5) and
+        # the mirror half is what stops a coordinator created after the backfill
+        # — by the legacy PATCH, which writes a district and no coverage row —
+        # from silently dropping out of every notification list.
+        where_parts.append(
+            """(
+              EXISTS (
+                SELECT 1 FROM org_coordinator_coverage c
+                 WHERE c.user_id = u.id AND c.district = :district AND c.is_active = 1
+              )
+              OR """
+            + org_directory.USER_DISTRICT_SQL
+            + " = :district)"
+        )
     else:
         normalized_office = normalize_office_code(office_code)
         if not normalized_office:
             return []
         params["office_code"] = normalized_office
-        normalized_user_office = (
-            "UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(u.metadata_json, '$.office_code')), '')))"
-        )
+        office_sql = org_directory.USER_OFFICE_CODE_SQL
         if assignment_key in {"BRANCH_CHIEF", "SENIOR_ENGINEER"}:
-            # Accounts created before office scoping was exposed in User
-            # Administration have no office_code. Excluding those otherwise-valid
-            # users leaves the office-chief routing pickers empty and strands the
-            # assessment. Keep explicitly-scoped users isolated to their own
-            # office, but admit legacy/unscoped assignees as a compatibility
-            # fallback. Their downstream authority remains limited to the one
-            # assessment that records their identity.
-            where_parts.append(f"({normalized_user_office} = :office_code OR {normalized_user_office} = '')")
+            # Accounts created before office scoping have no office at all.
+            # Excluding those otherwise-valid users leaves the office chief's
+            # routing pickers empty and strands the assessment, so a named
+            # branch chief or senior specialist with NO office is admitted as a
+            # compatibility fallback (PR #125); one scoped to another office is
+            # not. Their authority stays limited to the assessment that names them.
+            where_parts.append(f"({office_sql} = :office_code OR {office_sql} = '')")
         else:
             # Office chiefs own every assessment in their office, so unlike a
             # named branch/senior assignee they must always be explicitly scoped.
-            where_parts.append(f"{normalized_user_office} = :office_code")
+            where_parts.append(f"{office_sql} = :office_code")
 
     rows = db.execute(
         text(
@@ -497,6 +543,7 @@ def _routing_users_for(
             FROM users u
             JOIN user_roles ur ON ur.user_id = u.id
             JOIN roles r ON r.id = ur.role_id
+            {org_directory.USER_ORG_JOIN_SQL}
             WHERE {' AND '.join(where_parts)}
             ORDER BY u.id ASC
             """
@@ -506,14 +553,119 @@ def _routing_users_for(
     return [int(x) for x in rows]
 
 
-def _routing_user_options_for(
-    *,
-    db: Session,
-    assignment_type: str,
-    district: str | None = None,
-    office_code: str | None = None,
-) -> list[dict]:
-    user_ids = _routing_users_for(db=db, assignment_type=assignment_type, district=district, office_code=office_code)
+# ---------------------------------------------------------------------------
+# Picker annotations — inform, never choose (design §5)
+# ---------------------------------------------------------------------------
+#
+# THE GOVERNING RULE for everything below: no picker response carries a default,
+# a recommendation, a `selected` flag, or a sort key that reads as a ranking
+# (owner decision 7). Groups are ordered by the office's own sort order and
+# items by name; the two workload counts are RENDERED, never sorted on. An
+# availability marking is returned like any other field — nobody is filtered out
+# and nobody is moved, because filtering a rotated-out person out of a picker IS
+# the picker choosing.
+
+# Terminal states: work that is finished is not open work.
+_PICKER_TERMINAL_STATES = "('APPROVED','FINALIZED')"
+
+# The trailing group for people whose branch nobody has recorded. They are shown,
+# not hidden: a picker that silently drops a chief is worse than one that admits
+# a gap in the data.
+PICKER_UNASSIGNED_GROUP_KEY = "UNASSIGNED"
+PICKER_UNASSIGNED_GROUP_LABEL = "Branch not recorded"
+PICKER_UNKNOWN_LOCATION_GROUP_KEY = "loc:UNKNOWN"
+PICKER_UNKNOWN_LOCATION_GROUP_LABEL = "Location not recorded"
+
+
+def _branch_group_key(branch_id: int | None) -> str:
+    return f"b:{int(branch_id)}" if branch_id is not None else PICKER_UNASSIGNED_GROUP_KEY
+
+
+def _location_group_key(home_city: str | None, home_district: str | None) -> str:
+    city = (home_city or "").strip()
+    district = (home_district or "").strip()
+    if not city and not district:
+        return PICKER_UNKNOWN_LOCATION_GROUP_KEY
+    return f"loc:{city}:{district}"
+
+
+def _location_group_label(home_city: str | None, home_district: str | None) -> str:
+    city = (home_city or "").strip()
+    district = (home_district or "").strip()
+    if city and district:
+        return f"{city}, D{district}"
+    return city or (f"District {district}" if district else PICKER_UNKNOWN_LOCATION_GROUP_LABEL)
+
+
+def _picker_workload_counts(db: Session, user_ids: list[int]) -> dict[int, dict[str, int]]:
+    """Two counts per person, because one number cannot answer the question.
+
+    ``open_assessment_count`` is every non-terminal assessment this person owns —
+    as the branch chief it was handed to, or as its assignee. ``awaiting_action_count``
+    is the SUBSET whose next action is theirs: a hand-off waiting to be assigned
+    or a submission waiting for their review (chief), or a form waiting to be
+    filled (assignee). The client renders "4 open · 2 waiting on them"; neither
+    number is a sort key here or on the wire.
+
+    ``COUNT(DISTINCT ...)`` rather than a sum: the same assessment can name one
+    person as both chief and assignee, and it is still one piece of open work.
+    """
+    if not user_ids:
+        return {}
+    params = {f"pid_{idx}": int(user_id) for idx, user_id in enumerate(user_ids)}
+    tokens = ", ".join(f":pid_{idx}" for idx in range(len(user_ids)))
+    rows = db.execute(
+        text(
+            f"""
+            SELECT
+              w.owner_id,
+              COUNT(DISTINCT w.assessment_id) AS open_assessment_count,
+              COUNT(DISTINCT CASE WHEN w.awaiting = 1 THEN w.assessment_id END) AS awaiting_action_count
+            FROM (
+              SELECT
+                a.branch_chief_user_id AS owner_id,
+                a.id AS assessment_id,
+                CASE WHEN a.state IN ('PENDING_ENGINEER_ASSIGNMENT', 'SUBMITTED') THEN 1 ELSE 0 END AS awaiting
+              FROM assessments a
+              WHERE a.state NOT IN {_PICKER_TERMINAL_STATES}
+                AND a.branch_chief_user_id IN ({tokens})
+              UNION ALL
+              SELECT
+                a.assigned_engineer_user_id AS owner_id,
+                a.id AS assessment_id,
+                CASE WHEN a.state IN ('DRAFT', 'REVISION_REQUESTED') THEN 1 ELSE 0 END AS awaiting
+              FROM assessments a
+              WHERE a.state NOT IN {_PICKER_TERMINAL_STATES}
+                AND a.assigned_engineer_user_id IN ({tokens})
+            ) w
+            GROUP BY w.owner_id
+            """
+        ),
+        params,
+    ).mappings().all()
+    return {
+        int(r["owner_id"]): {
+            "open_assessment_count": int(r["open_assessment_count"] or 0),
+            "awaiting_action_count": int(r["awaiting_action_count"] or 0),
+        }
+        for r in rows
+        if r["owner_id"] is not None
+    }
+
+
+def _picker_people(db: Session, user_ids: list[int], *, office_code: str | None = None) -> list[dict]:
+    """The picker's item rows: identity, where they sit, and their two counts.
+
+    ONE query for the org facts rather than ``resolve_user_org`` per person: a
+    picker asks about everyone in an office at once. The office code and district
+    resolve exactly as they do everywhere else — the profile row first, the
+    ``metadata_json`` mirror second — through the shared SQL fragments in
+    services/org_directory, so a picker and an authority check can never disagree.
+
+    ``home_city`` / ``home_district`` are the PERSON's first, then their branch's,
+    then their office's: a senior specialist sits away from the office home city
+    more often than not, and their own recorded location is the true one.
+    """
     if not user_ids:
         return []
     params = {f"user_id_{idx}": int(user_id) for idx, user_id in enumerate(user_ids)}
@@ -522,62 +674,327 @@ def _routing_user_options_for(
     rows = db.execute(
         text(
             f"""
-            SELECT id, email, full_name, metadata_json
-            FROM users
-            WHERE id IN ({tokens})
+            SELECT
+              u.id, u.email, u.full_name, u.metadata_json,
+              {org_directory.USER_OFFICE_CODE_SQL} AS resolved_office_code,
+              {org_directory.USER_DISTRICT_SQL} AS resolved_district,
+              oo.id AS office_id, oo.name AS office_name, oo.home_city AS office_home_city,
+              oup.branch_id, oup.home_city AS profile_home_city,
+              oup.availability, oup.available_from, oup.available_until,
+              ob.letter AS branch_letter, ob.name AS branch_name,
+              ob.home_city AS branch_home_city, ob.home_district AS branch_home_district,
+              ob.is_active AS branch_is_active, ob.accepts_assignments AS branch_accepts_assignments,
+              ob.sort_order AS branch_sort_order
+            FROM users u
+            {org_directory.USER_ORG_JOIN_SQL}
+              LEFT JOIN org_branches ob ON ob.id = oup.branch_id
+            WHERE u.id IN ({tokens})
             ORDER BY
-              CASE
-                WHEN UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.office_code')), ''))) = :option_office_code
-                THEN 0 ELSE 1
-              END,
-              full_name ASC,
-              id ASC
+              CASE WHEN {org_directory.USER_OFFICE_CODE_SQL} = :option_office_code THEN 0 ELSE 1 END,
+              u.full_name ASC,
+              u.id ASC
             """
         ),
         params,
     ).mappings().all()
+    counts = _picker_workload_counts(db, [int(r["id"]) for r in rows])
+    items: list[dict] = []
+    for r in rows:
+        uid = int(r["id"])
+        branch_id = int(r["branch_id"]) if r["branch_id"] is not None else None
+        home_city = _normalize_text(r["profile_home_city"]) or _normalize_text(r["branch_home_city"]) or _normalize_text(r["office_home_city"])
+        home_district = _normalized_district_code(r["resolved_district"]) or _normalized_district_code(r["branch_home_district"])
+        workload = counts.get(uid, {"open_assessment_count": 0, "awaiting_action_count": 0})
+        items.append(
+            {
+                "id": uid,
+                "email": r["email"],
+                "full_name": r["full_name"],
+                # The legacy three-key blob stays on the wire for one release:
+                # clients that have not moved to the typed org fields still read
+                # it (design §3.2).
+                "metadata": parse_user_metadata(r.get("metadata_json")),
+                "office_code": normalize_office_code(r["resolved_office_code"]),
+                "office_name": _normalize_text(r["office_name"]),
+                "branch_id": branch_id,
+                "branch_letter": _normalize_text(r["branch_letter"]),
+                "branch_name": _normalize_text(r["branch_name"]),
+                "home_city": home_city,
+                "home_district": home_district,
+                "open_assessment_count": workload["open_assessment_count"],
+                "awaiting_action_count": workload["awaiting_action_count"],
+                # Rendered beside the name ("Rotation out — back 2/5/27"), never
+                # used to hide or reorder anybody (design §5, open question 9).
+                "availability": _normalize_text(r["availability"]) or "AVAILABLE",
+                "available_from": r["available_from"],
+                "available_until": r["available_until"],
+                # Present so a client can render a person whose branch has since
+                # been retired without a second lookup.
+                "branch_is_active": bool(r["branch_is_active"]) if r["branch_is_active"] is not None else None,
+                "_branch_accepts_assignments": (
+                    bool(r["branch_accepts_assignments"]) if r["branch_accepts_assignments"] is not None else None
+                ),
+                "_branch_sort_order": int(r["branch_sort_order"]) if r["branch_sort_order"] is not None else None,
+            }
+        )
+    return items
+
+
+def _branch_groups_for_office(db: Session, office_code: str | None) -> list[dict]:
+    """Every ACTIVE branch of an office, as picker groups, in the office's order.
+
+    Ordered by ``sort_order`` then letter — NEVER by load, which would turn the
+    group headings into a recommendation. A branch with ``accepts_assignments = 0``
+    is RETURNED with the flag set, so the client can render it disabled with the
+    reason instead of silently omitting a branch that exists on the chart.
+    """
+    code = normalize_office_code(office_code)
+    if not code:
+        return []
+    rows = db.execute(
+        text(
+            """
+            SELECT b.id, b.letter, b.name, b.home_city, b.home_district,
+                   b.accepts_assignments, b.is_active, b.sort_order
+              FROM org_branches b
+              JOIN org_offices o ON o.id = b.office_id AND o.org_type = 'GEOTECH'
+             WHERE o.code = :code
+               AND b.unit_type = 'BRANCH'
+               AND b.is_active = 1
+             ORDER BY b.sort_order ASC, b.letter ASC, b.name ASC, b.id ASC
+            """
+        ),
+        {"code": code},
+    ).mappings().all()
+    branch_ids = [int(r["id"]) for r in rows]
+    coverage = _branch_district_coverage(db, branch_ids)
     return [
         {
-            "id": int(r["id"]),
-            "email": r["email"],
-            "full_name": r["full_name"],
-            "metadata": parse_user_metadata(r.get("metadata_json")),
+            "group_key": _branch_group_key(int(r["id"])),
+            "label": _normalize_text(r["name"]) or f"Branch {r['letter']}",
+            "branch_id": int(r["id"]),
+            "branch_letter": _normalize_text(r["letter"]),
+            "branch_name": _normalize_text(r["name"]),
+            "home_city": _normalize_text(r["home_city"]),
+            "home_district": _normalized_district_code(r["home_district"]),
+            "districts_covered": coverage.get(int(r["id"]), []),
+            "accepts_assignments": bool(r["accepts_assignments"]),
+            "is_active": bool(r["is_active"]),
         }
         for r in rows
     ]
 
 
-def _ensure_incident_district_access(user: dict, district: str | None) -> None:
+def _branch_district_coverage(db: Session, branch_ids: list[int]) -> dict[int, list[str]]:
+    """Districts each branch covers. Empty until an admin enters them.
+
+    No chart states branch-to-district coverage for any office, so the table is
+    seeded empty and every row a deployment has was entered by a person and
+    carries its ``source`` (design §10, open question 1).
+    """
+    if not branch_ids:
+        return {}
+    params = {f"bid_{idx}": int(bid) for idx, bid in enumerate(branch_ids)}
+    tokens = ", ".join(f":bid_{idx}" for idx in range(len(branch_ids)))
+    rows = db.execute(
+        text(
+            f"""
+            SELECT branch_id, district
+              FROM org_branch_districts
+             WHERE branch_id IN ({tokens}) AND is_active = 1
+             ORDER BY district ASC
+            """
+        ),
+        params,
+    ).mappings().all()
+    out: dict[int, list[str]] = {}
+    for r in rows:
+        out.setdefault(int(r["branch_id"]), []).append(str(r["district"]).strip())
+    return out
+
+
+def _picker_payload_by_branch(db: Session, items: list[dict], office_code: str | None) -> tuple[list[dict], list[dict]]:
+    """Group picker items by branch; return ``(groups, items)``.
+
+    Groups come from the office's branch ROWS, not from the people present, so a
+    staffed branch and an empty one both appear. A branch referenced by a person
+    but missing from that list (deactivated after they were placed in it) is
+    appended rather than dropped — an item must never point at a group the client
+    was not given.
+    """
+    groups = _branch_groups_for_office(db, office_code)
+    known = {group["group_key"] for group in groups}
+    extra: list[dict] = []
+    needs_unassigned = False
+    for item in items:
+        group_key = _branch_group_key(item.get("branch_id"))
+        item["group_key"] = group_key
+        if group_key == PICKER_UNASSIGNED_GROUP_KEY:
+            needs_unassigned = True
+        elif group_key not in known and not any(g["group_key"] == group_key for g in extra):
+            extra.append(
+                {
+                    "group_key": group_key,
+                    "label": item.get("branch_name") or f"Branch {item.get('branch_letter') or ''}".strip(),
+                    "branch_id": item.get("branch_id"),
+                    "branch_letter": item.get("branch_letter"),
+                    "branch_name": item.get("branch_name"),
+                    "home_city": item.get("home_city"),
+                    "home_district": item.get("home_district"),
+                    "districts_covered": [],
+                    "accepts_assignments": bool(item.get("_branch_accepts_assignments", True)),
+                    "is_active": bool(item.get("branch_is_active")),
+                }
+            )
+    groups = groups + extra
+    if needs_unassigned:
+        groups = groups + [
+            {
+                "group_key": PICKER_UNASSIGNED_GROUP_KEY,
+                "label": PICKER_UNASSIGNED_GROUP_LABEL,
+                "branch_id": None,
+                "branch_letter": None,
+                "branch_name": PICKER_UNASSIGNED_GROUP_LABEL,
+                "home_city": None,
+                "home_district": None,
+                "districts_covered": [],
+                "accepts_assignments": True,
+                "is_active": True,
+            }
+        ]
+    return groups, _ordered_picker_items(groups, items)
+
+
+def _picker_payload_by_location(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Group picker items by home city and district; return ``(groups, items)``.
+
+    The senior specialist's grouping: a ``(Spec)`` position has no branch and
+    sits away from the office home city more often than not, so the branch
+    heading would be empty for every one of them (design §5).
+    """
+    groups: list[dict] = []
+    seen: set[str] = set()
+    for item in sorted(items, key=lambda i: ((i.get("home_city") or "~"), (i.get("home_district") or ""), i["full_name"] or "")):
+        group_key = _location_group_key(item.get("home_city"), item.get("home_district"))
+        if group_key in seen:
+            continue
+        seen.add(group_key)
+        groups.append(
+            {
+                "group_key": group_key,
+                "label": _location_group_label(item.get("home_city"), item.get("home_district")),
+                "branch_id": None,
+                "branch_letter": None,
+                "branch_name": None,
+                "home_city": item.get("home_city"),
+                "home_district": item.get("home_district"),
+                "districts_covered": [],
+                "accepts_assignments": True,
+                "is_active": True,
+            }
+        )
+    for item in items:
+        item["group_key"] = _location_group_key(item.get("home_city"), item.get("home_district"))
+    return groups, _ordered_picker_items(groups, items)
+
+
+def _ordered_picker_items(groups: list[dict], items: list[dict]) -> list[dict]:
+    """Items in group order, then by name inside a group. Never by load.
+
+    The private ``_``-prefixed keys collected for grouping are stripped here, so
+    the response carries only the documented contract.
+    """
+    order = {group["group_key"]: index for index, group in enumerate(groups)}
+    ordered = sorted(
+        items,
+        key=lambda i: (order.get(i.get("group_key"), len(order)), (i.get("full_name") or "").lower(), i["id"]),
+    )
+    return [{k: v for k, v in item.items() if not k.startswith("_")} for item in ordered]
+
+
+def _routing_user_options_for(
+    *,
+    db: Session,
+    assignment_type: str,
+    district: str | None = None,
+    office_code: str | None = None,
+) -> list[dict]:
+    """The eligible people for one routing role, annotated for a picker.
+
+    The item shape is a SUPERSET of the pre-org-model one — ``id``, ``email``,
+    ``full_name`` and the legacy ``metadata`` blob are all still there — so a
+    client that has not adopted the typed org fields keeps working.
+    """
+    user_ids = _routing_users_for(db=db, assignment_type=assignment_type, district=district, office_code=office_code)
+    return _picker_people(db, user_ids, office_code=office_code)
+
+
+# The caller's district and office come from services/org_directory, which reads
+# org_user_profiles first and users.metadata_json (the mirror) second. ``db`` is
+# keyword-only and optional so no existing call site breaks: without it the
+# helper uses the org record already resolved on this request's user dict, and
+# the mirror when there is none. Every call site inside the assessment and
+# incident flows passes it.
+def _caller_district(user: dict, db: Session | None) -> str | None:
+    if db is not None:
+        return org_directory.user_home_district(db, user)
+    cached = user.get("org")
+    if isinstance(cached, dict):
+        return _normalized_district_code(cached.get("home_district"))
+    return _normalized_district_code((user.get("metadata") or {}).get("district"))
+
+
+def _caller_office_code(user: dict, db: Session | None) -> str | None:
+    if db is not None:
+        return org_directory.user_office_code(db, user)
+    cached = user.get("org")
+    if isinstance(cached, dict):
+        return normalize_office_code(cached.get("office_code"))
+    return normalize_office_code((user.get("metadata") or {}).get("office_code"))
+
+
+def _ensure_incident_district_access(user: dict, district: str | None, *, db: Session | None = None) -> None:
     if "ADMIN" in set(user.get("roles") or []):
         return
-    user_district = _normalized_district_code((user.get("metadata") or {}).get("district"))
+    user_district = _caller_district(user, db)
     incident_district = _normalized_district_code(district)
     if not user_district or user_district != incident_district:
         raise HTTPException(status_code=403, detail="Incident is outside your assigned district")
 
 
-def _ensure_incident_office_access(user: dict, office_code: str | None) -> None:
+def _ensure_incident_office_access(user: dict, office_code: str | None, *, db: Session | None = None) -> None:
     if "ADMIN" in set(user.get("roles") or []):
         return
-    user_office = normalize_office_code((user.get("metadata") or {}).get("office_code"))
+    user_office = _caller_office_code(user, db)
     incident_office = normalize_office_code(office_code)
     if not user_office or user_office != incident_office:
         raise HTTPException(status_code=403, detail="Incident is outside your assigned office")
 
 
-def _ensure_incident_scope_access(user: dict, incident_row: dict) -> None:
-    roles = set(user.get("roles") or [])
-    if "ADMIN" in roles:
+def _ensure_incident_scope_access(user: dict, incident_row: dict, *, db: Session | None = None) -> None:
+    """Narrow incident detail to the caller's district or office.
+
+    The role tests are CANONICAL (``has_role``), not the raw legacy
+    strings they used to be. An account holding only ``MAINTENANCE_COORDINATOR``,
+    ``OFFICE_CHIEF`` or ``BRANCH_CHIEF`` — which is what the org
+    model and every new deployment issue — matched none of the old strings and
+    therefore got NO narrowing at all: the reverse of the intended bug, an
+    unscoped read rather than a refusal (design §5, B20).
+    """
+    if "ADMIN" in set(user.get("roles") or []):
         return
-    # Maintenance field workers may only read their own reports.
+    # Maintenance Crew members may only read their own reports.
     if is_maintenance_only(user):
         if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):
             raise HTTPException(status_code=403, detail="You can only view your own incident reports")
         return
-    if "MAINT_COORDINATOR" in roles:
-        _ensure_incident_district_access(user, incident_row.get("district"))
-    if "OFFICE_CHIEF" in roles or "BRANCH_CHIEF" in roles:
-        _ensure_incident_office_access(user, incident_row.get("office_code") or _office_for_district(incident_row.get("district")))
+    if has_role(user, MAINTENANCE_COORDINATOR):
+        _ensure_incident_district_access(user, incident_row.get("district"), db=db)
+    if has_role(user, OFFICE_CHIEF) or has_role(user, BRANCH_CHIEF):
+        office_code = incident_row.get("office_code")
+        if not office_code and db is not None:
+            office_code = org_directory.office_for_district(db, incident_row.get("district"))
+        _ensure_incident_office_access(user, office_code, db=db)
 
 
 def _active_assignment_for_stage(db: Session, incident_id: int, stage: str) -> dict | None:
@@ -728,12 +1145,24 @@ def _incident_with_assignment(db: Session, incident_id: int):
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
+              ru.full_name AS reporter_name, ru.email AS reporter_email,
+              tu.full_name AS triage_decided_by_name,
+              rsu.full_name AS resolved_by_name,
               isl.submission_id
             FROM incidents i
             LEFT JOIN incident_assignments a
               ON a.incident_id = i.id AND a.assignment_stage = 'ENGINEER' AND a.is_active = 1
             LEFT JOIN users u
               ON u.id = a.assignee_user_id
+            -- The reporter by name. Coordinator triage has to say who filed a
+            -- report before it can be judged, and "User #7" is not an answer
+            -- (redesign plan B5).
+            LEFT JOIN users ru
+              ON ru.id = i.reporter_user_id
+            LEFT JOIN users tu
+              ON tu.id = i.triage_decided_by_user_id
+            LEFT JOIN users rsu
+              ON rsu.id = i.resolved_by_user_id
             LEFT JOIN incident_submission_links isl
               ON isl.incident_id = i.id
             WHERE i.id = :iid
@@ -746,6 +1175,18 @@ def _incident_with_assignment(db: Session, incident_id: int):
 
 
 def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str, object]]:
+    """The mobile feed's per-role row filters.
+
+    Every branch tests CANONICAL role names now. Four of them — coordinator,
+    office chief, branch chief and maintenance reporter — used to test the legacy
+    strings only, so an account holding just ``MAINTENANCE_COORDINATOR`` matched
+    nothing, fell through to ``['1=0']`` below and saw an EMPTY feed. That is a
+    regression blocker the moment org accounts are seeded canonically, and it is
+    fixed here rather than on the client (design §9.3, B20).
+
+    District and office come from ``org_directory`` (profile first, metadata
+    mirror second) instead of straight off ``metadata_json``.
+    """
     roles = set(user.get("roles") or [])
     uid = int(user["id"])
     if "ADMIN" in roles:
@@ -753,10 +1194,10 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
 
     role_filters: list[str] = []
     params: dict[str, object] = {"mobile_uid": uid}
-    metadata = user.get("metadata") or {}
+    org = org_directory.resolve_user_org(db, user)
 
-    if "MAINT_COORDINATOR" in roles:
-        district_code = _normalized_district_code(metadata.get("district"))
+    if has_role(user, MAINTENANCE_COORDINATOR):
+        district_code = _normalized_district_code(org.get("home_district"))
         if district_code:
             params["coord_district"] = district_code
             params["coord_district_plain"] = district_code.lstrip("0") or district_code
@@ -769,33 +1210,33 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
                 "))"
             )
 
-    if "OFFICE_CHIEF" in roles:
-        office_code = normalize_office_code(metadata.get("office_code"))
+    if has_role(user, OFFICE_CHIEF):
+        office_code = normalize_office_code(org.get("office_code"))
         if office_code:
             params["office_chief_office"] = office_code
             role_filters.append(
                 "(i.office_code = :office_chief_office AND i.location_id IS NOT NULL AND i.current_stage IN ('OFFICE_CHIEF_REVIEW','BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
             )
 
-    if "BRANCH_CHIEF" in roles:
-        office_code = normalize_office_code(metadata.get("office_code"))
+    if has_role(user, BRANCH_CHIEF):
+        office_code = normalize_office_code(org.get("office_code"))
         if office_code:
             params["branch_chief_office"] = office_code
             role_filters.append(
                 "(i.office_code = :branch_chief_office AND i.location_id IS NOT NULL AND i.current_stage IN ('BRANCH_CHIEF_REVIEW','ENGINEER_ASSIGNED','RESOLVED'))"
             )
 
-    # The senior engineer holds the SAME active ENGINEER-stage assignment row as
-    # a Staff member does (the senior engineer route reuses stage ENGINEER), so
+    # The Senior Specialist holds the SAME active ENGINEER-stage assignment row as
+    # a Staff member does (the Senior Specialist route reuses stage ENGINEER), so
     # the EXISTS below is correct for them unchanged — only the role guard in
     # front of it has to widen, or a senior-engineer-only account sees no
     # incidents at all.
-    if roles & {"FIELD_WORKER", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_ENGINEER"}:
+    if has_role(user, STAFF) or has_role(user, SENIOR_SPECIALIST):
         role_filters.append(
             "EXISTS (SELECT 1 FROM incident_assignments ia WHERE ia.incident_id = i.id AND ia.assignment_stage = 'ENGINEER' AND ia.is_active = 1 AND ia.assignee_user_id = :mobile_uid)"
         )
 
-    if "MAINTENANCE" in roles:
+    if has_role(user, MAINTENANCE_CREW):
         role_filters.append("i.reporter_user_id = :mobile_uid")
 
     if not role_filters:
@@ -852,11 +1293,15 @@ def _serialize_incident(row: dict) -> dict:
         "incident_key": row.get("incident_key"),
         "status": row["status"],
         "reporter_user_id": int(row["reporter_user_id"]),
+        "reporter_name": row.get("reporter_name"),
+        "reporter_email": row.get("reporter_email"),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "resolved_at": row["resolved_at"],
         "resolved_by_user_id": row["resolved_by_user_id"],
+        "resolved_by_name": row.get("resolved_by_name"),
         "resolution_comment": row["resolution_comment"],
+        "triage_decided_by_name": row.get("triage_decided_by_name"),
         "triage_disposition": row.get("triage_disposition"),
         "triage_decided_by_user_id": int(row["triage_decided_by_user_id"]) if row.get("triage_decided_by_user_id") is not None else None,
         "triage_decided_at": row.get("triage_decided_at"),
@@ -1191,7 +1636,7 @@ def _notify_coordinator_engineer_assigned(*, db: Session, incident_id: int) -> N
 def create_incident(
     payload: IncidentCreate,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     title = (payload.title or "").strip() or None
     district = _normalize_text(payload.district)
@@ -1209,9 +1654,9 @@ def create_incident(
         raise HTTPException(status_code=400, detail="latitude and longitude are required")
 
     district_code = _normalized_district_code(district)
-    # Prefer the configurable geotech_office_routing table; fall back to the
-    # legacy constant map when a district has no active routing row yet.
-    office_code = office_routing.office_for_district(db, district) or _office_for_district(district)
+    # The admin-editable org_office_districts rows, with the legacy constant as
+    # the documented fallback for a district nobody has configured yet.
+    office_code = org_directory.office_for_district(db, district)
     ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     try:
         db.execute(
@@ -1291,12 +1736,12 @@ def list_incident_location_candidates(
     incident_id: int = Path(..., ge=1),
     limit: int = Query(default=8, ge=1, le=20),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_incident_district_access(user, incident.get("district"))
+    _ensure_incident_district_access(user, incident.get("district"), db=db)
     if incident["latitude"] is None or incident["longitude"] is None:
         raise HTTPException(status_code=409, detail="Incident coordinates are required for location matching")
     candidates = _incident_location_candidates(
@@ -1322,9 +1767,18 @@ def get_incident_location_timeline(
     location_id: int = Path(..., ge=1),
     limit: int = Query(default=20, ge=1, le=50),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "ADMIN"])),
+    # The viewer is added to the guard AND the row set is narrowed below: this
+    # endpoint returns every incident at a site regardless of state, so the role
+    # alone would hand a viewer exactly the in-flight work the rest of §4.5
+    # hides (design §4.5).
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, OFFICE_CHIEF, BRANCH_CHIEF, GUEST, ADMIN])),
 ):
-    return _location_timeline(db=db, location_id=location_id, limit=limit)
+    return _location_timeline(
+        db=db,
+        location_id=location_id,
+        limit=limit,
+        public_only=is_public_only(user),
+    )
 
 
 @router.post("/incidents/{incident_id}/location-link")
@@ -1332,12 +1786,12 @@ def link_incident_location(
     payload: IncidentLocationLinkRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_incident_district_access(user, incident.get("district"))
+    _ensure_incident_district_access(user, incident.get("district"), db=db)
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be relinked")
 
@@ -1417,12 +1871,12 @@ def coordinator_request_revision(
     payload: IncidentRequestRevision,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_incident_district_access(user, incident.get("district"))
+    _ensure_incident_district_access(user, incident.get("district"), db=db)
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be revised")
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
@@ -1471,7 +1925,7 @@ def maintenance_resubmit_incident(
     payload: IncidentCreate,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
@@ -1538,7 +1992,7 @@ def maintenance_resubmit_incident(
                 detail=f"Only requested revision fields may be changed: {', '.join(sorted(requested_fields))}",
             )
 
-    office_code = office_routing.office_for_district(db, district) or _office_for_district(district)
+    office_code = org_directory.office_for_district(db, district)
     ri = _validate_road_inventory_context(db, payload.road_inventory_context)
     metadata = {
         "mode": "RESUBMITTED_BY_MAINTENANCE",
@@ -1622,13 +2076,18 @@ def list_incidents(
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
     # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
-    # so GEOTECH_SENIOR_ENGINEER has to be added by hand: without it a
+    # so SENIOR_SPECIALIST has to be added by hand: without it a
     # senior-engineer-only account is 403'd from the incident behind their own
-    # assessment.
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_ENGINEER", "ADMIN"])),
+    # assessment. GUEST is here for the opposite reason — it is NOT an
+    # operational role — and the row predicate below is what makes the addition
+    # safe (design §4.5).
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     params: dict[str, object] = {"limit": limit}
     where_parts: list[str] = []
+    # A viewer sees only incidents carrying an approved assessment. A no-op for
+    # every other account.
+    public_visibility.scope_public_incidents(user, where_parts, params)
     if status:
         status_u = status.strip().upper()
         if status_u not in {"NEW", "IN_PROGRESS", "RESOLVED"}:
@@ -1641,7 +2100,7 @@ def list_incidents(
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
-    # Broad visibility, narrow authority: maintenance field workers are scoped
+    # Broad visibility, narrow authority: Maintenance Crew members are scoped
     # to their OWN reports server-side regardless of the requested scope. This
     # is enforced here (not only in the mobile filter) so the WebUI cannot be
     # used to enumerate statewide incidents.
@@ -1667,12 +2126,24 @@ def list_incidents(
               a.id AS assignment_id, a.assignee_user_id, a.assigned_by_user_id,
               a.assignment_mode, a.assignment_stage, a.created_at AS assigned_at,
               u.email AS assignee_email, u.full_name AS assignee_name,
+              ru.full_name AS reporter_name, ru.email AS reporter_email,
+              tu.full_name AS triage_decided_by_name,
+              rsu.full_name AS resolved_by_name,
               isl.submission_id
             FROM incidents i
             LEFT JOIN incident_assignments a
               ON a.incident_id = i.id AND a.assignment_stage = 'ENGINEER' AND a.is_active = 1
             LEFT JOIN users u
               ON u.id = a.assignee_user_id
+            -- The reporter by name. Coordinator triage has to say who filed a
+            -- report before it can be judged, and "User #7" is not an answer
+            -- (redesign plan B5).
+            LEFT JOIN users ru
+              ON ru.id = i.reporter_user_id
+            LEFT JOIN users tu
+              ON tu.id = i.triage_decided_by_user_id
+            LEFT JOIN users rsu
+              ON rsu.id = i.resolved_by_user_id
             LEFT JOIN incident_submission_links isl
               ON isl.incident_id = i.id
             {where_sql}
@@ -1690,16 +2161,21 @@ def get_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
-    # so GEOTECH_SENIOR_ENGINEER has to be added by hand: without it a
+    # so SENIOR_SPECIALIST has to be added by hand: without it a
     # senior-engineer-only account is 403'd from the incident behind their own
-    # assessment.
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_ENGINEER", "ADMIN"])),
+    # assessment. GUEST is here for the opposite reason — it is NOT an
+    # operational role — and ensure_public_incident below is what makes the
+    # addition safe (design §4.5).
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     row = _incident_with_assignment(db, incident_id)
     if not row:
         raise HTTPException(status_code=404, detail="Incident not found")
     incident = dict(row)
-    _ensure_incident_scope_access(user, incident)
+    # 404, not 403, for a non-public incident: a viewer must not be able to
+    # enumerate in-flight work by probing ids (design §4.3).
+    public_visibility.ensure_public_incident(db, user, incident_id)
+    _ensure_incident_scope_access(user, incident, db=db)
     return {"incident": _serialize_incident(incident), "requested_by_user_id": user["id"]}
 
 
@@ -1707,7 +2183,7 @@ def get_incident(
 def claim_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     raise HTTPException(status_code=409, detail="Claim is disabled. Incidents must follow coordinator/office/branch workflow.")
 
@@ -1734,7 +2210,7 @@ def assign_incident(
             detail="Choose or create a Project for this Incident before engineering assignment.",
         )
     # Admin recovery tool, but never a way around the routing decision: on the
-    # senior engineer route the assignee is a senior engineer chosen by the
+    # Senior Specialist route the assignee is a Senior Specialist chosen by the
     # office chief, and dropping a Staff member into the incident's ENGINEER
     # stage here would contradict the assessment and trip the route-aware
     # eligibility trigger with a database message instead of an explanation
@@ -1752,7 +2228,7 @@ def assign_incident(
     if senior_engineer_route:
         raise HTTPException(
             status_code=409,
-            detail="This incident's assessment was assigned to a senior engineer",
+            detail="This incident's assessment was assigned to a Senior Specialist",
         )
 
     try:
@@ -1779,12 +2255,12 @@ def coordinator_forward_incident(
     payload: IncidentCoordinatorForwardRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINT_COORDINATOR", "ADMIN"])),
+    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    _ensure_incident_district_access(user, incident.get("district"))
+    _ensure_incident_district_access(user, incident.get("district"), db=db)
     if str(incident["status"]).upper() == "RESOLVED":
         raise HTTPException(status_code=409, detail="Resolved incidents cannot be forwarded")
     if incident["location_id"] is None:
@@ -1795,7 +2271,7 @@ def coordinator_forward_incident(
 
     office_code = incident.get("office_code")
     if not office_code:
-        office_code = _office_for_district(incident.get("district"))
+        office_code = org_directory.office_for_district(db, incident.get("district"))
 
     office_chief_ids = _routing_users_for(
         db=db,
@@ -1862,21 +2338,26 @@ def coordinator_forward_incident(
 def office_chief_branch_options(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["OFFICE_CHIEF", "ADMIN"])),
+    user=Depends(require_roles([OFFICE_CHIEF, ADMIN])),
 ):
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    office_code = incident.get("office_code") or _office_for_district(incident.get("district"))
-    _ensure_incident_office_access(user, office_code)
+    office_code = incident.get("office_code") or org_directory.office_for_district(db, incident.get("district"))
+    _ensure_incident_office_access(user, office_code, db=db)
+    people = _routing_user_options_for(
+        db=db,
+        assignment_type="BRANCH_CHIEF",
+        office_code=office_code,
+    )
+    # The same grouped, annotated payload the assessment-scoped picker returns,
+    # so the mobile branch half and the web one render identically (design §5).
+    groups, items = _picker_payload_by_branch(db, people, office_code)
     return {
         "incident_id": int(incident_id),
         "office_code": office_code,
-        "items": _routing_user_options_for(
-            db=db,
-            assignment_type="BRANCH_CHIEF",
-            office_code=office_code,
-        ),
+        "groups": groups,
+        "items": items,
     }
 
 
@@ -1902,7 +2383,7 @@ def office_chief_assign_branch(
     payload: IncidentAssignBranchChiefRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["OFFICE_CHIEF", "ADMIN"])),
+    user=Depends(require_roles([OFFICE_CHIEF, ADMIN])),
 ):
     """410 Gone — hand off on the assessment (design §5.3)."""
     raise HTTPException(status_code=410, detail=_LEGACY_ROUTING_RETIRED_DETAIL)
@@ -1913,10 +2394,26 @@ def branch_chief_assign_engineer(
     payload: IncidentAssignEngineerRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["BRANCH_CHIEF", "ADMIN"])),
+    user=Depends(require_roles([BRANCH_CHIEF, ADMIN])),
 ):
     """410 Gone — assign the Staff member on the assessment (design §5.3)."""
     raise HTTPException(status_code=410, detail=_LEGACY_ROUTING_RETIRED_DETAIL)
+
+
+# The org model retired the routing-assignment table as an ADMIN SURFACE (design
+# §7). It stored coordinator coverage as one row per (type, district, office,
+# user) with no notion of primacy, no multi-district coverage and no relation to
+# the office structure; `org_coordinator_coverage` and the office/branch tables
+# answer all three. The rows and the table stay as history — nothing is dropped
+# here — but every reader has moved: _routing_users_for reads the coverage table,
+# and Administration > Organization is where an admin edits it.
+#
+# All three endpoints stay mounted, with their guards, so an old Admin client
+# gets this explanation rather than a 404 (the same choice §5.3 made for the two
+# retired incident-routing writes above).
+_ROUTING_ASSIGNMENTS_RETIRED_DETAIL = (
+    "Routing assignments moved to /admin/org/coverage in the organization model release"
+)
 
 
 @router.get("/incidents/routing/assignments")
@@ -1925,41 +2422,8 @@ def list_incident_routing_assignments(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["ADMIN"])),
 ):
-    params: dict[str, object] = {}
-    where = ""
-    if assignment_type:
-        where = "WHERE assignment_type = :assignment_type"
-        params["assignment_type"] = assignment_type.strip().upper()
-    rows = db.execute(
-        text(
-            f"""
-            SELECT
-              ra.id, ra.assignment_type, ra.district, ra.office_code, ra.user_id, ra.is_active,
-              u.email, u.full_name
-            FROM incident_routing_assignments ra
-            JOIN users u ON u.id = ra.user_id
-            {where}
-            ORDER BY ra.assignment_type, ra.district, ra.office_code, ra.id
-            """
-        ),
-        params,
-    ).mappings().all()
-    return {
-        "items": [
-            {
-                "id": int(r["id"]),
-                "assignment_type": r["assignment_type"],
-                "district": r["district"],
-                "office_code": r["office_code"],
-                "user_id": int(r["user_id"]),
-                "is_active": bool(r["is_active"]),
-                "email": r["email"],
-                "full_name": r["full_name"],
-            }
-            for r in rows
-        ],
-        "requested_by_user_id": user["id"],
-    }
+    """410 Gone — coordinator coverage now lives at /admin/org/coverage."""
+    raise HTTPException(status_code=410, detail=_ROUTING_ASSIGNMENTS_RETIRED_DETAIL)
 
 
 @router.post("/incidents/routing/assignments")
@@ -1968,45 +2432,8 @@ def create_incident_routing_assignment(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["ADMIN"])),
 ):
-    assignment_type = str(payload.get("assignment_type") or "").strip().upper()
-    district = _normalized_district_code(payload.get("district"))
-    office_code = str(payload.get("office_code") or "").strip().upper() or None
-    user_id = int(payload.get("user_id") or 0)
-    is_active = 1 if bool(payload.get("is_active", True)) else 0
-    if assignment_type not in {"DISTRICT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF"}:
-        raise HTTPException(status_code=400, detail="Invalid assignment_type")
-    if user_id <= 0:
-        raise HTTPException(status_code=400, detail="user_id is required")
-    if assignment_type == "DISTRICT_COORDINATOR" and not district:
-        raise HTTPException(status_code=400, detail="district is required for DISTRICT_COORDINATOR")
-    if assignment_type in {"OFFICE_CHIEF", "BRANCH_CHIEF"} and not office_code:
-        raise HTTPException(status_code=400, detail="office_code is required for this assignment_type")
-    try:
-        db.execute(
-            text(
-                """
-                INSERT INTO incident_routing_assignments
-                  (assignment_type, district, office_code, user_id, is_active)
-                VALUES
-                  (:assignment_type, :district, :office_code, :user_id, :is_active)
-                ON DUPLICATE KEY UPDATE
-                  is_active = VALUES(is_active),
-                  updated_at = NOW()
-                """
-            ),
-            {
-                "assignment_type": assignment_type,
-                "district": district,
-                "office_code": office_code,
-                "user_id": user_id,
-                "is_active": is_active,
-            },
-        )
-        db.commit()
-        return {"ok": True, "assignment_type": assignment_type, "district": district, "office_code": office_code, "user_id": user_id}
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc))
+    """410 Gone — POST /admin/org/coverage."""
+    raise HTTPException(status_code=410, detail=_ROUTING_ASSIGNMENTS_RETIRED_DETAIL)
 
 
 @router.delete("/incidents/routing/assignments/{assignment_id}")
@@ -2015,9 +2442,8 @@ def delete_incident_routing_assignment(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["ADMIN"])),
 ):
-    db.execute(text("DELETE FROM incident_routing_assignments WHERE id = :id"), {"id": assignment_id})
-    db.commit()
-    return {"ok": True, "assignment_id": assignment_id, "deleted_by_user_id": user["id"]}
+    """410 Gone — DELETE /admin/org/coverage/{id}."""
+    raise HTTPException(status_code=410, detail=_ROUTING_ASSIGNMENTS_RETIRED_DETAIL)
 
 
 @router.post("/incidents/{incident_id}/unassign")
@@ -2067,9 +2493,9 @@ def resolve_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     # The real gate is the identity check below (assignee_user_id == user.id).
-    # On the senior engineer route the senior engineer IS the incident's active
-    # ENGINEER-stage assignee, so a literal ["FIELD_WORKER", "ADMIN"] would 403
-    # them before that check ever ran. Resolution policy is unchanged: it stays
+    # On the Senior Specialist route the Senior Specialist IS the incident's active
+    # ENGINEER-stage assignee, so a Staff-only guard would 403 them before that
+    # check ever ran. Resolution policy is unchanged: it stays
     # with the assignee.
     user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ):
@@ -2080,7 +2506,7 @@ def resolve_incident(
     if not ("ADMIN" in set(user["roles"]) or (assignee_user_id is not None and int(assignee_user_id) == int(user["id"]))):
         raise HTTPException(
             status_code=403,
-            detail="Only the assignee (Staff or senior engineer) or admin can resolve",
+            detail="Only the assignee (Staff or Senior Specialist) or admin can resolve",
         )
     try:
         db.execute(
@@ -2124,18 +2550,20 @@ def mission_center_incident_feed(
     scope: str | None = Query(default=None),
     db: Session = Depends(get_db),
     # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
-    # so GEOTECH_SENIOR_ENGINEER has to be added by hand: without it a
+    # so SENIOR_SPECIALIST has to be added by hand: without it a
     # senior-engineer-only account is 403'd from the incident behind their own
-    # assessment.
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "MAINT_COORDINATOR", "OFFICE_CHIEF", "BRANCH_CHIEF", "REVIEWER", "GEOTECH_SENIOR_ENGINEER", "ADMIN"])),
+    # assessment. GUEST carries the same public row predicate as
+    # GET /incidents (design §4.5).
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     where_parts: list[str] = []
     params: dict[str, object] = {}
+    public_visibility.scope_public_incidents(user, where_parts, params)
     if (scope or "").strip().lower() == "mobile":
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
         where_parts.extend(mobile_filters)
         params.update(mobile_params)
-    # Maintenance field workers only ever see their own reports (server-side).
+    # Maintenance Crew members only ever see their own reports (server-side).
     if is_maintenance_only(user):
         where_parts.append("i.reporter_user_id = :self_uid")
         params["self_uid"] = int(user["id"])
@@ -2191,13 +2619,94 @@ def mission_center_incident_feed(
     }
 
 
+@router.get("/incidents/{incident_id}/attachments")
+def list_incident_attachments(
+    incident_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles(INCIDENT_EVIDENCE_READ_ROLES)),
+):
+    """Everything the reporter attached to a field report, with access URLs.
+
+    Coordinator triage could not see the evidence before this endpoint existed:
+    the only read path for a report's files was the Mission Center map, which
+    returns ``kind = 'PHOTO'`` rows alone, so a report whose evidence was a video
+    or a document looked empty. A coordinator is being asked whether a report is
+    a real incident, so they get every attachment, in upload order, with the
+    capture metadata recorded by the device.
+
+    Row-level scope is the incident's own rule (``_ensure_incident_scope_access``):
+    a maintenance field reporter sees their own report and nobody else's. A
+    read-only viewer sees the evidence of an APPROVED record only, and gets 404
+    — not 403 — for anything in flight, so in-progress work cannot be enumerated
+    by probing ids (org model design §4.3).
+    """
+    incident = db.execute(
+        text("SELECT id, reporter_user_id, office_code, district FROM incidents WHERE id = :iid LIMIT 1"),
+        {"iid": incident_id},
+    ).mappings().first()
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    public_visibility.ensure_public_incident(db, user, incident_id)
+    _ensure_incident_scope_access(user, dict(incident), db=db)
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              ia.attachment_id, ia.kind, ia.sort_order,
+              a.file_name, a.mime_type, a.file_size_bytes,
+              a.storage_bucket, a.storage_key, a.uploaded_at,
+              COALESCE(cm.captured_at, a.captured_at) AS captured_at,
+              cm.latitude, cm.longitude, cm.horizontal_accuracy_m,
+              cm.camera_heading_deg, cm.heading_reference, cm.location_source
+            FROM incident_attachments ia
+            JOIN attachments a ON a.id = ia.attachment_id
+            LEFT JOIN attachment_capture_metadata cm ON cm.attachment_id = a.id
+            WHERE ia.incident_id = :iid
+            ORDER BY ia.sort_order ASC, ia.attachment_id ASC
+            """
+        ),
+        {"iid": incident_id},
+    ).mappings().all()
+
+    items = []
+    for row in rows:
+        items.append(
+            {
+                "attachment_id": int(row["attachment_id"]),
+                "kind": row["kind"],
+                "file_name": row["file_name"],
+                "mime_type": row["mime_type"],
+                "file_size_bytes": int(row["file_size_bytes"]) if row["file_size_bytes"] is not None else None,
+                "uploaded_at": row["uploaded_at"],
+                "captured_at": row["captured_at"],
+                "latitude": float(row["latitude"]) if row["latitude"] is not None else None,
+                "longitude": float(row["longitude"]) if row["longitude"] is not None else None,
+                "horizontal_accuracy_m": (
+                    float(row["horizontal_accuracy_m"]) if row["horizontal_accuracy_m"] is not None else None
+                ),
+                "camera_heading_deg": (
+                    float(row["camera_heading_deg"]) if row["camera_heading_deg"] is not None else None
+                ),
+                "heading_reference": row["heading_reference"],
+                "location_source": row["location_source"],
+                "download_url": object_access_url(
+                    str(row["storage_bucket"] or settings.MINIO_BUCKET),
+                    str(row["storage_key"]),
+                    expires_seconds=900,
+                ),
+            }
+        )
+    return {"incident_id": incident_id, "items": items}
+
+
 @router.post("/incidents/{incident_id}/attachments")
 async def upload_incident_attachment(
     incident_id: int = Path(..., ge=1),
     file: UploadFile = File(...),
     kind: str = Query(default="PHOTO", max_length=16),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(["MAINTENANCE", "FIELD_WORKER", "ADMIN"])),
+    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
     incident = db.execute(
         text(

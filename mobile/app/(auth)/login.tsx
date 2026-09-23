@@ -8,8 +8,8 @@ import { consumeSessionExpiredNotice, setToken } from "../../src/auth/tokenStore
 type LoginResponse = { access_token: string; token_type: string };
 
 export default function Login() {
-  const [email, setEmail] = useState("admin@local");
-  const [password, setPassword] = useState("password");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function Login() {
           onChangeText={setEmail}
           autoCapitalize="none"
           keyboardType="email-address"
-          placeholder="admin@local"
+          placeholder="name@dot.ca.gov"
           placeholderTextColor="#6b7280"
           style={styles.input}
         />

@@ -136,6 +136,12 @@ class GisaDraftPatch(BaseModel):
     recommendations_notes: str | None = None
     sketchpad_notes: str | None = None
     observations_notes: str | None = None
+    # Formatted versions of four memos (sanitized HTML). Saving one also
+    # rewrites its plain-text field above from it (services/rich_text.py).
+    observations_notes_html: str | None = None
+    geotechnical_assessment_notes_html: str | None = None
+    recommendations_notes_html: str | None = None
+    sketchpad_notes_html: str | None = None
     geometry_json: dict | None = None
 
 
@@ -255,6 +261,15 @@ TriageDisposition = Literal[
 ]
 
 
+class TriageEventGroupChoice(BaseModel):
+    """The Event Group an ASSESSMENT_REQUIRED report joins, saved with the decision."""
+
+    mode: Literal["EXISTING", "CREATE_NEW"]
+    event_group_id: int | None = Field(default=None, ge=1)
+    title: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+
+
 class IncidentTriageRequest(BaseModel):
     """Coordinator triage decision for an incident report."""
 
@@ -268,13 +283,16 @@ class IncidentTriageRequest(BaseModel):
     # DUPLICATE_OR_LINKED: the incident/location this report duplicates or links to.
     target_incident_id: int | None = Field(default=None, ge=1)
     target_location_id: int | None = Field(default=None, ge=1)
+    # ASSESSMENT_REQUIRED only: the Event Group, committed in the same
+    # transaction as the decision. Omitted when the report is already grouped.
+    event_group: TriageEventGroupChoice | None = None
 
 
 class AssessmentDelegateBranchRequest(BaseModel):
     branch_chief_user_id: int = Field(..., ge=1)
     # RETIRED: the office chief used to be able to name the Staff member at
     # delegation time. Routing v2 gives the chief exactly two choices — hand off
-    # to a branch chief, or assign a senior engineer — so this field is now
+    # to a branch chief, or assign a Senior Specialist — so this field is now
     # REJECTED with an explanatory 400 rather than ignored. It is kept on the
     # model on purpose: dropping it would give an old client a silent behaviour
     # change instead of an explanation.
@@ -294,9 +312,9 @@ class AssessmentAssignEngineerRequest(BaseModel):
 
 
 class AssessmentAssignSeniorEngineerRequest(BaseModel):
-    """Office chief assigns a GeoTech senior engineer directly.
+    """Office chief assigns a Senior Specialist directly.
 
-    The senior engineer route: the senior engineer fills the technical form
+    The Senior Specialist route: the Senior Specialist fills the technical form
     exactly as a Staff member under a branch chief does, and reports back to the
     office chief, who reviews.
     """

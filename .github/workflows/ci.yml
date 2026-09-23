@@ -74,10 +74,11 @@ jobs:
         # requirements-worker.txt = API deps + the geospatial stack (numpy/rasterio/
         # Pillow/requests) that the offline-scene tests import at module load.
         run: pip install -r requirements-worker.txt
-      - name: Initialize authoritative schema + seed
+      - name: Initialize authoritative schema + seed + the dev/test mock accounts
         run: |
           mysql -h 127.0.0.1 -u root -prootpassword eris < ../database/init/010_schema.sql
           mysql -h 127.0.0.1 -u root -prootpassword eris < ../database/init/020_seed.sql
+          mysql -h 127.0.0.1 -u root -prootpassword eris < ../database/dev/030_mock_accounts.sql
       - name: Stamp baseline + upgrade head (upgrade-over-init path)
         run: |
           alembic stamp 0001_baseline

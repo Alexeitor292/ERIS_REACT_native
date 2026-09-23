@@ -24,7 +24,7 @@ NOT **ownership or jurisdiction**. Therefore:
 
 A true SHS/ownership provider must come from a source that explicitly represents the SHS
 (e.g. the Caltrans Postmile / LRS network), not from inferring ownership out of
-``F_System``. See docs/adr-offline-road-context-source.md ("Future state-highway provider
+``F_System``. See docs/decisions/adr-offline-road-context-source.md ("Future state-highway provider
 boundary").
 
 Design boundaries (mirrors the ADR):

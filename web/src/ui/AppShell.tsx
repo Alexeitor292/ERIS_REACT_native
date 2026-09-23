@@ -5,6 +5,7 @@ import {
   Inbox,
   Layers,
   Map as MapIcon,
+  Network,
   Mountain,
   PanelLeftClose,
   PanelLeftOpen,
@@ -16,7 +17,9 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { useUiSettings } from "./UiSettingsContext";
-import { hasWorkQueue, isAdmin, isOperationalUser, roleLabel } from "../utils/roleModel";
+import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
+import { placeLabel } from "../utils/orgDistricts";
+import type { UserOrg } from "../api/types";
 
 const NAV_ICON_STROKE = 1.9;
 
@@ -66,14 +69,33 @@ function NavGroup({ label, collapsed, children }: { label: string; collapsed?: b
  *   Operations › Mission Center / Event Groups / Incidents / Assessments (read-only records;
  *               submissions live inside assessments and have no nav item of their own)
  *   GIS Tools › Terrain Cross Sections
- *   Administration › Users / Road Inventory
+ *   Administration › Users / Offices / Branches / Coverage / Road Inventory
  *   Account › Settings
+ *
+ * A read-only viewer gets ONE destination plus Settings: Records, opening on
+ * Incidents. No Workspace, no Mission Center, no Event Groups, no GIS Tools —
+ * every one of those is work in flight, which is not the public record (org
+ * model design §8, §11).
  */
 function useNavSections(): NavSection[] {
   const { me } = useAuth();
   const roles = me?.roles;
   const operational = isOperationalUser(roles);
   const admin = isAdmin(roles);
+  const viewerOnly = isPublicOnly(roles);
+
+  if (viewerOnly) {
+    return [
+      {
+        label: "Records",
+        items: [
+          { to: "/incidents", label: "Incidents", icon: TriangleAlert },
+          { to: "/assessments", label: "Assessments", icon: ClipboardCheck, alsoActive: ["/submissions"] },
+        ],
+      },
+      { label: "Account", items: [{ to: "/settings", label: "Settings", icon: Settings }] },
+    ];
+  }
 
   const sections: NavSection[] = [];
   if (hasWorkQueue(roles)) {
@@ -90,17 +112,43 @@ function useNavSections(): NavSection[] {
   if (operational) {
     sections.push({ label: "GIS Tools", items: [{ to: "/gis/terrain-cross-sections", label: "Terrain Cross Sections", icon: Mountain }] });
   }
+  const held = roles ?? [];
+  if (!admin && (held.includes("OFFICE_CHIEF") || held.includes("BRANCH_CHIEF"))) {
+    // Chiefs manage their own part of their office's tree.
+    sections.push({ label: "Team", items: [{ to: "/organization", label: held.includes("OFFICE_CHIEF") ? "My office" : "My branch", icon: Network }] });
+  }
   if (admin) {
     sections.push({
       label: "Administration",
       items: [
         { to: "/admin/users", label: "Users", icon: Users },
+        { to: "/organization", label: "Organization", icon: Network },
         { to: "/admin/road-inventory", label: "Road Inventory", icon: Route },
       ],
     });
   }
   sections.push({ label: "Account", items: [{ to: "/settings", label: "Settings", icon: Settings }] });
   return sections;
+}
+
+/**
+ * "Office of Geotechnical Design West · Branch C · Oakland D4".
+ *
+ * The office's FULL name, not the short one: §9.1 of the redesign plan reserves
+ * the short name for flow copy and gives the full name to headers and records.
+ * Every part is optional — an account with no org record renders nothing rather
+ * than a line of dashes.
+ */
+export function orgIdentityLine(org: UserOrg | null | undefined): string | null {
+  if (!org) return null;
+  const parts: string[] = [];
+  const office = (org.office_name || "").trim() || (org.office_code || "").trim();
+  if (office) parts.push(office);
+  const branch = (org.branch_name || "").trim() || (org.branch_letter ? `Branch ${org.branch_letter}` : "");
+  if (branch) parts.push(branch);
+  const place = placeLabel(org.home_city, org.home_district);
+  if (place) parts.push(place);
+  return parts.length ? parts.join(" · ") : null;
 }
 
 function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
@@ -133,6 +181,7 @@ export default function AppShell({ title, children, workspace = false }: { title
   const { theme, setTheme } = useUiSettings();
   const [navExpanded, setNavExpanded] = useState(true);
   const displayName = me?.full_name?.trim() || me?.email || "Signed-in user";
+  const orgLine = orgIdentityLine(me?.org);
 
   return (
     <div className={cn("flex flex-col text-[var(--ink)]", workspace ? "min-h-screen lg:h-screen lg:overflow-hidden" : "min-h-screen")}>
@@ -154,7 +203,11 @@ export default function AppShell({ title, children, workspace = false }: { title
                 {THEME_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
             </label>
-            <div className="hidden text-right md:block"><div className="max-w-64 truncate text-sm font-medium">{displayName}</div><div className="text-xs text-muted">{me?.roles?.map(roleLabel).join(" · ") || "ERIS user"}</div></div>
+            <div className="hidden text-right md:block">
+              <div className="max-w-64 truncate text-sm font-medium">{displayName}</div>
+              <div className="max-w-80 truncate text-xs text-muted">{me?.roles?.map(roleLabel).join(" · ") || "ERIS user"}</div>
+              {orgLine ? <div className="max-w-80 truncate text-xs text-muted" title={orgLine}>{orgLine}</div> : null}
+            </div>
             <button type="button" onClick={logout} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Sign out</button>
           </div>
         </div>

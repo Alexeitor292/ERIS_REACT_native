@@ -49,13 +49,13 @@ def tokens(client_db, admin_token, senior_engineer_token):
     return {
         "admin": admin_token,
         "senior_engineer": senior_engineer_token,
-        # District 04 — the district these fixtures create in. coordinator@local
+        # District 04 — the district these fixtures create in. mock.coordinator.d01@dot.ca.gov
         # is district 01, so without this account every "the coordinator was
         # notified" assertion would pass vacuously against an empty list.
-        "coordinator04": _login(client_db, "coordinator04@local"),
-        "officechief": _login(client_db, "officechief@local"),
-        "branchchief": _login(client_db, "branchchief@local"),
-        "engineer": _login(client_db, "engineer@local"),
+        "coordinator04": _login(client_db, "mock.coordinator.d04@dot.ca.gov"),
+        "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
+        "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
+        "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
     }
 
 
@@ -240,7 +240,7 @@ class TestApprovalNotifiesCoordinators:
         assert payload["routing_path"] == "BRANCH"
         assert payload["office_code"] == "WEST"
         assert payload["district"] == "04"
-        assert payload["approved_by_role"] == "GeoTech Branch Chief"
+        assert payload["approved_by_role"] == "Branch Chief"
         assert payload["approved_at"], "the approval time is recorded WITH the notice"
         assert "District 04" in payload["route_label"]
 

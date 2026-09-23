@@ -98,7 +98,7 @@ class TestGenerateEndpoints:
     def test_permission_denied_for_non_editor(self, client_db, admin_token):
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
-            login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
+            login = client_db.post("/auth/login", json={"email": "mock.staff.2@dot.ca.gov", "password": "password"})
             other = login.json()["access_token"]
             r = client_db.post(_GEN.format(sid=sub_id), headers={"Authorization": f"Bearer {other}"})
             assert r.status_code == 403
@@ -362,7 +362,7 @@ class TestDownloadAuthorization:
             _cleanup(incident_id, sub_id)
 
     def test_admin_registration_requires_admin(self, client_db, admin_token):
-        login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
+        login = client_db.post("/auth/login", json={"email": "mock.staff.2@dot.ca.gov", "password": "password"})
         other = login.json()["access_token"]
         r = client_db.post("/admin/offline-scene-packages", json={}, headers={"Authorization": f"Bearer {other}"})
         assert r.status_code in (401, 403)  # admin-only
@@ -371,7 +371,7 @@ class TestDownloadAuthorization:
 class TestOpsHealth:
     def test_health_is_admin_only_and_sanitized(self, client_db, admin_token):
         # Non-admin denied.
-        login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
+        login = client_db.post("/auth/login", json={"email": "mock.staff.2@dot.ca.gov", "password": "password"})
         other = login.json()["access_token"]
         assert client_db.get("/ops/offline-scene/health", headers={"Authorization": f"Bearer {other}"}).status_code in (401, 403)
         # Admin gets a sanitized ops view (no MinIO creds/endpoint leaked).

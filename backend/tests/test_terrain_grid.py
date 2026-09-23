@@ -268,7 +268,7 @@ class TestTerrainGrid:
         matching existing submission edit access rules."""
         incident_id, sub_id = _create_submission_with_gisa(client_db, admin_token)
         try:
-            login = client_db.post("/auth/login", json={"email": "reviewer@local", "password": "password"})
+            login = client_db.post("/auth/login", json={"email": "mock.staff.2@dot.ca.gov", "password": "password"})
             assert login.status_code == 200, login.text
             other = login.json()["access_token"]
             resp = client_db.post(

@@ -6,7 +6,7 @@ are pinned nowhere else:
 
   * the six eligibility triggers became route-aware, so the SAME column
     (assessments.assigned_engineer_user_id) is checked against the Staff rule
-    on the branch route and the senior engineer rule on the other;
+    on the branch route and the Senior Specialist rule on the other;
   * trg_assessment_no_new_finalize closes FINALIZED to everything, including
     direct SQL, while leaving already-FINALIZED rows fully updatable;
   * the backfill is non-destructive ONLY because those triggers fire on a
@@ -31,8 +31,8 @@ _RUN = uuid.uuid4().hex[:8]
 # Copied from 20260817_engineer_assignment_eligibility.py via
 # 20260910_routing_v2.py. test_db_smoke.py pins the engineer text verbatim;
 # these are the substrings that tell the two rules apart.
-_ENGINEER_MESSAGE = "must be an active GeoTech engineer or admin"
-_SENIOR_ENGINEER_MESSAGE = "must be an active GeoTech senior engineer or admin"
+_ENGINEER_MESSAGE = "must be an active Staff member or administrator"
+_SENIOR_ENGINEER_MESSAGE = "must be an active Senior Specialist or administrator"
 
 
 def _login(client_db, email: str, password: str = "password") -> str:
@@ -56,9 +56,9 @@ def tokens(client_db, admin_token, senior_engineer_token):
     return {
         "admin": admin_token,
         "senior_engineer": senior_engineer_token,
-        "officechief": _login(client_db, "officechief@local"),
-        "branchchief": _login(client_db, "branchchief@local"),
-        "engineer": _login(client_db, "engineer@local"),
+        "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
+        "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
+        "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
     }
 
 
@@ -161,7 +161,7 @@ class TestAssigneeEligibility:
         # The picker guard answers first and more usefully than the trigger; the
         # trigger below is the boundary that holds for direct SQL.
         assert resp.status_code == 400, resp.text
-        assert "not a senior engineer for this office" in resp.json()["detail"]
+        assert "not a Senior Specialist for this office" in resp.json()["detail"]
         assert _scalar(
             "SELECT routing_path FROM assessments WHERE id = :aid", {"aid": case["assessment_id"]}
         ) is None
@@ -193,7 +193,7 @@ class TestAssigneeEligibility:
         assert _ENGINEER_MESSAGE in str(excinfo.value)
 
     def test_incident_stage_assignment_follows_the_assessment_route(self, client_db, tokens, ids):
-        # The senior engineer route reuses incident stage ENGINEER, so the
+        # The Senior Specialist route reuses incident stage ENGINEER, so the
         # incident-level trigger cannot read a role off its own row: it reads
         # the incident's assessment. Both routes are exercised on the SAME
         # table to prove the branch is the routing path and nothing else.
@@ -316,7 +316,7 @@ class TestBackfilledRowKeepsWorking:
         )
 
         # The triggers fire only when assigned_engineer_user_id CHANGES, so
-        # every later write on this row is untouched by the senior engineer rule.
+        # every later write on this row is untouched by the Senior Specialist rule.
         submitted = client_db.post(
             f"/assessments/{aid}/submit", json={"notes": "legacy engineer submits"},
             headers=_auth(tokens["engineer"]),
@@ -325,7 +325,7 @@ class TestBackfilledRowKeepsWorking:
         assert submitted.json()["assessment"]["state"] == "SUBMITTED"
         assert submitted.json()["assessment"]["assigned_user_kind"] == "SENIOR_ENGINEER"
 
-        # And the office chief — the senior engineer route's reviewer — approves it,
+        # And the office chief — the Senior Specialist route's reviewer — approves it,
         # so the row is not stranded.
         approved = client_db.post(
             f"/assessments/{aid}/review",
@@ -337,7 +337,7 @@ class TestBackfilledRowKeepsWorking:
 
     def test_reassigning_that_row_does_apply_the_senior_engineer_rule(self, client_db, tokens, ids):
         # The other half of the same fact: the moment the assignee CHANGES, the
-        # senior engineer rule applies, so the backfill is forgiving of history and
+        # Senior Specialist rule applies, so the backfill is forgiving of history and
         # strict about new work.
         case = _branch_routed(client_db, tokens, ids)
         aid = case["assessment_id"]
@@ -398,7 +398,7 @@ class TestAssignmentRoleWidth:
 
     def test_reassigning_a_senior_engineer_retires_the_previous_row(self, client_db, tokens, ids):
         # _perform_engineer_assignment deactivates by the SAME role it inserts,
-        # so a senior engineer reassignment cannot leave two active rows behind.
+        # so a Senior Specialist reassignment cannot leave two active rows behind.
         case = _triaged(client_db, tokens)
         aid = case["assessment_id"]
         for _ in range(2):

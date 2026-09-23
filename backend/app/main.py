@@ -21,7 +21,7 @@ from pypdf.generic import ContentStream
 from .db import get_db
 from .config import settings
 from .auth import decode_token
-from .deps import get_current_user, require_roles
+from .deps import deny_public_only, get_current_user, require_roles
 from .storage import ensure_bucket, ensure_bucket_exists, bucket_exists, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url, stat_object, sha256_of_object
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
@@ -35,9 +35,15 @@ from .routes.photo_map import router as photo_map_router
 from .routes import assessments as assessments_routes
 from .routes.assessments import router as assessments_router
 from .routes.workflow_tree import router as workflow_tree_router
+from .routes.org import router as org_router
+from .routes.org_tree import router as org_tree_router
+from .routes.user_layouts import router as user_layouts_router
+from .routes.site_history import router as site_history_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
-from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES
+from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
+from .services import public_visibility
+from .services import rich_text as rich_text_svc
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
 from .schemas.common import (
@@ -108,6 +114,12 @@ app.include_router(photo_map_router)
 app.include_router(assessments_router)
 app.include_router(workflow_tree_router)
 app.include_router(road_inventory_router)
+# The organization as data: /org/* for labels, /admin/org/* for the admin who
+# owns them (org model design §7).
+app.include_router(org_router)
+app.include_router(org_tree_router)
+app.include_router(user_layouts_router)
+app.include_router(site_history_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -150,12 +162,12 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
 # ----------------------------
 
 def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
-    # Broad visibility: any non-maintenance operational user (admin, coordinator,
-    # office/branch chief, Staff, senior engineer, legacy reviewer) may READ
-    # submissions / assessment technical forms. Maintenance field workers remain
-    # restricted to records they own or were explicitly granted. Write access is
-    # unchanged. is_operational_user() already includes REVIEWER, so the separate
-    # is_reviewer() term this used to carry was redundant.
+    # Broad visibility: any operational user (admin, coordinator, office/branch
+    # chief, Staff, Senior Specialist) may READ submissions / assessment
+    # technical forms. Everyone else — the Maintenance Crew — is restricted to
+    # records they own or were explicitly granted (the reader/editor permits).
+    # A guest never reaches this: every route behind it refuses a public-only
+    # account first (tests/test_route_guards.py).
     if is_admin(user) or is_operational_user(user):
         return True
 
@@ -190,6 +202,25 @@ def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
 def require_can_view_submission(submission_id: int, db: Session, user: dict) -> None:
     if not can_view_submission(db, user=user, submission_id=submission_id):
         raise HTTPException(status_code=403, detail="Not allowed to view this submission")
+
+def require_can_read_submission_record(submission_id: int, db: Session, user: dict) -> None:
+    """View permission — or, for a read-only viewer, the PUBLIC record.
+
+    The narrow replacement for require_can_view_submission on the handful of
+    reads §4.5 opens to a viewer. It exists instead of a viewer branch inside
+    ``can_view_submission`` because that helper has eleven call sites and
+    photo-map's twin has three more: widening either would grant all fourteen at
+    once, including a write behind a read gate (POST /submissions/{id}/gisa/pdf)
+    and two personnel-data reads (/shared-with, /permissions) that are on the
+    deny list (org model design §4.4).
+
+    A viewer gets 404 rather than 403 for an in-flight form, so ids cannot be
+    probed; every other account keeps the existing 403.
+    """
+    if is_public_only(user):
+        public_visibility.ensure_public_submission(db, user, submission_id)
+        return
+    require_can_view_submission(submission_id, db, user)
 
 def can_edit_submission(db: Session, *, user: dict, submission_id: int) -> bool:
     if is_admin(user):
@@ -610,6 +641,7 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           measure_main_scarp_height_ft, measure_landslide_slope_deg, measure_roadway_length_ft, measure_roadway_width_ft,
           record_of_event_notes, maintenance_history_notes, geotechnical_assessment_notes, recommendations_notes, sketchpad_notes,
           observations_notes, geometry_json,
+          observations_notes_html, geotechnical_assessment_notes_html, recommendations_notes_html, sketchpad_notes_html,
           road_inventory_dataset_version_id, road_inventory_segment_id,
           road_inventory_snapshot_json, road_inventory_match_method, road_inventory_checked_at,
           elevation_profile_json, elevation_profile_source, elevation_profile_checked_at,
@@ -2037,7 +2069,7 @@ def transition_submission_concurrency_safe(
 def enrich_point(
     lat: float,
     lon: float,
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     if lat < -90 or lat > 90 or lon < -180 or lon > 180:
         raise HTTPException(status_code=422, detail="Invalid latitude/longitude range")
@@ -2114,6 +2146,33 @@ def list_submissions(
         params["status"] = st
         status_filter = "WHERE status = :status"
 
+    # A read-only viewer gets technical forms belonging to APPROVED assessments
+    # and nothing else — never the operational branch below, whose whole point is
+    # that it is state-blind and returns DRAFT rows (org model design §4.5). The
+    # status filter still applies on top, so ?status=DRAFT simply returns nothing.
+    if is_public_only(user):
+        rows = db.execute(text("""
+            SELECT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,
+                   s.created_at, s.submitted_at, s.reviewed_at,
+                   g.district, g.county, g.route, g.post_mile
+            FROM submissions s
+            LEFT JOIN submission_gisa g ON g.submission_id = s.id
+            JOIN assessments a
+              ON a.submission_id = s.id
+              OR EXISTS (
+                SELECT 1 FROM assessment_submissions asub
+                WHERE asub.assessment_id = a.id AND asub.submission_id = s.id
+              )
+            WHERE a.state IN ('APPROVED','FINALIZED')
+            """ + (" AND s.status = :status" if status else "") + """
+            GROUP BY s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,
+                     s.created_at, s.submitted_at, s.reviewed_at,
+                     g.district, g.county, g.route, g.post_mile
+            ORDER BY s.id DESC
+            LIMIT :limit
+        """), params).mappings().all()
+        return {"items": [dict(r) for r in rows]}
+
     # Listing every submission is broad READ, not review authority, so it follows
     # the operational role model (which already includes the legacy REVIEWER).
     if is_admin(user) or is_operational_user(user):
@@ -2168,7 +2227,7 @@ def get_submission(
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    require_can_view_submission(submission_id, db, user)
+    require_can_read_submission_record(submission_id, db, user)
 
     gisa = get_gisa(db, submission_id)
     incident_types = get_gisa_incident_types(db, submission_id)
@@ -2307,8 +2366,8 @@ def get_submission_geometry(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    # viewer permission (admins/reviewers + owner/grants)
-    require_can_view_submission(submission_id, db, user)
+    # viewer permission (admins/reviewers + owner/grants), or the public record
+    require_can_read_submission_record(submission_id, db, user)
 
     row = db.execute(text("""
         SELECT geometry_json
@@ -2514,6 +2573,20 @@ def patch_gisa(
     # Clients send null when user deselects a chip; dropping null here prevents
     # unselect from persisting and causes stale values to reappear on reload.
 
+    # A formatted memo is stored sanitized, and its plain-text field is rewritten
+    # from it so the PDF, the submit checks and the mobile app stay in step.
+    for html_key in ("observations_notes_html", "geotechnical_assessment_notes_html", "recommendations_notes_html", "sketchpad_notes_html"):
+        if html_key not in provided:
+            continue
+        try:
+            clean_html = rich_text_svc.sanitize_memo_html(provided[html_key])
+        except ValueError:
+            raise HTTPException(status_code=413, detail="That memo is too large to save")
+        plain = rich_text_svc.memo_plain_text(clean_html)
+        # An editor emptied by the user still sends "<p></p>": that clears the memo.
+        provided[html_key] = clean_html if plain else None
+        provided[html_key.removesuffix("_html")] = plain
+
     if "geometry_json" in provided and provided["geometry_json"] is not None:
         provided["geometry_json"] = json.dumps(provided["geometry_json"])
     if "pavement_ground_annotation_layout_json" in provided and provided["pavement_ground_annotation_layout_json"] is not None:
@@ -2619,7 +2692,7 @@ def enrich_gisa_elevation_profile(
     submission_id: int = Path(..., ge=1),
     payload: ElevationProfileRequest = ElevationProfileRequest(),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     require_can_edit_submission(submission_id, db, user)
 
@@ -2745,7 +2818,7 @@ def build_gisa_terrain_grid(
     submission_id: int = Path(..., ge=1),
     payload: TerrainGridRequest = TerrainGridRequest(),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     """Build (and cache) the road-aligned USGS 3DEP terrain elevation grid for
     the '3D Terrain' view. Mirrors the elevation-profile refresh: the grid is
@@ -2867,7 +2940,7 @@ def _scene_object_present(catalog: dict) -> bool:
 def get_gisa_offline_scene_package(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     """Offline 3D scene-package descriptor for the mobile native viewer.
 
@@ -2898,7 +2971,7 @@ def get_gisa_offline_scene_package(
 def download_gisa_offline_scene_package(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     """Mint a SHORT-LIVED presigned URL for the newest READY package, only after
     a role/access check. Mobile never receives MinIO credentials; the bucket stays
@@ -2967,7 +3040,7 @@ def generate_offline_scene_package(
     submission_id: int = Path(..., ge=1),
     radius_m: float | None = None,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     """Request AUTOMATIC generation of a bounded offline 3D package.
 
@@ -3021,7 +3094,7 @@ def generate_offline_scene_package(
 def get_offline_scene_package_job(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     """Latest generation job for the submission (for mobile progress polling)."""
     require_can_view_submission(submission_id, db, user)
@@ -3033,7 +3106,7 @@ def get_offline_scene_package_job(
 def cancel_offline_scene_package_job(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     require_can_edit_submission(submission_id, db, user)
     active = offline_scene_jobs_svc.get_active_job(db, submission_id)
@@ -3049,7 +3122,7 @@ def cancel_offline_scene_package_job(
 def retry_offline_scene_package_job(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     require_can_edit_submission(submission_id, db, user)
     latest = offline_scene_jobs_svc.get_latest_job(db, submission_id)
@@ -3258,7 +3331,7 @@ def unshare_submission(
 def list_shared_with(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user)
+    user=Depends(deny_public_only)
 ):
     require_can_view_submission(submission_id, db, user)
     rows = db.execute(text("""
@@ -3276,7 +3349,7 @@ def list_shared_with(
 def get_submission_permissions(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     require_can_view_submission(submission_id, db, user)
     owner = db.execute(text("""
@@ -3396,7 +3469,7 @@ def replace_submission_permissions(
 def generate_submission_gisa_pdf(
     submission_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(deny_public_only),
 ):
     require_can_view_submission(submission_id, db, user)
 
@@ -3525,7 +3598,9 @@ def get_submission_gisa_pdf(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    require_can_view_submission(submission_id, db, user)
+    # The RENDERED record, readable by a viewer. Its POST twin above generates a
+    # PDF and inserts an attachment, and is on the deny list.
+    require_can_read_submission_record(submission_id, db, user)
     filename = f"gisa-{submission_id}.pdf"
 
     row = db.execute(text("""
@@ -3570,8 +3645,13 @@ def attachment_download_url(
     if not row:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
-    # Broad READ on attachments, not review authority.
-    if not (is_admin(user) or is_operational_user(user)):
+    # Broad READ on attachments, not review authority. Note the operational
+    # short-circuit does NOT fire for a read-only viewer — a viewer is not an
+    # operational user — so the public-record walk below is reached (design §4.5).
+    if is_public_only(user):
+        if not public_visibility.viewer_can_read_public_attachment(db, user, attachment_id):
+            raise HTTPException(status_code=404, detail="Attachment not found")
+    elif not (is_admin(user) or is_operational_user(user)):
         sid = db.execute(text("""
             SELECT al.submission_id
             FROM attachment_links al
@@ -3623,8 +3703,12 @@ def attachment_content(
     if not row:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
-    # Broad READ on attachments, not review authority.
-    if not (is_admin(user) or is_operational_user(user)):
+    # Broad READ on attachments, not review authority. Same public-record walk as
+    # the download-url twin above.
+    if is_public_only(user):
+        if not public_visibility.viewer_can_read_public_attachment(db, user, attachment_id):
+            raise HTTPException(status_code=404, detail="Attachment not found")
+    elif not (is_admin(user) or is_operational_user(user)):
         sid = db.execute(text("""
             SELECT al.submission_id
             FROM attachment_links al
