@@ -155,6 +155,10 @@ def _queue_incident_notifications(
             )
             if result.lastrowid:
                 inserted.append(int(result.lastrowid))
+    # The same event, in each recipient's notification feed (web bell, mobile app).
+    from ..services import notification_feed
+
+    notification_feed.for_incident_event(db, incident_id=incident_id, user_ids=unique_ids, template_code=template_code, payload=payload)
     return inserted
 
 

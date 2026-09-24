@@ -211,6 +211,10 @@ Release notes that need action:
   it, plus Administrator; anybody placed nowhere is a Guest. Branches and offices
   must keep a chief, and are created with one. Before upgrading, check on the
   Organization page that everybody who works in ERIS sits somewhere.
+- **Notification feed** (`20261001_notification_feed`). Adds
+  `user_notifications` and `push_devices`. The bell (web) and Notifications
+  screen (mobile) need nothing more; push to phones needs `EXPO_PUSH_ENABLED=true`
+  and a mobile build with push credentials (configuration.md).
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

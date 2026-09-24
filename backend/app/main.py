@@ -40,6 +40,7 @@ from .routes.org_tree import router as org_tree_router
 from .routes.user_layouts import router as user_layouts_router
 from .routes.site_history import router as site_history_router
 from .routes.sharing import router as sharing_router
+from .routes.notifications import router as notifications_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
 from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
@@ -65,6 +66,7 @@ from .schemas.common import (
 )
 from .services import elevation_profile as elevation_profile_svc
 from .services import notifications as notifications_svc
+from .services import push as push_svc
 from .services import offline_scene as offline_scene_svc
 from .services import offline_scene_jobs as offline_scene_jobs_svc
 from .services.offline_scene_catalog import register_ready_package, PackageRegistrationError
@@ -97,6 +99,8 @@ async def lifespan(_app: FastAPI):
     # dead relay or a backlog cannot hold up boot; with SMTP_HOST unset it is a
     # no-op. The cron half is `python -m app.tools.flush_email_outbox`.
     notifications_svc.sweep_startup()
+    # Phone alerts for the notification feed; a no-op unless EXPO_PUSH_ENABLED.
+    push_svc.start()
     yield
 
 
@@ -121,6 +125,7 @@ app.include_router(org_tree_router)
 app.include_router(user_layouts_router)
 app.include_router(site_history_router)
 app.include_router(sharing_router)
+app.include_router(notifications_router)
 
 app.add_middleware(
     CORSMiddleware,

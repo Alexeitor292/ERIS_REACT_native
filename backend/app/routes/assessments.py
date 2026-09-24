@@ -1626,6 +1626,13 @@ def assign_engineer(
             out_of_branch=out_of_branch,
             target_branch_id=target_branch_id,
         )
+        incidents_routes._queue_incident_notifications(
+            db=db,
+            incident_id=int(assessment["incident_id"]),
+            recipient_user_ids=[int(payload.engineer_user_id)],
+            template_code="ASSESSMENT_STAFF_ASSIGNMENT",
+            payload={"assessment_id": assessment_id, "incident_id": int(assessment["incident_id"]), "assigned_by_user_id": int(user["id"])},
+        )
         db.commit()
         return {"assessment": _assessment_payload(db, assessment_id, user)}
     except HTTPException:

@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import NotificationBell from "../features/notifications/NotificationBell";
 import { useUiSettings } from "./UiSettingsContext";
 import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
@@ -208,6 +209,7 @@ export default function AppShell({ title, children, workspace = false }: { title
               <div className="max-w-80 truncate text-xs text-muted">{me?.roles?.map(roleLabel).join(" · ") || "ERIS user"}</div>
               {orgLine ? <div className="max-w-80 truncate text-xs text-muted" title={orgLine}>{orgLine}</div> : null}
             </div>
+            {me && !isPublicOnly(me.roles) ? <NotificationBell /> : null}
             <button type="button" onClick={logout} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Sign out</button>
           </div>
         </div>

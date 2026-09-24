@@ -152,6 +152,17 @@ are told about them.
 "Act on it" opens the exact step. An assessment's page also shows whose turn it
 is.
 
+**Notifications.** Every step that lands on somebody also goes to their
+notification feed: a report to triage, an assessment to route, assign, fill in,
+review or revise, an approval, and every share of a technical form (approvals to
+give, notices to read, and how it went for the sharer and the recipient). The
+web portal shows it under the bell at the top of every page, with a full list at
+*Notifications*; the mobile app shows the same feed under its bell, and phones
+get it as push notifications once push is set up (see
+[configuration.md](configuration.md#push-notifications-mobile-app)). Selecting a
+notice opens the page where it is acted on and marks it read. Nobody is told
+about their own action.
+
 Each incident has a **workflow tree** (`GET /incidents/{id}/workflow-tree`)
 showing every step from report to resolution, who owns it, and what happened.
 

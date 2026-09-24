@@ -19,7 +19,7 @@ from fastapi import HTTPException
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
-from . import org_tree
+from . import notification_feed, org_tree
 from .share_rules import APPROVAL, BRANCH, NOTICE, OFFICE, Place, Review, reviews_for
 
 OPEN = ("PENDING", "ACTIVE")
@@ -94,6 +94,50 @@ def decided_units(db: Session, user_id: int) -> set[tuple[str, int]]:
     return units
 
 
+def unit_deciders(db: Session, unit_type: str, unit_id: int) -> list[int]:
+    """Who decides for a branch (its chief, else its office chiefs) or an office (its chiefs)."""
+    office_id = int(unit_id)
+    if unit_type == BRANCH:
+        branch = db.execute(text("SELECT office_id, chief_user_id FROM org_branches WHERE id = :bid"), {"bid": int(unit_id)}).mappings().first()
+        if not branch:
+            return []
+        if branch["chief_user_id"]:
+            return [int(branch["chief_user_id"])]
+        office_id = int(branch["office_id"])
+    return [
+        int(uid)
+        for (uid,) in db.execute(
+            text(
+                """
+                SELECT p.user_id FROM org_user_profiles p JOIN users u ON u.id = p.user_id
+                 WHERE p.office_id = :oid AND p.tree_position = 'OFFICE_CHIEF' AND u.is_active = 1
+                """
+            ),
+            {"oid": office_id},
+        ).all()
+    ]
+
+
+def _story(db: Session, share: dict) -> dict:
+    """The names a notice about this share needs."""
+    row = db.execute(
+        text(
+            """
+            SELECT sub.id AS submission_id, sub.title, o.full_name AS owner, r.full_name AS recipient, g.full_name AS sharer
+              FROM submissions sub
+              JOIN users o ON o.id = sub.created_by_user_id
+              JOIN users r ON r.id = :rid
+              JOIN users g ON g.id = :gid
+             WHERE sub.id = :sid
+            """
+        ),
+        {"sid": int(share["submission_id"]), "rid": int(share["recipient_user_id"]), "gid": int(share["sharer_user_id"])},
+    ).mappings().first()
+    story = dict(row) if row else {"submission_id": share["submission_id"], "title": None, "owner": "Someone", "recipient": "someone", "sharer": "Someone"}
+    story["form"] = f"“{story['title']}”" if story.get("title") else f"technical form #{story['submission_id']}"
+    return story
+
+
 def can_decide(db: Session, user: dict, unit_type: str, unit_id: int) -> bool:
     return org_tree.is_admin(user) or (unit_type, int(unit_id)) in decided_units(db, int(user["id"]))
 
@@ -131,9 +175,30 @@ def _remove_grants(db: Session, submission_id: int, user_id: int) -> None:
         db.execute(text(f"DELETE FROM {table} WHERE submission_id = :sid AND user_id = :uid"), {"sid": int(submission_id), "uid": int(user_id)})
 
 
-def _activate(db: Session, share: dict) -> None:
+def _activate(db: Session, share: dict, *, actor_id: int) -> None:
     db.execute(text("UPDATE submission_shares SET status = 'ACTIVE', activated_at = NOW() WHERE id = :id"), {"id": int(share["id"])})
     _grant(db, int(share["submission_id"]), int(share["recipient_user_id"]), int(share["sharer_user_id"]))
+    story = _story(db, share)
+    notification_feed.add(
+        db,
+        [int(share["recipient_user_id"])],
+        kind="SHARE_RECEIVED",
+        title=f"{story['sharer']} shared a technical form with you",
+        body=f"{story['form']}: you can view and edit it.",
+        link=f"/submissions/{int(share['submission_id'])}",
+        actor_id=actor_id,
+    )
+    if int(actor_id) != int(share["sharer_user_id"]):
+        # Approved later by the chiefs: the sharer hears it took effect.
+        notification_feed.add(
+            db,
+            [int(share["sharer_user_id"])],
+            kind="SHARE_APPROVED",
+            title="Sharing approved",
+            body=f"{story['recipient']} can now view and edit {story['form']}.",
+            link=f"/submissions/{int(share['submission_id'])}",
+            actor_id=actor_id,
+        )
 
 
 def _end(db: Session, share: dict, status: str, actor_id: int, note: str | None) -> None:
@@ -149,6 +214,30 @@ def _end(db: Session, share: dict, status: str, actor_id: int, note: str | None)
     )
     if share["status"] == "ACTIVE":
         _remove_grants(db, int(share["submission_id"]), int(share["recipient_user_id"]))
+    story = _story(db, share)
+    actor = db.execute(text("SELECT COALESCE(full_name, email) FROM users WHERE id = :uid"), {"uid": int(actor_id)}).scalar() or "Someone"
+    link = f"/submissions/{int(share['submission_id'])}"
+    if status in ("REJECTED", "REVOKED"):
+        notification_feed.add(
+            db,
+            [int(share["sharer_user_id"])],
+            kind="SHARE_STOPPED",
+            title="Sharing rejected" if status == "REJECTED" else "Sharing stopped",
+            body=f"{actor} {'rejected sharing' if status == 'REJECTED' else 'stopped sharing'} {story['form']} with {story['recipient']}."
+            + (f" “{note}”" if note else ""),
+            link=link,
+            actor_id=actor_id,
+        )
+    if share["status"] == "ACTIVE":
+        notification_feed.add(
+            db,
+            [int(share["recipient_user_id"])],
+            kind="SHARE_ENDED",
+            title="A technical form is no longer shared with you",
+            body=f"{actor} stopped sharing {story['form']} with you.",
+            link=None,
+            actor_id=actor_id,
+        )
 
 
 def _share(db: Session, share_id: int, *, lock: bool = False) -> dict | None:
@@ -208,11 +297,35 @@ def create(db: Session, *, submission_id: int, owner_id: int, actor: dict, recip
             ),
             {"share": share_id, "unit_type": review.unit_type, "unit_id": review.unit_id, "kind": review.kind, "decision": decision, "by": decided_by},
         )
-    _activate_if_approved(db, share_id)
+    _activate_if_approved(db, share_id, actor_id=int(actor["id"]))
+    _tell_the_chiefs(db, share_id, actor_id=int(actor["id"]))
     return share_id
 
 
-def _activate_if_approved(db: Session, share_id: int) -> None:
+def _tell_the_chiefs(db: Session, share_id: int, *, actor_id: int) -> None:
+    """Each branch or office with a say, still to decide, hears about the share."""
+    share = _share(db, share_id)
+    if not share or share["status"] not in OPEN:
+        return
+    story = _story(db, share)
+    for review in db.execute(
+        text("SELECT unit_type, unit_id, kind FROM submission_share_reviews WHERE share_id = :id AND decision = 'PENDING'"),
+        {"id": int(share_id)},
+    ).mappings().all():
+        approval = review["kind"] == APPROVAL
+        notification_feed.add(
+            db,
+            unit_deciders(db, review["unit_type"], int(review["unit_id"])),
+            kind="SHARE_APPROVAL" if approval else "SHARE_NOTICE",
+            title="Sharing to approve" if approval else "A technical form was shared",
+            body=f"{story['owner']} is sharing {story['form']} with {story['recipient']}."
+            + ("" if approval else " You need not do anything; you may stop it."),
+            link="/my-work",
+            actor_id=actor_id,
+        )
+
+
+def _activate_if_approved(db: Session, share_id: int, *, actor_id: int) -> None:
     share = _share(db, share_id)
     if not share or share["status"] != "PENDING":
         return
@@ -221,7 +334,7 @@ def _activate_if_approved(db: Session, share_id: int) -> None:
         {"id": int(share_id)},
     ).scalar()
     if not waiting:
-        _activate(db, share)
+        _activate(db, share, actor_id=actor_id)
 
 
 def decide(db: Session, *, actor: dict, share_id: int, review_id: int, decision: str, note: str | None) -> dict:
@@ -254,7 +367,7 @@ def decide(db: Session, *, actor: dict, share_id: int, review_id: int, decision:
         if review["decision"] != "PENDING":
             raise HTTPException(status_code=409, detail="Already decided")
         record("APPROVED")
-        _activate_if_approved(db, int(share_id))
+        _activate_if_approved(db, int(share_id), actor_id=int(actor["id"]))
     elif choice == "ACKNOWLEDGE":
         if review["kind"] != NOTICE:
             raise HTTPException(status_code=400, detail="This share waits on your approval: approve or reject it")
