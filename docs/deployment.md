@@ -202,6 +202,10 @@ Release notes that need action:
   Incident Groups everywhere people read them; the page moved to
   `/incident-groups` and old `/event-groups` links redirect. Group titles saved
   with "Event Group" in them are renamed. API paths and tables are unchanged.
+- **Sharing through the chiefs** (`20260929_share_approvals`). Sharing a
+  technical form now gives viewing and editing, and goes through the branch and
+  office chiefs (see roles-and-identity.md). Adds `submission_shares` and
+  `submission_share_reviews`. Existing grants are left as they are.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

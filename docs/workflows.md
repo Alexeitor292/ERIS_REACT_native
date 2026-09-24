@@ -146,7 +146,9 @@ approved before routing v2; the finalize endpoint now answers 410.
 
 **My Work** lists every step waiting on the signed-in person: triage for
 coordinators, routing for Office Chiefs, assignment for Branch Chiefs, forms for
-Staff and Senior Specialists, and reviews for whoever holds review authority.
+Staff and Senior Specialists, reviews for whoever holds review authority, and
+shares of technical forms for the branch and office chiefs who approve them or
+are told about them.
 "Act on it" opens the exact step. An assessment's page also shows whose turn it
 is.
 
@@ -160,8 +162,12 @@ Technical forms can also exist on their own, from before assessments. These go
 reviews them. A form attached to an assessment is always reviewed through the
 assessment instead.
 
-A form's author can grant named people **reader** or **editor** permits on that
-one form (see [roles-and-identity.md](roles-and-identity.md#special-permits)).
+A form's owner can **share** it with named people, who can then view and edit
+it. Branch chiefs approve shares into or out of their branch, and office chiefs
+are told when one leaves their office or involves a Senior Specialist (see
+[roles-and-identity.md](roles-and-identity.md#special-permits)). The **Sharing**
+card shows, before sharing, what it would take, and afterwards where each share
+stands.
 
 On the web, the form's GISA sheet is a canvas: its cards flow across the full
 width by default (about 400 px per column), each as tall as its content, and
