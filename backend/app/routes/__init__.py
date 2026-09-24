@@ -7,13 +7,13 @@ from . import photo_map as _photo_map
 _photo_map._quality_gated_capture = _capture_policy
 _install_media_ingest()
 
-# Incident is the operational root. Event Group is a shared grouping attribute,
+# Incident is the operational root. Incident Group is a shared grouping attribute,
 # and coordinator approval is the permanence boundary that mints incident_key.
 #
 # The legacy Project routers remain mounted for one compatibility window because
 # already-deployed Web/mobile clients may still call /projects. The database
 # migration backs those endpoints with compatibility views; new clients must use
-# the canonical Event Group APIs.
+# the canonical Incident Group APIs.
 from . import incidents as _incidents  # noqa: E402
 from . import event_groups as _event_groups  # noqa: E402
 from . import event_group_lifecycle as _event_group_lifecycle  # noqa: E402
@@ -35,7 +35,7 @@ _incidents.router.include_router(_incident_classification.router)
 _incidents.router.include_router(_mission_center_gis.router)
 
 # Caltrans Projects are an engineering/business reference domain, not Incident
-# Event Groups. They are intentionally exposed only through the Terrain Cross
+# Incident Groups. They are intentionally exposed only through the Terrain Cross
 # Sections API; there is no standalone Project workspace/navigation entry.
 _incidents.router.include_router(_terrain_cross_sections.router)
 

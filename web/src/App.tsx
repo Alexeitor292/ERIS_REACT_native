@@ -15,6 +15,7 @@ import EventGroupsPage from "./pages/EventGroupsPage";
 import EventGroupDetailPage from "./pages/EventGroupDetailPage";
 import TerrainCrossSectionsPage from "./pages/TerrainCrossSectionsPage";
 import MyWorkPage from "./features/myWork/MyWorkPage";
+import NotificationsPage from "./features/notifications/NotificationsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
@@ -32,7 +33,7 @@ import {
 /**
  * Route gates, in three bands.
  *
- *  - OPERATIONAL: the working surface — Mission Center, Event Groups, GIS Tools.
+ *  - OPERATIONAL: the working surface — Mission Center, Incident Groups, GIS Tools.
  *    A read-only viewer sees none of it: it is full of work in flight.
  *  - ASSESSMENT_READ / RECORD_READ: the record surface. The viewer belongs here,
  *    and the server narrows what they get to APPROVED records; the gate only
@@ -52,6 +53,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route
             path="/my-work"
             element={
@@ -85,7 +87,7 @@ export default function App() {
             }
           />
           <Route
-            path="/event-groups"
+            path="/incident-groups"
             element={
               <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <EventGroupsPage />
@@ -93,14 +95,17 @@ export default function App() {
             }
           />
           <Route
-            path="/event-groups/:id"
+            path="/incident-groups/:id"
             element={
               <RoleRoute roles={[...OPERATIONAL_ROLE_NAMES]}>
                 <EventGroupDetailPage />
               </RoleRoute>
             }
           />
-          <Route path="/projects" element={<Navigate to="/event-groups" replace />} />
+          {/* Old addresses: Event Groups were renamed Incident Groups. */}
+          <Route path="/event-groups" element={<Navigate to="/incident-groups" replace />} />
+          <Route path="/event-groups/:id" element={<LegacyProjectRedirect />} />
+          <Route path="/projects" element={<Navigate to="/incident-groups" replace />} />
           <Route path="/projects/:id" element={<LegacyProjectRedirect />} />
           <Route
             path="/assessments"
@@ -225,5 +230,5 @@ function HomeRedirect() {
 
 function LegacyProjectRedirect() {
   const { id } = useParams();
-  return <Navigate to={`/event-groups/${id ?? ""}`} replace />;
+  return <Navigate to={`/incident-groups/${id ?? ""}`} replace />;
 }

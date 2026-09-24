@@ -56,6 +56,7 @@ export const RELATION_LABELS: Record<SiteRelation, string> = {
 };
 
 export const OUTCOME_LABELS: Record<string, string> = {
+  ASSESSMENT_REQUIRED: "Sent for assessment",
   NO_ASSESSMENT_REQUIRED: "No assessment needed",
   DUPLICATE_OR_LINKED: "Duplicate of another report",
   NEEDS_REPORTER_INFORMATION: "Sent back to the reporter",
@@ -87,12 +88,36 @@ export function distanceLabel(distanceM: number | null, sameLocation: boolean): 
   return distanceM < 1000 ? `${Math.round(distanceM)} m away` : `${(distanceM / 1000).toFixed(1)} km away`;
 }
 
-/** Summary counts for the record-of-events header. */
-export function summarizeRecord(items: ReadonlyArray<{ relation: SiteRelation }>) {
+/**
+ * Summary counts for the Record of incidents header. Recurrences count only
+ * incidents in the record; reports that never entered it are counted apart.
+ */
+export function summarizeRecord(items: ReadonlyArray<{ relation: SiteRelation; in_record?: boolean }>) {
+  const inRecord = items.filter((item) => item.in_record !== false);
   return {
     total: items.length,
-    recurrences: items.filter((item) => item.relation === "SAME_TYPE").length,
-    differentType: items.filter((item) => item.relation === "DIFFERENT_TYPE").length,
-    unclassified: items.filter((item) => item.relation === "UNCLASSIFIED").length,
+    recurrences: inRecord.filter((item) => item.relation === "SAME_TYPE").length,
+    differentType: inRecord.filter((item) => item.relation === "DIFFERENT_TYPE").length,
+    unclassified: inRecord.filter((item) => item.relation === "UNCLASSIFIED").length,
+    outsideRecord: items.length - inRecord.length,
   };
+}
+
+type MaintenanceSide = {
+  triage: { notes: string | null } | null;
+  immediate_actions: readonly unknown[];
+  follow_up_actions: readonly unknown[];
+  notes: readonly unknown[];
+  also_reported: readonly unknown[];
+};
+
+/** Whether maintenance did or wrote anything beyond the report itself. */
+export function hasMaintenanceRecord(side: MaintenanceSide): boolean {
+  return Boolean(
+    side.triage?.notes ||
+      side.immediate_actions.length ||
+      side.follow_up_actions.length ||
+      side.notes.length ||
+      side.also_reported.length,
+  );
 }

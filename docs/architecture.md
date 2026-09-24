@@ -54,7 +54,7 @@ drainage problem into a routed, reviewed geotechnical assessment.
 The schema is created by `database/init/010_schema.sql` and moved forward by the
 Alembic revisions in `backend/migrations/versions/`. Business rules that must
 never be broken are enforced by MariaDB triggers as well as by the API: for
-example, a report cannot leave triage without an Event Group and an ERIS number
+example, a report cannot leave triage without an Incident Group and an ERIS number
 unless it is closed at triage, an ERIS number never changes, and an assessment
 can only be assigned to someone who holds the right role.
 
@@ -63,7 +63,7 @@ can only be assigned to someone who holds the right role.
 | Accounts | `users`, `roles`, `user_roles`, `user_external_identities` (Entra ID links), `role_consolidation_audit`, `user_saved_layouts` (each person's saved screen layouts) |
 | Organization | `org_offices`, `org_office_districts`, `org_branches`, `org_branch_districts`, `org_user_profiles` (with each person's `tree_position`), `org_coordinator_coverage`, `org_district_crew`, `org_classifications`; `geotech_office_routing` is kept as a mirror of the office-district map |
 | Incidents | `incidents`, `incident_locations`, `incident_assignments`, `incident_routing_assignments`, `incident_attachments`, `incident_submission_links`, `incident_notifications` (in-app and email notices), `workflow_events` |
-| Event Groups | `event_groups`, `event_group_events`; the views `projects` and `project_events` keep the older `/projects` API working |
+| Incident Groups | `event_groups`, `event_group_events`; the views `projects` and `project_events` keep the older `/projects` API working |
 | Assessments | `assessments`, `assessment_assignments`, `assessment_events`, `assessment_submissions` |
 | Technical forms | `submissions`, `submission_gisa`, `submission_gisa_actions`, `submission_gisa_incident_types`, `submission_visibility` and `submission_editors` (per-form reader and editor permits) |
 | Files | `attachments`, `attachment_links`, `attachment_capture_metadata`, `attachment_capture_corrections` |
@@ -80,7 +80,7 @@ Each role sees only what it can use:
 | Role | Navigation |
 | --- | --- |
 | Maintenance Crew | Incidents (their own reports, and "Report an incident"), Settings |
-| Maintenance Coordinator, Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Event Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. Office chiefs also get My office, and branch chiefs My branch (their part of the organization tree). |
+| Maintenance Coordinator, Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Incident Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. Office chiefs also get My office, and branch chiefs My branch (their part of the organization tree). |
 | Guest | Incidents and Assessments (approved records only), Settings |
 | Administrator | Everything above, plus Users, Organization (every office tree and the maintenance lists) and Road Inventory |
 

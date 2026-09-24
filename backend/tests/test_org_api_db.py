@@ -34,6 +34,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
+
+from tests.org_people import People
 from sqlalchemy import text
 
 pytestmark = pytest.mark.db
@@ -65,6 +67,16 @@ def _rows(statement: str, params: dict | None = None) -> list[dict]:
         return [dict(row) for row in conn.execute(text(statement), params or {}).mappings().all()]
 
 
+_PEOPLE: list = []
+
+
+def _chief(client_db, admin_token) -> int:
+    """A fresh account to lead a test office or branch (they never exist without one)."""
+    if not _PEOPLE:
+        _PEOPLE.append(People(client_db, admin_token, prefix="Zzz Org API"))
+    return _PEOPLE[0].account(f"chief-{uuid.uuid4().hex[:6]}")["id"]
+
+
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_test_org_rows(client_db):
     """Remove every row this module created, however it ended.
@@ -74,6 +86,13 @@ def cleanup_test_org_rows(client_db):
     org_branches -> org_offices is ON DELETE RESTRICT.
     """
     yield
+    for people in _PEOPLE:
+        people.cleanup()
+    _exec(
+        "UPDATE org_user_profiles SET office_id = NULL, branch_id = NULL, tree_position = NULL WHERE office_id IN "
+        "(SELECT id FROM org_offices WHERE code LIKE :prefix)",
+        {"prefix": f"{_CODE_PREFIX}%"},
+    )
     _exec(
         "DELETE FROM org_branches WHERE office_id IN "
         "(SELECT id FROM org_offices WHERE code LIKE :prefix)",
@@ -96,6 +115,8 @@ def _create_office(client_db, admin_token, *, suffix: str, org_type: str = "GEOT
         "is_routing_target": True,
         "sort_order": 900,
     }
+    if org_type == "GEOTECH":
+        payload["chief_user_id"] = _chief(client_db, admin_token)
     payload.update(overrides)
     resp = client_db.post("/admin/org/offices", json=payload, headers=_auth(admin_token))
     assert resp.status_code == 201, resp.text
@@ -104,6 +125,8 @@ def _create_office(client_db, admin_token, *, suffix: str, org_type: str = "GEOT
 
 def _create_branch(client_db, admin_token, office_id: int, **overrides):
     payload = {"office_id": office_id, "unit_type": "BRANCH", "letter": "A", "name": "Branch A"}
+    if overrides.get("unit_type", "BRANCH") == "BRANCH":
+        payload["chief_user_id"] = _chief(client_db, admin_token)
     payload.update(overrides)
     return client_db.post("/admin/org/branches", json=payload, headers=_auth(admin_token))
 
@@ -465,6 +488,9 @@ def retiring_branch(client_db, admin_token, west_office_id):
     A seeded branch cannot be used: retiring one would change what every other
     module sees, and the whole point of the test is to retire it.
     """
+    # A branch never exists without its chief: the chief comes first.
+    placed = People(client_db, admin_token, prefix="Zzz Retiring")
+    chief = placed.account("retiring-chief", full_name=f"Zzz Retiring Branch Chief {_RUN}")
     created = client_db.post(
         "/admin/org/branches",
         json={
@@ -475,37 +501,17 @@ def retiring_branch(client_db, admin_token, west_office_id):
             "home_city": "Oakland",
             "home_district": "04",
             "sort_order": 990,
+            "chief_user_id": chief["id"],
         },
         headers=_auth(admin_token),
     )
     assert created.status_code == 201, created.text
     branch = created.json()["branch"]
+    placed.branches.append(int(branch["id"]))
 
-    email = f"zzt-branchchief-{_RUN.lower()}@example.test"
-    user = client_db.post(
-        "/admin/users",
-        json={
-            "email": email,
-            "full_name": f"Zzz Retiring Branch Chief {_RUN}",
-            "password": "org-model-test-password",
-            "roles": ["BRANCH_CHIEF"],
-            "metadata": {"office_code": "WEST", "office_location": "West Office"},
-        },
-        headers=_auth(admin_token),
-    )
-    assert user.status_code == 201, user.text
-    user_id = int(user.json()["id"])
-    placed = client_db.put(
-        f"/admin/users/{user_id}/org",
-        json={"office_id": west_office_id, "branch_id": int(branch["id"])},
-        headers=_auth(admin_token),
-    )
-    assert placed.status_code == 200, placed.text
+    yield {"branch": branch, "user_id": chief["id"]}
 
-    yield {"branch": branch, "user_id": user_id}
-
-    client_db.patch(f"/admin/users/{user_id}", json={"is_active": False}, headers=_auth(admin_token))
-    _exec("DELETE FROM org_branches WHERE id = :bid", {"bid": int(branch["id"])})
+    placed.cleanup()
 
 
 def _assessment_in_west(client_db, admin_token) -> int:
@@ -602,21 +608,18 @@ class TestBranchDeactivationAndHistory:
         )[0]
         assert unchanged == frozen
 
-    def test_the_retired_branchs_chief_is_still_shown_rather_than_dropped(
-        self, client_db, admin_token, retiring_branch
-    ):
-        # The chief is still a WEST branch chief and still eligible; their branch
-        # simply no longer exists as a group. An item must never point at a group
-        # the client was not given, so the deactivated branch comes back as a
-        # trailing group badged inactive rather than vanishing with its people.
+    def test_the_retired_branchs_chief_leaves_with_it(self, client_db, admin_token, retiring_branch):
+        # A branch never exists without its chief, and a chief never without a
+        # branch: retiring the branch takes its chief out of the tree (a guest
+        # until placed again), so they are no longer offered for new work.
         chief_id = int(retiring_branch["user_id"])
+        roles = _rows(
+            "SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = :uid", {"uid": chief_id}
+        )
+        assert [row["name"] for row in roles] == ["GUEST"]
         assessment_id = _assessment_in_west(client_db, admin_token)
         options = client_db.get(
             f"/assessments/{assessment_id}/branch-options", headers=_auth(admin_token)
         )
         assert options.status_code == 200, options.text
-        payload = options.json()
-        item = next(item for item in payload["items"] if int(item["id"]) == chief_id)
-        groups = {group["group_key"]: group for group in payload["groups"]}
-        assert item["group_key"] in groups, "a picker item pointed at a group the client never got"
-        assert groups[item["group_key"]]["is_active"] is False
+        assert chief_id not in {int(item["id"]) for item in options.json()["items"]}

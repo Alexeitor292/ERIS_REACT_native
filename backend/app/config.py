@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     JWT_ALG: str = Field(default="HS256")
     JWT_EXPIRES_MINUTES: int = Field(default=120)
 
+    # PUSH NOTIFICATIONS to the ERIS mobile app go through Expo's push service
+    # (https://exp.host). Off unless EXPO_PUSH_ENABLED=true: the feed itself works
+    # without it (web bell, mobile Notifications screen); push only adds the phone's
+    # lock-screen alert. EXPO_ACCESS_TOKEN is needed only when the Expo project
+    # enforces access tokens for push.
+    EXPO_PUSH_ENABLED: bool = Field(default=False)
+    EXPO_ACCESS_TOKEN: str | None = Field(default=None)
+    EXPO_PUSH_URL: str = Field(default="https://exp.host/--/api/v2/push/send")
+
     # --- Outbound email for the incident-notification outbox (design §6.4) -----
     # EMAIL IS DISABLED WHENEVER SMTP_HOST IS UNSET — the dev and CI default, and
     # the master switch. The EMAIL notification row is still written (the audit

@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import deny_public_only, get_current_user, require_roles
 from ..roles import ADMIN, ALL_ROLES
-from ..services import org_directory
+from ..services import org_directory, org_tree
 from ..user_metadata import normalize_district_code, normalize_office_code, normalize_profile_text
 
 router = APIRouter(tags=["organization"])
@@ -63,6 +63,8 @@ ADMIN_ONLY = [ADMIN]
 
 
 class OfficeCreateIn(BaseModel):
+    # A GeoTech office never exists without its office chief.
+    chief_user_id: int | None = Field(default=None, ge=1)
     code: str = Field(min_length=1, max_length=16)
     org_type: Literal["GEOTECH", "MAINTENANCE"] = "GEOTECH"
     unit_number: str | None = Field(default=None, max_length=16)
@@ -109,6 +111,7 @@ class BranchCreateIn(BaseModel):
     home_city: str | None = Field(default=None, max_length=64)
     home_district: str | None = Field(default=None, max_length=8)
     home_location_label: str | None = Field(default=None, max_length=64)
+    # A GeoTech branch never exists without its chief (maintenance units have none).
     chief_user_id: int | None = Field(default=None, ge=1)
     accepts_assignments: bool = True
     sort_order: int = 0
@@ -503,6 +506,8 @@ def admin_create_office(
     ).scalar()
     if existing:
         raise HTTPException(status_code=409, detail=f"An office with code {code} already exists")
+    if body.org_type == "GEOTECH" and not body.chief_user_id:
+        raise HTTPException(status_code=422, detail="An office needs its office chief. Choose who leads it.")
     try:
         result = db.execute(
             text(
@@ -529,7 +534,12 @@ def admin_create_office(
             },
         )
         office_id = int(result.lastrowid)
+        if body.org_type == "GEOTECH":
+            org_tree.add_office_chief(db, _admin, office_id=office_id, user_id=int(body.chief_user_id))
         db.commit()
+    except org_tree.OrgTreeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status, detail=exc.message)
     except HTTPException:
         db.rollback()
         raise
@@ -813,6 +823,9 @@ def admin_create_branch(
     office = _office_row(db, body.office_id)
     if not office:
         raise HTTPException(status_code=404, detail="Office not found")
+    geotech = office.get("org_type", "GEOTECH") == "GEOTECH"
+    if geotech and not body.chief_user_id:
+        raise HTTPException(status_code=422, detail="A branch needs its chief. Choose who leads it.")
     letter = (normalize_profile_text(body.letter) or "").upper() or None
     if letter:
         clash = db.execute(
@@ -851,13 +864,19 @@ def admin_create_branch(
                 "home_city": normalize_profile_text(body.home_city),
                 "home_district": normalize_district_code(body.home_district),
                 "home_location_label": normalize_profile_text(body.home_location_label),
-                "chief_user_id": body.chief_user_id,
+                "chief_user_id": None if geotech else body.chief_user_id,
                 "accepts_assignments": 1 if body.accepts_assignments else 0,
                 "sort_order": int(body.sort_order),
             },
         )
         branch_id = int(result.lastrowid)
+        if geotech:
+            # The chief is placed through the tree, so their place and role follow.
+            org_tree.set_branch_chief(db, _admin, branch_id=branch_id, user_id=int(body.chief_user_id))
         db.commit()
+    except org_tree.OrgTreeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status, detail=exc.message)
     except HTTPException:
         db.rollback()
         raise
@@ -924,11 +943,31 @@ def admin_patch_branch(
         if clash:
             raise HTTPException(status_code=409, detail=f"Branch {letter} already exists in this office")
 
-    sets = ", ".join(f"{key} = :{key}" for key in fields)
+    # The chief and the branch's life go through the tree: a branch always has a
+    # chief, the chief's role follows the place, and retiring takes the chief
+    # out with the branch (services/org_tree.py).
+    new_chief = fields.pop("chief_user_id", None) if "chief_user_id" in fields else None
+    if "chief_user_id" in provided and not body.chief_user_id:
+        raise HTTPException(status_code=422, detail="A branch always has a chief. Name the new chief instead.")
+    activate = fields.pop("is_active", None)
+    was_active = bool(branch.get("is_active"))
+    if activate == 1 and not was_active and not new_chief:
+        raise HTTPException(status_code=422, detail="Reopen a branch with its chief: name who leads it.")
     fields["bid"] = int(branch_id)
     try:
-        db.execute(text(f"UPDATE org_branches SET {sets}, updated_at = NOW() WHERE id = :bid"), fields)
+        if len(fields) > 1:
+            sets = ", ".join(f"{key} = :{key}" for key in fields if key != "bid")
+            db.execute(text(f"UPDATE org_branches SET {sets}, updated_at = NOW() WHERE id = :bid"), fields)
+        if activate == 1 and not was_active:
+            db.execute(text("UPDATE org_branches SET is_active = 1, updated_at = NOW() WHERE id = :bid"), {"bid": int(branch_id)})
+        if new_chief:
+            org_tree.set_branch_chief(db, _admin, branch_id=int(branch_id), user_id=int(new_chief))
+        if activate == 0 and was_active:
+            org_tree.retire_branch(db, _admin, branch_id=int(branch_id))
         db.commit()
+    except org_tree.OrgTreeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status, detail=exc.message)
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1151,6 +1190,7 @@ def admin_create_coverage(
             ),
             {"district": district, "user_id": int(body.user_id), "is_primary": 1 if body.is_primary else 0},
         )
+        org_tree.sync_roles(db, int(body.user_id))  # a coordinator list gives the role
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -1185,7 +1225,7 @@ def admin_delete_coverage(
 ):
     """Deactivate a coverage row. The row stays: it is who was told, and when."""
     existing = db.execute(
-        text("SELECT id FROM org_coordinator_coverage WHERE id = :cid LIMIT 1"),
+        text("SELECT user_id FROM org_coordinator_coverage WHERE id = :cid LIMIT 1"),
         {"cid": int(coverage_id)},
     ).scalar()
     if not existing:
@@ -1195,6 +1235,7 @@ def admin_delete_coverage(
             text("UPDATE org_coordinator_coverage SET is_active = 0, updated_at = NOW() WHERE id = :cid"),
             {"cid": int(coverage_id)},
         )
+        org_tree.sync_roles(db, int(existing))
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -1305,6 +1346,18 @@ def admin_put_user_org(
     if not exists:
         raise HTTPException(status_code=404, detail="User not found")
     provided = body.model_dump(exclude_unset=True)
+
+    # Somebody placed in a tree moves only through the tree (their role follows
+    # their place); here their office and branch can only be restated.
+    placed = org_tree.placement(db, int(user_id))
+    if placed["position"] and (
+        ("office_id" in provided and provided["office_id"] != placed["office_id"])
+        or ("branch_id" in provided and provided["branch_id"] != placed["branch_id"])
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{placed['label']}. Move them on the Organization page, where their role follows their place.",
+        )
 
     if body.office_id is not None and "office_id" in provided:
         if not _office_row(db, body.office_id):

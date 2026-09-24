@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import NotificationBell from "../features/notifications/NotificationBell";
 import { useUiSettings } from "./UiSettingsContext";
 import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
@@ -66,14 +67,14 @@ function NavGroup({ label, collapsed, children }: { label: string; collapsed?: b
 /**
  * Information architecture:
  *   Workspace › My Work (role-gated actions)
- *   Operations › Mission Center / Event Groups / Incidents / Assessments (read-only records;
+ *   Operations › Mission Center / Incident Groups / Incidents / Assessments (read-only records;
  *               submissions live inside assessments and have no nav item of their own)
  *   GIS Tools › Terrain Cross Sections
  *   Administration › Users / Offices / Branches / Coverage / Road Inventory
  *   Account › Settings
  *
  * A read-only viewer gets ONE destination plus Settings: Records, opening on
- * Incidents. No Workspace, no Mission Center, no Event Groups, no GIS Tools —
+ * Incidents. No Workspace, no Mission Center, no Incident Groups, no GIS Tools —
  * every one of those is work in flight, which is not the public record (org
  * model design §8, §11).
  */
@@ -104,7 +105,7 @@ function useNavSections(): NavSection[] {
 
   const operations: NavEntry[] = [];
   if (operational) operations.push({ to: "/mission-center", label: "Mission Center", icon: MapIcon });
-  if (operational) operations.push({ to: "/event-groups", label: "Event Groups", icon: Layers });
+  if (operational) operations.push({ to: "/incident-groups", label: "Incident Groups", icon: Layers });
   operations.push({ to: "/incidents", label: "Incidents", icon: TriangleAlert });
   if (operational) operations.push({ to: "/assessments", label: "Assessments", icon: ClipboardCheck, alsoActive: ["/submissions"] });
   sections.push({ label: "Operations", items: operations });
@@ -208,6 +209,7 @@ export default function AppShell({ title, children, workspace = false }: { title
               <div className="max-w-80 truncate text-xs text-muted">{me?.roles?.map(roleLabel).join(" · ") || "ERIS user"}</div>
               {orgLine ? <div className="max-w-80 truncate text-xs text-muted" title={orgLine}>{orgLine}</div> : null}
             </div>
+            {me && !isPublicOnly(me.roles) ? <NotificationBell /> : null}
             <button type="button" onClick={logout} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Sign out</button>
           </div>
         </div>

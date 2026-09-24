@@ -25,13 +25,13 @@ def close_event_group(
 ):
     row = event_group_routes._event_group_row(db, event_group_id)
     if not row:
-        raise HTTPException(status_code=404, detail="Event Group not found")
+        raise HTTPException(status_code=404, detail="Incident Group not found")
     event_group = dict(row)
-    event_group_routes._ensure_manage_scope(user, event_group)
+    event_group_routes._ensure_manage_scope(user, event_group, db=db)
 
     status = str(event_group["status"]).upper()
     if status == "ARCHIVED":
-        raise HTTPException(status_code=409, detail="Archived Event Groups cannot be closed or reopened")
+        raise HTTPException(status_code=409, detail="Archived Incident Groups cannot be closed or reopened")
     if status == "CLOSED":
         return {"event_group": event_group_routes._serialize_event_group(event_group), "changed": False}
 
@@ -39,7 +39,7 @@ def close_event_group(
     if active_count > 0:
         raise HTTPException(
             status_code=409,
-            detail=f"Event Group cannot be closed while {active_count} active Incident{'s' if active_count != 1 else ''} remain",
+            detail=f"Incident Group cannot be closed while {active_count} active Incident{'s' if active_count != 1 else ''} remain",
         )
 
     notes = (payload.notes or "").strip() or None
@@ -86,13 +86,13 @@ def reopen_event_group(
 ):
     row = event_group_routes._event_group_row(db, event_group_id)
     if not row:
-        raise HTTPException(status_code=404, detail="Event Group not found")
+        raise HTTPException(status_code=404, detail="Incident Group not found")
     event_group = dict(row)
-    event_group_routes._ensure_manage_scope(user, event_group)
+    event_group_routes._ensure_manage_scope(user, event_group, db=db)
 
     status = str(event_group["status"]).upper()
     if status == "ARCHIVED":
-        raise HTTPException(status_code=409, detail="Archived Event Groups cannot be closed or reopened")
+        raise HTTPException(status_code=409, detail="Archived Incident Groups cannot be closed or reopened")
     if status == "OPEN":
         return {"event_group": event_group_routes._serialize_event_group(event_group), "changed": False}
 

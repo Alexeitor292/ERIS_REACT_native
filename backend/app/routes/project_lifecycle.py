@@ -27,7 +27,7 @@ def close_project(
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
     project = dict(row)
-    project_routes._ensure_manage_scope(user, project)
+    project_routes._ensure_manage_scope(user, project, db=db)
 
     status = str(project["status"]).upper()
     if status == "ARCHIVED":
@@ -88,7 +88,7 @@ def reopen_project(
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
     project = dict(row)
-    project_routes._ensure_manage_scope(user, project)
+    project_routes._ensure_manage_scope(user, project, db=db)
 
     status = str(project["status"]).upper()
     if status == "ARCHIVED":

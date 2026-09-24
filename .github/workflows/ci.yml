@@ -84,6 +84,8 @@ jobs:
           alembic stamp 0001_baseline
           alembic upgrade head
           alembic current
+      - name: Place the mock accounts (roles come from where people sit)
+        run: mysql -h 127.0.0.1 -u root -prootpassword eris < ../database/dev/040_mock_placements.sql
       - name: DB integration tests (incl. offline-scene jobs/catalog/cancellation)
         run: python -m pytest tests/ -m db --tb=short
 

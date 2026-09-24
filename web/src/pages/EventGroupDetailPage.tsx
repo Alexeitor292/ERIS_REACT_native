@@ -29,7 +29,7 @@ function incidentStatusText(status: string, stage: string) {
 const btn = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50";
 
 /**
- * Event Group record: compact single header card + incidents table + history.
+ * Incident Group record: compact single header card + incidents table + history.
  * Every incident inside a group has been accepted (its permanent key was minted at
  * coordinator approval); a grouped incident without a key is a data-integrity error.
  */
@@ -43,7 +43,7 @@ export default function EventGroupDetailPage() {
 
   async function load() {
     if (!Number.isFinite(eventGroupId) || eventGroupId <= 0) {
-      setError("Invalid Event Group ID.");
+      setError("Invalid Incident Group ID.");
       return;
     }
     setBusy(true);
@@ -56,7 +56,7 @@ export default function EventGroupDetailPage() {
       setDetail(next);
       setAssessments(Object.fromEntries((assessmentList.items ?? []).map((assessment) => [assessment.incident_id, assessment])));
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load Event Group.");
+      setError(e?.message ?? "Failed to load Incident Group.");
     } finally {
       setBusy(false);
     }
@@ -71,23 +71,23 @@ export default function EventGroupDetailPage() {
   const group = detail?.event_group ?? null;
 
   return (
-    <AppShell title={group?.title || `Event Group #${Number.isFinite(eventGroupId) ? eventGroupId : ""}`}>
+    <AppShell title={group?.title || `Incident Group #${Number.isFinite(eventGroupId) ? eventGroupId : ""}`}>
       <div className="grid gap-4 p-4 md:p-5">
         <div className="flex flex-wrap gap-2">
-          <Link to="/event-groups" className={btn}>← Event Groups</Link>
+          <Link to="/incident-groups" className={btn}>← Incident Groups</Link>
           {group ? <Link to={`/mission-center/${group.id}`} className={btn}>View on Mission Center map</Link> : null}
           <button type="button" onClick={load} disabled={busy} className={`${btn} ml-auto`}>{busy ? "Refreshing…" : "Refresh"}</button>
         </div>
 
         {error ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
 
-        {!detail || !group ? <div className="py-16 text-center text-sm text-muted">{busy ? "Loading Event Group…" : "Event Group unavailable."}</div> : (
+        {!detail || !group ? <div className="py-16 text-center text-sm text-muted">{busy ? "Loading Incident Group…" : "Incident Group unavailable."}</div> : (
           <>
             <div className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4">
               <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-2">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2"><div className="text-lg font-semibold">{group.title}</div><EventGroupStatusBadge status={group.status} /></div>
-                  <div className="mt-1 text-sm text-muted">Event Group #{group.id} · {eventGroupLocationLabel(group)}</div>
+                  <div className="mt-1 text-sm text-muted">Incident Group #{group.id} · {eventGroupLocationLabel(group)}</div>
                 </div>
                 <dl className="grid shrink-0 grid-cols-[auto_auto] items-baseline gap-x-6 gap-y-1 text-[13px]">
                   <dt className="text-muted">Incidents</dt><dd className="font-semibold tabular-nums">{group.incident_count} <span className="font-normal text-muted">· {group.open_incident_count} active</span></dd>
@@ -100,7 +100,7 @@ export default function EventGroupDetailPage() {
 
             {integrityProblems.length ? (
               <div role="alert" className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">
-                <b>Data integrity error:</b> {integrityProblems.length === 1 ? `incident #${integrityProblems[0].id} is` : `${integrityProblems.length} incidents are`} associated with this Event Group without a permanent incident key. Grouping happens at coordinator approval, so this state should not occur — report it to an administrator.
+                <b>Data integrity error:</b> {integrityProblems.length === 1 ? `incident #${integrityProblems[0].id} is` : `${integrityProblems.length} incidents are`} associated with this Incident Group without a permanent incident key. Grouping happens at coordinator approval, so this state should not occur — report it to an administrator.
               </div>
             ) : null}
 
@@ -111,7 +111,7 @@ export default function EventGroupDetailPage() {
                   <table className="w-full border-collapse">
                     <thead><tr className="border-b border-[var(--line)] text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"><th className="px-3 py-2.5">Incident</th><th className="px-3 py-2.5">Location</th><th className="px-3 py-2.5">Status</th><th className="px-3 py-2.5 text-right">Links</th></tr></thead>
                     <tbody>
-                      {detail.incidents.length === 0 ? <tr><td colSpan={4} className="px-3 py-8 text-center text-sm text-muted">No Incidents are associated with this Event Group.</td></tr> : detail.incidents.map((incident) => {
+                      {detail.incidents.length === 0 ? <tr><td colSpan={4} className="px-3 py-8 text-center text-sm text-muted">No Incidents are associated with this Incident Group.</td></tr> : detail.incidents.map((incident) => {
                         const assessment = assessments[incident.id];
                         const submissionIds = assessment ? submissionIdsOf(assessment) : [];
                         const broken = !incident.incident_key;
@@ -140,9 +140,9 @@ export default function EventGroupDetailPage() {
               </section>
 
               <section className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
-                <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-3"><h2 className="text-[13px] font-semibold">Event Group history</h2></div>
+                <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-3"><h2 className="text-[13px] font-semibold">Incident Group history</h2></div>
                 <div className="max-h-[520px] overflow-auto p-4">
-                  {detail.events.length === 0 ? <div className="text-sm text-muted">No Event Group history recorded.</div> : <ol className="grid gap-3">{detail.events.slice().reverse().map((event) => <li key={event.id} className="border-l-2 border-[var(--line)] pl-3"><div className="text-sm font-semibold">{eventLabel(event.event_type)}</div><div className="mt-0.5 text-xs text-muted">{formatDate(event.created_at)}{event.actor_name || event.actor_email ? ` · ${event.actor_name || event.actor_email}` : ""}</div>{event.incident_id ? <div className="mt-1 text-xs text-muted">Incident <Link to={`/mission-center/${group.id}/${event.incident_id}`} className="text-[var(--brand)] hover:underline">#{event.incident_id}</Link></div> : null}{event.notes ? <p className="mt-1 text-sm text-muted">{event.notes}</p> : null}</li>)}</ol>}
+                  {detail.events.length === 0 ? <div className="text-sm text-muted">No Incident Group history recorded.</div> : <ol className="grid gap-3">{detail.events.slice().reverse().map((event) => <li key={event.id} className="border-l-2 border-[var(--line)] pl-3"><div className="text-sm font-semibold">{eventLabel(event.event_type)}</div><div className="mt-0.5 text-xs text-muted">{formatDate(event.created_at)}{event.actor_name || event.actor_email ? ` · ${event.actor_name || event.actor_email}` : ""}</div>{event.incident_id ? <div className="mt-1 text-xs text-muted">Incident <Link to={`/mission-center/${group.id}/${event.incident_id}`} className="text-[var(--brand)] hover:underline">#{event.incident_id}</Link></div> : null}{event.notes ? <p className="mt-1 text-sm text-muted">{event.notes}</p> : null}</li>)}</ol>}
                 </div>
               </section>
             </div>

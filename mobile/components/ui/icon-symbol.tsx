@@ -23,6 +23,7 @@ const MAPPING = {
   'checkmark.seal.fill': 'verified',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  'bell.fill': 'notifications',
 } as IconMapping;
 
 /**

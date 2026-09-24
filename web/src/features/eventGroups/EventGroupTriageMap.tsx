@@ -25,8 +25,8 @@ const ACTIVE_INCIDENT_COLOR: [number, number, number, number] = [211, 47, 47, 0.
 const RESOLVED_INCIDENT_COLOR: [number, number, number, number] = [100, 116, 139, 0.92];
 
 /**
- * Map in the Event Group panel of coordinator triage: the new report,
- * every nearby open Event Group (click to select), and the selected group's
+ * Map in the Incident Group panel of coordinator triage: the new report,
+ * every nearby open Incident Group (click to select), and the selected group's
  * existing incidents so the coordinator can judge whether it belongs there.
  */
 export default function EventGroupTriageMap({ incident, groups, selectedGroupId, selectedIncidents, onSelectGroup, height = 360 }: Props) {
@@ -44,8 +44,8 @@ export default function EventGroupTriageMap({ incident, groups, selectedGroupId,
     esriConfig.assetsPath = "/assets";
     if (apiKey) esriConfig.apiKey = apiKey;
     if (!divRef.current) return;
-    const groupLayer = new GraphicsLayer({ title: "Open Event Groups" });
-    const incidentLayer = new GraphicsLayer({ title: "Event Group incidents" });
+    const groupLayer = new GraphicsLayer({ title: "Open Incident Groups" });
+    const incidentLayer = new GraphicsLayer({ title: "Incident Group incidents" });
     const reportLayer = new GraphicsLayer({ title: "New report" });
     groupLayerRef.current = groupLayer;
     incidentLayerRef.current = incidentLayer;
@@ -100,7 +100,7 @@ export default function EventGroupTriageMap({ incident, groups, selectedGroupId,
         geometry: new Point({ longitude: group.centroid_longitude, latitude: group.centroid_latitude, spatialReference: { wkid: 4326 } }),
         attributes: { groupId: group.id },
         symbol: { type: "simple-marker", style: "circle", size: selected ? 18 : 13, color: GROUP_COLOR, outline: { color: selected ? [255, 255, 255, 1] : [15, 23, 42, 0.9], width: selected ? 3 : 1.5 } } as any,
-        popupTemplate: { title: `Event Group #${group.id} · ${group.title}`, content: `${eventGroupLocationLabel(group)}<br/>${group.incident_count} incidents · ${group.open_incident_count} active<br/><br/>Click the marker to select this Event Group.` } as any,
+        popupTemplate: { title: `Incident Group #${group.id} · ${group.title}`, content: `${eventGroupLocationLabel(group)}<br/>${group.incident_count} incidents · ${group.open_incident_count} active<br/><br/>Click the marker to select this Incident Group.` } as any,
       });
       groupLayer.add(graphic);
       graphics.push(graphic);
@@ -126,16 +126,16 @@ export default function EventGroupTriageMap({ incident, groups, selectedGroupId,
 
   return (
     <div className="map-stack-guard overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel-soft)]">
-      <div ref={divRef} style={{ height }} aria-label={groups.length ? "Nearby Event Groups map" : "Location of the report"} />
+      <div ref={divRef} style={{ height }} aria-label={groups.length ? "Nearby Incident Groups map" : "Location of the report"} />
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-xs text-muted">
         <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full border-2 border-white bg-[var(--bad)] shadow-[0_0_0_1px_var(--line)]" /> {groups.length ? "New incident" : "Where the report was filed"}</span>
-        {/* Only the Event Group step has groups to explain. Showing this legend
+        {/* Only the Incident Group step has groups to explain. Showing this legend
             on the report review, where the map carries one pin, described a
             selection the coordinator was not being asked to make. */}
         {groups.length ? (
           <>
-            <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full bg-[rgb(30,96,255)]" /> Open Event Group — click to select</span>
-            {selectedGroup ? <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2 w-2 rotate-45 bg-[rgb(211,47,47)]" /> {selectedGroup.title}'s incidents ({selectedIncidents.length})</span> : <span>Select an Event Group to preview its existing incidents.</span>}
+            <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2.5 w-2.5 rounded-full bg-[rgb(30,96,255)]" /> Open Incident Group — click to select</span>
+            {selectedGroup ? <span className="inline-flex items-center gap-1.5"><i aria-hidden className="inline-block h-2 w-2 rotate-45 bg-[rgb(211,47,47)]" /> {selectedGroup.title}'s incidents ({selectedIncidents.length})</span> : <span>Select an Incident Group to preview its existing incidents.</span>}
           </>
         ) : null}
       </div>

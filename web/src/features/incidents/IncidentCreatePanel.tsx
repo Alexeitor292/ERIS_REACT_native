@@ -2,6 +2,7 @@ import { useState, type ChangeEvent, type DragEvent, type ReactNode, type RefObj
 import { Paperclip, X } from "lucide-react";
 
 import IncidentLocationInput from "./IncidentLocationInput";
+import { incidentName } from "./incidentLocationModel";
 import { formatFileSize, type IncidentCreateForm, type PendingIncidentUpload } from "./incidentUiModel";
 
 type Props = {
@@ -32,7 +33,6 @@ function Field({ label, required = false, hint, children }: { label: string; req
 
 /** What still stands between the form and a report, in words for the footer. */
 export function createBlocker(form: IncidentCreateForm): string | null {
-  if (!form.title.trim()) return "Give the report a title.";
   if (!form.first_observed_at.trim()) return "Say when it was first seen.";
   if (!form.location) return "Place it — on the map, by route and post mile, or by coordinates.";
   return null;
@@ -58,6 +58,7 @@ export default function IncidentCreatePanel({
   const [dragging, setDragging] = useState(false);
   const setField = <K extends keyof IncidentCreateForm>(key: K, value: IncidentCreateForm[K]) => onFormChange({ ...form, [key]: value });
   const blocker = createBlocker(form);
+  const name = incidentName(form.location, form.first_observed_at);
 
   function onDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
@@ -81,9 +82,12 @@ export default function IncidentCreatePanel({
 
       <div className="grid gap-6 px-5 py-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <div className="grid content-start gap-4">
-          <Field label="Title" required>
-            <input className={inputClass} value={form.title} onChange={(event) => setField("title", event.target.value)} placeholder="e.g. Rockfall on the northbound shoulder" />
-          </Field>
+          <div className="grid gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Name</span>
+            {name
+              ? <span className="font-mono text-sm tabular-nums">{name}</span>
+              : <span className="text-[13px] text-muted">District-County-Route-Post mile and the day it was first seen, filled in once the report is placed.</span>}
+          </div>
           <Field label="What was seen">
             <textarea
               rows={5}

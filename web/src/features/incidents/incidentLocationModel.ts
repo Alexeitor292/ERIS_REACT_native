@@ -332,6 +332,25 @@ export function roadLocationLabel(location: Pick<ResolvedIncidentLocation, "dist
   return `D${location.district} · ${location.county} · ${location.route} · PM ${location.post_mile}`;
 }
 
+/**
+ * The name the server gives a report: District-County-Route-PostMile and the
+ * day it was first seen, "04-MRN-001-12.300 - 09/22/26". Reporters no longer
+ * type a title. Null until the report is placed.
+ */
+export function incidentName(location: Pick<ResolvedIncidentLocation, "district" | "county" | "route" | "post_mile"> | null, firstObservedAt: string): string | null {
+  if (!location) return null;
+  const districtDigits = location.district.replace(/\D/g, "");
+  const district = districtDigits ? districtDigits.padStart(2, "0") : location.district.trim() || "?";
+  const county = location.county.trim().replace(/\s+County$/i, "").toUpperCase() || "?";
+  const routeDigits = location.route.replace(/\D/g, "");
+  const route = routeDigits ? routeDigits.slice(0, 3).padStart(3, "0") : location.route.trim() || "?";
+  const postMileNumber = Number(location.post_mile);
+  const postMile = location.post_mile.trim() && Number.isFinite(postMileNumber) ? postMileNumber.toFixed(3) : location.post_mile.trim() || "?";
+  const base = `${district}-${county}-${route}-${postMile}`;
+  const day = /^(\d{4})-(\d{2})-(\d{2})/.exec(firstObservedAt.trim());
+  return day ? `${base} - ${day[2]}/${day[3]}/${day[1].slice(2)}` : base;
+}
+
 /** Google Street View at a point, in a new tab — needs no key. */
 export function streetViewUrl(latitude: number, longitude: number): string {
   return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${latitude},${longitude}`;

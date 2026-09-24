@@ -20,6 +20,8 @@ import uuid
 import pytest
 from sqlalchemy import text
 
+from tests.org_people import People
+
 pytestmark = pytest.mark.db
 
 _RUN = uuid.uuid4().hex[:8]
@@ -62,81 +64,26 @@ def tokens(client_db, admin_token, senior_engineer_token):
 
 @pytest.fixture(scope="module")
 def extra_users(client_db, tokens):
-    """Extra scoped and legacy-unscoped routing users.
-
-    All are deactivated on teardown so they cannot leak into another module's
-    routing lookups, notification recipients or pickers.
+    """Routing users placed where their roles come from: a second West branch
+    chief, and a chief, branch chief and senior specialist of another office.
+    Nobody holds a role without its place, so there are no office-less chiefs.
     """
-    headers = _auth(tokens["admin"])
+    placed = People(client_db, tokens["admin"], prefix="Zzz Routing")
     created: dict[str, dict] = {}
 
-    def _create(key: str, email: str, full_name: str, roles: list[str], metadata: dict | None):
-        resp = client_db.post(
-            "/admin/users",
-            headers=headers,
-            json={
-                "email": email,
-                "full_name": full_name,
-                "password": "routing-v2-test-password",
-                "roles": roles,
-                "metadata": metadata,
-            },
-        )
-        assert resp.status_code == 201, f"create {email} failed: {resp.status_code} {resp.text}"
-        user_id = int(resp.json()["id"])
-        created[key] = {
-            "id": user_id,
-            "email": email,
-            "token": _login(client_db, email, "routing-v2-test-password"),
-        }
+    def _make(key: str, role: str, office: str, full_name: str) -> None:
+        user = placed.make(role, key, full_name=full_name, office=office)
+        created[key] = {**user, "token": placed.login(user)["Authorization"].split(" ", 1)[1]}
+        if role == "BRANCH_CHIEF":
+            created[key]["branch_id"] = placed.branches[-1]
 
-    _create(
-        "branchchief2",
-        f"rv2-branchchief2-{_RUN}@example.test",
-        "Zzz Second Branch Chief",
-        ["BRANCH_CHIEF"],
-        {"office_code": "WEST", "office_location": "West Office"},
-    )
-    _create(
-        "chief_no_office",
-        f"rv2-chief-no-office-{_RUN}@example.test",
-        "Zzz Unscoped Office Chief",
-        ["OFFICE_CHIEF"],
-        None,
-    )
-    _create(
-        "branchchief_no_office",
-        f"rv2-branchchief-no-office-{_RUN}@example.test",
-        "Zzz Legacy Unscoped Branch Chief",
-        ["BRANCH_CHIEF"],
-        None,
-    )
-    _create(
-        "senior_engineer_no_office",
-        f"rv2-senior-engineer-no-office-{_RUN}@example.test",
-        "Zzz Legacy Unscoped Senior Engineer",
-        ["SENIOR_SPECIALIST"],
-        None,
-    )
-    _create(
-        "branchchief_other_office",
-        f"rv2-branchchief-south-{_RUN}@example.test",
-        "Zzz South Branch Chief",
-        ["BRANCH_CHIEF"],
-        {"office_code": "SOUTH"},
-    )
-    _create(
-        "senior_engineer_other_office",
-        f"rv2-senior-engineer-south-{_RUN}@example.test",
-        "Zzz South Senior Engineer",
-        ["SENIOR_SPECIALIST"],
-        {"office_code": "SOUTH"},
-    )
+    _make("branchchief2", "BRANCH_CHIEF", "WEST", "Zzz Second Branch Chief")
+    _make("chief_other_office", "OFFICE_CHIEF", "SOUTH", "Zzz South Office Chief")
+    _make("branchchief_other_office", "BRANCH_CHIEF", "SOUTH", "Zzz South Branch Chief")
+    _make("senior_engineer_other_office", "SENIOR_SPECIALIST", "SOUTH", "Zzz South Senior Engineer")
+    created["_placed"] = placed
     yield created
-    for record in created.values():
-        client_db.patch(
-            f"/admin/users/{record['id']}", headers=headers, json={"is_active": False}
-        )
+    placed.cleanup()
 
 
 @pytest.fixture(scope="module")
@@ -351,19 +298,19 @@ class TestReviewAuthority:
         row = next(a for a in consulted.json()["assignments"] if a["assignment_role"] == "CONSULTED")
         assert row["is_authority"] is False
 
-    def test_office_chief_without_an_office_cannot_review_a_senior_engineer_route(
+    def test_an_office_chief_of_another_office_cannot_review_a_senior_engineer_route(
         self, client_db, tokens, ids, extra_users
     ):
         case = _senior_engineer_submitted(client_db, tokens, ids)
         resp = client_db.post(
             f"/assessments/{case['assessment_id']}/review",
             json={"action": "APPROVE"},
-            headers=_auth(extra_users["chief_no_office"]["token"]),
+            headers=_auth(extra_users["chief_other_office"]["token"]),
         )
         assert resp.status_code == 403, resp.text
         assert "office chief of this assessment's GeoTech office" in resp.json()["detail"]
 
-    def test_unscoped_chief_on_an_office_less_assessment_is_denied(
+    def test_no_chief_reviews_an_office_less_assessment(
         self, client_db, tokens, ids, extra_users
     ):
         # The None == None case §4.1's falsy guard closes. An office-less
@@ -373,15 +320,12 @@ class TestReviewAuthority:
         aid = case["assessment_id"]
         _sql("UPDATE assessments SET office_code = NULL WHERE id = :aid", {"aid": aid})
 
-        unscoped = client_db.post(
+        other = client_db.post(
             f"/assessments/{aid}/review",
             json={"action": "APPROVE"},
-            headers=_auth(extra_users["chief_no_office"]["token"]),
+            headers=_auth(extra_users["chief_other_office"]["token"]),
         )
-        assert unscoped.status_code == 403, (
-            "a chained `a == b != ''` would let None == None through and hand an "
-            "office-less assessment to any unscoped chief"
-        )
+        assert other.status_code == 403, other.text
         # The other half of the same guard: a scoped chief cannot review an
         # assessment that has no office either.
         scoped = client_db.post(
@@ -427,52 +371,19 @@ class TestRouteExclusivity:
         assert row["routing_path"] is None
         assert row["state"] == "PENDING_OFFICE_DELEGATION"
 
-    def test_legacy_unscoped_branch_chief_is_listed_and_assignable(
-        self, client_db, tokens, extra_users
-    ):
+    def test_the_pickers_offer_this_offices_people_and_nobody_elses(self, client_db, tokens, ids, extra_users):
         case = _triaged(client_db, tokens)
         aid = case["assessment_id"]
-        legacy = extra_users["branchchief_no_office"]
-
-        options = client_db.get(
-            f"/assessments/{aid}/branch-options", headers=_auth(tokens["officechief"])
-        )
-        assert options.status_code == 200, options.text
-        option_ids = {int(item["id"]) for item in options.json()["items"]}
-        assert legacy["id"] in option_ids
-        assert extra_users["branchchief_other_office"]["id"] not in option_ids
-
-        routed = client_db.post(
-            f"/assessments/{aid}/delegate-branch",
-            json={"branch_chief_user_id": legacy["id"]},
-            headers=_auth(tokens["officechief"]),
-        )
-        assert routed.status_code == 200, routed.text
-        assert routed.json()["assessment"]["branch_chief_user_id"] == legacy["id"]
-
-    def test_legacy_unscoped_senior_engineer_is_listed_and_assignable(
-        self, client_db, tokens, extra_users
-    ):
-        case = _triaged(client_db, tokens)
-        aid = case["assessment_id"]
-        legacy = extra_users["senior_engineer_no_office"]
-
-        options = client_db.get(
-            f"/assessments/{aid}/senior-engineer-options",
-            headers=_auth(tokens["officechief"]),
-        )
-        assert options.status_code == 200, options.text
-        option_ids = {int(item["id"]) for item in options.json()["items"]}
-        assert legacy["id"] in option_ids
-        assert extra_users["senior_engineer_other_office"]["id"] not in option_ids
-
-        routed = client_db.post(
-            f"/assessments/{aid}/assign-senior-engineer",
-            json={"senior_engineer_user_id": legacy["id"]},
-            headers=_auth(tokens["officechief"]),
-        )
-        assert routed.status_code == 200, routed.text
-        assert routed.json()["assessment"]["assigned_engineer_user_id"] == legacy["id"]
+        branch = client_db.get(f"/assessments/{aid}/branch-options", headers=_auth(tokens["officechief"]))
+        assert branch.status_code == 200, branch.text
+        branch_ids = {int(item["id"]) for item in branch.json()["items"]}
+        assert extra_users["branchchief2"]["id"] in branch_ids
+        assert extra_users["branchchief_other_office"]["id"] not in branch_ids
+        senior = client_db.get(f"/assessments/{aid}/senior-engineer-options", headers=_auth(tokens["officechief"]))
+        assert senior.status_code == 200, senior.text
+        senior_ids = {int(item["id"]) for item in senior.json()["items"]}
+        assert ids["senior_engineer"] in senior_ids
+        assert extra_users["senior_engineer_other_office"]["id"] not in senior_ids
 
     def test_assign_senior_engineer_after_the_branch_route_is_409(self, client_db, tokens, ids):
         case = _branch_routed(client_db, tokens, ids)
@@ -683,7 +594,8 @@ class TestRedelegationFromSubmitted:
         aid = case["assessment_id"]
         assigned = client_db.post(
             f"/assessments/{aid}/assign-engineer",
-            json={"engineer_user_id": ids["engineer"]},
+            # The engineer sits in Branch A, not this chief's branch: say why.
+            json={"engineer_user_id": ids["engineer"], "notes": "Branch A has the site history"},
             headers=_auth(first["token"]),
         )
         assert assigned.status_code == 200, assigned.text
@@ -693,7 +605,11 @@ class TestRedelegationFromSubmitted:
         before = _assessment_row(aid)
         assert before["state"] == "SUBMITTED"
 
-        # The chief leaves.
+        # The chief leaves: a branch always has a chief, so somebody takes the
+        # branch over first (the first chief stays there as staff), then they go.
+        refused = client_db.patch(f"/admin/users/{first['id']}", headers=admin_headers, json={"is_active": False})
+        assert refused.status_code == 409, refused.text
+        successor = extra_users["_placed"].make("BRANCH_CHIEF", "successor", branch_id=first["branch_id"])
         deactivated = client_db.patch(
             f"/admin/users/{first['id']}", headers=admin_headers, json={"is_active": False}
         )
@@ -730,6 +646,10 @@ class TestRedelegationFromSubmitted:
         )
         assert old.status_code == 403, old.text
 
+        # Back in charge of their branch for the tests that follow.
+        client_db.post(f"/org/branches/{first['branch_id']}/chief", json={"user_id": first["id"]}, headers=admin_headers)
+        assert successor
+
         # The new chief holds the pending decision, which is the point.
         new = client_db.post(
             f"/assessments/{aid}/review",
@@ -749,6 +669,11 @@ class TestRedelegationFromSubmitted:
             f"/admin/users/{extra_users['branchchief2']['id']}",
             headers=_auth(tokens["admin"]),
             json={"is_active": True},
+        )
+        client_db.post(
+            f"/org/branches/{extra_users['branchchief2']['branch_id']}/chief",
+            json={"user_id": extra_users["branchchief2"]["id"]},
+            headers=_auth(tokens["admin"]),
         )
         case = _branch_routed(client_db, tokens, ids)
         aid = case["assessment_id"]

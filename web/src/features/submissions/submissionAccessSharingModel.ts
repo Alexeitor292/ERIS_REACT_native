@@ -6,12 +6,12 @@ export function shareUserLabel(user: { full_name: string; email: string }) {
   return name || email || "Unnamed user";
 }
 
-export function filterShareCandidates(
-  availableUsers: SubmissionPermissionUser[],
+export function filterShareCandidates<T extends SubmissionPermissionUser>(
+  availableUsers: T[],
   query: string,
-  sharedWith: SubmissionPermissionGrant[],
+  sharedWith: Pick<SubmissionPermissionGrant, "user_id">[],
   limit = 25,
-) {
+): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
 
@@ -28,4 +28,37 @@ export function filterShareCandidates(
       return aName.localeCompare(bName) || a.email.localeCompare(b.email) || a.id - b.id;
     })
     .slice(0, Math.max(1, limit));
+}
+
+type ShareRouteLike = { immediate: boolean; approvals: readonly string[]; notices: readonly string[] };
+
+function joined(items: readonly string[]) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+const chiefsOf = (units: readonly string[]) => `the ${units.length === 1 ? "chief" : "chiefs"} of ${joined(units)}`;
+
+/** What sharing with someone would take, in one line: "Shared at once · the chief of West is told". */
+export function shareRouteSummary(route: ShareRouteLike): string {
+  const first = route.immediate ? "Shared at once" : `Needs approval from ${chiefsOf(route.approvals)}`;
+  return route.notices.length ? `${first} · ${chiefsOf(route.notices)} ${route.notices.length === 1 ? "is" : "are"} told` : first;
+}
+
+export const SHARE_STATUS_LABELS: Record<string, string> = {
+  PENDING: "Waiting for approval",
+  ACTIVE: "Can view and edit",
+  REJECTED: "Rejected",
+  REVOKED: "Stopped",
+  CANCELLED: "Withdrawn",
+};
+
+type ShareReviewLike = { unit_label: string; kind: string; decision: string; decided_by: string | null };
+
+/** Where one branch or office stands on a share: "West › Branch A — approved by Maria". */
+export function shareReviewLine(review: ShareReviewLike): string {
+  const by = review.decided_by ? ` by ${review.decided_by}` : "";
+  if (review.decision === "REJECTED") return `${review.unit_label} — ${review.kind === "APPROVAL" ? "rejected" : "stopped"}${by}`;
+  if (review.kind === "APPROVAL") return `${review.unit_label} — ${review.decision === "APPROVED" ? `approved${by}` : "waiting for approval"}`;
+  return `${review.unit_label} — ${review.decision === "ACKNOWLEDGED" ? `told, seen${by}` : "told"}`;
 }

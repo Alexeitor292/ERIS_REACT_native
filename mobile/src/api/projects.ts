@@ -1,7 +1,7 @@
 import { apiFetch } from "./client";
 
 // Compatibility exports keep existing mobile imports stable while the domain and
-// wire contract are Event Group based. These Project-prefixed aliases can be
+// wire contract are Incident Group based. These Project-prefixed aliases can be
 // removed after the Incident screen has completed its component rename.
 export type ProjectIncidentSummary = {
   id: number;

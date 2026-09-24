@@ -1,14 +1,14 @@
 """Only a report sent for assessment enters the incident record.
 
 The owner's rule. A field report gets its permanent ERIS number and joins an
-Event Group — the real-world site GeoTech work is tracked against, and what the
-Event Groups page and the Mission Center show — only when the Maintenance
+Incident Group — the real-world site GeoTech work is tracked against, and what the
+Incident Groups page and the Mission Center show — only when the Maintenance
 Coordinator decides it needs an assessment:
 
-  * "Assessment required" names the Event Group in the triage request itself,
+  * "Assessment required" names the Incident Group in the triage request itself,
     and the group and the decision commit together or not at all;
   * "No assessment required" and "Duplicate or linked" close the report at
-    triage. It is kept, but with no ERIS number and no Event Group — even one
+    triage. It is kept, but with no ERIS number and no Incident Group — even one
     the old triage flow picked beforehand;
   * "Needs more from the reporter" keeps it a temporary field report, outside
     any group, until the coordinator decides;
@@ -108,7 +108,7 @@ def _pregroup_the_old_way(incident_id: int, group_id: int) -> None:
 
 
 def _new_group_holding(incident_id: int) -> int:
-    """A fresh open Event Group containing only this (unaccepted) report."""
+    """A fresh open Incident Group containing only this (unaccepted) report."""
     from app.db import engine
     from app.routes import event_groups
 
@@ -237,7 +237,7 @@ class TestNothingGroupsAReportBeforeItIsAccepted:
             headers=_auth(coordinator_token),
         )
         assert resp.status_code == 409, resp.text
-        assert resp.json()["detail"] == "A report joins an Event Group when the coordinator sends it for assessment"
+        assert resp.json()["detail"] == "A report joins an Incident Group when the coordinator sends it for assessment"
         assert _incident(client_db, coordinator_token, incident_id)["event_group_id"] is None
 
 
@@ -246,7 +246,7 @@ class TestAssessmentRequiredNamesItsEventGroup:
         incident_id = new_report("No group chosen")
         resp = _triage(client_db, coordinator_token, incident_id, {"disposition": "ASSESSMENT_REQUIRED"})
         assert resp.status_code == 409, resp.text
-        assert resp.json()["detail"] == "Choose the Event Group this report belongs to before sending it for assessment"
+        assert resp.json()["detail"] == "Choose the Incident Group this report belongs to before sending it for assessment"
         assert _incident(client_db, coordinator_token, incident_id)["current_stage"] == "COORDINATOR_REVIEW"
 
     def test_a_new_group_and_the_decision_are_saved_together(self, client_db, coordinator_token, new_report):

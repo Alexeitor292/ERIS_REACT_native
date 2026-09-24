@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Crown, Leaf, MoreHorizontal, Pencil, Plus, TriangleAlert, Users } from "lucide-react";
 
+
 import { POSITION_LABEL, type OfficeTree, type TreeBranch, type TreePerson, type TreePosition } from "../../../api/orgTree";
 
 export type AddKind = "chief" | "specialist" | "branchChief" | "staff";
@@ -74,7 +75,9 @@ export default function OfficeTreeView({
     const el = scrollRef.current;
     if (el && el.scrollWidth > el.clientWidth) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
   }, [office.id]);
-  const manage = tree.can_manage;
+  // An office holds nobody until it has an office chief (it cannot exist without one).
+  const open = tree.chiefs.length > 0;
+  const manage = tree.can_manage && open;
   const showSpecialists = tree.specialists.length > 0 || manage;
 
   const personActions = (person: TreePerson, removable: boolean) => ({
@@ -116,7 +119,8 @@ export default function OfficeTreeView({
           {/* The top of the tree */}
           <div className="flex flex-wrap items-start justify-center gap-3">
             {tree.chiefs.map((chief) => (
-              <PersonCard key={chief.id} person={chief} tone={TONE.OFFICE_CHIEF} icon={<Crown size={12} />} {...personActions(chief, isAdmin)} wide />
+              // The last office chief stays until another is named.
+              <PersonCard key={chief.id} person={chief} tone={TONE.OFFICE_CHIEF} icon={<Crown size={12} />} {...personActions(chief, isAdmin && tree.chiefs.length > 1)} wide />
             ))}
             {!tree.chiefs.length ? (
               tree.can_name_chiefs ? (
@@ -128,6 +132,13 @@ export default function OfficeTreeView({
               <AddButton label="" round title="Add another office chief" onClick={() => onAdd({ kind: "chief", officeId: office.id, title: `Another office chief for ${officeName}`, target: `Office Chief of ${officeName}`, branchChiefOnly: false })} />
             ) : null}
           </div>
+
+          {!open ? (
+            <p className="mt-3 flex max-w-md items-start gap-1.5 rounded-md border border-[color:color-mix(in_oklab,var(--warn)_50%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn)_8%,var(--panel))] px-3 py-2 text-xs text-[var(--warn-text)]">
+              <TriangleAlert size={13} className="mt-0.5 shrink-0" aria-hidden />
+              <span>This office has no office chief yet, and an office cannot run without one. {tree.can_name_chiefs ? "Name its chief above; then its specialists and branches can be added." : "An administrator names its chief."}</span>
+            </p>
+          ) : null}
 
           <div className="org-stem" />
           <div className="org-children">
@@ -155,6 +166,7 @@ export default function OfficeTreeView({
                   officeName={officeName}
                   officeId={office.id}
                   manageOffice={manage}
+                  officeOpen={open}
                   onAdd={onAdd}
                   personActions={personActions}
                   onEdit={() => onEditBranch(branch)}
@@ -162,17 +174,6 @@ export default function OfficeTreeView({
                 />
               </div>
             ))}
-
-            {tree.unbranched.length ? (
-              <div className="org-node">
-                <Column title="Not in a branch" icon={<TriangleAlert size={13} />} warn>
-                  <p className="max-w-[13rem] text-[11px] text-[var(--warn-text)]">Their branch is missing or retired. Add them to a branch with its + button.</p>
-                  {tree.unbranched.map((person) => (
-                    <PersonCard key={person.id} person={person} tone={TONE[person.position ?? "STAFF"]} {...personActions(person, manage)} />
-                  ))}
-                </Column>
-              </div>
-            ) : null}
 
             {manage ? (
               <div className="org-node">
@@ -193,6 +194,7 @@ function BranchColumn({
   officeName,
   officeId,
   manageOffice,
+  officeOpen,
   onAdd,
   personActions,
   onEdit,
@@ -202,6 +204,7 @@ function BranchColumn({
   officeName: string;
   officeId: number;
   manageOffice: boolean;
+  officeOpen: boolean;
   onAdd: (request: AddRequest) => void;
   personActions: (person: TreePerson, removable: boolean) => { onDetails?: () => void; onRemove?: () => void };
   onEdit: () => void;
@@ -234,20 +237,26 @@ function BranchColumn({
       </div>
 
       {branch.chief ? (
-        <PersonCard person={branch.chief} tone={TONE.BRANCH_CHIEF} icon={<Crown size={12} />} {...personActions(branch.chief, manageOffice)}
+        // A branch always has its chief: replace them, never just remove them.
+        <PersonCard person={branch.chief} tone={TONE.BRANCH_CHIEF} icon={<Crown size={12} />} {...personActions(branch.chief, false)}
           extra={manageOffice ? { label: "Replace chief", onClick: () => onAdd({ kind: "branchChief", officeId, branchId: branch.id, title: `New chief for ${title}`, target: `Branch Chief of ${title}`, branchChiefOnly: false }) } : undefined}
         />
-      ) : manageOffice ? (
-        <AddButton label="Branch Chief" onClick={() => onAdd({ kind: "branchChief", officeId, branchId: branch.id, title: `Chief of ${title}`, target: `Branch Chief of ${title}`, branchChiefOnly: false })} />
       ) : (
-        <EmptySlot label="No branch chief" />
+        <>
+          <p className="mb-1.5 rounded-md border border-[color:color-mix(in_oklab,var(--warn)_50%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn)_8%,var(--panel))] px-2 py-1.5 text-[11px] text-[var(--warn-text)]">
+            No chief yet. A branch holds nobody until its chief is named.
+          </p>
+          {manageOffice && officeOpen ? (
+            <AddButton label="Branch Chief" onClick={() => onAdd({ kind: "branchChief", officeId, branchId: branch.id, title: `Chief of ${title}`, target: `Branch Chief of ${title}`, branchChiefOnly: false })} />
+          ) : null}
+        </>
       )}
 
       <div className="org-rail mt-2 space-y-1.5">
         {branch.staff.map((person) => (
           <PersonCard key={person.id} person={person} tone={TONE.STAFF} compact {...personActions(person, branch.can_manage)} />
         ))}
-        {branch.can_manage ? (
+        {branch.can_manage && branch.chief ? (
           <AddButton
             label="Staff"
             compact

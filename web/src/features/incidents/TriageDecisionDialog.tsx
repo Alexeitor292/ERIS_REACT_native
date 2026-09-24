@@ -32,7 +32,7 @@ const optionClass = (active: boolean) =>
  *
  * The four outcomes are shown at once and none is preselected. Only
  * "Assessment required" asks where the report belongs: choosing it widens the
- * window to the side and slides the Event Group picker in beside the decision;
+ * window to the side and slides the Incident Group picker in beside the decision;
  * choosing anything else never shows it, and switching away closes it again.
  * The group is saved by the triage request itself, so nothing is written until
  * the coordinator confirms.
@@ -143,7 +143,7 @@ export default function TriageDecisionDialog({
           <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Step 2 of 2 · Decide what happens</div>
           <h2 id="triage-decision-title" className="mt-0.5 truncate text-base font-semibold">{incident?.title || `Field report #${incidentId}`}</h2>
           <p id="triage-decision-description" className="mt-1 text-[13px] text-muted">
-            Field report #{incidentId}. Choose what happens to it — ERIS asks for an Event Group only when it needs an assessment.
+            Field report #{incidentId}. Choose what happens to it — ERIS asks for an Incident Group only when it needs an assessment.
           </p>
         </div>
         <button type="button" onClick={onClose} disabled={busy} aria-label="Close dialog" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-sm font-semibold hover:bg-[var(--panel-soft)] disabled:opacity-50">×</button>
@@ -179,7 +179,7 @@ export default function TriageDecisionDialog({
           {draft.disposition === "ASSESSMENT_REQUIRED" ? (
             <div className="rounded-md border border-[color:color-mix(in_oklab,var(--brand)_40%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_6%,var(--panel))] px-3 py-2 text-[13px]">
               {routing?.office_name ? <>The office chief of <b>{routing.office_name}</b> routes the assessment next. </> : null}
-              Choose the Event Group it belongs to <span className="hidden md:inline">on the right</span><span className="md:hidden">below</span>.
+              Choose the Incident Group it belongs to <span className="hidden md:inline">on the right</span><span className="md:hidden">below</span>.
             </div>
           ) : null}
 
@@ -263,7 +263,7 @@ export default function TriageDecisionDialog({
         </div>
 
         <section
-          aria-label="Event Group"
+          aria-label="Incident Group"
           aria-hidden={!expanded}
           inert={!expanded}
           className={[

@@ -61,20 +61,20 @@ BEGIN
       FROM (
         SELECT 'WEST' AS code, '59-315' AS unit_number,
                'Office of Geotechnical Design West' AS name,
-               'West GeoTech Office' AS short_name,
+               'OGDW' AS short_name,
                'Oakland' AS home_city, '04' AS home_district,
                NULL AS home_location_label, 1 AS is_routing_target, 10 AS sort_order
         UNION ALL SELECT 'NORTH', '59-323', 'Office of Geotechnical Design North',
-               'North GeoTech Office', 'Sacramento', NULL, 'Translab', 1, 20
+               'OGDN', 'Sacramento', NULL, 'Translab', 1, 20
         UNION ALL SELECT 'SOUTH', '59-324', 'Office of Geotechnical Design South',
-               'South GeoTech Office', 'Los Angeles', '07', NULL, 1, 30
+               'OGDS', 'Los Angeles', '07', NULL, 1, 30
         -- POLICY is shaped inversely to the three design offices and SUPPORT has
         -- no chart at all, so neither is offered for a district incident.
         UNION ALL SELECT 'POLICY', '59-325',
                'Office of Geotechnical Design Policies & Practices',
-               NULL, 'Sacramento', NULL, 'Translab', 0, 40
+               'OGDPP', 'Sacramento', NULL, 'Translab', 0, 40
         UNION ALL SELECT 'SUPPORT', '59-316', 'Office of Geotechnical Support',
-               NULL, 'Sacramento', NULL, 'Translab', 0, 50
+               'OGS', 'Sacramento', NULL, 'Translab', 0, 50
       ) s
       LEFT JOIN org_offices o ON o.org_type = 'GEOTECH' AND o.code = s.code
      WHERE o.id IS NULL;

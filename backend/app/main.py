@@ -39,6 +39,8 @@ from .routes.org import router as org_router
 from .routes.org_tree import router as org_tree_router
 from .routes.user_layouts import router as user_layouts_router
 from .routes.site_history import router as site_history_router
+from .routes.sharing import router as sharing_router
+from .routes.notifications import router as notifications_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
 from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
@@ -55,7 +57,6 @@ from .schemas.common import (
     ReplaceActions,
     ReplaceIncidentTypes,
     ReviewAction,
-    ShareRequest,
     SubmissionCreate,
     SubmissionPermissionsReplace,
     SubmissionTitlePatch,
@@ -65,6 +66,7 @@ from .schemas.common import (
 )
 from .services import elevation_profile as elevation_profile_svc
 from .services import notifications as notifications_svc
+from .services import push as push_svc
 from .services import offline_scene as offline_scene_svc
 from .services import offline_scene_jobs as offline_scene_jobs_svc
 from .services.offline_scene_catalog import register_ready_package, PackageRegistrationError
@@ -97,6 +99,8 @@ async def lifespan(_app: FastAPI):
     # dead relay or a backlog cannot hold up boot; with SMTP_HOST unset it is a
     # no-op. The cron half is `python -m app.tools.flush_email_outbox`.
     notifications_svc.sweep_startup()
+    # Phone alerts for the notification feed; a no-op unless EXPO_PUSH_ENABLED.
+    push_svc.start()
     yield
 
 
@@ -120,6 +124,8 @@ app.include_router(org_router)
 app.include_router(org_tree_router)
 app.include_router(user_layouts_router)
 app.include_router(site_history_router)
+app.include_router(sharing_router)
+app.include_router(notifications_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -2255,7 +2261,7 @@ def get_submission(
     photo_items = [dict(a) for a in attachments if str(a["kind"]).upper() == "PHOTO"]
 
     # Workflow context: the incident this technical form belongs to, its
-    # assessment, and the incident's Event Group — so the web detail view can
+    # assessment, and the incident's Incident Group — so the web detail view can
     # cross-link without extra round trips. A submission is attached either as
     # the incident's primary link or as a supplemental assessment submission.
     context_row = db.execute(text("""
@@ -3278,53 +3284,8 @@ def replace_actions(
 # Admin: share visibility
 # ----------------------------
 
-@app.post("/submissions/{submission_id}/share")
-def share_submission(
-    submission_id: int = Path(..., ge=1),
-    payload: ShareRequest = ...,
-    db: Session = Depends(get_db),
-    user=Depends(require_roles(GISA_AUTHOR_ROLES))
-):
-    require_can_manage_submission_permissions(submission_id, db, user)
-    exists = db.execute(text("SELECT 1 FROM submissions WHERE id=:sid"), {"sid": submission_id}).scalar()
-    if not exists:
-        raise HTTPException(status_code=404, detail="Submission not found")
-
-    target = db.execute(text("SELECT 1 FROM users WHERE id=:uid"), {"uid": payload.user_id}).scalar()
-    if not target:
-        raise HTTPException(status_code=404, detail="Target user not found")
-
-    try:
-        db.execute(text("""
-            INSERT INTO submission_visibility (submission_id, user_id, granted_by_user_id)
-            VALUES (:sid, :uid, :admin_id)
-            ON DUPLICATE KEY UPDATE granted_by_user_id = VALUES(granted_by_user_id)
-        """), {"sid": submission_id, "uid": payload.user_id, "admin_id": user["id"]})
-        db.commit()
-        return {"submission_id": submission_id, "shared_with_user_id": payload.user_id}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.delete("/submissions/{submission_id}/share/{user_id}")
-def unshare_submission(
-    submission_id: int = Path(..., ge=1),
-    user_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    user=Depends(require_roles(GISA_AUTHOR_ROLES))
-):
-    require_can_manage_submission_permissions(submission_id, db, user)
-    try:
-        db.execute(text("""
-            DELETE FROM submission_visibility
-            WHERE submission_id = :sid AND user_id = :uid
-        """), {"sid": submission_id, "uid": user_id})
-        db.commit()
-        return {"submission_id": submission_id, "unshared_user_id": user_id}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+# POST /submissions/{id}/share and DELETE /submissions/{id}/share/{user_id} live in
+# routes/sharing.py: a share now goes through the branch and office chiefs.
 
 
 @app.get("/submissions/{submission_id}/shared-with")
@@ -3438,23 +3399,30 @@ def replace_submission_permissions(
         if missing:
             raise HTTPException(status_code=400, detail=f"Unknown or inactive user ids: {missing}")
 
+    # A share is viewing and editing, and goes through the branch and office
+    # chiefs (services/sharing.py): newcomers are asked for, and people left out
+    # are withdrawn. Someone waiting on an approval is not a reader yet.
+    from .services import sharing
+
+    wanted = set(target_ids)
+    current = {
+        int(uid)
+        for (uid,) in db.execute(text("""
+            SELECT user_id FROM submission_visibility WHERE submission_id = :sid
+            UNION SELECT user_id FROM submission_editors WHERE submission_id = :sid
+            UNION SELECT recipient_user_id FROM submission_shares
+             WHERE submission_id = :sid AND status IN ('PENDING', 'ACTIVE')
+        """), {"sid": submission_id}).all()
+    }
     try:
-        db.execute(text("DELETE FROM submission_visibility WHERE submission_id = :sid"), {"sid": submission_id})
-        db.execute(text("DELETE FROM submission_editors WHERE submission_id = :sid"), {"sid": submission_id})
-
-        for uid in reader_ids:
-            db.execute(text("""
-                INSERT INTO submission_visibility (submission_id, user_id, granted_by_user_id)
-                VALUES (:sid, :uid, :granted_by)
-            """), {"sid": submission_id, "uid": uid, "granted_by": user["id"]})
-
-        for uid in editor_ids:
-            db.execute(text("""
-                INSERT INTO submission_editors (submission_id, user_id, granted_by_user_id)
-                VALUES (:sid, :uid, :granted_by)
-            """), {"sid": submission_id, "uid": uid, "granted_by": user["id"]})
-
+        for uid in sorted(current - wanted):
+            sharing.withdraw(db, submission_id=submission_id, recipient_id=uid, actor=user)
+        for uid in sorted(wanted - current):
+            sharing.create(db, submission_id=submission_id, owner_id=int(owner_id), actor=user, recipient_id=uid)
         db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))

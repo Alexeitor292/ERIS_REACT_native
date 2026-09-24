@@ -32,6 +32,7 @@ from ..roles import (
     is_public_only,
 )
 from ..services import org_directory
+from ..services.incident_name import incident_name
 from ..services import public_visibility
 from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
 from ..schemas.common import (
@@ -154,6 +155,10 @@ def _queue_incident_notifications(
             )
             if result.lastrowid:
                 inserted.append(int(result.lastrowid))
+    # The same event, in each recipient's notification feed (web bell, mobile app).
+    from ..services import notification_feed
+
+    notification_feed.for_incident_event(db, incident_id=incident_id, user_ids=unique_ids, template_code=template_code, payload=payload)
     return inserted
 
 
@@ -953,12 +958,43 @@ def _caller_office_code(user: dict, db: Session | None) -> str | None:
     return normalize_office_code((user.get("metadata") or {}).get("office_code"))
 
 
+def _caller_districts(user: dict, db: Session | None) -> set[str]:
+    """Every district this person covers: the districts whose coordinator list
+    they are on (Organization > Maintenance), and their home district. One rule
+    for the triage queue, the mobile list and the access check, so a report a
+    coordinator is shown is always one they may open."""
+    districts: set[str] = set()
+    home = _caller_district(user, db)
+    if home:
+        districts.add(home)
+    if db is not None and user.get("id") is not None:
+        covered = db.execute(
+            text("SELECT district FROM org_coordinator_coverage WHERE user_id = :uid AND is_active = 1"),
+            {"uid": int(user["id"])},
+        ).scalars().all()
+        districts |= {d for d in (_normalized_district_code(value) for value in covered) if d}
+    return districts
+
+
+def _district_filter(column: str, districts: set[str], params: dict, prefix: str) -> str:
+    """SQL matching any of `districts` in the stored forms ('04', '4', 'District 04')."""
+    parts = []
+    for index, district in enumerate(sorted(districts)):
+        key = f"{prefix}{index}"
+        params[key] = district
+        params[f"{key}p"] = district.lstrip("0") or district
+        parts.append(
+            f"{column} = :{key} OR {column} = :{key}p OR "
+            f"{column} = CONCAT('District ', :{key}) OR {column} = CONCAT('District ', :{key}p)"
+        )
+    return "(" + " OR ".join(parts) + ")" if parts else "1=0"
+
+
 def _ensure_incident_district_access(user: dict, district: str | None, *, db: Session | None = None) -> None:
     if "ADMIN" in set(user.get("roles") or []):
         return
-    user_district = _caller_district(user, db)
     incident_district = _normalized_district_code(district)
-    if not user_district or user_district != incident_district:
+    if not incident_district or incident_district not in _caller_districts(user, db):
         raise HTTPException(status_code=403, detail="Incident is outside your assigned district")
 
 
@@ -1197,17 +1233,12 @@ def _mobile_scope_filters(db: Session, user: dict) -> tuple[list[str], dict[str,
     org = org_directory.resolve_user_org(db, user)
 
     if has_role(user, MAINTENANCE_COORDINATOR):
-        district_code = _normalized_district_code(org.get("home_district"))
-        if district_code:
-            params["coord_district"] = district_code
-            params["coord_district_plain"] = district_code.lstrip("0") or district_code
+        districts = _caller_districts(user, db)
+        if districts:
             role_filters.append(
-                "(i.current_stage = 'COORDINATOR_REVIEW' AND ("
-                "i.district = :coord_district OR "
-                "i.district = :coord_district_plain OR "
-                "i.district = CONCAT('District ', :coord_district) OR "
-                "i.district = CONCAT('District ', :coord_district_plain)"
-                "))"
+                "(i.current_stage = 'COORDINATOR_REVIEW' AND "
+                + _district_filter("i.district", districts, params, "coord_district_")
+                + ")"
             )
 
     if has_role(user, OFFICE_CHIEF):
@@ -1638,11 +1669,12 @@ def create_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
-    title = (payload.title or "").strip() or None
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
     route = normalize_route(payload.route)
     post_mile = normalize_post_mile(payload.post_mile)
+    # Named by where and when, not by a typed title (any title sent is ignored).
+    title = incident_name(district=district, county=county, route=route, post_mile=post_mile, observed_at=payload.first_observed_at)
     latitude = round_coordinate(payload.latitude)
     longitude = round_coordinate(payload.longitude)
     if not (district and county and route and post_mile):
@@ -2044,7 +2076,7 @@ def maintenance_resubmit_incident(
             ),
             {
                 "iid": incident_id,
-                "title": (payload.title or "").strip() or None,
+                "title": incident_name(district=district, county=county, route=route, post_mile=post_mile, observed_at=payload.first_observed_at),
                 "incident_type": (payload.incident_type or "").strip() or None,
                 "description": (payload.description or "").strip() or None,
                 "lat": latitude,
@@ -2073,6 +2105,7 @@ def list_incidents(
     status: str | None = Query(default=None),
     unclaimed_only: bool = Query(default=False),
     scope: str | None = Query(default=None),
+    queue: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
     # This list enumerates role names instead of consulting OPERATIONAL_ROLES,
@@ -2107,6 +2140,19 @@ def list_incidents(
     if is_maintenance_only(user):
         where_parts.append("i.reporter_user_id = :self_uid")
         params["self_uid"] = int(user["id"])
+    # queue=triage is a WORK queue, not the broad list: reports waiting for a
+    # coordinator in the districts the caller covers. Anyone who is not a
+    # coordinator (or an administrator) has nothing to triage.
+    work_queue = (queue or "").strip().lower()
+    if work_queue == "triage":
+        where_parts.append("i.current_stage = 'COORDINATOR_REVIEW' AND i.status <> 'RESOLVED'")
+        if "ADMIN" not in set(user.get("roles") or []):
+            if has_role(user, MAINTENANCE_COORDINATOR):
+                where_parts.append(_district_filter("i.district", _caller_districts(user, db), params, "triage_district_"))
+            else:
+                where_parts.append("1=0")
+    elif work_queue:
+        raise HTTPException(status_code=400, detail="Invalid queue filter")
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = db.execute(
         text(

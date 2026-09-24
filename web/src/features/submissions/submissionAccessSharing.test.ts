@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filterShareCandidates, shareUserLabel } from "./submissionAccessSharingModel.ts";
+import { filterShareCandidates, shareReviewLine, shareRouteSummary, shareUserLabel } from "./submissionAccessSharingModel.ts";
 
 const available = [
   { id: 4, full_name: "Zoe Field", email: "zoe@example.test" },
@@ -38,4 +38,24 @@ test("sharing search is deterministic and respects the display limit", () => {
 
 test("sharing labels fall back to email when a name is blank", () => {
   assert.equal(shareUserLabel({ full_name: "", email: "person@example.test" }), "person@example.test");
+});
+
+test("what sharing would take reads as one line", () => {
+  assert.equal(shareRouteSummary({ immediate: true, approvals: [], notices: [] }), "Shared at once");
+  assert.equal(shareRouteSummary({ immediate: true, approvals: [], notices: ["West › Branch A"] }), "Shared at once · the chief of West › Branch A is told");
+  assert.equal(
+    shareRouteSummary({ immediate: false, approvals: ["West › Branch A", "North › Branch C"], notices: ["West", "North"] }),
+    "Needs approval from the chiefs of West › Branch A and North › Branch C · the chiefs of West and North are told",
+  );
+});
+
+test("each branch or office on a share says where it stands", () => {
+  const review = { unit_label: "West › Branch A", kind: "APPROVAL", decision: "PENDING", decided_by: null };
+  assert.equal(shareReviewLine(review), "West › Branch A — waiting for approval");
+  assert.equal(shareReviewLine({ ...review, decision: "APPROVED", decided_by: "Maria" }), "West › Branch A — approved by Maria");
+  assert.equal(shareReviewLine({ ...review, decision: "REJECTED", decided_by: "Maria" }), "West › Branch A — rejected by Maria");
+  const notice = { unit_label: "West", kind: "NOTICE", decision: "PENDING", decided_by: null };
+  assert.equal(shareReviewLine(notice), "West — told");
+  assert.equal(shareReviewLine({ ...notice, decision: "ACKNOWLEDGED", decided_by: "John" }), "West — told, seen by John");
+  assert.equal(shareReviewLine({ ...notice, decision: "REJECTED", decided_by: "John" }), "West — stopped by John");
 });

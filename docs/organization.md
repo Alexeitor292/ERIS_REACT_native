@@ -23,7 +23,7 @@ and how routing uses this data in [workflows.md](workflows.md).
 
 Two names per office, used deliberately: the **full name** ("Office of
 Geotechnical Design West") appears on record headers and the routing snapshot;
-the **short name** ("West GeoTech Office") appears in flow copy, banners, the
+the **short name**, the office's abbreviation ("OGDW"), appears in flow copy, banners, the
 office selector and receipts. Fill both in.
 
 ## Where roles come from
@@ -38,11 +38,26 @@ office selector and receipts. Fill both in.
 | On a district's crew list | Maintenance Crew |
 | Nowhere | Guest (read-only) |
 
+**No role is ever held without the place that gives it.** Somebody placed
+nowhere is a Guest, whatever they held before (`20260930_roles_from_org`), until
+an administrator, their office chief (in their office) or their branch chief (in
+their branch) places them.
+
 **Administrator** is the one role granted directly, on **Administration › Users**
-(the switch in each row), and it is kept whatever else the person is. An
-administrator placed nowhere is simply an administrator, not a guest. The Users
-page otherwise only creates accounts, resets passwords and enables or disables
-access; a new account is a Guest until somebody places it.
+(the switch in each row), and only by another administrator. It needs no place:
+an administrator may sit in no tree at all (IT, for instance), or be anybody in
+one, such as a branch chief who is also an administrator, and keeps both. Not
+every chief is an administrator. The Users page otherwise only creates accounts,
+resets passwords and enables or disables access; a new account is a Guest until
+somebody places it.
+
+**Every branch has a chief and every office an office chief.** A branch is
+created with its chief, and an office with its office chief. A chief can be
+replaced (the previous branch chief stays in the branch as staff) but never
+simply removed, deactivated or moved away, and an office keeps at least one
+office chief. Retiring a branch is the way to close it; its chief leaves with it.
+The offices and branches seeded on a fresh install have no chief yet: they hold
+nobody until theirs is named, and the page says so.
 
 A person sits in at most one place across the office trees (they may also be on
 district lists). Adding somebody who already sits elsewhere **moves** them, after
@@ -73,7 +88,7 @@ unit number, home city and district, and the districts it serves.
 **The code is set once and can never be changed.** Assessments and incidents are
 joined to an office by that code, so changing it would orphan every record the
 office already holds. Everything else is editable at any time with *Edit office*.
-Then name its chief with the + at the top of its tree.
+The office is created with its office chief, chosen in the same dialog.
 
 A unit that must never receive incidents is not a **routing target** — ERIS seeds
 Geotechnical Design Policies & Practices and Geotechnical Support that way. District
@@ -89,16 +104,17 @@ routing without anybody noticing. Turn it off in the current office first.
 
 ### Build a branch
 
-*+ Branch* in the office's tree: a letter (optional — two active branches in one
-office cannot share one), a name (blank with a letter reads "Branch C"), a home
-city and district. Then *+ Branch Chief* under it and *+ Staff* on its rail.
+*+ Branch* in the office's tree: its chief (required), a letter (optional — two
+active branches in one office cannot share one), a name (blank with a letter
+reads "Branch C"), a home city and district. Then *+ Staff* on its rail.
 
-Naming a new chief on a branch that has one keeps the previous chief **in the
-branch, as staff** — take them out afterwards if that is wrong.
+*Replace chief* on the chief's card names a new one; the previous chief stays
+**in the branch, as staff** — take them out afterwards if that is wrong.
 
-**Retire, never delete.** A branch with anybody in it cannot be retired: move or
-remove them first. Retiring stops it being offered as a destination and leaves
-every assessment already routed to it untouched, chief and all.
+**Retire, never delete.** A branch with staff in it cannot be retired: move or
+remove them first. Retiring takes its chief out with it (a guest until placed
+again), stops it being offered as a destination, and leaves every assessment
+already routed to it untouched.
 
 ### Keep the maintenance lists
 
@@ -122,17 +138,10 @@ acting assignments.
 
 ### People not yet placed
 
-The trees arrived after people already held roles. The migration
-(`20260926_org_tree`) placed everyone it could: GeoTech role holders into their
-office's tree (from their profile, else the office code on the account), branch
-chiefs at the branch that names them, coordinators and crew at their home
-district. Anybody it could not place — no office or district known — **keeps
-their role** and is listed at the top of the page ("N people hold a GeoTech role
-but sit in no tree"; "Not on any district list yet"). Place them with a +; the
-first change to them otherwise makes their role match where they sit.
-
-Staff or branch chiefs whose branch was retired or never recorded appear in a
-**Not in a branch** column of their office's tree until they are added to one.
+The trees arrived after people already held roles. `20260926_org_tree` placed
+everyone it could; `20260930_roles_from_org` then made every account's roles
+exactly what its place gives (plus Administrator). Anybody still placed nowhere
+is a Guest: find them with the + on the tree and place them.
 
 ---
 
@@ -172,7 +181,7 @@ an account that sits in no office tree and on no district list is a guest.
   history — **statewide**, and nothing else. Anything in flight is invisible:
   the record answers *not found*, so ids cannot be probed.
 - Their web navigation is **Incidents, Assessments and Settings**, landing on
-  Incidents. No My Work, no Mission Center, no Event Groups, no Terrain, no
+  Incidents. No My Work, no Mission Center, no Incident Groups, no Terrain, no
   administration, and no "Report an incident".
 - There is no mobile guest surface. A guest who signs in to ERIS Mobile is told
   the app is for field and office staff and to use ERIS on the web.

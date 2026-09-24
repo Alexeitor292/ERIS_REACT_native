@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 pytestmark = pytest.mark.db
 
-# A report enters an Event Group (the legacy "Project") only when the
+# A report enters an Incident Group (the legacy "Project") only when the
 # coordinator sends it for assessment, so every report here is grouped by that
 # triage decision. The header keeps the DB test client from grouping it first.
 UNGROUPED = {"X-ERIS-Test-Preserve-Projectless": "1"}
@@ -88,7 +88,7 @@ def test_project_close_reopen_and_active_incident_gate(client_db, admin_token) -
     second_incident_id = _create_incident(client_db, headers, "10.2")
     closed_target = _send_for_assessment(client_db, headers, second_incident_id, {"mode": "EXISTING", "event_group_id": project_id})
     assert closed_target.status_code == 409, closed_target.text
-    assert "open Event Group" in str(closed_target.json()["detail"])
+    assert "open Incident Group" in str(closed_target.json()["detail"])
 
     # The same rule is enforced by MariaDB, not only by the API. A direct SQL
     # attempt cannot attach an Incident to a closed Project.

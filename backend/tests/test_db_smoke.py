@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.org_people import People
+
 pytestmark = pytest.mark.db
 
 
@@ -182,30 +184,13 @@ class TestSubmissions:
         """
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
         unique = uuid4().hex
-        field_email = f"pagination-field-{unique}@example.test"
-        password = "pagination-test-password"
-        field_user_id = None
+        people = People(client_db, admin_token)
         admin_submission_id = None
         field_submission_id = None
         field_headers = None
 
         try:
-            created_user = client_db.post(
-                "/admin/users",
-                headers=admin_headers,
-                json={
-                    "email": field_email,
-                    "full_name": "Pagination Field Worker",
-                    "password": password,
-                    "roles": ["STAFF"],
-                },
-            )
-            assert created_user.status_code == 201
-            field_user_id = int(created_user.json()["id"])
-
-            login = client_db.post("/auth/login", json={"email": field_email, "password": password})
-            assert login.status_code == 200
-            field_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+            field_headers = people.login(people.make("STAFF", "pagination", full_name="Zzz Pagination Staff"))
 
             admin_created = client_db.post(
                 "/submissions",
@@ -232,12 +217,7 @@ class TestSubmissions:
                 client_db.delete(f"/submissions/{field_submission_id}", headers=field_headers)
             if admin_submission_id is not None:
                 client_db.delete(f"/submissions/{admin_submission_id}", headers=admin_headers)
-            if field_user_id is not None:
-                client_db.patch(
-                    f"/admin/users/{field_user_id}",
-                    headers=admin_headers,
-                    json={"is_active": False},
-                )
+            people.cleanup()
 
 
 class TestIncidents:
@@ -256,18 +236,8 @@ class TestIncidents:
     def test_engineer_assignment_rejects_active_non_engineer(self, admin_token, client_db):
         headers = {"Authorization": f"Bearer {admin_token}"}
         unique = uuid4().hex
-        created_user = client_db.post(
-            "/admin/users",
-            headers=headers,
-            json={
-                "email": f"not-engineer-{unique}@example.test",
-                "full_name": "Not An Engineer",
-                "password": "eligibility-test-password",
-                "roles": ["MAINTENANCE_CREW"],
-            },
-        )
-        assert created_user.status_code == 201
-        user_id = int(created_user.json()["id"])
+        people = People(client_db, admin_token)
+        user_id = people.make("MAINTENANCE_CREW", "not-engineer", full_name="Zzz Not An Engineer", district="03")["id"]
 
         incident = client_db.post(
             "/incidents",
@@ -293,28 +263,13 @@ class TestIncidents:
         )
         assert assigned.status_code == 400
         assert "active Staff member or administrator" in str(assigned.json().get("detail", ""))
+        people.cleanup()
 
-        client_db.patch(
-            f"/admin/users/{user_id}",
-            headers=headers,
-            json={"is_active": False},
-        )
-
-    def test_engineer_assignment_allows_legacy_field_worker(self, admin_token, client_db):
+    def test_engineer_assignment_allows_staff(self, admin_token, client_db):
         headers = {"Authorization": f"Bearer {admin_token}"}
         unique = uuid4().hex
-        created_user = client_db.post(
-            "/admin/users",
-            headers=headers,
-            json={
-                "email": f"legacy-engineer-{unique}@example.test",
-                "full_name": "Legacy GeoTech Engineer",
-                "password": "eligibility-test-password",
-                "roles": ["STAFF"],
-            },
-        )
-        assert created_user.status_code == 201
-        user_id = int(created_user.json()["id"])
+        people = People(client_db, admin_token)
+        user_id = people.make("STAFF", "assignable", full_name="Zzz Assignable Staff")["id"]
 
         incident = client_db.post(
             "/incidents",
@@ -341,3 +296,4 @@ class TestIncidents:
         assert assigned.status_code == 200
         assert int(assigned.json()["assignee_user_id"]) == user_id
         assert int(assigned.json()["linked_submission_id"]) > 0
+        people.cleanup()

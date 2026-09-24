@@ -262,7 +262,7 @@ TriageDisposition = Literal[
 
 
 class TriageEventGroupChoice(BaseModel):
-    """The Event Group an ASSESSMENT_REQUIRED report joins, saved with the decision."""
+    """The Incident Group an ASSESSMENT_REQUIRED report joins, saved with the decision."""
 
     mode: Literal["EXISTING", "CREATE_NEW"]
     event_group_id: int | None = Field(default=None, ge=1)
@@ -283,7 +283,7 @@ class IncidentTriageRequest(BaseModel):
     # DUPLICATE_OR_LINKED: the incident/location this report duplicates or links to.
     target_incident_id: int | None = Field(default=None, ge=1)
     target_location_id: int | None = Field(default=None, ge=1)
-    # ASSESSMENT_REQUIRED only: the Event Group, committed in the same
+    # ASSESSMENT_REQUIRED only: the Incident Group, committed in the same
     # transaction as the decision. Omitted when the report is already grouped.
     event_group: TriageEventGroupChoice | None = None
 

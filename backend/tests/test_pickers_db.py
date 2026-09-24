@@ -8,8 +8,7 @@ these is a way an implementer's instinct goes wrong:
   reads as a ranking.** Groups are ordered by the office's own branch order,
   never by load. The two workload counts are rendered BESIDE a name, never used
   to reorder people.
-* **Nobody is hidden.** A chief whose branch nobody has recorded goes into a
-  trailing ``UNASSIGNED`` group rather than vanishing; a branch that accepts no
+* **Nobody is hidden.** A branch that accepts no
   assignments is returned WITH the flag so the client can disable it with the
   reason; a person marked ``ROTATION_OUT`` is returned with their return date and
   is neither filtered out nor moved to the end. The first implementer's instinct
@@ -31,6 +30,8 @@ import uuid
 
 import pytest
 from sqlalchemy import text
+
+from tests.org_people import People
 
 pytestmark = pytest.mark.db
 
@@ -117,83 +118,57 @@ def offices(client_db, admin_token):
 
 @pytest.fixture(scope="module")
 def org(client_db, admin_token, offices):
-    """Two WEST branches with people in them, plus one chief with no branch.
+    """Three WEST branches, each with its chief, staff in two of them, and a
+    rotated-out senior specialist.
 
     All of it is created here and removed on teardown, because the seeded
     structure is what test_seed_shape_db.py counts and the seeded accounts are
     what every other module routes through.
     """
     west_id = int(offices["WEST"]["id"])
-    created_branches: dict[str, int] = {}
+    placed = People(client_db, admin_token, prefix="Zzz Picker")
     created_users: dict[str, dict] = {}
 
-    def _branch(letter: str, name: str, sort_order: int, **extra) -> int:
-        resp = client_db.post(
-            "/admin/org/branches",
-            json={
-                "office_id": west_id,
-                "unit_type": "BRANCH",
-                "letter": letter,
-                "name": f"{_BRANCH_PREFIX} {name} {_RUN}",
-                "home_city": "Oakland",
-                "home_district": "04",
-                "sort_order": sort_order,
-                **extra,
-            },
-            headers=_auth(admin_token),
-        )
-        assert resp.status_code == 201, resp.text
-        created_branches[letter] = int(resp.json()["branch"]["id"])
-        return created_branches[letter]
+    def _person(key: str, full_name: str) -> dict:
+        user = placed.account(f"zzp-{key}", full_name=full_name, metadata={"office_code": "WEST", "office_location": "West Office"})
+        created_users[key] = user
+        return user
 
-    def _person(key: str, role: str, *, branch_id=None, full_name=None, **org_fields) -> dict:
-        email = f"zzp-{key}-{_RUN}@example.test"
-        resp = client_db.post(
-            "/admin/users",
-            json={
-                "email": email,
-                "full_name": full_name or f"Zzz Picker {key.title()} {_RUN}",
-                "password": "org-model-test-password",
-                "roles": [role],
-                "metadata": {"office_code": "WEST", "office_location": "West Office"},
-            },
-            headers=_auth(admin_token),
+    def _branch(letter: str, name: str, sort_order: int, chief: dict, **extra) -> int:
+        return placed.branch(
+            "WEST",
+            chief=chief,
+            name=f"{_BRANCH_PREFIX} {name} {_RUN}",
+            letter=letter,
+            home_city="Oakland",
+            home_district="04",
+            sort_order=sort_order,
+            **extra,
         )
-        assert resp.status_code == 201, resp.text
-        user_id = int(resp.json()["id"])
-        payload = {"office_id": west_id, **org_fields}
-        if branch_id is not None:
-            payload["branch_id"] = branch_id
-        placed = client_db.put(
-            f"/admin/users/{user_id}/org", json=payload, headers=_auth(admin_token)
-        )
-        assert placed.status_code == 200, placed.text
-        created_users[key] = {"id": user_id, "email": email, "token": _login(client_db, email, "org-model-test-password")}
-        return created_users[key]
 
+    chief_y = _person("chiefy", f"Zzz Chief Yankee {_RUN}")
+    chief_x = _person("chiefx", f"Zzz Chief Xray {_RUN}")
+    chief_w = _person("chiefw", f"Zzz Chief Whiskey {_RUN}")
     # Two branches: X sorts before Y, and Y is where the calling chief sits, so
     # "own branch first" and "the office's own order" cannot be confused.
-    branch_x = _branch("X", "Branch X", 970)
-    branch_y = _branch("Y", "Branch Y", 980)
+    branch_x = _branch("X", "Branch X", 970, chief_x)
+    branch_y = _branch("Y", "Branch Y", 980, chief_y)
     # ...and a third that accepts nothing, like SOUTH's proposed Branch E.
-    branch_w = _branch("W", "Branch W", 960, accepts_assignments=False)
+    branch_w = _branch("W", "Branch W", 960, chief_w, accepts_assignments=False)
 
-    chief_y = _person("chiefy", "BRANCH_CHIEF", branch_id=branch_y, full_name=f"Zzz Chief Yankee {_RUN}")
-    chief_x = _person("chiefx", "BRANCH_CHIEF", branch_id=branch_x, full_name=f"Zzz Chief Xray {_RUN}")
-    chief_none = _person("chiefnone", "BRANCH_CHIEF", full_name=f"Zzz Chief Nobranch {_RUN}")
-    staff_y = _person("staffy", "STAFF", branch_id=branch_y, full_name=f"Zzz Staff Yankee {_RUN}")
-    staff_x = _person("staffx", "STAFF", branch_id=branch_x, full_name=f"Zzz Staff Xray {_RUN}")
+    staff_y = placed.place(_person("staffy", f"Zzz Staff Yankee {_RUN}"), "STAFF", branch_id=branch_y)
+    staff_x = placed.place(_person("staffx", f"Zzz Staff Xray {_RUN}"), "STAFF", branch_id=branch_x)
     # A rotated-out Senior Specialist, with a home city of their own: a (Spec)
     # position sits away from the office home city more often than not.
-    senior = _person(
-        "senior",
-        "SENIOR_SPECIALIST",
-        full_name=f"Zzz Senior Rotated {_RUN}",
-        home_city="San Luis Obispo",
-        home_district="05",
-        availability="ROTATION_OUT",
-        available_until="2027-02-05",
+    senior = placed.place(_person("senior", f"Zzz Senior Rotated {_RUN}"), "SENIOR_SPECIALIST")
+    details = client_db.put(
+        f"/admin/users/{senior['id']}/org",
+        json={"home_city": "San Luis Obispo", "home_district": "05", "availability": "ROTATION_OUT", "available_until": "2027-02-05"},
+        headers=_auth(admin_token),
     )
+    assert details.status_code == 200, details.text
+    for record in created_users.values():
+        record["token"] = placed.login(record)["Authorization"].split(" ", 1)[1]
 
     yield {
         "west_id": west_id,
@@ -202,20 +177,14 @@ def org(client_db, admin_token, offices):
         "branch_w": branch_w,
         "chief_y": chief_y,
         "chief_x": chief_x,
-        "chief_none": chief_none,
+        "chief_w": chief_w,
         "staff_y": staff_y,
         "staff_x": staff_x,
         "senior": senior,
         "users": created_users,
     }
 
-    for record in created_users.values():
-        client_db.patch(
-            f"/admin/users/{record['id']}", json={"is_active": False}, headers=_auth(admin_token)
-        )
-        _exec("DELETE FROM org_user_profiles WHERE user_id = :uid", {"uid": record["id"]})
-    for branch_id in created_branches.values():
-        _exec("DELETE FROM org_branches WHERE id = :bid", {"bid": branch_id})
+    placed.cleanup()
 
 
 def _forbidden_fields(payload: dict) -> set[str]:
@@ -283,15 +252,6 @@ class TestBranchOptions:
         letters = {group["branch_letter"]: group for group in resp.json()["groups"] if group.get("branch_id")}
         assert letters["E"]["accepts_assignments"] is False
         assert {letter for letter, g in letters.items() if g["accepts_assignments"]} >= {"A", "B", "C", "D"}
-
-    def test_a_chief_with_no_branch_lands_in_the_unassigned_group(self, payload, org):
-        item = next(item for item in payload["items"] if int(item["id"]) == org["chief_none"]["id"])
-        assert item["group_key"] == "UNASSIGNED"
-        assert item["branch_id"] is None
-        group = next(g for g in payload["groups"] if g["group_key"] == "UNASSIGNED")
-        assert group["branch_name"] == "Branch not recorded"
-        # ...and it is the LAST group: shown, but not offered ahead of a real one.
-        assert payload["groups"][-1]["group_key"] == "UNASSIGNED"
 
     def test_every_item_points_at_a_group_the_client_was_given(self, payload):
         keys = {group["group_key"] for group in payload["groups"]}
@@ -495,17 +455,6 @@ class TestStaffPicker:
             int(item["id"]) for item in payload["items"] if item["group_key"] == f"b:{org['branch_y']}"
         }
 
-    def test_the_office_less_fallback_is_a_visible_trailing_group(self, client_db, org, case):
-        # The permissive blank-office fallback survives one release, made VISIBLE
-        # rather than silent: removing it on day one would empty this picker in
-        # any deployment whose accounts have no recorded office.
-        payload = self._options(client_db, org["chief_y"]["token"], case["assessment_id"])
-        keys = [group["group_key"] for group in payload["groups"]]
-        assert "NO_OFFICE" in keys
-        assert keys[-1] == "NO_OFFICE"
-        label = next(g for g in payload["groups"] if g["group_key"] == "NO_OFFICE")["label"]
-        assert label == "Office not recorded"
-
     def test_it_names_no_default_either(self, client_db, org, case):
         payload = self._options(client_db, org["chief_y"]["token"], case["assessment_id"])
         assert _forbidden_fields(payload) == set()
@@ -542,19 +491,22 @@ class TestPickerEligibility:
     def test_a_deactivated_person_leaves_every_picker(self, client_db, admin_token, org):
         # is_active = 1 is the one filter every picker applies, and it is not the
         # picker choosing: a retired account cannot be handed work at all.
+        # (A branch chief cannot be deactivated while leading a branch, so the
+        # rotated-out senior specialist is the one who leaves here.)
         case = _incident_and_assessment(client_db, admin_token)
-        chief_id = org["chief_x"]["id"]
+        senior_id = org["senior"]["id"]
         try:
-            client_db.patch(
-                f"/admin/users/{chief_id}", json={"is_active": False}, headers=_auth(admin_token)
+            resp = client_db.patch(
+                f"/admin/users/{senior_id}", json={"is_active": False}, headers=_auth(admin_token)
             )
+            assert resp.status_code == 200, resp.text
             payload = client_db.get(
-                f"/assessments/{case['assessment_id']}/branch-options", headers=_auth(admin_token)
+                f"/assessments/{case['assessment_id']}/senior-engineer-options", headers=_auth(admin_token)
             ).json()
-            assert chief_id not in {int(item["id"]) for item in payload["items"]}
+            assert senior_id not in {int(item["id"]) for item in payload["items"]}
         finally:
             client_db.patch(
-                f"/admin/users/{chief_id}", json={"is_active": True}, headers=_auth(admin_token)
+                f"/admin/users/{senior_id}", json={"is_active": True}, headers=_auth(admin_token)
             )
 
     def test_the_picker_is_not_open_to_the_office_it_is_not_about(self, client_db, org):

@@ -18,9 +18,9 @@ import { readinessChecks } from "./reportReviewModel";
 
 /**
  * Step 1 of coordinator triage: everything needed to judge whether a field
- * report is a real incident, before any Event Group question is put.
+ * report is a real incident, before any Incident Group question is put.
  *
- * The coordinator used to reach the Event Group map having seen only a title,
+ * The coordinator used to reach the Incident Group map having seen only a title,
  * a location line and a description — never the photos, never who filed it.
  * This step puts the evidence first and asks nothing; "Continue" is the only
  * decision it offers, and no disposition is preselected in the next step.

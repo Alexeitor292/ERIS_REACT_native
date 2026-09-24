@@ -42,7 +42,6 @@ export type OfficeTree = {
   chiefs: TreePerson[];
   specialists: TreePerson[];
   branches: TreeBranch[];
-  unbranched: TreePerson[];
   can_manage: boolean;
   can_name_chiefs: boolean;
 };
@@ -55,12 +54,9 @@ export type Placement = {
   label: string | null;
 };
 
-export type UnplacedPerson = { id: number; full_name: string; email: string; role: string };
-
 export type TreePayload = {
   offices: OfficeTree[];
   me: Placement & { id: number; is_admin: boolean };
-  unplaced: UnplacedPerson[];
 };
 
 export type PersonHit = {
@@ -79,7 +75,7 @@ export type MaintenanceDistrict = {
   crew: Array<{ id: number; full_name: string; email: string }>;
 };
 
-export type MaintenancePayload = { districts: MaintenanceDistrict[]; unplaced: UnplacedPerson[] };
+export type MaintenancePayload = { districts: MaintenanceDistrict[] };
 
 export type PersonDetails = {
   user_id: number;
@@ -100,7 +96,8 @@ export const getTree = () => api<TreePayload>("/org/tree");
 export const findPeople = (q: string) => api<{ items: PersonHit[] }>(`/org/people?q=${encodeURIComponent(q)}`);
 export const addOfficeChief = (officeId: number, userId: number) => post<TreePayload>(`/org/offices/${officeId}/chiefs`, { user_id: userId });
 export const addSpecialist = (officeId: number, userId: number) => post<TreePayload>(`/org/offices/${officeId}/specialists`, { user_id: userId });
-export const addBranch = (officeId: number, body: { name?: string; letter?: string | null; home_city?: string | null; home_district?: string | null }) =>
+/** A branch never exists without its chief: `chief_user_id` is required. */
+export const addBranch = (officeId: number, body: { name?: string; letter?: string | null; home_city?: string | null; home_district?: string | null; chief_user_id: number }) =>
   post<TreePayload>(`/org/offices/${officeId}/branches`, body);
 export const editBranch = (branchId: number, body: { name?: string; letter?: string | null; home_city?: string | null; home_district?: string | null }) =>
   api<TreePayload>(`/org/branches/${branchId}`, { method: "PATCH", body: JSON.stringify(body) });

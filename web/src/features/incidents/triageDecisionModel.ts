@@ -2,7 +2,7 @@
  * The coordinator's triage decision, as data: what may be chosen, what each
  * choice still needs before it can be recorded, and the exact request it sends.
  *
- * An Event Group is asked for only when the report needs an assessment — the
+ * An Incident Group is asked for only when the report needs an assessment — the
  * one outcome that becomes GeoTech work at a site. Closing a report, or sending
  * it back to its reporter, never asks where it belongs. The server enforces the
  * same rule (POST /incidents/{id}/triage refuses a group with any other
@@ -42,7 +42,7 @@ export const TRIAGE_OPTIONS: ReadonlyArray<{ value: TriageDispositionCode; label
   {
     value: "ASSESSMENT_REQUIRED",
     label: "Assessment required",
-    description: "Accept the report into ERIS and open a GeoTech assessment. You also say which Event Group it belongs to.",
+    description: "Accept the report into ERIS and open a GeoTech assessment. You also say which Incident Group it belongs to.",
   },
   {
     value: "NO_ASSESSMENT_REQUIRED",
@@ -75,7 +75,7 @@ export function triageBlocker(draft: TriageDraft): string | null {
     case null:
       return "Choose what happens to this report.";
     case "ASSESSMENT_REQUIRED":
-      return draft.eventGroup ? null : "Choose its Event Group, or start a new one.";
+      return draft.eventGroup ? null : "Choose its Incident Group, or start a new one.";
     case "NEEDS_REPORTER_INFORMATION":
       return draft.revisionFields.length || draft.notes.trim() ? null : "Say what the reporter should correct.";
     case "DUPLICATE_OR_LINKED":

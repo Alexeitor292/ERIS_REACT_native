@@ -51,12 +51,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
  *
  *   1. REVIEW    — read the report and look at the evidence.
  *   2. DECISION  — choose what happens to it. Only "Assessment required" asks
- *                  which Event Group it belongs to, in a panel that slides in
+ *                  which Incident Group it belongs to, in a panel that slides in
  *                  beside the decision.
  *
  * The draft lives here so stepping back to the report and forward again keeps
  * every choice. Nothing is saved until the decision is confirmed, and then the
- * decision and its Event Group are saved together.
+ * decision and its Incident Group are saved together.
  */
 export function IncidentTriageDialog({ incidentId, onClose, onDone }: {
   incidentId: number;

@@ -1,9 +1,10 @@
 """Roles follow from where people sit: the office trees and the maintenance lists.
 
-Walks one throwaway office through the whole lifecycle: an administrator names
-its chief; the chief adds a senior specialist and a branch with its chief; the
-branch chief adds staff; people move, are removed and become guests; and the
-maintenance lists give and take the coordinator and crew roles.
+Walks one throwaway office through the whole lifecycle: an administrator opens
+it with its chief; the chief adds a senior specialist and a branch with its
+chief; the branch chief adds staff; people move, are removed and become guests;
+chiefs can be replaced but never leave a branch or an office without one; and
+the maintenance lists give and take the coordinator and crew roles.
 
 Requires a live MariaDB at Alembic head. Run with: pytest -m db
 """
@@ -58,13 +59,13 @@ def people(client_db, admin_token):
 
 
 @pytest.fixture(scope="module")
-def office(client_db, admin_token):
+def office(client_db, admin_token, people):
     code = f"T{_RUN}"
-    resp = client_db.post(
-        "/admin/org/offices",
-        json={"code": code, "name": f"Zzz Tree Test Office {_RUN}", "short_name": f"Tree {_RUN}", "is_routing_target": False},
-        headers=_auth(admin_token),
-    )
+    body = {"code": code, "name": f"Zzz Tree Test Office {_RUN}", "short_name": f"Tree {_RUN}", "is_routing_target": False}
+    # An office never exists without its office chief.
+    refused = client_db.post("/admin/org/offices", json=body, headers=_auth(admin_token))
+    assert refused.status_code == 422, refused.text
+    resp = client_db.post("/admin/org/offices", json={**body, "chief_user_id": people["chief"]["id"]}, headers=_auth(admin_token))
     assert resp.status_code == 201, resp.text
     office = resp.json()["office"]
     yield office
@@ -77,6 +78,11 @@ def _drop_office(office_id: int) -> None:
     from app.db import engine
 
     with engine.begin() as conn:
+        # Whoever sat there sits nowhere now: a guest (roles never outlive places).
+        placed = [row[0] for row in conn.execute(text("SELECT user_id FROM org_user_profiles WHERE office_id = :oid"), {"oid": office_id}).all()]
+        for uid in placed:
+            conn.execute(text("DELETE ur FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = :uid AND r.name <> 'ADMIN'"), {"uid": uid})
+            conn.execute(text("INSERT IGNORE INTO user_roles (user_id, role_id) SELECT :uid, id FROM roles WHERE name = 'GUEST'"), {"uid": uid})
         conn.execute(text("UPDATE org_user_profiles SET office_id = NULL, branch_id = NULL, tree_position = NULL WHERE office_id = :oid"), {"oid": office_id})
         conn.execute(text("DELETE FROM org_branch_districts WHERE branch_id IN (SELECT id FROM org_branches WHERE office_id = :oid)"), {"oid": office_id})
         conn.execute(text("DELETE FROM org_branches WHERE office_id = :oid"), {"oid": office_id})
@@ -102,9 +108,7 @@ def test_the_whole_tree(client_db, admin_token, people, office):
     oid = office["id"]
     admin = _auth(admin_token)
 
-    # Only an administrator names an office chief.
-    resp = client_db.post(f"/org/offices/{oid}/chiefs", json={"user_id": people["chief"]["id"]}, headers=admin)
-    assert resp.status_code == 200, resp.text
+    # The office opened with its chief; only an administrator names office chiefs.
     assert _roles(people["chief"]["id"]) == {"OFFICE_CHIEF"}
     chief = _auth(_login(client_db, people["chief"]))
     tree = _tree(client_db.get("/org/tree", headers=chief).json(), oid)
@@ -125,8 +129,10 @@ def test_the_whole_tree(client_db, admin_token, people, office):
     assert branch["letter"] == "A" and branch["name"] == "Branch A" and branch["home_district"] == "04"
     assert branch["chief"]["id"] == people["bchief"]["id"]
     assert _roles(people["bchief"]["id"]) == {"BRANCH_CHIEF"}
-    dup = client_db.post(f"/org/offices/{oid}/branches", json={"letter": "A"}, headers=chief)
+    dup = client_db.post(f"/org/offices/{oid}/branches", json={"letter": "A", "chief_user_id": people["outsider"]["id"]}, headers=chief)
     assert dup.status_code == 409
+    # A branch never exists without its chief.
+    assert client_db.post(f"/org/offices/{oid}/branches", json={"name": "Headless"}, headers=chief).status_code == 422
 
     # The branch chief adds staff to their own branch, and nothing else.
     bchief = _auth(_login(client_db, people["bchief"]))
@@ -139,8 +145,14 @@ def test_the_whole_tree(client_db, admin_token, people, office):
     tree = _tree(client_db.get("/org/tree", headers=bchief).json(), oid)
     assert tree["can_manage"] is False and tree["branches"][0]["can_manage"] is True
 
+    # A branch chief cannot be removed or leave: the branch would have no chief.
+    stuck = client_db.delete(f"/org/tree/people/{people['bchief']['id']}", headers=chief)
+    assert stuck.status_code == 409 and "always has a chief" in stuck.json()["detail"]
+    assert client_db.patch(f"/admin/users/{people['bchief']['id']}", json={"is_active": False}, headers=admin).status_code == 409
+
     # A second branch; the office chief moves staff between branches.
-    resp = client_db.post(f"/org/offices/{oid}/branches", json={"name": "Coastal"}, headers=chief)
+    resp = client_db.post(f"/org/offices/{oid}/branches", json={"name": "Coastal", "chief_user_id": people["chief2"]["id"]}, headers=chief)
+    assert resp.status_code == 201, resp.text
     coastal = next(b for b in _tree(resp.json(), oid)["branches"] if b["name"] == "Coastal")
     assert client_db.post(f"/org/branches/{coastal['id']}/staff", json={"user_id": people["staff"]["id"]}, headers=chief).status_code == 200
     tree = _tree(client_db.get("/org/tree", headers=chief).json(), oid)
@@ -165,16 +177,50 @@ def test_the_whole_tree(client_db, admin_token, people, office):
         refused = client_db.post(f"/org/offices/{oid}/specialists", json={"user_id": stranger}, headers=chief)
         assert refused.status_code == 409 and "administrator" in refused.json()["detail"]
 
-    # A branch with people in it cannot be retired; empty, it can.
+    # A branch with staff in it cannot be retired; with only its chief, it can,
+    # and its chief leaves with it.
     assert client_db.post(f"/org/branches/{coastal['id']}/retire", headers=chief).status_code == 409
     assert client_db.delete(f"/org/tree/people/{people['staff']['id']}", headers=chief).status_code == 200
     assert _roles(people["staff"]["id"]) == {"GUEST"}
     assert client_db.post(f"/org/branches/{coastal['id']}/retire", headers=chief).status_code == 200
+    assert _roles(people["chief2"]["id"]) == {"GUEST"}
 
-    # The office chief cannot remove themselves; the administrator can.
+    # The office chief cannot remove themselves. Nor can the administrator while
+    # they are its only chief; with a second office chief, they can.
     assert client_db.delete(f"/org/tree/people/{people['chief']['id']}", headers=chief).status_code == 403
+    last = client_db.delete(f"/org/tree/people/{people['chief']['id']}", headers=admin)
+    assert last.status_code == 409 and "only chief" in last.json()["detail"]
+    assert client_db.post(f"/org/offices/{oid}/chiefs", json={"user_id": people["outsider"]["id"]}, headers=admin).status_code == 200
     assert client_db.delete(f"/org/tree/people/{people['chief']['id']}", headers=admin).status_code == 200
     assert _roles(people["chief"]["id"]) == {"GUEST"}
+
+
+def test_nothing_goes_into_a_branch_that_has_no_chief(client_db, admin_token, people):
+    # The seeded branches start with no chief: they hold nobody until one is named.
+    admin = _auth(admin_token)
+    west = next(o for o in client_db.get("/org/tree", headers=admin).json()["offices"] if o["office"]["code"] == "WEST")
+    headless = next((b for b in west["branches"] if not b["chief"]), None)
+    if headless:
+        resp = client_db.post(f"/org/branches/{headless['id']}/staff", json={"user_id": people["staff2"]["id"]}, headers=admin)
+        assert resp.status_code == 409 and "no chief" in resp.json()["detail"]
+
+
+def test_an_administrator_needs_no_place(client_db, admin_token, people):
+    admin = _auth(admin_token)
+    uid = people["crew"]["id"]
+    assert client_db.put(f"/admin/users/{uid}/admin", json={"is_admin": True}, headers=admin).status_code == 200
+    assert _roles(uid) == {"ADMIN"}
+    assert client_db.put(f"/admin/users/{uid}/admin", json={"is_admin": False}, headers=admin).status_code == 200
+    assert _roles(uid) == {"GUEST"}
+
+
+def test_roles_are_never_granted_directly(client_db, admin_token):
+    resp = client_db.post(
+        "/admin/users",
+        json={"email": f"orgtree-direct-{_RUN.lower()}@example.test", "full_name": "Zzz Direct Role", "password": _PASSWORD, "roles": ["STAFF"]},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 422 and "Organization page" in resp.json()["detail"]
 
 
 def test_people_search_says_where_each_one_sits(client_db, admin_token, people):
@@ -209,11 +255,12 @@ def test_maintenance_lists_give_and_take_roles(client_db, admin_token, people):
 
 def test_the_admin_switch(client_db, admin_token, people):
     admin = _auth(admin_token)
+    # The outsider is an office chief by now: being an administrator sits beside it.
     uid = people["outsider"]["id"]
     resp = client_db.put(f"/admin/users/{uid}/admin", json={"is_admin": True}, headers=admin)
-    assert resp.status_code == 200 and resp.json()["roles"] == ["ADMIN"]
+    assert resp.status_code == 200 and resp.json()["roles"] == ["ADMIN", "OFFICE_CHIEF"]
     resp = client_db.put(f"/admin/users/{uid}/admin", json={"is_admin": False}, headers=admin)
-    assert resp.status_code == 200 and resp.json()["roles"] == ["GUEST"]
+    assert resp.status_code == 200 and resp.json()["roles"] == ["OFFICE_CHIEF"]
     me = client_db.get("/auth/me", headers=admin)
     my_id = me.json()["id"] if me.status_code == 200 else None
     if my_id:

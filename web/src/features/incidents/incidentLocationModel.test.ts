@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   coordinatesFromRoadFeatures,
+  incidentName,
   numericPostmile,
   roadFromCoordinateFeatures,
   roadLocationLabel,
@@ -93,4 +94,11 @@ test("post miles with a prefix or suffix still give their number", () => {
 test("labels and links", () => {
   assert.equal(roadLocationLabel({ district: "01", county: "HUM", route: "101", post_mile: "84.20" }), "D01 · HUM · 101 · PM 84.20");
   assert.equal(streetViewUrl(40.605, -124.134), "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=40.605,-124.134");
+});
+
+test("a report is named by district, county, route, post mile and the day it was first seen", () => {
+  const location = { district: "04", county: "MRN", route: "1", post_mile: "12.3" };
+  assert.equal(incidentName(location, "2026-09-22T06:40"), "04-MRN-001-12.300 - 09/22/26");
+  assert.equal(incidentName({ district: "4", county: "mrn", route: "SR-101", post_mile: "R2.1" }, ""), "04-MRN-101-R2.1");
+  assert.equal(incidentName(null, "2026-09-22T06:40"), null);
 });

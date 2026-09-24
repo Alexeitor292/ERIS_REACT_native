@@ -47,7 +47,7 @@ def test_mission_center_project_to_incident_gis_drilldown(client_db, admin_token
     incident_id = int(created.json()["incident"]["id"])
 
     # A report reaches the Mission Center only by being sent for assessment,
-    # which is also what places it in its Event Group (the legacy "Project").
+    # which is also what places it in its Incident Group (the legacy "Project").
     associated = client_db.post(
         f"/incidents/{incident_id}/triage",
         headers={**admin_headers, "X-ERIS-Test-Preserve-Projectless": "1"},

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, HardHat, Plus, Radio, Star, TriangleAlert, X } from "lucide-react";
 
-import { DISTRICT_HQ, type MaintenanceDistrict, type UnplacedPerson } from "../../../api/orgTree";
+import { DISTRICT_HQ, type MaintenanceDistrict } from "../../../api/orgTree";
 
 type Kind = "coordinators" | "crew";
 
@@ -12,13 +12,11 @@ type Kind = "coordinators" | "crew";
  */
 export default function MaintenanceDistricts({
   districts,
-  unplaced,
   onAdd,
   onRemove,
   onMakePrimary,
 }: {
   districts: MaintenanceDistrict[];
-  unplaced: UnplacedPerson[];
   onAdd: (district: string, kind: Kind) => void;
   onRemove: (district: string, kind: Kind, person: { id: number; full_name: string }) => void;
   onMakePrimary: (district: string, userId: number) => void;
@@ -37,14 +35,6 @@ export default function MaintenanceDistricts({
           </span>
         </div>
       ) : null}
-      {unplaced.length ? (
-        <div className="rounded-lg border border-[color:color-mix(in_oklab,var(--warn)_45%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn)_7%,var(--panel))] px-3 py-2 text-sm">
-          <strong>Not on any district list yet:</strong>{" "}
-          {unplaced.map((p) => `${p.full_name} (${p.role === "MAINTENANCE_COORDINATOR" ? "coordinator" : "crew"})`).join(", ")}.{" "}
-          <span className="text-muted">They keep their role until they are added to a district or changed.</span>
-        </div>
-      ) : null}
-
       <ul className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
         {districts.map((d) => {
           const isOpen = !!open[d.district];

@@ -1,6 +1,6 @@
 # Workflows
 
-How work moves through ERIS: from a field report, through triage, into an Event
+How work moves through ERIS: from a field report, through triage, into an Incident
 Group and an assessment, to approval. Role names are those in
 [roles-and-identity.md](roles-and-identity.md); organization data (offices,
 branches, district coverage) is maintained as described in
@@ -15,7 +15,7 @@ postmile with county, or latitude and longitude. Each is converted to the others
 through the public Caltrans postmile layer.
 
 A new report is **provisional**: stage `COORDINATOR_REVIEW`, no ERIS number, not
-in any Event Group, and not part of the incident record, the Event Groups page or
+in any Incident Group, and not part of the incident record, the Incident Groups page or
 the Mission Center. Until triage, its reporter (or the coordinator, or an
 administrator) may discard it.
 
@@ -26,18 +26,18 @@ administrator) reviews it and makes one decision (`POST /incidents/{id}/triage`)
 
 | Decision | Result |
 | --- | --- |
-| **Assessment required** | The report **enters the incident record**. The coordinator attaches it to an open Event Group nearby, or starts a new one. The report receives its permanent ERIS number, an assessment is created for the GeoTech office that serves the district, and the stage becomes `OFFICE_CHIEF_REVIEW`. |
-| **No assessment required** | Closed at triage (stage `RESOLVED`). Kept with its decision and history, but with no ERIS number and no Event Group, and it never appears in the record or the Mission Center. |
+| **Assessment required** | The report **enters the incident record**. The coordinator attaches it to an open Incident Group nearby, or starts a new one. The report receives its permanent ERIS number, an assessment is created for the GeoTech office that serves the district, and the stage becomes `OFFICE_CHIEF_REVIEW`. |
+| **No assessment required** | Closed at triage (stage `RESOLVED`). Kept with its decision and history, but with no ERIS number and no Incident Group, and it never appears in the record or the Mission Center. |
 | **Duplicate or linked** | Closed at triage the same way, linked to the report it duplicates. |
-| **Needs reporter information** | Sent back to the reporter. It stays provisional, is taken out of any Event Group, and returns to the coordinator when the reporter answers. |
+| **Needs reporter information** | Sent back to the reporter. It stays provisional, is taken out of any Incident Group, and returns to the coordinator when the reporter answers. |
 
-Only "Assessment required" asks for an Event Group. The database refuses to move
-a report out of triage without an Event Group and an ERIS number, except when it
+Only "Assessment required" asks for an Incident Group. The database refuses to move
+a report out of triage without an Incident Group and an ERIS number, except when it
 is closed at triage, and refuses ever to change an ERIS number.
 
-## 3. Event Groups
+## 3. Incident Groups
 
-An Event Group gathers the reports caused by one event, such as a storm that
+An Incident Group gathers the reports caused by one event, such as a storm that
 damaged several slopes on one route.
 
 - A report belongs to **at most one** group. New groups are started from a
@@ -50,11 +50,11 @@ damaged several slopes on one route.
 - Coordinators and administrators edit a group's title and description. Moving a
   report that is already in the record to another group is for administrators
   only.
-- The **Mission Center** shows every Event Group holding at least one report in
+- The **Mission Center** shows every Incident Group holding at least one report in
   the record, with its reports on the map; selecting a group or a report zooms
   the map to fit it.
 
-The older `/projects` endpoints still answer, as views over Event Groups, for
+The older `/projects` endpoints still answer, as views over Incident Groups, for
 older clients.
 
 ## 4. Assessments
@@ -116,12 +116,15 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
      indent and spacing, tables with merge and shading, symbols, find and
      replace, print). The server stores each memo
      sanitized, next to a plain-text copy used by the PDF and the mobile app.
-     Two more tabs show the site's history (`GET /submissions/{id}/site-history`,
-     operational roles): **Record of events** lists earlier incidents in the
-     record within 150 m, marked as a recurrence of the same type or a
-     different type; **Maintenance history** lists maintenance reports there
-     that never entered the record, with the coordinator's decision. Both keep
-     a notes field.
+     One more tab, **Record of incidents**, shows the site's history
+     (`GET /submissions/{id}/site-history`, operational roles): every earlier
+     report within 150 m, newest first. Incidents in the record are marked as a
+     recurrence of the same type or a different type; reports that never
+     entered it (closed at triage, awaiting triage) are marked as such. Under
+     each one is its maintenance: what the crew reported, the coordinator's
+     decision and notes, the immediate and follow-up actions on its technical
+     forms, notes the maintenance team left in its history, and later reports
+     closed as duplicates of it. The tab keeps a notes field.
    - **Review and record:** where the form stands, the reviewer's note, its
      history and who it is shared with.
 3. **The reviewer decides.** On the branch route that is the Branch Chief named
@@ -143,9 +146,22 @@ approved before routing v2; the finalize endpoint now answers 410.
 
 **My Work** lists every step waiting on the signed-in person: triage for
 coordinators, routing for Office Chiefs, assignment for Branch Chiefs, forms for
-Staff and Senior Specialists, and reviews for whoever holds review authority.
+Staff and Senior Specialists, reviews for whoever holds review authority, and
+shares of technical forms for the branch and office chiefs who approve them or
+are told about them.
 "Act on it" opens the exact step. An assessment's page also shows whose turn it
 is.
+
+**Notifications.** Every step that lands on somebody also goes to their
+notification feed: a report to triage, an assessment to route, assign, fill in,
+review or revise, an approval, and every share of a technical form (approvals to
+give, notices to read, and how it went for the sharer and the recipient). The
+web portal shows it under the bell at the top of every page, with a full list at
+*Notifications*; the mobile app shows the same feed under its bell, and phones
+get it as push notifications once push is set up (see
+[configuration.md](configuration.md#push-notifications-mobile-app)). Selecting a
+notice opens the page where it is acted on and marks it read. Nobody is told
+about their own action.
 
 Each incident has a **workflow tree** (`GET /incidents/{id}/workflow-tree`)
 showing every step from report to resolution, who owns it, and what happened.
@@ -157,8 +173,12 @@ Technical forms can also exist on their own, from before assessments. These go
 reviews them. A form attached to an assessment is always reviewed through the
 assessment instead.
 
-A form's author can grant named people **reader** or **editor** permits on that
-one form (see [roles-and-identity.md](roles-and-identity.md#special-permits)).
+A form's owner can **share** it with named people, who can then view and edit
+it. Branch chiefs approve shares into or out of their branch, and office chiefs
+are told when one leaves their office or involves a Senior Specialist (see
+[roles-and-identity.md](roles-and-identity.md#special-permits)). The **Sharing**
+card shows, before sharing, what it would take, and afterwards where each share
+stands.
 
 On the web, the form's GISA sheet is a canvas: its cards flow across the full
 width by default (about 400 px per column), each as tall as its content, and

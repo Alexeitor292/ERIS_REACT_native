@@ -110,18 +110,18 @@ depends_on = None
 # code, unit_number, name, short_name, home_city, home_district,
 # home_location_label, is_routing_target, sort_order
 _OFFICES: list[tuple] = [
-    ("WEST", "59-315", "Office of Geotechnical Design West", "West GeoTech Office",
+    ("WEST", "59-315", "Office of Geotechnical Design West", "OGDW",
      "Oakland", "04", None, 1, 10),
-    ("NORTH", "59-323", "Office of Geotechnical Design North", "North GeoTech Office",
+    ("NORTH", "59-323", "Office of Geotechnical Design North", "OGDN",
      "Sacramento", None, "Translab", 1, 20),
-    ("SOUTH", "59-324", "Office of Geotechnical Design South", "South GeoTech Office",
+    ("SOUTH", "59-324", "Office of Geotechnical Design South", "OGDS",
      "Los Angeles", "07", None, 1, 30),
     # POLICY is shaped inversely to the three design offices (9 specialists, two
     # subject-named branches, no district list) and SUPPORT has no chart at all,
     # so neither is offered for a district incident (design §10, open question 2).
-    ("POLICY", "59-325", "Office of Geotechnical Design Policies & Practices", None,
+    ("POLICY", "59-325", "Office of Geotechnical Design Policies & Practices", "OGDPP",
      "Sacramento", None, "Translab", 0, 40),
-    ("SUPPORT", "59-316", "Office of Geotechnical Support", None,
+    ("SUPPORT", "59-316", "Office of Geotechnical Support", "OGS",
      "Sacramento", None, "Translab", 0, 50),
 ]
 

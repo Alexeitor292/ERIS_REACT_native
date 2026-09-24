@@ -1,12 +1,14 @@
 import { Tabs, router, usePathname } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { clearToken, getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
+import { getUnread } from "@/src/api/notifications";
+import { badgeText } from "@/src/notifications/notificationRoutes";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
 import {
   canReportIncident,
@@ -74,6 +76,36 @@ export default function TabLayout() {
     return -1;
   }, [pathname]);
   const isIncidentDetailsRoute = useMemo(() => /\/incidents\/\d+$/.test(pathname || ""), [pathname]);
+
+  // The notification feed's unread count (the same feed as the web portal's
+  // bell): refreshed every minute, when the app comes back to the foreground,
+  // and on every screen change (so it drops after reading).
+  const [unread, setUnread] = useState(0);
+  useEffect(() => {
+    if (!rolesLoaded || publicOnly) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const token = await getToken();
+      if (!token || cancelled) return;
+      try {
+        const r = await getUnread(token);
+        if (!cancelled) setUnread(r.unread);
+      } catch {
+        // offline or signed out: keep the last count
+      }
+    };
+    refresh().catch(() => {});
+    const timer = setInterval(() => { refresh().catch(() => {}); }, 60_000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") refresh().catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [rolesLoaded, publicOnly, pathname]);
+  const unreadBadge = badgeText(unread);
 
   const canSwipeTabs = currentTabIndex >= 0;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -214,7 +246,41 @@ export default function TabLayout() {
           title: "Road Inventory",
         }}
       />
+
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          href: null,
+          title: "Notifications",
+        }}
+      />
       </Tabs>
+
+      {canSwipeTabs && !isIncidentDetailsRoute && rolesLoaded && !publicOnly ? (
+        <Pressable
+          onPress={() => router.push("/(tabs)/notifications" as any)}
+          accessibilityLabel={unreadBadge ? `Notifications, ${unread} unread` : "Notifications"}
+          style={[
+            styles.profileBtn,
+            {
+              top: insets.top + 8,
+              right: 12 + meBtnSize + 8,
+              width: meBtnSize,
+              height: meBtnSize,
+              borderRadius: Math.round(meBtnSize / 2),
+              backgroundColor: palette.panel,
+              borderColor: palette.border,
+            },
+          ]}
+        >
+          <IconSymbol size={Math.round(meBtnSize * 0.5)} name="bell.fill" color={palette.text} />
+          {unreadBadge ? (
+            <View style={[styles.badge, { backgroundColor: palette.danger }]}>
+              <Text style={styles.badgeText}>{unreadBadge}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ) : null}
 
       {canSwipeTabs && !isIncidentDetailsRoute ? (
         <Pressable
@@ -252,6 +318,16 @@ export default function TabLayout() {
               },
             ]}
           >
+            {!publicOnly ? (
+              <Pressable
+                style={[styles.menuItem, { borderBottomColor: palette.border }]}
+                onPress={() => closeMenu(() => router.push("/(tabs)/notifications" as any))}
+              >
+                <Text style={[styles.menuItemText, { color: palette.text }]}>
+                  Notifications{unread ? ` (${unread})` : ""}
+                </Text>
+              </Pressable>
+            ) : null}
             <Pressable
               style={[styles.menuItem, { borderBottomColor: palette.border }]}
               onPress={() => closeMenu(() => router.push("/(tabs)/settings"))}
@@ -294,6 +370,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "800",
     letterSpacing: 0.4,
+  },
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
   },
   menuBackdrop: {
     ...StyleSheet.absoluteFillObject,

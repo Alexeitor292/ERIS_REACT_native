@@ -26,6 +26,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
+
+from tests.org_people import People
 from sqlalchemy import text
 
 pytestmark = pytest.mark.db
@@ -60,24 +62,22 @@ def offices(client_db, admin_token):
 
 
 @pytest.fixture(scope="module")
-def staff_user(client_db, admin_token):
-    """An account holding Staff and nothing else, deactivated on teardown."""
-    email = f"orgadmin-staff-{_RUN}@example.test"
-    created = client_db.post(
-        "/admin/users",
-        json={
-            "email": email,
-            "full_name": f"Zzz Org Model Staff {_RUN}",
-            "password": "org-model-test-password",
-            "roles": ["STAFF"],
-            "metadata": {"office_code": "WEST", "office_location": "West Office"},
-        },
-        headers=_auth(admin_token),
-    )
-    assert created.status_code == 201, created.text
-    user_id = int(created.json()["id"])
-    yield {"id": user_id, "email": email}
-    client_db.patch(f"/admin/users/{user_id}", json={"is_active": False}, headers=_auth(admin_token))
+def placed(client_db, admin_token):
+    people = People(client_db, admin_token, prefix="Zzz Org Model")
+    yield people
+    people.cleanup()
+
+
+@pytest.fixture(scope="module")
+def staff_user(placed):
+    """An account holding Staff (staff in a West branch) and nothing else."""
+    return placed.make("STAFF", "orgadmin-staff")
+
+
+@pytest.fixture(scope="module")
+def record_user(placed):
+    """An account placed nowhere (a guest), whose org record can be edited freely."""
+    return placed.make(None, "orgadmin-record", metadata={"office_code": "WEST", "office_location": "West Office"})
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +227,8 @@ class TestClassificationSuggestsAndNeverGrants:
 
 
 class TestUserOrgRecord:
-    def test_omitted_fields_are_untouched(self, client_db, admin_token, staff_user, offices):
-        user_id = staff_user["id"]
+    def test_omitted_fields_are_untouched(self, client_db, admin_token, record_user, offices):
+        user_id = record_user["id"]
         client_db.put(
             f"/admin/users/{user_id}/org",
             json={
@@ -250,7 +250,7 @@ class TestUserOrgRecord:
         assert org["home_district"] == "04"
         assert org["job_title"] == "Transportation Engineer, Civil"
 
-    def test_a_branch_from_another_office_is_422(self, client_db, admin_token, staff_user, offices):
+    def test_a_branch_from_another_office_is_422(self, client_db, admin_token, record_user, offices):
         south_branch = _rows(
             """
             SELECT b.id FROM org_branches b JOIN org_offices o ON o.id = b.office_id
@@ -258,7 +258,7 @@ class TestUserOrgRecord:
             """
         )[0]["id"]
         resp = client_db.put(
-            f"/admin/users/{staff_user['id']}/org",
+            f"/admin/users/{record_user['id']}/org",
             json={"office_id": int(offices["WEST"]["id"]), "branch_id": int(south_branch)},
             headers=_auth(admin_token),
         )
@@ -266,13 +266,13 @@ class TestUserOrgRecord:
         assert "different office" in resp.json()["detail"]
 
     def test_the_metadata_mirror_is_re_rendered_from_the_profile(
-        self, client_db, admin_token, staff_user, offices
+        self, client_db, admin_token, record_user, offices
     ):
         # Both are written in ONE transaction, because for one release both are
         # read. A profile that moved without its mirror is the "chief loses their
         # queue" window.
         resp = client_db.put(
-            f"/admin/users/{staff_user['id']}/org",
+            f"/admin/users/{record_user['id']}/org",
             json={"office_id": int(offices["SOUTH"]["id"]), "home_district": "07"},
             headers=_auth(admin_token),
         )
@@ -281,7 +281,7 @@ class TestUserOrgRecord:
             "SELECT JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.office_code')) AS office_code, "
             "JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.district')) AS district "
             "FROM users WHERE id = :uid",
-            {"uid": staff_user["id"]},
+            {"uid": record_user["id"]},
         )[0]
         assert mirrored["office_code"] == "SOUTH"
         assert mirrored["district"] == "07"
@@ -290,12 +290,12 @@ class TestUserOrgRecord:
         location = _rows(
             "SELECT JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.office_location')) AS office_location "
             "FROM users WHERE id = :uid",
-            {"uid": staff_user["id"]},
+            {"uid": record_user["id"]},
         )[0]["office_location"]
         assert location == "West Office"
 
     def test_removing_someone_from_their_office_takes_the_office_away(
-        self, client_db, admin_token, staff_user, offices
+        self, client_db, admin_token, record_user, offices
     ):
         # A NULL profile office falls back to the mirror, so a mirror that kept
         # the old office would hand it straight back: the person would keep that
@@ -304,21 +304,21 @@ class TestUserOrgRecord:
         from app.services import org_directory
 
         placed = client_db.put(
-            f"/admin/users/{staff_user['id']}/org",
+            f"/admin/users/{record_user['id']}/org",
             json={"office_id": int(offices["SOUTH"]["id"]), "home_district": "07"},
             headers=_auth(admin_token),
         )
         assert placed.status_code == 200, placed.text
         try:
             cleared = client_db.put(
-                f"/admin/users/{staff_user['id']}/org",
+                f"/admin/users/{record_user['id']}/org",
                 json={"office_id": None, "home_district": None},
                 headers=_auth(admin_token),
             )
             assert cleared.status_code == 200, cleared.text
             db = SessionLocal()
             try:
-                org = org_directory.resolve_user_org(db, staff_user["id"], use_cache=False)
+                org = org_directory.resolve_user_org(db, record_user["id"], use_cache=False)
             finally:
                 db.close()
             assert org["office_id"] is None and org["office_code"] is None
@@ -326,19 +326,19 @@ class TestUserOrgRecord:
             mirrored = _rows(
                 "SELECT JSON_VALUE(metadata_json, '$.office_code') AS office_code, "
                 "JSON_VALUE(metadata_json, '$.district') AS district FROM users WHERE id = :uid",
-                {"uid": staff_user["id"]},
+                {"uid": record_user["id"]},
             )[0]
             assert mirrored == {"office_code": None, "district": None}
         finally:
             client_db.put(
-                f"/admin/users/{staff_user['id']}/org",
+                f"/admin/users/{record_user['id']}/org",
                 json={"office_id": int(offices["WEST"]["id"]), "home_district": None},
                 headers=_auth(admin_token),
             )
 
-    def test_availability_is_recorded_with_its_dates(self, client_db, admin_token, staff_user):
+    def test_availability_is_recorded_with_its_dates(self, client_db, admin_token, record_user):
         resp = client_db.put(
-            f"/admin/users/{staff_user['id']}/org",
+            f"/admin/users/{record_user['id']}/org",
             json={"availability": "ROTATION_OUT", "available_until": "2027-02-05"},
             headers=_auth(admin_token),
         )
@@ -347,28 +347,28 @@ class TestUserOrgRecord:
         assert str(resp.json()["org"]["available_until"]).startswith("2027-02-05")
 
     def test_an_unknown_office_or_branch_is_422_and_an_unknown_user_is_404(
-        self, client_db, admin_token, staff_user
+        self, client_db, admin_token, record_user
     ):
         assert client_db.put(
-            f"/admin/users/{staff_user['id']}/org", json={"office_id": 99999999}, headers=_auth(admin_token)
+            f"/admin/users/{record_user['id']}/org", json={"office_id": 99999999}, headers=_auth(admin_token)
         ).status_code == 422
         assert client_db.put(
-            f"/admin/users/{staff_user['id']}/org", json={"branch_id": 99999999}, headers=_auth(admin_token)
+            f"/admin/users/{record_user['id']}/org", json={"branch_id": 99999999}, headers=_auth(admin_token)
         ).status_code == 422
         assert client_db.put(
             "/admin/users/99999999/org", json={"home_city": "Oakland"}, headers=_auth(admin_token)
         ).status_code == 404
 
-    def test_only_admins_may_read_or_write_an_org_record(self, client_db, staff_user):
+    def test_only_admins_may_read_or_write_an_org_record(self, client_db, record_user):
         for email in ("mock.office.chief@dot.ca.gov", "mock.staff@dot.ca.gov"):
             token = client_db.post(
                 "/auth/login", json={"email": email, "password": "password"}
             ).json()["access_token"]
             assert client_db.get(
-                f"/admin/users/{staff_user['id']}/org", headers=_auth(token)
+                f"/admin/users/{record_user['id']}/org", headers=_auth(token)
             ).status_code == 403
             assert client_db.put(
-                f"/admin/users/{staff_user['id']}/org",
+                f"/admin/users/{record_user['id']}/org",
                 json={"home_city": "Oakland"},
                 headers=_auth(token),
             ).status_code == 403
@@ -380,8 +380,8 @@ class TestUserOrgRecord:
 
 
 class TestLegacyPatchWritesThrough:
-    def test_an_office_code_moves_the_profile_row_too(self, client_db, admin_token, staff_user, offices):
-        user_id = staff_user["id"]
+    def test_an_office_code_moves_the_profile_row_too(self, client_db, admin_token, record_user, offices):
+        user_id = record_user["id"]
         resp = client_db.patch(
             f"/admin/users/{user_id}",
             json={"metadata": {"office_code": "NORTH", "district": "03", "office_location": "Translab"}},
@@ -405,27 +405,27 @@ class TestLegacyPatchWritesThrough:
         assert org["office_code"] == "NORTH"
         assert org["office_id"] == int(offices["NORTH"]["id"])
 
-    def test_clearing_the_office_code_clears_the_profile_office(self, client_db, admin_token, staff_user):
+    def test_clearing_the_office_code_clears_the_profile_office(self, client_db, admin_token, record_user):
         resp = client_db.patch(
-            f"/admin/users/{staff_user['id']}",
+            f"/admin/users/{record_user['id']}",
             json={"metadata": {"office_code": None, "district": None, "office_location": None}},
             headers=_auth(admin_token),
         )
         assert resp.status_code == 200, resp.text
-        org = client_db.get(f"/admin/users/{staff_user['id']}/org", headers=_auth(admin_token)).json()["org"]
+        org = client_db.get(f"/admin/users/{record_user['id']}/org", headers=_auth(admin_token)).json()["org"]
         assert org["office_id"] is None
         assert org["office_code"] is None
 
-    def test_a_code_that_resolves_to_no_office_is_422(self, client_db, admin_token, staff_user):
+    def test_a_code_that_resolves_to_no_office_is_422(self, client_db, admin_token, record_user):
         # office_code is free text today — the admin form is an <input list=…>
         # over a datalist — so "WEST GEOTECH" and "W" are realistic values. A code
         # that resolves to nothing is never stored: it would misroute a queue
         # silently, and it is the same value the migration refuses to guess at.
         before = _rows(
-            "SELECT metadata_json FROM users WHERE id = :uid", {"uid": staff_user["id"]}
+            "SELECT metadata_json FROM users WHERE id = :uid", {"uid": record_user["id"]}
         )[0]["metadata_json"]
         resp = client_db.patch(
-            f"/admin/users/{staff_user['id']}",
+            f"/admin/users/{record_user['id']}",
             json={"metadata": {"office_code": "WEST GEOTECH", "district": "04"}},
             headers=_auth(admin_token),
         )
@@ -434,26 +434,26 @@ class TestLegacyPatchWritesThrough:
         assert "WEST GEOTECH" in detail
         assert "/admin/users/{id}/org" in detail
         # Nothing was written — neither the blob nor the profile row.
-        after = _rows("SELECT metadata_json FROM users WHERE id = :uid", {"uid": staff_user["id"]})[0]
+        after = _rows("SELECT metadata_json FROM users WHERE id = :uid", {"uid": record_user["id"]})[0]
         assert after["metadata_json"] == before
-        org = client_db.get(f"/admin/users/{staff_user['id']}/org", headers=_auth(admin_token)).json()["org"]
+        org = client_db.get(f"/admin/users/{record_user['id']}/org", headers=_auth(admin_token)).json()["org"]
         assert org["office_code"] is None
 
     def test_a_patch_without_metadata_leaves_the_org_record_alone(
-        self, client_db, admin_token, staff_user, offices
+        self, client_db, admin_token, record_user, offices
     ):
         client_db.put(
-            f"/admin/users/{staff_user['id']}/org",
+            f"/admin/users/{record_user['id']}/org",
             json={"office_id": int(offices["WEST"]["id"]), "home_city": "Oakland"},
             headers=_auth(admin_token),
         )
         resp = client_db.patch(
-            f"/admin/users/{staff_user['id']}",
+            f"/admin/users/{record_user['id']}",
             json={"full_name": f"Renamed {_RUN}"},
             headers=_auth(admin_token),
         )
         assert resp.status_code == 200, resp.text
-        org = client_db.get(f"/admin/users/{staff_user['id']}/org", headers=_auth(admin_token)).json()["org"]
+        org = client_db.get(f"/admin/users/{record_user['id']}/org", headers=_auth(admin_token)).json()["org"]
         assert org["office_code"] == "WEST"
         assert org["home_city"] == "Oakland"
 
@@ -464,11 +464,11 @@ class TestLegacyPatchWritesThrough:
 
 
 class TestCoordinatorCoverage:
-    def test_a_coordinator_may_cover_several_districts(self, client_db, admin_token, staff_user):
+    def test_a_coordinator_may_cover_several_districts(self, client_db, admin_token, record_user):
         # The model's answer to open question 10: several. It changes every
         # coordinator notification query, so it is a row per district rather
         # than one district on the person.
-        user_id = staff_user["id"]
+        user_id = record_user["id"]
         created = []
         try:
             for district in ("77", "78"):

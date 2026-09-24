@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { getAssessment, listAssessments, type Assessment, type AssessmentDetail } from "../../api/assessments";
 import { api } from "../../api/client";
+import { listShareReviews, type ShareReviewItem } from "../../api/sharing";
 import type { Incident } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import AppShell from "../../ui/AppShell";
@@ -10,10 +11,13 @@ import { canAssignEngineer, canDelegateBranch, canTriage, hasWorkQueue, isAdmin,
 import AssessmentDetailPanel, { AssessmentRailCard, formatTimestamp } from "../assessments/AssessmentDetailPanel";
 import { useSubmissionIndex } from "../assessments/AssessmentWorkspacePage";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
+import ShareWorkItem from "./ShareWorkItem";
 import TriageWorkItem from "./TriageWorkItem";
 
 type WorkItem =
   | { kind: "triage"; id: string; incident: Incident; sortKey: number }
+  /** A share of a technical form waiting on this branch or office chief. */
+  | { kind: "share"; id: string; share: ShareReviewItem; sortKey: number }
   /** `outsideQueue`: opened by a link although no queue of the caller's holds it. */
   | { kind: "assessment"; id: string; assessment: Assessment; sortKey: number; outsideQueue?: boolean };
 
@@ -36,6 +40,8 @@ function timestamp(value: string | null | undefined) {
  *  - Staff or Senior Specialist: their own assessments in Draft / Revision
  *    requested (`assignee` — both routes store the assignee in the same column).
  *  - Admin: every submitted assessment, matching the server's review bypass.
+ *  - Branch and Office Chiefs: shares of technical forms to approve, or that
+ *    they were told about and may stop (`/shares/reviews`).
  *
  * Every request carries its own `.catch(() => [])`: one failing queue — or a
  * failing /incidents call — must never blank the whole page.
@@ -94,20 +100,27 @@ export default function MyWorkPage() {
       if (isAdmin(roles)) requests.push(queue({ state: "SUBMITTED" }));
 
       const triagePromise: Promise<Incident[]> = canTriage(roles)
-        ? api<{ items: Incident[] }>("/incidents?limit=1000")
+        // The server's triage queue: only reports in the districts this person covers.
+        ? api<{ items: Incident[] }>("/incidents?queue=triage&limit=1000")
           .then((r) => (r.items ?? []).filter((i) => i.current_stage === "COORDINATOR_REVIEW" && i.status !== "RESOLVED"))
           .catch(() => [])
         : Promise.resolve([]);
 
-      const [triage, ...assessmentLists] = await Promise.all([triagePromise, ...requests]);
+      const sharesPromise: Promise<ShareReviewItem[]> = canDelegateBranch(roles) || canAssignEngineer(roles) || isAdmin(roles)
+        ? listShareReviews().then((r) => r.items ?? []).catch(() => [])
+        : Promise.resolve([]);
+
+      const [triage, shares, ...assessmentLists] = await Promise.all([triagePromise, sharesPromise, ...requests]);
       const byId = new Map<number, Assessment>();
       for (const list of assessmentLists) for (const assessment of list) byId.set(assessment.id, assessment);
 
       const next: WorkItem[] = [
         ...triage.map((incident) => ({ kind: "triage" as const, id: `t${incident.id}`, incident, sortKey: timestamp(incident.first_observed_at) })),
+        ...shares.map((share) => ({ kind: "share" as const, id: `s${share.review_id}`, share, sortKey: timestamp(share.created_at) })),
         ...[...byId.values()].map((assessment) => ({ kind: "assessment" as const, id: `a${assessment.id}`, assessment, sortKey: timestamp(assessment.updated_at) })),
       ];
-      next.sort((a, b) => (a.kind === b.kind ? b.sortKey - a.sortKey : a.kind === "triage" ? -1 : 1));
+      const rank = { triage: 0, share: 1, assessment: 2 } as const;
+      next.sort((a, b) => (a.kind === b.kind ? b.sortKey - a.sortKey : rank[a.kind] - rank[b.kind]));
       setItems(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load your work queue.");
@@ -231,6 +244,24 @@ export default function MyWorkPage() {
                       </button>
                     );
                   }
+                  if (item.kind === "share") {
+                    const share = item.share;
+                    const approval = share.kind === "APPROVAL";
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => { setSelectedId(item.id); setSearchParams({}, { replace: true }); }}
+                        className={`block w-full rounded-lg border p-3 text-left ${active ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]" : "border-[var(--line)] bg-[var(--panel)] hover:border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] hover:bg-[var(--panel-soft)]"}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div><div className="font-semibold">Sharing · Form #{share.submission.id}</div><div className="mt-0.5 text-xs text-muted">{share.owner.full_name ?? share.owner.email} → {share.recipient.full_name ?? share.recipient.email}</div></div>
+                          <span className="inline-flex whitespace-nowrap rounded-full border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-0.5 text-[11px] font-semibold">{approval ? "Needs approval" : "For your information"}</span>
+                        </div>
+                        <div className="mt-2 text-xs text-muted">{share.unit_label} · {formatTimestamp(share.created_at)}</div>
+                      </button>
+                    );
+                  }
                   const card = (
                     <AssessmentRailCard
                       key={item.id}
@@ -252,7 +283,13 @@ export default function MyWorkPage() {
             </section>
 
             <section className="min-w-0">
-              {!selected ? null : selected.kind === "triage" ? (
+              {!selected ? null : selected.kind === "share" ? (
+                <ShareWorkItem
+                  key={selected.id}
+                  item={selected.share}
+                  onDecided={async (message) => { setNotice(message); setSelectedId(null); await refresh(); }}
+                />
+              ) : selected.kind === "triage" ? (
                 <TriageWorkItem
                   incident={selected.incident}
                   onTriaged={async (message) => { setNotice(message); setSelectedId(null); await refresh(); }}

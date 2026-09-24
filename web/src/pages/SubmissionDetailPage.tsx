@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Link, useParams } from "react-router-dom";
 import { ClipboardList, GripVertical, LayoutGrid, ListChecks, Maximize2, Minimize2, NotebookPen, Plus, RotateCcw, Ruler, ShieldCheck, Shrub, Siren, Sprout, Trash2, TreeDeciduous, X } from "lucide-react";
 import { api } from "../api/client";
-import type { GisaLookups, SubmissionDetail, SubmissionPermissionGrant, SubmissionPermissions, SubmissionPermissionUser } from "../api/types";
+import type { GisaLookups, SubmissionDetail } from "../api/types";
+import { getFormShares, type FormShares } from "../api/sharing";
 import AppShell from "../ui/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
@@ -210,8 +211,7 @@ export default function SubmissionDetailPage() {
   const [districtContacts, setDistrictContacts] = useState<DistrictContact[]>([]);
   const [geom, setGeom] = useState<any | null>(null);
   const [shareQuery, setShareQuery] = useState("");
-  const [shareCandidates, setShareCandidates] = useState<SubmissionPermissionUser[]>([]);
-  const [sharedWith, setSharedWith] = useState<SubmissionPermissionGrant[]>([]);
+  const [shares, setShares] = useState<FormShares | null>(null);
   const [geoBusy, setGeoBusy] = useState(false);
   const [geoSaveState, setGeoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [geoSaveMessage, setGeoSaveMessage] = useState("");
@@ -403,12 +403,9 @@ export default function SubmissionDetailPage() {
       setFol(d.actions?.follow_up ?? []);
       const loadedCanManageSharing = d.submission.can_manage_permissions === true;
       if (loadedCanManageSharing) {
-        const permissions = await api<SubmissionPermissions>(`/submissions/${sid}/permissions`);
-        setShareCandidates(permissions.available_users ?? []);
-        setSharedWith(permissions.readers ?? []);
+        setShares(await getFormShares(sid));
       } else {
-        setShareCandidates([]);
-        setSharedWith([]);
+        setShares(null);
       }
       void loadPhotoMap();
     } catch (e: any) {
@@ -476,6 +473,7 @@ export default function SubmissionDetailPage() {
     setBusy(true); setErr(null);
     try {
       await api(`/submissions/${sid}/share`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
+      setShareQuery("");
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Share failed");
@@ -903,7 +901,11 @@ export default function SubmissionDetailPage() {
   );
 
   const canvasCards = data ? (
-    <div ref={canvas.containerRef} className={`min-w-0 overflow-x-auto ${canvas.fullscreen ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
+    // The canvas is as tall as its cards, so outside full screen it never scrolls
+    // vertically: a scrollbar coming and going would change its width, reflow the
+    // cards, change their heights and bring the scrollbar back, without end. In
+    // full screen it scrolls, with the scrollbar's room always kept.
+    <div ref={canvas.containerRef} className={`min-w-0 overflow-x-auto ${canvas.fullscreen ? "min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" : "overflow-y-hidden"}`}>
       <div style={canvas.canvasStyle} className="eris-canvas-grid rounded-md">
         <CanvasCard {...cardProps("report_header")}>
           <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 @2xl:grid-cols-4">
@@ -1499,12 +1501,11 @@ export default function SubmissionDetailPage() {
               {canManageSharing ? (
                 <SubmissionAccessSharing
                   query={shareQuery}
-                  availableUsers={shareCandidates}
-                  sharedWith={sharedWith}
+                  data={shares}
                   busy={busy}
                   onQueryChange={setShareQuery}
-                  onGrant={addShare}
-                  onRevoke={removeShare}
+                  onShare={addShare}
+                  onWithdraw={removeShare}
                 />
               ) : null}
             </SubmissionDetailCardGrid>

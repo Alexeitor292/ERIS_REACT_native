@@ -7,7 +7,6 @@ import type { ResolvedIncidentLocation } from "./incidentLocationModel";
  * gave them — never six loose fields that can disagree with each other.
  */
 export type IncidentCreateForm = {
-  title: string;
   description: string;
   first_observed_at: string;
   first_occurred_at: string;
@@ -15,7 +14,6 @@ export type IncidentCreateForm = {
 };
 
 export const EMPTY_INCIDENT_FORM: IncidentCreateForm = {
-  title: "",
   description: "",
   first_observed_at: "",
   first_occurred_at: "",

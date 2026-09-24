@@ -30,7 +30,7 @@ function generatedTitle(incident: EventGroupIncidentSummary | undefined): string
     incident.post_mile ? `PM ${incident.post_mile}` : null,
     incident.county || null,
   ].filter(Boolean);
-  return parts.length ? `${parts.join(" · ")} Event Group` : `Incident #${incident.id} Event Group`;
+  return parts.length ? `${parts.join(" · ")} Incident Group` : `Incident #${incident.id} Incident Group`;
 }
 
 const inputClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal normal-case tracking-normal text-[var(--ink)] outline-none focus:ring-2 focus:ring-[var(--brand)]";
@@ -41,7 +41,7 @@ const optionClass = (active: boolean) =>
     : "border-[var(--line)] bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`;
 
 /**
- * Which Event Group a report joins, chosen beside the triage decision.
+ * Which Incident Group a report joins, chosen beside the triage decision.
  *
  * Controlled and write-free: the choice lives in the triage draft and is saved
  * by the triage request itself, together with "Assessment required", so a
@@ -79,7 +79,7 @@ export default function EventGroupPicker({
         setContext(nextContext);
         setGroups(nearby.items ?? []);
       })
-      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : "Nearby Event Groups could not be loaded."); })
+      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : "Nearby Incident Groups could not be loaded."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [incidentId, radiusMiles]);
@@ -120,8 +120,8 @@ export default function EventGroupPicker({
     <div className="@container flex h-full min-h-0 flex-col">
       <div className="border-b border-[var(--line)] px-5 py-4">
         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Where it belongs</div>
-        <h3 id="event-group-picker-title" className="mt-0.5 text-base font-semibold">Which Event Group does it belong to?</h3>
-        <p className="mt-1 max-w-2xl text-[13px] text-muted">An Event Group is one real-world site. The assessment is tracked against it, together with every other report about the same place.</p>
+        <h3 id="event-group-picker-title" className="mt-0.5 text-base font-semibold">Which Incident Group does it belong to?</h3>
+        <p className="mt-1 max-w-2xl text-[13px] text-muted">An Incident Group is one real-world site. The assessment is tracked against it, together with every other report about the same place.</p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -148,7 +148,7 @@ export default function EventGroupPicker({
 
           <fieldset className="grid min-w-0 content-start gap-2 @3xl:order-1" aria-labelledby="event-group-picker-title">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold">Open Event Groups nearby</span>
+              <span className="text-sm font-semibold">Open Incident Groups nearby</span>
               <label className="flex items-center gap-1.5 text-xs text-muted">
                 Within
                 <select value={radiusMiles} onChange={(event) => setRadiusMiles(Number(event.target.value))} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1.5 text-xs text-[var(--ink)]">
@@ -164,7 +164,7 @@ export default function EventGroupPicker({
 
             {creating ? (
               <div className="grid gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3">
-                <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">New Event Group title
+                <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">New Incident Group title
                   <input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} className={inputClass} placeholder={generatedTitle(incident)} />
                 </label>
                 <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-muted">Description
@@ -174,9 +174,9 @@ export default function EventGroupPicker({
             ) : null}
 
             {loading && !listed.length ? (
-              <div className="rounded-lg border border-dashed border-[var(--line)] p-4 text-sm text-muted">Looking for nearby Event Groups…</div>
+              <div className="rounded-lg border border-dashed border-[var(--line)] p-4 text-sm text-muted">Looking for nearby Incident Groups…</div>
             ) : listed.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-[var(--line)] p-4 text-sm text-muted">No open Event Groups within {radiusMiles} miles.</div>
+              <div className="rounded-lg border border-dashed border-[var(--line)] p-4 text-sm text-muted">No open Incident Groups within {radiusMiles} miles.</div>
             ) : listed.map((group) => (
               <label key={group.id} className={optionClass(selectedId === group.id)}>
                 <input type="radio" name={`event-group-${incidentId}`} checked={selectedId === group.id} onChange={() => onChange({ mode: "EXISTING", eventGroupId: group.id })} className="mt-0.5" />

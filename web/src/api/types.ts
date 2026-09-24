@@ -264,7 +264,7 @@ export type SubmissionDetail = {
   photos: Attachment[];
   attachments: Attachment[];
   workflow_events: WorkflowEvent[];
-  /** Incident / assessment / Event Group this technical form belongs to (null for standalone forms). */
+  /** Incident / assessment / Incident Group this technical form belongs to (null for standalone forms). */
   context?: SubmissionWorkflowContext | null;
 };
 
@@ -346,7 +346,7 @@ export type Incident = {
   post_mile: string | null;
   office_code: string | null;
   current_stage: IncidentStage;
-  /** Event Group the incident was accepted into (null until coordinator approval). */
+  /** Incident Group the incident was accepted into (null until coordinator approval). */
   event_group_id?: number | null;
   /** Permanent identity minted at coordinator approval (null while awaiting intake). */
   incident_key?: string | null;

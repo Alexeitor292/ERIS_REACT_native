@@ -194,6 +194,30 @@ Release notes that need action:
   known) is listed at the top of each tab; place them there. The Offices,
   Branches and Coverage pages redirect to it, and Users keeps only accounts and
   the Administrator switch.
+- **Incident names** (`20260927_incident_names`). Reporters no longer type a
+  title: every incident is named District-County-Route-PostMile - MM/DD/YY (the
+  day it was first observed), e.g. `04-MRN-001-12.300 - 09/22/26`. The
+  migration renames existing incidents the same way, replacing typed titles.
+- **Incident Groups** (`20260928_incident_groups`). Event Groups are now called
+  Incident Groups everywhere people read them; the page moved to
+  `/incident-groups` and old `/event-groups` links redirect. Group titles saved
+  with "Event Group" in them are renamed. API paths and tables are unchanged.
+- **Sharing through the chiefs** (`20260929_share_approvals`). Sharing a
+  technical form now gives viewing and editing, and goes through the branch and
+  office chiefs (see roles-and-identity.md). Adds `submission_shares` and
+  `submission_share_reviews`. Existing grants are left as they are.
+- **No role without its place** (`20260930_roles_from_org`). Every account's
+  roles become exactly what its place in an office tree or a district list gives
+  it, plus Administrator; anybody placed nowhere is a Guest. Branches and offices
+  must keep a chief, and are created with one. Before upgrading, check on the
+  Organization page that everybody who works in ERIS sits somewhere.
+- **Notification feed** (`20261001_notification_feed`). Adds
+  `user_notifications` and `push_devices`. The bell (web) and Notifications
+  screen (mobile) need nothing more; push to phones needs `EXPO_PUSH_ENABLED=true`
+  and a mobile build with push credentials (configuration.md).
+- **Office abbreviations** (`20261002_office_abbreviations`). Offices' short
+  names become OGDN, OGDS, OGDW, OGS and OGDPP, shown wherever the short name
+  was ("West GeoTech Office"). Full names are unchanged.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

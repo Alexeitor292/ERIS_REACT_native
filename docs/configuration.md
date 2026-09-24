@@ -96,6 +96,22 @@ To retry undelivered messages on a schedule, run
 `python -m app.tools.flush_email_outbox` from cron (see
 [deployment.md](deployment.md#email)).
 
+### Push notifications (mobile app)
+
+The notification feed (the web portal's bell and the mobile app's
+Notifications screen) works without any setting. Push only adds the phone's
+lock-screen alert, sent through Expo's push service to the phones people signed
+in on. It is **off unless `EXPO_PUSH_ENABLED=true`**.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `EXPO_PUSH_ENABLED` | `false` | Start the push sender with the API. |
+| `EXPO_ACCESS_TOKEN` | unset | Only if the Expo project requires an access token for push. |
+| `EXPO_PUSH_URL` | Expo's endpoint | Override for testing. |
+
+Phones register through the mobile app, which needs the `expo-notifications`
+module and push credentials in EAS (Apple push key; Firebase for Android).
+
 ### ArcGIS (mobile runtime)
 
 Served to signed-in mobile clients by `GET /arcgis/runtime-config`. These are

@@ -116,17 +116,16 @@ class TestSeededCounts:
 
     def test_exactly_one_viewer_role_row(self, client_db):
         assert int(_scalar("SELECT COUNT(*) FROM roles WHERE name = 'GUEST'")) == 1
-        # ...and it is a role row, not a grant: the migration seeds the role and
-        # nobody holds it until an admin grants it. Among ACTIVE accounts the dev
-        # seed's mock.guest@dot.ca.gov is the one exception, and it is the only one.
-        # An account the role consolidation turned from the retired REVIEWER
-        # into a Guest is the migration's doing, not the seed's.
+        # ...and among the seeded accounts only mock.guest@dot.ca.gov is one. (Any
+        # account placed nowhere is a guest by rule, so other modules' throwaway
+        # accounts are left out; so is an account the role consolidation turned
+        # from the retired REVIEWER into a Guest, which is the migration's doing.)
         holders = _rows(
             """
             SELECT u.email FROM user_roles ur
               JOIN roles r ON r.id = ur.role_id
               JOIN users u ON u.id = ur.user_id
-             WHERE r.name = 'GUEST' AND u.is_active = 1
+             WHERE r.name = 'GUEST' AND u.is_active = 1 AND u.email LIKE 'mock.%'
                AND NOT EXISTS (
                  SELECT 1 FROM role_consolidation_audit a
                   WHERE a.user_id = u.id AND a.old_role = 'REVIEWER'
@@ -226,8 +225,11 @@ class TestSeededValues:
 
     def test_no_seeded_branch_binds_a_role_to_a_named_person(self, client_db):
         # Owner decision 6: no real employee name from any chart appears in any
-        # seeded row, and roles are never bound to named people.
-        assert int(_scalar("SELECT COUNT(*) FROM org_branches WHERE chief_user_id IS NOT NULL")) == 0
+        # seeded row, and roles are never bound to named people. The only chief a
+        # seeded branch may have is a dev mock account (database/dev/040).
+        assert int(_scalar(
+            "SELECT COUNT(*) FROM org_branches b JOIN users u ON u.id = b.chief_user_id WHERE u.email NOT LIKE 'mock.%'"
+        )) == 0
 
     def test_the_undecided_class_is_seeded_with_no_role_and_a_note(self, client_db):
         row = _rows("SELECT eris_role, notes, level_code FROM org_classifications WHERE class_code = '5758'")[0]

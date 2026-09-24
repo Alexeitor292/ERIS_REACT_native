@@ -13,7 +13,7 @@ Seven work roles and the Administrator. One code each, with no aliases.
 | Code | Name | What it is for |
 | --- | --- | --- |
 | `MAINTENANCE_CREW` | Maintenance Crew | Files field reports from the road. Sees only their own reports. No assessments. |
-| `MAINTENANCE_COORDINATOR` | Maintenance Coordinator | Triages field reports in the districts they cover and runs Event Groups. Only "Assessment required" puts a report on the record. |
+| `MAINTENANCE_COORDINATOR` | Maintenance Coordinator | Triages field reports in the districts they cover and runs Incident Groups. Only "Assessment required" puts a report on the record. |
 | `OFFICE_CHIEF` | Office Chief | Routes their GeoTech office's assessments: hands one to a branch chief, or assigns a Senior Specialist directly. Reviews the Senior Specialist route. |
 | `BRANCH_CHIEF` | Branch Chief | Assigns Staff to the assessments handed to their branch, and reviews the branch route. |
 | `SENIOR_SPECIALIST` | Senior Specialist | Fills the assessments an office chief assigns directly. |
@@ -55,10 +55,26 @@ Rules that hold across the system:
 
 Per-record grants sit beside the roles and never widen them:
 
-- **Reader and editor permits on a technical form** (`submission_visibility`,
-  `submission_editors`). An author, or an administrator, names one person who
-  may read, or edit, that one form. The grants are ignored for a guest, because
-  every route that honors them refuses a guest-only account first.
+- **Sharing a technical form** (`submission_shares`, granted through
+  `submission_visibility` and `submission_editors`). The form's owner, or an
+  administrator, shares it with one person, who can then view **and** edit it.
+  Who has a say follows the office trees (`services/share_rules.py`):
+  - **Branch chiefs gate their branch.** A share into or out of a branch needs
+    its chief's approval; across two branches, both chiefs must approve, and it
+    takes effect only then. Either may reject it.
+  - **Inside one branch** it goes through at once; the branch chief is told and
+    may stop it.
+  - **Office chiefs are told**, and may stop it, when a share leaves their
+    office or involves one of their Senior Specialists. They never have to
+    approve: if they do nothing, it stands.
+
+  So Senior Specialist to Senior Specialist goes through at once (their office
+  chiefs told); staff to a Senior Specialist needs the staff member's branch
+  chief (the office chiefs told). A branch with no chief is decided by its
+  office chiefs, and an administrator may decide for any branch or office.
+  Approvals and notices wait in the chiefs' **My Work**. Stopping a share takes
+  the person's access away. Grants from before sharing needed approval stay as
+  they were. Every route that honors a grant refuses a guest-only account first.
 - **Consulted on an assessment** (`assessment_assignments.assignment_role =
   'CONSULTED'`). An office chief, a branch chief or an administrator attaches
   an operational user for information. Consulted confers no authority: it
@@ -128,10 +144,13 @@ production:
 | `mock.coordinator.d01@dot.ca.gov` | Maintenance Coordinator, district 01 |
 | `mock.coordinator.d04@dot.ca.gov` | Maintenance Coordinator, district 04 |
 | `mock.office.chief@dot.ca.gov` | Office Chief, WEST |
-| `mock.branch.chief@dot.ca.gov` | Branch Chief, WEST |
+| `mock.branch.chief@dot.ca.gov` | Branch Chief, WEST Branch A |
 | `mock.senior.specialist@dot.ca.gov` | Senior Specialist, WEST |
-| `mock.staff@dot.ca.gov`, `mock.staff.2@dot.ca.gov` | Staff |
+| `mock.staff@dot.ca.gov`, `mock.staff.2@dot.ca.gov` | Staff, WEST Branch A |
 | `mock.guest@dot.ca.gov` | Guest |
+
+Their places come from `database/dev/040_mock_placements.sql`, loaded after
+`alembic upgrade head`: no role is held without its place.
 
 The addresses sit on the real `dot.ca.gov` domain, so the notification service
 never hands a `mock.*` address to a live mail relay. A development database
