@@ -71,18 +71,6 @@ def _get_all_roles(db: Session) -> list[str]:
     return sorted(names, key=lambda name: (order.get(name, len(order)), name))
 
 
-def _ensure_roles_exist(db: Session, roles: list[str]) -> None:
-    if not roles:
-        return
-    existing = set(_get_all_roles(db))
-    missing = [r for r in roles if r not in existing]
-    if missing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown role(s): {missing}",
-        )
-
-
 def _get_user_row(db: Session, user_id: int):
     u = db.execute(
         text(
@@ -128,27 +116,19 @@ def _user_with_roles(db: Session, user_id: int) -> dict:
     }
 
 
-def _set_roles(db: Session, user_id: int, roles: list[str]) -> None:
-    _ensure_roles_exist(db, roles)
+PLACE_ROLES_MESSAGE = (
+    "Roles come from where a person sits: place them on the Organization page (an office or "
+    "branch tree, or a district's maintenance list). Only Administrator is granted directly."
+)
 
-    # Remove old roles
-    db.execute(text("DELETE FROM user_roles WHERE user_id = :id"), {"id": user_id})
 
-    if not roles:
-        return
-
-    # Insert new roles
-    db.execute(
-        text(
-            """
-            INSERT INTO user_roles (user_id, role_id)
-            SELECT :uid, r.id
-            FROM roles r
-            WHERE r.name IN :names
-            """
-        ),
-        {"uid": user_id, "names": tuple(roles)},
-    )
+def _only_admin(roles: list[str]) -> bool:
+    """Whether the requested roles ask for Administrator; refuses any other role."""
+    requested = {str(role).strip().upper() for role in roles or [] if str(role).strip()}
+    requested.discard("GUEST")  # what everybody placed nowhere already is
+    if requested - {ADMIN}:
+        raise HTTPException(status_code=422, detail=PLACE_ROLES_MESSAGE)
+    return ADMIN in requested
 
 
 def _role_predicate_params(roles: list[str] | set[str]) -> tuple[str, dict[str, str]]:
@@ -505,7 +485,7 @@ def create_user(
     if exists:
         raise HTTPException(status_code=409, detail="Email already exists")
 
-    _ensure_roles_exist(db, body.roles)
+    make_admin = _only_admin(body.roles)
 
     pw_hash = hash_password(body.password)
 
@@ -526,11 +506,11 @@ def create_user(
         )
         user_id = int(res.lastrowid)
 
-        if body.roles:
-            # Tooling and tests may still grant roles directly; the web app does not.
-            _set_roles(db, user_id, body.roles)
+        # A new account sits nowhere yet: a guest (or an administrator, the one
+        # role granted directly) until it is placed.
+        if make_admin:
+            org_tree.set_admin(db, actor_id=int(_admin["id"]), user_id=user_id, is_admin=True)
         else:
-            # A new account sits nowhere yet: its roles follow from where it is placed.
             org_tree.sync_roles(db, user_id)
 
         db.commit()
@@ -556,6 +536,12 @@ def update_user(
         fields["full_name"] = body.full_name
     if body.is_active is not None:
         fields["is_active"] = 1 if body.is_active else 0
+        if not body.is_active:
+            # A chief cannot just vanish: their branch or office would be left without one.
+            try:
+                org_tree.guard_leaving(db, user_id)
+            except org_tree.OrgTreeError as exc:
+                raise HTTPException(status_code=exc.status, detail=exc.message)
 
     # THE CUTOVER WRITE-THROUGH (design §3.2, §13.3). This endpoint still
     # replaces the metadata blob WHOLESALE, and that blob is now the org record's
@@ -574,6 +560,12 @@ def update_user(
     if body.metadata is not None:
         metadata = body.metadata.model_dump()
         office_code = normalize_office_code(metadata.get("office_code"))
+        placed = org_tree.placement(db, int(user_id))
+        if placed["position"] and (office_code or None) != (placed["office_code"] or None):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{placed['label']}. Move them on the Organization page, where their role follows their place.",
+            )
         if office_code:
             office = org_directory.office_by_code(db, office_code)
             if not office:
@@ -637,10 +629,16 @@ def replace_roles(
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Kept for older tools: only Administrator can be set here; every other role
+    # follows from the organization.
+    make_admin = _only_admin(body.roles)
     try:
-        _set_roles(db, user_id, body.roles)
+        org_tree.set_admin(db, actor_id=int(_admin["id"]), user_id=user_id, is_admin=make_admin)
         db.commit()
         return _user_with_roles(db, user_id)
+    except org_tree.OrgTreeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status, detail=exc.message)
     except Exception:
         db.rollback()
         raise

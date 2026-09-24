@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 
 import ModalDialog from "../../../ui/ModalDialog";
 import { adminCreateOffice, adminListClassifications, adminPatchOffice, adminReplaceOfficeDistricts, type OrgClassificationRule } from "../../../api/org";
-import { getDetails, putDetails, type OfficeTree, type PersonDetails, type TreeBranch, type TreePerson } from "../../../api/orgTree";
+import { findPeople, getDetails, putDetails, type OfficeTree, type PersonDetails, type PersonHit, type TreeBranch, type TreePerson } from "../../../api/orgTree";
 
 const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
 const DISTRICTS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
@@ -57,13 +57,57 @@ async function run(setBusy: (b: boolean) => void, setError: (e: string | null) =
   }
 }
 
-/** Add a branch, or rename one and move its home. */
+/** Choose a registered person: who will lead a new branch or office. */
+function ChiefPicker({ value, onChange }: { value: PersonHit | null; onChange: (person: PersonHit | null) => void }) {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<PersonHit[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setHits([]); return; }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      findPeople(q).then((r) => { if (live) setHits(r.items); }).catch(() => { if (live) setHits([]); });
+    }, 200);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [query]);
+  if (value) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm">
+        <span className="min-w-0">
+          <span className="font-medium">{value.full_name}</span>
+          <span className="block truncate text-[11px] text-muted">{value.placement.label ?? "Not placed anywhere yet"}</span>
+        </span>
+        <button type="button" onClick={() => onChange(null)} className="rounded border border-[var(--line)] px-2 py-1 text-xs font-medium">Change</button>
+      </div>
+    );
+  }
+  return (
+    <div className="grid gap-1">
+      <input className={input} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search registered people by name or email" aria-label="Find the chief" />
+      {hits.length ? (
+        <ul className="max-h-44 overflow-auto rounded-md border border-[var(--line)]">
+          {hits.slice(0, 8).map((hit) => (
+            <li key={hit.id}>
+              <button type="button" onClick={() => onChange(hit)} className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--panel-soft)]">
+                {hit.full_name}
+                <span className="block truncate text-[11px] text-muted">{hit.placement.label ?? "Not placed anywhere yet"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** Add a branch (with its chief: a branch never exists without one), or rename one and move its home. */
 export function BranchDialog({ officeName, branch, onSave, onClose }: {
   officeName: string;
   branch: TreeBranch | null;
-  onSave: (body: { name: string; letter: string | null; home_city: string | null; home_district: string | null }) => Promise<void>;
+  onSave: (body: { name: string; letter: string | null; home_city: string | null; home_district: string | null; chief_user_id?: number }) => Promise<void>;
   onClose: () => void;
 }) {
+  const [chief, setChief] = useState<PersonHit | null>(null);
   const [letter, setLetter] = useState(branch?.letter ?? "");
   const [name, setName] = useState(branch?.name ?? "");
   const [city, setCity] = useState(branch?.home_city ?? "");
@@ -73,13 +117,22 @@ export function BranchDialog({ officeName, branch, onSave, onClose }: {
   return (
     <Shell
       title={branch ? `Edit ${branch.name}` : `New branch in ${officeName}`}
-      description={branch ? undefined : "Add its chief and staff afterwards with the + buttons."}
+      description={branch ? undefined : "A branch always has a chief: choose who leads it. Add staff afterwards with the + under it."}
       busy={busy}
       error={error}
       onClose={onClose}
       submitLabel={branch ? "Save branch" : "Add branch"}
-      onSubmit={() => run(setBusy, setError, () => onSave({ name: name.trim(), letter: letter.trim() || null, home_city: city.trim() || null, home_district: district || null }), onClose)}
+      onSubmit={() => run(setBusy, setError, async () => {
+        if (!branch && !chief) throw new Error("Choose the branch chief.");
+        await onSave({ name: name.trim(), letter: letter.trim() || null, home_city: city.trim() || null, home_district: district || null, ...(branch ? {} : { chief_user_id: chief!.id }) });
+      }, onClose)}
     >
+      {!branch ? (
+        <div className="grid gap-1 sm:col-span-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Branch chief</span>
+          <ChiefPicker value={chief} onChange={setChief} />
+        </div>
+      ) : null}
       <Field label="Letter" hint="Optional. Two active branches cannot share one.">
         <input className={input} value={letter} maxLength={4} onChange={(e) => setLetter(e.target.value.toUpperCase())} placeholder="C" />
       </Field>
@@ -109,6 +162,7 @@ export function OfficeDialog({ office, onDone, onClose }: { office: OfficeTree["
   const [homeDistrict, setHomeDistrict] = useState(office?.home_district ?? "");
   const [routing, setRouting] = useState(office?.is_routing_target ?? true);
   const [districts, setDistricts] = useState<string[]>(office?.districts ?? []);
+  const [chief, setChief] = useState<PersonHit | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,7 +178,8 @@ export function OfficeDialog({ office, onDone, onClose }: { office: OfficeTree["
     let id = office?.id;
     if (!id) {
       if (!code.trim()) throw new Error("An office needs a code.");
-      id = (await adminCreateOffice({ code: code.trim().toUpperCase(), ...body })).office.id;
+      if (!chief) throw new Error("Choose the office chief: an office always has one.");
+      id = (await adminCreateOffice({ code: code.trim().toUpperCase(), ...body, chief_user_id: chief.id })).office.id;
     } else {
       await adminPatchOffice(id, body);
     }
@@ -136,7 +191,7 @@ export function OfficeDialog({ office, onDone, onClose }: { office: OfficeTree["
   return (
     <Shell
       title={office ? `Edit ${office.name}` : "New GeoTech office"}
-      description={office ? "Reports already routed keep the office they were sent to." : "Name its chief afterwards with the + at the top of its tree."}
+      description={office ? "Reports already routed keep the office they were sent to." : "An office always has an office chief: choose who leads it."}
       busy={busy}
       error={error}
       onClose={onClose}
@@ -147,6 +202,12 @@ export function OfficeDialog({ office, onDone, onClose }: { office: OfficeTree["
         <Field label="Code" hint="Set once. Records are joined on it, so it cannot change later." wide>
           <input className={input} value={code} maxLength={16} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="WEST" />
         </Field>
+      ) : null}
+      {!office ? (
+        <div className="grid gap-1 sm:col-span-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Office chief</span>
+          <ChiefPicker value={chief} onChange={setChief} />
+        </div>
       ) : null}
       <Field label="Full name" wide>
         <input className={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Office of Geotechnical Design West" required />

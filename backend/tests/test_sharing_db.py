@@ -10,71 +10,28 @@ import uuid
 
 import pytest
 
+from tests.org_people import People
+
 pytestmark = pytest.mark.db
-
-_RUN = uuid.uuid4().hex[:6]
-_PASSWORD = "sharing-rules-password"
-
-
-def _auth(token: str) -> dict:
-    return {"Authorization": f"Bearer {token}"}
-
 
 @pytest.fixture(scope="module")
 def org(client_db, admin_token):
-    admin = _auth(admin_token)
-    tree = client_db.get("/org/tree", headers=admin).json()
-    offices = {o["office"]["code"]: o["office"]["id"] for o in tree["offices"]}
-    west, north = offices["WEST"], offices["NORTH"]
-
-    branches = {}
-    for key, office in (("wa", west), ("wb", west), ("na", north)):
-        name = f"Share test {key} {_RUN}"
-        payload = client_db.post(f"/org/offices/{office}/branches", json={"name": name}, headers=admin)
-        assert payload.status_code == 201, payload.text
-        branches[key] = next(b["id"] for o in payload.json()["offices"] for b in o["branches"] if b["name"] == name)
-
+    placed = People(client_db, admin_token, prefix="Zzz Share")
     people = {}
-    for key in ("owner", "mate", "chief_wa", "chief_wb", "staff_wb", "chief_na", "staff_na", "spec_w", "spec_n", "ochief_w", "ochief_n"):
-        email = f"share-{key}-{_RUN}@example.test"
-        made = client_db.post("/admin/users", json={"email": email, "full_name": f"Zzz Share {key}", "password": _PASSWORD}, headers=admin)
-        assert made.status_code == 201, made.text
-        people[key] = {"id": made.json()["id"], "email": email}
-
-    def place(path, key):
-        resp = client_db.post(path, json={"user_id": people[key]["id"]}, headers=admin)
-        assert resp.status_code == 200, resp.text
-
-    place(f"/org/branches/{branches['wa']}/chief", "chief_wa")
-    place(f"/org/branches/{branches['wa']}/staff", "owner")
-    place(f"/org/branches/{branches['wa']}/staff", "mate")
-    place(f"/org/branches/{branches['wb']}/chief", "chief_wb")
-    place(f"/org/branches/{branches['wb']}/staff", "staff_wb")
-    place(f"/org/branches/{branches['na']}/chief", "chief_na")
-    place(f"/org/branches/{branches['na']}/staff", "staff_na")
-    place(f"/org/offices/{west}/specialists", "spec_w")
-    place(f"/org/offices/{north}/specialists", "spec_n")
-    place(f"/org/offices/{west}/chiefs", "ochief_w")
-    place(f"/org/offices/{north}/chiefs", "ochief_n")
-    for key in people:
-        login = client_db.post("/auth/login", json={"email": people[key]["email"], "password": _PASSWORD})
-        assert login.status_code == 200, login.text
-        people[key]["headers"] = _auth(login.json()["access_token"])
-
-    yield people
+    for key, office in (("ochief_w", "WEST"), ("ochief_n", "NORTH")):
+        people[key] = placed.make("OFFICE_CHIEF", key, office=office)
+    branches = {}
+    for key, office in (("chief_wa", "WEST"), ("chief_wb", "WEST"), ("chief_na", "NORTH")):
+        people[key] = placed.make("BRANCH_CHIEF", key, office=office)
+        branches[key[-2:]] = placed.branches[-1]
+    for key, branch in (("owner", "wa"), ("mate", "wa"), ("staff_wb", "wb"), ("staff_na", "na")):
+        people[key] = placed.make("STAFF", key, branch_id=branches[branch])
+    for key, office in (("spec_w", "WEST"), ("spec_n", "NORTH")):
+        people[key] = placed.make("SENIOR_SPECIALIST", key, office=office)
     for person in people.values():
-        client_db.delete(f"/org/tree/people/{person['id']}", headers=admin)
-        client_db.patch(f"/admin/users/{person['id']}", json={"is_active": False}, headers=admin)
-    # Gone, not retired: the seed-shape tests count every branch row.
-    from sqlalchemy import bindparam, text
-
-    from app.db import engine
-
-    with engine.begin() as conn:
-        ids = {"ids": list(branches.values())}
-        conn.execute(text("DELETE FROM org_branch_districts WHERE branch_id IN :ids").bindparams(bindparam("ids", expanding=True)), ids)
-        conn.execute(text("UPDATE org_user_profiles SET branch_id = NULL WHERE branch_id IN :ids").bindparams(bindparam("ids", expanding=True)), ids)
-        conn.execute(text("DELETE FROM org_branches WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)), ids)
+        person["headers"] = placed.login(person)
+    yield people
+    placed.cleanup()
 
 
 def _form(client_db, owner) -> int:

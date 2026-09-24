@@ -204,6 +204,8 @@ export function adminListOffices(params: { includeInactive?: boolean; orgType?: 
 }
 
 export type OfficeCreateBody = {
+  /** A GeoTech office never exists without its office chief. */
+  chief_user_id?: number;
   code: string;
   org_type?: "GEOTECH" | "MAINTENANCE";
   unit_number?: string | null;

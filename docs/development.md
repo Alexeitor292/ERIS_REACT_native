@@ -38,7 +38,13 @@ Get-Content -Raw database\dev\030_mock_accounts.sql | docker exec -i eris_mariad
 ```
 
 The order matters: the organization-model migration builds each coordinator's
-district coverage from the accounts it finds. The accounts, all with password
+district coverage from the accounts it finds. After `alembic upgrade head`, put
+the mock accounts in their places (roles come only from where people sit):
+
+```bash
+docker exec -i eris_mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' < database/dev/040_mock_placements.sql
+```
+ The accounts, all with password
 `password`, are listed in [roles-and-identity.md](roles-and-identity.md#mock-accounts-development-and-test-only).
 
 A database seeded before the `mock.*` addresses can be renamed in place with
@@ -153,8 +159,12 @@ Then, from `backend/`, with `DB_HOST=127.0.0.1`, `DB_PORT=3307`,
 
 ```bash
 alembic stamp 0001_baseline && alembic upgrade head
+docker exec -i eris_test_db mariadb -uroot -prootpassword eris < ../database/dev/040_mock_placements.sql
 python -m pytest tests -m db
 ```
+
+Tests that need somebody in a role create and place them with
+`tests/org_people.py` (a role can never be granted directly).
 
 The database tests do not need MinIO. A few offline-scene tests import the GIS
 packages in `requirements-worker.txt` (such as `rasterio` and `affine`); install

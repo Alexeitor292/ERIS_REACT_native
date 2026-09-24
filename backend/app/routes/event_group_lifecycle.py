@@ -27,7 +27,7 @@ def close_event_group(
     if not row:
         raise HTTPException(status_code=404, detail="Incident Group not found")
     event_group = dict(row)
-    event_group_routes._ensure_manage_scope(user, event_group)
+    event_group_routes._ensure_manage_scope(user, event_group, db=db)
 
     status = str(event_group["status"]).upper()
     if status == "ARCHIVED":
@@ -88,7 +88,7 @@ def reopen_event_group(
     if not row:
         raise HTTPException(status_code=404, detail="Incident Group not found")
     event_group = dict(row)
-    event_group_routes._ensure_manage_scope(user, event_group)
+    event_group_routes._ensure_manage_scope(user, event_group, db=db)
 
     status = str(event_group["status"]).upper()
     if status == "ARCHIVED":

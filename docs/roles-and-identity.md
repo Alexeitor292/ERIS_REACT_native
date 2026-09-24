@@ -144,10 +144,13 @@ production:
 | `mock.coordinator.d01@dot.ca.gov` | Maintenance Coordinator, district 01 |
 | `mock.coordinator.d04@dot.ca.gov` | Maintenance Coordinator, district 04 |
 | `mock.office.chief@dot.ca.gov` | Office Chief, WEST |
-| `mock.branch.chief@dot.ca.gov` | Branch Chief, WEST |
+| `mock.branch.chief@dot.ca.gov` | Branch Chief, WEST Branch A |
 | `mock.senior.specialist@dot.ca.gov` | Senior Specialist, WEST |
-| `mock.staff@dot.ca.gov`, `mock.staff.2@dot.ca.gov` | Staff |
+| `mock.staff@dot.ca.gov`, `mock.staff.2@dot.ca.gov` | Staff, WEST Branch A |
 | `mock.guest@dot.ca.gov` | Guest |
+
+Their places come from `database/dev/040_mock_placements.sql`, loaded after
+`alembic upgrade head`: no role is held without its place.
 
 The addresses sit on the real `dot.ca.gov` domain, so the notification service
 never hands a `mock.*` address to a live mail relay. A development database

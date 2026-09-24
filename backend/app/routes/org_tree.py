@@ -33,7 +33,8 @@ class BranchIn(BaseModel):
     letter: str | None = Field(default=None, max_length=4)
     home_city: str | None = Field(default=None, max_length=64)
     home_district: str | None = Field(default=None, max_length=4)
-    chief_user_id: int | None = Field(default=None, ge=1)
+    # A branch never exists without its chief.
+    chief_user_id: int = Field(..., ge=1)
 
 
 class BranchPatchIn(BaseModel):
@@ -78,7 +79,6 @@ def _tree_payload(db: Session, actor: dict) -> dict:
     return {
         "offices": offices,
         "me": {"id": int(actor["id"]), "is_admin": org_tree.is_admin(actor), **org_tree.placement(db, int(actor["id"]))},
-        "unplaced": org_tree.unplaced_role_holders(db)["geotech"] if org_tree.is_admin(actor) else [],
     }
 
 
@@ -114,12 +114,10 @@ def add_specialist(body: PersonIn, office_id: int = Path(..., ge=1), db: Session
 @router.post("/org/offices/{office_id}/branches", status_code=201)
 def add_branch(body: BranchIn, office_id: int = Path(..., ge=1), db: Session = Depends(get_db), actor=Depends(require_roles(TREE_VIEWERS))):
     with _writing(db):
-        branch_id = org_tree.create_branch(
+        org_tree.create_branch(
             db, actor, office_id=office_id, name=body.name, letter=body.letter,
-            home_city=body.home_city, home_district=body.home_district,
+            home_city=body.home_city, home_district=body.home_district, chief_user_id=body.chief_user_id,
         )
-        if body.chief_user_id:
-            org_tree.set_branch_chief(db, actor, branch_id=branch_id, user_id=body.chief_user_id)
     return _tree_payload(db, actor)
 
 
@@ -191,7 +189,7 @@ _KINDS = {"coordinators": "COORDINATOR", "crew": "CREW"}
 
 
 def _maintenance_payload(db: Session) -> dict:
-    return {"districts": org_tree.maintenance_lists(db), "unplaced": org_tree.unplaced_role_holders(db)["maintenance"]}
+    return {"districts": org_tree.maintenance_lists(db)}
 
 
 def _kind(value: str) -> str:
@@ -237,8 +235,3 @@ def set_admin(body: AdminIn, user_id: int = Path(..., ge=1), db: Session = Depen
         roles = org_tree.set_admin(db, actor_id=int(actor["id"]), user_id=user_id, is_admin=body.is_admin)
     return {"user_id": user_id, "roles": sorted(roles)}
 
-
-@router.get("/org/unplaced")
-def get_unplaced(db: Session = Depends(get_db), _actor=Depends(require_roles(ADMIN_ONLY))):
-    """People holding a role their place does not (yet) give them — pre-tree accounts."""
-    return org_tree.unplaced_role_holders(db)

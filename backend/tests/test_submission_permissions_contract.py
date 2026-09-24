@@ -2,6 +2,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.org_people import People
+
 pytestmark = pytest.mark.db
 
 
@@ -13,39 +15,14 @@ def test_submission_owner_can_manage_scoped_sharing_without_admin_directory(clie
     candidate_id = None
     submission_id = None
 
+    people = People(client_db, admin_token)
     try:
-        owner = client_db.post(
-            "/admin/users",
-            headers=admin_headers,
-            json={
-                "email": f"sharing-owner-{unique}@example.test",
-                "full_name": "Sharing Contract Owner",
-                "password": password,
-                "roles": ["STAFF"],
-            },
-        )
-        assert owner.status_code == 201
-        owner_id = int(owner.json()["id"])
-
-        candidate = client_db.post(
-            "/admin/users",
-            headers=admin_headers,
-            json={
-                "email": f"sharing-reader-{unique}@example.test",
-                "full_name": "Sharing Contract Reader",
-                "password": password,
-                "roles": ["MAINTENANCE_CREW"],
-            },
-        )
-        assert candidate.status_code == 201
-        candidate_id = int(candidate.json()["id"])
-
-        login = client_db.post(
-            "/auth/login",
-            json={"email": owner.json()["email"], "password": password},
-        )
-        assert login.status_code == 200
-        owner_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        # The candidate works in the owner's branch, so the share needs nobody's
+        # approval (their branch chief is only told).
+        owner_user = people.make("STAFF", "sharing-owner", full_name="Sharing Contract Owner")
+        candidate_user = people.make("STAFF", "sharing-reader", full_name="Sharing Contract Reader")
+        owner_id, candidate_id = owner_user["id"], candidate_user["id"]
+        owner_headers = people.login(owner_user)
 
         created = client_db.post(
             "/submissions",
@@ -106,10 +83,4 @@ def test_submission_owner_can_manage_scoped_sharing_without_admin_directory(clie
         if submission_id is not None and owner_id is not None:
             # Admin can clean up a draft if an earlier assertion interrupted the owner path.
             client_db.delete(f"/submissions/{submission_id}", headers=admin_headers)
-        for user_id in (owner_id, candidate_id):
-            if user_id is not None:
-                client_db.patch(
-                    f"/admin/users/{user_id}",
-                    headers=admin_headers,
-                    json={"is_active": False},
-                )
+        people.cleanup()

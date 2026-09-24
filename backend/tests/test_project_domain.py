@@ -5,6 +5,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
+from tests.org_people import People
+
 pytestmark = pytest.mark.db
 
 
@@ -12,20 +14,6 @@ def _login(client, email: str, password: str) -> dict[str, str]:
     response = client.post("/auth/login", json={"email": email, "password": password})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
-
-
-def _create_user(client, admin_headers: dict[str, str], *, email: str, password: str, roles: list[str], metadata: dict | None = None) -> int:
-    payload: dict = {
-        "email": email,
-        "full_name": email.split("@")[0].replace("-", " ").title(),
-        "password": password,
-        "roles": roles,
-    }
-    if metadata is not None:
-        payload["metadata"] = metadata
-    response = client.post("/admin/users", headers=admin_headers, json=payload)
-    assert response.status_code == 201, response.text
-    return int(response.json()["id"])
 
 
 def _create_incident(client, headers: dict[str, str], *, title: str, post_mile: str) -> dict:
@@ -67,14 +55,13 @@ def test_incident_is_root_and_approval_mints_permanent_identity(client_db, admin
     coordinator_email = f"event-coord-{unique}@example.test"
     office_email = f"event-office-{unique}@example.test"
 
-    user_ids = [
-        _create_user(client_db, admin_headers, email=maintenance_email, password=password, roles=["MAINTENANCE_CREW"], metadata={"district": "03"}),
-        _create_user(client_db, admin_headers, email=coordinator_email, password=password, roles=["MAINTENANCE_COORDINATOR"], metadata={"district": "03"}),
-        _create_user(client_db, admin_headers, email=office_email, password=password, roles=["OFFICE_CHIEF"], metadata={"office_code": "NORTH"}),
-    ]
+    people = People(client_db, admin_token)
+    maintenance = people.make("MAINTENANCE_CREW", email=maintenance_email, district="03")
+    coordinator = people.make("MAINTENANCE_COORDINATOR", email=coordinator_email, district="03")
+    people.make("OFFICE_CHIEF", email=office_email, office="NORTH")
 
-    maintenance_headers = _login(client_db, maintenance_email, password)
-    coordinator_headers = _login(client_db, coordinator_email, password)
+    maintenance_headers = people.login(maintenance)
+    coordinator_headers = people.login(coordinator)
 
     incident = _create_incident(client_db, maintenance_headers, title=f"Provisional {unique}", post_mile="1.00")
     incident_id = int(incident["id"])
@@ -130,9 +117,7 @@ def test_incident_is_root_and_approval_mints_permanent_identity(client_db, admin
     # the domain parent relation.
     assert int(stored["project_id"]) == event_group_id
 
-    for user_id in user_ids:
-        response = client_db.patch(f"/admin/users/{user_id}", headers=admin_headers, json={"is_active": False})
-        assert response.status_code == 200
+    people.cleanup()
 
 
 def test_multiple_incidents_share_event_group_attribute_without_sharing_identity(client_db, admin_token):
@@ -142,11 +127,10 @@ def test_multiple_incidents_share_event_group_attribute_without_sharing_identity
     coordinator_email = f"event-share-coord-{unique}@example.test"
     office_email = f"event-share-office-{unique}@example.test"
 
-    user_ids = [
-        _create_user(client_db, admin_headers, email=coordinator_email, password=password, roles=["MAINTENANCE_COORDINATOR"], metadata={"district": "03"}),
-        _create_user(client_db, admin_headers, email=office_email, password=password, roles=["OFFICE_CHIEF"], metadata={"office_code": "NORTH"}),
-    ]
-    coordinator_headers = _login(client_db, coordinator_email, password)
+    people = People(client_db, admin_token)
+    coordinator = people.make("MAINTENANCE_COORDINATOR", email=coordinator_email, district="03")
+    people.make("OFFICE_CHIEF", email=office_email, office="NORTH")
+    coordinator_headers = people.login(coordinator)
 
     first = _create_incident(client_db, admin_headers, title=f"Shared A {unique}", post_mile="2.00")
     first_id = int(first["id"])
@@ -197,9 +181,7 @@ def test_multiple_incidents_share_event_group_attribute_without_sharing_identity
     assert refreshed.json()["incident"]["incident_key"] == second_body["incident"]["incident_key"]
     assert int(refreshed.json()["incident"]["event_group_id"]) != group_id
 
-    for user_id in user_ids:
-        response = client_db.patch(f"/admin/users/{user_id}", headers=admin_headers, json={"is_active": False})
-        assert response.status_code == 200
+    people.cleanup()
 
 
 def test_provisional_incident_can_be_discarded(client_db, admin_token):

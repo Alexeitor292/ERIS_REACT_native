@@ -191,17 +191,6 @@ export default function OrganizationPage() {
 
         {tab === "offices" ? (
           <>
-            {isAdmin && tree?.unplaced.length ? (
-              <div className="flex items-start gap-2 rounded-lg border border-[color:color-mix(in_oklab,var(--warn)_45%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn)_7%,var(--panel))] px-3 py-2 text-sm">
-                <TriangleAlert size={16} className="mt-0.5 shrink-0 text-[var(--warn-text)]" aria-hidden />
-                <span>
-                  <strong>{tree.unplaced.length} {tree.unplaced.length === 1 ? "person holds" : "people hold"} a GeoTech role but sit in no tree:</strong>{" "}
-                  {tree.unplaced.map((p) => `${p.full_name} (${p.role.replace("_", " ").toLowerCase()})`).join(", ")}.{" "}
-                  <span className="text-muted">Add them with a + in the right tree. Until then they keep their current role.</span>
-                </span>
-              </div>
-            ) : null}
-
             {offices.length > 1 || isAdmin ? (
               <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Offices">
                 {offices.map((o) => {
@@ -254,7 +243,6 @@ export default function OrganizationPage() {
         ) : maintenance ? (
           <MaintenanceDistricts
             districts={maintenance.districts}
-            unplaced={maintenance.unplaced}
             onAdd={openMaintenanceAdd}
             onRemove={maintenanceRemove}
             onMakePrimary={async (district, userId) => {
@@ -278,9 +266,9 @@ export default function OrganizationPage() {
           branch={branchDialog.branch}
           onClose={() => setBranchDialog(null)}
           onSave={async (body) => {
-            const next = branchDialog.branch ? await editBranch(branchDialog.branch.id, body) : await addBranch(branchDialog.office.office.id, body);
+            const next = branchDialog.branch ? await editBranch(branchDialog.branch.id, body) : await addBranch(branchDialog.office.office.id, { ...body, chief_user_id: body.chief_user_id! });
             setTree(next);
-            done(branchDialog.branch ? "Branch saved." : "Branch added. Name its chief with the + under it.");
+            done(branchDialog.branch ? "Branch saved." : "Branch added, with its chief. Add staff with the + under it.");
           }}
         />
       ) : null}
@@ -290,7 +278,7 @@ export default function OrganizationPage() {
           onClose={() => setOfficeDialog(null)}
           onDone={async () => {
             await loadTree();
-            done(officeDialog.office ? "Office saved. Reports already routed keep the office they were sent to." : "Office created. Name its chief with the + at the top of its tree.");
+            done(officeDialog.office ? "Office saved. Reports already routed keep the office they were sent to." : "Office created, with its office chief.");
           }}
         />
       ) : null}

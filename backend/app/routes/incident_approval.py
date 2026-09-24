@@ -186,7 +186,7 @@ def coordinator_approve_incident(
             if not target:
                 raise HTTPException(status_code=404, detail="Incident Group not found")
             target_dict = dict(target)
-            event_group_routes._ensure_manage_scope(user, target_dict)
+            event_group_routes._ensure_manage_scope(user, target_dict, db=db)
             if str(target_dict["status"]).upper() != "OPEN":
                 raise HTTPException(status_code=409, detail="Only an open Incident Group can accept an Incident")
             target_event_group_id = int(requested_event_group_id)

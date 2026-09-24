@@ -30,6 +30,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
+
+from tests.org_people import People
 from fastapi.routing import APIRoute
 from sqlalchemy import text
 
@@ -562,27 +564,20 @@ class TestAViewerIsNeverNotified:
 class TestViewerCombinesRatherThanNarrows:
     @pytest.fixture(scope="class")
     def chief_plus_viewer(self, client_db, tokens):
-        email = f"viewer-and-chief-{_RUN}@example.test"
-        created = client_db.post(
-            "/admin/users",
-            json={
-                "email": email,
-                "full_name": f"Zzz Chief And Viewer {_RUN}",
-                "password": "org-model-test-password",
-                "roles": ["OFFICE_CHIEF", "GUEST"],
-                "metadata": {"office_code": "WEST", "office_location": "West Office"},
-            },
-            headers=_auth(tokens["admin"]),
+        # A West office chief with a stray Guest grant beside the role. The API
+        # never produces this (roles follow places, and Guest only when nothing
+        # else), so it is written by hand: whatever the data, Guest must never
+        # narrow a chief.
+        placed = People(client_db, tokens["admin"], prefix="Zzz Chief And Viewer")
+        chief = placed.make("OFFICE_CHIEF", "viewer-and-chief", office="WEST")
+        _exec(
+            "INSERT IGNORE INTO user_roles (user_id, role_id) SELECT :uid, id FROM roles WHERE name = 'GUEST'",
+            {"uid": chief["id"]},
         )
-        assert created.status_code == 201, created.text
-        user_id = int(created.json()["id"])
-        yield {"id": user_id, "token": _login(client_db, email, "org-model-test-password")}
-        client_db.patch(
-            f"/admin/users/{user_id}", json={"is_active": False}, headers=_auth(tokens["admin"])
-        )
-        # The grant goes too: mock.guest@dot.ca.gov is meant to be the only account
-        # holding GUEST, and test_seed_shape_db.py says so.
-        _exec("DELETE FROM user_roles WHERE user_id = :uid", {"uid": user_id})
+        yield {"id": chief["id"], "token": placed.login(chief)["Authorization"].split(" ", 1)[1]}
+        placed.cleanup()
+        # People.cleanup leaves the account a guest; mock.guest@dot.ca.gov is meant
+        # to be the only ACTIVE one (test_seed_shape_db.py), and this one is inactive.
 
     def test_they_still_read_work_in_flight(self, client_db, chief_plus_viewer, in_flight):
         # require_roles is a union and the most permissive role wins. The
