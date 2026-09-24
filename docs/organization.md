@@ -23,7 +23,7 @@ and how routing uses this data in [workflows.md](workflows.md).
 
 Two names per office, used deliberately: the **full name** ("Office of
 Geotechnical Design West") appears on record headers and the routing snapshot;
-the **short name** ("West GeoTech Office") appears in flow copy, banners, the
+the **short name**, the office's abbreviation ("OGDW"), appears in flow copy, banners, the
 office selector and receipts. Fill both in.
 
 ## Where roles come from

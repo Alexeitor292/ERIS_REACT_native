@@ -212,7 +212,7 @@ export function OfficeDialog({ office, onDone, onClose }: { office: OfficeTree["
       <Field label="Full name" wide>
         <input className={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Office of Geotechnical Design West" required />
       </Field>
-      <Field label="Short name"><input className={input} value={shortName} onChange={(e) => setShortName(e.target.value)} placeholder="West GeoTech Office" /></Field>
+      <Field label="Short name"><input className={input} value={shortName} onChange={(e) => setShortName(e.target.value)} placeholder="OGDW" /></Field>
       <Field label="Unit number"><input className={input} value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="59-315" /></Field>
       <Field label="Home city"><input className={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Oakland" /></Field>
       <Field label="Home district">
