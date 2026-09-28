@@ -24,6 +24,7 @@ import {
 } from "./siteTerrainModel";
 import { useDroneSurveys } from "./drone/DroneSurveyContext";
 import SlopeProfileDiagram, { type ProfilePoint } from "./drone/SlopeProfileDiagram";
+import { surveyTitle } from "./drone/surveyLabels";
 
 export const MEASURE_KEYS = [
   "measure_slope_height_ft",
@@ -69,7 +70,7 @@ const GROUPS: Array<{ title: string; fields: FieldSpec[] }> = [
 ];
 
 type TerrainResult = {
-  /** The area and the drone survey (with its offset) it was measured against. */
+  /** The area, the drone survey and what it is compared with (each with its offset). */
   key: string;
   measurement: SiteMeasurement;
   proposed: Partial<Record<MeasurementField, string>>;
@@ -80,11 +81,13 @@ type TerrainResult = {
   drone: {
     comparison: SurfaceComparison;
     profile: ProfilePoint[];
-    label: string;
-    capturedOn: string | null;
+    /** The survey that is the ground now, and what the ground before is: "terrain model" or an earlier survey. */
+    nowTitle: string;
+    beforeTitle: string;
+    beforeIsSurvey: boolean;
     offsetM: number;
   } | null;
-  /** A drone survey is loaded but covers too little of the area to measure it. */
+  /** A drone survey is loaded but covers too little of the area (with what it is compared with) to measure it. */
   droneCoverage: number | null;
 };
 
@@ -123,7 +126,12 @@ export default function SiteMeasurementsPanel({
   const areaKey = area ? JSON.stringify(area) : "";
   const drone = useDroneSurveys();
   const survey = drone?.active ?? null;
-  const measureKey = `${areaKey}|${survey ? `${survey.survey.id}:${survey.survey.vertical_offset_m}` : ""}`;
+  const baseline = drone?.baseline ?? null;
+  const measureKey = [
+    areaKey,
+    survey ? `${survey.survey.id}:${survey.survey.vertical_offset_m}` : "",
+    baseline ? `${baseline.survey.id}:${baseline.survey.vertical_offset_m}` : "terrain",
+  ].join("|");
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,24 +156,28 @@ export default function SiteMeasurementsPanel({
       const measurement = measureSiteArea(area, inside, around);
       if (!measurement) throw new Error("The terrain model has no usable data under this area.");
 
-      // A drone survey over the area: the same points on the ground now, and a section down the slope.
+      // A drone survey over the area: the same points on the ground now, compared with the
+      // ground before (the terrain model, or an earlier survey), and a section down the slope.
       let before: TerrainResult["drone"] = null;
       let droneCoverage: number | null = null;
       if (drone && survey) {
-        const actual = [...plan.inside, ...plan.around].map(([lon, lat]) => drone.actualAt(lon, lat));
-        const comparison = compareSurfaces(area, plan, z, actual);
-        droneCoverage = comparison?.coverage ?? plan.inside.filter((_, i) => actual[i] != null).length / Math.max(1, plan.inside.length);
+        const all = [...plan.inside, ...plan.around];
+        const actual = all.map(([lon, lat]) => drone.actualAt(lon, lat));
+        const historical = baseline ? all.map(([lon, lat]) => drone.baselineAt(lon, lat)) : z;
+        const comparison = compareSurfaces(area, plan, historical, actual);
+        droneCoverage = comparison?.coverage ?? plan.inside.filter((_, i) => actual[i] != null && historical[i] != null).length / Math.max(1, plan.inside.length);
         if (comparison && comparison.coverage >= MIN_DRONE_COVERAGE) {
           setBusy("Drawing the section down the slope…");
           const [top, bottom] = profileLine(area, comparison.original.downslopeBearingDeg, Math.max(10, plan.bufferM));
           const along = pointsAlong(top, bottom, 90);
-          const { z: historical } = await sampleElevations(along.map((a) => a.point));
-          const profile = along.map((a, i) => ({ distanceM: a.distanceM, historical: historical[i] ?? null, actual: drone.actualAt(a.point[0], a.point[1]) }));
+          const beforeLine = await drone.beforeHeights(along.map((a) => a.point));
+          const profile = along.map((a, i) => ({ distanceM: a.distanceM, historical: beforeLine[i] ?? null, actual: drone.actualAt(a.point[0], a.point[1]) }));
           before = {
             comparison,
             profile,
-            label: survey.survey.label || survey.survey.dsm_filename || "Drone survey",
-            capturedOn: survey.survey.captured_on,
+            nowTitle: surveyTitle(survey.survey),
+            beforeTitle: baseline ? surveyTitle(baseline.survey) : "terrain model",
+            beforeIsSurvey: !!baseline,
             offsetM: survey.survey.vertical_offset_m,
           };
           if (canEdit) {
@@ -174,6 +186,9 @@ export default function SiteMeasurementsPanel({
               area_key: areaKey,
               measured_at: new Date().toISOString(),
               offset_m: survey.survey.vertical_offset_m,
+              baseline: baseline
+                ? { kind: "survey", survey_id: baseline.survey.id, title: surveyTitle(baseline.survey), offset_m: baseline.survey.vertical_offset_m }
+                : { kind: "terrain" },
               original: heights(comparison.original),
               updated: heights(comparison.updated),
               coverage: comparison.coverage,
@@ -234,7 +249,11 @@ export default function SiteMeasurementsPanel({
               {area
                 ? "Samples the elevation model inside the area drawn on the location map and around it, and works out the slope, the slide's size and the slope height."
                 : "Draw the slide's outline on the location map (Site areas, then Draw area) to measure it from the elevation model."}
-              {area && survey ? ` The drone survey "${survey.survey.label || survey.survey.dsm_filename || "Drone survey"}" gives the ground now: the terrain model stays the ground before.` : ""}
+              {area && survey
+                ? baseline
+                  ? ` The drone survey "${surveyTitle(survey.survey)}" gives the ground now and "${surveyTitle(baseline.survey)}" the ground before.`
+                  : ` The drone survey "${surveyTitle(survey.survey)}" gives the ground now: the terrain model stays the ground before.`
+                : ""}
             </p>
           </div>
           {area ? (
@@ -279,7 +298,10 @@ export default function SiteMeasurementsPanel({
         {stale ? <p className="mt-2 text-xs text-[var(--warn-text)]">The area or the drone survey changed since it was measured. Measure it again.</p> : null}
         {result && !stale && !result.drone && result.droneCoverage != null ? (
           <p className="mt-2 text-xs text-[var(--warn-text)]">
-            The drone survey covers {Math.round(result.droneCoverage * 100)}% of this area, too little to measure the ground now. These values come from the terrain model only.
+            {baseline
+              ? `The two drone surveys overlap on ${Math.round(result.droneCoverage * 100)}% of this area, too little to compare them.`
+              : `The drone survey covers ${Math.round(result.droneCoverage * 100)}% of this area, too little to measure the ground now.`}{" "}
+            These values come from the terrain model only.
           </p>
         ) : null}
 
@@ -325,15 +347,19 @@ export default function SiteMeasurementsPanel({
                 <li>Ld runs down the fall line, measured along the slope; Wd is the area's extent across it.</li>
                 {result.drone ? (
                   <li>
-                    With a drone survey, α and H describe the ground before (the terrain model) and β, Ld and Wd the ground now (the drone), measured the same way.
-                    The drone heights are shifted {result.drone.offsetM >= 0 ? "up" : "down"} {Math.abs(result.drone.offsetM * FT_PER_M).toFixed(1)} ft to line up with the terrain model on the ground around the slide.
+                    With a drone survey, α and H describe the ground before ({result.drone.beforeIsSurvey ? "the earlier survey" : "the terrain model"}) and β, Ld and Wd the ground now (the drone), measured the same way.
+                    {result.drone.beforeIsSurvey
+                      ? " Both surveys' heights are lined up with the terrain model on the ground around the slide, so they compare on the same footing."
+                      : ` The drone heights are shifted ${result.drone.offsetM >= 0 ? "up" : "down"} ${Math.abs(result.drone.offsetM * FT_PER_M).toFixed(1)} ft to line up with the terrain model on the ground around the slide.`}
                     Volumes add up the change at each sample inside the area.
                   </li>
                 ) : null}
                 <li>H is the rise from the low point to the high point of the area and the band around it (2nd to 98th percentile, so single spikes don't count).</li>
                 <li>
                   {result.drone
-                    ? "The terrain model predates the slide and the drone survey is only as good as its flight and processing. Check both in the field."
+                    ? result.drone.beforeIsSurvey
+                      ? "Each drone survey is only as good as its flight and processing. Check both in the field."
+                      : "The terrain model predates the slide and the drone survey is only as good as its flight and processing. Check both in the field."
                     : "The elevation model usually predates the slide, so these describe the slope as it was mapped. Check them in the field."}
                 </li>
                 <li>Hs is too small to read from the model: measure it in the field. Lr and Wr come from the roadway panel below.</li>
@@ -449,7 +475,7 @@ function SymbolBadge({ children }: { children: ReactNode }) {
   );
 }
 
-/** The slope before (terrain model) and now (drone survey), the change between them, and the section down the slope. */
+/** The slope before (terrain model or an earlier survey) and now (drone survey), the change between them, and the section down the slope. */
 function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> }) {
   const { comparison: c } = drone;
   const angle = (d: number) => `${d.toFixed(1)}°`;
@@ -468,8 +494,8 @@ function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> 
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wide text-muted">
               <th className="py-1 pr-3 font-semibold" scope="col"><span className="sr-only">Measure</span></th>
-              <th className="py-1 pr-3 font-semibold" scope="col">Original ground<span className="block font-normal normal-case tracking-normal">terrain model</span></th>
-              <th className="py-1 pr-3 font-semibold" scope="col">Ground now<span className="block font-normal normal-case tracking-normal">{drone.label}{drone.capturedOn ? `, ${drone.capturedOn}` : ""}</span></th>
+              <th className="py-1 pr-3 font-semibold" scope="col">Before<span className="block font-normal normal-case tracking-normal">{drone.beforeTitle}</span></th>
+              <th className="py-1 pr-3 font-semibold" scope="col">Now<span className="block font-normal normal-case tracking-normal">{drone.nowTitle}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -487,7 +513,7 @@ function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> 
         <Metric label="Deepest drop" value={fmtChangeFt(c.maxLossM)} note={`Mean change ${c.meanChangeM >= 0 ? "+" : "−"}${fmtChangeFt(Math.abs(c.meanChangeM))}`} />
         <Metric label="Highest rise" value={fmtChangeFt(c.maxGainM)} note="Debris or bulging ground" />
         <Metric label="Ground lost" value={fmtYd3(c.lossVolumeM3)} note={`Gained ${fmtYd3(c.gainVolumeM3)}`} />
-        <Metric label="Net change" value={`${c.netVolumeM3 >= 0 ? "+" : "−"}${fmtYd3(Math.abs(c.netVolumeM3))}`} note={`Drone covers ${Math.round(c.coverage * 100)}% of the area`} />
+        <Metric label="Net change" value={`${c.netVolumeM3 >= 0 ? "+" : "−"}${fmtYd3(Math.abs(c.netVolumeM3))}`} note={`${drone.beforeIsSurvey ? "The surveys overlap on" : "Drone covers"} ${Math.round(c.coverage * 100)}% of the area`} />
       </dl>
       <SlopeProfileDiagram
         profile={drone.profile}
@@ -495,7 +521,8 @@ function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> 
         newSlopeDeg={c.updated.landslideSlopeDeg}
         originalHeightM={c.original.slopeHeightM}
         newHeightM={c.updated.slopeHeightM}
-        capturedOn={drone.capturedOn}
+        beforeTitle={drone.beforeTitle}
+        nowTitle={drone.nowTitle}
       />
     </div>
   );

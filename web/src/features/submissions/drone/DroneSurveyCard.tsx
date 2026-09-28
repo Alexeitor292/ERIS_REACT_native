@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { Crosshair, Layers, Loader2, Plane, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeftRight, Crosshair, Layers, Loader2, Plane, Trash2, Upload, X } from "lucide-react";
 
 import { FT_PER_M } from "../siteTerrainModel";
 import { MAX_ARCHIVED_BYTES, useDroneSurveys, type NewSurvey } from "./DroneSurveyContext";
 import { dateFromFileName, VERTICAL_UNIT_LABEL, type VerticalUnit } from "./readDroneFiles";
+import { flownOutOfOrder, surveyTitle } from "./surveyLabels";
 
 const button = "inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50";
 const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1.5 text-xs";
@@ -12,16 +13,18 @@ const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024
 
 /**
  * Drone surveys under the 3D view: add one (its elevation file and
- * orthomosaic), show it or the original ground, line its heights up with the
- * terrain model, and capture points on both surfaces.
+ * orthomosaic), compare it with the terrain model or an earlier survey, show
+ * either in 3D, line its heights up with the terrain model, and capture points
+ * on both surfaces.
  */
 export default function DroneSurveyCard() {
   const drone = useDroneSurveys();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!drone) return null;
-  const { active, surveys, canEdit } = drone;
+  const { active, baseline, surveys, canEdit } = drone;
   const survey = active?.survey ?? null;
+  const beforeTitle = baseline ? surveyTitle(baseline.survey) : "terrain model";
 
   if (!surveys.length && !canEdit) return null;
 
@@ -31,9 +34,25 @@ export default function DroneSurveyCard() {
         <Plane size={15} className="text-[var(--accent)]" aria-hidden />
         <h3 id="drone-survey-title" className="text-sm font-semibold">Drone survey</h3>
         {surveys.length > 1 ? (
-          <select aria-label="Survey shown" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={drone.activeId ?? ""} onChange={(e) => drone.setActiveId(Number(e.target.value))}>
-            {surveys.map((s) => <option key={s.id} value={s.id}>{s.label || s.dsm_filename || `Survey ${s.id}`}{s.captured_on ? ` · ${s.captured_on}` : ""}</option>)}
-          </select>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <label className="inline-flex items-center gap-1.5">
+              <span className="font-semibold text-muted">Now</span>
+              <select className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={drone.activeId ?? ""} onChange={(e) => {
+                const id = Number(e.target.value);
+                if (id === drone.baselineId) drone.setBaselineId(null);
+                drone.setActiveId(id);
+              }}>
+                {surveys.map((s) => <option key={s.id} value={s.id}>{surveyTitle(s)}</option>)}
+              </select>
+            </label>
+            <label className="inline-flex items-center gap-1.5">
+              <span className="font-semibold text-muted">compared with</span>
+              <select className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={drone.baselineId ?? ""} onChange={(e) => drone.setBaselineId(e.target.value ? Number(e.target.value) : null)}>
+                <option value="">Terrain model</option>
+                {surveys.filter((s) => s.id !== drone.activeId).map((s) => <option key={s.id} value={s.id}>{surveyTitle(s)}</option>)}
+              </select>
+            </label>
+          </div>
         ) : null}
         {canEdit && !adding ? (
           <button type="button" onClick={() => setAdding(true)} className={`${button} ml-auto`}>
@@ -51,11 +70,18 @@ export default function DroneSurveyCard() {
 
       {adding ? <AddSurvey onClose={() => setAdding(false)} onError={setError} /> : null}
 
+      {survey && baseline && flownOutOfOrder(baseline.survey, survey) ? (
+        <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--warn-text)]">
+          The survey compared with was flown after the one shown as now, so ground lost and gained read reversed.
+          <button type="button" className={button} onClick={drone.swapBaseline}><ArrowLeftRight size={13} aria-hidden /> Swap them</button>
+        </p>
+      ) : null}
+
       {survey && active ? (
         <div className="mt-3 grid gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <div role="radiogroup" aria-label="Ground shown in 3D" className="inline-flex overflow-hidden rounded-md border border-[var(--line)] text-xs font-medium">
-              {[[false, "Before (terrain model)"], [true, `Now (drone${survey.captured_on ? `, ${survey.captured_on}` : ""})`]].map(([value, label]) => (
+              {[[false, `Before (${baseline ? baseline.survey.captured_on ?? "earlier survey" : "terrain model"})`], [true, `Now (drone${survey.captured_on ? `, ${survey.captured_on}` : ""})`]].map(([value, label]) => (
                 <button key={String(value)} type="button" role="radio" aria-checked={drone.showSurface === value} onClick={() => drone.setShowSurface(value as boolean)}
                   className={`px-2.5 py-1.5 ${drone.showSurface === value ? "bg-[var(--accent)] text-white" : "bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}>
                   {label as string}
@@ -163,22 +189,25 @@ function OffsetEditor() {
 function Points() {
   const drone = useDroneSurveys()!;
   const points = drone.active!.survey.points;
+  // Each point keeps the terrain model's height; compared with an earlier survey, "before" is that survey's.
+  const beforeAt = (p: { lon: number; lat: number; historical_m: number | null }) => (drone.baseline ? drone.baselineAt(p.lon, p.lat) : p.historical_m);
   if (!points.length) {
-    return drone.canEdit ? <p className="text-xs text-muted">No points yet. <b>Capture points</b>, then click the 3D view: each point records the original ground (terrain model) and the ground now (drone).</p> : null;
+    return drone.canEdit ? <p className="text-xs text-muted">No points yet. <b>Capture points</b>, then click the 3D view: each point records the ground before and the ground now (the drone).</p> : null;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[28rem] text-xs tabular-nums">
         <thead className="text-left text-muted">
-          <tr><th className="py-1 pr-2 font-semibold">Point</th><th className="pr-2 font-semibold">Original ground</th><th className="pr-2 font-semibold">Ground now</th><th className="pr-2 font-semibold">Change</th><th className="pr-2 font-semibold">Where</th><th /></tr>
+          <tr><th className="py-1 pr-2 font-semibold">Point</th><th className="pr-2 font-semibold">Before</th><th className="pr-2 font-semibold">Now</th><th className="pr-2 font-semibold">Change</th><th className="pr-2 font-semibold">Where</th><th /></tr>
         </thead>
         <tbody>
           {points.map((p) => {
-            const change = p.historical_m != null && p.actual_m != null ? p.actual_m - p.historical_m : null;
+            const before = beforeAt(p);
+            const change = before != null && p.actual_m != null ? p.actual_m - before : null;
             return (
               <tr key={p.id} className="border-t border-[var(--line)]">
                 <td className="py-1 pr-2 font-semibold">{p.label ?? "—"}</td>
-                <td className="pr-2">{ft(p.historical_m)}</td>
+                <td className="pr-2">{drone.baseline && before == null ? <span className="text-muted">outside the earlier survey</span> : ft(before)}</td>
                 <td className="pr-2">{p.actual_m == null ? <span className="text-muted">outside the survey</span> : ft(p.actual_m)}</td>
                 <td className={`pr-2 font-semibold ${change == null ? "" : change < 0 ? "text-[var(--bad)]" : "text-[var(--good)]"}`}>{change == null ? "—" : `${change > 0 ? "+" : ""}${(change * FT_PER_M).toFixed(1)} ft`}</td>
                 <td className="pr-2 text-muted">{p.lat.toFixed(6)}, {p.lon.toFixed(6)}</td>
