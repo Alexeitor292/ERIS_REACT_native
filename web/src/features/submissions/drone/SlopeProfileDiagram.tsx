@@ -25,9 +25,9 @@ function path(points: Array<[number, number] | null>): string {
 }
 
 /**
- * The slope in section, down the fall line: the original ground (terrain
- * model) dashed, the ground now (drone survey) solid, and the ground lost or
- * gained between them shaded. Heights and distances in feet, not exaggerated
+ * The slope in section, down the fall line: the ground before (terrain model
+ * or an earlier survey) dashed, the ground now (drone survey) solid, and the
+ * ground lost or gained between them shaded. Heights and distances in feet, not exaggerated
  * more than the chart's proportions require.
  */
 export default function SlopeProfileDiagram({
@@ -36,14 +36,17 @@ export default function SlopeProfileDiagram({
   newSlopeDeg,
   originalHeightM,
   newHeightM,
-  capturedOn,
+  beforeTitle,
+  nowTitle,
 }: {
   profile: ProfilePoint[];
   originalSlopeDeg: number;
   newSlopeDeg: number;
   originalHeightM: number;
   newHeightM: number;
-  capturedOn: string | null;
+  /** What each line is: "terrain model", or a survey's name and date. */
+  beforeTitle: string;
+  nowTitle: string;
 }) {
   const heights = profile.flatMap((p) => [p.historical, p.actual]).filter((v): v is number => v != null).map((m) => m * FT_PER_M);
   if (heights.length < 4) return null;
@@ -74,7 +77,7 @@ export default function SlopeProfileDiagram({
 
   return (
     <figure className="mt-3">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Section down the slope: original ground ${originalSlopeDeg.toFixed(1)} degrees, ground now ${newSlopeDeg.toFixed(1)} degrees`} className="h-auto w-full">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Section down the slope: before ${originalSlopeDeg.toFixed(1)} degrees, now ${newSlopeDeg.toFixed(1)} degrees`} className="h-auto w-full">
         <rect x={PAD.left} y={PAD.top} width={W - PAD.left - PAD.right} height={H - PAD.top - PAD.bottom} fill="var(--panel-soft)" />
         {zTicks.map((v) => (
           <g key={`z${v}`}>
@@ -92,8 +95,8 @@ export default function SlopeProfileDiagram({
         <path d={path(after)} fill="none" stroke="var(--accent)" strokeWidth={2.5} />
       </svg>
       <figcaption className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-dashed border-[var(--muted)]" aria-hidden />Original ground (terrain model): {originalSlopeDeg.toFixed(1)}°, {Math.round(originalHeightM * FT_PER_M)} ft high</span>
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-[var(--accent)]" aria-hidden />Ground now (drone{capturedOn ? `, ${capturedOn}` : ""}): {newSlopeDeg.toFixed(1)}°, {Math.round(newHeightM * FT_PER_M)} ft high</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-dashed border-[var(--muted)]" aria-hidden />Before ({beforeTitle}): {originalSlopeDeg.toFixed(1)}°, {Math.round(originalHeightM * FT_PER_M)} ft high</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-[var(--accent)]" aria-hidden />Now ({nowTitle}): {newSlopeDeg.toFixed(1)}°, {Math.round(newHeightM * FT_PER_M)} ft high</span>
         <span className="text-muted">Shaded: ground lost (red) and gained (green)</span>
       </figcaption>
     </figure>

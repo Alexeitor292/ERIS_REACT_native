@@ -128,7 +128,12 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    before), and β, Ld and Wd from the survey (the ground now). It shows both
    slopes and heights side by side, the deepest drop and highest rise, the
    ground lost and gained in cubic yards, and a section down the fall line with
-   the original ground dashed and the ground now solid. **Capture points**
+   the original ground dashed and the ground now solid. With two or more
+   surveys, **compared with** picks the ground before. It is the terrain model
+   by default, or an earlier survey; both surveys are lined up with the terrain
+   model, so they compare on the same footing. **Before** in the 3D view then
+   shows that survey, and the form warns (with **Swap**) when the survey used
+   as before was flown after the one shown as now. **Capture points**
    records, at each click on the 3D view, the height of both surfaces there.
    Surveys, their shift, the captured points and the last comparison are kept
    with the form.

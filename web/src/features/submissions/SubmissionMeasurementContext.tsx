@@ -62,14 +62,16 @@ export default function SubmissionMeasurementContext({
   const terrain = gisa?.elevation_terrain ?? null;
   const drone = useDroneSurveys();
   const active = drone?.active ?? null;
-  const droneScene = active
+  // "Before" shows the earlier survey when the active one is compared with one, else the terrain model.
+  const shown = active && !drone!.showSurface && drone!.baseline ? drone!.baseline : active;
+  const droneScene = active && shown
     ? {
-        key: `${active.survey.id}:${active.survey.vertical_offset_m}`,
-        grid: active.grid,
-        offsetM: active.survey.vertical_offset_m,
-        overlayUrl: active.overlayUrl,
-        corners: active.survey.overlay_corners,
-        show: drone!.showSurface,
+        key: `${shown.survey.id}:${shown.survey.vertical_offset_m}`,
+        grid: shown.grid,
+        offsetM: shown.survey.vertical_offset_m,
+        overlayUrl: shown.overlayUrl,
+        corners: shown.survey.overlay_corners,
+        show: drone!.showSurface || shown !== active,
         points: active.survey.points,
       }
     : null;

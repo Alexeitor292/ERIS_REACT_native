@@ -42,6 +42,16 @@ type DroneSurveyState = {
   active: LoadedSurvey | null;
   activeId: number | null;
   setActiveId: (id: number | null) => void;
+  /** What the active survey is compared with: another survey, or null for the terrain model. */
+  baseline: LoadedSurvey | null;
+  baselineId: number | null;
+  setBaselineId: (id: number | null) => void;
+  /** Make the baseline the survey shown, and the survey shown the baseline. */
+  swapBaseline: () => void;
+  /** The baseline survey's height at a point, lined up with the terrain model (null without one, or outside it). */
+  baselineAt: (lon: number, lat: number) => number | null;
+  /** The ground before at each point: the baseline survey, or the terrain model when there is none. */
+  beforeHeights: (points: LonLat[]) => Promise<Array<number | null>>;
   /** Show the drone surface (now) or the terrain model (before) in the 3D view. */
   showSurface: boolean;
   setShowSurface: (show: boolean) => void;
@@ -81,15 +91,39 @@ async function offsetFor(grid: DroneGrid, geojson: unknown): Promise<{ offsetM: 
  * The drone surveys of one technical form. With `enabled` false (public
  * viewers, who cannot see them) nothing loads and `useDroneSurveys()` is null.
  */
+/** Load survey `id` (from `surveys`) into `set`; the returned function stops a load that is no longer wanted. */
+function follow(
+  id: number | null,
+  surveys: DroneSurvey[],
+  load: (survey: DroneSurvey) => Promise<{ grid: DroneGrid; overlayUrl: string | null }>,
+  set: (value: LoadedSurvey | null) => void,
+  onError: (message: string) => void,
+): (() => void) | undefined {
+  const survey = surveys.find((s) => s.id === id) ?? null;
+  if (!survey) {
+    set(null);
+    return undefined;
+  }
+  let cancelled = false;
+  load(survey).then(
+    (entry) => { if (!cancelled) set({ survey, ...entry }); },
+    (e) => { if (!cancelled) onError(e instanceof Error ? e.message : "Could not load the drone survey."); },
+  );
+  return () => { cancelled = true; };
+}
+
 export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = true, children }: { submissionId: number; canEdit: boolean; geojson: unknown; enabled?: boolean; children: ReactNode }) {
   const [surveys, setSurveys] = useState<DroneSurvey[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [active, setActive] = useState<LoadedSurvey | null>(null);
+  const [baselineId, setBaselineId] = useState<number | null>(null);
+  const [baseline, setBaseline] = useState<LoadedSurvey | null>(null);
   const [showSurface, setShowSurface] = useState(true);
   const [capturing, setCapturing] = useState(false);
   const loaded = useRef(new Map<number, { grid: DroneGrid; overlayUrl: string | null }>());
+  const inflight = useRef(new Map<number, Promise<{ grid: DroneGrid; overlayUrl: string | null }>>());
   const geojsonRef = useRef(geojson);
   geojsonRef.current = geojson;
 
@@ -109,25 +143,28 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
 
   useEffect(() => { if (enabled) void reload(); }, [enabled, reload]);
 
-  // Load the active survey's patch and image once; keep them for the page.
-  useEffect(() => {
-    const survey = surveys.find((s) => s.id === activeId) ?? null;
-    if (!survey) { setActive(null); return; }
+  // A survey's patch and image are fetched once and kept for the page.
+  const loadSurvey = useCallback((survey: DroneSurvey) => {
     const cached = loaded.current.get(survey.id);
-    if (cached) { setActive({ survey, ...cached }); return; }
-    let cancelled = false;
-    (async () => {
-      try {
+    if (cached) return Promise.resolve(cached);
+    let pending = inflight.current.get(survey.id);
+    if (!pending) {
+      pending = (async () => {
         const grid = decodeGrid(await fetchPatch(submissionId, survey.id));
         const overlayUrl = survey.has_overlay ? URL.createObjectURL(await fetchOverlay(submissionId, survey.id)) : null;
-        loaded.current.set(survey.id, { grid, overlayUrl });
-        if (!cancelled) setActive({ survey, grid, overlayUrl });
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Could not load the drone survey.");
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [activeId, surveys, submissionId]);
+        const entry = { grid, overlayUrl };
+        loaded.current.set(survey.id, entry);
+        return entry;
+      })().finally(() => inflight.current.delete(survey.id));
+      inflight.current.set(survey.id, pending);
+    }
+    return pending;
+  }, [submissionId]);
+
+  useEffect(() => follow(activeId, surveys, loadSurvey, setActive, setError), [activeId, surveys, loadSurvey]);
+  useEffect(() => follow(baselineId, surveys, loadSurvey, setBaseline, setError), [baselineId, surveys, loadSurvey]);
+  // A survey is never compared with itself.
+  const liveBaseline = baseline && baseline.survey.id !== activeId ? baseline : null;
 
   useEffect(() => () => {
     for (const { overlayUrl } of loaded.current.values()) if (overlayUrl) URL.revokeObjectURL(overlayUrl);
@@ -141,6 +178,26 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
     },
     [active],
   );
+
+  const baselineAt = useCallback(
+    (lon: number, lat: number) => {
+      if (!liveBaseline) return null;
+      const raw = sampleGrid(liveBaseline.grid, lon, lat);
+      return raw == null ? null : raw + liveBaseline.survey.vertical_offset_m;
+    },
+    [liveBaseline],
+  );
+
+  const beforeHeights = useCallback(
+    async (points: LonLat[]) => (liveBaseline ? points.map(([lon, lat]) => baselineAt(lon, lat)) : (await sampleElevations(points)).z),
+    [liveBaseline, baselineAt],
+  );
+
+  const swapBaseline = useCallback(() => {
+    if (baselineId == null || activeId == null) return;
+    setActiveId(baselineId);
+    setBaselineId(activeId);
+  }, [activeId, baselineId]);
 
   const upload = useCallback(async (input: NewSurvey, onProgress: Progress) => {
     const step = (from: number, to: number): Progress => (fraction, message) => onProgress(from + (to - from) * fraction, message);
@@ -207,6 +264,7 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
 
   const remove = useCallback(async (id: number) => {
     await deleteSurvey(submissionId, id);
+    setBaselineId((current) => (current === id ? null : current));
     const cached = loaded.current.get(id);
     if (cached?.overlayUrl) URL.revokeObjectURL(cached.overlayUrl);
     loaded.current.delete(id);
@@ -257,10 +315,12 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
 
   const value = useMemo<DroneSurveyState>(
     () => ({
-      submissionId, canEdit, surveys, loading, error, active, activeId, setActiveId, showSurface, setShowSurface,
-      capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
+      submissionId, canEdit, surveys, loading, error, active, activeId, setActiveId,
+      baseline: liveBaseline, baselineId: baselineId !== activeId ? baselineId : null, setBaselineId, swapBaseline, baselineAt, beforeHeights,
+      showSurface, setShowSurface, capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
     }),
-    [submissionId, canEdit, surveys, loading, error, active, activeId, showSurface, capturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison],
+    [submissionId, canEdit, surveys, loading, error, active, activeId, liveBaseline, baselineId, swapBaseline, baselineAt, beforeHeights,
+      showSurface, capturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison],
   );
   return <Context.Provider value={enabled ? value : null}>{children}</Context.Provider>;
 }
