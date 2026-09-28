@@ -5,6 +5,8 @@ import { api } from "../../api/client";
 import type { Gisa, GisaTerrainGrid } from "../../api/types";
 
 const InteractiveTerrainScene = lazy(() => import("../../components/InteractiveTerrainScene"));
+import DroneSurveyCard from "./drone/DroneSurveyCard";
+import { useDroneSurveys } from "./drone/DroneSurveyContext";
 
 /**
  * Measurement context = the 3D terrain scene only. The elevation-profile block, the
@@ -58,6 +60,27 @@ export default function SubmissionMeasurementContext({
   }
 
   const terrain = gisa?.elevation_terrain ?? null;
+  const drone = useDroneSurveys();
+  const active = drone?.active ?? null;
+  const droneScene = active
+    ? {
+        key: `${active.survey.id}:${active.survey.vertical_offset_m}`,
+        grid: active.grid,
+        offsetM: active.survey.vertical_offset_m,
+        overlayUrl: active.overlayUrl,
+        corners: active.survey.overlay_corners,
+        show: drone!.showSurface,
+        points: active.survey.points,
+      }
+    : null;
+  const [pickError, setPickError] = useState<string | null>(null);
+  const onPick =
+    drone?.capturing && active
+      ? (lon: number, lat: number) => {
+          setPickError(null);
+          drone.addPoint(lon, lat).catch((e: unknown) => setPickError(e instanceof Error ? e.message : "Could not capture the point."));
+        }
+      : null;
 
   return (
     <div id="terrain-3d-section" className="mb-2">
@@ -103,12 +126,16 @@ export default function SubmissionMeasurementContext({
             postMile={gisa?.post_mile ?? null}
             county={gisa?.county ?? null}
             incidentLabel={`Submission #${submissionId}`}
+            drone={droneScene}
+            onPick={onPick}
           />
         </Suspense>
       </div>
 
       {terrainError ? <div className="mt-1 text-[10px] text-[var(--bad)]">{terrainError}</div> : null}
+      {pickError ? <div className="mt-1 text-[10px] text-[var(--bad)]">{pickError}</div> : null}
       {terrain?.error ? <div className="mt-1 text-[10px] text-[var(--bad)]">{terrain.error}</div> : null}
+      <DroneSurveyCard />
     </div>
   );
 }

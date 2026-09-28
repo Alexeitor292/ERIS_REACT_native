@@ -2,7 +2,9 @@ import { Link } from "react-router-dom";
 import { Camera, Compass, LocateFixed, MapPin } from "lucide-react";
 
 import type { Gisa } from "../../api/types";
-import SubmissionArcGisMap from "../../components/SubmissionArcGisMap";
+import SubmissionArcGisMap, { type DroneMapSurvey } from "../../components/SubmissionArcGisMap";
+import { useDroneSurveys } from "./drone/DroneSurveyContext";
+import { boundsRing } from "./drone/droneGrid";
 import type { PhotoMapResponse } from "./photoEvidenceApi";
 
 export type StatePlaneHeroProps = {
@@ -93,6 +95,15 @@ export default function SubmissionLocationHero({
   photoError,
 }: Props) {
   const summary = photoMap?.summary ?? null;
+  const active = useDroneSurveys()?.active ?? null;
+  const droneMap: DroneMapSurvey | null = active
+    ? {
+        key: String(active.survey.id),
+        overlayUrl: active.overlayUrl,
+        corners: active.survey.overlay_corners,
+        footprint: active.survey.overlay_corners?.length === 4 ? [...active.survey.overlay_corners, active.survey.overlay_corners[0]] : boundsRing(active.grid),
+      }
+    : null;
   const location = {
     latitude: latitude.trim() ? Number(latitude) : null,
     longitude: longitude.trim() ? Number(longitude) : null,
@@ -259,6 +270,7 @@ export default function SubmissionLocationHero({
             height={360}
             editable={canEdit}
             onGeometryChange={onGeometryChange}
+            drone={droneMap}
           />
         </div>
       </div>

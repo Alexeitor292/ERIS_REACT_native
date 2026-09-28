@@ -31,6 +31,7 @@ import { fitMapView } from "./fitMapView";
 import { areasFromGeoJson, areasSummary, geoJsonFromAreas, type AreaRings } from "./siteAreasModel";
 import { comfortableExtent, coordinatePositions, geoJsonPositions, type LonLat } from "./mapFit";
 import type { PhotoEvidence } from "../features/submissions/photoEvidenceApi";
+import { createOrthomosaicLayer } from "../features/submissions/drone/droneSceneLayers";
 import {
   headingWedgeRing,
   PHOTO_HEADING_WEDGE_FILL_ALPHA,
@@ -57,6 +58,17 @@ type Props = {
   height?: number;
   editable?: boolean;
   onGeometryChange?: (geometry: any | null) => void;
+  /** A drone survey's orthomosaic and footprint, under the site areas so a new outline can be drawn over it. */
+  drone?: DroneMapSurvey | null;
+};
+
+export type DroneMapSurvey = {
+  key: string;
+  overlayUrl: string | null;
+  /** The orthomosaic's corners: top-left, top-right, bottom-right, bottom-left. */
+  corners: Array<[number, number]> | null;
+  /** The survey's outline, a closed ring of [lon, lat]. */
+  footprint: Array<[number, number]>;
 };
 
 function toGeoJsonGeometry(rawGeometry: any): any | null {
@@ -118,6 +130,7 @@ export default function SubmissionArcGisMap({
   height = 320,
   editable = false,
   onGeometryChange,
+  drone = null,
 }: Props) {
   const divRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<MapView | null>(null);
@@ -128,6 +141,7 @@ export default function SubmissionArcGisMap({
   const [expanded, setExpanded] = useState(false);
   // Site areas: polygons live on their own layer so the sketch tools can edit them.
   const areasLayerRef = useRef<GraphicsLayer | null>(null);
+  const droneLayerRef = useRef<GraphicsLayer | null>(null);
   const sketchRef = useRef<SketchViewModel | null>(null);
   // The geometry this map last reported; the prop echoing it back must not redraw
   // (and so interrupt) the areas being edited.
@@ -147,6 +161,8 @@ export default function SubmissionArcGisMap({
     photoLayerRef.current = photoLayer;
     const areasLayer = new GraphicsLayer({ title: "Site areas" });
     areasLayerRef.current = areasLayer;
+    const droneLayer = new GraphicsLayer({ title: "Drone survey outline" });
+    droneLayerRef.current = droneLayer;
 
     // Optional Caltrans highways layer sits BELOW the submission overlays so drawn/loaded
     // geometry always stays on top. It appears in the Layers + Legend widgets (off until
@@ -156,7 +172,7 @@ export default function SubmissionArcGisMap({
 
     const map = new Map({
       basemap: "hybrid",
-      layers: caltransLayer ? [caltransLayer, graphicsLayer, areasLayer, photoLayer] : [graphicsLayer, areasLayer, photoLayer],
+      layers: caltransLayer ? [caltransLayer, droneLayer, graphicsLayer, areasLayer, photoLayer] : [droneLayer, graphicsLayer, areasLayer, photoLayer],
     });
 
     const view = new MapView({
@@ -268,6 +284,7 @@ export default function SubmissionArcGisMap({
       sketchRef.current?.destroy();
       sketchRef.current = null;
       areasLayerRef.current = null;
+      droneLayerRef.current = null;
       view.destroy();
     };
   }, [editable, onGeometryChange]);
@@ -494,6 +511,35 @@ export default function SubmissionArcGisMap({
     }
   }, [photoEvidence]);
 
+  // A drone survey: its orthomosaic just above the basemap, its outline dashed.
+  const droneKey = drone ? `${drone.key}|${drone.overlayUrl ?? ""}|${JSON.stringify(drone.footprint)}` : "";
+  useEffect(() => {
+    const view = viewRef.current;
+    const outline = droneLayerRef.current;
+    if (!view || !outline) return;
+    outline.removeAll();
+    if (!drone) return;
+    outline.add(
+      new Graphic({
+        geometry: new Polygon({ rings: [drone.footprint], spatialReference: SpatialReference.WGS84 }),
+        symbol: DRONE_FOOTPRINT_SYMBOL as any,
+        attributes: { __drone_footprint: true },
+      }),
+    );
+    if (!drone.overlayUrl || drone.corners?.length !== 4) return;
+    const media = createOrthomosaicLayer(drone.overlayUrl, drone.corners);
+    view.map?.layers.add(media, 0);
+    return () => {
+      try {
+        view.map?.layers.remove(media);
+        media.destroy();
+      } catch {
+        // The view (and its layers) may already be gone.
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [droneKey, editable, onGeometryChange]);
+
   // Where the map looks: the recorded point, the saved geometry and every mapped
   // photo with its camera wedge, with room around them — and Home returns there.
   // It used to fit each layer's `fullExtent`, which for a GraphicsLayer is the
@@ -666,6 +712,12 @@ export default function SubmissionArcGisMap({
     </div>
   );
 }
+
+const DRONE_FOOTPRINT_SYMBOL = {
+  type: "simple-fill",
+  color: [249, 115, 22, 0],
+  outline: { width: 2, color: [249, 115, 22, 0.95], style: "dash" },
+};
 
 const AREA_SYMBOL = {
   type: "simple-fill",

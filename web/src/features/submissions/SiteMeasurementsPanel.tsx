@@ -5,17 +5,25 @@ import { SliderField } from "./gisaFields";
 import RoadwayEncroachment, { type RoadIdentity } from "./RoadwayEncroachment";
 
 import { areasFromGeoJson, formatArea, polygonAreaSqM } from "../../components/siteAreasModel";
+import { sampleElevations } from "./terrainElevation";
 import {
   bearingLabel,
   buildSamplePlan,
+  compareSurfaces,
+  comparisonFieldValues,
   FT_PER_M,
   measureSiteArea,
   measurementFieldValues,
+  pointsAlong,
+  profileLine,
   type LonLat,
   type MeasurementField,
   type Sample,
   type SiteMeasurement,
+  type SurfaceComparison,
 } from "./siteTerrainModel";
+import { useDroneSurveys } from "./drone/DroneSurveyContext";
+import SlopeProfileDiagram, { type ProfilePoint } from "./drone/SlopeProfileDiagram";
 
 export const MEASURE_KEYS = [
   "measure_slope_height_ft",
@@ -61,50 +69,35 @@ const GROUPS: Array<{ title: string; fields: FieldSpec[] }> = [
 ];
 
 type TerrainResult = {
-  areaKey: string;
+  /** The area and the drone survey (with its offset) it was measured against. */
+  key: string;
   measurement: SiteMeasurement;
   proposed: Partial<Record<MeasurementField, string>>;
   resolution: { min: number; max: number } | null;
   missing: number;
   bufferM: number;
+  /** Before and after, when a drone survey covers the area. */
+  drone: {
+    comparison: SurfaceComparison;
+    profile: ProfilePoint[];
+    label: string;
+    capturedOn: string | null;
+    offsetM: number;
+  } | null;
+  /** A drone survey is loaded but covers too little of the area to measure it. */
+  droneCoverage: number | null;
 };
 
-// One elevation source for the page, loaded the first time someone measures.
-let groundPromise: Promise<any> | null = null;
-function worldElevationGround(): Promise<any> {
-  if (!groundPromise) {
-    groundPromise = (async () => {
-      const [{ default: esriConfig }, { default: ArcGisMap }] = await Promise.all([import("@arcgis/core/config"), import("@arcgis/core/Map")]);
-      const apiKey = import.meta.env.VITE_ARCGIS_API_KEY;
-      if (apiKey) esriConfig.apiKey = String(apiKey);
-      const map = new ArcGisMap({ ground: "world-elevation" });
-      await map.ground.loadAll();
-      return map.ground;
-    })().catch((error) => {
-      groundPromise = null;
-      throw error;
-    });
-  }
-  return groundPromise;
-}
-
-/** Elevations (metres) at [lon, lat] points from Esri World Elevation, finest resolution that covers them all. */
-async function sampleElevations(points: LonLat[]) {
-  const [ground, { default: Multipoint }] = await Promise.all([worldElevationGround(), import("@arcgis/core/geometry/Multipoint")]);
-  const geometry = new Multipoint({ points: points.map(([lon, lat]) => [lon, lat]), spatialReference: { wkid: 4326 } });
-  const result = await ground.queryElevation(geometry, { demResolution: "finest-contiguous", returnSampleInfo: true });
-  const noData = result.noDataValue;
-  const z: Array<number | null> = (result.geometry.points as number[][]).map((p) => (Number.isFinite(p[2]) && p[2] !== noData ? p[2] : null));
-  const resolutions = ((result.sampleInfo ?? []) as Array<{ demResolution?: number }>)
-    .map((info) => Number(info.demResolution))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  return { z, resolution: resolutions.length ? { min: Math.min(...resolutions), max: Math.max(...resolutions) } : null };
-}
+/** The drone survey must cover at least this share of the area to measure the ground now. */
+const MIN_DRONE_COVERAGE = 0.5;
+const YD3_PER_M3 = 1.307950619;
 
 const fmtFt = (m: number) => `${Math.round(m * FT_PER_M).toLocaleString("en-US")} ft`;
 const fmtRes = (r: { min: number; max: number } | null) =>
   !r ? "resolution not reported" : Math.abs(r.max - r.min) < 0.01 ? `${+r.min.toFixed(1)} m DEM` : `${+r.min.toFixed(1)}–${+r.max.toFixed(1)} m DEM`;
 const sameNumber = (a: string, b: string | undefined) => b != null && a.trim() !== "" && Number(a) === Number(b);
+const fmtYd3 = (m3: number) => `${Math.round(m3 * YD3_PER_M3).toLocaleString("en-US")} yd³`;
+const fmtChangeFt = (m: number) => `${(m * FT_PER_M).toFixed(1)} ft`;
 
 /**
  * The measurement fields beside their reference sketch, and the tool that
@@ -128,13 +121,16 @@ export default function SiteMeasurementsPanel({
   const index = Math.min(areaIndex, Math.max(0, areas.length - 1));
   const area = areas[index] ?? null;
   const areaKey = area ? JSON.stringify(area) : "";
+  const drone = useDroneSurveys();
+  const survey = drone?.active ?? null;
+  const measureKey = `${areaKey}|${survey ? `${survey.survey.id}:${survey.survey.vertical_offset_m}` : ""}`;
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TerrainResult | null>(null);
   const [applied, setApplied] = useState<number | null>(null);
   const [roadProposal, setRoadProposal] = useState<{ areaKey: string; values: Partial<Record<MeasureKey, string>> } | null>(null);
-  const stale = result != null && result.areaKey !== areaKey;
+  const stale = result != null && result.key !== measureKey;
   const proposed = result && !stale ? result.proposed : {};
 
   async function measure() {
@@ -151,13 +147,57 @@ export default function SiteMeasurementsPanel({
       const around = toSamples(plan.around, plan.inside.length);
       const measurement = measureSiteArea(area, inside, around);
       if (!measurement) throw new Error("The terrain model has no usable data under this area.");
+
+      // A drone survey over the area: the same points on the ground now, and a section down the slope.
+      let before: TerrainResult["drone"] = null;
+      let droneCoverage: number | null = null;
+      if (drone && survey) {
+        const actual = [...plan.inside, ...plan.around].map(([lon, lat]) => drone.actualAt(lon, lat));
+        const comparison = compareSurfaces(area, plan, z, actual);
+        droneCoverage = comparison?.coverage ?? plan.inside.filter((_, i) => actual[i] != null).length / Math.max(1, plan.inside.length);
+        if (comparison && comparison.coverage >= MIN_DRONE_COVERAGE) {
+          setBusy("Drawing the section down the slope…");
+          const [top, bottom] = profileLine(area, comparison.original.downslopeBearingDeg, Math.max(10, plan.bufferM));
+          const along = pointsAlong(top, bottom, 90);
+          const { z: historical } = await sampleElevations(along.map((a) => a.point));
+          const profile = along.map((a, i) => ({ distanceM: a.distanceM, historical: historical[i] ?? null, actual: drone.actualAt(a.point[0], a.point[1]) }));
+          before = {
+            comparison,
+            profile,
+            label: survey.survey.label || survey.survey.dsm_filename || "Drone survey",
+            capturedOn: survey.survey.captured_on,
+            offsetM: survey.survey.vertical_offset_m,
+          };
+          if (canEdit) {
+            const heights = (m: SiteMeasurement) => ({ slope_deg: m.landslideSlopeDeg, height_m: m.slopeHeightM, low_m: m.lowElevationM, high_m: m.highElevationM });
+            drone.saveComparison({
+              area_key: areaKey,
+              measured_at: new Date().toISOString(),
+              offset_m: survey.survey.vertical_offset_m,
+              original: heights(comparison.original),
+              updated: heights(comparison.updated),
+              coverage: comparison.coverage,
+              max_loss_m: comparison.maxLossM,
+              max_gain_m: comparison.maxGainM,
+              mean_change_m: comparison.meanChangeM,
+              loss_m3: comparison.lossVolumeM3,
+              gain_m3: comparison.gainVolumeM3,
+              net_m3: comparison.netVolumeM3,
+            }).catch(() => {
+              // The comparison shows either way; keeping it with the survey is a convenience.
+            });
+          }
+        }
+      }
       setResult({
-        areaKey,
+        key: measureKey,
         measurement,
-        proposed: measurementFieldValues(measurement),
+        proposed: before ? comparisonFieldValues(before.comparison) : measurementFieldValues(measurement),
         resolution,
         missing: plan.inside.length + plan.around.length - inside.length - around.length,
         bufferM: plan.bufferM,
+        drone: before,
+        droneCoverage,
       });
     } catch (e: any) {
       setError(e?.message ? `Could not measure the terrain: ${e.message}` : "Could not measure the terrain.");
@@ -194,6 +234,7 @@ export default function SiteMeasurementsPanel({
               {area
                 ? "Samples the elevation model inside the area drawn on the location map and around it, and works out the slope, the slide's size and the slope height."
                 : "Draw the slide's outline on the location map (Site areas, then Draw area) to measure it from the elevation model."}
+              {area && survey ? ` The drone survey "${survey.survey.label || survey.survey.dsm_filename || "Drone survey"}" gives the ground now: the terrain model stays the ground before.` : ""}
             </p>
           </div>
           {area ? (
@@ -235,7 +276,12 @@ export default function SiteMeasurementsPanel({
 
         {busy ? <p className="mt-2 text-xs text-muted" aria-live="polite">{busy}</p> : null}
         {error ? <p className="mt-2 text-xs text-[var(--bad)]">{error}</p> : null}
-        {stale ? <p className="mt-2 text-xs text-[var(--warn-text)]">The area changed since it was measured. Measure it again.</p> : null}
+        {stale ? <p className="mt-2 text-xs text-[var(--warn-text)]">The area or the drone survey changed since it was measured. Measure it again.</p> : null}
+        {result && !stale && !result.drone && result.droneCoverage != null ? (
+          <p className="mt-2 text-xs text-[var(--warn-text)]">
+            The drone survey covers {Math.round(result.droneCoverage * 100)}% of this area, too little to measure the ground now. These values come from the terrain model only.
+          </p>
+        ) : null}
 
         {m && result ? (
           <>
@@ -245,6 +291,7 @@ export default function SiteMeasurementsPanel({
               <Metric label="Plan length" value={fmtFt(m.horizontalLengthM)} note={`${fmtFt(m.slopeLengthM)} along the slope`} />
               <Metric label="Source" value="Esri World Elevation" note={`${fmtRes(result.resolution)} · ${(m.insideSamples + m.aroundSamples).toLocaleString("en-US")} samples`} />
             </dl>
+            {result.drone ? <BeforeAndAfter drone={result.drone} /> : null}
             {canEdit && !differentKeys.length ? (
               <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-[var(--good)]" aria-live="polite">
                 <Check size={14} />
@@ -276,8 +323,19 @@ export default function SiteMeasurementsPanel({
               <ul className="mt-1.5 list-disc space-y-1 pl-4">
                 <li>β: a plane fitted to the elevations inside the area. α: a plane fitted to a band {Math.round(result.bufferM)} m wide around it.</li>
                 <li>Ld runs down the fall line, measured along the slope; Wd is the area's extent across it.</li>
+                {result.drone ? (
+                  <li>
+                    With a drone survey, α and H describe the ground before (the terrain model) and β, Ld and Wd the ground now (the drone), measured the same way.
+                    The drone heights are shifted {result.drone.offsetM >= 0 ? "up" : "down"} {Math.abs(result.drone.offsetM * FT_PER_M).toFixed(1)} ft to line up with the terrain model on the ground around the slide.
+                    Volumes add up the change at each sample inside the area.
+                  </li>
+                ) : null}
                 <li>H is the rise from the low point to the high point of the area and the band around it (2nd to 98th percentile, so single spikes don't count).</li>
-                <li>The elevation model usually predates the slide, so these describe the slope as it was mapped. Check them in the field.</li>
+                <li>
+                  {result.drone
+                    ? "The terrain model predates the slide and the drone survey is only as good as its flight and processing. Check both in the field."
+                    : "The elevation model usually predates the slide, so these describe the slope as it was mapped. Check them in the field."}
+                </li>
                 <li>Hs is too small to read from the model: measure it in the field. Lr and Wr come from the roadway panel below.</li>
                 {result.missing ? <li>{result.missing} points had no elevation data and were left out.</li> : null}
               </ul>
@@ -388,6 +446,58 @@ function SymbolBadge({ children }: { children: ReactNode }) {
     <span className="mr-0.5 inline-block min-w-8 text-center rounded-md bg-[color:color-mix(in_oklab,var(--accent)_14%,var(--panel))] px-1.5 py-0.5 font-serif text-sm italic leading-none text-[var(--accent)]">
       {children}
     </span>
+  );
+}
+
+/** The slope before (terrain model) and now (drone survey), the change between them, and the section down the slope. */
+function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> }) {
+  const { comparison: c } = drone;
+  const angle = (d: number) => `${d.toFixed(1)}°`;
+  const rows: Array<{ label: ReactNode; before: string; now: string }> = [
+    { label: "Slope", before: angle(c.original.landslideSlopeDeg), now: angle(c.updated.landslideSlopeDeg) },
+    { label: "Height", before: fmtFt(c.original.slopeHeightM), now: fmtFt(c.updated.slopeHeightM) },
+    { label: "Low point", before: fmtFt(c.original.lowElevationM), now: fmtFt(c.updated.lowElevationM) },
+    { label: "High point", before: fmtFt(c.original.highElevationM), now: fmtFt(c.updated.highElevationM) },
+    { label: "Length along the slope", before: fmtFt(c.original.slopeLengthM), now: fmtFt(c.updated.slopeLengthM) },
+  ];
+  return (
+    <div className="mt-3 border-t border-[var(--line)] pt-3">
+      <div className="text-xs font-semibold">Before and now</div>
+      <div className="mt-1.5 overflow-x-auto">
+        <table className="w-full min-w-[22rem] text-xs tabular-nums">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wide text-muted">
+              <th className="py-1 pr-3 font-semibold" scope="col"><span className="sr-only">Measure</span></th>
+              <th className="py-1 pr-3 font-semibold" scope="col">Original ground<span className="block font-normal normal-case tracking-normal">terrain model</span></th>
+              <th className="py-1 pr-3 font-semibold" scope="col">Ground now<span className="block font-normal normal-case tracking-normal">{drone.label}{drone.capturedOn ? `, ${drone.capturedOn}` : ""}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} className="border-t border-[var(--line)]">
+                <th scope="row" className="py-1 pr-3 text-left font-medium">{row.label}</th>
+                <td className="py-1 pr-3">{row.before}</td>
+                <td className="py-1 pr-3 font-semibold">{row.now}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+        <Metric label="Deepest drop" value={fmtChangeFt(c.maxLossM)} note={`Mean change ${c.meanChangeM >= 0 ? "+" : "−"}${fmtChangeFt(Math.abs(c.meanChangeM))}`} />
+        <Metric label="Highest rise" value={fmtChangeFt(c.maxGainM)} note="Debris or bulging ground" />
+        <Metric label="Ground lost" value={fmtYd3(c.lossVolumeM3)} note={`Gained ${fmtYd3(c.gainVolumeM3)}`} />
+        <Metric label="Net change" value={`${c.netVolumeM3 >= 0 ? "+" : "−"}${fmtYd3(Math.abs(c.netVolumeM3))}`} note={`Drone covers ${Math.round(c.coverage * 100)}% of the area`} />
+      </dl>
+      <SlopeProfileDiagram
+        profile={drone.profile}
+        originalSlopeDeg={c.original.landslideSlopeDeg}
+        newSlopeDeg={c.updated.landslideSlopeDeg}
+        originalHeightM={c.original.slopeHeightM}
+        newHeightM={c.updated.slopeHeightM}
+        capturedOn={drone.capturedOn}
+      />
+    </div>
   );
 }
 

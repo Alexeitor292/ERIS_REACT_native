@@ -218,6 +218,12 @@ Release notes that need action:
 - **Office abbreviations** (`20261002_office_abbreviations`). Offices' short
   names become OGDN, OGDS, OGDW, OGS and OGDPP, shown wherever the short name
   was ("West GeoTech Office"). Full names are unchanged.
+- **Drone surveys** (`20261003_drone_surveys`). Adds
+  `submission_drone_surveys`; each survey's heights and orthomosaic are stored
+  in MinIO next to the attachments. Nothing to configure. Uploads go through the
+  same connection as attachments, so the original GeoTIFFs are archived only
+  under 95 MB (Cloudflare refuses larger requests). Larger files still make a
+  survey: the browser reads them in bands and uploads only the lighter copy.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs
