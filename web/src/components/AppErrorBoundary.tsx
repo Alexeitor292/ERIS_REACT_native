@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 
+import { isStaleReleaseError, reloadForNewRelease } from "../staleRelease";
+
 type BoundaryProps = { resetKey: string; children: ReactNode };
 type BoundaryState = { error: Error | null };
 
@@ -18,6 +20,8 @@ class Boundary extends Component<BoundaryProps, BoundaryState> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("ERIS page error", error, info.componentStack);
+    // A page from before an update asked for a file the server no longer has.
+    if (isStaleReleaseError(error)) reloadForNewRelease();
   }
 
   componentDidUpdate(prevProps: BoundaryProps) {
