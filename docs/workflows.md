@@ -107,8 +107,33 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    roadway it covers at one station), with which lanes it reaches and a plan
    sketch. Without an inventory row it assumes two 12 ft lanes and says so.
    Proposals fill empty fields, or one field at a time. Nothing is saved until
-   the author saves the draft. Hs stays a field measurement. The rest of the lower half has three
-   parts:
+   the author saves the draft. Hs stays a field measurement.
+
+   **Drone surveys.** Under the 3D view, **Add a drone survey** takes the
+   elevation model (DSM or DEM GeoTIFF) and, optionally, the orthomosaic
+   exported from DroneDeploy, Pix4D or similar software. The browser reads the
+   files (any projected or geographic coordinate system, heights in metres,
+   feet or US survey feet) and keeps a lighter copy of the heights, up to
+   1024 cells a side, for the flown area only. The original files are kept with the
+   form's Measurements attachments when each is under 95 MB. The survey's heights are lined up with the terrain model
+   on the ground around the drawn areas, which the flight did not change
+   (drone software often reports ellipsoid heights, about 30 m off in
+   California). The shift can be changed or turned off. In the 3D view the
+   survey replaces World Elevation inside its outline only, with the
+   orthomosaic draped over it; **Before** and **Now** switch between the
+   terrain model and the survey. The location map shows the orthomosaic and the
+   survey's outline, so the new affected area can be drawn over the flown
+   ground. With a survey covering at least half of the area, **Measure**
+   compares the two surfaces. α and H come from the terrain model (the ground
+   before), and β, Ld and Wd from the survey (the ground now). It shows both
+   slopes and heights side by side, the deepest drop and highest rise, the
+   ground lost and gained in cubic yards, and a section down the fall line with
+   the original ground dashed and the ground now solid. **Capture points**
+   records, at each click on the 3D view, the height of both surfaces there.
+   Surveys, their shift, the captured points and the last comparison are kept
+   with the form.
+
+   The rest of the lower half has three parts:
    - **Actions:** checklists of immediate and follow-up actions.
    - **Memos:** one tab each for Observations, Geotechnical assessment,
      Recommendations and Sketch notes, written in a word processor with a

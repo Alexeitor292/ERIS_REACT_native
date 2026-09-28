@@ -243,3 +243,109 @@ const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "
 export function bearingLabel(bearing: number): string {
   return `${Math.round(bearing)}° (${COMPASS[Math.round(bearing / 22.5) % 16]})`;
 }
+
+// --- Before and after: the terrain model against a drone survey -----------------
+
+export type SurfaceComparison = {
+  /** The original ground: the terrain model, from before the event. */
+  original: SiteMeasurement;
+  /** The ground now: the drone survey, lined up with the terrain model. */
+  updated: SiteMeasurement;
+  /** Points inside the outline where both surfaces have a height. */
+  paired: number;
+  /** Share of the outline the drone survey covers (0 to 1). */
+  coverage: number;
+  /** The deepest drop and the highest rise, metres (both ≥ 0). */
+  maxLossM: number;
+  maxGainM: number;
+  meanChangeM: number;
+  /** Ground lost (cut) and gained (fill) inside the outline, cubic metres (both ≥ 0). */
+  lossVolumeM3: number;
+  gainVolumeM3: number;
+  netVolumeM3: number;
+};
+
+/**
+ * Measure the same outline on both surfaces, sampled at the same points
+ * (`historical` and `actual` follow `plan.inside` then `plan.around`), and the
+ * change between them inside it: each sample stands for a spacing² cell.
+ */
+export function compareSurfaces(rings: Ring[], plan: SamplePlan, historical: Array<number | null>, actual: Array<number | null>): SurfaceComparison | null {
+  const n = plan.inside.length;
+  const samples = (z: Array<number | null>, points: LonLat[], offset: number): Sample[] =>
+    points.flatMap(([lon, lat], i) => (z[offset + i] == null ? [] : [{ lon, lat, z: z[offset + i]! }]));
+  const original = measureSiteArea(rings, samples(historical, plan.inside, 0), samples(historical, plan.around, n));
+  const updated = measureSiteArea(rings, samples(actual, plan.inside, 0), samples(actual, plan.around, n));
+  if (!original || !updated) return null;
+  const cell = plan.spacingM * plan.spacingM;
+  let paired = 0, loss = 0, gain = 0, sum = 0, maxLoss = 0, maxGain = 0;
+  for (let i = 0; i < n; i += 1) {
+    const before = historical[i];
+    const after = actual[i];
+    if (before == null || after == null) continue;
+    const d = after - before;
+    paired += 1;
+    sum += d;
+    if (d < 0) { loss -= d * cell; maxLoss = Math.max(maxLoss, -d); }
+    else { gain += d * cell; maxGain = Math.max(maxGain, d); }
+  }
+  return {
+    original,
+    updated,
+    paired,
+    coverage: n ? paired / n : 0,
+    maxLossM: maxLoss,
+    maxGainM: maxGain,
+    meanChangeM: paired ? sum / paired : 0,
+    lossVolumeM3: loss,
+    gainVolumeM3: gain,
+    netVolumeM3: gain - loss,
+  };
+}
+
+/**
+ * A cross-section down the fall line (`bearingDeg`, downhill) through the
+ * outline, running `marginM` past it at each end: [top, bottom].
+ */
+export function profileLine(rings: Ring[], bearingDeg: number, marginM = 10): [LonLat, LonLat] {
+  const [lon0, lat0] = ringCentroid(rings[0]);
+  const frame = localFrame(lon0, lat0);
+  const rad = (bearingDeg * Math.PI) / 180;
+  const ux = Math.sin(rad);
+  const uy = Math.cos(rad);
+  const along = rings[0].map((p) => {
+    const [x, y] = frame.toXY(p);
+    return x * ux + y * uy;
+  });
+  const from = Math.min(...along) - marginM;
+  const to = Math.max(...along) + marginM;
+  return [frame.toLonLat([from * ux, from * uy]), frame.toLonLat([to * ux, to * uy])];
+}
+
+/** `count` evenly spaced points from a to b (both ends included), and how far along each is, metres. */
+export function pointsAlong(a: LonLat, b: LonLat, count: number): Array<{ point: LonLat; distanceM: number }> {
+  const frame = localFrame(a[0], a[1]);
+  const [bx, by] = frame.toXY(b);
+  const length = Math.hypot(bx, by);
+  return Array.from({ length: count }, (_, i) => {
+    const t = count === 1 ? 0 : i / (count - 1);
+    return { point: frame.toLonLat([bx * t, by * t]), distanceM: length * t };
+  });
+}
+
+/**
+ * The form fields a before/after comparison fills. The original slope (α) and
+ * the slope height (H) describe the ground as it was — the terrain model; the
+ * landslide slope (β), its length and width describe the ground now — the drone.
+ */
+export function comparisonFieldValues(c: SurfaceComparison): Partial<Record<MeasurementField, string>> {
+  const feet = (meters: number) => (meters * FT_PER_M).toFixed(0);
+  const angle = (degrees: number) => degrees.toFixed(1);
+  return {
+    measure_slope_height_ft: feet(c.original.slopeHeightM),
+    measure_original_slope_deg: angle(c.original.landslideSlopeDeg),
+    measure_landslide_slope_deg: angle(c.updated.landslideSlopeDeg),
+    measure_landslide_length_ft: feet(c.updated.slopeLengthM),
+    measure_landslide_width_ft: feet(c.updated.widthM),
+  };
+}

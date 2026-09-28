@@ -10,6 +10,7 @@ import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHead
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
 import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
 import SubmissionMeasurementContext from "../features/submissions/SubmissionMeasurementContext";
+import { DroneSurveyProvider } from "../features/submissions/drone/DroneSurveyContext";
 import SiteMeasurementsPanel, { MEASURE_KEYS, type MeasureValues } from "../features/submissions/SiteMeasurementsPanel";
 import SubmissionLocationHero from "../features/submissions/SubmissionLocationHero";
 import SubmissionLibrary from "../features/submissions/SubmissionLibrary";
@@ -1342,7 +1343,7 @@ export default function SubmissionDetailPage() {
         {!invalid && !data && !err && <div className="text-sm text-muted">{busy ? "Loading..." : "No data."}</div>}
 
         {!invalid && data && (
-          <>
+          <DroneSurveyProvider submissionId={data.submission.id} canEdit={canEdit} geojson={geom} enabled={!viewer}>
             <SubmissionLocationHero
               submissionId={data.submission.id}
               gisa={data.gisa}
@@ -1510,7 +1511,7 @@ export default function SubmissionDetailPage() {
               ) : null}
             </SubmissionDetailCardGrid>
             </section>
-          </>
+          </DroneSurveyProvider>
         )}
       </div>
 

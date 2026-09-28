@@ -236,3 +236,12 @@ def get_object_bytes(*, object_key: str, bucket: str | None = None) -> tuple[byt
             obj.release_conn()
     except S3Error as e:
         raise RuntimeError(f"MinIO get_object failed bucket={bucket_name} key={object_key}: {e}") from e
+
+
+def remove_object_quietly(*, object_key: str, bucket: str | None = None) -> None:
+    """Delete an object; a missing object or an unreachable store is not an error."""
+    bucket_name = bucket or settings.MINIO_BUCKET
+    try:
+        _client().remove_object(bucket_name, object_key)
+    except Exception:  # best effort: an orphaned object costs space, not correctness
+        pass

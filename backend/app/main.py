@@ -41,6 +41,7 @@ from .routes.user_layouts import router as user_layouts_router
 from .routes.site_history import router as site_history_router
 from .routes.sharing import router as sharing_router
 from .routes.notifications import router as notifications_router
+from .routes.drone_surveys import router as drone_surveys_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
 from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
@@ -126,6 +127,7 @@ app.include_router(user_layouts_router)
 app.include_router(site_history_router)
 app.include_router(sharing_router)
 app.include_router(notifications_router)
+app.include_router(drone_surveys_router)
 
 app.add_middleware(
     CORSMiddleware,

@@ -11,6 +11,10 @@ import Polygon from "@arcgis/core/geometry/Polygon";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference";
 import Home from "@arcgis/core/widgets/Home";
 import Compass from "@arcgis/core/widgets/Compass";
+import type Layer from "@arcgis/core/layers/Layer";
+
+import { boundsRing, type DroneGrid, type LonLat } from "../features/submissions/drone/droneGrid";
+import { createOrthomosaicLayer, createPatchedElevationLayer } from "../features/submissions/drone/droneSceneLayers";
 
 import type { GisaTerrainGrid } from "../api/types";
 import {
@@ -46,6 +50,22 @@ type Props = {
   county?: string | null;
   incidentLabel?: string | null;
   height?: number;
+  /** A drone survey laid over the terrain model: its elevation patch, orthomosaic and captured points. */
+  drone?: DroneSceneSurvey | null;
+  /** When set, a click on the ground reports where (the view is picking points). */
+  onPick?: ((lon: number, lat: number) => void) | null;
+};
+
+export type DroneSceneSurvey = {
+  /** Changes when the survey or its heights change (id and vertical offset). */
+  key: string;
+  grid: DroneGrid;
+  offsetM: number;
+  overlayUrl: string | null;
+  corners: LonLat[] | null;
+  /** Show the drone surface (now); false shows the terrain model (before). */
+  show: boolean;
+  points: Array<{ id: string; lon: number; lat: number; label?: string | null }>;
 };
 
 type SceneStatus = "loading" | "ready" | "error";
@@ -70,12 +90,19 @@ export default function InteractiveTerrainScene({
   county = null,
   incidentLabel = null,
   height = 460,
+  drone = null,
+  onPick = null,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<SceneView | null>(null);
   const mapRef = useRef<Map | null>(null);
   const overlayRef = useRef<GraphicsLayer | null>(null);
+  const droneGraphicsRef = useRef<GraphicsLayer | null>(null);
+  const droneMediaRef = useRef<Layer | null>(null);
+  const worldGroundRef = useRef<Layer[] | null>(null);
+  const pickRef = useRef<Props["onPick"]>(null);
+  pickRef.current = onPick;
   const elevHealthRef = useRef<ServiceHealth>(OK_HEALTH);
   const nativeFsRef = useRef(false);
 
@@ -143,10 +170,14 @@ export default function InteractiveTerrainScene({
     (overlay as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "on-the-ground" };
     overlayRef.current = overlay;
 
+    const droneGraphics = new GraphicsLayer({ title: "Drone survey" });
+    (droneGraphics as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "on-the-ground" };
+    droneGraphicsRef.current = droneGraphics;
+
     const map = new Map({
       basemap: basemapIdFor(basemapMode),
       ground: "world-elevation",
-      layers: [overlay],
+      layers: [overlay, droneGraphics],
     });
     mapRef.current = map;
 
@@ -161,6 +192,14 @@ export default function InteractiveTerrainScene({
       qualityProfile: "high",
     });
     viewRef.current = view;
+    // Picking points (drone survey capture): report where the ground was clicked.
+    view.on("click", (event) => {
+      const pick = pickRef.current;
+      const point = event.mapPoint;
+      if (!pick || !point || point.longitude == null || point.latitude == null) return;
+      event.stopPropagation();
+      pick(point.longitude, point.latitude);
+    });
 
     let cancelled = false;
     view
@@ -195,6 +234,9 @@ export default function InteractiveTerrainScene({
 
     return () => {
       cancelled = true;
+      droneGraphicsRef.current = null;
+      droneMediaRef.current = null;
+      worldGroundRef.current = null;
       overlayRef.current = null;
       mapRef.current = null;
       viewRef.current = null;
@@ -319,6 +361,68 @@ export default function InteractiveTerrainScene({
       );
     }
   }, [toggles, available, lat, lon, terrain, geometryJson]);
+
+  // ---- Drone survey: the patched ground and the draped orthomosaic -----------
+  const droneKey = drone ? `${drone.key}|${drone.show ? 1 : 0}|${drone.overlayUrl ?? ""}` : "";
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== "ready") return;
+    const ground = map.ground;
+    if (!worldGroundRef.current) worldGroundRef.current = ground.layers.toArray() as Layer[];
+    if (droneMediaRef.current) {
+      map.layers.remove(droneMediaRef.current);
+      droneMediaRef.current.destroy();
+      droneMediaRef.current = null;
+    }
+    ground.layers.removeAll();
+    if (drone && drone.show) {
+      ground.layers.add(createPatchedElevationLayer(drone.grid, drone.offsetM) as never);
+      if (drone.overlayUrl && drone.corners?.length === 4) {
+        const media = createOrthomosaicLayer(drone.overlayUrl, drone.corners);
+        map.layers.add(media, 0);
+        droneMediaRef.current = media;
+      }
+    } else {
+      ground.layers.addMany(worldGroundRef.current as never[]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [droneKey, status]);
+
+  // ---- Drone survey: its footprint and the captured points -------------------
+  const pointsKey = drone ? JSON.stringify(drone.points.map((p) => [p.id, p.lon, p.lat, p.label])) : "";
+  const footprintKey = drone ? JSON.stringify(drone.corners ?? [drone.grid.west, drone.grid.south, drone.grid.east, drone.grid.north]) : "";
+  useEffect(() => {
+    const layer = droneGraphicsRef.current;
+    if (!layer) return;
+    layer.removeAll();
+    if (!drone) return;
+    const ring = drone.corners?.length === 4 ? [...drone.corners, drone.corners[0]] : boundsRing(drone.grid);
+    layer.add(
+      new Graphic({
+        geometry: new Polygon({ rings: [ring], spatialReference: WGS84 }),
+        symbol: { type: "simple-fill", color: [249, 115, 22, 0.04], outline: { color: [249, 115, 22, 0.95], width: 2, style: "dash" } } as never,
+        attributes: { __overlay: "drone_footprint" },
+      }),
+    );
+    for (const point of drone.points) {
+      const geometry = new Point({ longitude: point.lon, latitude: point.lat, spatialReference: WGS84 });
+      layer.add(
+        new Graphic({
+          geometry,
+          symbol: { type: "simple-marker", style: "circle", color: [249, 115, 22, 1], size: 10, outline: { color: [255, 255, 255, 1], width: 2 } } as never,
+        }),
+      );
+      if (point.label) {
+        layer.add(
+          new Graphic({
+            geometry,
+            symbol: { type: "text", text: point.label, color: [255, 255, 255, 1], haloColor: [15, 23, 42, 0.9], haloSize: 1.5, yoffset: 12, font: { size: 11, weight: "bold" } } as never,
+          }),
+        );
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointsKey, footprintKey, status]);
 
   // ---- Fullscreen (real Fullscreen API + CSS fallback) -----------------------
   const toggleFullscreen = useCallback(async () => {
