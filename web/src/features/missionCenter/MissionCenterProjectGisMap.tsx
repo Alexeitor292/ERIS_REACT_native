@@ -26,6 +26,7 @@ import { classificationLabel } from "../incidents/incidentClassification";
 import type { ProjectDetailResponse, ProjectSummary } from "../projects/projectTypes";
 import { projectLocationLabel } from "../projects/projectTypes";
 import { cameraDirectionEndpoint, type MissionCenterIncidentGis, type MissionCenterMode } from "./missionCenterGisModel";
+import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
 
 const CALIFORNIA_BOUNDS: LonLatExtent = { xmin: -124.482003, ymin: 32.528832, xmax: -114.131211, ymax: 42.009518 };
 const CALIFORNIA_EXTENT = new Extent({ ...CALIFORNIA_BOUNDS, spatialReference: { wkid: 4326 } });
@@ -199,6 +200,7 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
       constraints: { geometry: CALIFORNIA_EXTENT, minZoom: 5, snapToZoom: false },
       popup: { dockEnabled: false } as any,
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
 
     view.ui.add(new Home({ view }), "top-left");
     view.ui.add(new Compass({ view }), "top-left");
@@ -233,6 +235,7 @@ const MissionCenterProjectGisMap = forwardRef<MissionCenterMapHandle, Props>(fun
     viewRef.current = view;
     return () => {
       clickHandle.remove();
+      detachTerrainSource();
       view.destroy();
       viewRef.current = null;
       fitKeyRef.current = null;

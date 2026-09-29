@@ -12,6 +12,7 @@ import Search from "@arcgis/core/widgets/Search";
 import Expand from "@arcgis/core/widgets/Expand";
 
 import { basemapForTheme, useThemeBasemap } from "../../components/mapTheme";
+import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
 
 const CALIFORNIA = new Extent({ xmin: -124.482003, ymin: 32.528832, xmax: -114.131211, ymax: 42.009518, spatialReference: { wkid: 4326 } });
 /** Street level: close enough to see which lane or shoulder the pin is on. */
@@ -48,6 +49,7 @@ export default function IncidentLocationMap({ point, onPick, height = 340 }: { p
       constraints: { minZoom: 5, snapToZoom: false },
       popupEnabled: false,
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
     view.ui.add(new Home({ view }), "top-left");
     view.ui.add(new ScaleBar({ view, unit: "dual" }), "bottom-left");
     view.ui.add(new Expand({ view, content: new Search({ view, popupEnabled: false }), expandTooltip: "Find a place" }), "top-right");
@@ -59,6 +61,7 @@ export default function IncidentLocationMap({ point, onPick, height = 340 }: { p
     viewRef.current = view;
     return () => {
       clickHandle.remove();
+      detachTerrainSource();
       view.destroy();
       viewRef.current = null;
       pinLayerRef.current = null;

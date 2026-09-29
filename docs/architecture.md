@@ -114,6 +114,7 @@ Maps, the site photo map and offline 3D terrain use native iOS screens
 | Esri ArcGIS basemaps and World Elevation | web, mobile | Maps and the 3D terrain view |
 | Google Maps | web | Street View (embedded with an API key, otherwise in a new tab) |
 | USGS 3DEP elevation (ImageServer and EPQS) | worker, backend | Terrain packages, elevation profiles, terrain grids |
+| USGS 3DEP Elevation Index; Esri World Elevation Data Extents | web | Which lidar the terrain at a map's center comes from, and when it was flown |
 | USGS NAIP imagery | worker (optional) | Aerial imagery in terrain packages |
 | U.S. Census TIGERweb | worker (optional) | Road context in terrain packages |
 

@@ -43,6 +43,7 @@ import {
   type CrossSectionProfile,
   type DemResolutionMode,
 } from "./terrainCrossSectionModel";
+import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
 
 type SceneState = "loading" | "ready" | "error";
 type BasemapMode = "satellite" | "topo-vector";
@@ -260,6 +261,7 @@ export default function TerrainCrossSectionWorkspace() {
       } as never,
       qualityProfile: "high",
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
     viewRef.current = view;
 
     let disposed = false;
@@ -330,6 +332,7 @@ export default function TerrainCrossSectionWorkspace() {
       hoverLayerRef.current = null;
       mapRef.current = null;
       viewRef.current = null;
+      detachTerrainSource();
       view.destroy();
     };
   }, []);

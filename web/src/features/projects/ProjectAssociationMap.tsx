@@ -11,6 +11,7 @@ import Compass from "@arcgis/core/widgets/Compass";
 
 import type { NearbyProject, ProjectIncidentSummary } from "./projectTypes";
 import { milesFromMeters, projectLocationLabel } from "./projectTypes";
+import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
 
 type Props = {
   incident: ProjectIncidentSummary;
@@ -49,6 +50,7 @@ export default function ProjectAssociationMap({
       zoom: 13,
       constraints: { snapToZoom: false },
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
 
     view.ui.add(new Home({ view }), "top-left");
     view.ui.add(new Compass({ view }), "top-left");
@@ -72,6 +74,7 @@ export default function ProjectAssociationMap({
       clickHandle.remove();
       layerRef.current = null;
       viewRef.current = null;
+      detachTerrainSource();
       view.destroy();
     };
   }, [incident.id, incident.latitude, incident.longitude]);

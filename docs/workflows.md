@@ -128,7 +128,11 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    California). The shift can be changed or turned off. In the 3D view the
    survey replaces World Elevation inside its outline only, with the
    orthomosaic draped over it; **Before** and **Now** switch between the
-   terrain model and the survey. The location map shows the orthomosaic and the
+   terrain model and the survey. The terrain model has a date too: **Before** names
+   the year its lidar was flown there, and **Measure** gives the full source
+   ("USGS 3DEP 1 m lidar · flown Jan–Apr 2018"). When that lidar was flown
+   after the survey, the form warns that "before" may already show the event
+   and suggests comparing with an earlier survey instead. The location map shows the orthomosaic and the
    survey's outline, so the new affected area can be drawn over the flown
    ground. With a survey covering at least half of the area, **Measure**
    compares the two surfaces. α and H come from the terrain model (the ground
@@ -273,6 +277,14 @@ an assessment are not shown, unless
 `PUBLIC_INCLUDES_CLOSED_WITHOUT_ASSESSMENT=true`.
 
 ## 9. Offline terrain, road inventory and cross sections
+
+Every ArcGIS map and 3D view says, in its lower-left corner, where the terrain
+at the middle of the view comes from and when it was flown ("Terrain here: USGS
+3DEP 1 m lidar · flown Jan–Apr 2018"), with a link to the source's metadata. It
+updates when the view stops moving. Inside the United States the answer comes
+from the USGS 3DEP Elevation Index (the lidar project behind the 1 m DEM, else
+the 1/3 arc-second DEM). Elsewhere it comes from Esri World Elevation's data
+extents, which date only a whole dataset, so the label gives its years.
 
 Technical-form authors can generate offline 3D terrain packages for a site;
 administrators publish the road inventory the phones download; operational users

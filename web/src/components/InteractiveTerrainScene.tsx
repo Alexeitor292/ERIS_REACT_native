@@ -40,6 +40,7 @@ import {
   type SceneLoadFailure,
   type ServiceHealth,
 } from "./terrainScene";
+import { attachTerrainSourceBadge } from "./terrainSourceBadge";
 
 type Props = {
   location?: { latitude: number | null; longitude: number | null } | null;
@@ -201,6 +202,7 @@ export default function InteractiveTerrainScene({
       } as never,
       qualityProfile: "high",
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
     viewRef.current = view;
     // Picking points (drone survey capture): report where the ground was clicked.
     view.on("click", (event) => {
@@ -253,6 +255,7 @@ export default function InteractiveTerrainScene({
       mapRef.current = null;
       viewRef.current = null;
       elevHealthRef.current = OK_HEALTH;
+      detachTerrainSource();
       view.destroy();
     };
     // Recreated ONLY when the incident coordinates change (anchorKey) or on Retry

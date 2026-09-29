@@ -24,6 +24,7 @@ import {
   terrainSliceFromSampledPoints,
   type TerrainSliceData,
 } from "./terrainSliceModel";
+import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
 
 const WGS84 = SpatialReference.WGS84;
 const DEFAULT_WIDTH_M = 100;
@@ -342,6 +343,7 @@ function TerrainSliceScene({
         background: { type: "color", color: [15, 23, 42, 1] },
       } as never,
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
 
     const mesh = buildTerrainMesh(data, texture);
     terrainLayer.add(new Graphic({
@@ -402,6 +404,7 @@ function TerrainSliceScene({
     return () => {
       disposed = true;
       controlLayerRef.current = null;
+      detachTerrainSource();
       view.destroy();
     };
   }, [data, surfaceMode, texture, textureError, controlPoints]);

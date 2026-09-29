@@ -5,6 +5,8 @@ import { FT_PER_M } from "../siteTerrainModel";
 import { MAX_ARCHIVED_BYTES, useDroneSurveys, type NewSurvey } from "./DroneSurveyContext";
 import { dateFromFileName, VERTICAL_UNIT_LABEL, type VerticalUnit } from "./readDroneFiles";
 import { flownOutOfOrder, surveyTitle } from "./surveyLabels";
+import { useTerrainSource } from "../../../components/terrainSource";
+import { flownAfter, monthYearRange, terrainSourceText } from "../../../components/terrainSourceModel";
 
 const button = "inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50";
 const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1.5 text-xs";
@@ -25,6 +27,11 @@ export default function DroneSurveyCard() {
   const { active, baseline, surveys, canEdit } = drone;
   const survey = active?.survey ?? null;
   const beforeTitle = baseline ? surveyTitle(baseline.survey) : "terrain model";
+  // The terrain model's source at the survey: its flight year goes on "Before".
+  const grid = active?.grid ?? null;
+  const terrain = useTerrainSource(grid ? [(grid.west + grid.east) / 2, (grid.north + grid.south) / 2] : null);
+  const terrainYear = terrain ? monthYearRange(terrain.flownFrom, terrain.flownTo, true) : "";
+  const terrainAfter = !baseline && flownAfter(terrain, survey?.captured_on);
 
   if (!surveys.length && !canEdit) return null;
 
@@ -77,7 +84,7 @@ export default function DroneSurveyCard() {
         <div className="mt-3 grid gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <div role="radiogroup" aria-label="Ground shown in 3D" className="inline-flex overflow-hidden rounded-md border border-[var(--line)] text-xs font-medium">
-              {[[false, `Before (${baseline ? baseline.survey.captured_on ?? "earlier survey" : "terrain model"})`], [true, `Now (drone${survey.captured_on ? `, ${survey.captured_on}` : ""})`]].map(([value, label]) => (
+              {[[false, `Before (${baseline ? baseline.survey.captured_on ?? "earlier survey" : terrainYear ? `terrain model, ${terrainYear}` : "terrain model"})`], [true, `Now (drone${survey.captured_on ? `, ${survey.captured_on}` : ""})`]].map(([value, label]) => (
                 <button key={String(value)} type="button" role="radio" aria-checked={drone.showSurface === value} onClick={() => drone.setShowSurface(value as boolean)}
                   className={`px-2.5 py-1.5 ${drone.showSurface === value ? "bg-[var(--accent)] text-white" : "bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}>
                   {label as string}
@@ -91,6 +98,12 @@ export default function DroneSurveyCard() {
             ) : null}
           </div>
 
+          {terrainAfter && terrain ? (
+            <p className="text-xs text-[var(--warn-text)]">
+              The terrain model here ({terrainSourceText(terrain)}) was flown after this survey, so "Before" may already show the event.
+              {surveys.length > 1 ? " Compare with an earlier survey instead." : " Add an earlier survey to compare with, if there is one."}
+            </p>
+          ) : null}
           <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
             <Fact label="Flown">{survey.captured_on ?? "date not given"}{survey.source ? ` · ${survey.source}` : ""}</Fact>
             <Fact label="Files">{[survey.dsm_filename, survey.ortho_filename].filter(Boolean).join(" · ") || "—"}</Fact>

@@ -12,6 +12,7 @@ import ScaleBar from "@arcgis/core/widgets/ScaleBar";
 import type { IncidentClassification } from "../incidents/incidentClassification";
 import { classificationLabel } from "../incidents/incidentClassification";
 import type { ProjectIncidentSummary, ProjectSummary } from "./projectTypes";
+import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
 
 type Props = {
   project: ProjectSummary;
@@ -42,6 +43,7 @@ export default function ProjectDetailMap({ project, incidents, classifications =
       zoom: 13,
       constraints: { snapToZoom: false },
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
     view.ui.add(new Home({ view }), "top-left");
     view.ui.add(new Compass({ view }), "top-left");
     view.ui.add(new ScaleBar({ view, unit: "dual" }), "bottom-left");
@@ -98,6 +100,7 @@ export default function ProjectDetailMap({ project, incidents, classifications =
 
     return () => {
       clickHandle.remove();
+      detachTerrainSource();
       view.destroy();
     };
   }, [classifications, incidents, project]);

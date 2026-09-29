@@ -9,6 +9,7 @@ import Point from "@arcgis/core/geometry/Point";
 import { basemapForTheme, useThemeBasemap } from "../../components/mapTheme";
 import type { EventGroupIncidentSummary, EventGroupSummary } from "./eventGroupTypes";
 import { eventGroupLocationLabel } from "./eventGroupTypes";
+import { attachTerrainSourceBadge } from "../../components/terrainSourceBadge";
 
 type Props = {
   incident: { id: number; latitude: number; longitude: number; title?: string | null } | null;
@@ -52,6 +53,7 @@ export default function EventGroupTriageMap({ incident, groups, selectedGroupId,
     reportLayerRef.current = reportLayer;
     const map = new Map({ basemap: basemapForTheme(!!apiKey), layers: [groupLayer, incidentLayer, reportLayer] });
     const view = new MapView({ container: divRef.current, map, center: [-119.5, 37.3], zoom: 6, popup: { dockEnabled: false } as any });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
     const clickHandle = view.on("click", async (event) => {
       try {
         const hit = await view.hitTest(event);
@@ -65,6 +67,7 @@ export default function EventGroupTriageMap({ incident, groups, selectedGroupId,
     viewRef.current = view;
     return () => {
       clickHandle.remove();
+      detachTerrainSource();
       view.destroy();
       viewRef.current = null;
       groupLayerRef.current = null;
