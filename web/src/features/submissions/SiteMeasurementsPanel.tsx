@@ -27,6 +27,8 @@ import type { SavedComparison } from "../../api/droneSurveys";
 import { useDroneSurveys } from "./drone/DroneSurveyContext";
 import SlopeProfileDiagram, { type ProfilePoint } from "./drone/SlopeProfileDiagram";
 import { surveyTitle } from "./drone/surveyLabels";
+import { useTerrainSource } from "../../components/terrainSource";
+import { flownAfter, terrainSourceText, terrainWhen, type TerrainSource } from "../../components/terrainSourceModel";
 
 export const MEASURE_KEYS = [
   "measure_slope_height_ft",
@@ -85,6 +87,8 @@ type TerrainResult = {
     profile: ProfilePoint[];
     /** The survey that is the ground now, and what the ground before is: "terrain model" or an earlier survey. */
     nowTitle: string;
+    /** When the survey that is the ground now was flown (ISO), to set against the terrain model's date. */
+    nowDate: string | null;
     beforeTitle: string;
     beforeIsSurvey: boolean;
     offsetM: number;
@@ -133,6 +137,13 @@ export default function SiteMeasurementsPanel({
   const index = Math.min(areaIndex, Math.max(0, areas.length - 1));
   const area = areas[index] ?? null;
   const areaKey = area ? JSON.stringify(area) : "";
+  // Where the terrain model under the area comes from, and when it was flown.
+  const areaCentre = useMemo((): [number, number] | null => {
+    const ring = area?.[0];
+    if (!ring?.length) return null;
+    return [ring.reduce((sum, p) => sum + p[0], 0) / ring.length, ring.reduce((sum, p) => sum + p[1], 0) / ring.length];
+  }, [areaKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const terrain = useTerrainSource(areaCentre);
   const drone = useDroneSurveys();
   const survey = drone?.active ?? null;
   const baseline = drone?.baseline ?? null;
@@ -252,6 +263,7 @@ export default function SiteMeasurementsPanel({
             comparison,
             profile,
             nowTitle: surveyTitle(survey.survey),
+            nowDate: survey.survey.captured_on,
             beforeTitle: baseline ? surveyTitle(baseline.survey) : "terrain model",
             beforeIsSurvey: !!baseline,
             offsetM: survey.survey.vertical_offset_m,
@@ -374,9 +386,13 @@ export default function SiteMeasurementsPanel({
               <Metric label="Faces" value={bearingLabel(m.downslopeBearingDeg)} note={m.directionFromOutline ? "Nearly flat: length follows the outline" : "Down the fall line"} />
               <Metric label="Elevation" value={`${fmtFt(m.lowElevationM)} – ${fmtFt(m.highElevationM)}`} note="Low and high points, with the ground around" />
               <Metric label="Plan length" value={fmtFt(m.horizontalLengthM)} note={`${fmtFt(m.slopeLengthM)} along the slope`} />
-              <Metric label="Source" value="Esri World Elevation" note={`${fmtRes(result.resolution)} · ${(m.insideSamples + m.aroundSamples).toLocaleString("en-US")} samples`} />
+              <Metric
+                label="Source"
+                value="Esri World Elevation"
+                note={[terrain ? terrainSourceText(terrain).replace(/^Esri World Elevation /, "") : null, fmtRes(result.resolution), `${(m.insideSamples + m.aroundSamples).toLocaleString("en-US")} samples`].filter(Boolean).join(" · ")}
+              />
             </dl>
-            {result.drone ? <BeforeAndAfter drone={result.drone} /> : null}
+            {result.drone ? <BeforeAndAfter drone={result.drone} terrain={terrain} /> : null}
             {canEdit && !differentKeys.length ? (
               <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-[var(--good)]" aria-live="polite">
                 <Check size={14} />
@@ -539,7 +555,10 @@ function SymbolBadge({ children }: { children: ReactNode }) {
 }
 
 /** The slope before (terrain model or an earlier survey) and now (drone survey), the change between them, and the section down the slope. */
-function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> }) {
+function BeforeAndAfter({ drone, terrain }: { drone: NonNullable<TerrainResult["drone"]>; terrain: TerrainSource | null }) {
+  // The terrain model as "before" is only before if it was flown before the survey.
+  const terrainAfter = !drone.beforeIsSurvey && flownAfter(terrain, drone.nowDate);
+  const beforeTitle = !drone.beforeIsSurvey && terrain && terrainWhen(terrain) ? `${drone.beforeTitle} · ${terrainWhen(terrain)}` : drone.beforeTitle;
   const { comparison: c } = drone;
   const surveys = useDroneSurveys();
   const angle = (d: number) => `${d.toFixed(1)}°`;
@@ -553,12 +572,18 @@ function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> 
   return (
     <div className="mt-3 border-t border-[var(--line)] pt-3">
       <div className="text-xs font-semibold">Before and now</div>
+      {terrainAfter && terrain ? (
+        <p className="mt-1 rounded-md border border-[color:color-mix(in_oklab,var(--warn-text)_40%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn-text)_8%,var(--panel))] px-2.5 py-1.5 text-xs text-[var(--warn-text)]">
+          The terrain model here ({terrainSourceText(terrain)}) was flown after this survey ({drone.nowDate}), so as "before" it may already show the event.
+          Compare with an earlier survey if there is one.
+        </p>
+      ) : null}
       <div className="mt-1.5 overflow-x-auto">
         <table className="w-full min-w-[22rem] text-xs tabular-nums">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wide text-muted">
               <th className="py-1 pr-3 font-semibold" scope="col"><span className="sr-only">Measure</span></th>
-              <th className="py-1 pr-3 font-semibold" scope="col">Before<span className="block font-normal normal-case tracking-normal">{drone.beforeTitle}</span></th>
+              <th className="py-1 pr-3 font-semibold" scope="col">Before<span className="block font-normal normal-case tracking-normal">{beforeTitle}</span></th>
               <th className="py-1 pr-3 font-semibold" scope="col">Now<span className="block font-normal normal-case tracking-normal">{drone.nowTitle}</span></th>
             </tr>
           </thead>

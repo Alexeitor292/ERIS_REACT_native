@@ -8,6 +8,7 @@ import Point from "@arcgis/core/geometry/Point";
 import Extent from "@arcgis/core/geometry/Extent";
 
 import type { Incident } from "../api/types";
+import { attachTerrainSourceBadge } from "./terrainSourceBadge";
 
 type Props = {
   incidents: Incident[];
@@ -66,6 +67,7 @@ export default function MissionCenterMap({
         minZoom: 5,
       },
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
 
     // Defensive fallback: if a styled basemap fails for any reason, force OSM.
     view.when().catch(() => {
@@ -86,6 +88,7 @@ export default function MissionCenterMap({
     viewRef.current = view;
 
     return () => {
+      detachTerrainSource();
       view.destroy();
       viewRef.current = null;
       layerRef.current = null;

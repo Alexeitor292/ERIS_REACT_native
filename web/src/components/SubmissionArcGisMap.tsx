@@ -38,6 +38,7 @@ import {
   themeColor,
   withAlpha,
 } from "./photoEvidenceGraphics";
+import { attachTerrainSourceBadge } from "./terrainSourceBadge";
 
 // Optional ONLINE Caltrans freeway/expressway context layer. OPT-IN: when
 // VITE_CALTRANS_HIGHWAYS_URL is unset the config helper returns null and NO layer is
@@ -181,6 +182,7 @@ export default function SubmissionArcGisMap({
       center: [-121.4944, 38.5816],
       zoom: 10,
     });
+    const detachTerrainSource = attachTerrainSourceBadge(view);
 
     const home = new Home({ view });
     homeRef.current = home;
@@ -285,6 +287,7 @@ export default function SubmissionArcGisMap({
       sketchRef.current = null;
       areasLayerRef.current = null;
       droneLayerRef.current = null;
+      detachTerrainSource();
       view.destroy();
     };
   }, [editable, onGeometryChange]);
