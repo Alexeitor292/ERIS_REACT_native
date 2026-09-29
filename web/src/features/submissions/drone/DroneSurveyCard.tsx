@@ -186,7 +186,9 @@ function Points() {
   const drone = useDroneSurveys()!;
   const points = drone.active!.survey.points;
   // Each point keeps the terrain model's height; compared with an earlier survey, "before" is that survey's.
-  const beforeAt = (p: { lon: number; lat: number; historical_m: number | null }) => (drone.baseline ? drone.baselineAt(p.lon, p.lat) : p.historical_m);
+  // Compared with an earlier survey, "before" is its height, or sea level where it saw the sea.
+  const beforeAt = (p: { lon: number; lat: number; historical_m: number | null }) =>
+    drone.baseline ? drone.baselineGroundAt(p.lon, p.lat) : p.historical_m == null ? null : { z: p.historical_m, sea: false };
   if (!points.length) {
     return drone.canEdit ? <p className="text-xs text-muted">No points yet. <b>Capture points</b>, then click the 3D view: each point records the ground before and the ground now (the drone).</p> : null;
   }
@@ -199,11 +201,15 @@ function Points() {
         <tbody>
           {points.map((p) => {
             const before = beforeAt(p);
-            const change = before != null && p.actual_m != null ? p.actual_m - before : null;
+            const change = before != null && p.actual_m != null ? p.actual_m - before.z : null;
             return (
               <tr key={p.id} className="border-t border-[var(--line)]">
                 <td className="py-1 pr-2 font-semibold">{p.label ?? "—"}</td>
-                <td className="pr-2">{drone.baseline && before == null ? <span className="text-muted">outside the earlier survey</span> : ft(before)}</td>
+                <td className="pr-2">
+                  {before == null
+                    ? drone.baseline ? <span className="text-muted">outside the earlier survey</span> : ft(null)
+                    : before.sea ? <span title="The earlier survey saw sea here: the ground was the water surface.">{ft(before.z)} <span className="text-muted">· sea</span></span> : ft(before.z)}
+                </td>
                 <td className="pr-2">{p.actual_m == null ? <span className="text-muted">outside the survey</span> : ft(p.actual_m)}</td>
                 <td className={`pr-2 font-semibold ${change == null ? "" : change < 0 ? "text-[var(--bad)]" : "text-[var(--good)]"}`}>{change == null ? "—" : `${change > 0 ? "+" : ""}${(change * FT_PER_M).toFixed(1)} ft`}</td>
                 <td className="pr-2 text-muted">{p.lat.toFixed(6)}, {p.lon.toFixed(6)}</td>

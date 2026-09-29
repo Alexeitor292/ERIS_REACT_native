@@ -14,7 +14,7 @@ import {
 } from "../../../api/droneSurveys";
 import { areasFromGeoJson } from "../../../components/siteAreasModel";
 import { sampleElevations } from "../terrainElevation";
-import { alignmentPoints, decodeGrid, encodeGrid, sampleGrid, verticalOffset, type DroneGrid, type LonLat } from "./droneGrid";
+import { alignmentPoints, decodeGrid, encodeGrid, fillSea, sampleGrid, SEA_LEVEL_M, verticalOffset, type DroneGrid, type LonLat } from "./droneGrid";
 import { readElevation, readOrthomosaic, type Progress, type VerticalUnit } from "./readDroneFiles";
 
 /** Files larger than this are not archived as attachments (the public connection refuses bigger uploads). */
@@ -53,6 +53,12 @@ type DroneSurveyState = {
   swapBaseline: () => void;
   /** The baseline survey's height at a point, lined up with the terrain model (null without one, or outside it). */
   baselineAt: (lon: number, lat: number) => number | null;
+  /**
+   * The ground before at a point for a reader: the baseline survey's height, or
+   * sea level (with `sea`) where it saw the sea it could not map (null without a
+   * baseline survey, or in a gap that does not face the sea).
+   */
+  baselineGroundAt: (lon: number, lat: number) => { z: number; sea: boolean } | null;
   /** The ground before at each point: the baseline survey, or the terrain model when there is none. */
   beforeHeights: (points: LonLat[]) => Promise<Array<number | null>>;
   /** Show the drone surface (now) or the terrain model (before) in the 3D view. */
@@ -224,6 +230,21 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
       return raw == null ? null : raw + liveBaseline.survey.vertical_offset_m;
     },
     [liveBaseline],
+  );
+
+  // Where the baseline survey faced the sea it could not map (as the 3D view draws it).
+  const baselineSea = useMemo(
+    () => (liveBaseline ? fillSea(liveBaseline.grid, liveBaseline.survey.vertical_offset_m).grid : null),
+    [liveBaseline],
+  );
+  const baselineGroundAt = useCallback(
+    (lon: number, lat: number) => {
+      const measured = baselineAt(lon, lat);
+      if (measured != null) return { z: measured, sea: false };
+      if (!baselineSea || sampleGrid(baselineSea, lon, lat) == null) return null;
+      return { z: SEA_LEVEL_M, sea: true };
+    },
+    [baselineAt, baselineSea],
   );
 
   const beforeHeights = useCallback(
@@ -399,11 +420,11 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
   const value = useMemo<DroneSurveyState>(
     () => ({
       submissionId, canEdit, surveys, loading, error, active, activeId, setActiveId,
-      baseline: liveBaseline, baselineId: baselineId !== activeId ? baselineId : null, setBaselineId, swapBaseline, baselineAt, beforeHeights,
+      baseline: liveBaseline, baselineId: baselineId !== activeId ? baselineId : null, setBaselineId, swapBaseline, baselineAt, baselineGroundAt, beforeHeights,
       showSurface, setShowSurface, capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
       section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover, setSectionHover,
     }),
-    [submissionId, canEdit, surveys, loading, error, active, activeId, liveBaseline, baselineId, swapBaseline, baselineAt, beforeHeights,
+    [submissionId, canEdit, surveys, loading, error, active, activeId, liveBaseline, baselineId, swapBaseline, baselineAt, baselineGroundAt, beforeHeights,
       showSurface, capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
       section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover],
   );
