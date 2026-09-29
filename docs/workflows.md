@@ -155,10 +155,14 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    **Before**, land the event made since (where the earlier survey saw sea and
    the later one found ground) is painted as water. Other gaps, and ground
    beyond the flight, come from the terrain model, blended over the survey's
-   last 12 m so the two never meet as a wall. Captured points compared with an
-   earlier survey read sea level ("0.0 ft · sea") where it saw the sea, so a
-   point on new land shows its gain. The before/now table, volumes and section
-   use only what the surveys captured. **Capture points**
+   last 12 m so the two never meet as a wall. Compared with an earlier
+   survey, the ground before is the sea surface where that survey saw sea:
+   captured points read "0.0 ft · sea", the section's before line runs at sea
+   level (blue), and the ground lost and gained count the material now in the
+   water from the surface. The seabed under it is unknown, so those gains are a
+   lower bound, and the form says what share of the area was sea. The slope,
+   its height and its length before come from surveyed ground only (water is
+   not slope). **Capture points**
    records, at each click on the 3D view, the height of both surfaces there.
    Surveys, their shift, the captured points and the last comparison are kept
    with the form.
