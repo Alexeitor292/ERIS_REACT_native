@@ -57,6 +57,8 @@ export type DroneSurvey = {
   stats: Record<string, unknown> | null;
   comparison: SavedComparison | null;
   points: SurveyPoint[];
+  /** The survey of the same form this one is compared with (null: the terrain model). */
+  compare_with_survey_id?: number | null;
 };
 
 export type NewSurveyMeta = {
@@ -102,6 +104,7 @@ export function updateSurvey(
     points: SurveyPoint[];
     alignment_spread_m: number | null;
     alignment_points: number;
+    compare_with_survey_id: number | null;
   }>,
 ) {
   return api<DroneSurvey>(`${base(submissionId)}/${surveyId}`, { method: "PATCH", body: JSON.stringify(patch) });

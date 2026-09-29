@@ -1,3 +1,4 @@
+import { countyCodeFromNameOrCode } from "./caltransLookups";
 import { normalizePostMileInput, normalizeRouteInput } from "./precision";
 
 type SubmissionLabelParts = {
@@ -22,6 +23,19 @@ function formatCreatedAt(createdAt?: string | null): string {
   });
 }
 
+/** Two digits, as in incident names: "5" and "District 5" read "05". */
+function formatDistrict(district?: string | null): string {
+  const raw = (district ?? "").trim();
+  const digits = raw.replace(/\D/g, "");
+  return digits ? digits.padStart(2, "0") : raw || "?";
+}
+
+/** The county's Caltrans code, as in incident names: "Monterey" reads "MON". */
+function formatCounty(county?: string | null): string {
+  const raw = (county ?? "").trim();
+  return countyCodeFromNameOrCode(raw) ?? (raw || "?");
+}
+
 function formatRoute(route?: string | null): string {
   return normalizeRouteInput(route) || "?";
 }
@@ -31,8 +45,8 @@ function formatPostMile(postMile?: string | null): string {
 }
 
 export function buildSubmissionDescriptor(parts: SubmissionLabelParts): string {
-  const district = (parts.district || "?").trim() || "?";
-  const county = (parts.county || "?").trim() || "?";
+  const district = formatDistrict(parts.district);
+  const county = formatCounty(parts.county);
   const route = formatRoute(parts.route);
   const postMile = formatPostMile(parts.post_mile);
   const when = formatCreatedAt(parts.created_at);

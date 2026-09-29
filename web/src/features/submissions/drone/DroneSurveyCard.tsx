@@ -37,11 +37,7 @@ export default function DroneSurveyCard() {
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <label className="inline-flex items-center gap-1.5">
               <span className="font-semibold text-muted">Now</span>
-              <select className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={drone.activeId ?? ""} onChange={(e) => {
-                const id = Number(e.target.value);
-                if (id === drone.baselineId) drone.setBaselineId(null);
-                drone.setActiveId(id);
-              }}>
+              <select className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={drone.activeId ?? ""} onChange={(e) => drone.setActiveId(Number(e.target.value))}>
                 {surveys.map((s) => <option key={s.id} value={s.id}>{surveyTitle(s)}</option>)}
               </select>
             </label>

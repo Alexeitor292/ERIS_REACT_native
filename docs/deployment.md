@@ -229,6 +229,11 @@ Release notes that need action:
   backfilled for existing notices from their links and kinds. Existing notices
   also lose the internal incident key that preceded the incident's name. The
   unread badge drops notices whose step someone already took.
+- **Survey comparison kept; district and county codes** (`20261005_survey_baseline_codes`).
+  Adds `submission_drone_surveys.compare_with_survey_id`, filled for surveys
+  already measured against another survey. Technical forms that stored the
+  district and county as the web form displays them ("5", "Monterey") now
+  store "05" and "MON", and the API normalizes every save.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

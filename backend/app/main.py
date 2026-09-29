@@ -66,6 +66,7 @@ from .schemas.common import (
     WorkflowAction,
 )
 from .services import elevation_profile as elevation_profile_svc
+from .services import incident_name as incident_name_service
 from .services import notifications as notifications_svc
 from .services import push as push_svc
 from .services import offline_scene as offline_scene_svc
@@ -2514,6 +2515,13 @@ def patch_gisa(
     for key in list(boolean_not_null_fields):
         if key in provided and provided[key] is None:
             provided.pop(key, None)
+
+    # District and county are stored the way ERIS stores them everywhere ("05",
+    # "MON"), whatever a form displays them as ("District 5", "Monterey").
+    if provided.get("district"):
+        provided["district"] = incident_name_service.district_code(provided["district"]) or provided["district"]
+    if provided.get("county"):
+        provided["county"] = incident_name_service.county_code(provided["county"]) or provided["county"]
 
     def _to_bool(v):
         if v is True or v == 1 or v == "1":

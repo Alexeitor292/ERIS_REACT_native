@@ -140,7 +140,11 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    by default, or an earlier survey; both surveys are lined up with the terrain
    model, so they compare on the same footing. **Before** in the 3D view then
    shows that survey, and the form warns (with **Swap**) when the survey used
-   as before was flown after the one shown as now. **Capture points**
+   as before was flown after the one shown as now. The choice is kept with the
+   survey, so everyone who opens the form (a reviewer, say) sees the comparison
+   its author chose. The section is drawn at true scale whenever it fits, so a
+   slope looks as steep as its angle; otherwise the caption says how much the
+   heights are stretched or squeezed. **Capture points**
    records, at each click on the 3D view, the height of both surfaces there.
    Surveys, their shift, the captured points and the last comparison are kept
    with the form.

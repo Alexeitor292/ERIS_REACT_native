@@ -97,6 +97,8 @@ class SurveyPatch(BaseModel):
     # How well the heights agree with the terrain model on stable ground, after lining them up again.
     alignment_spread_m: float | None = Field(default=None, ge=0, le=1000)
     alignment_points: int | None = Field(default=None, ge=0, le=100_000)
+    # Which survey of the same form this one is compared with (null: the terrain model).
+    compare_with_survey_id: int | None = Field(default=None, ge=1)
 
 
 def _corners(value: list[list[float]] | None) -> list[list[float]] | None:
@@ -140,6 +142,7 @@ def _survey(row) -> dict:
         "stats": _json(row["stats_json"]),
         "comparison": _json(row["comparison_json"]),
         "points": _json(row["points_json"]) or [],
+        "compare_with_survey_id": int(row["compare_with_survey_id"]) if row.get("compare_with_survey_id") is not None else None,
     }
 
 
@@ -310,6 +313,18 @@ def update_survey(
     if "points" in provided:
         sets.append("points_json = :points")
         params["points"] = json.dumps(payload.points or [])
+    if "compare_with_survey_id" in provided:
+        other = payload.compare_with_survey_id
+        if other is not None:
+            if int(other) == int(survey_id):
+                raise HTTPException(status_code=422, detail="A survey cannot be compared with itself")
+            if not db.execute(
+                text("SELECT 1 FROM submission_drone_surveys WHERE id = :id AND submission_id = :sid"),
+                {"id": int(other), "sid": int(submission_id)},
+            ).first():
+                raise HTTPException(status_code=422, detail="Compare with a survey of the same form")
+        sets.append("compare_with_survey_id = :compare_with")
+        params["compare_with"] = other
     if "alignment_spread_m" in provided or "alignment_points" in provided:
         stats = _json(current["stats_json"]) or {}
         if "alignment_spread_m" in provided:
