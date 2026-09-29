@@ -11,7 +11,12 @@ export type FeedItem = {
   actor: string | null;
   created_at: string | null;
   read: boolean;
+  /** For a notice asking a step: set once somebody took it (then it no longer counts as unread). */
+  done?: DoneStep | null;
 };
+
+/** A step somebody already took: when, who, what they did, and where the record stands now. */
+export type DoneStep = { at: string | null; by: string | null; by_you: boolean; action: string | null; state: string | null };
 
 export type Feed = { items: FeedItem[]; unread: number };
 

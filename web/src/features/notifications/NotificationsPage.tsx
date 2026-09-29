@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 
 import { getFeed, markRead, type FeedItem } from "../../api/notifications";
 import AppShell from "../../ui/AppShell";
-import { internalLink, whenLabel } from "./notificationModel";
+import { doneText, internalLink, whenLabel } from "./notificationModel";
+import { DoneChip } from "./NotificationBell";
 
 const PAGE = 30;
 
@@ -66,11 +67,15 @@ export default function NotificationsPage() {
         <ul className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
           {items.map((item) => (
             <li key={item.id} className="border-b border-[var(--line)] last:border-b-0">
-              <button type="button" onClick={() => follow(item)} className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-[var(--panel-soft)] ${item.read ? "" : "bg-[color:color-mix(in_oklab,var(--brand)_6%,var(--panel))]"}`}>
-                {!item.read ? <span aria-label="Unread" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" /> : <span className="w-2 shrink-0" aria-hidden />}
+              <button type="button" onClick={() => follow(item)} className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-[var(--panel-soft)] ${item.read || item.done ? "" : "bg-[color:color-mix(in_oklab,var(--brand)_6%,var(--panel))]"}`}>
+                {!item.read && !item.done ? <span aria-label="Unread" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" /> : <span className="w-2 shrink-0" aria-hidden />}
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold">{item.title}</span>
+                  <span className={`flex flex-wrap items-center gap-1.5 text-sm font-semibold ${item.done ? "text-muted" : ""}`}>
+                    {item.title}
+                    {item.done ? <DoneChip /> : null}
+                  </span>
                   {item.body ? <span className="mt-0.5 block text-sm text-muted">{item.body}</span> : null}
+                  {item.done ? <span className="mt-0.5 block text-sm text-[var(--good)]">{doneText(item.done)}</span> : null}
                 </span>
                 <span className="shrink-0 text-xs text-muted">{whenLabel(item.created_at)}</span>
               </button>

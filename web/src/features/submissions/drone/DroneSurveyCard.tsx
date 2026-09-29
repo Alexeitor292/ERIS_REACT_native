@@ -100,7 +100,7 @@ export default function DroneSurveyCard() {
             <Fact label="Files">{[survey.dsm_filename, survey.ortho_filename].filter(Boolean).join(" · ") || "—"}</Fact>
             <Fact label="Patch">{survey.cols} × {survey.rows} cells{survey.resolution_m ? ` · ${(survey.resolution_m * FT_PER_M).toFixed(2)} ft (${survey.resolution_m.toFixed(2)} m) each` : ""}{survey.source_crs ? ` · from ${survey.source_crs}` : ""}</Fact>
             <Fact label="Lined up">
-              <OffsetEditor />
+              <OffsetEditor key={survey.id} />
             </Fact>
           </dl>
 
@@ -173,7 +173,7 @@ function OffsetEditor() {
         setBusy(true);
         try {
           const result = await drone.realign();
-          setNote(result ? `lined up again on stable ground (±${(result.spreadM * FT_PER_M).toFixed(1)} ft)` : "not enough stable ground to line up");
+          setNote(result ? "lined up again on stable ground" : "not enough stable ground to line up");
           setEditing(false);
         } finally { setBusy(false); }
       }}>Line up again</button>

@@ -399,20 +399,36 @@ class TestAssignmentRoleWidth:
     def test_reassigning_a_senior_engineer_retires_the_previous_row(self, client_db, tokens, ids):
         # _perform_engineer_assignment deactivates by the SAME role it inserts,
         # so a Senior Specialist reassignment cannot leave two active rows behind.
-        case = _triaged(client_db, tokens)
-        aid = case["assessment_id"]
-        for _ in range(2):
-            resp = client_db.post(
+        from tests.org_people import People
+
+        people = People(client_db, tokens["admin"], prefix="Zzz Reassign")
+        try:
+            second = people.make("SENIOR_SPECIALIST", "ss2", office="WEST")
+            case = _triaged(client_db, tokens)
+            aid = case["assessment_id"]
+            for specialist in (ids["senior_engineer"], second["id"]):
+                resp = client_db.post(
+                    f"/assessments/{aid}/assign-senior-engineer",
+                    json={"senior_engineer_user_id": specialist},
+                    headers=_auth(tokens["officechief"]),
+                )
+                assert resp.status_code == 200, resp.text
+            active = _scalar(
+                """
+                SELECT COUNT(*) FROM assessment_assignments
+                 WHERE assessment_id = :aid AND assignment_role = 'SENIOR_ENGINEER' AND is_active = 1
+                """,
+                {"aid": aid},
+            )
+            assert int(active) == 1
+
+            # Assigning the one who already has it changes nothing, and says so.
+            again = client_db.post(
                 f"/assessments/{aid}/assign-senior-engineer",
-                json={"senior_engineer_user_id": ids["senior_engineer"]},
+                json={"senior_engineer_user_id": second["id"]},
                 headers=_auth(tokens["officechief"]),
             )
-            assert resp.status_code == 200, resp.text
-        active = _scalar(
-            """
-            SELECT COUNT(*) FROM assessment_assignments
-             WHERE assessment_id = :aid AND assignment_role = 'SENIOR_ENGINEER' AND is_active = 1
-            """,
-            {"aid": aid},
-        )
-        assert int(active) == 1
+            assert again.status_code == 409, again.text
+            assert "already has this assessment" in again.json()["detail"]
+        finally:
+            people.cleanup()

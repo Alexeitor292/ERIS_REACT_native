@@ -197,7 +197,9 @@ def _serialize_assessment(
         "routed_branch_letter": row.get("routed_branch_letter"),
         "routing_path": routing_path,
         "branch_chief_user_id": int(row["branch_chief_user_id"]) if row.get("branch_chief_user_id") is not None else None,
+        "branch_chief_name": row.get("branch_chief_name"),
         "assigned_engineer_user_id": assigned_user_id,
+        "assigned_user_name": row.get("assigned_user_name"),
         "assigned_user_id": assigned_user_id,
         "assigned_user_kind": assigned_user_kind,
         "can_review": can_review,
@@ -237,7 +239,9 @@ _ASSESSMENT_COLUMNS = """
   a.submitted_at, a.review_requested_at, a.approved_at, a.finalized_at,
   a.routed_office_id, a.routed_office_name,
   a.routed_branch_id, a.routed_branch_name, a.routed_branch_letter,
-  a.created_at, a.updated_at
+  a.created_at, a.updated_at,
+  (SELECT u.full_name FROM users u WHERE u.id = a.branch_chief_user_id) AS branch_chief_name,
+  (SELECT u.full_name FROM users u WHERE u.id = a.assigned_engineer_user_id) AS assigned_user_name
 """
 
 
@@ -1312,6 +1316,9 @@ def delegate_branch(
         int(assessment["branch_chief_user_id"]) if assessment.get("branch_chief_user_id") is not None else None
     )
     to_state = "PENDING_ENGINEER_ASSIGNMENT" if first_handoff else assessment["state"]
+    if not first_handoff and previous_branch_chief == int(payload.branch_chief_user_id):
+        # Handing it to the chief who already has it changes nothing: no event, no notice.
+        raise HTTPException(status_code=409, detail=f"{_person_name(db, previous_branch_chief)} already has this assessment.")
 
     # The BRANCH half of the routing snapshot: the branch this work was handed
     # to, named as it reads today. Taken from the receiving chief's org record,
@@ -1411,6 +1418,11 @@ def delegate_branch(
 # ---------------------------------------------------------------------------
 
 
+def _person_name(db: Session, user_id: int) -> str:
+    name = db.execute(text("SELECT full_name FROM users WHERE id = :uid"), {"uid": int(user_id)}).scalar()
+    return str(name) if name else "That person"
+
+
 def _perform_engineer_assignment(
     db: Session,
     *,
@@ -1441,6 +1453,10 @@ def _perform_engineer_assignment(
     """
     assessment_id = int(assessment["id"])
     incident_id = int(assessment["incident_id"])
+    current = assessment.get("assigned_engineer_user_id")
+    if current is not None and int(current) == int(engineer_user_id):
+        # Re-assigning the person who already has it changes nothing: no event, no notice.
+        raise HTTPException(status_code=409, detail=f"{_person_name(db, int(current))} already has this assessment.")
     result = incidents_routes._assign_incident(
         db=db,
         incident_id=incident_id,

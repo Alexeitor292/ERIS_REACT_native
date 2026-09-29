@@ -275,7 +275,14 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
     if (!active) return null;
     const offset = await offsetFor(active.grid, geojsonRef.current);
     if (!offset) return null;
-    replace(await updateSurvey(submissionId, active.survey.id, { vertical_offset_m: Math.round(offset.offsetM * 1000) / 1000, offset_mode: "AUTO" }));
+    replace(
+      await updateSurvey(submissionId, active.survey.id, {
+        vertical_offset_m: Math.round(offset.offsetM * 1000) / 1000,
+        offset_mode: "AUTO",
+        alignment_spread_m: offset.spreadM,
+        alignment_points: offset.count,
+      }),
+    );
     return offset;
   }, [active, submissionId]);
 

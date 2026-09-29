@@ -63,10 +63,14 @@ export type Assessment = {
   routed_branch_letter: string | null;
   routing_path: RoutingPath | null;
   branch_chief_user_id: number | null;
+  /** The branch chief's name, when the branch route named one. */
+  branch_chief_name?: string | null;
   /** Both routes store the assignee here; `assigned_user_kind` says which kind. */
   assigned_engineer_user_id: number | null;
   /** Route-neutral alias of `assigned_engineer_user_id`. */
   assigned_user_id: number | null;
+  /** The assignee's name (Staff member or Senior Specialist). */
+  assigned_user_name?: string | null;
   assigned_user_kind: "STAFF" | "SENIOR_ENGINEER" | null;
   /** Server-computed: may the signed-in caller decide this assessment now? */
   can_review: boolean;

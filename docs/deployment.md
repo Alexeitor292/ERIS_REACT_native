@@ -224,6 +224,11 @@ Release notes that need action:
   same connection as attachments, so the original GeoTIFFs are archived only
   under 95 MB (Cloudflare refuses larger requests). Larger files still make a
   survey: the browser reads them in bands and uploads only the lighter copy.
+- **Notices that know when their step is done** (`20261004_notification_tasks`).
+  Adds `incident_id`, `assessment_id` and `task_state` to `user_notifications`,
+  backfilled for existing notices from their links and kinds. Existing notices
+  also lose the internal incident key that preceded the incident's name. The
+  unread badge drops notices whose step someone already took.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs

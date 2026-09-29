@@ -93,7 +93,16 @@ export function createSurvey(submissionId: number, meta: NewSurveyMeta, patch: U
 export function updateSurvey(
   submissionId: number,
   surveyId: number,
-  patch: Partial<{ label: string | null; captured_on: string | null; vertical_offset_m: number; offset_mode: DroneSurvey["offset_mode"]; comparison: SavedComparison | null; points: SurveyPoint[] }>,
+  patch: Partial<{
+    label: string | null;
+    captured_on: string | null;
+    vertical_offset_m: number;
+    offset_mode: DroneSurvey["offset_mode"];
+    comparison: SavedComparison | null;
+    points: SurveyPoint[];
+    alignment_spread_m: number | null;
+    alignment_points: number;
+  }>,
 ) {
   return api<DroneSurvey>(`${base(submissionId)}/${surveyId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
