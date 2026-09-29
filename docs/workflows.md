@@ -252,6 +252,23 @@ are told when one leaves their office or involves a Senior Specialist (see
 card shows, before sharing, what it would take, and afterwards where each share
 stands.
 
+Several people can have one form open at once (its author and the people it is
+shared with, say):
+- **Who is where.** A line at the top names everyone else in the form. The card
+  or section each of them is in is outlined in their colour, with a circle of
+  their initials in its corner, and so is the field they are in.
+- **Saves send only what you changed.** When someone else saves, their changes
+  appear in your copy wherever you have not typed.
+- **Conflicts are yours to settle.** If you both changed the same field, ERIS
+  shows both versions and you choose which one each field keeps. Nothing is
+  overwritten without a choice.
+- **Memos lock while someone writes.** A memo someone is writing (Observations,
+  Geotechnical assessment, Recommendations, Sketch notes) is read-only for
+  everyone else, with their name on it. It opens again once they save, leave
+  the form, or stop typing for 10 minutes.
+
+The mobile app saves as before, without these checks.
+
 On the web, the form's GISA sheet is a canvas: its cards flow across the full
 width by default (about 400 px per column), each as tall as its content, and
 can be dragged and resized. Every option is visible up front: picking a detail

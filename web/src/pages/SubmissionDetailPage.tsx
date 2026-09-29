@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ClipboardList, GripVertical, LayoutGrid, ListChecks, Maximize2, Minimize2, NotebookPen, Plus, RotateCcw, Ruler, ShieldCheck, Shrub, Siren, Sprout, Trash2, TreeDeciduous, X } from "lucide-react";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
+import { mergeFresh, rebase, sameValue, type FormSnapshot } from "../features/submissions/collab/formMerge";
+import { fieldLabel, othersIn, type PresenceOther } from "../features/submissions/collab/presenceModel";
+import { ConflictDialog, PresenceArea, PresenceBar, PresenceDots, presenceRing, useFieldOutlines, type Conflict } from "../features/submissions/collab/PresenceUI";
+import { useFormPresence } from "../features/submissions/collab/useFormPresence";
 import type { GisaLookups, SubmissionDetail } from "../api/types";
 import { getFormShares, type FormShares } from "../api/sharing";
 import AppShell from "../ui/AppShell";
@@ -75,6 +79,185 @@ const toolbarButton = "inline-flex items-center gap-1 rounded-md border border-[
 const memoText = (html: string) =>
   html ? new DOMParser().parseFromString(html, "text/html").body.textContent ?? "" : "";
 
+/** The form in the page's editing shape. */
+type LoadedForm = { draft: Draft; memos: Record<RichMemoKey, string>; inc: string[]; imm: string[]; fol: string[] };
+
+/**
+ * What this person started from (the form as they opened it, or last caught up
+ * with): the editing shape, and the saved values each save is checked against.
+ */
+type FormBase = {
+  form: LoadedForm;
+  gisa: Record<string, unknown>;
+  incidentTypes: string[];
+  actions: { immediate: string[]; follow_up: string[] };
+  revision: number;
+};
+
+/** The plain-text copies of the formatted memos: the server writes them from the memo. */
+const RICH_PLAIN = new Set<string>(RICH_MEMO_KEYS);
+
+const sameList = (a: readonly string[], b: readonly string[]) => sameValue([...new Set(a)].sort(), [...new Set(b)].sort());
+
+/** The form as the server has it, in the page's editing shape. */
+function formFromDetail(d: SubmissionDetail): LoadedForm {
+  const gisa: any = d.gisa || {};
+  const districtContactText = districtContactRaw(gisa.district_contact);
+  const loadedIncidentTypeCodes = new Set((d.incident_types ?? []).map((x) => String(x)));
+  const incidentTri = (key: string, value: unknown): Tri =>
+    value === true || value === 1 || value === "1" || loadedIncidentTypeCodes.has(INCIDENT_TYPE_CODE_BY_FORM_KEY[key])
+      ? "YES"
+      : "NO";
+  return {
+    draft: {
+      ...EMPTY,
+      report_date: t(gisa.report_date),
+      district: normalizeDistrictValue(gisa.district) || normalizeDistrictValue(districtForCounty(gisa.county)),
+      county: countyNameFromNameOrCode(gisa.county) ?? t(gisa.county),
+      route: normalizeRouteInput(gisa.route),
+      post_mile: normalizePostMileInput(gisa.post_mile),
+      ea: t(gisa.ea),
+      project_id: t(gisa.project_id),
+      date_incident_reported: t(gisa.date_incident_reported),
+      district_contact: districtContactText,
+      latitude: formatCoordinate(gisa.latitude), longitude: formatCoordinate(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_cause: t(gisa.highway_status_cause), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
+      pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
+      failure_rock_fall: incidentTri("failure_rock_fall", gisa.failure_rock_fall), failure_topple: incidentTri("failure_topple", gisa.failure_topple), failure_slide: incidentTri("failure_slide", gisa.failure_slide), failure_spread: incidentTri("failure_spread", gisa.failure_spread), failure_flow: incidentTri("failure_flow", gisa.failure_flow), failure_compound: incidentTri("failure_compound", gisa.failure_compound), failure_erosion: incidentTri("failure_erosion", gisa.failure_erosion), failure_surficial_failure: incidentTri("failure_surficial_failure", gisa.failure_surficial_failure), failure_scoured_toe: incidentTri("failure_scoured_toe", gisa.failure_scoured_toe), failure_washout: incidentTri("failure_washout", gisa.failure_washout),
+      incident_type_description: t(gisa.incident_type_description),
+      distribution_advancing: boolToTri(gisa.distribution_advancing), distribution_retrogressive: boolToTri(gisa.distribution_retrogressive), distribution_enlarging: boolToTri(gisa.distribution_enlarging), distribution_widening: boolToTri(gisa.distribution_widening), distribution_moving: boolToTri(gisa.distribution_moving), distribution_confined: boolToTri(gisa.distribution_confined),
+      material_rock: boolToTri(gisa.material_rock), material_soil: boolToTri(gisa.material_soil), material_bedding: boolToTri(gisa.material_bedding), material_joints: boolToTri(gisa.material_joints), material_fractures: boolToTri(gisa.material_fractures),
+      est_soil_pct: t(gisa.est_soil_pct), est_clay_pct: t(gisa.est_clay_pct), est_silt_pct: t(gisa.est_silt_pct), est_sand_pct: t(gisa.est_sand_pct), est_gravel_pct: t(gisa.est_gravel_pct),
+      water_dry: boolToTri(gisa.water_dry), water_moist: boolToTri(gisa.water_moist), water_wet: boolToTri(gisa.water_wet), water_flowing: boolToTri(gisa.water_flowing), water_seep: boolToTri(gisa.water_seep), water_spring: boolToTri(gisa.water_spring),
+      vegetation_trees: t(gisa.vegetation_trees), vegetation_bushes_shrubs: t(gisa.vegetation_bushes_shrubs), vegetation_groundcover: t(gisa.vegetation_groundcover),
+      drainage_clogged_inlet: boolToTri(gisa.drainage_clogged_inlet), drainage_compromised_drains: boolToTri(gisa.drainage_compromised_drains), drainage_surface_runoff: boolToTri(gisa.drainage_surface_runoff), drainage_torrent_surge_flood: boolToTri(gisa.drainage_torrent_surge_flood),
+      impact_impacted_adj_utilities: boolToTri(gisa.impact_impacted_adj_utilities), impact_maybe_adj_utilities: boolToTri(gisa.impact_maybe_adj_utilities), impact_adj_utilities: t(gisa.impact_adj_utilities), impact_impacted_adj_properties: boolToTri(gisa.impact_impacted_adj_properties), impact_maybe_adj_properties: boolToTri(gisa.impact_maybe_adj_properties), impact_adj_properties: t(gisa.impact_adj_properties), impact_impacted_adj_structure: boolToTri(gisa.impact_impacted_adj_structure), impact_maybe_adj_structure: boolToTri(gisa.impact_maybe_adj_structure), impact_adj_structure: t(gisa.impact_adj_structure),
+      measure_slope_height_ft: t(gisa.measure_slope_height_ft), measure_original_slope_deg: t(gisa.measure_original_slope_deg), measure_landslide_width_ft: t(gisa.measure_landslide_width_ft), measure_landslide_length_ft: t(gisa.measure_landslide_length_ft), measure_main_scarp_height_ft: t(gisa.measure_main_scarp_height_ft), measure_landslide_slope_deg: t(gisa.measure_landslide_slope_deg), measure_roadway_length_ft: t(gisa.measure_roadway_length_ft), measure_roadway_width_ft: t(gisa.measure_roadway_width_ft),
+      record_of_event_notes: t(gisa.record_of_event_notes), maintenance_history_notes: t(gisa.maintenance_history_notes), geotechnical_assessment_notes: t(gisa.geotechnical_assessment_notes), recommendations_notes: t(gisa.recommendations_notes), sketchpad_notes: t(gisa.sketchpad_notes),
+      observations_notes: t(gisa.observations_notes), geometry_json: gisa.geometry_json ? JSON.stringify(gisa.geometry_json, null, 2) : "",
+      },
+    memos: Object.fromEntries(
+        RICH_MEMO_KEYS.map((key) => {
+          const html = (gisa as Record<string, unknown>)[`${key}_html`] as string | null | undefined;
+          const plain = (gisa as Record<string, unknown>)[key] as string | null | undefined;
+          return [key, chooseMemoContent(html, plain, memoText(html ?? ""))];
+        }),
+      ) as Record<RichMemoKey, string>,
+    inc: d.incident_types ?? [],
+    imm: d.actions?.immediate ?? [],
+    fol: d.actions?.follow_up ?? [],
+  };
+}
+
+function baseFromDetail(d: SubmissionDetail, form: LoadedForm): FormBase {
+  return {
+    form,
+    gisa: { ...((d.gisa ?? {}) as Record<string, unknown>) },
+    incidentTypes: d.incident_types ?? [],
+    actions: { immediate: d.actions?.immediate ?? [], follow_up: d.actions?.follow_up ?? [] },
+    revision: Number((d.gisa as { revision?: number } | null)?.revision ?? 0),
+  };
+}
+
+/** The GISA fields as the server stores them. */
+function gisaPayload(draft: Draft, memos: Record<RichMemoKey, string>): Record<string, unknown> {
+  let geometry: Record<string, unknown> | null = null;
+  if (draft.geometry_json.trim()) {
+    const parsed = JSON.parse(draft.geometry_json);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Geometry JSON must be object");
+    geometry = parsed as Record<string, unknown>;
+  }
+  return {
+    report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: normalizeRouteValue(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
+    latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_cause: nt(draft.highway_status_cause), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
+    pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), crack_length_ft: nf(draft.crack_length_ft, "Crack length"), crack_horizontal_in: nf(draft.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: nf(draft.crack_vertical_in, "Crack vertical"), crack_depth_in: nf(draft.crack_depth_in, "Crack depth"), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
+    failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout), incident_type_description: nt(draft.incident_type_description),
+    distribution_advancing: triToBool(draft.distribution_advancing), distribution_retrogressive: triToBool(draft.distribution_retrogressive), distribution_enlarging: triToBool(draft.distribution_enlarging), distribution_widening: triToBool(draft.distribution_widening), distribution_moving: triToBool(draft.distribution_moving), distribution_confined: triToBool(draft.distribution_confined),
+    material_rock: triToBool(draft.material_rock), material_soil: triToBool(draft.material_soil), material_bedding: triToBool(draft.material_bedding), material_joints: triToBool(draft.material_joints), material_fractures: triToBool(draft.material_fractures),
+    est_soil_pct: nf(draft.est_soil_pct, "Estimated soil %"), est_clay_pct: nf(draft.est_clay_pct, "Estimated clay %"), est_silt_pct: nf(draft.est_silt_pct, "Estimated silt %"), est_sand_pct: nf(draft.est_sand_pct, "Estimated sand %"), est_gravel_pct: nf(draft.est_gravel_pct, "Estimated gravel %"),
+    water_dry: triToBool(draft.water_dry), water_moist: triToBool(draft.water_moist), water_wet: triToBool(draft.water_wet), water_flowing: triToBool(draft.water_flowing), water_seep: triToBool(draft.water_seep), water_spring: triToBool(draft.water_spring),
+    vegetation_trees: np(draft.vegetation_trees, "Trees Coverage %"), vegetation_bushes_shrubs: np(draft.vegetation_bushes_shrubs, "Bushes/Shrubs Coverage %"), vegetation_groundcover: np(draft.vegetation_groundcover, "Groundcover Coverage %"),
+    drainage_clogged_inlet: triToBool(draft.drainage_clogged_inlet), drainage_compromised_drains: triToBool(draft.drainage_compromised_drains), drainage_surface_runoff: triToBool(draft.drainage_surface_runoff), drainage_torrent_surge_flood: triToBool(draft.drainage_torrent_surge_flood),
+    impact_impacted_adj_utilities: triToBool(draft.impact_impacted_adj_utilities), impact_maybe_adj_utilities: triToBool(draft.impact_maybe_adj_utilities), impact_adj_utilities: nt(draft.impact_adj_utilities), impact_impacted_adj_properties: triToBool(draft.impact_impacted_adj_properties), impact_maybe_adj_properties: triToBool(draft.impact_maybe_adj_properties), impact_adj_properties: nt(draft.impact_adj_properties), impact_impacted_adj_structure: triToBool(draft.impact_impacted_adj_structure), impact_maybe_adj_structure: triToBool(draft.impact_maybe_adj_structure), impact_adj_structure: nt(draft.impact_adj_structure),
+    measure_slope_height_ft: nf(draft.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: nf(draft.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: nf(draft.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: nf(draft.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: nf(draft.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: nf(draft.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: nf(draft.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: nf(draft.measure_roadway_width_ft, "Roadway width"),
+    record_of_event_notes: nt(draft.record_of_event_notes), maintenance_history_notes: nt(draft.maintenance_history_notes), geotechnical_assessment_notes: nt(draft.geotechnical_assessment_notes), recommendations_notes: nt(draft.recommendations_notes), sketchpad_notes: nt(draft.sketchpad_notes),
+    observations_notes: nt(draft.observations_notes), geometry_json: geometry,
+    observations_notes_html: memos.observations_notes, geotechnical_assessment_notes_html: memos.geotechnical_assessment_notes,
+    recommendations_notes_html: memos.recommendations_notes, sketchpad_notes_html: memos.sketchpad_notes,
+    };
+}
+
+function incidentItemsOf(draft: Draft, inc: string[]): string[] {
+  return Array.from(new Set([
+    ...Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
+      .filter(([key]) => draft[key] === "YES")
+      .map(([, code]) => code),
+    ...inc.filter((code) => !INCIDENT_TYPE_FORM_CODES.has(code)),
+  ]));
+}
+
+/** One flat snapshot to compare three versions of the form by. */
+function snapshotOf(form: LoadedForm): FormSnapshot {
+  const snapshot: FormSnapshot = {};
+  for (const [key, value] of Object.entries(form.draft)) if (!RICH_PLAIN.has(key)) snapshot[key] = value;
+  for (const key of RICH_MEMO_KEYS) snapshot[`memo:${key}`] = form.memos[key];
+  snapshot["list:inc"] = [...new Set(form.inc)].sort();
+  snapshot["list:imm"] = [...new Set(form.imm)].sort();
+  snapshot["list:fol"] = [...new Set(form.fol)].sort();
+  return snapshot;
+}
+
+/** Back from a snapshot to the editing shape. */
+function formFromSnapshot(snapshot: FormSnapshot, like: LoadedForm): LoadedForm {
+  const draft = { ...like.draft } as Draft;
+  const memos = { ...like.memos };
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (key.startsWith("memo:")) {
+      const memo = key.slice(5) as RichMemoKey;
+      memos[memo] = String(value ?? "");
+      (draft as Record<string, string>)[memo] = memoText(memos[memo]);
+    } else if (!key.startsWith("list:")) {
+      (draft as Record<string, string>)[key] = String(value ?? "");
+    }
+  }
+  return {
+    draft,
+    memos,
+    inc: (snapshot["list:inc"] as string[] | undefined) ?? like.inc,
+    imm: (snapshot["list:imm"] as string[] | undefined) ?? like.imm,
+    fol: (snapshot["list:fol"] as string[] | undefined) ?? like.fol,
+  };
+}
+
+/** The saved values a save is checked against, caught up with `d` except the fields in `keep`. */
+function rebaseSaved(old: FormBase, d: SubmissionDetail, keep: readonly string[]): Pick<FormBase, "gisa" | "incidentTypes" | "actions"> {
+  const gisa = { ...((d.gisa ?? {}) as Record<string, unknown>) };
+  let incidentTypes = d.incident_types ?? [];
+  const actions = { immediate: d.actions?.immediate ?? [], follow_up: d.actions?.follow_up ?? [] };
+  for (const key of keep) {
+    if (key.startsWith("memo:")) gisa[`${key.slice(5)}_html`] = old.gisa[`${key.slice(5)}_html`];
+    else if (key === "list:inc") incidentTypes = old.incidentTypes;
+    else if (key === "list:imm") actions.immediate = old.actions.immediate;
+    else if (key === "list:fol") actions.follow_up = old.actions.follow_up;
+    else gisa[key] = old.gisa[key];
+  }
+  // Failure boxes are also incident types: a kept one keeps the list too.
+  if (keep.some((key) => key in INCIDENT_TYPE_CODE_BY_FORM_KEY)) incidentTypes = old.incidentTypes;
+  return { gisa, incidentTypes, actions };
+}
+
+/** A field's value as the conflict dialog shows it. */
+function shownValue(key: string, value: unknown): string {
+  if (key.startsWith("memo:")) return memoText(String(value ?? "")).trim().slice(0, 600);
+  if (Array.isArray(value)) return value.join(", ");
+  if (value === "YES") return "Yes";
+  if (value === "NO") return "No";
+  if (value === "UNKNOWN") return "";
+  if (key === "geometry_json") return value ? "Site areas as drawn" : "";
+  return String(value ?? "").trim();
+}
+
+const NO_ONE: readonly PresenceOther[] = [];
+
 const EMPTY_MEMOS: Record<RichMemoKey, string> = {
   observations_notes: "",
   geotechnical_assessment_notes: "",
@@ -134,12 +317,15 @@ type CanvasCardProps = {
   onMeasure?: (id: DashboardCardId, height: number) => void;
   /** Rendered outside the disabled fieldset (read-only tools such as the 3D scene). */
   tools?: ReactNode;
+  /** Others in this card: outlined in their colour, their initials in the corner, their field outlined. */
+  presence?: readonly PresenceOther[];
   children: ReactNode;
 };
 
-function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpenAttachments, onDragStart, onResizeStart, onMeasure, tools, children }: CanvasCardProps) {
+function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpenAttachments, onDragStart, onResizeStart, onMeasure, tools, presence = NO_ONE, children }: CanvasCardProps) {
   const headerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  useFieldOutlines(contentRef, presence);
   // Re-measured before paint whenever the card's width changes (content reflows), and
   // by the observer whenever the content itself grows or shrinks.
   const width = style.width;
@@ -156,7 +342,8 @@ function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpen
   return (
     <div
       data-card-id={id}
-      style={style}
+      data-presence-area={`card:${id}`}
+      style={{ ...style, ...presenceRing(presence) }}
       className={`flex flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] ${dragging ? "opacity-40 shadow-2xl" : ""}`}
     >
       <div
@@ -169,10 +356,13 @@ function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpen
           <GripVertical size={14} strokeWidth={1.9} aria-hidden className="shrink-0 text-muted" />
           <span className="truncate">{DASHBOARD_CARD_TITLES[id]}</span>
         </div>
-        <SectionAttachmentsButton count={attachmentCount} onClick={onOpenAttachments} />
+        <div className="flex shrink-0 items-center gap-2">
+          <PresenceDots others={presence} />
+          <SectionAttachmentsButton count={attachmentCount} onClick={onOpenAttachments} />
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <div ref={contentRef} className="@container px-3 pb-3">
+        <div ref={contentRef} className="@container px-3 pb-3 pt-1">
           {tools}
           <fieldset disabled={formDisabled} className="contents min-w-0">
             {children}
@@ -251,6 +441,138 @@ export default function SubmissionDetailPage() {
     (me?.roles?.includes("ADMIN") ||
       (data.submission.status === "DRAFT" && me?.id === data.submission.created_by_user_id));
   const tog = (arr: string[], code: string) => (arr.includes(code) ? arr.filter((x) => x !== code) : [...arr, code]);
+
+  // ---- Several people in one form (features/submissions/collab) ----------------
+  // `baseRef`: what this person started from. Saves send only what differs from
+  // it, checked by the server against what is saved now; others' saves are
+  // folded in where this person has not typed, and fields both changed wait for
+  // their choice.
+  const baseRef = useRef<FormBase | null>(null);
+  const [baseVersion, setBaseVersion] = useState(0);
+  const setBase = useCallback((next: FormBase | null) => {
+    baseRef.current = next;
+    setBaseVersion((version) => version + 1);
+  }, []);
+  const currentRef = useRef<LoadedForm>({ draft, memos, inc, imm, fol });
+  currentRef.current = { draft, memos, inc, imm, fol };
+  // The memos this person is writing (changed, not saved): locked for everyone else.
+  const writingMemos = useMemo(() => {
+    const base = baseRef.current;
+    return base ? RICH_MEMO_KEYS.filter((key) => !sameValue(memos[key], base.form.memos[key])) : [];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memos, baseVersion]);
+  const presence = useFormPresence({ submissionId: sid, enabled: !invalid && !!data && !viewer, memos: writingMemos });
+  const [conflict, setConflict] = useState<{ conflicts: Conflict[]; savedBy: string | null; fresh: SubmissionDetail } | null>(null);
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [conflictChoice, setConflictChoice] = useState<Record<string, "mine" | "theirs">>({});
+  const [mergedNotice, setMergedNotice] = useState<string | null>(null);
+  const [resaveTick, setResaveTick] = useState(0);
+  const resaves = useRef(0);
+  const syncing = useRef(false);
+
+  const applyForm = useCallback((next: LoadedForm, keys: readonly string[]) => {
+    setDraft(next.draft);
+    setMemos(next.memos);
+    setInc(next.inc);
+    setImm(next.imm);
+    setFol(next.fol);
+    if (keys.includes("district_contact")) setDistrictContacts(parseDistrictContacts(next.draft.district_contact));
+    if (keys.includes("geometry_json")) {
+      try {
+        setGeom(next.draft.geometry_json.trim() ? JSON.parse(next.draft.geometry_json) : null);
+      } catch {
+        // The drawn areas stay as they are.
+      }
+    }
+  }, []);
+
+  /** Folds what others saved into the form; returns how many fields both changed. */
+  const syncWithServer = useCallback(
+    async (reason: "saved" | "refused", savedBy: string | null): Promise<number> => {
+      const base = baseRef.current;
+      if (!base || syncing.current) return 0;
+      syncing.current = true;
+      try {
+        const d = await api<SubmissionDetail>(`/submissions/${sid}`);
+        const fresh = formFromDetail(d);
+        const baseSnap = snapshotOf(base.form);
+        const freshSnap = snapshotOf(fresh);
+        const mine = snapshotOf(currentRef.current);
+        const result = mergeFresh(baseSnap, mine, freshSnap);
+        // Their changes land only where the screen still shows what this person started from.
+        const take = result.theirs.filter((key) => sameValue(mine[key], baseSnap[key]));
+        if (take.length) {
+          applyForm(formFromSnapshot({ ...mine, ...Object.fromEntries(take.map((key) => [key, freshSnap[key]])) }, currentRef.current), take);
+          const names = take.map(fieldLabel);
+          setMergedNotice(`${savedBy ?? "Someone"} saved ${names.slice(0, 4).join(", ")}${names.length > 4 ? ` and ${names.length - 4} more` : ""}. Their changes are shown here.`);
+        }
+        const keep = result.conflicts;
+        setBase({
+          form: formFromSnapshot(rebase(baseSnap, freshSnap, keep), fresh),
+          ...rebaseSaved(base, d, keep),
+          revision: Number((d.gisa as { revision?: number } | null)?.revision ?? base.revision),
+        });
+        if (keep.length) {
+          setConflict({
+            conflicts: keep.map((key) => ({ key, label: fieldLabel(key), mine: shownValue(key, mine[key]), theirs: shownValue(key, freshSnap[key]) })),
+            savedBy,
+            fresh: d,
+          });
+          setConflictChoice(Object.fromEntries(keep.map((key) => [key, "mine" as const])));
+          if (reason === "refused") setConflictOpen(true);
+        } else {
+          setConflict(null);
+        }
+        return keep.length;
+      } finally {
+        syncing.current = false;
+      }
+    },
+    [applyForm, setBase, sid],
+  );
+
+  // Someone else saved: bring their changes in.
+  useEffect(() => {
+    const base = baseRef.current;
+    if (presence.revision == null || !base || busy || presence.revision <= base.revision) return;
+    void syncWithServer("saved", presence.savedBy?.name ?? null);
+  }, [presence.revision, presence.savedBy, busy, syncWithServer]);
+
+  useEffect(() => {
+    if (!mergedNotice) return;
+    const timer = window.setTimeout(() => setMergedNotice(null), 12000);
+    return () => window.clearTimeout(timer);
+  }, [mergedNotice]);
+
+  /** A save refused because someone else changed the same fields: catch up and let this person choose. */
+  async function handleRefusal(e: unknown): Promise<boolean> {
+    if (!(e instanceof ApiError) || e.status !== 409 || !e.detail || typeof e.detail !== "object") return false;
+    const detail = e.detail as { conflicts?: unknown; locked?: unknown; saved_by?: string | null };
+    if (detail.locked) {
+      setErr(e.message);
+      return true;
+    }
+    if (!detail.conflicts) return false;
+    const remaining = await syncWithServer("refused", detail.saved_by ?? null);
+    // Nothing left to choose (their change was elsewhere): save the rest.
+    if (!remaining) setResaveTick((tick) => tick + 1);
+    return true;
+  }
+
+  function applyConflictChoices() {
+    if (!conflict) return;
+    const fresh = formFromDetail(conflict.fresh);
+    const freshSnap = snapshotOf(fresh);
+    const now = snapshotOf(currentRef.current);
+    const theirs = conflict.conflicts.filter((item) => conflictChoice[item.key] === "theirs").map((item) => item.key);
+    applyForm(formFromSnapshot({ ...now, ...Object.fromEntries(theirs.map((key) => [key, freshSnap[key]])) }, currentRef.current), theirs);
+    // Both versions seen: these fields now start from what is saved.
+    setBase(baseFromDetail(conflict.fresh, fresh));
+    setConflict(null);
+    setConflictOpen(false);
+    resaves.current = 0;
+    setResaveTick((tick) => tick + 1);
+  }
   const statePlaneZone = useMemo(() => getCaliforniaStatePlaneZone(draft.county), [draft.county]);
   const statePlaneCoordinates = useMemo(() => {
     if (!statePlaneZone) return null;
@@ -355,53 +677,14 @@ export default function SubmissionDetailPage() {
       setLookups(l);
       setReviewNote(d.submission.review_comment ?? "");
       setGeom(geomRes?.geometry ?? d.gisa?.geometry_json ?? pointFromLatLon(d.gisa) ?? null);
-      const gisa: any = d.gisa || {};
-      const districtContactText = districtContactRaw(gisa.district_contact);
-      const loadedDistrictContacts = parseDistrictContacts(districtContactText);
-      const loadedIncidentTypeCodes = new Set((d.incident_types ?? []).map((x) => String(x)));
-      const incidentTri = (key: string, value: unknown): Tri =>
-        value === true || value === 1 || value === "1" || loadedIncidentTypeCodes.has(INCIDENT_TYPE_CODE_BY_FORM_KEY[key])
-          ? "YES"
-          : "NO";
-      setDraft({
-        ...EMPTY,
-        report_date: t(gisa.report_date),
-        district: normalizeDistrictValue(gisa.district) || normalizeDistrictValue(districtForCounty(gisa.county)),
-        county: countyNameFromNameOrCode(gisa.county) ?? t(gisa.county),
-        route: normalizeRouteInput(gisa.route),
-        post_mile: normalizePostMileInput(gisa.post_mile),
-        ea: t(gisa.ea),
-        project_id: t(gisa.project_id),
-        date_incident_reported: t(gisa.date_incident_reported),
-        district_contact: districtContactText,
-        latitude: formatCoordinate(gisa.latitude), longitude: formatCoordinate(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_cause: t(gisa.highway_status_cause), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
-        pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
-        failure_rock_fall: incidentTri("failure_rock_fall", gisa.failure_rock_fall), failure_topple: incidentTri("failure_topple", gisa.failure_topple), failure_slide: incidentTri("failure_slide", gisa.failure_slide), failure_spread: incidentTri("failure_spread", gisa.failure_spread), failure_flow: incidentTri("failure_flow", gisa.failure_flow), failure_compound: incidentTri("failure_compound", gisa.failure_compound), failure_erosion: incidentTri("failure_erosion", gisa.failure_erosion), failure_surficial_failure: incidentTri("failure_surficial_failure", gisa.failure_surficial_failure), failure_scoured_toe: incidentTri("failure_scoured_toe", gisa.failure_scoured_toe), failure_washout: incidentTri("failure_washout", gisa.failure_washout),
-        incident_type_description: t(gisa.incident_type_description),
-        distribution_advancing: boolToTri(gisa.distribution_advancing), distribution_retrogressive: boolToTri(gisa.distribution_retrogressive), distribution_enlarging: boolToTri(gisa.distribution_enlarging), distribution_widening: boolToTri(gisa.distribution_widening), distribution_moving: boolToTri(gisa.distribution_moving), distribution_confined: boolToTri(gisa.distribution_confined),
-        material_rock: boolToTri(gisa.material_rock), material_soil: boolToTri(gisa.material_soil), material_bedding: boolToTri(gisa.material_bedding), material_joints: boolToTri(gisa.material_joints), material_fractures: boolToTri(gisa.material_fractures),
-        est_soil_pct: t(gisa.est_soil_pct), est_clay_pct: t(gisa.est_clay_pct), est_silt_pct: t(gisa.est_silt_pct), est_sand_pct: t(gisa.est_sand_pct), est_gravel_pct: t(gisa.est_gravel_pct),
-        water_dry: boolToTri(gisa.water_dry), water_moist: boolToTri(gisa.water_moist), water_wet: boolToTri(gisa.water_wet), water_flowing: boolToTri(gisa.water_flowing), water_seep: boolToTri(gisa.water_seep), water_spring: boolToTri(gisa.water_spring),
-        vegetation_trees: t(gisa.vegetation_trees), vegetation_bushes_shrubs: t(gisa.vegetation_bushes_shrubs), vegetation_groundcover: t(gisa.vegetation_groundcover),
-        drainage_clogged_inlet: boolToTri(gisa.drainage_clogged_inlet), drainage_compromised_drains: boolToTri(gisa.drainage_compromised_drains), drainage_surface_runoff: boolToTri(gisa.drainage_surface_runoff), drainage_torrent_surge_flood: boolToTri(gisa.drainage_torrent_surge_flood),
-        impact_impacted_adj_utilities: boolToTri(gisa.impact_impacted_adj_utilities), impact_maybe_adj_utilities: boolToTri(gisa.impact_maybe_adj_utilities), impact_adj_utilities: t(gisa.impact_adj_utilities), impact_impacted_adj_properties: boolToTri(gisa.impact_impacted_adj_properties), impact_maybe_adj_properties: boolToTri(gisa.impact_maybe_adj_properties), impact_adj_properties: t(gisa.impact_adj_properties), impact_impacted_adj_structure: boolToTri(gisa.impact_impacted_adj_structure), impact_maybe_adj_structure: boolToTri(gisa.impact_maybe_adj_structure), impact_adj_structure: t(gisa.impact_adj_structure),
-        measure_slope_height_ft: t(gisa.measure_slope_height_ft), measure_original_slope_deg: t(gisa.measure_original_slope_deg), measure_landslide_width_ft: t(gisa.measure_landslide_width_ft), measure_landslide_length_ft: t(gisa.measure_landslide_length_ft), measure_main_scarp_height_ft: t(gisa.measure_main_scarp_height_ft), measure_landslide_slope_deg: t(gisa.measure_landslide_slope_deg), measure_roadway_length_ft: t(gisa.measure_roadway_length_ft), measure_roadway_width_ft: t(gisa.measure_roadway_width_ft),
-        record_of_event_notes: t(gisa.record_of_event_notes), maintenance_history_notes: t(gisa.maintenance_history_notes), geotechnical_assessment_notes: t(gisa.geotechnical_assessment_notes), recommendations_notes: t(gisa.recommendations_notes), sketchpad_notes: t(gisa.sketchpad_notes),
-        observations_notes: t(gisa.observations_notes), geometry_json: gisa.geometry_json ? JSON.stringify(gisa.geometry_json, null, 2) : "",
-      });
-      setDistrictContacts(loadedDistrictContacts);
-      setInc(d.incident_types ?? []);
-      setMemos(
-        Object.fromEntries(
-          RICH_MEMO_KEYS.map((key) => {
-            const html = (gisa as Record<string, unknown>)[`${key}_html`] as string | null | undefined;
-            const plain = (gisa as Record<string, unknown>)[key] as string | null | undefined;
-            return [key, chooseMemoContent(html, plain, memoText(html ?? ""))];
-          }),
-        ) as Record<RichMemoKey, string>,
-      );
-      setImm(d.actions?.immediate ?? []);
-      setFol(d.actions?.follow_up ?? []);
+      const form = formFromDetail(d);
+      setDraft(form.draft);
+      setDistrictContacts(parseDistrictContacts(form.draft.district_contact));
+      setInc(form.inc);
+      setMemos(form.memos);
+      setImm(form.imm);
+      setFol(form.fol);
+      setBase(baseFromDetail(d, form));
       const loadedCanManageSharing = d.submission.can_manage_permissions === true;
       if (loadedCanManageSharing) {
         setShares(await getFormShares(sid));
@@ -416,43 +699,55 @@ export default function SubmissionDetailPage() {
     }
   }
 
+  /** Saves what this person changed since they opened the form (or caught up): nothing else. */
   async function persistDraft() {
     if (!canEdit) return;
-    let geometry: Record<string, unknown> | null = null;
-    if (draft.geometry_json.trim()) {
-      const parsed = JSON.parse(draft.geometry_json);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Geometry JSON must be object");
-      geometry = parsed as Record<string, unknown>;
+    const base = baseRef.current;
+    if (!base) return;
+    const now = gisaPayload(draft, memos);
+    const was = gisaPayload(base.form.draft, base.form.memos);
+    const keys = Object.keys(now).filter((key) => !RICH_PLAIN.has(key) && !sameValue(now[key], was[key]));
+    if (keys.length) {
+      await api(`/submissions/${sid}/gisa`, { method: "PATCH", body: JSON.stringify({
+        ...Object.fromEntries(keys.map((key) => [key, now[key]])),
+        base: Object.fromEntries(keys.map((key) => [key, base.gisa[key] ?? null])),
+      }) });
     }
-    const incidentItems = Array.from(new Set([
-      ...Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
-        .filter(([key]) => draft[key] === "YES")
-        .map(([, code]) => code),
-      ...inc.filter((code) => !INCIDENT_TYPE_FORM_CODES.has(code)),
-    ]));
-    await api(`/submissions/${sid}/gisa`, { method: "PATCH", body: JSON.stringify({
-      report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: normalizeRouteValue(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
-      latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_cause: nt(draft.highway_status_cause), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
-      pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), crack_length_ft: nf(draft.crack_length_ft, "Crack length"), crack_horizontal_in: nf(draft.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: nf(draft.crack_vertical_in, "Crack vertical"), crack_depth_in: nf(draft.crack_depth_in, "Crack depth"), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
-      failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout), incident_type_description: nt(draft.incident_type_description),
-      distribution_advancing: triToBool(draft.distribution_advancing), distribution_retrogressive: triToBool(draft.distribution_retrogressive), distribution_enlarging: triToBool(draft.distribution_enlarging), distribution_widening: triToBool(draft.distribution_widening), distribution_moving: triToBool(draft.distribution_moving), distribution_confined: triToBool(draft.distribution_confined),
-      material_rock: triToBool(draft.material_rock), material_soil: triToBool(draft.material_soil), material_bedding: triToBool(draft.material_bedding), material_joints: triToBool(draft.material_joints), material_fractures: triToBool(draft.material_fractures),
-      est_soil_pct: nf(draft.est_soil_pct, "Estimated soil %"), est_clay_pct: nf(draft.est_clay_pct, "Estimated clay %"), est_silt_pct: nf(draft.est_silt_pct, "Estimated silt %"), est_sand_pct: nf(draft.est_sand_pct, "Estimated sand %"), est_gravel_pct: nf(draft.est_gravel_pct, "Estimated gravel %"),
-      water_dry: triToBool(draft.water_dry), water_moist: triToBool(draft.water_moist), water_wet: triToBool(draft.water_wet), water_flowing: triToBool(draft.water_flowing), water_seep: triToBool(draft.water_seep), water_spring: triToBool(draft.water_spring),
-      vegetation_trees: np(draft.vegetation_trees, "Trees Coverage %"), vegetation_bushes_shrubs: np(draft.vegetation_bushes_shrubs, "Bushes/Shrubs Coverage %"), vegetation_groundcover: np(draft.vegetation_groundcover, "Groundcover Coverage %"),
-      drainage_clogged_inlet: triToBool(draft.drainage_clogged_inlet), drainage_compromised_drains: triToBool(draft.drainage_compromised_drains), drainage_surface_runoff: triToBool(draft.drainage_surface_runoff), drainage_torrent_surge_flood: triToBool(draft.drainage_torrent_surge_flood),
-      impact_impacted_adj_utilities: triToBool(draft.impact_impacted_adj_utilities), impact_maybe_adj_utilities: triToBool(draft.impact_maybe_adj_utilities), impact_adj_utilities: nt(draft.impact_adj_utilities), impact_impacted_adj_properties: triToBool(draft.impact_impacted_adj_properties), impact_maybe_adj_properties: triToBool(draft.impact_maybe_adj_properties), impact_adj_properties: nt(draft.impact_adj_properties), impact_impacted_adj_structure: triToBool(draft.impact_impacted_adj_structure), impact_maybe_adj_structure: triToBool(draft.impact_maybe_adj_structure), impact_adj_structure: nt(draft.impact_adj_structure),
-      measure_slope_height_ft: nf(draft.measure_slope_height_ft, "Slope height"), measure_original_slope_deg: nf(draft.measure_original_slope_deg, "Original slope"), measure_landslide_width_ft: nf(draft.measure_landslide_width_ft, "Landslide width"), measure_landslide_length_ft: nf(draft.measure_landslide_length_ft, "Landslide length"), measure_main_scarp_height_ft: nf(draft.measure_main_scarp_height_ft, "Main scarp height"), measure_landslide_slope_deg: nf(draft.measure_landslide_slope_deg, "Landslide slope"), measure_roadway_length_ft: nf(draft.measure_roadway_length_ft, "Roadway length"), measure_roadway_width_ft: nf(draft.measure_roadway_width_ft, "Roadway width"),
-      record_of_event_notes: nt(draft.record_of_event_notes), maintenance_history_notes: nt(draft.maintenance_history_notes), geotechnical_assessment_notes: nt(draft.geotechnical_assessment_notes), recommendations_notes: nt(draft.recommendations_notes), sketchpad_notes: nt(draft.sketchpad_notes),
-      observations_notes: nt(draft.observations_notes), geometry_json: geometry,
-      observations_notes_html: memos.observations_notes, geotechnical_assessment_notes_html: memos.geotechnical_assessment_notes,
-      recommendations_notes_html: memos.recommendations_notes, sketchpad_notes_html: memos.sketchpad_notes,
-    })});
-    await api(`/submissions/${sid}/gisa/incident-types`, { method: "PUT", body: JSON.stringify({ items: incidentItems }) });
-    await api(`/submissions/${sid}/gisa/actions`, { method: "PUT", body: JSON.stringify({ immediate: imm, follow_up: fol }) });
+    const items = incidentItemsOf(draft, inc);
+    if (!sameList(items, base.incidentTypes)) {
+      await api(`/submissions/${sid}/gisa/incident-types`, { method: "PUT", body: JSON.stringify({ items, base: base.incidentTypes }) });
+    }
+    if (!sameList(imm, base.actions.immediate) || !sameList(fol, base.actions.follow_up)) {
+      await api(`/submissions/${sid}/gisa/actions`, { method: "PUT", body: JSON.stringify({
+        immediate: imm, follow_up: fol, base_immediate: base.actions.immediate, base_follow_up: base.actions.follow_up,
+      }) });
+    }
   }
 
-  async function saveDraft() { setBusy(true); setErr(null); try { await persistDraft(); await load(); } catch (e: any) { setErr(e?.message ?? "Save failed"); setBusy(false); } }
+  async function saveDraft() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await persistDraft();
+      resaves.current = 0;
+      await load();
+    } catch (e: any) {
+      setBusy(false);
+      if (!(await handleRefusal(e))) setErr(e?.message ?? "Save failed");
+    }
+  }
+
+  // Save again once a refusal has been sorted out (after the page shows the result).
+  useEffect(() => {
+    if (!resaveTick) return;
+    if (resaves.current >= 2) {
+      setErr("The form keeps changing while it saves. Refresh it, then save again.");
+      return;
+    }
+    resaves.current += 1;
+    void saveDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resaveTick]);
   async function submitDraft() {
     // A linked form is sent for review on its assessment; the server 409s here.
     if (assessmentLinked) {
@@ -464,7 +759,7 @@ export default function SubmissionDetailPage() {
       setErr(soilMsg);
       return;
     }
-    setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setErr(e?.message ?? "Submit failed"); setBusy(false); }
+    setBusy(true); setErr(null); try { await persistDraft(); await api(`/submissions/${sid}/submit`, { method: "POST", body: JSON.stringify({ comment: submitNote.trim() || null }) }); setSubmitNote(""); await load(); } catch (e: any) { setBusy(false); if (!(await handleRefusal(e))) setErr(e?.message ?? "Submit failed"); }
   }
   // One approval per piece of work: on a linked form the decision is the
   // assessment's, and the server refuses this endpoint with a 409.
@@ -508,16 +803,26 @@ export default function SubmissionDetailPage() {
       try {
         await api(`/submissions/${sid}/gisa`, {
           method: "PATCH",
-          body: JSON.stringify({ geometry_json: nextGeometry }),
+          body: JSON.stringify({ geometry_json: nextGeometry, base: { geometry_json: baseRef.current?.gisa.geometry_json ?? null } }),
         });
+        // Saved: the drawn areas are this person's new starting point for them.
+        const base = baseRef.current;
+        if (base) {
+          const drawn = nextGeometry ? JSON.stringify(nextGeometry, null, 2) : "";
+          setBase({ ...base, form: { ...base.form, draft: { ...base.form.draft, geometry_json: drawn } }, gisa: { ...base.gisa, geometry_json: nextGeometry } });
+        }
         setGeoSaveState("saved");
         setGeoSaveMessage(nextGeometry ? "Map geometry saved." : "Map geometry cleared.");
       } catch (e: any) {
         setGeoSaveState("error");
         setGeoSaveMessage(e?.message ?? "Map geometry save failed.");
+        if (e instanceof ApiError && e.status === 409) {
+          const detail = e.detail as { saved_by?: string | null } | undefined;
+          void syncWithServer("refused", detail?.saved_by ?? null);
+        }
       }
     },
-    [canEdit, invalid, sid]
+    [canEdit, invalid, setBase, sid, syncWithServer]
   );
 
   async function onDeleteSubmission() {
@@ -832,6 +1137,7 @@ export default function SubmissionDetailPage() {
     onDragStart: canvas.startDrag,
     onResizeStart: canvas.startResize,
     onMeasure: canvas.reportContentHeight,
+    presence: othersIn(presence.others, `card:${cardId}`),
   });
 
   const descriptor = data
@@ -1303,6 +1609,29 @@ export default function SubmissionDetailPage() {
           onDelete={onDeleteSubmission}
         />
 
+        <PresenceBar others={presence.others} />
+        {conflict && !conflictOpen ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-[color:color-mix(in_oklab,var(--warn-text)_45%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn-text)_8%,var(--panel))] px-3 py-2 text-sm" role="status">
+            <span>
+              <b>{conflict.savedBy ?? "Someone else"}</b> saved fields you are also changing: {conflict.conflicts.map((item) => item.label).join(", ")}.
+            </span>
+            <button type="button" onClick={() => setConflictOpen(true)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1 text-xs font-semibold hover:bg-[var(--panel-soft)]">Choose which to keep</button>
+          </div>
+        ) : null}
+        {mergedNotice ? (
+          <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-xs text-muted" role="status">{mergedNotice}</div>
+        ) : null}
+        {conflict && conflictOpen ? (
+          <ConflictDialog
+            conflicts={conflict.conflicts}
+            savedBy={conflict.savedBy}
+            choice={conflictChoice}
+            onChoose={(key, pick) => setConflictChoice((current) => ({ ...current, [key]: pick }))}
+            onApply={applyConflictChoices}
+            onClose={() => setConflictOpen(false)}
+          />
+        ) : null}
+
         {data?.submission.status === "REJECTED" && data.submission.review_comment ? (
           <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]"><b>Returned for correction:</b> {data.submission.review_comment}</div>
         ) : null}
@@ -1351,6 +1680,7 @@ export default function SubmissionDetailPage() {
 
         {!invalid && data && (
           <DroneSurveyProvider submissionId={data.submission.id} canEdit={canEdit} geojson={geom} enabled={!viewer}>
+            <PresenceArea area="section:location" others={presence.others} className="rounded-2xl">
             <SubmissionLocationHero
               submissionId={data.submission.id}
               gisa={data.gisa}
@@ -1374,6 +1704,7 @@ export default function SubmissionDetailPage() {
               photoLoading={photoLoading}
               photoError={photoError}
             />
+            </PresenceArea>
 
             {canvas.fullscreen ? (
               <div className="fixed inset-0 z-40 flex flex-col bg-[var(--bg)] p-3" role="dialog" aria-modal="true" aria-label="GISA sheet full screen">
@@ -1388,7 +1719,7 @@ export default function SubmissionDetailPage() {
             )}
 
             {data ? (
-              <section id="measurements-section" className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
+              <PresenceArea area="section:measurements" others={presence.others} id="measurements-section" className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
                 <div className="flex items-start justify-between gap-3">
                   <SectionHeading
                     icon={<Ruler size={16} />}
@@ -1412,10 +1743,10 @@ export default function SubmissionDetailPage() {
                     road={{ county: countyCodeFromNameOrCode(draft.county), route: draft.route, postMile: draft.post_mile, district: draft.district }}
                   />
                 </div>
-              </section>
+              </PresenceArea>
             ) : null}
 
-            <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
+            <PresenceArea area="section:actions" others={presence.others} className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
               <SectionHeading icon={<ListChecks size={16} />} title="Actions" subtitle="What was done to make the site safe, and the work that should follow." />
               <div className="grid gap-4 xl:grid-cols-2">
                 <ActionChecklist
@@ -1441,9 +1772,9 @@ export default function SubmissionDetailPage() {
                   editable={canEdit}
                 />
               </div>
-            </section>
+            </PresenceArea>
 
-            <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
+            <PresenceArea area="section:memos" others={presence.others} className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">
               <SectionHeading icon={<NotebookPen size={16} />} title="Memos" subtitle="The written record of this assessment, and what is known about the site." />
               <MemosPanel
                 submissionId={data.submission.id}
@@ -1451,7 +1782,10 @@ export default function SubmissionDetailPage() {
                 onMemoChange={(key, html) => {
                   setMemos((current) => ({ ...current, [key]: html }));
                   setDraft((d) => ({ ...d, [key]: memoText(html) }));
+                  presence.typed();
                 }}
+                presence={presence.others}
+                writers={presence.writers}
                 notes={{ record_of_event_notes: draft.record_of_event_notes, maintenance_history_notes: draft.maintenance_history_notes }}
                 onNotesChange={(key, value) => setDraft((d) => ({ ...d, [key]: value }))}
                 editable={canEdit}
@@ -1480,7 +1814,7 @@ export default function SubmissionDetailPage() {
                   <textarea id="submit-comment" className={input} rows={2} placeholder="Included with the submission when you submit for review from the header" value={submitNote} onChange={(e)=>setSubmitNote(e.target.value)} />
                 </div>
               ) : null}
-            </section>
+            </PresenceArea>
 
             <SubmissionLibrary attachments={data.attachments} resolver={resolver} />
 

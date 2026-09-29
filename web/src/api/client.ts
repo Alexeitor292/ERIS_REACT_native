@@ -3,6 +3,17 @@ import { appConfig } from "../config";
 
 const API_BASE = appConfig.apiBaseUrl;
 
+/** A refused request: its status, and the server's detail as sent (a string, or an object for structured refusals). */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly detail: unknown) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** The API's base URL, for requests that cannot go through `api` (a page closing). */
+export const apiUrl = (path: string) => `${API_BASE}${path}`;
+
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
@@ -31,17 +42,21 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
 
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
+    let detail: unknown = undefined;
     if (res.status >= 500) {
       msg = "Internal server error. Please try again later.";
     } else {
       try {
         const j = await res.json();
-        msg = j?.detail || j?.message || msg;
+        detail = j?.detail;
+        // A structured refusal (a save conflict, say) carries its message inside.
+        const structured = detail && typeof detail === "object" ? (detail as { message?: string }).message : undefined;
+        msg = structured || (typeof detail === "string" ? detail : "") || j?.message || msg;
       } catch {
         // ignore
       }
     }
-    throw new Error(msg);
+    throw new ApiError(msg, res.status, detail);
   }
 
   const text = await res.text();

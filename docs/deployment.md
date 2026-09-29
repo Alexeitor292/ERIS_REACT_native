@@ -234,6 +234,10 @@ Release notes that need action:
   already measured against another survey. Technical forms that stored the
   district and county as the web form displays them ("5", "Monterey") now
   store "05" and "MON", and the API normalizes every save.
+- **Several people in one form** (`20261006_form_presence`). Adds
+  `submission_gisa.revision` (counts a form's saves) and the
+  `submission_presence` table (who has a form open, where, and the memos they
+  are writing). Rows expire on their own; nothing to back up or clean.
 - **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
   now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
   `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs
