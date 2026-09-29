@@ -3,7 +3,14 @@ import { useState, type PointerEvent } from "react";
 import { FT_PER_M, type LonLat } from "../siteTerrainModel";
 
 /** A spot on the section: how far along, where, and the ground before and now there (metres). */
-export type ProfilePoint = { distanceM: number; point?: LonLat; historical: number | null; actual: number | null };
+export type ProfilePoint = {
+  distanceM: number;
+  point?: LonLat;
+  historical: number | null;
+  /** The ground before here was the sea surface (the earlier survey saw water), not a surveyed height. */
+  historicalSea?: boolean;
+  actual: number | null;
+};
 
 const W = 640;
 const PAD = { left: 52, right: 14, top: 16, bottom: 34 };
@@ -75,7 +82,11 @@ export default function SlopeProfileDiagram({
   const x = (dFt: number) => PAD.left + (dFt / maxDist) * PLOT_W;
   const y = (zFt: number) => PAD.top + (1 - (zFt - z0) / (z1 - z0)) * plotH;
   const at = (p: ProfilePoint, key: "historical" | "actual"): [number, number] | null => (p[key] == null ? null : [x(p.distanceM * FT_PER_M), y(p[key]! * FT_PER_M)]);
-  const before = profile.map((p) => at(p, "historical"));
+  // The before line: surveyed ground grey, the sea surface blue (each joined to where the other ends).
+  const seaAt = (i: number) => !!profile[i]?.historicalSea;
+  const before = profile.map((p, i) => (seaAt(i) && seaAt(i - 1) ? null : at(p, "historical")));
+  const beforeSea = profile.map((p, i) => (seaAt(i) || seaAt(i - 1) ? at(p, "historical") : null));
+  const hasSea = profile.some((p) => p.historicalSea);
   const after = profile.map((p) => at(p, "actual"));
   const zStep = niceStep(z1 - z0, Math.max(3, Math.round(plotH / 50)));
   const dStep = niceStep(maxDist, 6);
@@ -140,6 +151,7 @@ export default function SlopeProfileDiagram({
         <text x={12} y={PAD.top + (H - PAD.top - PAD.bottom) / 2} textAnchor="middle" fontSize={10} fill="var(--muted)" transform={`rotate(-90 12 ${PAD.top + (H - PAD.top - PAD.bottom) / 2})`}>Elevation (ft)</text>
         {bands.map((band, i) => <path key={i} d={band.d} fill={band.lost ? "#dc2626" : "#16a34a"} fillOpacity={0.22} stroke="none" />)}
         <path d={path(before)} fill="none" stroke="var(--muted)" strokeWidth={2} strokeDasharray="6 4" />
+        {hasSea ? <path d={path(beforeSea)} fill="none" stroke="#0284c7" strokeWidth={2} strokeDasharray="6 4" /> : null}
         <path d={path(after)} fill="none" stroke="var(--accent)" strokeWidth={2.5} />
         {spot ? (
           <g pointerEvents="none">
@@ -154,6 +166,9 @@ export default function SlopeProfileDiagram({
       <figcaption className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-dashed border-[var(--muted)]" aria-hidden />Before ({beforeTitle}): {originalSlopeDeg.toFixed(1)}°, {Math.round(originalHeightM * FT_PER_M)} ft high</span>
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-[var(--accent)]" aria-hidden />Now ({nowTitle}): {newSlopeDeg.toFixed(1)}°, {Math.round(newHeightM * FT_PER_M)} ft high</span>
+        {hasSea ? (
+          <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-dashed border-[#0284c7]" aria-hidden />Before: sea level where the earlier survey saw sea</span>
+        ) : null}
         <span className="text-muted">Shaded: ground lost (red) and gained (green)</span>
         <span className="text-muted">{scaleNote(exaggeration)}</span>
       </figcaption>

@@ -90,6 +90,8 @@ type TerrainResult = {
     offsetM: number;
     /** The drawn line the section follows (null: down the fall line), as a key to notice when it changes. */
     sectionLine: LonLat[] | null;
+    /** Share of the compared area the earlier survey saw as sea: compared from sea level, so gains there are a lower bound. */
+    seaShare: number;
     sectionKey: string;
     /** What was saved with the survey, to save again when only the section line changes. */
     saved: SavedComparison | null;
@@ -160,8 +162,17 @@ export default function SiteMeasurementsPanel({
           const [top, bottom] = profileLine(rings, bearingDeg, Math.max(10, bufferM));
           return pointsAlong(top, bottom, 90);
         })();
-    const beforeLine = await drone.beforeHeights(along.map((a) => a.point));
-    return along.map((a, i) => ({ distanceM: a.distanceM, point: a.point, historical: beforeLine[i] ?? null, actual: drone.actualAt(a.point[0], a.point[1]) }));
+    // Compared with an earlier survey, the ground before is its height, or sea level where it saw the sea.
+    const beforeLine = drone.baseline
+      ? along.map((a) => drone.baselineGroundAt(a.point[0], a.point[1]))
+      : (await drone.beforeHeights(along.map((a) => a.point))).map((z) => (z == null ? null : { z, sea: false }));
+    return along.map((a, i) => ({
+      distanceM: a.distanceM,
+      point: a.point,
+      historical: beforeLine[i]?.z ?? null,
+      historicalSea: beforeLine[i]?.sea ?? false,
+      actual: drone.actualAt(a.point[0], a.point[1]),
+    }));
   }
 
   // A new section line redraws the section (and is kept with the comparison) without measuring again.
@@ -202,8 +213,17 @@ export default function SiteMeasurementsPanel({
       if (drone && survey) {
         const all = [...plan.inside, ...plan.around];
         const actual = all.map(([lon, lat]) => drone.actualAt(lon, lat));
-        const historical = baseline ? all.map(([lon, lat]) => drone.baselineAt(lon, lat)) : z;
-        const comparison = compareSurfaces(area, plan, historical, actual);
+        // An earlier survey's sea counts as sea level: the material now in the water is counted
+        // from the surface (the seabed under it is unknown, so those gains are a lower bound).
+        const beforeGround = baseline ? all.map(([lon, lat]) => drone.baselineGroundAt(lon, lat)) : null;
+        const historical = beforeGround ? beforeGround.map((g) => g?.z ?? null) : z;
+        const withSea = compareSurfaces(area, plan, historical, actual);
+        // The slope, its height and its length describe ground: water is not slope, so they come
+        // from what the earlier survey mapped; the volumes and the change count the sea as its surface.
+        const onLand = beforeGround ? compareSurfaces(area, plan, beforeGround.map((g) => (g && !g.sea ? g.z : null)), actual) : null;
+        const comparison = withSea && onLand ? { ...withSea, original: onLand.original } : withSea;
+        const seaInside = beforeGround ? plan.inside.filter((_, i) => beforeGround[i]?.sea && actual[i] != null).length : 0;
+        const seaShare = comparison?.paired ? seaInside / comparison.paired : 0;
         droneCoverage = comparison?.coverage ?? plan.inside.filter((_, i) => actual[i] != null && historical[i] != null).length / Math.max(1, plan.inside.length);
         if (comparison && comparison.coverage >= MIN_DRONE_COVERAGE) {
           setBusy(drawnLine ? "Drawing the section along your line…" : "Drawing the section down the slope…");
@@ -226,6 +246,7 @@ export default function SiteMeasurementsPanel({
               gain_m3: comparison.gainVolumeM3,
               net_m3: comparison.netVolumeM3,
               section_line: drawnLine,
+              sea_share: seaShare,
           };
           before = {
             comparison,
@@ -235,6 +256,7 @@ export default function SiteMeasurementsPanel({
             beforeIsSurvey: !!baseline,
             offsetM: survey.survey.vertical_offset_m,
             sectionLine: drawnLine,
+            seaShare,
             sectionKey: drawnKey,
             saved,
           };
@@ -555,8 +577,14 @@ function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> 
         <Metric label="Deepest drop" value={fmtChangeFt(c.maxLossM)} note={`Mean change ${c.meanChangeM >= 0 ? "+" : "−"}${fmtChangeFt(Math.abs(c.meanChangeM))}`} />
         <Metric label="Highest rise" value={fmtChangeFt(c.maxGainM)} note="Debris or bulging ground" />
         <Metric label="Ground lost" value={fmtYd3(c.lossVolumeM3)} note={`Gained ${fmtYd3(c.gainVolumeM3)}`} />
-        <Metric label="Net change" value={`${c.netVolumeM3 >= 0 ? "+" : "−"}${fmtYd3(Math.abs(c.netVolumeM3))}`} note={`${drone.beforeIsSurvey ? "The surveys overlap on" : "Drone covers"} ${Math.round(c.coverage * 100)}% of the area`} />
+        <Metric label="Net change" value={`${c.netVolumeM3 >= 0 ? "+" : "−"}${fmtYd3(Math.abs(c.netVolumeM3))}`} note={`${drone.beforeIsSurvey ? "Compared on" : "Drone covers"} ${Math.round(c.coverage * 100)}% of the area`} />
       </dl>
+      {drone.seaShare > 0 ? (
+        <p className="mt-2 text-xs text-muted">
+          {Math.round(drone.seaShare * 100)}% of the compared area was sea before (the earlier survey saw water there). It is compared from sea level,
+          so the ground gained there counts only what stands above the water: the seabed under it is unknown, and the true volume is larger.
+        </p>
+      ) : null}
       <SlopeProfileDiagram
         profile={drone.profile}
         originalSlopeDeg={c.original.landslideSlopeDeg}

@@ -24,6 +24,8 @@ export type SavedComparison = {
   baseline?: { kind: "terrain" } | { kind: "survey"; survey_id: number; title: string; offset_m: number };
   /** The section line the author drew, [lon, lat] points; absent when the section ran down the fall line. */
   section_line?: Array<[number, number]> | null;
+  /** Share of the compared area the earlier survey saw as sea, compared from sea level (0 when none). */
+  sea_share?: number;
   original: { slope_deg: number; height_m: number; low_m: number; high_m: number };
   updated: { slope_deg: number; height_m: number; low_m: number; high_m: number };
   coverage: number;
