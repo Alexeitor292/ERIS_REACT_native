@@ -348,3 +348,58 @@ export function edgeDistance(grid: DroneGrid, cap: number): Uint8Array {
   }
   return d;
 }
+
+// --- The sea a survey could not map ---------------------------------------------
+
+/** Sea level, metres: survey heights are lined up with the terrain model (NAVD88), where the sea sits near 0. */
+export const SEA_LEVEL_M = 0;
+
+/**
+ * A copy of the grid where the cells without data that face the sea read as sea
+ * level. Photogrammetry cannot map water, so a coastal survey stops at the
+ * shore; drawing whatever another model has there instead would show ground
+ * that was not there on the day of the flight. A cell without data faces the sea
+ * when the nearest cell with data (after `offsetM`) is at most `shoreM` high.
+ * Other gaps (inland shadows, beyond the flight's edge) stay without data.
+ */
+export function fillSea(grid: DroneGrid, offsetM: number, shoreM = 5): { grid: DroneGrid; filled: number } {
+  const { cols, rows, values } = grid;
+  const n = cols * rows;
+  const nearest = new Float32Array(n).fill(NaN);
+  const queue = new Int32Array(n);
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < n; i += 1) {
+    if (Number.isFinite(values[i])) {
+      nearest[i] = values[i];
+      queue[tail++] = i;
+    }
+  }
+  // Breadth-first from every cell with data: each gap cell takes the height of
+  // the cell with data that reaches it first (the nearest, 8-connected).
+  while (head < tail) {
+    const k = queue[head++];
+    const r = Math.floor(k / cols);
+    const c = k - r * cols;
+    for (let dr = -1; dr <= 1; dr += 1) {
+      for (let dc = -1; dc <= 1; dc += 1) {
+        const rr = r + dr;
+        const cc = c + dc;
+        if ((dr === 0 && dc === 0) || rr < 0 || cc < 0 || rr >= rows || cc >= cols) continue;
+        const j = rr * cols + cc;
+        if (!Number.isNaN(nearest[j])) continue;
+        nearest[j] = nearest[k];
+        queue[tail++] = j;
+      }
+    }
+  }
+  const out = Float32Array.from(values);
+  let filled = 0;
+  for (let i = 0; i < n; i += 1) {
+    if (!Number.isFinite(values[i]) && Number.isFinite(nearest[i]) && nearest[i] + offsetM <= shoreM) {
+      out[i] = SEA_LEVEL_M - offsetM;
+      filled += 1;
+    }
+  }
+  return { grid: { ...grid, values: out }, filled };
+}

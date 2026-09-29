@@ -14,7 +14,7 @@ import Compass from "@arcgis/core/widgets/Compass";
 import type Layer from "@arcgis/core/layers/Layer";
 
 import { boundsRing, type DroneGrid, type LonLat } from "../features/submissions/drone/droneGrid";
-import { createGapOverlayLayer, createOrthomosaicLayer, createPatchedElevationLayer } from "../features/submissions/drone/droneSceneLayers";
+import { createOrthomosaicLayer, createPatchedElevationLayer, createSeaLayer } from "../features/submissions/drone/droneSceneLayers";
 
 import type { GisaTerrainGrid } from "../api/types";
 import {
@@ -56,8 +56,6 @@ type Props = {
   onPick?: ((lon: number, lat: number) => void) | null;
   /** A section line drawn on the ground (S1, S2, …), dashed while being drawn, and the spot the chart points at. */
   section?: { points: LonLat[]; drawing: boolean; hover: LonLat | null } | null;
-  /** Showing an earlier survey as "before": hatch where it has no data but the survey shown as now does. */
-  droneGaps?: { key: string; now: DroneGrid; before: DroneGrid } | null;
 };
 
 export type DroneSceneSurvey = {
@@ -69,6 +67,8 @@ export type DroneSceneSurvey = {
   corners: LonLat[] | null;
   /** Show the drone surface (now); false shows the terrain model (before). */
   show: boolean;
+  /** When this is an earlier survey shown as "before": the later survey, to paint as sea the land it found where the earlier one saw water. */
+  later?: DroneGrid | null;
   points: Array<{ id: string; lon: number; lat: number; label?: string | null }>;
 };
 
@@ -97,7 +97,6 @@ export default function InteractiveTerrainScene({
   drone = null,
   onPick = null,
   section = null,
-  droneGaps = null,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -106,8 +105,8 @@ export default function InteractiveTerrainScene({
   const overlayRef = useRef<GraphicsLayer | null>(null);
   const droneGraphicsRef = useRef<GraphicsLayer | null>(null);
   const sectionGraphicsRef = useRef<GraphicsLayer | null>(null);
-  const gapsLayerRef = useRef<Layer | null>(null);
   const droneMediaRef = useRef<Layer | null>(null);
+  const droneSeaRef = useRef<Layer | null>(null);
   const worldGroundRef = useRef<Layer[] | null>(null);
   const pickRef = useRef<Props["onPick"]>(null);
   pickRef.current = onPick;
@@ -247,8 +246,8 @@ export default function InteractiveTerrainScene({
       cancelled = true;
       droneGraphicsRef.current = null;
       sectionGraphicsRef.current = null;
-      gapsLayerRef.current = null;
       droneMediaRef.current = null;
+      droneSeaRef.current = null;
       worldGroundRef.current = null;
       overlayRef.current = null;
       mapRef.current = null;
@@ -376,16 +375,17 @@ export default function InteractiveTerrainScene({
   }, [toggles, available, lat, lon, terrain, geometryJson]);
 
   // ---- Drone survey: the patched ground and the draped orthomosaic -----------
-  const droneKey = drone ? `${drone.key}|${drone.show ? 1 : 0}|${drone.overlayUrl ?? ""}` : "";
+  const droneKey = drone ? `${drone.key}|${drone.show ? 1 : 0}|${drone.overlayUrl ?? ""}|${drone.later ? "later" : ""}` : "";
   useEffect(() => {
     const map = mapRef.current;
     if (!map || status !== "ready") return;
     const ground = map.ground;
     if (!worldGroundRef.current) worldGroundRef.current = ground.layers.toArray() as Layer[];
-    if (droneMediaRef.current) {
-      map.layers.remove(droneMediaRef.current);
-      droneMediaRef.current.destroy();
-      droneMediaRef.current = null;
+    for (const ref of [droneMediaRef, droneSeaRef]) {
+      if (!ref.current) continue;
+      map.layers.remove(ref.current);
+      ref.current.destroy();
+      ref.current = null;
     }
     ground.layers.removeAll();
     if (drone && drone.show) {
@@ -394,6 +394,12 @@ export default function InteractiveTerrainScene({
         const media = createOrthomosaicLayer(drone.overlayUrl, drone.corners);
         map.layers.add(media, 0);
         droneMediaRef.current = media;
+      }
+      // An earlier survey's sea where the later one found land, painted as water.
+      const sea = drone.later ? createSeaLayer(drone.grid, drone.offsetM, drone.later) : null;
+      if (sea) {
+        map.layers.add(sea, droneMediaRef.current ? 1 : 0);
+        droneSeaRef.current = sea;
       }
     } else {
       ground.layers.addMany(worldGroundRef.current as never[]);
@@ -436,25 +442,6 @@ export default function InteractiveTerrainScene({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointsKey, footprintKey, status]);
-
-  // ---- Where an earlier survey shown as "before" has no data: hatched ------------
-  const gapsKey = droneGaps?.key ?? "";
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || status !== "ready") return;
-    if (gapsLayerRef.current) {
-      map.layers.remove(gapsLayerRef.current);
-      gapsLayerRef.current.destroy();
-      gapsLayerRef.current = null;
-    }
-    if (!droneGaps) return;
-    const layer = createGapOverlayLayer(droneGaps.now, droneGaps.before);
-    if (!layer) return;
-    // Above the draped orthomosaic (index 0), below the graphics.
-    map.layers.add(layer, Math.min(1, map.layers.length));
-    gapsLayerRef.current = layer;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gapsKey, status]);
 
   // ---- The section line and the spot the chart points at ----------------------
   const sectionKey = section ? JSON.stringify([section.points, section.drawing, section.hover]) : "";

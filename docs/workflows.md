@@ -149,10 +149,14 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    line**, click its points in the 3D view (S1, S2, …) and **Finish**, as in
    the terrain cross-section tool. The line is kept with the comparison.
    Pointing at the section reads the ground there (distance, before, now,
-   change) and marks the spot in the 3D view. In the 3D view each survey blends
-   into the terrain model over its last 12 m, so the two never meet as a wall.
-   With an earlier survey shown as **Before**, the places it has no data (the
-   sea, say) are hatched: the terrain model fills in there. **Capture points**
+   change) and marks the spot in the 3D view. In the 3D view a survey's gaps
+   that face the sea (photogrammetry cannot map water) are drawn at sea level,
+   never with another model's ground. With an earlier survey shown as
+   **Before**, land the event made since (where the earlier survey saw sea and
+   the later one found ground) is painted as water. Other gaps, and ground
+   beyond the flight, come from the terrain model, blended over the survey's
+   last 12 m so the two never meet as a wall. Measurements use only what the
+   surveys captured. **Capture points**
    records, at each click on the 3D view, the height of both surfaces there.
    Surveys, their shift, the captured points and the last comparison are kept
    with the form.

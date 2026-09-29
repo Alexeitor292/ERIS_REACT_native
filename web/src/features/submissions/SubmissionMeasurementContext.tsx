@@ -72,6 +72,7 @@ export default function SubmissionMeasurementContext({
         overlayUrl: shown.overlayUrl,
         corners: shown.survey.overlay_corners,
         show: drone!.showSurface || shown !== active,
+        later: shown !== active ? active.grid : null,
         points: active.survey.points,
       }
     : null;
@@ -88,9 +89,7 @@ export default function SubmissionMeasurementContext({
   const section = drone && (drone.section.points.length || drone.section.drawing || drone.sectionHover)
     ? { points: drone.section.points, drawing: drone.section.drawing, hover: drone.sectionHover }
     : null;
-  const droneGaps = drone && active && drone.baseline && !drone.showSurface
-    ? { key: `${active.survey.id}|${drone.baseline.survey.id}`, now: active.grid, before: drone.baseline.grid }
-    : null;
+
 
   return (
     <div id="terrain-3d-section" className="mb-2">
@@ -139,7 +138,6 @@ export default function SubmissionMeasurementContext({
             drone={droneScene}
             onPick={onPick}
             section={section}
-            droneGaps={droneGaps}
           />
         </Suspense>
       </div>
