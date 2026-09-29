@@ -42,10 +42,11 @@ from .routes.site_history import router as site_history_router
 from .routes.sharing import router as sharing_router
 from .routes.notifications import router as notifications_router
 from .routes.drone_surveys import router as drone_surveys_router
+from .routes.form_presence import router as form_presence_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
 from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
-from .services import form_access, public_visibility
+from .services import form_access, form_saves, public_visibility
 from .services import rich_text as rich_text_svc
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
@@ -129,6 +130,7 @@ app.include_router(site_history_router)
 app.include_router(sharing_router)
 app.include_router(notifications_router)
 app.include_router(drone_surveys_router)
+app.include_router(form_presence_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -593,7 +595,8 @@ def _derive_road_bearing_from_postmile_layer(
 # GISA helpers
 # ----------------------------
 
-def get_gisa(db: Session, submission_id: int) -> dict | None:
+def get_gisa(db: Session, submission_id: int, *, for_update: bool = False) -> dict | None:
+    # for_update: read the latest saved row and hold it until the save commits.
     row = db.execute(text("""
         SELECT
           submission_id,
@@ -629,11 +632,11 @@ def get_gisa(db: Session, submission_id: int) -> dict | None:
           elevation_profile_json, elevation_profile_source, elevation_profile_checked_at,
           elevation_profile_classification, elevation_profile_confidence, elevation_profile_error,
           elevation_terrain_grid_json, elevation_terrain_source, elevation_terrain_checked_at, elevation_terrain_error,
-          updated_by_user_id, created_at, updated_at
+          updated_by_user_id, revision, created_at, updated_at
         FROM submission_gisa
         WHERE submission_id = :sid
         LIMIT 1
-    """), {"sid": submission_id}).mappings().first()
+    """ + (" FOR UPDATE" if for_update else "")), {"sid": submission_id}).mappings().first()
     if not row:
         return None
 
@@ -2437,8 +2440,20 @@ def patch_gisa(
         raise HTTPException(status_code=409, detail="Only DRAFT or REJECTED submissions can be edited")
 
     provided = payload.model_dump(exclude_unset=True)
+    base = provided.pop("base", None)
     if not provided:
         return {"submission_id": submission_id, "gisa": get_gisa(db, submission_id)}
+
+    # Several people may have the form open (services/form_saves.py): a field
+    # someone else saved since this person opened the form is refused, and so
+    # is a memo someone else is writing. Linked fields are judged against the
+    # saved values of the ones this save does not send.
+    current_gisa = get_gisa(db, submission_id, for_update=True)
+    sent_keys = set(provided)
+    if base is not None:
+        form_saves.refuse_changed_since(db, submission_id, {k: v for k, v in base.items() if k in provided}, current_gisa)
+        form_saves.refuse_locked_memos(db, submission_id, user, sent_keys)
+    form_saves.fill_linked_groups(provided, current_gisa)
 
     # PATCH semantics: treat null as "no change" for NOT NULL boolean fields.
     # Some clients send nullable booleans in draft payloads; coercing null->False
@@ -2506,7 +2521,10 @@ def patch_gisa(
         touched = [k for k in group if k in provided]
         if not touched:
             return
-        selected = [k for k in group if _to_bool(provided.get(k)) is True]
+        # What this save chose wins over what was saved before.
+        selected = [k for k in group if k in sent_keys and _to_bool(provided.get(k)) is True] or [
+            k for k in group if _to_bool(provided.get(k)) is True
+        ]
         keep = selected[0] if selected else None
         for k in group:
             provided[k] = (k == keep)
@@ -2606,11 +2624,12 @@ def patch_gisa(
                 set_parts.append(f"{key} = :{key}")
                 params[key] = value
             set_parts.append("updated_by_user_id = :updated_by")
+            set_parts.append("revision = revision + 1")
             update_sql = f"UPDATE submission_gisa SET {', '.join(set_parts)} WHERE submission_id = :sid"
             db.execute(text(update_sql), params)
         else:
-            cols = ["submission_id", "updated_by_user_id"]
-            vals = [":sid", ":updated_by"]
+            cols = ["submission_id", "updated_by_user_id", "revision"]
+            vals = [":sid", ":updated_by", "1"]
             params = {"sid": submission_id, "updated_by": user["id"]}
             for key, value in provided.items():
                 cols.append(key)
@@ -3210,6 +3229,8 @@ def replace_incident_types(
     items = list(dict.fromkeys(payload.items))
 
     validate_incident_type_codes(items)
+    form_saves.lock_form(db, submission_id)
+    form_saves.refuse_changed_list(db, submission_id, "incident_types", payload.base, get_gisa_incident_types(db, submission_id))
     try:
         db.execute(text("DELETE FROM submission_gisa_incident_types WHERE submission_id=:sid"), {"sid": submission_id})
         for code in items:
@@ -3217,6 +3238,7 @@ def replace_incident_types(
                 INSERT INTO submission_gisa_incident_types (submission_id, incident_type_code)
                 VALUES (:sid, :code)
             """), {"sid": submission_id, "code": code})
+        form_saves.bump_revision(db, submission_id, user)
         db.commit()
         return {"submission_id": submission_id, "incident_types": get_gisa_incident_types(db, submission_id)}
     except Exception as e:
@@ -3243,6 +3265,11 @@ def replace_actions(
     for c in payload.follow_up:
         validate_action(c, "FOLLOW_UP")
 
+    form_saves.lock_form(db, submission_id)
+    saved_actions = get_gisa_actions(db, submission_id)
+    form_saves.refuse_changed_list(db, submission_id, "actions_immediate", payload.base_immediate, saved_actions.get("immediate", []))
+    form_saves.refuse_changed_list(db, submission_id, "actions_follow_up", payload.base_follow_up, saved_actions.get("follow_up", []))
+
     try:
         db.execute(text("DELETE FROM submission_gisa_actions WHERE submission_id=:sid"), {"sid": submission_id})
         for c in payload.immediate:
@@ -3255,6 +3282,7 @@ def replace_actions(
                 INSERT INTO submission_gisa_actions (submission_id, action_group, action_code)
                 VALUES (:sid, 'FOLLOW_UP', :code)
             """), {"sid": submission_id, "code": c})
+        form_saves.bump_revision(db, submission_id, user)
         db.commit()
         return {"submission_id": submission_id, "actions": get_gisa_actions(db, submission_id)}
     except Exception as e:

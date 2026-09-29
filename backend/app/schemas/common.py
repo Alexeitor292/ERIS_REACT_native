@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -40,6 +40,10 @@ class SubmissionTitlePatch(BaseModel):
 
 
 class GisaDraftPatch(BaseModel):
+    # The value each sent field had when the person opened the form (the web
+    # form sends only what it changed). A field that has moved since is refused
+    # with 409 (services/form_saves.py); without it a save behaves as before.
+    base: dict[str, Any] | None = None
     location_id: int | None = None
     report_date: str | None = None
     district: str | None = None
@@ -147,11 +151,16 @@ class GisaDraftPatch(BaseModel):
 
 class ReplaceIncidentTypes(BaseModel):
     items: list[str]
+    # The list as the person opened it; refused with 409 if it moved since.
+    base: list[str] | None = None
 
 
 class ReplaceActions(BaseModel):
     immediate: list[str] = []
     follow_up: list[str] = []
+    # The lists as the person opened them; refused with 409 if they moved since.
+    base_immediate: list[str] | None = None
+    base_follow_up: list[str] | None = None
 
 
 class GeometryUpsert(BaseModel):

@@ -5,6 +5,8 @@ import { getSiteHistory, type SiteHistory } from "../../api/siteHistory";
 import type { RichMemoKey } from "./memoContentModel";
 import RichMemoEditor from "./RichMemoEditor";
 import { RecordOfIncidentsView, type SiteNotesField } from "./SiteHistoryViews";
+import { othersIn, type PresenceOther } from "./collab/presenceModel";
+import { MemoLockNotice, PresenceDots, presenceOutline } from "./collab/PresenceUI";
 
 type HistoryKey = "record_of_event_notes" | "maintenance_history_notes";
 /** Maintenance history now lives inside Record of incidents; it has no tab of its own. */
@@ -73,7 +75,13 @@ type Props = {
   attachmentCount: (key: MemoTabKey) => number;
   onOpenAttachments: (key: MemoTabKey, label: string) => void;
   attachmentsButton: (count: number, onClick: () => void) => ReactNode;
+  /** Others in the form: each memo tab shows who is in it. */
+  presence?: readonly PresenceOther[];
+  /** Memos someone else is writing: read-only here until they are done. */
+  writers?: Partial<Record<string, PresenceOther>>;
 };
+
+const NO_ONE: readonly PresenceOther[] = [];
 
 /**
  * The form's memos: one dedicated view per memo behind a single tab bar. The
@@ -118,16 +126,20 @@ export default function MemosPanel(props: Props) {
   const body = (tall: boolean) => {
     if (tab.kind === "document") {
       const key = tab.key as RichMemoKey;
+      const writer = props.writers?.[key];
       return (
+        <>
+        {writer ? <MemoLockNotice writer={writer} /> : null}
         <RichMemoEditor
           key={key}
           value={props.memos[key]}
           onChange={(html) => props.onMemoChange(key, html)}
-          editable={props.editable}
+          editable={props.editable && !writer}
           placeholder={tab.placeholder ?? ""}
           documentTitle={tab.label}
           tall={tall}
         />
+        </>
       );
     }
     const notes: SiteNotesField[] = [
@@ -206,6 +218,7 @@ export default function MemosPanel(props: Props) {
             >
               {item.icon}
               {item.label}
+              <PresenceDots others={othersIn(props.presence ?? NO_ONE, `memo:${item.key}`)} size={18} />
               {count ? (
                 <span className={`rounded-full px-1.5 text-[10px] font-semibold ${selected ? "bg-white/25" : "bg-[var(--panel)]"}`}>{count}</span>
               ) : null}
@@ -214,7 +227,13 @@ export default function MemosPanel(props: Props) {
         })}
       </div>
 
-      <div role="tabpanel" aria-label={tab.label}>
+      <div
+        role="tabpanel"
+        aria-label={tab.label}
+        data-presence-area={`memo:${tab.key}`}
+        className="rounded-xl"
+        style={presenceOutline(othersIn(props.presence ?? NO_ONE, `memo:${tab.key}`))}
+      >
         {header}
         {focus && tab.kind === "document" ? (
           <div className="rounded-xl border border-dashed border-[var(--line)] p-6 text-center text-sm text-muted">
@@ -227,7 +246,7 @@ export default function MemosPanel(props: Props) {
       </div>
 
       {focus && tab.kind === "document" ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg)]" role="dialog" aria-modal="true" aria-label={tab.label}>
+        <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg)]" role="dialog" aria-modal="true" aria-label={tab.label} data-presence-area={`memo:${tab.key}`}>
           <div className="mx-auto flex w-full max-w-5xl min-h-0 flex-1 flex-col p-4">
             {header}
             <div className="min-h-0 flex-1 overflow-y-auto">{body(true)}</div>

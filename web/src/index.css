@@ -168,6 +168,32 @@ body {
 .eris-memo-tabs { scrollbar-width: none; }
 .eris-memo-tabs::-webkit-scrollbar { display: none; }
 
+/* A field someone else is in (features/submissions/collab): their colour, and their initials on the label's corner. */
+[data-presence-by] {
+  position: relative;
+  border-radius: 6px;
+  outline: 2px solid var(--presence-color);
+  outline-offset: 1px;
+}
+[data-presence-by]::after {
+  content: attr(data-presence-by);
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  background: var(--presence-color);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
 .eris-memo-surface { padding: 28px 36px; }
 @media (max-width: 640px) {
   .eris-memo-surface { padding: 18px 16px; }
