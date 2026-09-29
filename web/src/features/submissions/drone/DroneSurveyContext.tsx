@@ -118,7 +118,7 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [active, setActive] = useState<LoadedSurvey | null>(null);
-  const [baselineId, setBaselineId] = useState<number | null>(null);
+  const [baselineId, setBaselineIdState] = useState<number | null>(null);
   const [baseline, setBaseline] = useState<LoadedSurvey | null>(null);
   const [showSurface, setShowSurface] = useState(true);
   const [capturing, setCapturing] = useState(false);
@@ -193,11 +193,47 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
     [liveBaseline, baselineAt],
   );
 
+  // What a survey is compared with is kept on the survey, so everybody who opens
+  // the form sees the comparison its author chose. Whoever cannot edit the form
+  // may still switch it for themselves.
+  const remember = useCallback(
+    (surveyId: number, compareWith: number | null) => {
+      if (!canEdit) return;
+      updateSurvey(submissionId, surveyId, { compare_with_survey_id: compareWith })
+        .then((saved) => setSurveys((current) => current.map((s) => (s.id === saved.id ? saved : s))))
+        .catch(() => {
+          // The choice still applies on this page; it is just not kept.
+        });
+    },
+    [canEdit, submissionId],
+  );
+
+  const setBaselineId = useCallback(
+    (id: number | null) => {
+      setBaselineIdState(id);
+      if (activeId != null) remember(activeId, id);
+    },
+    [activeId, remember],
+  );
+
+  // A survey shown as now brings back what it was last compared with.
+  const appliedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (activeId == null || appliedFor.current === activeId) return;
+    const survey = surveys.find((s) => s.id === activeId);
+    if (!survey) return;
+    appliedFor.current = activeId;
+    const other = survey.compare_with_survey_id ?? null;
+    setBaselineIdState(other != null && other !== activeId && surveys.some((s) => s.id === other) ? other : null);
+  }, [activeId, surveys]);
+
   const swapBaseline = useCallback(() => {
     if (baselineId == null || activeId == null) return;
+    appliedFor.current = baselineId;
     setActiveId(baselineId);
-    setBaselineId(activeId);
-  }, [activeId, baselineId]);
+    setBaselineIdState(activeId);
+    remember(baselineId, activeId);
+  }, [activeId, baselineId, remember]);
 
   const upload = useCallback(async (input: NewSurvey, onProgress: Progress) => {
     const step = (from: number, to: number): Progress => (fraction, message) => onProgress(from + (to - from) * fraction, message);
@@ -264,7 +300,7 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
 
   const remove = useCallback(async (id: number) => {
     await deleteSurvey(submissionId, id);
-    setBaselineId((current) => (current === id ? null : current));
+    setBaselineIdState((current) => (current === id ? null : current));
     const cached = loaded.current.get(id);
     if (cached?.overlayUrl) URL.revokeObjectURL(cached.overlayUrl);
     loaded.current.delete(id);

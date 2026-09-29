@@ -139,3 +139,31 @@ def test_deleting_a_survey_removes_its_files(client_db, cast, memory_storage):
 
 def test_a_guest_sees_nothing(client_db, cast, viewer_token):
     assert client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers={"Authorization": f"Bearer {viewer_token}"}).status_code == 403
+
+
+def test_a_survey_remembers_what_it_is_compared_with(client_db, cast):
+    before = _create(client_db, cast, label="Before", captured_on="2026-09-19").json()
+    after = _create(client_db, cast, label="After", captured_on="2026-09-27").json()
+    url = f"/submissions/{cast['form']}/drone-surveys/{after['id']}"
+    saved = client_db.patch(url, json={"compare_with_survey_id": before["id"]}, headers=cast["owner"]["headers"])
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["compare_with_survey_id"] == before["id"]
+    # Everybody who opens the form sees it.
+    listed = client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers=cast["other"]["headers"]).json()["items"]
+    assert next(s for s in listed if s["id"] == after["id"])["compare_with_survey_id"] == before["id"]
+
+    assert client_db.patch(url, json={"compare_with_survey_id": after["id"]}, headers=cast["owner"]["headers"]).status_code == 422
+    assert client_db.patch(url, json={"compare_with_survey_id": 999999999}, headers=cast["owner"]["headers"]).status_code == 422
+
+    # Removing the survey it was compared with goes back to the terrain model.
+    assert client_db.delete(f"/submissions/{cast['form']}/drone-surveys/{before['id']}", headers=cast["owner"]["headers"]).status_code == 200
+    assert client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers=cast["owner"]["headers"]).json()["items"][0]["compare_with_survey_id"] is None
+
+
+def test_a_form_stores_district_and_county_codes_whatever_it_displays(client_db, cast):
+    resp = client_db.patch(
+        f"/submissions/{cast['form']}/gisa", json={"district": "5", "county": "Monterey"}, headers=cast["owner"]["headers"]
+    )
+    assert resp.status_code == 200, resp.text
+    gisa = resp.json()["gisa"]
+    assert (gisa["district"], gisa["county"]) == ("05", "MON")

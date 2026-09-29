@@ -24,15 +24,25 @@ _COUNTY_CODES = {
 }
 
 
-def _district(value: object | None) -> str:
+def district_code(value: object | None) -> str:
+    """A district as ERIS stores it: two digits ("5" -> "05"). Anything else comes back trimmed."""
     raw = str(value or "").strip()
     digits = "".join(ch for ch in raw if ch.isdigit())
-    return digits.zfill(2) if digits else (raw or "?")
+    return digits.zfill(2) if digits else raw
+
+
+def county_code(value: object | None) -> str:
+    """A county as ERIS stores it: its Caltrans code ("Monterey" -> "MON", "mon" -> "MON")."""
+    raw = re.sub(r"\s+County$", "", str(value or "").strip(), flags=re.IGNORECASE)
+    return _COUNTY_CODES.get(raw.lower()) or raw.upper()
+
+
+def _district(value: object | None) -> str:
+    return district_code(value) or "?"
 
 
 def _county(value: object | None) -> str:
-    raw = re.sub(r"\s+County$", "", str(value or "").strip(), flags=re.IGNORECASE)
-    return _COUNTY_CODES.get(raw.lower()) or raw.upper() or "?"
+    return county_code(value) or "?"
 
 
 def _day(value: object | None) -> str:
