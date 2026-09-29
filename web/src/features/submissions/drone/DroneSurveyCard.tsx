@@ -89,6 +89,11 @@ export default function DroneSurveyCard() {
                 <Crosshair size={13} aria-hidden /> {drone.capturing ? "Click the 3D view to capture · stop" : "Capture points"}
               </button>
             ) : null}
+            {baseline && !drone.showSurface ? (
+              <span className="basis-full text-[11px] text-muted">
+                Hatched: the earlier survey has no data there, so the terrain model fills in.
+              </span>
+            ) : null}
           </div>
 
           <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">

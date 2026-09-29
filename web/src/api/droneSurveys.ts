@@ -22,6 +22,8 @@ export type SavedComparison = {
   offset_m: number;
   /** What "before" was: the terrain model, or an earlier survey (absent in comparisons saved before this was recorded). */
   baseline?: { kind: "terrain" } | { kind: "survey"; survey_id: number; title: string; offset_m: number };
+  /** The section line the author drew, [lon, lat] points; absent when the section ran down the fall line. */
+  section_line?: Array<[number, number]> | null;
   original: { slope_deg: number; height_m: number; low_m: number; high_m: number };
   updated: { slope_deg: number; height_m: number; low_m: number; high_m: number };
   coverage: number;

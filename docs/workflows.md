@@ -144,7 +144,15 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    survey, so everyone who opens the form (a reviewer, say) sees the comparison
    its author chose. The section is drawn at true scale whenever it fits, so a
    slope looks as steep as its angle; otherwise the caption says how much the
-   heights are stretched or squeezed. **Capture points**
+   heights are stretched or squeezed. The section runs down the fall line
+   through the middle of the area, or along a line of your own: **Draw section
+   line**, click its points in the 3D view (S1, S2, …) and **Finish**, as in
+   the terrain cross-section tool. The line is kept with the comparison.
+   Pointing at the section reads the ground there (distance, before, now,
+   change) and marks the spot in the 3D view. In the 3D view each survey blends
+   into the terrain model over its last 12 m, so the two never meet as a wall.
+   With an earlier survey shown as **Before**, the places it has no data (the
+   sea, say) are hatched: the terrain model fills in there. **Capture points**
    records, at each click on the 3D view, the height of both surfaces there.
    Surveys, their shift, the captured points and the last comparison are kept
    with the form.

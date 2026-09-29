@@ -14,7 +14,7 @@ import Compass from "@arcgis/core/widgets/Compass";
 import type Layer from "@arcgis/core/layers/Layer";
 
 import { boundsRing, type DroneGrid, type LonLat } from "../features/submissions/drone/droneGrid";
-import { createOrthomosaicLayer, createPatchedElevationLayer } from "../features/submissions/drone/droneSceneLayers";
+import { createGapOverlayLayer, createOrthomosaicLayer, createPatchedElevationLayer } from "../features/submissions/drone/droneSceneLayers";
 
 import type { GisaTerrainGrid } from "../api/types";
 import {
@@ -54,6 +54,10 @@ type Props = {
   drone?: DroneSceneSurvey | null;
   /** When set, a click on the ground reports where (the view is picking points). */
   onPick?: ((lon: number, lat: number) => void) | null;
+  /** A section line drawn on the ground (S1, S2, …), dashed while being drawn, and the spot the chart points at. */
+  section?: { points: LonLat[]; drawing: boolean; hover: LonLat | null } | null;
+  /** Showing an earlier survey as "before": hatch where it has no data but the survey shown as now does. */
+  droneGaps?: { key: string; now: DroneGrid; before: DroneGrid } | null;
 };
 
 export type DroneSceneSurvey = {
@@ -92,6 +96,8 @@ export default function InteractiveTerrainScene({
   height = 460,
   drone = null,
   onPick = null,
+  section = null,
+  droneGaps = null,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -99,6 +105,8 @@ export default function InteractiveTerrainScene({
   const mapRef = useRef<Map | null>(null);
   const overlayRef = useRef<GraphicsLayer | null>(null);
   const droneGraphicsRef = useRef<GraphicsLayer | null>(null);
+  const sectionGraphicsRef = useRef<GraphicsLayer | null>(null);
+  const gapsLayerRef = useRef<Layer | null>(null);
   const droneMediaRef = useRef<Layer | null>(null);
   const worldGroundRef = useRef<Layer[] | null>(null);
   const pickRef = useRef<Props["onPick"]>(null);
@@ -173,11 +181,14 @@ export default function InteractiveTerrainScene({
     const droneGraphics = new GraphicsLayer({ title: "Drone survey" });
     (droneGraphics as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "on-the-ground" };
     droneGraphicsRef.current = droneGraphics;
+    const sectionGraphics = new GraphicsLayer({ title: "Section line" });
+    (sectionGraphics as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "on-the-ground" };
+    sectionGraphicsRef.current = sectionGraphics;
 
     const map = new Map({
       basemap: basemapIdFor(basemapMode),
       ground: "world-elevation",
-      layers: [overlay, droneGraphics],
+      layers: [overlay, droneGraphics, sectionGraphics],
     });
     mapRef.current = map;
 
@@ -235,6 +246,8 @@ export default function InteractiveTerrainScene({
     return () => {
       cancelled = true;
       droneGraphicsRef.current = null;
+      sectionGraphicsRef.current = null;
+      gapsLayerRef.current = null;
       droneMediaRef.current = null;
       worldGroundRef.current = null;
       overlayRef.current = null;
@@ -423,6 +436,62 @@ export default function InteractiveTerrainScene({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointsKey, footprintKey, status]);
+
+  // ---- Where an earlier survey shown as "before" has no data: hatched ------------
+  const gapsKey = droneGaps?.key ?? "";
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== "ready") return;
+    if (gapsLayerRef.current) {
+      map.layers.remove(gapsLayerRef.current);
+      gapsLayerRef.current.destroy();
+      gapsLayerRef.current = null;
+    }
+    if (!droneGaps) return;
+    const layer = createGapOverlayLayer(droneGaps.now, droneGaps.before);
+    if (!layer) return;
+    // Above the draped orthomosaic (index 0), below the graphics.
+    map.layers.add(layer, Math.min(1, map.layers.length));
+    gapsLayerRef.current = layer;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gapsKey, status]);
+
+  // ---- The section line and the spot the chart points at ----------------------
+  const sectionKey = section ? JSON.stringify([section.points, section.drawing, section.hover]) : "";
+  useEffect(() => {
+    const layer = sectionGraphicsRef.current;
+    if (!layer) return;
+    layer.removeAll();
+    if (!section) return;
+    const blue = [37, 99, 235, 1];
+    if (section.points.length >= 2) {
+      layer.add(
+        new Graphic({
+          geometry: new Polyline({ paths: [section.points], spatialReference: WGS84 }),
+          symbol: { type: "simple-line", color: blue, width: 3, style: section.drawing ? "dash" : "solid" } as never,
+        }),
+      );
+    }
+    section.points.forEach((point, index) => {
+      const geometry = new Point({ longitude: point[0], latitude: point[1], spatialReference: WGS84 });
+      layer.add(new Graphic({ geometry, symbol: { type: "simple-marker", style: "circle", color: blue, size: 9, outline: { color: [255, 255, 255, 1], width: 1.5 } } as never }));
+      layer.add(
+        new Graphic({
+          geometry,
+          symbol: { type: "text", text: `S${index + 1}`, color: [255, 255, 255, 1], haloColor: [30, 58, 138, 0.95], haloSize: 2, yoffset: 14, font: { size: 10, weight: "bold" } } as never,
+        }),
+      );
+    });
+    if (section.hover) {
+      layer.add(
+        new Graphic({
+          geometry: new Point({ longitude: section.hover[0], latitude: section.hover[1], spatialReference: WGS84 }),
+          symbol: { type: "simple-marker", style: "circle", color: [250, 204, 21, 1], size: 13, outline: { color: [15, 23, 42, 1], width: 2 } } as never,
+        }),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionKey, status]);
 
   // ---- Fullscreen (real Fullscreen API + CSS fallback) -----------------------
   const toggleFullscreen = useCallback(async () => {

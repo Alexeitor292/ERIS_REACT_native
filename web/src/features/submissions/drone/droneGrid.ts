@@ -309,3 +309,42 @@ export function resampleToGrid(args: {
   }
   return { ...b, cols, rows, values };
 }
+
+// --- Blending a survey into the terrain model at its edges -----------------------
+
+/** The cell holding a point, or -1 outside the grid. */
+export function cellIndex(grid: DroneGrid, lon: number, lat: number): number {
+  if (!covers(grid, lon, lat)) return -1;
+  const c = Math.min(grid.cols - 1, Math.max(0, Math.floor(((lon - grid.west) / (grid.east - grid.west)) * grid.cols)));
+  const r = Math.min(grid.rows - 1, Math.max(0, Math.floor(((grid.north - lat) / (grid.north - grid.south)) * grid.rows)));
+  return r * grid.cols + c;
+}
+
+/**
+ * For each cell, how many cells away the nearest cell without data is (outside
+ * the grid counts as without data), capped at `cap`; 0 for cells without data.
+ * Two passes of an 8-neighbour chamfer: exact along rows and columns, close
+ * enough on diagonals for blending an edge.
+ */
+export function edgeDistance(grid: DroneGrid, cap: number): Uint8Array {
+  const { cols, rows, values } = grid;
+  const limit = Math.max(1, Math.min(255, Math.floor(cap)));
+  const d = new Uint8Array(cols * rows);
+  for (let i = 0; i < d.length; i += 1) d[i] = Number.isFinite(values[i]) ? limit : 0;
+  const at = (r: number, c: number) => (r < 0 || c < 0 || r >= rows || c >= cols ? 0 : d[r * cols + c]);
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const k = r * cols + c;
+      if (!d[k]) continue;
+      d[k] = Math.min(d[k], at(r - 1, c - 1) + 1, at(r - 1, c) + 1, at(r - 1, c + 1) + 1, at(r, c - 1) + 1);
+    }
+  }
+  for (let r = rows - 1; r >= 0; r -= 1) {
+    for (let c = cols - 1; c >= 0; c -= 1) {
+      const k = r * cols + c;
+      if (!d[k]) continue;
+      d[k] = Math.min(d[k], at(r + 1, c + 1) + 1, at(r + 1, c) + 1, at(r + 1, c - 1) + 1, at(r, c + 1) + 1);
+    }
+  }
+  return d;
+}

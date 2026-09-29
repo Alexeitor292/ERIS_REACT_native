@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { Check, Info, Loader2, MapPinned, Mountain, Route as RouteIcon } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Check, Info, Loader2, MapPinned, Mountain, PenLine, Route as RouteIcon, Undo2 } from "lucide-react";
 
 import { SliderField } from "./gisaFields";
 import RoadwayEncroachment, { type RoadIdentity } from "./RoadwayEncroachment";
@@ -15,6 +15,7 @@ import {
   measureSiteArea,
   measurementFieldValues,
   pointsAlong,
+  pointsAlongPath,
   profileLine,
   type LonLat,
   type MeasurementField,
@@ -22,6 +23,7 @@ import {
   type SiteMeasurement,
   type SurfaceComparison,
 } from "./siteTerrainModel";
+import type { SavedComparison } from "../../api/droneSurveys";
 import { useDroneSurveys } from "./drone/DroneSurveyContext";
 import SlopeProfileDiagram, { type ProfilePoint } from "./drone/SlopeProfileDiagram";
 import { surveyTitle } from "./drone/surveyLabels";
@@ -86,6 +88,11 @@ type TerrainResult = {
     beforeTitle: string;
     beforeIsSurvey: boolean;
     offsetM: number;
+    /** The drawn line the section follows (null: down the fall line), as a key to notice when it changes. */
+    sectionLine: LonLat[] | null;
+    sectionKey: string;
+    /** What was saved with the survey, to save again when only the section line changes. */
+    saved: SavedComparison | null;
   } | null;
   /** A drone survey is loaded but covers too little of the area (with what it is compared with) to measure it. */
   droneCoverage: number | null;
@@ -141,6 +148,38 @@ export default function SiteMeasurementsPanel({
   const stale = result != null && result.key !== measureKey;
   const proposed = result && !stale ? result.proposed : {};
 
+  // The section follows a line someone drew in the 3D view, else the fall line.
+  const drawnLine = drone && !drone.section.drawing && drone.section.points.length >= 2 ? drone.section.points : null;
+  const drawnKey = drawnLine ? JSON.stringify(drawnLine) : "";
+
+  async function sectionProfile(rings: LonLat[][], bearingDeg: number, bufferM: number, line: LonLat[] | null): Promise<ProfilePoint[]> {
+    if (!drone) return [];
+    const along = line
+      ? pointsAlongPath(line, 160)
+      : (() => {
+          const [top, bottom] = profileLine(rings, bearingDeg, Math.max(10, bufferM));
+          return pointsAlong(top, bottom, 90);
+        })();
+    const beforeLine = await drone.beforeHeights(along.map((a) => a.point));
+    return along.map((a, i) => ({ distanceM: a.distanceM, point: a.point, historical: beforeLine[i] ?? null, actual: drone.actualAt(a.point[0], a.point[1]) }));
+  }
+
+  // A new section line redraws the section (and is kept with the comparison) without measuring again.
+  useEffect(() => {
+    const current = result?.drone;
+    if (!current || stale || !area || current.sectionKey === drawnKey) return;
+    let cancelled = false;
+    sectionProfile(area, current.comparison.original.downslopeBearingDeg, result.bufferM, drawnLine).then((profile) => {
+      if (cancelled) return;
+      setResult((prev) => (prev?.drone ? { ...prev, drone: { ...prev.drone, profile, sectionLine: drawnLine, sectionKey: drawnKey } } : prev));
+      if (canEdit && current.saved) {
+        drone?.saveComparison({ ...current.saved, measured_at: new Date().toISOString(), section_line: drawnLine }).catch(() => undefined);
+      }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawnKey, result?.drone?.sectionKey, stale]);
+
   async function measure() {
     if (!area) return;
     setError(null);
@@ -167,22 +206,10 @@ export default function SiteMeasurementsPanel({
         const comparison = compareSurfaces(area, plan, historical, actual);
         droneCoverage = comparison?.coverage ?? plan.inside.filter((_, i) => actual[i] != null && historical[i] != null).length / Math.max(1, plan.inside.length);
         if (comparison && comparison.coverage >= MIN_DRONE_COVERAGE) {
-          setBusy("Drawing the section down the slope…");
-          const [top, bottom] = profileLine(area, comparison.original.downslopeBearingDeg, Math.max(10, plan.bufferM));
-          const along = pointsAlong(top, bottom, 90);
-          const beforeLine = await drone.beforeHeights(along.map((a) => a.point));
-          const profile = along.map((a, i) => ({ distanceM: a.distanceM, historical: beforeLine[i] ?? null, actual: drone.actualAt(a.point[0], a.point[1]) }));
-          before = {
-            comparison,
-            profile,
-            nowTitle: surveyTitle(survey.survey),
-            beforeTitle: baseline ? surveyTitle(baseline.survey) : "terrain model",
-            beforeIsSurvey: !!baseline,
-            offsetM: survey.survey.vertical_offset_m,
-          };
-          if (canEdit) {
-            const heights = (m: SiteMeasurement) => ({ slope_deg: m.landslideSlopeDeg, height_m: m.slopeHeightM, low_m: m.lowElevationM, high_m: m.highElevationM });
-            drone.saveComparison({
+          setBusy(drawnLine ? "Drawing the section along your line…" : "Drawing the section down the slope…");
+          const profile = await sectionProfile(area, comparison.original.downslopeBearingDeg, plan.bufferM, drawnLine);
+          const heights = (m: SiteMeasurement) => ({ slope_deg: m.landslideSlopeDeg, height_m: m.slopeHeightM, low_m: m.lowElevationM, high_m: m.highElevationM });
+          const saved: SavedComparison = {
               area_key: areaKey,
               measured_at: new Date().toISOString(),
               offset_m: survey.survey.vertical_offset_m,
@@ -198,7 +225,21 @@ export default function SiteMeasurementsPanel({
               loss_m3: comparison.lossVolumeM3,
               gain_m3: comparison.gainVolumeM3,
               net_m3: comparison.netVolumeM3,
-            }).catch(() => {
+              section_line: drawnLine,
+          };
+          before = {
+            comparison,
+            profile,
+            nowTitle: surveyTitle(survey.survey),
+            beforeTitle: baseline ? surveyTitle(baseline.survey) : "terrain model",
+            beforeIsSurvey: !!baseline,
+            offsetM: survey.survey.vertical_offset_m,
+            sectionLine: drawnLine,
+            sectionKey: drawnKey,
+            saved,
+          };
+          if (canEdit) {
+            drone.saveComparison(saved).catch(() => {
               // The comparison shows either way; keeping it with the survey is a convenience.
             });
           }
@@ -478,6 +519,7 @@ function SymbolBadge({ children }: { children: ReactNode }) {
 /** The slope before (terrain model or an earlier survey) and now (drone survey), the change between them, and the section down the slope. */
 function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> }) {
   const { comparison: c } = drone;
+  const surveys = useDroneSurveys();
   const angle = (d: number) => `${d.toFixed(1)}°`;
   const rows: Array<{ label: ReactNode; before: string; now: string }> = [
     { label: "Slope", before: angle(c.original.landslideSlopeDeg), now: angle(c.updated.landslideSlopeDeg) },
@@ -523,7 +565,48 @@ function BeforeAndAfter({ drone }: { drone: NonNullable<TerrainResult["drone"]> 
         newHeightM={c.updated.slopeHeightM}
         beforeTitle={drone.beforeTitle}
         nowTitle={drone.nowTitle}
+        axisLabel={drone.sectionLine ? "Distance along your section line (ft)" : "Distance down the slope (ft)"}
+        onHover={(index) => surveys?.setSectionHover(index == null ? null : drone.profile[index]?.point ?? null)}
       />
+      {surveys ? <SectionControls line={drone.sectionLine} lengthM={drone.profile[drone.profile.length - 1]?.distanceM ?? 0} /> : null}
+    </div>
+  );
+}
+
+/** Where the section runs: down the fall line, or along a line drawn in the 3D view (as in the cross-section tool). */
+function SectionControls({ line, lengthM }: { line: LonLat[] | null; lengthM: number }) {
+  const drone = useDroneSurveys()!;
+  const { section } = drone;
+  const link = "inline-flex items-center gap-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1 text-xs font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50";
+  if (section.drawing) {
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-[#2563eb] bg-[color:color-mix(in_oklab,#2563eb_6%,var(--panel))] px-2.5 py-2 text-xs">
+        <span className="basis-full sm:basis-auto sm:flex-1">
+          <b>Click the 3D view</b> to place the section's points in order (S1, S2, …).{" "}
+          {section.points.length ? `${section.points.length} placed.` : "None placed yet."}
+        </span>
+        <button type="button" className={link} disabled={!section.points.length} onClick={drone.undoSectionPoint}><Undo2 size={12} aria-hidden /> Undo point</button>
+        <button type="button" className={link} onClick={drone.clearSection}>Cancel</button>
+        <button
+          type="button"
+          disabled={section.points.length < 2}
+          onClick={drone.finishSection}
+          className="inline-flex items-center gap-1 rounded-md bg-[#2563eb] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+        >
+          <Check size={12} aria-hidden /> Finish &amp; draw section
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-muted">
+        Section: {line ? <>your line S1–S{line.length}, {Math.round(lengthM * FT_PER_M).toLocaleString("en-US")} ft</> : "down the fall line, through the middle of the area"}.
+      </span>
+      <button type="button" className={link} onClick={drone.startSection}>
+        <PenLine size={12} aria-hidden /> {line ? "Redraw section line" : "Draw section line"}
+      </button>
+      {line ? <button type="button" className={link} onClick={drone.clearSection}>Use fall line</button> : null}
     </div>
   );
 }

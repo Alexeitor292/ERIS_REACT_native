@@ -4,9 +4,11 @@ import test from "node:test";
 import {
   alignmentPoints,
   BlockAverager,
+  cellIndex,
   cellSizeM,
   chooseGridSize,
   decodeGrid,
+  edgeDistance,
   encodeGrid,
   latticeInterpolator,
   latticePoints,
@@ -109,4 +111,19 @@ test("a patch is resampled from the reduced raster, and its units converted", ()
   // Cell centre x = 0.5 → pixel 0 → reduced −0.25 → clamped to the first block (0.5).
   assert.ok(Math.abs(patch.values[0] - 0.5 * 0.3048) < 1e-6);
   assert.ok(Math.abs(patch.values[1] - 1 * 0.3048) < 1e-6);
+});
+
+test("edge distance counts cells to the nearest gap or the grid's edge, capped", () => {
+  const cols = 7, rows = 5;
+  const values = new Float32Array(cols * rows).fill(10);
+  values[2 * cols + 3] = NaN; // a hole in the middle
+  const grid = { west: 0, south: 0, east: 0.007, north: 0.005, cols, rows, values };
+  const d = edgeDistance(grid, 3);
+  assert.equal(d[2 * cols + 3], 0); // the hole
+  assert.equal(d[0], 1); // a corner touches the outside
+  assert.equal(d[2 * cols + 2], 1); // next to the hole
+  assert.equal(d[2 * cols + 1], 2); // two cells from the hole, two from the edge
+  assert.ok([...d].every((v) => v <= 3));
+  assert.equal(cellIndex(grid, 0.0035, 0.0025), 2 * cols + 3);
+  assert.equal(cellIndex(grid, 0.01, 0.0025), -1);
 });
