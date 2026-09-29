@@ -9,11 +9,13 @@ import {
   chooseGridSize,
   decodeGrid,
   edgeDistance,
+  fillSea,
   encodeGrid,
   latticeInterpolator,
   latticePoints,
   resampleToGrid,
   sampleGrid,
+  SEA_LEVEL_M,
   verticalOffset,
   type DroneGrid,
 } from "./droneGrid.ts";
@@ -126,4 +128,24 @@ test("edge distance counts cells to the nearest gap or the grid's edge, capped",
   assert.ok([...d].every((v) => v <= 3));
   assert.equal(cellIndex(grid, 0.0035, 0.0025), 2 * cols + 3);
   assert.equal(cellIndex(grid, 0.01, 0.0025), -1);
+});
+
+test("gaps facing the sea read as sea level; gaps beside high ground stay without data", () => {
+  // 5 columns × 4 rows. Row 0: a hill at 50 m with a gap beside it (beyond the flight).
+  // Row 1: slope. Row 2: beach at 1.5 m. Row 3: the sea, no data.
+  const N = NaN;
+  const values = Float32Array.from([
+    50, 50, 50, N, N,
+    30, 30, 30, 30, 30,
+    1.5, 1.5, 1.5, 1.5, 1.5,
+    N, N, N, N, N,
+  ]);
+  const grid = { west: 0, south: 0, east: 0.005, north: 0.004, cols: 5, rows: 4, values };
+  const offset = -0.5; // heights as flown sit half a metre above the terrain model
+  const { grid: filled, filled: count } = fillSea(grid, offset);
+  assert.equal(count, 5);
+  for (let c = 0; c < 5; c += 1) assert.equal(filled.values[15 + c], SEA_LEVEL_M - offset); // sea level after the offset
+  assert.ok(Number.isNaN(filled.values[3]) && Number.isNaN(filled.values[4])); // beside the hill: still no data
+  assert.equal(filled.values[10], 1.5); // what was mapped is untouched
+  assert.ok(Number.isNaN(values[15])); // the survey itself is not changed
 });

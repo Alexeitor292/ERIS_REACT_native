@@ -9,7 +9,7 @@ import ImageElement from "@arcgis/core/layers/support/ImageElement";
 import CornersGeoreference from "@arcgis/core/layers/support/CornersGeoreference";
 import Point from "@arcgis/core/geometry/Point";
 
-import { cellIndex, cellSizeM, edgeDistance, sampleGrid, type DroneGrid, type LonLat } from "./droneGrid";
+import { cellIndex, cellSizeM, edgeDistance, fillSea, sampleGrid, type DroneGrid, type LonLat } from "./droneGrid";
 
 export const WORLD_ELEVATION_URL = "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer";
 
@@ -24,11 +24,13 @@ const BLEND_M = 12;
 
 /**
  * World Elevation with the drone survey's heights (plus its vertical offset)
- * wherever the survey has data. Near the survey's edges (and around holes in
- * it) the two blend over BLEND_M, so where they disagree the ground ramps
- * instead of standing up as a wall. Tiles away from the survey pass through untouched.
+ * wherever the survey has data, and sea level where it faces the sea (the water
+ * it could not map; not whatever another model has there). Near the survey's
+ * other edges the two blend over BLEND_M, so where they disagree the ground
+ * ramps instead of standing up as a wall. Tiles away from the survey pass through untouched.
  */
-export function createPatchedElevationLayer(grid: DroneGrid, offsetM: number): BaseElevationLayer {
+export function createPatchedElevationLayer(survey: DroneGrid, offsetM: number): BaseElevationLayer {
+  const grid = fillSea(survey, offsetM).grid;
   const bounds = { xmin: toX(grid.west), xmax: toX(grid.east), ymin: toY(grid.south), ymax: toY(grid.north) };
   const cell = cellSizeM(grid);
   const blendCells = Math.max(2, Math.min(60, Math.round(BLEND_M / Math.max(0.05, Math.min(cell.dx, cell.dy)))));
@@ -93,43 +95,45 @@ export function createOrthomosaicLayer(url: string, corners: LonLat[], opacity =
 }
 
 /**
- * Where the survey shown as now has data and the earlier survey does not, hatched:
- * there the "before" ground is the terrain model, not the earlier flight.
- * Draped over the now survey's extent; null when the earlier survey covers it all.
+ * Where an earlier survey faced the sea but a later one found ground (land the
+ * event made), painted as water: today's imagery shows that land, which was not
+ * there on the day of the earlier flight. Null when there is no such place.
  */
-export function createGapOverlayLayer(now: DroneGrid, before: DroneGrid): MediaLayer | null {
-  const side = 768;
-  const aspect = ((now.east - now.west) * Math.cos((((now.north + now.south) / 2) * Math.PI) / 180)) / (now.north - now.south);
-  const width = aspect >= 1 ? side : Math.max(64, Math.round(side * aspect));
-  const height = aspect >= 1 ? Math.max(64, Math.round(side / aspect)) : side;
+export function createSeaLayer(survey: DroneGrid, offsetM: number, later: DroneGrid): MediaLayer | null {
+  const { grid: filled, filled: count } = fillSea(survey, offsetM);
+  if (!count) return null;
+  const cellLon = (survey.east - survey.west) / survey.cols;
+  const cellLat = (survey.north - survey.south) / survey.rows;
+  let painted = 0;
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = survey.cols;
+  canvas.height = survey.rows;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  const image = ctx.createImageData(width, height);
-  let gaps = 0;
-  for (let y = 0; y < height; y += 1) {
-    const lat = now.north - ((y + 0.5) / height) * (now.north - now.south);
-    for (let x = 0; x < width; x += 1) {
-      const lon = now.west + ((x + 0.5) / width) * (now.east - now.west);
-      if (sampleGrid(now, lon, lat) == null || sampleGrid(before, lon, lat) != null) continue;
-      gaps += 1;
-      const stripe = (x + y) % 10 < 4;
-      const k = (y * width + x) * 4;
-      image.data[k] = 15;
-      image.data[k + 1] = 23;
-      image.data[k + 2] = 42;
-      image.data[k + 3] = stripe ? 150 : 60;
-    }
+  const image = ctx.createImageData(survey.cols, survey.rows);
+  for (let i = 0; i < survey.values.length; i += 1) {
+    if (Number.isFinite(survey.values[i]) || !Number.isFinite(filled.values[i])) continue;
+    const r = Math.floor(i / survey.cols);
+    const lon = survey.west + (i - r * survey.cols + 0.5) * cellLon;
+    const lat = survey.north - (r + 0.5) * cellLat;
+    if (sampleGrid(later, lon, lat) == null) continue; // sea on both days: today's imagery already shows it
+    painted += 1;
+    image.data[i * 4] = 32;
+    image.data[i * 4 + 1] = 96;
+    image.data[i * 4 + 2] = 128;
+    image.data[i * 4 + 3] = 235;
   }
-  if (!gaps) return null;
+  if (!painted) return null;
   ctx.putImageData(image, 0, 0);
-  const corners: LonLat[] = [[now.west, now.north], [now.east, now.north], [now.east, now.south], [now.west, now.south]];
   const at = ([lon, lat]: LonLat) => new Point({ longitude: lon, latitude: lat, spatialReference: { wkid: 4326 } });
   const element = new ImageElement({
     image: canvas,
-    georeference: new CornersGeoreference({ topLeft: at(corners[0]), topRight: at(corners[1]), bottomRight: at(corners[2]), bottomLeft: at(corners[3]) }),
+    georeference: new CornersGeoreference({
+      topLeft: at([survey.west, survey.north]),
+      topRight: at([survey.east, survey.north]),
+      bottomRight: at([survey.east, survey.south]),
+      bottomLeft: at([survey.west, survey.south]),
+    }),
   });
-  return new MediaLayer({ source: [element], title: "No earlier survey here", opacity: 1 });
+  return new MediaLayer({ source: [element], title: "Sea on the day of the flight" });
 }
