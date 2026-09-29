@@ -22,6 +22,9 @@ export const MAX_ARCHIVED_BYTES = 95 * 1024 * 1024;
 
 export type LoadedSurvey = { survey: DroneSurvey; grid: DroneGrid; overlayUrl: string | null };
 
+export type SectionLine = { points: LonLat[]; drawing: boolean };
+const NO_SECTION: SectionLine = { points: [], drawing: false };
+
 export type NewSurvey = {
   dsm: File;
   ortho: File | null;
@@ -58,6 +61,16 @@ type DroneSurveyState = {
   /** Clicking the 3D view captures points on both surfaces. */
   capturing: boolean;
   setCapturing: (on: boolean) => void;
+  /** The section line someone drew (empty: the section runs down the fall line), and whether they are drawing it. */
+  section: SectionLine;
+  startSection: () => void;
+  addSectionPoint: (lon: number, lat: number) => void;
+  undoSectionPoint: () => void;
+  finishSection: () => void;
+  clearSection: () => void;
+  /** The spot on the section the pointer is over in the chart, shown in the 3D view. */
+  sectionHover: LonLat | null;
+  setSectionHover: (point: LonLat | null) => void;
   /** The drone height at a point, lined up with the terrain model (null outside the survey). */
   actualAt: (lon: number, lat: number) => number | null;
   upload: (input: NewSurvey, onProgress: Progress) => Promise<void>;
@@ -121,7 +134,32 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
   const [baselineId, setBaselineIdState] = useState<number | null>(null);
   const [baseline, setBaseline] = useState<LoadedSurvey | null>(null);
   const [showSurface, setShowSurface] = useState(true);
-  const [capturing, setCapturing] = useState(false);
+  const [capturing, setCapturingState] = useState(false);
+  const [section, setSection] = useState<SectionLine>(NO_SECTION);
+  const [sectionHover, setSectionHover] = useState<LonLat | null>(null);
+  // One click, one meaning: capturing points and drawing a section never run together.
+  const setCapturing = useCallback((on: boolean) => {
+    if (on) setSection((current) => (current.drawing ? { ...current, drawing: false } : current));
+    setCapturingState(on);
+  }, []);
+  const startSection = useCallback(() => {
+    setCapturingState(false);
+    setSectionHover(null);
+    setSection({ points: [], drawing: true });
+  }, []);
+  const addSectionPoint = useCallback((lon: number, lat: number) => {
+    setSection((current) => (current.drawing ? { ...current, points: [...current.points, [lon, lat] as LonLat] } : current));
+  }, []);
+  const undoSectionPoint = useCallback(() => {
+    setSection((current) => ({ ...current, points: current.points.slice(0, -1) }));
+  }, []);
+  const finishSection = useCallback(() => {
+    setSection((current) => (current.points.length >= 2 ? { points: current.points, drawing: false } : NO_SECTION));
+  }, []);
+  const clearSection = useCallback(() => {
+    setSectionHover(null);
+    setSection(NO_SECTION);
+  }, []);
   const loaded = useRef(new Map<number, { grid: DroneGrid; overlayUrl: string | null }>());
   const inflight = useRef(new Map<number, Promise<{ grid: DroneGrid; overlayUrl: string | null }>>());
   const geojsonRef = useRef(geojson);
@@ -225,6 +263,8 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
     appliedFor.current = activeId;
     const other = survey.compare_with_survey_id ?? null;
     setBaselineIdState(other != null && other !== activeId && surveys.some((s) => s.id === other) ? other : null);
+    const saved = survey.comparison?.section_line;
+    setSection(saved && saved.length >= 2 ? { points: saved.map(([lon, lat]) => [lon, lat] as LonLat), drawing: false } : NO_SECTION);
   }, [activeId, surveys]);
 
   const swapBaseline = useCallback(() => {
@@ -361,9 +401,11 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
       submissionId, canEdit, surveys, loading, error, active, activeId, setActiveId,
       baseline: liveBaseline, baselineId: baselineId !== activeId ? baselineId : null, setBaselineId, swapBaseline, baselineAt, beforeHeights,
       showSurface, setShowSurface, capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
+      section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover, setSectionHover,
     }),
     [submissionId, canEdit, surveys, loading, error, active, activeId, liveBaseline, baselineId, swapBaseline, baselineAt, beforeHeights,
-      showSurface, capturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison],
+      showSurface, capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
+      section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover],
   );
   return <Context.Provider value={enabled ? value : null}>{children}</Context.Provider>;
 }

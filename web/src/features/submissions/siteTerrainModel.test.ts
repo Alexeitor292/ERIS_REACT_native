@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bearingLabel, buildSamplePlan, compareSurfaces, comparisonFieldValues, fitPlane, localFrame, measureSiteArea, measurementFieldValues, pointsAlong, profileLine, type Ring, type Sample } from "./siteTerrainModel.ts";
+import { bearingLabel, buildSamplePlan, compareSurfaces, comparisonFieldValues, fitPlane, localFrame, measureSiteArea, measurementFieldValues, pointsAlong, pointsAlongPath, profileLine, type Ring, type Sample } from "./siteTerrainModel.ts";
 
 // A 40 m (east-west) x 60 m (north-south) rectangle near Muir Beach.
 const LON0 = -122.58;
@@ -145,4 +145,18 @@ test("a before/after fills α and H from the original ground, β and the size fr
     measure_landslide_length_ft: "180",
     measure_landslide_width_ft: "102",
   });
+});
+
+test("points along a drawn path follow each segment, with distances along the whole path", () => {
+  const frame = localFrame(-121.43, 35.86);
+  // An L: 100 m east, then 50 m north.
+  const path = [frame.toLonLat([0, 0]), frame.toLonLat([100, 0]), frame.toLonLat([100, 50])];
+  const along = pointsAlongPath(path, 4);
+  assert.equal(along.length, 4);
+  assert.ok(Math.abs(along[3].distanceM - 150) < 0.5);
+  const xy = along.map((a) => frame.toXY(a.point));
+  assert.ok(Math.abs(xy[1][0] - 50) < 0.5 && Math.abs(xy[1][1]) < 0.5); // 50 m along the first leg
+  assert.ok(Math.abs(xy[2][0] - 100) < 0.5 && Math.abs(xy[2][1]) < 0.5); // the corner, 100 m along
+  assert.ok(Math.abs(xy[3][0] - 100) < 0.5 && Math.abs(xy[3][1] - 50) < 0.5);
+  assert.deepEqual(pointsAlongPath([], 5), []);
 });

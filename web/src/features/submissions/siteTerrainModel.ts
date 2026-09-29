@@ -349,3 +349,29 @@ export function comparisonFieldValues(c: SurfaceComparison): Partial<Record<Meas
     measure_landslide_width_ft: feet(c.updated.widthM),
   };
 }
+
+/**
+ * `count` evenly spaced points along a path of two or more points (a section
+ * line someone drew), both ends included, and how far along each is, metres.
+ */
+export function pointsAlongPath(path: LonLat[], count: number): Array<{ point: LonLat; distanceM: number }> {
+  if (path.length < 2) return path.length ? [{ point: path[0], distanceM: 0 }] : [];
+  const frame = localFrame(path[0][0], path[0][1]);
+  const xy = path.map(frame.toXY);
+  const cumulative = [0];
+  for (let i = 1; i < xy.length; i += 1) {
+    cumulative.push(cumulative[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
+  }
+  const total = cumulative[cumulative.length - 1];
+  const n = Math.max(2, count);
+  let segment = 1;
+  return Array.from({ length: n }, (_, i) => {
+    const d = (total * i) / (n - 1);
+    while (segment < cumulative.length - 1 && cumulative[segment] < d) segment += 1;
+    const span = cumulative[segment] - cumulative[segment - 1] || 1;
+    const t = Math.min(1, Math.max(0, (d - cumulative[segment - 1]) / span));
+    const [ax, ay] = xy[segment - 1];
+    const [bx, by] = xy[segment];
+    return { point: frame.toLonLat([ax + (bx - ax) * t, ay + (by - ay) * t]), distanceM: d };
+  });
+}

@@ -76,13 +76,21 @@ export default function SubmissionMeasurementContext({
       }
     : null;
   const [pickError, setPickError] = useState<string | null>(null);
-  const onPick =
-    drone?.capturing && active
+  // A click on the ground adds to the section line being drawn, or captures a point.
+  const onPick = drone?.section.drawing
+    ? (lon: number, lat: number) => drone.addSectionPoint(lon, lat)
+    : drone?.capturing && active
       ? (lon: number, lat: number) => {
           setPickError(null);
           drone.addPoint(lon, lat).catch((e: unknown) => setPickError(e instanceof Error ? e.message : "Could not capture the point."));
         }
       : null;
+  const section = drone && (drone.section.points.length || drone.section.drawing || drone.sectionHover)
+    ? { points: drone.section.points, drawing: drone.section.drawing, hover: drone.sectionHover }
+    : null;
+  const droneGaps = drone && active && drone.baseline && !drone.showSurface
+    ? { key: `${active.survey.id}|${drone.baseline.survey.id}`, now: active.grid, before: drone.baseline.grid }
+    : null;
 
   return (
     <div id="terrain-3d-section" className="mb-2">
@@ -130,6 +138,8 @@ export default function SubmissionMeasurementContext({
             incidentLabel={`Submission #${submissionId}`}
             drone={droneScene}
             onPick={onPick}
+            section={section}
+            droneGaps={droneGaps}
           />
         </Suspense>
       </div>

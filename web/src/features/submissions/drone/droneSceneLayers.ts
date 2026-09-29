@@ -9,7 +9,7 @@ import ImageElement from "@arcgis/core/layers/support/ImageElement";
 import CornersGeoreference from "@arcgis/core/layers/support/CornersGeoreference";
 import Point from "@arcgis/core/geometry/Point";
 
-import { sampleGrid, type DroneGrid, type LonLat } from "./droneGrid";
+import { cellIndex, cellSizeM, edgeDistance, sampleGrid, type DroneGrid, type LonLat } from "./droneGrid";
 
 export const WORLD_ELEVATION_URL = "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer";
 
@@ -19,12 +19,20 @@ const toLat = (y: number) => (Math.atan(Math.exp(y / R)) * 2 - Math.PI / 2) * (1
 const toX = (lon: number) => (lon * Math.PI * R) / 180;
 const toY = (lat: number) => R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 
+/** How far in from a survey's edge its heights take over completely from the terrain model, metres. */
+const BLEND_M = 12;
+
 /**
  * World Elevation with the drone survey's heights (plus its vertical offset)
- * wherever the survey has data. Tiles away from the survey pass through untouched.
+ * wherever the survey has data. Near the survey's edges (and around holes in
+ * it) the two blend over BLEND_M, so where they disagree the ground ramps
+ * instead of standing up as a wall. Tiles away from the survey pass through untouched.
  */
 export function createPatchedElevationLayer(grid: DroneGrid, offsetM: number): BaseElevationLayer {
   const bounds = { xmin: toX(grid.west), xmax: toX(grid.east), ymin: toY(grid.south), ymax: toY(grid.north) };
+  const cell = cellSizeM(grid);
+  const blendCells = Math.max(2, Math.min(60, Math.round(BLEND_M / Math.max(0.05, Math.min(cell.dx, cell.dy)))));
+  const edge = edgeDistance(grid, blendCells);
   const Patched = (BaseElevationLayer as any).createSubclass({
     load(this: any) {
       this._base = new ElevationLayer({ url: WORLD_ELEVATION_URL });
@@ -54,8 +62,12 @@ export function createPatchedElevationLayer(grid: DroneGrid, offsetM: number): B
         for (let j = 0; j < height; j += 1) {
           const lat = toLat(ymax - j * stepY);
           for (let i = 0; i < width; i += 1) {
-            const z = sampleGrid(grid, toLon(xmin + i * stepX), lat);
-            if (z != null) values[j * width + i] = z + offsetM;
+            const lon = toLon(xmin + i * stepX);
+            const z = sampleGrid(grid, lon, lat);
+            if (z == null) continue;
+            const k = j * width + i;
+            const w = Math.min(1, edge[cellIndex(grid, lon, lat)] / blendCells);
+            values[k] = values[k] + w * (z + offsetM - values[k]);
           }
         }
         return data;
@@ -78,4 +90,46 @@ export function createOrthomosaicLayer(url: string, corners: LonLat[], opacity =
     }),
   });
   return new MediaLayer({ source: [element], title: "Drone orthomosaic", opacity });
+}
+
+/**
+ * Where the survey shown as now has data and the earlier survey does not, hatched:
+ * there the "before" ground is the terrain model, not the earlier flight.
+ * Draped over the now survey's extent; null when the earlier survey covers it all.
+ */
+export function createGapOverlayLayer(now: DroneGrid, before: DroneGrid): MediaLayer | null {
+  const side = 768;
+  const aspect = ((now.east - now.west) * Math.cos((((now.north + now.south) / 2) * Math.PI) / 180)) / (now.north - now.south);
+  const width = aspect >= 1 ? side : Math.max(64, Math.round(side * aspect));
+  const height = aspect >= 1 ? Math.max(64, Math.round(side / aspect)) : side;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const image = ctx.createImageData(width, height);
+  let gaps = 0;
+  for (let y = 0; y < height; y += 1) {
+    const lat = now.north - ((y + 0.5) / height) * (now.north - now.south);
+    for (let x = 0; x < width; x += 1) {
+      const lon = now.west + ((x + 0.5) / width) * (now.east - now.west);
+      if (sampleGrid(now, lon, lat) == null || sampleGrid(before, lon, lat) != null) continue;
+      gaps += 1;
+      const stripe = (x + y) % 10 < 4;
+      const k = (y * width + x) * 4;
+      image.data[k] = 15;
+      image.data[k + 1] = 23;
+      image.data[k + 2] = 42;
+      image.data[k + 3] = stripe ? 150 : 60;
+    }
+  }
+  if (!gaps) return null;
+  ctx.putImageData(image, 0, 0);
+  const corners: LonLat[] = [[now.west, now.north], [now.east, now.north], [now.east, now.south], [now.west, now.south]];
+  const at = ([lon, lat]: LonLat) => new Point({ longitude: lon, latitude: lat, spatialReference: { wkid: 4326 } });
+  const element = new ImageElement({
+    image: canvas,
+    georeference: new CornersGeoreference({ topLeft: at(corners[0]), topRight: at(corners[1]), bottomRight: at(corners[2]), bottomLeft: at(corners[3]) }),
+  });
+  return new MediaLayer({ source: [element], title: "No earlier survey here", opacity: 1 });
 }
