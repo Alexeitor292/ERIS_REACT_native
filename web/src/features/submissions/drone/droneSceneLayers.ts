@@ -44,9 +44,11 @@ export function createPatchedElevationLayer(grid: DroneGrid, offsetM: number): B
         const xmin = this.tileInfo.origin.x + col * span[0];
         const ymax = this.tileInfo.origin.y - row * span[1];
         if (xmin > bounds.xmax || xmin + span[0] < bounds.xmin || ymax < bounds.ymin || ymax - span[1] > bounds.ymax) return data;
-        const { width, height, noDataValue, maxZError } = data as { width: number; height: number; noDataValue: number; maxZError?: number };
-        // A copy: the tile World Elevation returned keeps its own (read-only) statistics.
-        const values = Float32Array.from(data.values as Float32Array);
+        // Edit the heights in the tile World Elevation returned, and return that same
+        // tile: the view hit-tests and queries the ground through its class (a plain
+        // copy leaves the drone ground unclickable). Its min and max are read-only
+        // and worked out on first use, so they come out right after the edit.
+        const { width, height, values } = data as { width: number; height: number; values: Float32Array };
         const stepX = span[0] / (width - 1);
         const stepY = span[1] / (height - 1);
         for (let j = 0; j < height; j += 1) {
@@ -56,7 +58,7 @@ export function createPatchedElevationLayer(grid: DroneGrid, offsetM: number): B
             if (z != null) values[j * width + i] = z + offsetM;
           }
         }
-        return maxZError == null ? { values, width, height, noDataValue } : { values, width, height, noDataValue, maxZError };
+        return data;
       });
     },
   });
