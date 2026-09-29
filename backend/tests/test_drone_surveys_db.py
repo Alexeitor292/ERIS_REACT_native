@@ -92,6 +92,19 @@ def test_the_before_after_record_and_points_are_saved(client_db, cast):
     assert saved["vertical_offset_m"] == -30.9 and saved["offset_mode"] == "MANUAL"
 
 
+def test_lining_up_again_updates_how_well_the_heights_agree(client_db, cast):
+    survey = _create(client_db, cast, stats={"alignment_spread_m": 0.4, "alignment_points": 120, "vertical_unit": "m"}).json()
+    resp = client_db.patch(
+        f"/submissions/{cast['form']}/drone-surveys/{survey['id']}",
+        json={"vertical_offset_m": -31.2, "offset_mode": "AUTO", "alignment_spread_m": 0.18, "alignment_points": 380},
+        headers=cast["owner"]["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    stats = resp.json()["stats"]
+    # The new agreement replaces the old; what else the survey recorded stays.
+    assert stats["alignment_spread_m"] == 0.18 and stats["alignment_points"] == 380 and stats["vertical_unit"] == "m"
+
+
 def test_only_people_who_can_edit_the_form_change_it(client_db, cast):
     survey = _create(client_db, cast).json()
     other = cast["other"]["headers"]

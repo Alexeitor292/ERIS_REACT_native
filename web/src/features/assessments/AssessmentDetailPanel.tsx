@@ -267,6 +267,10 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const [engineerId, setEngineerId] = useState<number | null>(null);
   const [consultedId, setConsultedId] = useState("");
   const [routingOptionsLoading, setRoutingOptionsLoading] = useState(false);
+  // Once someone has the assessment, changing who has it is a deliberate second
+  // step, not the form that greets whoever opens it (a stale notice, say).
+  const [changingHolder, setChangingHolder] = useState(false);
+  const [changingStaff, setChangingStaff] = useState(false);
 
   const resetPickers = () => {
     setBranchChiefId(null); setSeniorEngineerId(null); setEngineerId(null); setConsultedId("");
@@ -278,7 +282,8 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   useEffect(() => {
     setNotes(""); setRouteChoice(null); setConsultedOpen(false);
     setBranchChiefId(null); setSeniorEngineerId(null); setEngineerId(null); setConsultedId("");
-  }, [assessment.id, assessment.state, assessment.routing_path]);
+    setChangingHolder(false); setChangingStaff(false);
+  }, [assessment.id, assessment.state, assessment.routing_path, assessment.branch_chief_user_id, assessment.assigned_engineer_user_id]);
 
   // Incident title / Incident Group for cross-links (incident payload carries event_group_id).
   useEffect(() => {
@@ -296,6 +301,15 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
 
   const showRouting = mode === "work" && (permissions.delegate || permissions.assignSeniorEngineer);
   const showAssignEngineer = mode === "work" && permissions.assignEngineer;
+  // Who has it now, on the route it took; they are left out of the pickers.
+  const routed = assessment.routing_path != null && assessment.state !== "PENDING_OFFICE_DELEGATION";
+  const holder = assessment.routing_path === "BRANCH"
+    ? { id: assessment.branch_chief_user_id, name: assessment.branch_chief_name, role: "branch chief" }
+    : { id: assessment.assigned_engineer_user_id, name: assessment.assigned_user_name, role: "Senior Specialist" };
+  const staffHolder = assessment.routing_path === "BRANCH" && assessment.assigned_engineer_user_id != null
+    ? { id: assessment.assigned_engineer_user_id, name: assessment.assigned_user_name }
+    : null;
+  const notHolder = <T extends { id: number }>(items: T[], id: number | null | undefined) => (id == null ? items : items.filter((item) => item.id !== id));
   const showConsultedManagement = mode === "work" && permissions.manageConsulted;
 
   // The route choice precedes the picker, so exactly one routing option list is
@@ -475,12 +489,32 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                 </div>
               ) : null}
 
-              {showRouting ? (
-                <div className="grid gap-2.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
-                    {assessment.routing_path == null ? "Route this assessment" : "Change who has this assessment"}
+              {showRouting && routed && !changingHolder ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Who has this assessment</div>
+                    <p className="mt-0.5 text-[13px]">
+                      {assessment.routing_path === "BRANCH" ? "Handed to " : "Assigned to "}
+                      <b>{holder.name ?? `the ${holder.role}`}</b>
+                      {assessment.routing_path === "BRANCH" && assessment.office_delegated_at ? ` · ${new Date(assessment.office_delegated_at).toLocaleString()}` : ""}
+                      . Nothing more is needed from you unless that has to change.
+                    </p>
                   </div>
-                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Routing choice">
+                  <button type="button" className={btn} onClick={() => setChangingHolder(true)}>
+                    {assessment.routing_path === "BRANCH" ? "Change branch chief" : "Change Senior Specialist"}
+                  </button>
+                </div>
+              ) : null}
+
+              {showRouting && (!routed || changingHolder) ? (
+                <div className="grid gap-2.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+                      {!routed ? "Route this assessment" : `Hand it to another ${holder.role}`}
+                    </div>
+                    {routed ? <button type="button" className="text-xs font-medium text-[var(--brand)] hover:underline" onClick={() => setChangingHolder(false)}>Cancel</button> : null}
+                  </div>
+                  <div className={`flex flex-wrap gap-1.5 ${routed ? "hidden" : ""}`} role="group" aria-label="Routing choice">
                     {routeOptions.map((choice) => {
                       const selected = activeRoute === choice.value;
                       return (
@@ -507,7 +541,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                             label="Branch chief"
                             placeholder="Select branch chief…"
                             groups={branchList.groups}
-                            items={branchList.items}
+                            items={routed ? notHolder(branchList.items, holder.id) : branchList.items}
                             value={branchChiefId}
                             onChange={setBranchChiefId}
                             emptyMessage={routingOptionsLoading ? "Loading branch chiefs…" : "No branch chief is recorded for this office yet. Place one in this office's tree under Organization."}
@@ -522,7 +556,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                             label="Senior Specialist"
                             placeholder="Select Senior Specialist…"
                             groups={seniorEngineerList.groups}
-                            items={seniorEngineerList.items}
+                            items={routed ? notHolder(seniorEngineerList.items, holder.id) : seniorEngineerList.items}
                             value={seniorEngineerId}
                             onChange={setSeniorEngineerId}
                             emptyMessage={routingOptionsLoading ? "Loading Senior Specialists…" : "No Senior Specialist is recorded for this office yet. Place one in this office's tree under Organization."}
@@ -550,7 +584,13 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                 </p>
               ) : null}
               <div className="flex flex-wrap items-center gap-2">
-                {showAssignEngineer ? (
+                {showAssignEngineer && staffHolder && !changingStaff ? (
+                  <span className="inline-flex flex-wrap items-center gap-2 text-[13px]">
+                    Assigned to <b>{staffHolder.name ?? "a Staff member"}</b>.
+                    <button type="button" className={btn} onClick={() => setChangingStaff(true)}>Change Staff member</button>
+                  </span>
+                ) : null}
+                {showAssignEngineer && (!staffHolder || changingStaff) ? (
                   <>
                     {/* "Your branch" first, then the rest of the office — the ordering
                         is the server's, and no candidate is ever chosen for the chief. */}
@@ -558,7 +598,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                       label="Staff member"
                       placeholder="Select Staff member…"
                       groups={engineerOptions.groups}
-                      items={engineerOptions.items}
+                      items={notHolder(engineerOptions.items, staffHolder?.id)}
                       value={engineerId}
                       onChange={setEngineerId}
                       emptyMessage="No Staff account is recorded in this office yet."
@@ -569,8 +609,9 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                       className={btnPrimary}
                       onClick={() => run(() => assignEngineer(assessment.id, Number(engineerId), notes.trim() || undefined))}
                     >
-                      Assign Staff member
+                      {staffHolder ? "Assign instead" : "Assign Staff member"}
                     </button>
+                    {staffHolder ? <button type="button" className="text-xs font-medium text-[var(--brand)] hover:underline" onClick={() => setChangingStaff(false)}>Cancel</button> : null}
                   </>
                 ) : null}
                 {permissions.submit ? (

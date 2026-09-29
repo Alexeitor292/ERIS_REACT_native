@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 
 import { getFeed, getUnread, markRead, type FeedItem } from "../../api/notifications";
-import { badgeText, internalLink, whenLabel } from "./notificationModel";
+import { badgeText, doneText, internalLink, whenLabel } from "./notificationModel";
 
 const POLL_MS = 60_000;
 
@@ -97,13 +97,17 @@ export default function NotificationBell() {
                 key={item.id}
                 type="button"
                 onClick={() => follow(item)}
-                className={`block w-full border-b border-[var(--line)] px-3 py-2.5 text-left last:border-b-0 hover:bg-[var(--panel-soft)] ${item.read ? "" : "bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]"}`}
+                className={`block w-full border-b border-[var(--line)] px-3 py-2.5 text-left last:border-b-0 hover:bg-[var(--panel-soft)] ${item.read || item.done ? "" : "bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]"}`}
               >
                 <div className="flex items-start gap-2">
-                  {!item.read ? <span aria-label="Unread" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" /> : <span className="w-2 shrink-0" aria-hidden />}
+                  {!item.read && !item.done ? <span aria-label="Unread" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--brand)]" /> : <span className="w-2 shrink-0" aria-hidden />}
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold">{item.title}</div>
+                    <div className={`flex flex-wrap items-center gap-1.5 text-sm font-semibold ${item.done ? "text-muted" : ""}`}>
+                      {item.title}
+                      {item.done ? <DoneChip /> : null}
+                    </div>
                     {item.body ? <div className="mt-0.5 line-clamp-2 text-xs text-muted">{item.body}</div> : null}
+                    {item.done ? <div className="mt-0.5 text-xs text-[var(--good)]">{doneText(item.done)}</div> : null}
                     <div className="mt-1 text-[11px] text-muted">{whenLabel(item.created_at)}</div>
                   </div>
                 </div>
@@ -116,5 +120,14 @@ export default function NotificationBell() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** A step somebody already took: shown, but no longer asking anything of the reader. */
+export function DoneChip() {
+  return (
+    <span className="rounded-full border border-[color:color-mix(in_oklab,var(--good)_45%,var(--line))] px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-[var(--good)]">
+      Done
+    </span>
   );
 }

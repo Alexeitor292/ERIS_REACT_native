@@ -94,6 +94,9 @@ class SurveyPatch(BaseModel):
     offset_mode: str | None = Field(default=None, pattern="^(AUTO|MANUAL|NONE)$")
     comparison: dict[str, Any] | None = None
     points: list[dict[str, Any]] | None = Field(default=None, max_length=500)
+    # How well the heights agree with the terrain model on stable ground, after lining them up again.
+    alignment_spread_m: float | None = Field(default=None, ge=0, le=1000)
+    alignment_points: int | None = Field(default=None, ge=0, le=100_000)
 
 
 def _corners(value: list[list[float]] | None) -> list[list[float]] | None:
@@ -283,7 +286,7 @@ def update_survey(
     user=Depends(require_roles(GISA_AUTHOR_ROLES)),
 ) -> dict:
     _can_edit(submission_id, db, user)
-    _row(db, submission_id, survey_id)
+    current = _row(db, submission_id, survey_id)
     provided = payload.model_dump(exclude_unset=True)
     sets, params = [], {"id": int(survey_id)}
     if "label" in provided:
@@ -307,6 +310,14 @@ def update_survey(
     if "points" in provided:
         sets.append("points_json = :points")
         params["points"] = json.dumps(payload.points or [])
+    if "alignment_spread_m" in provided or "alignment_points" in provided:
+        stats = _json(current["stats_json"]) or {}
+        if "alignment_spread_m" in provided:
+            stats["alignment_spread_m"] = payload.alignment_spread_m
+        if "alignment_points" in provided:
+            stats["alignment_points"] = payload.alignment_points
+        sets.append("stats_json = :stats")
+        params["stats"] = json.dumps(stats)
     if sets:
         db.execute(text(f"UPDATE submission_drone_surveys SET {', '.join(sets)} WHERE id = :id"), params)
         db.commit()

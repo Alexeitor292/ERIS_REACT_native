@@ -82,6 +82,13 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    - **Senior Specialist route:** assign a **Senior Specialist** of the office
      directly.
 
+   Once routed, the assessment shows the office chief who has it ("Handed to
+   Maria") with a separate **Change branch chief** (or **Change Senior
+   Specialist**) action. The Branch Chief likewise sees the assigned Staff
+   member, with **Change Staff member**. Handing the assessment to the person
+   who already has it is refused, with nothing recorded and nobody notified
+   again.
+
    Either way the assessment moves to `DRAFT` and the incident to
    `ENGINEER_ASSIGNED`. The database refuses an assignee without the right role.
    Both pickers list the office's own people first. An account with no office
@@ -191,7 +198,11 @@ web portal shows it under the bell at the top of every page, with a full list at
 get it as push notifications once push is set up (see
 [configuration.md](configuration.md#push-notifications-mobile-app)). Selecting a
 notice opens the page where it is acted on and marks it read. Nobody is told
-about their own action.
+about their own action. Notices read by the incident's name. A notice asking
+for a step (triage, route, assign, fill in, review, revise) knows when the step
+has been taken, by its reader or anybody else. From then on it is marked
+**Done** with who did what and when (for example "You handed it to a branch
+chief · 5 min ago"), and it no longer counts toward the unread badge.
 
 Each incident has a **workflow tree** (`GET /incidents/{id}/workflow-tree`)
 showing every step from report to resolution, who owns it, and what happened.
