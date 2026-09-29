@@ -40,11 +40,16 @@ def cast(client_db, admin_token):
     placed = People(client_db, admin_token, prefix="Zzz Drone")
     owner = placed.make("STAFF", "drone-owner")
     other = placed.make("STAFF", "drone-other")
-    people = {"owner": owner, "other": other}
+    colleague = placed.make("STAFF", "drone-colleague")
+    people = {"owner": owner, "other": other, "colleague": colleague}
     for person in people.values():
         person["headers"] = placed.login(person)
     form = client_db.post("/submissions", json={"title": "Drone survey form"}, headers=owner["headers"]).json()["submission_id"]
     people["form"] = form
+    # A colleague opens a draft only once it is shared with them (inside one
+    # branch, a share goes through at once); "other" is not shared with.
+    shared = client_db.post(f"/submissions/{form}/share", json={"user_id": colleague["id"]}, headers=owner["headers"])
+    assert shared.status_code == 200 and shared.json()["share"]["status"] == "ACTIVE", shared.text
     yield people
     placed.cleanup()
 
@@ -69,9 +74,12 @@ def test_a_survey_keeps_its_patch_image_and_offset(client_db, cast, memory_stora
     assert (survey["cols"], survey["rows"]) == (4, 3)
     assert survey["vertical_offset_m"] == -31.5 and survey["has_overlay"] and survey["overlay_corners"] == corners
 
-    listed = client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers=cast["other"]["headers"]).json()["items"]
+    # A draft's surveys open to the people it is shared with, not to everyone.
+    refused = client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers=cast["other"]["headers"])
+    assert refused.status_code == 403 and "in progress" in refused.json()["detail"]
+    listed = client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers=cast["colleague"]["headers"]).json()["items"]
     assert survey["id"] in [s["id"] for s in listed]
-    patch = client_db.get(f"/submissions/{cast['form']}/drone-surveys/{survey['id']}/patch", headers=cast["other"]["headers"])
+    patch = client_db.get(f"/submissions/{cast['form']}/drone-surveys/{survey['id']}/patch", headers=cast["colleague"]["headers"])
     assert patch.status_code == 200 and patch.content == patch_bytes()
     image = client_db.get(f"/submissions/{cast['form']}/drone-surveys/{survey['id']}/overlay", headers=cast["owner"]["headers"])
     assert image.status_code == 200 and image.headers["content-type"] == "image/webp"
@@ -149,7 +157,7 @@ def test_a_survey_remembers_what_it_is_compared_with(client_db, cast):
     assert saved.status_code == 200, saved.text
     assert saved.json()["compare_with_survey_id"] == before["id"]
     # Everybody who opens the form sees it.
-    listed = client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers=cast["other"]["headers"]).json()["items"]
+    listed = client_db.get(f"/submissions/{cast['form']}/drone-surveys", headers=cast["colleague"]["headers"]).json()["items"]
     assert next(s for s in listed if s["id"] == after["id"])["compare_with_survey_id"] == before["id"]
 
     assert client_db.patch(url, json={"compare_with_survey_id": after["id"]}, headers=cast["owner"]["headers"]).status_code == 422

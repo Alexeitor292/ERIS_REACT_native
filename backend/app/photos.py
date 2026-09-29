@@ -12,7 +12,8 @@ from .deps import deny_public_only, require_roles
 from .db import get_db
 from .storage import put_object_bytes, make_object_key
 from .config import settings
-from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
+from .permissions import require_is_owner_or_admin
+from .services import form_access
 from .roles import GISA_AUTHOR_ROLES
 
 router = APIRouter(tags=["photos"])
@@ -266,11 +267,10 @@ def list_submissions_page(
     status_filter: str | None = Query(default=None, alias="status"),
     db: Session = Depends(get_db),
     # A second, photo-centric submission list. The narrowed GET /submissions is
-    # the viewer's list; this one keeps the legacy operational visibility rules
-    # and is on the deny list (org model design §4.5).
+    # the viewer's list; this one is on the deny list (org model design §4.5).
     user=Depends(deny_public_only),
 ):
-    """Cursor-paginated submission worklist preserving the legacy visibility rules."""
+    """Cursor-paginated submission worklist: the forms this person may open."""
     params: dict[str, object] = {"limit_plus_one": limit + 1}
     predicates: list[str] = []
 
@@ -292,21 +292,10 @@ def list_submissions_page(
         FROM submissions s
     """
 
-    # The photo index across all submissions is broad READ, not review
-    # authority: it follows the operational role model, which already includes
-    # the legacy REVIEWER.
-    if is_admin(user) or is_operational_user(user):
-        joins_sql = "LEFT JOIN submission_gisa g ON g.submission_id = s.id"
-    else:
-        params["uid"] = int(user["id"])
-        joins_sql = """
-            LEFT JOIN submission_visibility v
-              ON v.submission_id = s.id AND v.user_id = :uid
-            LEFT JOIN submission_editors e
-              ON e.submission_id = s.id AND e.user_id = :uid
-            LEFT JOIN submission_gisa g ON g.submission_id = s.id
-        """
-        predicates.insert(0, "(s.created_by_user_id = :uid OR v.user_id IS NOT NULL OR e.user_id IS NOT NULL)")
+    # The forms this person may open (services/form_access.py): approved work,
+    # their own and shared forms, and work in progress on their route.
+    joins_sql = "LEFT JOIN submission_gisa g ON g.submission_id = s.id"
+    predicates.insert(0, form_access.readable_sql(db, user, params))
 
     where_sql = f"WHERE {' AND '.join(predicates)}" if predicates else ""
     rows = db.execute(text(f"""

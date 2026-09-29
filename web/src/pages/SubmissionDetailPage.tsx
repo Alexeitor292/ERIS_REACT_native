@@ -1336,6 +1336,13 @@ export default function SubmissionDetailPage() {
             title="This record is not available"
             detail="Only approved records are published. This one is either still in progress or does not exist."
           />
+        ) : err && !data && err.startsWith("This technical form is in progress") ? (
+          /* Work in progress opens only to the people on its route and those it
+             is shared with (backend services/form_access.py). */
+          <AccessDeniedNotice
+            title="This technical form is in progress"
+            detail="Until it is approved, only the people working on it (its author, the chiefs on its route, whoever is assigned) and those it is shared with can open it. Ask its author to share it with you."
+          />
         ) : err ? (
           <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{err}</div>
         ) : null}

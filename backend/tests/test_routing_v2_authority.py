@@ -545,10 +545,13 @@ class TestSubmissionLevelConflicts:
         assert chief.json()["context"]["assessment_routing_path"] == "BRANCH"
         assert chief.json()["context"]["can_review"] is True
         assert chief.json()["submission"]["can_review"] is True
-        # The legacy REVIEWER account reads everything and decides nothing.
-        legacy = client_db.get(f"/submissions/{sid}", headers=_auth(tokens["other_staff"]))
-        assert legacy.status_code == 200
-        assert legacy.json()["submission"]["can_review"] is False
+        # The office chief is on the route (their office's work): reads it, decides nothing.
+        office = client_db.get(f"/submissions/{sid}", headers=_auth(tokens["officechief"]))
+        assert office.status_code == 200, office.text
+        assert office.json()["submission"]["can_review"] is False
+        # Someone off the route cannot open work in progress.
+        other = client_db.get(f"/submissions/{sid}", headers=_auth(tokens["other_staff"]))
+        assert other.status_code == 403 and "in progress" in other.json()["detail"]
 
     def test_unlinked_legacy_submission_review_is_unchanged(self, client_db, tokens):
         created = client_db.post(

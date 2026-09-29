@@ -45,7 +45,7 @@ from .routes.drone_surveys import router as drone_surveys_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
 from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
-from .services import public_visibility
+from .services import form_access, public_visibility
 from .services import rich_text as rich_text_svc
 from .precision import normalize_post_mile, normalize_route, round_coordinate
 from .user_metadata import parse_user_metadata
@@ -171,46 +171,19 @@ async def eris_unhandled_exception_handler(request: Request, exc: Exception):
 # ----------------------------
 
 def can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
-    # Broad visibility: any operational user (admin, coordinator, office/branch
-    # chief, Staff, Senior Specialist) may READ submissions / assessment
-    # technical forms. Everyone else — the Maintenance Crew — is restricted to
-    # records they own or were explicitly granted (the reader/editor permits).
-    # A guest never reaches this: every route behind it refuses a public-only
-    # account first (tests/test_route_guards.py).
-    if is_admin(user) or is_operational_user(user):
-        return True
-
-    row = db.execute(text("""
-        SELECT
-            s.created_by_user_id AS owner_id,
-            EXISTS(
-                SELECT 1
-                FROM submission_visibility v
-                WHERE v.submission_id = s.id AND v.user_id = :uid
-                LIMIT 1
-            ) AS has_view_grant,
-            EXISTS(
-                SELECT 1
-                FROM submission_editors e
-                WHERE e.submission_id = s.id AND e.user_id = :uid
-                LIMIT 1
-            ) AS has_edit_grant
-        FROM submissions s
-        WHERE s.id = :sid
-        LIMIT 1
-    """), {"sid": submission_id, "uid": user["id"]}).mappings().first()
-
-    if not row:
-        return False
-
-    if int(row["owner_id"]) == int(user["id"]):
-        return True
-
-    return bool(row["has_view_grant"]) or bool(row["has_edit_grant"])
+    # Opening a technical form: its owner and the people it is shared with; for
+    # operational users, approved work, and work in progress only to the people
+    # on its route (services/form_access.py). The Maintenance Crew keep their own
+    # forms and shares. A guest never reaches this: every route behind it refuses
+    # a public-only account first (tests/test_route_guards.py).
+    return form_access.can_read(db, user, submission_id)
 
 def require_can_view_submission(submission_id: int, db: Session, user: dict) -> None:
     if not can_view_submission(db, user=user, submission_id=submission_id):
-        raise HTTPException(status_code=403, detail="Not allowed to view this submission")
+        # An operational user is refused only work in progress; say so, and how
+        # to get it (a share), rather than a bare "not allowed".
+        detail = form_access.IN_PROGRESS_DETAIL if is_operational_user(user) else "Not allowed to view this submission"
+        raise HTTPException(status_code=403, detail=detail)
 
 def require_can_read_submission_record(submission_id: int, db: Session, user: dict) -> None:
     """View permission — or, for a read-only viewer, the PUBLIC record.
@@ -2147,17 +2120,15 @@ def list_submissions(
 ):
     allowed = {"DRAFT", "SUBMITTED", "APPROVED", "REJECTED"}
     params: dict[str, object] = {"limit": limit}
-    status_filter = ""
     if status:
         st = status.upper()
         if st not in allowed:
             raise HTTPException(status_code=400, detail="Invalid status filter")
         params["status"] = st
-        status_filter = "WHERE status = :status"
 
     # A read-only viewer gets technical forms belonging to APPROVED assessments
-    # and nothing else — never the operational branch below, whose whole point is
-    # that it is state-blind and returns DRAFT rows (org model design §4.5). The
+    # and nothing else — never the operational branch below, which returns
+    # work in progress to the people on its route (org model design §4.5). The
     # status filter still applies on top, so ?status=DRAFT simply returns nothing.
     if is_public_only(user):
         rows = db.execute(text("""
@@ -2182,16 +2153,17 @@ def list_submissions(
         """), params).mappings().all()
         return {"items": [dict(r) for r in rows]}
 
-    # Listing every submission is broad READ, not review authority, so it follows
-    # the operational role model (which already includes the legacy REVIEWER).
+    # Operational users list the forms they may open: approved work, their own
+    # and shared forms, and work in progress on their route (form_access).
     if is_admin(user) or is_operational_user(user):
+        readable = form_access.readable_sql(db, user, params)
         rows = db.execute(text("""
             SELECT s.id, s.created_by_user_id, s.status, s.client_submission_uuid, s.title,
                    s.created_at, s.submitted_at, s.reviewed_at,
                    g.district, g.county, g.route, g.post_mile
             FROM submissions s
             LEFT JOIN submission_gisa g ON g.submission_id = s.id
-            """ + status_filter + """
+            WHERE """ + readable + (" AND s.status = :status" if status else "") + """
             ORDER BY s.id DESC
             LIMIT :limit
         """), params).mappings().all()
@@ -3623,12 +3595,15 @@ def attachment_download_url(
     if not row:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
-    # Broad READ on attachments, not review authority. Note the operational
-    # short-circuit does NOT fire for a read-only viewer — a viewer is not an
+    # A form's files open when the form does (form_access). Note the operational
+    # branch does NOT fire for a read-only viewer — a viewer is not an
     # operational user — so the public-record walk below is reached (design §4.5).
     if is_public_only(user):
         if not public_visibility.viewer_can_read_public_attachment(db, user, attachment_id):
             raise HTTPException(status_code=404, detail="Attachment not found")
+    elif is_operational_user(user) and not is_admin(user):
+        if not form_access.can_read_attachment(db, user, attachment_id):
+            raise HTTPException(status_code=403, detail=form_access.IN_PROGRESS_DETAIL)
     elif not (is_admin(user) or is_operational_user(user)):
         sid = db.execute(text("""
             SELECT al.submission_id
@@ -3686,6 +3661,9 @@ def attachment_content(
     if is_public_only(user):
         if not public_visibility.viewer_can_read_public_attachment(db, user, attachment_id):
             raise HTTPException(status_code=404, detail="Attachment not found")
+    elif is_operational_user(user) and not is_admin(user):
+        if not form_access.can_read_attachment(db, user, attachment_id):
+            raise HTTPException(status_code=403, detail=form_access.IN_PROGRESS_DETAIL)
     elif not (is_admin(user) or is_operational_user(user)):
         sid = db.execute(text("""
             SELECT al.submission_id

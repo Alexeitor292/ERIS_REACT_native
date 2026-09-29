@@ -356,7 +356,8 @@ export default function MissionCenterProjectExplorer() {
                   {incidentGis.incident.description ? <div className="mt-4 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-3"><div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Report description</div><p className="mt-1 text-sm">{incidentGis.incident.description}</p></div> : null}
 
                   <div className="mt-5 flex flex-wrap gap-2">
-                    {incidentGis.incident.linked_submission_id ? <Link to={`/submissions/${incidentGis.incident.linked_submission_id}`} className={btnPrimary}>Open technical submission</Link> : null}
+                    {incidentGis.incident.linked_submission_id && incidentGis.incident.linked_submission_readable !== false ? <Link to={`/submissions/${incidentGis.incident.linked_submission_id}`} className={btnPrimary}>Open technical submission</Link> : null}
+                    {incidentGis.incident.linked_submission_id && incidentGis.incident.linked_submission_readable === false ? <span className="text-xs text-muted">Technical form in progress · opens once approved</span> : null}
                     <Link to={`/incidents/${selectedIncident.id}`} className={btn}>Open incident record</Link>
                     <Link to={`/incident-groups/${selectedEventGroup.id}`} className={btn}>Open Incident Group</Link>
                   </div>

@@ -240,6 +240,11 @@ Technical forms can also exist on their own, from before assessments. These go
 reviews them. A form attached to an assessment is always reviewed through the
 assessment instead.
 
+Until its assessment is approved, a technical form opens only to the people
+working on it: its owner, the chiefs on its route, whoever is assigned, and
+administrators (see [roles-and-identity.md](roles-and-identity.md)). Anyone
+can still see that the assessment exists and where it stands.
+
 A form's owner can **share** it with named people, who can then view and edit
 it. Branch chiefs approve shares into or out of their branch, and office chiefs
 are told when one leaves their office or involves a Senior Specialist (see

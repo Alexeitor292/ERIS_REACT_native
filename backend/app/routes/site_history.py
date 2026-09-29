@@ -32,6 +32,7 @@ from ..constants.gisa_lookups import GISA_ACTION_LUT, GISA_INCIDENT_TYPE_LUT
 from ..db import get_db
 from ..deps import require_roles
 from ..roles import MAINTENANCE_COORDINATOR, MAINTENANCE_CREW, OPERATIONAL_ROLES
+from ..services import form_access
 from .event_groups import is_outside_record
 
 router = APIRouter(tags=["site-history"])
@@ -159,20 +160,26 @@ def site_history(
 
     ids = [int(row["id"]) for row, _, _ in near]
     types: dict[int, set[str]] = {incident_id: set() for incident_id in ids + own_incidents}
+    # What other technical forms say is read only from forms this person may open
+    # (approved work, or work on their route): a form in progress stays closed.
+    readable_params: dict = {}
+    readable = form_access.readable_sql(db, user, readable_params)
     if types:
         for incident_id, code in db.execute(
             text(
-                """
+                f"""
                 SELECT l.incident_id, t.incident_type_code FROM incident_submission_links l
                   JOIN submission_gisa_incident_types t ON t.submission_id = l.submission_id
-                 WHERE l.incident_id IN :ids
+                  JOIN submissions s ON s.id = t.submission_id
+                 WHERE l.incident_id IN :ids AND {readable}
                 UNION
                 SELECT a.incident_id, t.incident_type_code FROM assessments a
                   JOIN submission_gisa_incident_types t ON t.submission_id = a.submission_id
-                 WHERE a.incident_id IN :ids
+                  JOIN submissions s ON s.id = t.submission_id
+                 WHERE a.incident_id IN :ids AND {readable}
                 """
             ).bindparams(bindparam("ids", expanding=True)),
-            {"ids": list(types)},
+            {"ids": list(types), **readable_params},
         ).all():
             types[int(incident_id)].add(str(code))
     for row, _, _ in near:
@@ -225,7 +232,7 @@ def site_history(
         # Immediate and follow-up actions from each incident's technical forms.
         for incident_id, group, code in db.execute(
             text(
-                """
+                f"""
                 SELECT f.incident_id, g.action_group, g.action_code FROM (
                     SELECT incident_id, submission_id FROM incident_submission_links WHERE incident_id IN :ids
                     UNION SELECT incident_id, submission_id FROM assessments
@@ -234,9 +241,11 @@ def site_history(
                       JOIN assessments a ON a.id = s.assessment_id WHERE a.incident_id IN :ids
                 ) f
                 JOIN submission_gisa_actions g ON g.submission_id = f.submission_id
+                JOIN submissions s ON s.id = f.submission_id
+                WHERE {readable}
                 """
             ).bindparams(bindparam("ids", expanding=True)),
-            {"ids": listed},
+            {"ids": listed, **readable_params},
         ).all():
             actions.setdefault(int(incident_id), {}).setdefault(str(group), set()).add(str(code))
 
