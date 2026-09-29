@@ -91,11 +91,10 @@ OPERATIONAL_ROLES: set[str] = {
 
 # Read-only public visibility. A THIRD CATEGORY, deliberately outside
 # OPERATIONAL_ROLES: that set is a single flat switch guarding roughly twelve
-# endpoint families and it is STATE-BLIND — can_view_submission returns True for
-# any operational user and list_submissions returns DRAFT rows to them — so
-# adding GUEST there would hand every guest every draft technical form in the
-# state (design §4.1). "Approved only" is expressed per handler by
-# services/public_visibility.py instead.
+# endpoint families, and operational users open work in progress on their route
+# (services/form_access.py), so adding GUEST there would widen far more than
+# the approved record (design §4.1). "Approved only" is expressed per handler
+# by services/public_visibility.py instead.
 PUBLIC_VIEW_ROLES: set[str] = {GUEST}
 
 # Who may file a field report: the crew on the road, Staff, and administrators.

@@ -10,7 +10,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import deny_public_only, get_current_user
 from ..permissions import is_admin, is_operational_user, is_public_only
-from ..services import public_visibility
+from ..services import form_access, public_visibility
 from ..storage import object_access_url
 
 router = APIRouter(tags=["photo-map"])
@@ -36,15 +36,9 @@ def _owns_linked_incident(db: Session, *, user_id: int, submission_id: int) -> b
 
 
 def _can_view_submission(db: Session, *, user: dict, submission_id: int) -> bool:
-    if is_admin(user) or is_operational_user(user):
-        return True
-    row = db.execute(text("""
-        SELECT s.created_by_user_id AS owner_id,
-               EXISTS(SELECT 1 FROM submission_visibility v WHERE v.submission_id=s.id AND v.user_id=:uid) AS has_view_grant,
-               EXISTS(SELECT 1 FROM submission_editors e WHERE e.submission_id=s.id AND e.user_id=:uid) AS has_edit_grant
-        FROM submissions s WHERE s.id=:sid LIMIT 1
-    """), {"sid": submission_id, "uid": user["id"]}).mappings().first()
-    if bool(row) and (int(row["owner_id"]) == int(user["id"]) or bool(row["has_view_grant"]) or bool(row["has_edit_grant"])):
+    # Whoever may open the form (services/form_access.py), and the reporter of
+    # the incident its photos came from.
+    if form_access.can_read(db, user, submission_id):
         return True
     return _owns_linked_incident(db, user_id=int(user["id"]), submission_id=submission_id)
 
@@ -61,7 +55,7 @@ def _require_photo_map_read(db: Session, *, user: dict, submission_id: int) -> N
         public_visibility.ensure_public_submission(db, user, submission_id)
         return
     if not _can_view_submission(db, user=user, submission_id=submission_id):
-        raise HTTPException(status_code=403, detail="Not allowed to view this submission photo map")
+        raise HTTPException(status_code=403, detail=form_access.IN_PROGRESS_DETAIL if is_operational_user(user) else "Not allowed to view this submission photo map")
 
 
 def _can_edit_submission(db: Session, *, user: dict, submission_id: int) -> bool:
@@ -321,7 +315,7 @@ def put_photo_correction(
     user=Depends(deny_public_only),
 ):
     if not _can_view_submission(db, user=user, submission_id=submission_id):
-        raise HTTPException(status_code=403, detail="Not allowed to view this submission photo map")
+        raise HTTPException(status_code=403, detail=form_access.IN_PROGRESS_DETAIL if is_operational_user(user) else "Not allowed to view this submission photo map")
     if not _photo_belongs_to_submission(db, submission_id=submission_id, attachment_id=attachment_id):
         raise HTTPException(status_code=404, detail="Photo attachment not found in this submission")
     if not _can_edit_photo(db, user=user, submission_id=submission_id, attachment_id=attachment_id):

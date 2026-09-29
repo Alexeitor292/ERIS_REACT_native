@@ -12,6 +12,8 @@ export type MissionCenterIncident = ProjectIncidentSummary & {
   description: string | null;
   first_occurred_at: string | null;
   linked_submission_id: number | null;
+  /** False while the form is in progress and the viewer is not on its route. */
+  linked_submission_readable?: boolean;
 };
 
 export type MissionCenterIncidentGis = {

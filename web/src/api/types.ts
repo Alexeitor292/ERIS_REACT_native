@@ -370,6 +370,8 @@ export type Incident = {
   duplicate_of_incident_id?: number | null;
   duplicate_of_location_id?: number | null;
   linked_submission_id: number | null;
+  /** False while the form is in progress and the viewer is not on its route. */
+  linked_submission_readable?: boolean;
   road_inventory_context: RoadInventoryIncidentContext | null;
   assignment: IncidentAssignment | null;
 };

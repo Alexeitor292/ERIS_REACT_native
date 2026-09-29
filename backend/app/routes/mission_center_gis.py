@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import require_roles
+from ..services import form_access
 from ..storage import object_access_url
 from . import photo_map as photo_map_routes
 from . import projects as project_routes
@@ -212,7 +213,10 @@ def mission_center_incident_gis(
         else None
     )
 
-    if linked_submission_id is not None:
+    # The form's corrected photo map only for someone who may open the form; to
+    # everyone else a form in progress shows the incident's own photos.
+    form_readable = linked_submission_id is not None and form_access.can_read(db, user, linked_submission_id)
+    if form_readable:
         photo_map = photo_map_routes.submission_photo_map(
             submission_id=linked_submission_id,
             db=db,
@@ -247,11 +251,13 @@ def mission_center_incident_gis(
             "created_at": _iso(incident.get("created_at")),
             "updated_at": _iso(incident.get("updated_at")),
             "linked_submission_id": linked_submission_id,
+            # False while the form is in progress and this person is not on its route.
+            "linked_submission_readable": form_readable,
         },
         "project": project,
         "geometry": _json_value(geometry),
         "geometry_srid": 4326,
-        "geometry_source": "SUBMISSION_GISA" if linked_submission_id is not None and geometry is not None else None,
+        "geometry_source": "SUBMISSION_GISA" if form_readable and geometry is not None else None,
         "photo_summary": summary,
         "photos": photos,
     }

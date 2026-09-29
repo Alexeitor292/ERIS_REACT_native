@@ -46,6 +46,15 @@ Rules that hold across the system:
   the branch route, only the branch chief named on that assessment may review.
   On the Senior Specialist route, only an office chief of that assessment's
   office may.
+- **A technical form opens to its route until the work is approved.** Everyone
+  operational sees that an assessment exists, its stage and who has it. Its
+  technical forms (fields, memos, photos and files, drone surveys, the PDF)
+  open only to the form's owner, the people it is shared with, the office
+  chiefs of the assessment's office, the branch chief it was handed to, whoever
+  is assigned to it, and administrators. Once the assessment is approved they
+  open to every operational user; a form outside any assessment opens once it
+  is approved itself. Anyone else is told the form is in progress and can ask
+  its owner to share it (`backend/app/services/form_access.py`).
 - **Scope narrows the reach.** A coordinator reads the districts they cover;
   office and branch chiefs read their office; Staff and Senior Specialists read
   what they are assigned. A missing district or office reads nothing (fail
