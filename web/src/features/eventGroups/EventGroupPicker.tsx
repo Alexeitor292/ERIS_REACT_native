@@ -159,7 +159,7 @@ export default function EventGroupPicker({
 
             <label className={optionClass(creating)}>
               <input type="radio" name={`event-group-${incidentId}`} checked={creating} onChange={chooseNew} className="mt-0.5" />
-              <span><span className="block text-sm font-semibold">Starts its own event</span><span className="mt-0.5 block text-xs text-muted">No group here covers it — ERIS creates a new one.</span></span>
+              <span><span className="block text-sm font-semibold">Starts its own group</span><span className="mt-0.5 block text-xs text-muted">No group here covers it — ERIS creates a new one.</span></span>
             </label>
 
             {creating ? (
