@@ -61,6 +61,8 @@ type Props = {
   onGeometryChange?: (geometry: any | null) => void;
   /** A drone survey's orthomosaic and footprint, under the site areas so a new outline can be drawn over it. */
   drone?: DroneMapSurvey | null;
+  /** The section line Measure uses: drawn (S1, S2, …) or the default fall line (Top to Bottom). */
+  sectionLine?: { points: Array<[number, number]>; fallLine: boolean } | null;
 };
 
 export type DroneMapSurvey = {
@@ -132,6 +134,7 @@ export default function SubmissionArcGisMap({
   editable = false,
   onGeometryChange,
   drone = null,
+  sectionLine = null,
 }: Props) {
   const divRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<MapView | null>(null);
@@ -513,6 +516,40 @@ export default function SubmissionArcGisMap({
       );
     }
   }, [photoEvidence]);
+
+  // The section line Measure uses, over everything else.
+  const sectionLineKey = sectionLine ? JSON.stringify(sectionLine) : "";
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view?.map || !sectionLine || sectionLine.points.length < 2) return;
+    const layer = new GraphicsLayer({ title: "Section line", listMode: "hide" });
+    const blue = [37, 99, 235, 1];
+    layer.add(
+      new Graphic({
+        geometry: new Polyline({ paths: [sectionLine.points], spatialReference: SpatialReference.WGS84 }),
+        symbol: { type: "simple-line", color: blue, width: 3, style: sectionLine.fallLine ? "dash" : "solid" } as any,
+        attributes: { __section_line: true },
+      }),
+    );
+    const labels: Array<[[number, number], string]> = sectionLine.fallLine
+      ? [[sectionLine.points[0], "Top"], [sectionLine.points[sectionLine.points.length - 1], "Bottom"]]
+      : sectionLine.points.map((p, i) => [p, `S${i + 1}`]);
+    for (const [point, text] of labels) {
+      const geometry = new Point({ longitude: point[0], latitude: point[1], spatialReference: SpatialReference.WGS84 });
+      layer.add(new Graphic({ geometry, symbol: { type: "simple-marker", style: "circle", color: blue, size: 8, outline: { color: [255, 255, 255, 1], width: 1.5 } } as any, attributes: { __section_line: true } }));
+      layer.add(new Graphic({ geometry, symbol: { type: "text", text, color: [255, 255, 255, 1], haloColor: [30, 58, 138, 0.95], haloSize: 2, yoffset: 12, font: { size: 10, weight: "bold" } } as any, attributes: { __section_line: true } }));
+    }
+    view.map.add(layer);
+    return () => {
+      try {
+        view.map?.remove(layer);
+        layer.destroy();
+      } catch {
+        // The view may already be gone.
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionLineKey]);
 
   // A drone survey: its orthomosaic just above the basemap, its outline dashed.
   const droneKey = drone ? `${drone.key}|${drone.overlayUrl ?? ""}|${JSON.stringify(drone.footprint)}` : "";
