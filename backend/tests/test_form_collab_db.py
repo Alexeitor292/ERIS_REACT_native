@@ -132,3 +132,38 @@ def test_presence_and_the_memo_being_written(client_db, pair, form):
     assert free["granted"] == ["recommendations_notes"] and not any(o["session_id"] == mine for o in free["others"])
     assert _save(client_db, form, colleague, {"recommendations_notes_html": "<p>Mine</p>"}, opened).status_code == 200
     client_db.delete(f"{url}/{theirs}", headers=colleague["headers"])
+
+
+def test_people_it_is_shared_with_add_photos_videos_and_documents_to_sections(client_db, pair, form, monkeypatch):
+    from app import photos
+    from app.config import settings
+
+    stored: dict[str, bytes] = {}
+    monkeypatch.setattr(photos, "put_object_bytes", lambda *, object_key, data, content_type, bucket=None: stored.__setitem__(object_key, data))
+    colleague = pair["colleague"]
+    video = client_db.post(
+        f"/submissions/{form}/attachments?section_key=water_drainage&kind=VIDEO",
+        files={"file": ("culvert.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")},
+        headers=colleague["headers"],
+    )
+    assert video.status_code == 200, video.text
+    assert video.json()["kind"] == "VIDEO" and video.json()["section_key"] == "water_drainage"
+    doc = client_db.post(
+        f"/submissions/{form}/attachments?section_key=material",
+        files={"file": ("lab-results.pdf", b"%PDF-1.4 test", "application/pdf")},
+        headers=colleague["headers"],
+    )
+    assert doc.status_code == 200 and doc.json()["kind"] == "DOC"
+    listed = client_db.get(f"/submissions/{form}", headers=pair["owner"]["headers"]).json()["attachments"]
+    assert {(a["section_key"], a["kind"]) for a in listed} >= {("water_drainage", "VIDEO"), ("material", "DOC")}
+
+    # Too large: a clear refusal, nothing stored.
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 1)
+    before = len(stored)
+    big = client_db.post(
+        f"/submissions/{form}/attachments?section_key=distribution&kind=VIDEO",
+        files={"file": ("long.mp4", b"0" * (1024 * 1024 + 10), "video/mp4")},
+        headers=colleague["headers"],
+    )
+    assert big.status_code == 413 and "larger than 1 MB" in big.json()["detail"]
+    assert len(stored) == before

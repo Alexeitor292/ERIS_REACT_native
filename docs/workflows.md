@@ -283,6 +283,8 @@ layout every form opens with.
 
 ## 7. Photos
 
+On the web, every section of the GISA sheet (Distribution, Incident Type, Material, Highway Status, Pavement / Ground Status, Vegetation on Slope, Water / Drainage, Water Content, Measurements) and every memo has **Attach**: photos, videos and documents (PDF, Word, Excel, KMZ and the like, up to 95 MB each) are filed under that section, for anyone who can edit the form. Photos keep the location and direction in their EXIF.
+
 Photos carry the phone's position and heading when they were taken. The **site
 photo map** places them around the site. Anyone who can edit the form, and
 the reporter of the incident a photo came from, can correct its position or
