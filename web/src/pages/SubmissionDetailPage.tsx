@@ -23,6 +23,8 @@ import { useAttachmentUrlResolver } from "../features/submissions/SubmissionAtta
 import { R, SubmissionDetailCard, SubmissionDetailCardGrid } from "../features/submissions/SubmissionDetailPrimitives";
 import { getSubmissionPhotoEvidence, type PhotoMapResponse } from "../features/submissions/photoEvidenceApi";
 import { buildLibraryItems, CARD_SECTION_KEYS, itemsForSectionKeys, NOTES_SECTION_KEYS } from "../features/submissions/submissionAttachmentModel";
+import { uploadSection } from "../features/submissions/sectionUpload";
+import { figureRegistry } from "../features/submissions/memoFigureModel";
 import { useSubmissionDashboardLayout, type ResizeMode } from "../features/submissions/useSubmissionDashboardLayout";
 import {
   boolToTri,
@@ -1129,6 +1131,13 @@ export default function SubmissionDetailPage() {
     if (keys) setSectionDialog({ title, keys });
   };
 
+  // The memos' figures: the form's photos, numbered across the memos, and new ones uploaded to the memo's section.
+  const memoPhotos = useMemo(
+    () => libraryItems.filter((item) => item.media === "photo").map((item) => ({ id: item.attachment.id, name: item.attachment.file_name })).reverse(),
+    [libraryItems],
+  );
+  const figureRegistryValue = useMemo(() => figureRegistry(memos), [memos]);
+
   // New files in a section: refresh the attachments (and the photo map) without touching the form being edited.
   async function refreshAttachments() {
     try {
@@ -1808,6 +1817,22 @@ export default function SubmissionDetailPage() {
                 attachmentCount={(key) => sectionCount(NOTES_SECTION_KEYS[key])}
                 onOpenAttachments={(key, title) => openSectionAttachments(title, NOTES_SECTION_KEYS[key])}
                 attachmentsButton={(count, onClick) => <SectionAttachmentsButton count={count} onClick={onClick} canAdd={canEdit} />}
+                figureTools={{
+                  registry: figureRegistryValue,
+                  photos: memoPhotos,
+                  thumbUrl: resolver.previewUrl,
+                  requestThumb: resolver.requestPreview,
+                  resolveUrl: resolver.resolve,
+                  uploadPhoto: canEdit
+                    ? async (memoKey, file) => {
+                        const sectionKey = NOTES_SECTION_KEYS[memoKey as keyof typeof NOTES_SECTION_KEYS]?.[0] ?? "observation";
+                        const id = await uploadSection(data.submission.id, sectionKey, file, () => {});
+                        await refreshAttachments();
+                        if (!id) throw new Error(`${file.name} uploaded, but the server did not say which photo it is.`);
+                        return id;
+                      }
+                    : null,
+                }}
               />
               <details className="mt-4 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2">
                 <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">Advanced: geometry JSON</summary>

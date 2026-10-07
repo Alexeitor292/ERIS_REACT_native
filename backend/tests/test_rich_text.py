@@ -52,3 +52,14 @@ def test_lists_headings_and_tables_read_naturally():
 def test_an_oversized_memo_is_refused():
     with pytest.raises(ValueError):
         sanitize_memo_html("<p>" + "x" * 210_000 + "</p>")
+
+
+def test_figures_and_citations_keep_their_photo_and_read_as_captions():
+    html = sanitize_memo_html(
+        "<p>Scarp in <span data-figure-ref=\"12\" data-label=\"1.1\" onclick=\"x()\">Figure 1.1</span>.</p>"
+        "<figure data-figure=\"12\" data-caption=\"Scarp &amp; road\" data-width=\"75\" data-label=\"1.1\" data-evil=\"1\">"
+        "<figcaption>Figure 1.1. Scarp &amp; road</figcaption></figure>"
+    )
+    assert 'data-figure="12"' in html and 'data-width="75"' in html and 'data-label="1.1"' in html
+    assert 'data-figure-ref="12"' in html and "onclick" not in html and "data-evil" not in html
+    assert memo_plain_text(html) == "Scarp in Figure 1.1.\nFigure 1.1. Scarp & road"

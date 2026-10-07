@@ -26,7 +26,7 @@ MAX_MIRROR_CHARS = 60_000
 _TAGS = {
     "p", "br", "h1", "h2", "h3", "h4", "strong", "b", "em", "i", "u", "s", "strike", "mark", "span",
     "a", "ul", "ol", "li", "blockquote", "pre", "code", "hr", "sub", "sup",
-    "table", "thead", "tbody", "tr", "th", "td", "colgroup", "col", "div",
+    "table", "thead", "tbody", "tr", "th", "td", "colgroup", "col", "div", "figure", "figcaption",
 }
 _STYLED = {"p", "h1", "h2", "h3", "h4", "span", "mark", "td", "th", "li"}
 _ATTRIBUTES: dict[str, set[str]] = {tag: {"style"} for tag in _STYLED}
@@ -39,6 +39,11 @@ _ATTRIBUTES["ol"] = {"start"}
 # Checklists: <ul data-type="taskList"><li data-type="taskItem" data-checked="true">.
 _ATTRIBUTES["ul"] = {"data-type"}
 _ATTRIBUTES["li"] = {"style", "data-type", "data-checked"}
+# Figures: one of the form's photos by attachment id, with its caption and number
+# (<figure data-figure="12" data-caption="…" data-width="100" data-label="1.1">);
+# citations point at one (<span data-figure-ref="12" data-label="1.1">Figure 1.1</span>).
+_ATTRIBUTES["figure"] = {"data-figure", "data-caption", "data-width", "data-label"}
+_ATTRIBUTES["span"] = {"style", "data-figure-ref", "data-label"}
 _STYLE_PROPERTIES = {
     "color", "background-color", "text-align", "font-size", "font-family", "line-height",
     "margin-left", "width", "min-width",
@@ -63,7 +68,7 @@ def sanitize_memo_html(html: str | None) -> str | None:
     return cleaned or None
 
 
-_BLOCKS = {"p", "div", "h1", "h2", "h3", "h4", "blockquote", "pre", "li", "tr", "table", "ul", "ol", "hr"}
+_BLOCKS = {"p", "div", "h1", "h2", "h3", "h4", "blockquote", "pre", "li", "tr", "table", "ul", "ol", "hr", "figure", "figcaption"}
 
 
 class _TextExtractor(HTMLParser):
