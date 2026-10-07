@@ -8,7 +8,7 @@ type AuthState = {
   me: Me | null;
   token: string | null;
   isInitializing: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<Me>;
   logout: () => void;
   refreshMe: () => Promise<void>;
 };
@@ -34,9 +34,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
+    // Who this is comes first: the pages see the token and the account together.
+    // Publishing the token alone sent /login to the landing page and the landing
+    // page's role gate (no account yet) back to /login, round and round until the
+    // browser stopped honouring history changes, leaving a blank /login.
     setToken(res.access_token);
+    let data: Me;
+    try {
+      data = await api<Me>("/auth/me");
+    } catch (error) {
+      clearToken();
+      throw error;
+    }
+    setMe(data);
     setTokenState(res.access_token);
-    await refreshMe();
+    return data;
   }
 
   function logout() {
