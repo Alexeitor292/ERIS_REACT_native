@@ -298,19 +298,15 @@ def test_coordinators_keep_their_crew_and_office_chiefs_their_coordinators(clien
         assert client_db.post("/org/maintenance/11/coordinators", json={"user_id": crew}, headers=mine).status_code == 403
         assert client_db.delete(f"/org/maintenance/11/crew/{crew}", headers=mine).status_code == 200
 
-        # An office chief adds coordinators to the districts their office serves, only.
+        # An office chief adds coordinators to any district.
         resp = client_db.post("/auth/login", json={"email": "mock.office.chief@dot.ca.gov", "password": "password"})
         assert resp.status_code == 200, resp.text
         chief = _auth(resp.json()["access_token"])
         by_district = client_db.get("/org/maintenance", headers=chief).json()["districts"]
-        served = [d["district"] for d in by_district if d["can_manage_coordinators"]]
-        elsewhere = [d["district"] for d in by_district if not d["can_manage_coordinators"]]
+        assert all(d["can_manage_coordinators"] for d in by_district)
         assert not any(d["can_manage_crew"] for d in by_district)
-        if served:
-            assert client_db.post(f"/org/maintenance/{served[0]}/coordinators", json={"user_id": crew}, headers=chief).status_code == 200
-            assert client_db.delete(f"/org/maintenance/{served[0]}/coordinators/{crew}", headers=chief).status_code == 200
-        if elsewhere:
-            assert client_db.post(f"/org/maintenance/{elsewhere[0]}/coordinators", json={"user_id": crew}, headers=chief).status_code == 403
+        assert client_db.post("/org/maintenance/12/coordinators", json={"user_id": crew}, headers=chief).status_code == 200
+        assert client_db.delete(f"/org/maintenance/12/coordinators/{crew}", headers=chief).status_code == 200
     finally:
         client_db.delete(f"/org/maintenance/11/coordinators/{coord}", headers=admin)
 

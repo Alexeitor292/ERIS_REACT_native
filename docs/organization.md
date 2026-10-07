@@ -71,7 +71,7 @@ once: the next request they make is judged by it.
 | **Administrator** | Everything, in every office: create and edit offices, name office chiefs, move people between offices, the maintenance lists, and who is an administrator. |
 | **Office chief** | Their own office's tree: add senior specialists, add, rename and retire branches, name or replace branch chiefs, add staff to any branch, move people within the office, remove anybody except office chiefs. |
 | **Branch chief** | Add staff to their own branch (people who sit nowhere yet) and remove them. Moving somebody from elsewhere in the office is the office chief's job. |
-| **Office chief, district lists** | Add and remove the Maintenance Coordinators of the districts their office serves, and choose the Primary. |
+| **Office chief, district lists** | Add and remove the Maintenance Coordinators of any district, and choose the Primary. |
 | **Maintenance coordinator** | Add and remove the Maintenance Crew of their own district(s). |
 
 Everybody may edit their own details. **Everybody with access to ERIS, guests

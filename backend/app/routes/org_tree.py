@@ -3,8 +3,8 @@ maintenance lists per district. Places give roles (services/org_tree.py).
 
 Anyone with access to ERIS (guests too) can read all of it. Changing it:
 office chiefs their own office, branch chiefs their own branch, maintenance
-coordinators their district's crew, office chiefs (for districts their office
-serves) and administrators the coordinators; administrators everything,
+coordinators their district's crew, office chiefs and administrators any
+district's coordinators; administrators everything,
 including who is an administrator. Office details (name, districts served) stay
 on /admin/org/offices.
 """

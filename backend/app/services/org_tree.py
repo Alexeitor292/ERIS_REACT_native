@@ -458,36 +458,22 @@ def _coordinated_districts(db: Session, user_id: int) -> set[str]:
     return {d for d in (normalize_district_code(r) for r in rows) if d}
 
 
-def _served_districts(db: Session, office_id: int | None) -> set[str]:
-    if not office_id:
-        return set()
-    rows = db.execute(
-        text("SELECT district FROM org_office_districts WHERE office_id = :oid AND org_type = 'GEOTECH' AND is_active = 1"),
-        {"oid": int(office_id)},
-    ).scalars().all()
-    return {d for d in (normalize_district_code(r) for r in rows) if d}
-
-
 def can_manage_crew(db: Session, actor: dict, district: str) -> bool:
     """A district's crew list: administrators, and that district's maintenance coordinators."""
     return is_admin(actor) or normalize_district_code(district) in _coordinated_districts(db, int(actor["id"]))
 
 
 def can_manage_coordinators(db: Session, actor: dict, district: str) -> bool:
-    """A district's coordinators: administrators, and office chiefs of an office that serves the district."""
-    if is_admin(actor):
-        return True
-    mine = placement(db, int(actor["id"]))
-    return mine["position"] == "OFFICE_CHIEF" and normalize_district_code(district) in _served_districts(db, mine["office_id"])
+    """Any district's coordinators: administrators and office chiefs."""
+    return is_admin(actor) or placement(db, int(actor["id"]))["position"] == "OFFICE_CHIEF"
 
 
 def maintenance_rights(db: Session, actor: dict) -> dict[str, dict[str, bool]]:
     """District -> what this person may change there, for the page."""
     admin = is_admin(actor)
     crew = _coordinated_districts(db, int(actor["id"]))
-    mine = placement(db, int(actor["id"]))
-    coordinators = _served_districts(db, mine["office_id"]) if mine["position"] == "OFFICE_CHIEF" else set()
-    return {d: {"crew": admin or d in crew, "coordinators": admin or d in coordinators} for d in DISTRICTS}
+    coordinators = admin or placement(db, int(actor["id"]))["position"] == "OFFICE_CHIEF"
+    return {d: {"crew": admin or d in crew, "coordinators": coordinators} for d in DISTRICTS}
 
 
 def _office_chief_count(db: Session, office_id: int, *, excluding: int | None = None) -> int:
@@ -771,7 +757,7 @@ def _require_list_right(db: Session, actor: dict, district: str, kind: str) -> N
     if kind == "CREW" and not can_manage_crew(db, actor, district):
         raise OrgTreeError(403, "Only this district's maintenance coordinators or an administrator can change its crew.")
     if kind == "COORDINATOR" and not can_manage_coordinators(db, actor, district):
-        raise OrgTreeError(403, "Only the office chief of an office serving this district or an administrator can change its coordinators.")
+        raise OrgTreeError(403, "Only an office chief or an administrator can change a district's coordinators.")
 
 
 def add_maintenance(db: Session, actor: dict, *, district: str, user_id: int, kind: str) -> None:
