@@ -2,7 +2,7 @@ import { mergeAttributes, Node, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { ImageOff, Trash2 } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 
 import { figureText, type FigureEntry } from "./memoFigureModel";
 
@@ -91,17 +91,71 @@ function FigureView({ node, editor, updateAttributes, deleteNode, selected }: No
     };
   }, [attachmentId, context]);
   const label = node.attrs.label || context?.registry.get(attachmentId)?.label || "";
-  const width = Number(node.attrs.width) || 100;
+  const stored = Number(node.attrs.width) || 100;
   const editable = editor.isEditable;
+  // Dragging a corner resizes like Word: live while dragging, saved on release.
+  const figureRef = useRef<HTMLElement | null>(null);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const width = dragWidth ?? stored;
+  const startResize = (side: "left" | "right") => (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const frame = figureRef.current;
+    const box = event.currentTarget.parentElement;
+    if (!frame || !box) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startPx = box.getBoundingClientRect().width;
+    const fullPx = frame.getBoundingClientRect().width || 1;
+    let latest = stored;
+    // The figure is centred, so one side moving by d changes its width by 2d.
+    const onMove = (move: PointerEvent) => {
+      const dx = (move.clientX - startX) * (side === "right" ? 1 : -1);
+      latest = Math.max(10, Math.min(100, Math.round(((startPx + 2 * dx) / fullPx) * 100)));
+      setDragWidth(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDragWidth(null);
+      if (latest !== stored) updateAttributes({ width: latest });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+  const handle = (corner: string, side: "left" | "right", cursor: string) => (
+    <span
+      aria-hidden
+      draggable={false}
+      onPointerDown={startResize(side)}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      className={`absolute ${corner} z-10 h-3 w-3 rounded-sm border-2 border-white bg-[var(--accent)] shadow ${selected || dragWidth != null ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+      style={{ cursor, touchAction: "none" }}
+    />
+  );
 
   return (
     <NodeViewWrapper
       as="figure"
       data-figure-view={attachmentId}
+      ref={figureRef}
       className={`eris-memo-figure my-3 rounded-lg p-1 ${selected && editable ? "ring-2 ring-[var(--accent)]" : ""}`}
       contentEditable={false}
     >
-      <div className="mx-auto" style={{ width: `${width}%` }} data-drag-handle>
+      <div className="group relative mx-auto" style={{ width: `${width}%` }} data-drag-handle>
+        {editable ? (
+          <>
+            {handle("-left-1.5 -top-1.5", "left", "nwse-resize")}
+            {handle("-right-1.5 -top-1.5", "right", "nesw-resize")}
+            {handle("-left-1.5 -bottom-1.5", "left", "nesw-resize")}
+            {handle("-right-1.5 -bottom-1.5", "right", "nwse-resize")}
+          </>
+        ) : null}
+        {dragWidth != null ? (
+          <span className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white">{dragWidth}%</span>
+        ) : null}
         {url && !failed ? (
           <img src={url} alt={node.attrs.caption || "Figure"} className="block h-auto w-full rounded border border-[var(--line)]" onError={() => setFailed(true)} />
         ) : (
@@ -130,7 +184,7 @@ function FigureView({ node, editor, updateAttributes, deleteNode, selected }: No
               key={w}
               type="button"
               onClick={() => updateAttributes({ width: w })}
-              className={`rounded border px-2 py-0.5 ${w === width ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--line)]"}`}
+              className={`rounded border px-2 py-0.5 ${w === stored ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--line)]"}`}
             >
               {w}%
             </button>
