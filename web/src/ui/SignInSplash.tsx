@@ -26,10 +26,10 @@ export function SignInSplashProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// Mobile: shrink 900 ms, "ERIS" from 460 ms over 420 ms, fade out at 1750 ms.
-// The web fade is a little longer (450 ms) so the page arrives softly.
-const FADE_AT_MS = 1750;
-const FADE_MS = 450;
+// The mobile timings (shrink 900 ms, "ERIS" from 460 ms, fade out at 1750 ms),
+// about half as slow again on the web, with a soft 700 ms fade onto the page.
+const FADE_AT_MS = 2700;
+const FADE_MS = 700;
 
 function SignInSplash({ onDone }: { onDone: () => void }) {
   const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;

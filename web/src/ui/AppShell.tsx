@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ClipboardCheck,
   Inbox,
@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Route,
+  Search,
   Settings,
   TriangleAlert,
   Users,
@@ -18,6 +19,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import NotificationBell from "../features/notifications/NotificationBell";
 import { useUiSettings } from "./UiSettingsContext";
+import Spotlight from "./Spotlight";
 import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
 import type { UserOrg } from "../api/types";
@@ -33,24 +35,33 @@ type NavSection = { label: string; items: NavEntry[] };
 
 function NavItem({ to, label, icon: Icon, alsoActive, collapsed }: NavEntry & { collapsed?: boolean }) {
   const { pathname } = useLocation();
+  const { pageTransitions } = useUiSettings();
   const extraActive = (alsoActive ?? []).some((prefix) => pathname.startsWith(prefix));
   return (
     <NavLink
       to={to}
+      // The browser's view transition: the new page slides in while the frame stays put.
+      viewTransition={pageTransitions}
       className={({ isActive }) =>
         cn(
-          "flex items-center rounded-lg text-sm font-medium transition-[background-color,color,box-shadow]",
+          "relative flex items-center overflow-hidden rounded-lg text-sm font-medium transition-[color,box-shadow]",
           collapsed ? "h-10 w-10 justify-center" : "gap-2.5 px-3 py-2",
           isActive || extraActive
-            ? "bg-[var(--brand)] text-white shadow-[0_8px_20px_rgba(31,94,255,0.25)]"
+            ? "text-white shadow-[0_8px_20px_rgba(31,94,255,0.25)]"
             : "text-[var(--ink)] hover:bg-[var(--panel-soft)]"
         )
       }
       title={collapsed ? label : undefined}
       aria-label={collapsed ? label : undefined}
     >
-      <Icon size={18} strokeWidth={NAV_ICON_STROKE} aria-hidden className="shrink-0" />
-      {collapsed ? null : <span className="truncate">{label}</span>}
+      {({ isActive }) => (
+        <>
+          {/* The blue bar fills from left to right as the page arrives. */}
+          {isActive || extraActive ? <span aria-hidden className="eris-nav-fill absolute inset-0 rounded-lg bg-[var(--brand)]" /> : null}
+          <Icon size={18} strokeWidth={NAV_ICON_STROKE} aria-hidden className="relative shrink-0" />
+          {collapsed ? null : <span className="relative truncate">{label}</span>}
+        </>
+      )}
     </NavLink>
   );
 }
@@ -178,20 +189,46 @@ const THEME_OPTIONS = [
 
 export default function AppShell({ title, children, workspace = false }: { title: string; children: ReactNode; workspace?: boolean }) {
   const { me, logout } = useAuth();
-  const { theme, setTheme } = useUiSettings();
-  const [navExpanded, setNavExpanded] = useState(true);
+  const { theme, setTheme, navCollapsed, setNavCollapsed } = useUiSettings();
+  const navExpanded = !navCollapsed;
+  const setNavExpanded = (update: (expanded: boolean) => boolean) => setNavCollapsed(!update(navExpanded));
+  const sections = useNavSections();
+  const pages = useMemo(() => sections.flatMap((section) => section.items), [sections]);
+  const [searching, setSearching] = useState(false);
+
+  // Ctrl/Cmd+K opens search anywhere.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearching(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const displayName = me?.full_name?.trim() || me?.email || "Signed-in user";
   const orgLine = orgIdentityLine(me?.org);
 
   return (
     <div className={cn("flex flex-col text-[var(--ink)]", workspace ? "min-h-screen lg:h-screen lg:overflow-hidden" : "min-h-screen")}>
-      <header className="sticky top-0 z-20 shrink-0 border-b border-[var(--line)] bg-[color:var(--panel)]/95 backdrop-blur">
+      <header className="sticky top-0 z-20 shrink-0 border-b border-[var(--line)] bg-[color:var(--panel)]/95 backdrop-blur" style={{ viewTransitionName: "eris-header" }}>
         <div className="mx-auto flex w-full max-w-[1900px] items-center gap-3 px-4 py-3 md:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <img src="/eris-logo.svg" alt="ERIS" className="h-9 w-9 shrink-0 rounded-md object-contain" />
             <div className="min-w-0 leading-tight"><div className="truncate text-sm font-semibold">Emergency Response Information System</div><div className="truncate text-xs text-muted">Caltrans | Geotechnical Services</div></div>
           </div>
           <div className="ml-auto flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSearching(true)}
+              title="Search ERIS (Ctrl+K)"
+              className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-sm text-muted hover:border-[var(--brand)] hover:text-[var(--ink)]"
+            >
+              <Search size={15} strokeWidth={NAV_ICON_STROKE} aria-hidden />
+              <span className="hidden md:inline">Search</span>
+              <kbd className="hidden rounded border border-[var(--line)] px-1 text-[10px] font-medium lg:inline">Ctrl K</kbd>
+            </button>
             <label className="hidden items-center gap-2 text-xs text-muted sm:flex">
               <span className="sr-only">Theme</span>
               <select
@@ -216,7 +253,7 @@ export default function AppShell({ title, children, workspace = false }: { title
 
       <div className={cn("mx-auto flex w-full max-w-[1900px] flex-1 flex-col px-4 md:px-6 lg:flex-row", workspace ? "gap-3 py-3 lg:min-h-0 lg:gap-4" : "gap-4 py-6 lg:gap-6")}>
         <aside className="lg:hidden"><div className="product-card p-3"><div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div><SidebarNavigation /></div></aside>
-        <aside className={cn("hidden shrink-0 transition-[width] duration-200 ease-out lg:block", navExpanded ? "w-64" : "w-16")}>
+        <aside className={cn("hidden shrink-0 transition-[width] duration-200 ease-out lg:block", navExpanded ? "w-64" : "w-16")} style={{ viewTransitionName: "eris-nav" }}>
           <div className="product-card sticky top-[82px] p-2">
             <div className={cn("mb-3 flex items-center", navExpanded ? "justify-between px-1" : "justify-center")}>
               {navExpanded && <div className="px-2 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div>}
@@ -234,12 +271,13 @@ export default function AppShell({ title, children, workspace = false }: { title
             <SidebarNavigation collapsed={!navExpanded} />
           </div>
         </aside>
-        <main className={cn("min-w-0 flex-1", workspace ? "lg:flex lg:min-h-0 lg:flex-col" : "")}>
+        <main className={cn("min-w-0 flex-1", workspace ? "lg:flex lg:min-h-0 lg:flex-col" : "")} style={{ viewTransitionName: "eris-page" }}>
           <div className={workspace ? "mb-2 shrink-0" : "mb-4"}><h1 className={workspace ? "text-lg font-semibold" : "text-xl font-semibold"}>{title}</h1></div>
           <div className={cn("product-card overflow-hidden", workspace ? "lg:min-h-0 lg:flex-1" : "min-h-full")}>{children}</div>
         </main>
       </div>
 
+      <Spotlight open={searching} onClose={() => setSearching(false)} pages={pages} searchRecords={!!me && isOperationalUser(me.roles)} />
       {!workspace ? <footer className="mt-auto border-t border-[var(--line)] bg-[color:var(--panel)]/70"><div className="mx-auto w-full max-w-[1900px] px-4 py-4 text-xs text-muted md:px-6">© {new Date().getFullYear()} Caltrans | ERIS (Internal)</div></footer> : null}
     </div>
   );
