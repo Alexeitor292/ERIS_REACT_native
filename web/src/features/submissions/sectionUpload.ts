@@ -22,7 +22,8 @@ export function uploadSection(
   sectionKey: string,
   file: File,
   onProgress: (fraction: number) => void,
-): Promise<void> {
+): Promise<number | null> {
+  // Resolves with the new attachment's id.
   const kind = uploadKind(file);
   const path =
     kind === "PHOTO"
@@ -43,7 +44,13 @@ export function uploadSection(
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         onProgress(1);
-        resolve();
+        let id: number | null = null;
+        try {
+          id = Number(JSON.parse(xhr.responseText)?.attachment_id) || null;
+        } catch {
+          // an empty answer still means it uploaded
+        }
+        resolve(id);
         return;
       }
       let message = `Upload failed (${xhr.status})`;

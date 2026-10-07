@@ -4,6 +4,7 @@ import { BookOpenText, ClipboardCheck, Eye, History, Lightbulb, Maximize2, Penci
 import { getSiteHistory, type SiteHistory } from "../../api/siteHistory";
 import type { RichMemoKey } from "./memoContentModel";
 import RichMemoEditor from "./RichMemoEditor";
+import type { MemoFigureTools } from "./memoFigures";
 import { RecordOfIncidentsView, type SiteNotesField } from "./SiteHistoryViews";
 import { othersIn, type PresenceOther } from "./collab/presenceModel";
 import { MemoLockNotice, PresenceDots, presenceOutline } from "./collab/PresenceUI";
@@ -75,6 +76,8 @@ type Props = {
   attachmentCount: (key: MemoTabKey) => number;
   onOpenAttachments: (key: MemoTabKey, label: string) => void;
   attachmentsButton: (count: number, onClick: () => void) => ReactNode;
+  /** Photos as figures and Word files in the memos; the memo key is filled in per tab. */
+  figureTools?: Omit<MemoFigureTools, "memoKey" | "uploadPhoto"> & { uploadPhoto: ((memoKey: string, file: File) => Promise<number>) | null };
   /** Others in the form: each memo tab shows who is in it. */
   presence?: readonly PresenceOther[];
   /** Memos someone else is writing: read-only here until they are done. */
@@ -138,6 +141,15 @@ export default function MemosPanel(props: Props) {
           placeholder={tab.placeholder ?? ""}
           documentTitle={tab.label}
           tall={tall}
+          figures={
+            props.figureTools
+              ? {
+                  ...props.figureTools,
+                  memoKey: key,
+                  uploadPhoto: props.figureTools.uploadPhoto ? (file) => props.figureTools!.uploadPhoto!(key, file) : null,
+                }
+              : null
+          }
         />
         </>
       );

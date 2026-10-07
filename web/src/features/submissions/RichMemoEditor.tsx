@@ -26,6 +26,10 @@ import {
   Code2,
   Columns2,
   Eraser,
+  FileDown,
+  FileUp,
+  Image as ImageIcon,
+  TextQuote as CiteIcon,
   Heading,
   Highlighter,
   IndentDecrease,
@@ -53,11 +57,15 @@ import {
   TableCellsMerge,
   Trash2,
   Underline,
+  Upload,
   Undo2,
   WrapText,
 } from "lucide-react";
 
 import { BlockFormatting, ShadedTableCell, ShadedTableHeader } from "./memoEditorExtensions";
+import { downloadBlob, exportMemoDocx, importMemoDocx } from "./memoDocx";
+import { figureText, memoNumber } from "./memoFigureModel";
+import { MemoFigure, MemoFigureRef, setFigureContext, type MemoFigureTools } from "./memoFigures";
 
 type Props = {
   value: string;
@@ -68,6 +76,8 @@ type Props = {
   documentTitle: string;
   /** Taller writing area for the full-screen view. */
   tall?: boolean;
+  /** Photos as figures, citations, and Word files (the memos of a form). */
+  figures?: MemoFigureTools | null;
 };
 
 const FONT_FAMILIES = [
@@ -105,7 +115,7 @@ const clean = (html: string) => DOMPurify.sanitize(html || "", { USE_PROFILES: {
  * over a writing surface that fills the container. Read-only viewers get the
  * document alone.
  */
-export default function RichMemoEditor({ value, onChange, editable, placeholder, documentTitle, tall = false }: Props) {
+export default function RichMemoEditor({ value, onChange, editable, placeholder, documentTitle, tall = false, figures = null }: Props) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -128,6 +138,8 @@ export default function RichMemoEditor({ value, onChange, editable, placeholder,
       ShadedTableHeader,
       Placeholder.configure({ placeholder }),
       CharacterCount,
+      MemoFigure,
+      MemoFigureRef,
     ],
     content: clean(value),
     editable,
@@ -145,6 +157,55 @@ export default function RichMemoEditor({ value, onChange, editable, placeholder,
   useEffect(() => {
     if (editor && !editor.isDestroyed) editor.setEditable(editable);
   }, [editor, editable]);
+
+  // The figures' numbers and photos.
+  const figureMemo = figures ? memoNumber(figures.memoKey) : 0;
+  const figureRegistry = figures?.registry;
+  const resolveFigureUrl = figures?.resolveUrl;
+  useEffect(() => {
+    if (!editor || !resolveFigureUrl || !figureRegistry) return;
+    setFigureContext(editor, { memoNumber: figureMemo || 9, registry: figureRegistry, resolveUrl: resolveFigureUrl });
+  }, [editor, figureMemo, figureRegistry, resolveFigureUrl]);
+
+  const [wordNotice, setWordNotice] = useState<string | null>(null);
+  const [wordBusy, setWordBusy] = useState(false);
+  const exportWord = async () => {
+    if (!editor) return;
+    setWordBusy(true);
+    setWordNotice("Preparing the Word file…");
+    try {
+      const blob = await exportMemoDocx({ doc: editor.getJSON(), title: documentTitle, memoTitle: "" });
+      downloadBlob(blob, `${documentTitle}.docx`);
+      setWordNotice(null);
+    } catch (error) {
+      setWordNotice(`The Word file could not be made: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setWordBusy(false);
+    }
+  };
+  const importWord = async (file: File) => {
+    if (!editor) return;
+    if (!editor.isEmpty && !window.confirm(`Replace this memo with ${file.name}? Text, tables, lists, figures and citations come back; colours and fonts come back simplified.`)) return;
+    setWordBusy(true);
+    setWordNotice(`Reading ${file.name}…`);
+    try {
+      const known = new Set(figures?.photos.map((photo) => photo.id) ?? []);
+      const upload = figures?.uploadPhoto;
+      const result = await importMemoDocx(file, {
+        known: (id) => known.has(id),
+        uploadPicture: upload ?? (() => Promise.reject(new Error("pictures can only be added by the form's editors"))),
+      });
+      editor.chain().focus().setContent(clean(result.html), { emitUpdate: true }).run();
+      const parts = [`${file.name} is in the memo.`];
+      if (result.uploaded) parts.push(`${result.uploaded} new picture${result.uploaded === 1 ? " was" : "s were"} added to the form's photos.`);
+      if (result.warnings.length) parts.push(result.warnings.slice(0, 3).join(" "));
+      setWordNotice(parts.join(" "));
+    } catch (error) {
+      setWordNotice(`${file.name} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setWordBusy(false);
+    }
+  };
 
   const [ribbonTab, setRibbonTab] = useState<TabKey>("home");
   const [findOpen, setFindOpen] = useState(false);
@@ -168,6 +229,8 @@ export default function RichMemoEditor({ value, onChange, editable, placeholder,
           findOpen={findOpen}
           setFindOpen={setFindOpen}
           pinned={tall ? "top-0" : "top-16"}
+          figures={figures}
+          word={{ busy: wordBusy, exportWord, importWord }}
         />
       ) : null}
       <div
@@ -183,11 +246,28 @@ export default function RichMemoEditor({ value, onChange, editable, placeholder,
       >
         <EditorContent editor={editor} />
       </div>
+      {wordNotice ? (
+        <div className="flex items-start justify-between gap-3 border-t border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2 text-xs" role="status">
+          <span>{wordNotice}</span>
+          {wordBusy ? null : (
+            <button type="button" className="shrink-0 text-muted hover:text-[var(--ink)]" onClick={() => setWordNotice(null)}>
+              Dismiss
+            </button>
+          )}
+        </div>
+      ) : null}
       <div className="flex items-center justify-between gap-3 rounded-b-xl border-t border-[var(--line)] bg-[var(--panel-soft)] px-4 py-1.5 text-[11px] text-muted">
         <span>
           {stats?.words ?? 0} words · {stats?.characters ?? 0} characters
         </span>
-        <span>{editable ? "Saved with the form" : "Read only"}</span>
+        <span className="flex items-center gap-3">
+          {!editable && editor ? (
+            <button type="button" disabled={wordBusy} onClick={exportWord} className="inline-flex items-center gap-1 hover:text-[var(--ink)]">
+              <FileDown size={12} /> Word (.docx)
+            </button>
+          ) : null}
+          {editable ? "Saved with the form" : "Read only"}
+        </span>
       </div>
     </div>
   );
@@ -205,9 +285,13 @@ function Ribbon({
   findOpen,
   setFindOpen,
   pinned,
+  figures,
+  word,
 }: {
   editor: Editor;
   documentTitle: string;
+  figures: MemoFigureTools | null;
+  word: { busy: boolean; exportWord: () => void; importWord: (file: File) => void };
   tab: TabKey;
   setTab: (tab: TabKey) => void;
   findOpen: boolean;
@@ -443,6 +527,14 @@ function Ribbon({
 
         {tab === "insert" ? (
           <>
+            {figures ? (
+              <Group caption="Figures">
+                <div className="flex items-center gap-1">
+                  <FigurePicker editor={editor} figures={figures} />
+                  <CiteMenu editor={editor} figures={figures} />
+                </div>
+              </Group>
+            ) : null}
             <Group caption="Tables">
               <TablePicker onPick={(rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: true }).run()} />
             </Group>
@@ -579,11 +671,192 @@ function Ribbon({
             <Group caption="Output">
               <BigTool label="Print" onClick={() => printMemo(editor, documentTitle)}><Printer size={18} /></BigTool>
             </Group>
+            <Group caption="Word">
+              <WordTools word={word} />
+            </Group>
           </>
         ) : null}
       </div>
 
       {findOpen ? <FindReplace editor={editor} onClose={() => setFindOpen(false)} /> : null}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Figures, citations and Word files
+ * ------------------------------------------------------------------------- */
+
+/** Insert › Picture: one of the form's photos as a figure, or a new one uploaded to this memo's section. */
+function FigurePicker({ editor, figures }: { editor: Editor; figures: MemoFigureTools }) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const insert = (attachmentId: number) => editor.chain().focus().insertMemoFigure({ attachmentId }).run();
+  return (
+    <Menu
+      label="Insert a photo as a figure"
+      big
+      trigger={<><ImageIcon size={18} /><span className="text-[11px]">Picture</span></>}
+      render={(close) => (
+        <div className="w-80 p-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold">The form's photos</span>
+            {figures.uploadPhoto ? (
+              <>
+                <button
+                  type="button"
+                  disabled={!!uploading}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => fileRef.current?.click()}
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--line)] px-2 py-1 text-[11px] hover:border-[var(--accent)] disabled:opacity-50"
+                >
+                  <Upload size={12} /> {uploading ? "Uploading…" : "Upload"}
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file || !figures.uploadPhoto) return;
+                    setUploading(file.name);
+                    setError(null);
+                    try {
+                      const id = await figures.uploadPhoto(file);
+                      insert(id);
+                      close();
+                    } catch (failure) {
+                      setError(failure instanceof Error ? failure.message : String(failure));
+                    } finally {
+                      setUploading(null);
+                    }
+                  }}
+                />
+              </>
+            ) : null}
+          </div>
+          {error ? <div className="mb-2 text-[11px] text-[var(--bad)]">{error}</div> : null}
+          {figures.photos.length ? (
+            <div className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto">
+              {figures.photos.map((photo) => (
+                <PhotoChoice
+                  key={photo.id}
+                  photo={photo}
+                  thumbUrl={figures.thumbUrl(photo.id)}
+                  used={figures.registry.get(photo.id)?.label ?? null}
+                  requestThumb={figures.requestThumb}
+                  onPick={() => {
+                    insert(photo.id);
+                    close();
+                  }}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="py-6 text-center text-xs text-muted">No photos on this form yet. Upload one to place it here.</div>
+          )}
+        </div>
+      )}
+    />
+  );
+}
+
+function PhotoChoice({
+  photo,
+  thumbUrl,
+  used,
+  requestThumb,
+  onPick,
+}: {
+  photo: MemoFigureTools["photos"][number];
+  thumbUrl: string | null;
+  used: string | null;
+  requestThumb: (attachmentId: number) => void;
+  onPick: () => void;
+}) {
+  useEffect(() => {
+    if (!thumbUrl) requestThumb(photo.id);
+  }, [photo.id, thumbUrl, requestThumb]);
+  return (
+    <button
+      type="button"
+      title={used ? `${photo.name} (already ${figureText(used)})` : photo.name}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onPick}
+      className="group relative aspect-square overflow-hidden rounded-md border border-[var(--line)] bg-[var(--panel-soft)] hover:border-[var(--accent)]"
+    >
+      {thumbUrl ? <img src={thumbUrl} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={18} className="m-auto text-muted" />}
+      {used ? (
+        <span className="absolute bottom-0.5 left-0.5 rounded bg-black/65 px-1 text-[10px] font-medium text-white">{figureText(used)}</span>
+      ) : null}
+    </button>
+  );
+}
+
+/** Insert › Cite: "Figure 1.1" pointing at any figure in the memos. */
+function CiteMenu({ editor, figures }: { editor: Editor; figures: MemoFigureTools }) {
+  return (
+    <Menu
+      label="Cite a figure"
+      big
+      trigger={<><CiteIcon size={18} /><span className="text-[11px]">Cite</span></>}
+      render={(close) => {
+        // This memo's own figures as they are now, then the other memos'.
+        const local: Array<{ id: number; label: string; caption: string }> = [];
+        editor.state.doc.descendants((node) => {
+          if (node.type.name === "memoFigure") local.push({ id: Number(node.attrs.attachmentId), label: String(node.attrs.label ?? ""), caption: String(node.attrs.caption ?? "") });
+        });
+        const localIds = new Set(local.map((f) => f.id));
+        const others = [...figures.registry.values()]
+          .filter((entry) => entry.memo !== figures.memoKey && !localIds.has(entry.attachmentId))
+          .map((entry) => ({ id: entry.attachmentId, label: entry.label, caption: entry.caption }));
+        const all = [...local, ...others].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+        return (
+          <div className="max-h-72 w-72 overflow-y-auto py-1">
+            {all.length ? (
+              all.map((figure) => (
+                <MenuItem
+                  key={`${figure.id}-${figure.label}`}
+                  onClick={() => {
+                    editor.chain().focus().insertFigureRef(figure.id).run();
+                    close();
+                  }}
+                >
+                  <span className="font-semibold">{figureText(figure.label)}</span>
+                  {figure.caption ? <span className="text-muted"> · {figure.caption}</span> : null}
+                </MenuItem>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-center text-xs text-muted">No figures yet. Insert a picture first, then cite it.</div>
+            )}
+          </div>
+        );
+      }}
+    />
+  );
+}
+
+/** Review › Word: the memo as a .docx, and a .docx edited in Word back into the memo. */
+function WordTools({ word }: { word: { busy: boolean; exportWord: () => void; importWord: (file: File) => void } }) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <div className="flex items-center gap-1">
+      <BigTool label="Export to Word (.docx)" disabled={word.busy} onClick={word.exportWord}><FileDown size={18} /></BigTool>
+      <BigTool label="Import from Word (.docx)" disabled={word.busy} onClick={() => fileRef.current?.click()}><FileUp size={18} /></BigTool>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) word.importWord(file);
+        }}
+      />
     </div>
   );
 }
