@@ -150,6 +150,11 @@ export default function SubmissionArcGisMap({
   // The geometry this map last reported; the prop echoing it back must not redraw
   // (and so interrupt) the areas being edited.
   const lastEmittedRef = useRef<string | null>(null);
+  // The saved shapes last put on the map: they are put back only when they change.
+  const lastAppliedRef = useRef<string | null>(null);
+  // The latest callback, so a new function from the page never rebuilds the map mid-drawing.
+  const onGeometryChangeRef = useRef(onGeometryChange);
+  onGeometryChangeRef.current = onGeometryChange;
   const emitAreasRef = useRef<() => void>(() => {});
   const [areaMode, setAreaMode] = useState<"idle" | "drawing" | "editing">("idle");
   const [areaRings, setAreaRings] = useState<AreaRings[]>(() => areasFromGeoJson(geojson));
@@ -240,7 +245,7 @@ export default function SubmissionArcGisMap({
       const next = geoJsonFromAreas(rings);
       lastEmittedRef.current = JSON.stringify(next);
       setAreaRings(rings);
-      onGeometryChange?.(next);
+      onGeometryChangeRef.current?.(next);
     };
     emitAreasRef.current = emitAreas;
 
@@ -293,7 +298,7 @@ export default function SubmissionArcGisMap({
       detachTerrainSource();
       view.destroy();
     };
-  }, [editable, onGeometryChange]);
+  }, [editable]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -303,12 +308,16 @@ export default function SubmissionArcGisMap({
 
     graphicsLayer.removeAll();
     const areasLayer = areasLayerRef.current;
-    const echo = lastEmittedRef.current !== null && lastEmittedRef.current === JSON.stringify(geojson ?? null);
-    if (areasLayer && !echo) {
+    // Put the saved shapes back only when they really changed (not on every render,
+    // and not the echo of what was just drawn): this cancels a shape being drawn.
+    const incoming = JSON.stringify(geojson ?? null);
+    const known = incoming === lastEmittedRef.current || incoming === lastAppliedRef.current;
+    if (areasLayer && !known) {
       sketchRef.current?.cancel();
       areasLayer.removeAll();
       setAreaRings(areasFromGeoJson(geojson));
     }
+    lastAppliedRef.current = incoming;
 
     const hasLocationPoint =
       location != null &&
@@ -346,7 +355,7 @@ export default function SubmissionArcGisMap({
     };
 
     const addPolygon = (rings: any) => {
-      if (echo || !areasLayer) return;
+      if (known || !areasLayer) return;
       const sr = inferSpatialReference(rings);
       const polygon = new Polygon({
         rings,
@@ -578,7 +587,7 @@ export default function SubmissionArcGisMap({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [droneKey, editable, onGeometryChange]);
+  }, [droneKey, editable]);
 
   // Where the map looks: the recorded point, the saved geometry and every mapped
   // photo with its camera wedge, with room around them — and Home returns there.

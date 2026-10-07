@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Camera, Compass, LocateFixed, MapPin } from "lucide-react";
 
@@ -113,10 +114,15 @@ export default function SubmissionLocationHero({
         footprint: active.survey.overlay_corners?.length === 4 ? [...active.survey.overlay_corners, active.survey.overlay_corners[0]] : boundsRing(active.grid),
       }
     : null;
-  const location = {
-    latitude: latitude.trim() ? Number(latitude) : null,
-    longitude: longitude.trim() ? Number(longitude) : null,
-  };
+  // The same object until the coordinates change: a new one each render made the
+  // map redraw its areas (and drop a shape being drawn) every few seconds.
+  const location = useMemo(
+    () => ({
+      latitude: latitude.trim() ? Number(latitude) : null,
+      longitude: longitude.trim() ? Number(longitude) : null,
+    }),
+    [latitude, longitude],
+  );
 
   return (
     <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3 md:p-4" aria-labelledby="submission-location-title">
