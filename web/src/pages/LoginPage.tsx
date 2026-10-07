@@ -3,10 +3,11 @@ import { Navigate, useNavigate } from "react-router-dom";
 
 import AuthGateLoading from "../auth/AuthGateLoading";
 import { useAuth } from "../auth/AuthContext";
+import { landingPathFor } from "../utils/roleModel";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login, token, isInitializing } = useAuth();
+  const { login, token, me, isInitializing } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +26,9 @@ export default function LoginPage() {
   }, []);
 
   if (isInitializing && token) return <AuthGateLoading />;
-  if (!isInitializing && token) return <Navigate to="/my-work" replace />;
+  // Signed in already: on to this person's own landing. Only with the account in
+  // hand: a token alone would bounce off the landing page's role gate.
+  if (!isInitializing && token && me) return <Navigate to={landingPathFor(me.roles)} replace />;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -38,8 +41,8 @@ export default function LoginPage() {
 
     setBusy(true);
     try {
-      await login(normalizedEmail, password);
-      navigate("/my-work", { replace: true });
+      const signedIn = await login(normalizedEmail, password);
+      navigate(landingPathFor(signedIn.roles), { replace: true });
     } catch (e: any) {
       setError(e?.message ?? "Sign in failed. Verify your credentials and try again.");
     } finally {
