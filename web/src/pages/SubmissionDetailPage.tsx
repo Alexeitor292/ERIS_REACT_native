@@ -311,6 +311,8 @@ type CanvasCardProps = {
   formDisabled: boolean;
   attachmentCount: number;
   onOpenAttachments: () => void;
+  /** This person may add files to the section (shows "Attach" while it has none). */
+  canAttach?: boolean;
   onDragStart: (id: DashboardCardId, event: ReactMouseEvent) => void;
   onResizeStart: (id: DashboardCardId, mode: ResizeMode, event: ReactMouseEvent) => void;
   /** Receives the card's natural height (header plus content), so auto layout can fit it. */
@@ -322,7 +324,7 @@ type CanvasCardProps = {
   children: ReactNode;
 };
 
-function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpenAttachments, onDragStart, onResizeStart, onMeasure, tools, presence = NO_ONE, children }: CanvasCardProps) {
+function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpenAttachments, canAttach = false, onDragStart, onResizeStart, onMeasure, tools, presence = NO_ONE, children }: CanvasCardProps) {
   const headerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   useFieldOutlines(contentRef, presence);
@@ -358,7 +360,7 @@ function CanvasCard({ id, style, dragging, formDisabled, attachmentCount, onOpen
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <PresenceDots others={presence} />
-          <SectionAttachmentsButton count={attachmentCount} onClick={onOpenAttachments} />
+          <SectionAttachmentsButton count={attachmentCount} onClick={onOpenAttachments} canAdd={canAttach} />
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
@@ -1127,6 +1129,17 @@ export default function SubmissionDetailPage() {
     if (keys) setSectionDialog({ title, keys });
   };
 
+  // New files in a section: refresh the attachments (and the photo map) without touching the form being edited.
+  async function refreshAttachments() {
+    try {
+      const fresh = await api<SubmissionDetail>(`/submissions/${sid}`);
+      setData((current) => (current ? { ...current, attachments: fresh.attachments } : current));
+    } catch {
+      // They are saved; a reload shows them.
+    }
+    void loadPhotoMap();
+  }
+
   const cardProps = (cardId: DashboardCardId) => ({
     id: cardId,
     style: canvas.cardStyle(cardId),
@@ -1134,6 +1147,7 @@ export default function SubmissionDetailPage() {
     formDisabled: !canEdit,
     attachmentCount: sectionCount(CARD_SECTION_KEYS[cardId]),
     onOpenAttachments: () => openSectionAttachments(DASHBOARD_CARD_TITLES[cardId], CARD_SECTION_KEYS[cardId]),
+    canAttach: canEdit && !!CARD_SECTION_KEYS[cardId],
     onDragStart: canvas.startDrag,
     onResizeStart: canvas.startResize,
     onMeasure: canvas.reportContentHeight,
@@ -1729,6 +1743,7 @@ export default function SubmissionDetailPage() {
                   <SectionAttachmentsButton
                     count={sectionCount(CARD_SECTION_KEYS.measurements)}
                     onClick={() => openSectionAttachments(DASHBOARD_CARD_TITLES.measurements, CARD_SECTION_KEYS.measurements)}
+                    canAdd={canEdit}
                   />
                 </div>
                 <div className="grid gap-5 lg:grid-cols-2">
@@ -1792,7 +1807,7 @@ export default function SubmissionDetailPage() {
                 showSiteHistory={isOperationalUser(me?.roles)}
                 attachmentCount={(key) => sectionCount(NOTES_SECTION_KEYS[key])}
                 onOpenAttachments={(key, title) => openSectionAttachments(title, NOTES_SECTION_KEYS[key])}
-                attachmentsButton={(count, onClick) => <SectionAttachmentsButton count={count} onClick={onClick} />}
+                attachmentsButton={(count, onClick) => <SectionAttachmentsButton count={count} onClick={onClick} canAdd={canEdit} />}
               />
               <details className="mt-4 rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2">
                 <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted">Advanced: geometry JSON</summary>
@@ -1862,6 +1877,7 @@ export default function SubmissionDetailPage() {
           items={sectionDialogItems}
           resolver={resolver}
           onClose={() => setSectionDialog(null)}
+          upload={canEdit ? { submissionId: sid, sectionKey: sectionDialog.keys[0], onUploaded: refreshAttachments } : undefined}
         />
       ) : null}
     </AppShell>

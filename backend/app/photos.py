@@ -12,7 +12,6 @@ from .deps import deny_public_only, require_roles
 from .db import get_db
 from .storage import put_object_bytes, make_object_key
 from .config import settings
-from .permissions import require_is_owner_or_admin
 from .services import form_access
 from .roles import GISA_AUTHOR_ROLES
 
@@ -183,10 +182,16 @@ def _store_capture_metadata(db: Session, attachment_id: int, metadata: dict | No
 async def _store_submission_attachment(*, submission_id: int, file: UploadFile, section_key: str | None,
                                        kind: str, capture_metadata_json: str | None,
                                        db: Session, user: dict) -> dict:
-    require_is_owner_or_admin(db, user=user, submission_id=submission_id)
-    content = await file.read()
+    # Whoever may edit the form may add to it: its owner, the people it is shared with, administrators.
+    from .main import require_can_edit_submission  # the app module imports this router
+
+    require_can_edit_submission(submission_id, db, user)
+    limit = settings.MAX_UPLOAD_MB * 1024 * 1024
+    content = await file.read(limit + 1)
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
+    if len(content) > limit:
+        raise HTTPException(status_code=413, detail=f"{file.filename or 'That file'} is larger than {settings.MAX_UPLOAD_MB} MB. Shorten or compress it, or share a link in the notes.")
 
     mime_type = file.content_type or "application/octet-stream"
     normalized_section = _normalize_section_key(section_key)

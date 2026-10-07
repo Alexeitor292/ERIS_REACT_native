@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # MinIO (keys required)
     MINIO_ENDPOINT: str = Field(default="http://localhost:9000")
     MINIO_BUCKET: str = Field(default="eris-uploads")
+    # One file uploaded to a form (photo, video or document). Cloudflare refuses requests over 100 MB.
+    MAX_UPLOAD_MB: int = Field(default=95, ge=1)
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", validation_alias="MINIO_ROOT_USER")
     MINIO_SECRET_KEY: str = Field(default="minio_root_password", validation_alias="MINIO_ROOT_PASSWORD")
     MINIO_PUBLIC_ENDPOINT: str | None = Field(default=None)
