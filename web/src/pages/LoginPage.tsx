@@ -4,10 +4,12 @@ import { Navigate, useNavigate } from "react-router-dom";
 import AuthGateLoading from "../auth/AuthGateLoading";
 import { useAuth } from "../auth/AuthContext";
 import { landingPathFor } from "../utils/roleModel";
+import { useSignInSplash } from "../ui/SignInSplash";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login, token, me, isInitializing } = useAuth();
+  const playSplash = useSignInSplash();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +44,8 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const signedIn = await login(normalizedEmail, password);
+      // The mobile app's opening animation, over the landing page as it loads.
+      playSplash();
       navigate(landingPathFor(signedIn.roles), { replace: true });
     } catch (e: any) {
       setError(e?.message ?? "Sign in failed. Verify your credentials and try again.");

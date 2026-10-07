@@ -18,6 +18,7 @@ import MyWorkPage from "./features/myWork/MyWorkPage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import AppErrorBoundary from "./components/AppErrorBoundary";
+import { SignInSplashProvider } from "./ui/SignInSplash";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import RoleRoute from "./auth/RoleRoute";
@@ -49,6 +50,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <SignInSplashProvider>
         <AppErrorBoundary>
         <Routes>
           <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
@@ -213,6 +215,7 @@ export default function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
         </AppErrorBoundary>
+        </SignInSplashProvider>
       </BrowserRouter>
     </AuthProvider>
   );
