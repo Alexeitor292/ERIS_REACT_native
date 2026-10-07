@@ -185,9 +185,9 @@ export default function App() {
           <Route
             path="/organization"
             element={
-              <RoleRoute roles={["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF"]}>
+              <ProtectedRoute>
                 <OrganizationPage />
-              </RoleRoute>
+              </ProtectedRoute>
             }
           />
           {/* The Offices, Branches and Coverage pages became the Organization page. */}

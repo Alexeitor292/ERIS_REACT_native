@@ -267,6 +267,8 @@ VIEWER_READABLE_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/auth/me"): "own identity only",
     ("GET", "/gisa/lookups"): "static label dictionary, no record data",
     ("GET", "/org/offices"): "office and branch names for labels only, no personnel",
+    ("GET", "/org/tree"): "the organization is open to everyone with access (owner decision 2026-10-06)",
+    ("GET", "/org/maintenance"): "the district lists are open to everyone with access (owner decision 2026-10-06)",
     ("GET", "/incidents/{incident_id}/workflow-tree"): "workflow_tree._ensure_workflow_tree_access",
     ("GET", "/submissions"): "scope narrowed to public assessments in the handler",
     ("GET", "/submissions/{submission_id}"): "viewer_can_read_public_submission",

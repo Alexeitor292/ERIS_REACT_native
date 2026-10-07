@@ -59,7 +59,7 @@ export default function OrganizationPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const isAdmin = !!tree?.me.is_admin;
-  const tab = params.get("tab") === "maintenance" && isAdmin ? "maintenance" : "offices";
+  const tab = params.get("tab") === "maintenance" ? "maintenance" : "offices";
 
   const loadTree = useCallback(async () => {
     try {
@@ -79,7 +79,8 @@ export default function OrganizationPage() {
   }, [tab, maintenance]);
 
   const offices = tree?.offices ?? [];
-  const current = offices.find((o) => o.office.id === officeId) ?? offices[0] ?? null;
+  // The office picked last, else the person's own office, else the first.
+  const current = offices.find((o) => o.office.id === officeId) ?? offices.find((o) => o.office.id === tree?.me.office_id) ?? offices[0] ?? null;
 
   function chooseOffice(id: number) {
     setOfficeId(id);
@@ -167,7 +168,7 @@ export default function OrganizationPage() {
           <p className="min-w-0 flex-1 text-sm text-muted">
             Where people sit decides their role. Anyone in no office tree and on no district list is a Guest.
           </p>
-          {isAdmin ? (
+          {tree ? (
             <nav className="inline-flex overflow-hidden rounded-lg border border-[var(--line)]" aria-label="Organization views">
               {([["offices", "GeoTech offices", Building2], ["maintenance", "Maintenance", HardHat]] as const).map(([key, label, Icon], i) => (
                 <button
@@ -191,7 +192,7 @@ export default function OrganizationPage() {
 
         {tab === "offices" ? (
           <>
-            {offices.length > 1 || isAdmin ? (
+            {offices.length ? (
               <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Offices">
                 {offices.map((o) => {
                   const people = o.chiefs.length + o.specialists.length + o.branches.reduce((n, b) => n + b.staff.length + (b.chief ? 1 : 0), 0);

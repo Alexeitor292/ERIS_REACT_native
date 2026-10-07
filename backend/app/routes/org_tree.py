@@ -1,9 +1,12 @@
 """The organization as people see it: one tree per GeoTech office, and the
 maintenance lists per district. Places give roles (services/org_tree.py).
 
-Office and branch chiefs manage their own part of their office's tree;
-administrators manage everything, including the maintenance lists and who is an
-administrator. Office details (name, districts served) stay on /admin/org/offices.
+Anyone with access to ERIS (guests too) can read all of it. Changing it:
+office chiefs their own office, branch chiefs their own branch, maintenance
+coordinators their district's crew, office chiefs (for districts their office
+serves) and administrators the coordinators; administrators everything,
+including who is an administrator. Office details (name, districts served) stay
+on /admin/org/offices.
 """
 from __future__ import annotations
 
@@ -14,14 +17,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import require_roles
+from ..deps import get_current_user, require_roles
 from ..services import org_tree
 from ..services.org_tree import OrgTreeError
 
 router = APIRouter(tags=["organization"])
 
+# Who may reach the tree-editing endpoints; each change is checked against the office or branch.
 TREE_VIEWERS = ["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF"]
 ADMIN_ONLY = ["ADMIN"]
+# Who may reach the district-list endpoints; each change is checked against the district.
+LIST_EDITORS = ["ADMIN", "OFFICE_CHIEF", "MAINTENANCE_COORDINATOR"]
 
 
 class PersonIn(BaseModel):
@@ -83,7 +89,8 @@ def _tree_payload(db: Session, actor: dict) -> dict:
 
 
 @router.get("/org/tree")
-def get_tree(db: Session = Depends(get_db), actor=Depends(require_roles(TREE_VIEWERS))):
+def get_tree(db: Session = Depends(get_db), actor=Depends(get_current_user)):
+    """Every office's tree, for everyone; each office and branch says whether this person may change it."""
     return _tree_payload(db, actor)
 
 
@@ -91,7 +98,7 @@ def get_tree(db: Session = Depends(get_db), actor=Depends(require_roles(TREE_VIE
 def find_people(
     q: str = Query(default="", max_length=80),
     db: Session = Depends(get_db),
-    _actor=Depends(require_roles(TREE_VIEWERS)),
+    _actor=Depends(require_roles(sorted(set(TREE_VIEWERS) | set(LIST_EDITORS)))),
 ):
     """Registered users to place, with where each one sits today."""
     return {"items": org_tree.search_people(db, q)}
@@ -188,8 +195,14 @@ def put_details(body: DetailsIn, user_id: int = Path(..., ge=1), db: Session = D
 _KINDS = {"coordinators": "COORDINATOR", "crew": "CREW"}
 
 
-def _maintenance_payload(db: Session) -> dict:
-    return {"districts": org_tree.maintenance_lists(db)}
+def _maintenance_payload(db: Session, actor: dict) -> dict:
+    rights = org_tree.maintenance_rights(db, actor)
+    districts = org_tree.maintenance_lists(db)
+    for entry in districts:
+        allowed = rights.get(entry["district"], {"crew": False, "coordinators": False})
+        entry["can_manage_crew"] = allowed["crew"]
+        entry["can_manage_coordinators"] = allowed["coordinators"]
+    return {"districts": districts}
 
 
 def _kind(value: str) -> str:
@@ -200,29 +213,30 @@ def _kind(value: str) -> str:
 
 
 @router.get("/org/maintenance")
-def get_maintenance(db: Session = Depends(get_db), _actor=Depends(require_roles(ADMIN_ONLY))):
-    return _maintenance_payload(db)
+def get_maintenance(db: Session = Depends(get_db), actor=Depends(get_current_user)):
+    """Every district's coordinators and crew, for everyone; each district says what this person may change."""
+    return _maintenance_payload(db, actor)
 
 
 @router.post("/org/maintenance/{district}/{kind}")
-def add_maintenance(body: PersonIn, district: str = Path(..., max_length=4), kind: str = Path(...), db: Session = Depends(get_db), actor=Depends(require_roles(ADMIN_ONLY))):
+def add_maintenance(body: PersonIn, district: str = Path(..., max_length=4), kind: str = Path(...), db: Session = Depends(get_db), actor=Depends(require_roles(LIST_EDITORS))):
     with _writing(db):
         org_tree.add_maintenance(db, actor, district=district, user_id=body.user_id, kind=_kind(kind))
-    return _maintenance_payload(db)
+    return _maintenance_payload(db, actor)
 
 
 @router.delete("/org/maintenance/{district}/{kind}/{user_id}")
-def remove_maintenance(district: str = Path(..., max_length=4), kind: str = Path(...), user_id: int = Path(..., ge=1), db: Session = Depends(get_db), actor=Depends(require_roles(ADMIN_ONLY))):
+def remove_maintenance(district: str = Path(..., max_length=4), kind: str = Path(...), user_id: int = Path(..., ge=1), db: Session = Depends(get_db), actor=Depends(require_roles(LIST_EDITORS))):
     with _writing(db):
         org_tree.remove_maintenance(db, actor, district=district, user_id=user_id, kind=_kind(kind))
-    return _maintenance_payload(db)
+    return _maintenance_payload(db, actor)
 
 
 @router.post("/org/maintenance/{district}/coordinators/{user_id}/primary")
-def make_primary(district: str = Path(..., max_length=4), user_id: int = Path(..., ge=1), db: Session = Depends(get_db), actor=Depends(require_roles(ADMIN_ONLY))):
+def make_primary(district: str = Path(..., max_length=4), user_id: int = Path(..., ge=1), db: Session = Depends(get_db), actor=Depends(require_roles(LIST_EDITORS))):
     with _writing(db):
         org_tree.set_primary_coordinator(db, actor, district=district, user_id=user_id)
-    return _maintenance_payload(db)
+    return _maintenance_payload(db, actor)
 
 
 # --- administrators ----------------------------------------------------------

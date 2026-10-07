@@ -73,6 +73,10 @@ export type MaintenanceDistrict = {
   district: string;
   coordinators: Array<{ id: number; full_name: string; email: string; is_primary: boolean }>;
   crew: Array<{ id: number; full_name: string; email: string }>;
+  /** This district's coordinators may change its crew; administrators may change everything. */
+  can_manage_crew?: boolean;
+  /** Office chiefs of an office serving this district, and administrators, may change its coordinators. */
+  can_manage_coordinators?: boolean;
 };
 
 export type MaintenancePayload = { districts: MaintenanceDistrict[] };
