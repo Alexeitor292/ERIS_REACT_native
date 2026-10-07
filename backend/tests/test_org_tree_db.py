@@ -268,10 +268,51 @@ def test_the_admin_switch(client_db, admin_token, people):
         assert refused.status_code == 409
 
 
-def test_only_chiefs_and_administrators_see_the_trees(client_db, people):
-    guest = _auth(_login(client_db, people["staff2"]))
-    assert client_db.get("/org/tree", headers=guest).status_code == 403
-    assert client_db.get("/org/maintenance", headers=guest).status_code == 403
+def test_everyone_sees_the_whole_organization(client_db, admin_token, people):
+    viewer = _auth(_login(client_db, people["staff2"]))
+    tree = client_db.get("/org/tree", headers=viewer)
+    assert tree.status_code == 200
+    everything = client_db.get("/org/tree", headers=_auth(admin_token)).json()["offices"]
+    assert {o["office"]["id"] for o in tree.json()["offices"]} == {o["office"]["id"] for o in everything}
+    # Seeing is not changing.
+    assert not any(o["can_manage"] for o in tree.json()["offices"])
+    lists = client_db.get("/org/maintenance", headers=viewer)
+    assert lists.status_code == 200 and len(lists.json()["districts"]) >= 12
+    assert not any(d["can_manage_crew"] or d["can_manage_coordinators"] for d in lists.json()["districts"])
+    assert client_db.post("/org/maintenance/11/crew", json={"user_id": people["crew"]["id"]}, headers=viewer).status_code == 403
+
+
+def test_coordinators_keep_their_crew_and_office_chiefs_their_coordinators(client_db, admin_token, people):
+    admin = _auth(admin_token)
+    coord, crew = people["coord"]["id"], people["crew"]["id"]
+    assert client_db.post("/org/maintenance/11/coordinators", json={"user_id": coord}, headers=admin).status_code == 200
+    try:
+        mine = _auth(_login(client_db, people["coord"]))
+        rights = {d["district"]: d for d in client_db.get("/org/maintenance", headers=mine).json()["districts"]}
+        assert rights["11"]["can_manage_crew"] and not rights["11"]["can_manage_coordinators"]
+        assert not rights["12"]["can_manage_crew"]
+        # Their own district's crew, and nothing else.
+        assert client_db.post("/org/maintenance/11/crew", json={"user_id": crew}, headers=mine).status_code == 200
+        assert _roles(crew) == {"MAINTENANCE_CREW"}
+        assert client_db.post("/org/maintenance/12/crew", json={"user_id": crew}, headers=mine).status_code == 403
+        assert client_db.post("/org/maintenance/11/coordinators", json={"user_id": crew}, headers=mine).status_code == 403
+        assert client_db.delete(f"/org/maintenance/11/crew/{crew}", headers=mine).status_code == 200
+
+        # An office chief adds coordinators to the districts their office serves, only.
+        resp = client_db.post("/auth/login", json={"email": "mock.office.chief@dot.ca.gov", "password": "password"})
+        assert resp.status_code == 200, resp.text
+        chief = _auth(resp.json()["access_token"])
+        by_district = client_db.get("/org/maintenance", headers=chief).json()["districts"]
+        served = [d["district"] for d in by_district if d["can_manage_coordinators"]]
+        elsewhere = [d["district"] for d in by_district if not d["can_manage_coordinators"]]
+        assert not any(d["can_manage_crew"] for d in by_district)
+        if served:
+            assert client_db.post(f"/org/maintenance/{served[0]}/coordinators", json={"user_id": crew}, headers=chief).status_code == 200
+            assert client_db.delete(f"/org/maintenance/{served[0]}/coordinators/{crew}", headers=chief).status_code == 200
+        if elsewhere:
+            assert client_db.post(f"/org/maintenance/{elsewhere[0]}/coordinators", json={"user_id": crew}, headers=chief).status_code == 403
+    finally:
+        client_db.delete(f"/org/maintenance/11/coordinators/{coord}", headers=admin)
 
 
 def test_details_are_edited_on_the_tree(client_db, admin_token, people, office):

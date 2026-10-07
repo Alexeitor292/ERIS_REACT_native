@@ -18,7 +18,7 @@ and how routing uses this data in [workflows.md](workflows.md).
 | **Office** | A Geotechnical Services office — *Office of Geotechnical Design West*. Has a permanent ERIS **code** (`WEST`), a unit number (`59-315`), a home city and district, and the districts it serves. This is what an assessment is routed to. | Organization › GeoTech offices › *Edit office* / *New office* (administrators) |
 | **Office tree** | One per office. The office chief(s) at the top; hanging from them the **senior specialists** (single leaves) and the **branches**; under each branch its chief and its staff. | Organization › GeoTech offices |
 | **Branch** | A supervised group inside an office, led by a branch chief — "Branch C", or the printed name from the chart. | The office's tree: *+ Branch*, and the branch's ⋯ menu |
-| **District lists** | For each Caltrans district, its **Maintenance Coordinators** (one marked Primary, notified first) and its **Maintenance Crew**. | Organization › Maintenance (administrators) |
+| **District lists** | For each Caltrans district, its **Maintenance Coordinators** (one marked Primary, notified first) and its **Maintenance Crew**. | Organization › Maintenance |
 | **Details** | Classification, position number, home city and district, and availability. Shown in pickers; never a role. | A person's card in the tree › *Details and availability* |
 
 Two names per office, used deliberately: the **full name** ("Office of
@@ -71,10 +71,13 @@ once: the next request they make is judged by it.
 | **Administrator** | Everything, in every office: create and edit offices, name office chiefs, move people between offices, the maintenance lists, and who is an administrator. |
 | **Office chief** | Their own office's tree: add senior specialists, add, rename and retire branches, name or replace branch chiefs, add staff to any branch, move people within the office, remove anybody except office chiefs. |
 | **Branch chief** | Add staff to their own branch (people who sit nowhere yet) and remove them. Moving somebody from elsewhere in the office is the office chief's job. |
+| **Office chief, district lists** | Add and remove the Maintenance Coordinators of the districts their office serves, and choose the Primary. |
+| **Maintenance coordinator** | Add and remove the Maintenance Crew of their own district(s). |
 
-Everybody may edit their own details. Office chiefs see only their office's tree
-("My office" in the menu); branch chiefs see it with only their branch editable
-("My branch"). The page never shows a + where the viewer could not use it.
+Everybody may edit their own details. **Everybody with access to ERIS, guests
+included, can see the whole organization:** every office's tree and every
+district's lists (Organization in the menu). The page never shows a + or a
+remove button where the viewer could not use it.
 
 ---
 

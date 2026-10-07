@@ -440,15 +440,54 @@ def can_manage_branch(db: Session, actor: dict, branch: dict) -> bool:
 
 
 def offices_visible_to(db: Session, actor: dict) -> list[int]:
-    """Administrators see every office; chiefs see their own."""
+    """Every active office: anyone with access to ERIS, guests too, can read the whole organization.
+
+    Who may change it is decided per office and branch (``can_manage_office``,
+    ``can_manage_branch``) and per district list (``can_manage_crew``,
+    ``can_manage_coordinators``).
+    """
+    return [int(i) for i in db.execute(
+        text("SELECT id FROM org_offices WHERE org_type = 'GEOTECH' AND is_active = 1 ORDER BY sort_order, name")
+    ).scalars().all()]
+
+
+def _coordinated_districts(db: Session, user_id: int) -> set[str]:
+    rows = db.execute(
+        text("SELECT district FROM org_coordinator_coverage WHERE user_id = :uid AND is_active = 1"), {"uid": int(user_id)}
+    ).scalars().all()
+    return {d for d in (normalize_district_code(r) for r in rows) if d}
+
+
+def _served_districts(db: Session, office_id: int | None) -> set[str]:
+    if not office_id:
+        return set()
+    rows = db.execute(
+        text("SELECT district FROM org_office_districts WHERE office_id = :oid AND org_type = 'GEOTECH' AND is_active = 1"),
+        {"oid": int(office_id)},
+    ).scalars().all()
+    return {d for d in (normalize_district_code(r) for r in rows) if d}
+
+
+def can_manage_crew(db: Session, actor: dict, district: str) -> bool:
+    """A district's crew list: administrators, and that district's maintenance coordinators."""
+    return is_admin(actor) or normalize_district_code(district) in _coordinated_districts(db, int(actor["id"]))
+
+
+def can_manage_coordinators(db: Session, actor: dict, district: str) -> bool:
+    """A district's coordinators: administrators, and office chiefs of an office that serves the district."""
     if is_admin(actor):
-        return [int(i) for i in db.execute(
-            text("SELECT id FROM org_offices WHERE org_type = 'GEOTECH' AND is_active = 1 ORDER BY sort_order, name")
-        ).scalars().all()]
+        return True
     mine = placement(db, int(actor["id"]))
-    if mine["position"] in ("OFFICE_CHIEF", "BRANCH_CHIEF") and mine["office_id"]:
-        return [mine["office_id"]]
-    return []
+    return mine["position"] == "OFFICE_CHIEF" and normalize_district_code(district) in _served_districts(db, mine["office_id"])
+
+
+def maintenance_rights(db: Session, actor: dict) -> dict[str, dict[str, bool]]:
+    """District -> what this person may change there, for the page."""
+    admin = is_admin(actor)
+    crew = _coordinated_districts(db, int(actor["id"]))
+    mine = placement(db, int(actor["id"]))
+    coordinators = _served_districts(db, mine["office_id"]) if mine["position"] == "OFFICE_CHIEF" else set()
+    return {d: {"crew": admin or d in crew, "coordinators": admin or d in coordinators} for d in DISTRICTS}
 
 
 def _office_chief_count(db: Session, office_id: int, *, excluding: int | None = None) -> int:
@@ -728,10 +767,16 @@ def _district(value: str) -> str:
     return district
 
 
+def _require_list_right(db: Session, actor: dict, district: str, kind: str) -> None:
+    if kind == "CREW" and not can_manage_crew(db, actor, district):
+        raise OrgTreeError(403, "Only this district's maintenance coordinators or an administrator can change its crew.")
+    if kind == "COORDINATOR" and not can_manage_coordinators(db, actor, district):
+        raise OrgTreeError(403, "Only the office chief of an office serving this district or an administrator can change its coordinators.")
+
+
 def add_maintenance(db: Session, actor: dict, *, district: str, user_id: int, kind: str) -> None:
-    if not is_admin(actor):
-        raise OrgTreeError(403, "Only an administrator can change the maintenance lists.")
     district = _district(district)
+    _require_list_right(db, actor, district, kind)
     if not db.execute(text("SELECT 1 FROM users WHERE id = :uid AND is_active = 1"), {"uid": int(user_id)}).scalar():
         raise OrgTreeError(404, "That person is not an active ERIS user.")
     if kind == "COORDINATOR":
@@ -763,9 +808,8 @@ def add_maintenance(db: Session, actor: dict, *, district: str, user_id: int, ki
 
 
 def remove_maintenance(db: Session, actor: dict, *, district: str, user_id: int, kind: str) -> None:
-    if not is_admin(actor):
-        raise OrgTreeError(403, "Only an administrator can change the maintenance lists.")
     district = _district(district)
+    _require_list_right(db, actor, district, kind)
     table = {"COORDINATOR": "org_coordinator_coverage", "CREW": "org_district_crew"}.get(kind)
     if not table:
         raise OrgTreeError(422, "Unknown list.")
@@ -795,9 +839,8 @@ def remove_maintenance(db: Session, actor: dict, *, district: str, user_id: int,
 
 
 def set_primary_coordinator(db: Session, actor: dict, *, district: str, user_id: int) -> None:
-    if not is_admin(actor):
-        raise OrgTreeError(403, "Only an administrator can change the maintenance lists.")
     district = _district(district)
+    _require_list_right(db, actor, district, "COORDINATOR")
     if not db.execute(
         text("SELECT 1 FROM org_coordinator_coverage WHERE district = :d AND user_id = :uid AND is_active = 1"),
         {"d": district, "uid": int(user_id)},

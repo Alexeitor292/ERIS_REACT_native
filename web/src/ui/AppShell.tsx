@@ -113,10 +113,9 @@ function useNavSections(): NavSection[] {
   if (operational) {
     sections.push({ label: "GIS Tools", items: [{ to: "/gis/terrain-cross-sections", label: "Terrain Cross Sections", icon: Mountain }] });
   }
-  const held = roles ?? [];
-  if (!admin && (held.includes("OFFICE_CHIEF") || held.includes("BRANCH_CHIEF"))) {
-    // Chiefs manage their own part of their office's tree.
-    sections.push({ label: "Team", items: [{ to: "/organization", label: held.includes("OFFICE_CHIEF") ? "My office" : "My branch", icon: Network }] });
+  if (!admin) {
+    // Everyone can see the whole organization; what each person may change is decided on the page.
+    sections.push({ label: "Team", items: [{ to: "/organization", label: "Organization", icon: Network }] });
   }
   if (admin) {
     sections.push({

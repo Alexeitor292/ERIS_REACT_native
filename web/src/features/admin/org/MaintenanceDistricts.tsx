@@ -65,14 +65,14 @@ export default function MaintenanceDistricts({
                     people={d.coordinators}
                     addLabel="Add coordinator"
                     empty="No coordinator: reports filed here notify nobody."
-                    onAdd={() => onAdd(d.district, "coordinators")}
-                    onRemove={(p) => onRemove(d.district, "coordinators", p)}
+                    onAdd={d.can_manage_coordinators ? () => onAdd(d.district, "coordinators") : undefined}
+                    onRemove={d.can_manage_coordinators ? (p) => onRemove(d.district, "coordinators", p) : undefined}
                     renderExtra={(p) =>
                       "is_primary" in p && p.is_primary ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-[color:color-mix(in_oklab,var(--brand)_12%,var(--panel))] px-2 py-0.5 text-[10px] font-semibold text-[var(--brand)]" title="Notified first">
                           <Star size={10} /> Primary
                         </span>
-                      ) : d.coordinators.length > 1 ? (
+                      ) : d.coordinators.length > 1 && d.can_manage_coordinators ? (
                         <button type="button" onClick={() => onMakePrimary(d.district, p.id)} className="text-[11px] font-medium text-[var(--brand)] hover:underline">
                           Make primary
                         </button>
@@ -86,8 +86,8 @@ export default function MaintenanceDistricts({
                     addLabel="Add crew member"
                     empty="No crew listed."
                     filterable
-                    onAdd={() => onAdd(d.district, "crew")}
-                    onRemove={(p) => onRemove(d.district, "crew", p)}
+                    onAdd={d.can_manage_crew ? () => onAdd(d.district, "crew") : undefined}
+                    onRemove={d.can_manage_crew ? (p) => onRemove(d.district, "crew", p) : undefined}
                   />
                 </div>
               ) : null}
@@ -128,8 +128,9 @@ function Section({
   addLabel: string;
   empty: string;
   filterable?: boolean;
-  onAdd: () => void;
-  onRemove: (person: Person) => void;
+  /** Absent when this person may not change the list: it is shown read-only. */
+  onAdd?: () => void;
+  onRemove?: (person: Person) => void;
   renderExtra?: (person: Person) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(true);
@@ -161,18 +162,18 @@ function Section({
                   <span className="block truncate text-[11px] text-muted">{p.email}</span>
                 </span>
                 {renderExtra?.(p)}
-                <button type="button" onClick={() => onRemove(p)} aria-label={`Remove ${p.full_name}`} title="Remove from this list"
+                {onRemove ? <button type="button" onClick={() => onRemove(p)} aria-label={`Remove ${p.full_name}`} title="Remove from this list"
                   className="rounded p-1 text-muted hover:bg-[color:color-mix(in_oklab,var(--bad)_10%,var(--panel))] hover:text-[var(--bad)]">
                   <X size={14} />
-                </button>
+                </button> : null}
               </li>
             ))}
           </ul>
-          <button type="button" onClick={onAdd}
+          {onAdd ? <button type="button" onClick={onAdd}
             className="flex w-full items-center gap-2 rounded-md border-2 border-dashed border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] px-2 py-1.5 text-sm font-medium text-[var(--brand)] hover:border-[var(--brand)]">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--brand)] text-white" aria-hidden><Plus size={13} /></span>
             {addLabel}
-          </button>
+          </button> : null}
         </div>
       ) : null}
     </section>
