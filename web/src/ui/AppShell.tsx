@@ -1,5 +1,5 @@
-import { NavLink, useLocation } from "react-router-dom";
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ClipboardCheck,
   Inbox,
@@ -20,6 +20,7 @@ import { useAuth } from "../auth/AuthContext";
 import NotificationBell from "../features/notifications/NotificationBell";
 import { useUiSettings } from "./UiSettingsContext";
 import Spotlight from "./Spotlight";
+import { navigateWithTransition, pageRendered } from "./pageTransition";
 import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
 import type { UserOrg } from "../api/types";
@@ -35,13 +36,19 @@ type NavSection = { label: string; items: NavEntry[] };
 
 function NavItem({ to, label, icon: Icon, alsoActive, collapsed }: NavEntry & { collapsed?: boolean }) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { pageTransitions } = useUiSettings();
   const extraActive = (alsoActive ?? []).some((prefix) => pathname.startsWith(prefix));
   return (
     <NavLink
       to={to}
-      // The browser's view transition: the new page slides in while the frame stays put.
-      viewTransition={pageTransitions}
+      // The new page slides in while the frame stays put (ui/pageTransition.ts).
+      onClick={(event) => {
+        if (!pageTransitions || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (to === pathname) return;
+        event.preventDefault();
+        navigateWithTransition(navigate, to);
+      }}
       className={({ isActive }) =>
         cn(
           "relative flex items-center overflow-hidden rounded-lg text-sm font-medium transition-[color,box-shadow]",
@@ -195,6 +202,11 @@ export default function AppShell({ title, children, workspace = false }: { title
   const sections = useNavSections();
   const pages = useMemo(() => sections.flatMap((section) => section.items), [sections]);
   const [searching, setSearching] = useState(false);
+  const { pathname } = useLocation();
+  // This page has rendered: a page transition waiting for it can run.
+  useLayoutEffect(() => {
+    pageRendered();
+  }, [pathname]);
 
   // Ctrl/Cmd+K opens search anywhere.
   useEffect(() => {
