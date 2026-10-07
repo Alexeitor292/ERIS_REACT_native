@@ -151,7 +151,9 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    heights are stretched or squeezed. The section runs down the fall line
    through the middle of the area, or along a line of your own: **Draw section
    line**, click its points in the 3D view (S1, S2, …) and **Finish**, as in
-   the terrain cross-section tool. The line is kept with the comparison.
+   the terrain cross-section tool. The line is kept with the comparison. Whichever
+   line the section uses is drawn on the location map and in the 3D view: the
+   default fall line dashed, from Top to Bottom, a drawn line solid, S1, S2, ….
    Pointing at the section reads the ground there (distance, before, now,
    change) and marks the spot in the 3D view. In the 3D view a survey's gaps
    that face the sea (photogrammetry cannot map water) are drawn at sea level,

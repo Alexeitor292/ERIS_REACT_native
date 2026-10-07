@@ -186,6 +186,20 @@ export default function SiteMeasurementsPanel({
     }));
   }
 
+  // The line Measure used by default, for the maps: down the fall line through the area,
+  // as long as nobody drew their own and the measurement is current.
+  const fallLineKey = result && !stale && !drawnLine && area ? `${result.key}|${result.measurement.downslopeBearingDeg}` : "";
+  useEffect(() => {
+    if (!drone) return;
+    if (!fallLineKey || !result || !area) {
+      drone.setFallLine(null);
+      return;
+    }
+    const [top, bottom] = profileLine(area, result.measurement.downslopeBearingDeg, Math.max(10, result.bufferM));
+    drone.setFallLine([top, bottom]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fallLineKey]);
+
   // A new section line redraws the section (and is kept with the comparison) without measuring again.
   useEffect(() => {
     const current = result?.drone;

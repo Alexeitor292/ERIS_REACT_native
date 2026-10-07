@@ -76,6 +76,9 @@ type DroneSurveyState = {
   clearSection: () => void;
   /** The spot on the section the pointer is over in the chart, shown in the 3D view. */
   sectionHover: LonLat | null;
+  /** The line Measure from the terrain used when nobody drew one: down the fall line, [top, bottom]. */
+  fallLine: LonLat[] | null;
+  setFallLine: (line: LonLat[] | null) => void;
   setSectionHover: (point: LonLat | null) => void;
   /** The drone height at a point, lined up with the terrain model (null outside the survey). */
   actualAt: (lon: number, lat: number) => number | null;
@@ -143,6 +146,7 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
   const [capturing, setCapturingState] = useState(false);
   const [section, setSection] = useState<SectionLine>(NO_SECTION);
   const [sectionHover, setSectionHover] = useState<LonLat | null>(null);
+  const [fallLine, setFallLine] = useState<LonLat[] | null>(null);
   // One click, one meaning: capturing points and drawing a section never run together.
   const setCapturing = useCallback((on: boolean) => {
     if (on) setSection((current) => (current.drawing ? { ...current, drawing: false } : current));
@@ -422,11 +426,11 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
       submissionId, canEdit, surveys, loading, error, active, activeId, setActiveId,
       baseline: liveBaseline, baselineId: baselineId !== activeId ? baselineId : null, setBaselineId, swapBaseline, baselineAt, baselineGroundAt, beforeHeights,
       showSurface, setShowSurface, capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
-      section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover, setSectionHover,
+      section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover, setSectionHover, fallLine, setFallLine,
     }),
     [submissionId, canEdit, surveys, loading, error, active, activeId, liveBaseline, baselineId, swapBaseline, baselineAt, baselineGroundAt, beforeHeights,
       showSurface, capturing, setCapturing, actualAt, upload, update, remove, realign, addPoint, removePoint, saveComparison,
-      section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover],
+      section, startSection, addSectionPoint, undoSectionPoint, finishSection, clearSection, sectionHover, fallLine],
   );
   return <Context.Provider value={enabled ? value : null}>{children}</Context.Provider>;
 }

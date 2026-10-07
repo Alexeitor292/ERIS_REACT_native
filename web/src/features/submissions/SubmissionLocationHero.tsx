@@ -95,7 +95,16 @@ export default function SubmissionLocationHero({
   photoError,
 }: Props) {
   const summary = photoMap?.summary ?? null;
-  const active = useDroneSurveys()?.active ?? null;
+  const droneState = useDroneSurveys();
+  const active = droneState?.active ?? null;
+  // The section Measure uses: a line someone drew, else the fall line Measure took.
+  const sectionLine = droneState
+    ? droneState.section.points.length >= 2 && !droneState.section.drawing
+      ? { points: droneState.section.points, fallLine: false }
+      : droneState.fallLine
+        ? { points: droneState.fallLine, fallLine: true }
+        : null
+    : null;
   const droneMap: DroneMapSurvey | null = active
     ? {
         key: String(active.survey.id),
@@ -271,6 +280,7 @@ export default function SubmissionLocationHero({
             editable={canEdit}
             onGeometryChange={onGeometryChange}
             drone={droneMap}
+            sectionLine={sectionLine}
           />
         </div>
       </div>

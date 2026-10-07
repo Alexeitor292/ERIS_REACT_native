@@ -56,7 +56,7 @@ type Props = {
   /** When set, a click on the ground reports where (the view is picking points). */
   onPick?: ((lon: number, lat: number) => void) | null;
   /** A section line drawn on the ground (S1, S2, …), dashed while being drawn, and the spot the chart points at. */
-  section?: { points: LonLat[]; drawing: boolean; hover: LonLat | null } | null;
+  section?: { points: LonLat[]; drawing: boolean; hover: LonLat | null; fallLine?: boolean } | null;
 };
 
 export type DroneSceneSurvey = {
@@ -447,7 +447,7 @@ export default function InteractiveTerrainScene({
   }, [pointsKey, footprintKey, status]);
 
   // ---- The section line and the spot the chart points at ----------------------
-  const sectionKey = section ? JSON.stringify([section.points, section.drawing, section.hover]) : "";
+  const sectionKey = section ? JSON.stringify([section.points, section.drawing, section.hover, section.fallLine]) : "";
   useEffect(() => {
     const layer = sectionGraphicsRef.current;
     if (!layer) return;
@@ -458,11 +458,21 @@ export default function InteractiveTerrainScene({
       layer.add(
         new Graphic({
           geometry: new Polyline({ paths: [section.points], spatialReference: WGS84 }),
-          symbol: { type: "simple-line", color: blue, width: 3, style: section.drawing ? "dash" : "solid" } as never,
+          symbol: { type: "simple-line", color: blue, width: 3, style: section.drawing || section.fallLine ? "dash" : "solid" } as never,
         }),
       );
     }
-    section.points.forEach((point, index) => {
+    // The default section (Measure from the terrain): down the fall line, top to bottom.
+    if (section.fallLine && section.points.length >= 2) {
+      const [top, bottom] = section.points;
+      const mid: LonLat = [(top[0] + bottom[0]) / 2, (top[1] + bottom[1]) / 2];
+      ([[top, "Top"], [bottom, "Bottom"], [mid, "Fall line"]] as Array<[LonLat, string]>).forEach(([point, text], index) => {
+        const geometry = new Point({ longitude: point[0], latitude: point[1], spatialReference: WGS84 });
+        if (index < 2) layer.add(new Graphic({ geometry, symbol: { type: "simple-marker", style: "circle", color: blue, size: 8, outline: { color: [255, 255, 255, 1], width: 1.5 } } as never }));
+        layer.add(new Graphic({ geometry, symbol: { type: "text", text, color: [255, 255, 255, 1], haloColor: [30, 58, 138, 0.95], haloSize: 2, yoffset: 14, font: { size: 10, weight: "bold" } } as never }));
+      });
+    }
+    (section.fallLine ? [] : section.points).forEach((point, index) => {
       const geometry = new Point({ longitude: point[0], latitude: point[1], spatialReference: WGS84 });
       layer.add(new Graphic({ geometry, symbol: { type: "simple-marker", style: "circle", color: blue, size: 9, outline: { color: [255, 255, 255, 1], width: 1.5 } } as never }));
       layer.add(

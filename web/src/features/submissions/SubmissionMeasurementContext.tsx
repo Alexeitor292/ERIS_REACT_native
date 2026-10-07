@@ -86,8 +86,11 @@ export default function SubmissionMeasurementContext({
           drone.addPoint(lon, lat).catch((e: unknown) => setPickError(e instanceof Error ? e.message : "Could not capture the point."));
         }
       : null;
-  const section = drone && (drone.section.points.length || drone.section.drawing || drone.sectionHover)
-    ? { points: drone.section.points, drawing: drone.section.drawing, hover: drone.sectionHover }
+  const drawn = !!drone && (drone.section.points.length > 0 || drone.section.drawing);
+  const section = drone && (drawn || drone.fallLine || drone.sectionHover)
+    ? drawn
+      ? { points: drone.section.points, drawing: drone.section.drawing, hover: drone.sectionHover }
+      : { points: drone.fallLine ?? [], drawing: false, hover: drone.sectionHover, fallLine: true }
     : null;
 
 
