@@ -19,7 +19,8 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import NotificationBell from "../features/notifications/NotificationBell";
 import { useUiSettings } from "./UiSettingsContext";
-import Spotlight from "./Spotlight";
+import HeaderSearch from "./HeaderSearch";
+import ProfileMenu from "./ProfileMenu";
 import { navigateWithTransition, pageRendered } from "./pageTransition";
 import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
@@ -112,7 +113,6 @@ function useNavSections(): NavSection[] {
           { to: "/assessments", label: "Assessments", icon: ClipboardCheck, alsoActive: ["/submissions"] },
         ],
       },
-      { label: "Account", items: [{ to: "/settings", label: "Settings", icon: Settings }] },
     ];
   }
 
@@ -145,7 +145,7 @@ function useNavSections(): NavSection[] {
       ],
     });
   }
-  sections.push({ label: "Account", items: [{ to: "/settings", label: "Settings", icon: Settings }] });
+  // Settings lives in the profile menu (ui/ProfileMenu.tsx).
   return sections;
 }
 
@@ -188,77 +188,40 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-const THEME_OPTIONS = [
-  { id: "light", label: "Light" },
-  { id: "dark", label: "Dark" },
-  { id: "coastal", label: "Coastal" },
-] as const;
 
 export default function AppShell({ title, children, workspace = false }: { title: string; children: ReactNode; workspace?: boolean }) {
   const { me, logout } = useAuth();
-  const { theme, setTheme, navCollapsed, setNavCollapsed } = useUiSettings();
+  const { navCollapsed, setNavCollapsed } = useUiSettings();
   const navExpanded = !navCollapsed;
   const setNavExpanded = (update: (expanded: boolean) => boolean) => setNavCollapsed(!update(navExpanded));
   const sections = useNavSections();
   const pages = useMemo(() => sections.flatMap((section) => section.items), [sections]);
-  const [searching, setSearching] = useState(false);
   const { pathname } = useLocation();
   // This page has rendered: a page transition waiting for it can run.
   useLayoutEffect(() => {
     pageRendered();
   }, [pathname]);
 
-  // Ctrl/Cmd+K opens search anywhere.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setSearching(true);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  const displayName = me?.full_name?.trim() || me?.email || "Signed-in user";
   const orgLine = orgIdentityLine(me?.org);
 
   return (
     <div className={cn("flex flex-col text-[var(--ink)]", workspace ? "min-h-screen lg:h-screen lg:overflow-hidden" : "min-h-screen")}>
-      <header className="sticky top-0 z-20 shrink-0 border-b border-[var(--line)] bg-[color:var(--panel)]/95 backdrop-blur" style={{ viewTransitionName: "eris-header" }}>
-        <div className="mx-auto flex w-full max-w-[1900px] items-center gap-3 px-4 py-3 md:px-6">
+      <header className="sticky top-0 z-30 shrink-0 border-b border-[var(--line)] bg-[color:color-mix(in_oklab,var(--panel)_86%,transparent)] backdrop-blur-xl" style={{ viewTransitionName: "eris-header" }}>
+        <div className="mx-auto grid h-16 w-full max-w-[1900px] grid-cols-[auto_1fr_auto] items-center gap-4 px-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <img src="/eris-logo.svg" alt="ERIS" className="h-9 w-9 shrink-0 rounded-md object-contain" />
-            <div className="min-w-0 leading-tight"><div className="truncate text-sm font-semibold">Emergency Response Information System</div><div className="truncate text-xs text-muted">Caltrans | Geotechnical Services</div></div>
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setSearching(true)}
-              title="Search ERIS (Ctrl+K)"
-              className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-1.5 text-sm text-muted hover:border-[var(--brand)] hover:text-[var(--ink)]"
-            >
-              <Search size={15} strokeWidth={NAV_ICON_STROKE} aria-hidden />
-              <span className="hidden md:inline">Search</span>
-              <kbd className="hidden rounded border border-[var(--line)] px-1 text-[10px] font-medium lg:inline">Ctrl K</kbd>
-            </button>
-            <label className="hidden items-center gap-2 text-xs text-muted sm:flex">
-              <span className="sr-only">Theme</span>
-              <select
-                value={theme}
-                onChange={(event) => setTheme(event.target.value as typeof theme)}
-                title="Theme (Settings › Appearance)"
-                className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--panel-soft)]"
-              >
-                {THEME_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-              </select>
-            </label>
-            <div className="hidden text-right md:block">
-              <div className="max-w-64 truncate text-sm font-medium">{displayName}</div>
-              <div className="max-w-80 truncate text-xs text-muted">{me?.roles?.map(roleLabel).join(" · ") || "ERIS user"}</div>
-              {orgLine ? <div className="max-w-80 truncate text-xs text-muted" title={orgLine}>{orgLine}</div> : null}
+            <img src="/eris-logo.svg" alt="" className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-sm" />
+            <div className="hidden min-w-0 leading-tight sm:block">
+              <div className="truncate text-sm font-bold tracking-tight">ERIS</div>
+              <div className="truncate text-[11px] text-muted">Emergency Response Information System</div>
             </div>
+          </div>
+          <div className="min-w-0">
+            <HeaderSearch pages={pages} searchRecords={!!me && isOperationalUser(me.roles)} />
+          </div>
+          <div className="flex items-center justify-end gap-1.5">
             {me && !isPublicOnly(me.roles) ? <NotificationBell /> : null}
-            <button type="button" onClick={logout} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Sign out</button>
+            <span aria-hidden className="mx-1 hidden h-6 w-px bg-[var(--line)] sm:block" />
+            <ProfileMenu orgLine={orgLine} />
           </div>
         </div>
       </header>
@@ -289,7 +252,6 @@ export default function AppShell({ title, children, workspace = false }: { title
         </main>
       </div>
 
-      <Spotlight open={searching} onClose={() => setSearching(false)} pages={pages} searchRecords={!!me && isOperationalUser(me.roles)} />
       {!workspace ? <footer className="mt-auto border-t border-[var(--line)] bg-[color:var(--panel)]/70"><div className="mx-auto w-full max-w-[1900px] px-4 py-4 text-xs text-muted md:px-6">© {new Date().getFullYear()} Caltrans | ERIS (Internal)</div></footer> : null}
     </div>
   );
