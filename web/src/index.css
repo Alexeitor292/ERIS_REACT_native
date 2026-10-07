@@ -168,8 +168,8 @@ body {
 .eris-memo-tabs { scrollbar-width: none; }
 
 /* Sign-in animation (ui/SignInSplash.tsx), the mobile app's opening one. */
-.eris-splash-logo { animation: eris-splash-shrink 900ms cubic-bezier(0.33, 1, 0.68, 1) both; }
-.eris-splash-name { animation: eris-splash-fade 420ms cubic-bezier(0.5, 1, 0.89, 1) 460ms both; }
+.eris-splash-logo { animation: eris-splash-shrink 1400ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+.eris-splash-name { animation: eris-splash-fade 650ms cubic-bezier(0.5, 1, 0.89, 1) 720ms both; }
 @keyframes eris-splash-shrink { from { transform: scale(6); } to { transform: scale(1); } }
 @keyframes eris-splash-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
@@ -455,4 +455,25 @@ body {
   left: -0.9rem;
   width: 0.7rem;
   border-top: 2px solid var(--org-line);
+}
+
+/* Moving between pages from the side navigation (ui/AppShell.tsx, Settings › Page transitions).
+   The header and the navigation stay put; the page slides in, whichever page it came from. */
+::view-transition-old(eris-header), ::view-transition-old(eris-nav) { display: none; }
+::view-transition-new(eris-header), ::view-transition-new(eris-nav) { animation: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-group(eris-page) { animation-duration: 520ms; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); }
+::view-transition-old(eris-page) { animation: eris-page-out 320ms cubic-bezier(0.4, 0, 1, 1) both; }
+::view-transition-new(eris-page) { animation: eris-page-in 520ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both; }
+@keyframes eris-page-out { to { opacity: 0; transform: translateX(-40px); } }
+@keyframes eris-page-in { from { opacity: 0; transform: translateX(72px); } }
+
+/* The active navigation bar fills from left to right as its page arrives. */
+.eris-nav-fill { transform-origin: left center; animation: eris-nav-fill 560ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes eris-nav-fill { from { transform: scaleX(0); opacity: 0.6; } to { transform: scaleX(1); opacity: 1; } }
+:root[data-page-transitions="off"] .eris-nav-fill { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  .eris-nav-fill { animation: none; }
 }

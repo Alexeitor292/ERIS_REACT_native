@@ -20,7 +20,7 @@ const THEMES = [
 ];
 
 export default function SettingsPage() {
-  const { theme, setTheme } = useUiSettings();
+  const { theme, setTheme, pageTransitions, setPageTransitions } = useUiSettings();
 
   return (
     <AppShell title="Settings">
@@ -60,6 +60,25 @@ export default function SettingsPage() {
               );
             })}
           </div>
+        </section>
+
+        <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 md:p-5">
+          <h2 className="text-base font-semibold">Motion</h2>
+          <label className="mt-3 flex max-w-2xl cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={pageTransitions}
+              onChange={(event) => setPageTransitions(event.target.checked)}
+              className="mt-1 h-4 w-4 accent-[var(--brand)]"
+            />
+            <span>
+              <span className="block text-sm font-semibold">Page transitions</span>
+              <span className="block text-sm text-muted">
+                When you pick a page in the side navigation, it slides smoothly into place while the header and navigation stay put, and the
+                highlighted entry fills in. Turn off to switch pages instantly.
+              </span>
+            </span>
+          </label>
         </section>
 
         <section className="rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] p-4">
