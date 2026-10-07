@@ -51,6 +51,11 @@ export default function OrganizationPage() {
       return null;
     }
   });
+  // A link can name the office to show (search results do: ?office=<id>).
+  const officeParam = Number(params.get("office"));
+  useEffect(() => {
+    if (officeParam > 0) setOfficeId(officeParam);
+  }, [officeParam]);
   const [picker, setPicker] = useState<Picker | null>(null);
   const [branchDialog, setBranchDialog] = useState<{ office: OfficeTree; branch: TreeBranch | null } | null>(null);
   const [officeDialog, setOfficeDialog] = useState<{ office: OfficeTree["office"] | null } | null>(null);
