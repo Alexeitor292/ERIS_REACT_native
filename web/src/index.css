@@ -166,6 +166,15 @@ body {
 
 /* ---- Memo editor: a writing surface that fills its container ------------- */
 .eris-memo-tabs { scrollbar-width: none; }
+
+/* Sign-in animation (ui/SignInSplash.tsx), the mobile app's opening one. */
+.eris-splash-logo { animation: eris-splash-shrink 900ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+.eris-splash-name { animation: eris-splash-fade 420ms cubic-bezier(0.5, 1, 0.89, 1) 460ms both; }
+@keyframes eris-splash-shrink { from { transform: scale(6); } to { transform: scale(1); } }
+@keyframes eris-splash-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .eris-splash-logo, .eris-splash-name { animation: none; }
+}
 .eris-memo-tabs::-webkit-scrollbar { display: none; }
 
 /* A field someone else is in (features/submissions/collab): their colour, and their initials on the label's corner. */
