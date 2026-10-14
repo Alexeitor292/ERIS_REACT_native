@@ -108,6 +108,8 @@ export function updateSurvey(
     points: SurveyPoint[];
     alignment_spread_m: number | null;
     alignment_points: number;
+    /** How the alignment went: points compared, vegetation left out, tilt. */
+    alignment: { compared: number; vegetation_left_out: number; tilt_deg: number | null; tilt_across_m: number | null } | null;
     compare_with_survey_id: number | null;
   }>,
 ) {

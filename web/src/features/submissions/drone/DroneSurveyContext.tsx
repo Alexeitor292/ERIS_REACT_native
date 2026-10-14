@@ -14,8 +14,8 @@ import {
 } from "../../../api/droneSurveys";
 import { areasFromGeoJson } from "../../../components/siteAreasModel";
 import { sampleElevations } from "../terrainElevation";
-import { alignmentPoints, decodeGrid, encodeGrid, fillSea, sampleGrid, SEA_LEVEL_M, verticalOffset, type DroneGrid, type LonLat } from "./droneGrid";
-import { readElevation, readOrthomosaic, type Progress, type VerticalUnit } from "./readDroneFiles";
+import { alignmentPoints, decodeGrid, encodeGrid, fillSea, groundAlignment, groundSample, metresPerDegree, sampleGrid, SEA_LEVEL_M, type DroneGrid, type GroundAlignment, type LonLat } from "./droneGrid";
+import { readElevation, readOrthomosaic, VERTICAL_UNIT_TO_M, type Progress, type VerticalUnit } from "./readDroneFiles";
 
 /** Files larger than this are not archived as attachments (the public connection refuses bigger uploads). */
 export const MAX_ARCHIVED_BYTES = 95 * 1024 * 1024;
@@ -85,7 +85,7 @@ type DroneSurveyState = {
   upload: (input: NewSurvey, onProgress: Progress) => Promise<void>;
   update: (id: number, patch: Parameters<typeof updateSurvey>[2]) => Promise<void>;
   remove: (id: number) => Promise<void>;
-  realign: () => Promise<{ offsetM: number; spreadM: number } | null>;
+  realign: () => Promise<GroundAlignment | null>;
   addPoint: (lon: number, lat: number) => Promise<void>;
   removePoint: (id: string) => Promise<void>;
   saveComparison: (comparison: SavedComparison) => Promise<void>;
@@ -102,11 +102,46 @@ function affectedRings(geojson: unknown): LonLat[][] {
   return areasFromGeoJson(geojson).map((rings) => rings[0] as LonLat[]);
 }
 
-async function offsetFor(grid: DroneGrid, geojson: unknown): Promise<{ offsetM: number; spreadM: number; count: number } | null> {
-  const points = alignmentPoints(grid, affectedRings(geojson), 400);
+/**
+ * Puts the drone heights on true elevation: compared with the terrain model at
+ * up to 2,500 points across the survey, outside the drawn (moved) areas, on
+ * smooth ground only, each drone height averaged over the terrain model's own
+ * cell size (groundAlignment in droneGrid.ts).
+ */
+async function offsetFor(grid: DroneGrid, geojson: unknown): Promise<GroundAlignment | null> {
+  const points = alignmentPoints(grid, affectedRings(geojson), 2500);
   if (points.length < 8) return null;
-  const { z } = await sampleElevations(points);
-  return verticalOffset(points.map(([lon, lat], i) => ({ terrain: z[i], drone: sampleGrid(grid, lon, lat) })));
+  const { z, resolution } = await sampleElevations(points);
+  const radiusM = Math.min(5, Math.max(1, (resolution?.max ?? 2) / 2));
+  const lon0 = (grid.west + grid.east) / 2;
+  const lat0 = (grid.north + grid.south) / 2;
+  const m = metresPerDegree(lat0);
+  return groundAlignment(
+    points.map(([lon, lat], i) => ({ x: (lon - lon0) * m.lon, y: (lat - lat0) * m.lat, terrain: z[i], drone: groundSample(grid, lon, lat, radiusM) })),
+  );
+}
+
+/** The heights scaled from one unit to another (a file that does not say which it uses). */
+function rescaled(grid: DroneGrid, factor: number): DroneGrid {
+  const values = new Float32Array(grid.values.length);
+  for (let i = 0; i < values.length; i += 1) values[i] = grid.values[i] * factor;
+  return { ...grid, values };
+}
+
+/** What the saved stats keep about the alignment. */
+function alignmentStats(a: GroundAlignment | null) {
+  return {
+    alignment_spread_m: a?.spreadM ?? null,
+    alignment_points: a?.count ?? 0,
+    alignment: a
+      ? {
+          compared: a.compared,
+          vegetation_left_out: a.vegetationLeftOut,
+          tilt_deg: a.tiltDeg == null ? null : Math.round(a.tiltDeg * 1000) / 1000,
+          tilt_across_m: a.tiltAcrossM == null ? null : Math.round(a.tiltAcrossM * 1000) / 1000,
+        }
+      : null,
+  };
 }
 
 /**
@@ -302,12 +337,26 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
 
   const upload = useCallback(async (input: NewSurvey, onProgress: Progress) => {
     const step = (from: number, to: number): Progress => (fraction, message) => onProgress(from + (to - from) * fraction, message);
-    const elevation = await readElevation(input.dsm, { verticalUnit: input.verticalUnit, onProgress: step(0, input.ortho ? 0.5 : 0.75) });
+    let elevation = await readElevation(input.dsm, { verticalUnit: input.verticalUnit, onProgress: step(0, input.ortho ? 0.5 : 0.75) });
     const ortho = input.ortho ? await readOrthomosaic(input.ortho, { onProgress: step(0.5, 0.75) }) : null;
-    let offset: { offsetM: number; spreadM: number; count: number } | null = null;
+    let offset: GroundAlignment | null = null;
+    let unitChecked = false;
     if (input.alignment === "AUTO") {
       onProgress(0.78, "Lining the drone heights up with the terrain model…");
       offset = await offsetFor(elevation.grid, geojsonRef.current);
+      // A file that does not say its height unit (DroneDeploy's do not): the
+      // unit that agrees with the terrain model clearly better wins.
+      if (offset && !input.verticalUnit && !elevation.declaredVerticalUnit) {
+        const other: VerticalUnit = elevation.verticalUnit === "m" ? "usft" : "m";
+        const factor = VERTICAL_UNIT_TO_M[other] / VERTICAL_UNIT_TO_M[elevation.verticalUnit];
+        const grid = rescaled(elevation.grid, factor);
+        const tried = await offsetFor(grid, geojsonRef.current);
+        if (tried && tried.spreadM < offset.spreadM / 2) {
+          elevation = { ...elevation, grid, verticalUnit: other, stats: { ...elevation.stats, min: elevation.stats.min == null ? null : elevation.stats.min * factor, max: elevation.stats.max == null ? null : elevation.stats.max * factor } };
+          offset = tried;
+        }
+        unitChecked = true;
+      }
     }
     const archived: { dsm: number | null; ortho: number | null } = { dsm: null, ortho: null };
     for (const [key, file] of [["dsm", input.dsm], ["ortho", input.ortho]] as const) {
@@ -342,8 +391,8 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
           native_resolution_m: elevation.nativeResolutionM,
           vertical_unit: elevation.verticalUnit,
           declared_vertical_unit: elevation.declaredVerticalUnit,
-          alignment_spread_m: offset?.spreadM ?? null,
-          alignment_points: offset?.count ?? 0,
+          ...alignmentStats(offset),
+          vertical_unit_checked: unitChecked,
           dsm_size_bytes: input.dsm.size,
           ortho_size_bytes: input.ortho?.size ?? null,
         },
@@ -380,8 +429,7 @@ export function DroneSurveyProvider({ submissionId, canEdit, geojson, enabled = 
       await updateSurvey(submissionId, active.survey.id, {
         vertical_offset_m: Math.round(offset.offsetM * 1000) / 1000,
         offset_mode: "AUTO",
-        alignment_spread_m: offset.spreadM,
-        alignment_points: offset.count,
+        ...alignmentStats(offset),
       }),
     );
     return offset;

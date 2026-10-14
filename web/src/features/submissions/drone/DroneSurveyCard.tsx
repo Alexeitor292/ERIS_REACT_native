@@ -111,6 +111,7 @@ export default function DroneSurveyCard() {
             <Fact label="Lined up">
               <OffsetEditor key={survey.id} />
             </Fact>
+            <HeightsFacts />
           </dl>
 
           <Points />
@@ -141,6 +142,37 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
       <dt className="shrink-0 font-semibold text-muted">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
+  );
+}
+
+/** The height unit read, and the ground the alignment rests on (vegetation left out, any lean). */
+function HeightsFacts() {
+  const survey = useDroneSurveys()!.active!.survey;
+  const stats = (survey.stats ?? {}) as {
+    vertical_unit?: VerticalUnit;
+    declared_vertical_unit?: VerticalUnit | null;
+    vertical_unit_checked?: boolean;
+    alignment_points?: number;
+    alignment?: { compared: number; vegetation_left_out: number; tilt_deg: number | null; tilt_across_m: number | null } | null;
+  };
+  const unit = stats.vertical_unit ? VERTICAL_UNIT_LABEL[stats.vertical_unit] : null;
+  const how = stats.declared_vertical_unit ? "as the file says" : stats.vertical_unit_checked ? "the file does not say; checked against the terrain model" : null;
+  const a = survey.offset_mode === "AUTO" ? stats.alignment : null;
+  return (
+    <>
+      {unit ? <Fact label="Heights">{unit}{how ? <span className="text-muted"> ({how})</span> : null}</Fact> : null}
+      {a ? (
+        <Fact label="Ground used">
+          {stats.alignment_points ?? 0} of {a.compared} points on bare ground or pavement
+          {a.vegetation_left_out ? <span className="text-muted"> · {a.vegetation_left_out} over vegetation or objects left out</span> : null}
+          {a.tilt_deg != null && a.tilt_across_m != null ? (
+            <span className={a.tilt_across_m > 0.5 ? "text-[var(--warn-text)]" : "text-muted"}>
+              {" "}· leans {a.tilt_deg.toFixed(2)}° against the terrain model ({ft(a.tilt_across_m)} across the site)
+            </span>
+          ) : null}
+        </Fact>
+      ) : null}
+    </>
   );
 }
 
