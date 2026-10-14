@@ -11,6 +11,9 @@ import {
   edgeDistance,
   fillSea,
   encodeGrid,
+  groundAlignment,
+  groundSample,
+  metresPerDegree,
   latticeInterpolator,
   latticePoints,
   resampleToGrid,
@@ -148,4 +151,68 @@ test("gaps facing the sea read as sea level; gaps beside high ground stay withou
   assert.ok(Number.isNaN(filled.values[3]) && Number.isNaN(filled.values[4])); // beside the hill: still no data
   assert.equal(filled.values[10], 1.5); // what was mapped is untouched
   assert.ok(Number.isNaN(values[15])); // the survey itself is not changed
+});
+
+
+// A 100 m square slope at 0.2 m cells, floating 89.4 m below true elevation
+// (a DroneDeploy model without ground control), with trees over its west third.
+function floatingSlope(): { grid: DroneGrid; trueZ: (lon: number, lat: number) => number } {
+  const west = -122.075, south = 37.054;
+  const m = metresPerDegree(south);
+  const cols = 500, rows = 500;
+  const east = west + 100 / m.lon, north = south + 100 / m.lat;
+  const values = new Float32Array(cols * rows);
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const trueZ = (lon: number, lat: number) => 120 + 0.3 * (lon - west) * m.lon + 0.1 * (lat - south) * m.lat;
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const lon = west + ((c + 0.5) / cols) * (east - west);
+      const lat = north - ((r + 0.5) / rows) * (north - south);
+      const canopy = c < cols / 3 ? 2 + 6 * random() : 0;
+      values[r * cols + c] = trueZ(lon, lat) - 89.4 + canopy + 0.03 * (random() - 0.5);
+    }
+  }
+  return { grid: { west, east, south, north, cols, rows, values }, trueZ };
+}
+
+test("a floating drone model lines up on the bare ground, not on the treetops", () => {
+  const { grid: slope, trueZ } = floatingSlope();
+  const m = metresPerDegree(slope.south);
+  const samples = alignmentPoints(slope, [], 400).map(([lon, lat]) => ({
+    x: (lon - slope.west) * m.lon,
+    y: (lat - slope.south) * m.lat,
+    terrain: trueZ(lon, lat),
+    drone: groundSample(slope, lon, lat, 1.2),
+  }));
+  const a = groundAlignment(samples)!;
+  assert.ok(Math.abs(a.offsetM - 89.4) < 0.05, `offset ${a.offsetM}`);
+  assert.ok(a.spreadM < 0.05);
+  // The trees (a third of the site) are left out, and the model does not lean.
+  assert.ok(a.vegetationLeftOut > 0.25 * a.compared && a.vegetationLeftOut < 0.45 * a.compared);
+  assert.ok(a.tiltDeg! < 0.05);
+});
+
+test("a drone model that leans against the terrain model says so", () => {
+  const { grid: slope, trueZ } = floatingSlope();
+  const m = metresPerDegree(slope.south);
+  // The terrain model rises 1 m more than the drone over the 100 m west to east.
+  const samples = alignmentPoints(slope, [], 400).map(([lon, lat]) => ({
+    x: (lon - slope.west) * m.lon,
+    y: (lat - slope.south) * m.lat,
+    terrain: trueZ(lon, lat) + 0.01 * (lon - slope.west) * m.lon,
+    drone: groundSample(slope, lon, lat, 1.2),
+  }));
+  const a = groundAlignment(samples)!;
+  assert.ok(a.tiltAcrossM! > 0.5 && a.tiltAcrossM! < 0.8, `across ${a.tiltAcrossM}`);
+  assert.ok(Math.abs(a.tiltDeg! - 0.573) < 0.05, `tilt ${a.tiltDeg}`);
+});
+
+test("rough ground reads rough and a plane reads smooth", () => {
+  const { grid: slope } = floatingSlope();
+  const lat = (slope.north + slope.south) / 2;
+  const trees = groundSample(slope, slope.west + 0.15 * (slope.east - slope.west), lat, 1.2)!;
+  const bare = groundSample(slope, slope.west + 0.75 * (slope.east - slope.west), lat, 1.2)!;
+  assert.ok(trees.roughM > 1 && bare.roughM < 0.05);
+  assert.equal(groundSample(slope, slope.west - 0.001, lat, 1.2), null);
 });

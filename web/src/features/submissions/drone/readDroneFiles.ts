@@ -137,6 +137,23 @@ function boundsOf(points: Array<[number, number]>): Bounds {
   return { west: Math.min(...lons), east: Math.max(...lons), south: Math.min(...lats), north: Math.max(...lats) };
 }
 
+/** Exports that are not an elevation grid or a photo, with what to export instead. */
+function refuseOtherExports(file: File) {
+  if (/\.(dxf|dwg|shp|kml|kmz|geojson)$/i.test(file.name)) {
+    throw new Error(`${file.name} is a drawing (contours or lines), not an elevation grid. Use the elevation GeoTIFF instead (from DroneDeploy, the "Elevation Toolbox" export).`);
+  }
+}
+
+/** What the drone software named this raster ("DTM", "Orthomosaic"…), from its GDAL metadata. */
+function exportName(image: GeoTIFFImage): string {
+  try {
+    const meta = (image.getGDALMetadata() ?? {}) as Record<string, string>;
+    return String(meta.name ?? "");
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Read an elevation GeoTIFF (DSM/DEM) into the patch. `verticalUnit`, when
  * given, overrides what the file declares (or does not).
@@ -144,9 +161,15 @@ function boundsOf(points: Array<[number, number]>): Bounds {
 export async function readElevation(file: File, options: { verticalUnit?: VerticalUnit; onProgress?: Progress } = {}): Promise<ElevationRead> {
   const progress = options.onProgress ?? (() => {});
   progress(0, "Opening the elevation file…");
+  refuseOtherExports(file);
   const tiff = await fromBlob(file);
   const image = await tiff.getImage();
   if (image.getSamplesPerPixel() > 2) {
+    if (/dtm|dsm|dem|elev/i.test(exportName(image))) {
+      throw new Error(
+        "This is a coloured picture of the elevation, not the heights themselves. Use the elevation export that carries the heights (from DroneDeploy, the \"Elevation Toolbox\" GeoTIFF).",
+      );
+    }
     throw new Error("This looks like an orthomosaic (a colour image). Choose the elevation file (DSM or DEM) here.");
   }
   const f = frameOf(image);
@@ -202,8 +225,15 @@ export async function readElevation(file: File, options: { verticalUnit?: Vertic
 export async function readOrthomosaic(file: File, options: { onProgress?: Progress } = {}): Promise<OrthoRead> {
   const progress = options.onProgress ?? (() => {});
   progress(0, "Opening the orthomosaic…");
+  refuseOtherExports(file);
   const tiff = await fromBlob(file);
   const image = await tiff.getImage();
+  if (image.getSamplesPerPixel() <= 2) {
+    throw new Error("This is an elevation file (heights, not a photo). Choose it as the elevation file, and the orthomosaic here.");
+  }
+  if (/dtm|dsm|dem|elev/i.test(exportName(image))) {
+    throw new Error("This is a coloured picture of the elevation, not the orthomosaic photo. In DroneDeploy, export the Orthomosaic (GeoTIFF) for this slot.");
+  }
   const f = frameOf(image);
   const factor = Math.max(1, Math.ceil(Math.max(f.width, f.height) / MAX_ORTHO_SIDE));
   const width = Math.ceil(f.width / factor);

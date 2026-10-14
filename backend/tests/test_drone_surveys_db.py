@@ -113,6 +113,25 @@ def test_lining_up_again_updates_how_well_the_heights_agree(client_db, cast):
     assert stats["alignment_spread_m"] == 0.18 and stats["alignment_points"] == 380 and stats["vertical_unit"] == "m"
 
 
+def test_lining_up_again_keeps_how_the_ground_was_chosen(client_db, cast):
+    survey = _create(client_db, cast, stats={"vertical_unit": "usft"}).json()
+    details = {"compared": 935, "vegetation_left_out": 537, "tilt_deg": 0.268, "tilt_across_m": 0.6}
+    resp = client_db.patch(
+        f"/submissions/{cast['form']}/drone-surveys/{survey['id']}",
+        json={"vertical_offset_m": 89.37, "offset_mode": "AUTO", "alignment_spread_m": 0.19, "alignment_points": 326, "alignment": details},
+        headers=cast["owner"]["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    stats = resp.json()["stats"]
+    assert stats["alignment"] == details and stats["vertical_unit"] == "usft"
+    too_big = client_db.patch(
+        f"/submissions/{cast['form']}/drone-surveys/{survey['id']}",
+        json={"alignment": {"note": "x" * 3000}},
+        headers=cast["owner"]["headers"],
+    )
+    assert too_big.status_code == 413
+
+
 def test_only_people_who_can_edit_the_form_change_it(client_db, cast):
     survey = _create(client_db, cast).json()
     other = cast["other"]["headers"]

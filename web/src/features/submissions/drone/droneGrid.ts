@@ -145,6 +145,120 @@ export function verticalOffset(pairs: Array<{ terrain: number | null; drone: num
   return { offsetM, spreadM: median(diffs.map((d) => Math.abs(d - offsetM)))!, count: diffs.length };
 }
 
+/**
+ * The drone surface around a point, at the terrain model's scale: the mean
+ * height over a square of `radiusM` (the terrain model's cells are metres
+ * across, the drone's centimetres) and how rough it is there, the spread
+ * around a plane fitted through it. Bare ground and pavement are smooth;
+ * trees, brush and cars are rough, and a photo-built model sits on top of
+ * them rather than on the ground. Null near the edge of the data.
+ */
+export function groundSample(grid: DroneGrid, lon: number, lat: number, radiusM: number): { meanM: number; roughM: number } | null {
+  if (!covers(grid, lon, lat)) return null;
+  const { dx, dy } = cellSizeM(grid);
+  const cx = Math.floor(((lon - grid.west) / (grid.east - grid.west)) * grid.cols);
+  const cy = Math.floor(((grid.north - lat) / (grid.north - grid.south)) * grid.rows);
+  const rx = Math.max(1, Math.round(radiusM / dx));
+  const ry = Math.max(1, Math.round(radiusM / dy));
+  let n = 0, sx = 0, sy = 0, sz = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, szz = 0;
+  for (let y = cy - ry; y <= cy + ry; y += 1) {
+    if (y < 0 || y >= grid.rows) continue;
+    for (let x = cx - rx; x <= cx + rx; x += 1) {
+      if (x < 0 || x >= grid.cols) continue;
+      const z = grid.values[y * grid.cols + x];
+      if (!Number.isFinite(z)) continue;
+      const X = (x - cx) * dx;
+      const Y = (y - cy) * dy;
+      n += 1; sx += X; sy += Y; sz += z; sxx += X * X; syy += Y * Y; sxy += X * Y; sxz += X * z; syz += Y * z; szz += z * z;
+    }
+  }
+  if (n < 0.8 * (2 * rx + 1) * (2 * ry + 1)) return null;
+  const plane = solvePlane(n, sx, sy, sxx, syy, sxy, sz, sxz, syz);
+  if (!plane) return null;
+  const [a, b, c] = plane;
+  // Residual sum of squares from the sums: Σ(z − a − bX − cY)².
+  const rss = szz - a * sz - b * sxz - c * syz;
+  return { meanM: sz / n, roughM: Math.sqrt(Math.max(0, rss) / n) };
+}
+
+/** Least squares z = a + bX + cY from the sums; null when the points are degenerate. */
+function solvePlane(n: number, sx: number, sy: number, sxx: number, syy: number, sxy: number, sz: number, sxz: number, syz: number): [number, number, number] | null {
+  const det3 = (m: number[][]) =>
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const m = [[n, sx, sy], [sx, sxx, sxy], [sy, sxy, syy]];
+  const rhs = [sz, sxz, syz];
+  const d = det3(m);
+  if (!Number.isFinite(d) || Math.abs(d) < 1e-9) return null;
+  const replaced = (col: number) => m.map((row, i) => row.map((v, j) => (j === col ? rhs[i] : v)));
+  return [det3(replaced(0)) / d, det3(replaced(1)) / d, det3(replaced(2)) / d];
+}
+
+/** Smoother than this (metres around a local plane) counts as bare ground or pavement. */
+export const SMOOTH_GROUND_M = 0.2;
+
+export type GroundAlignment = {
+  /** Add to every drone height to put it on the terrain model's (true) elevation. */
+  offsetM: number;
+  /** How closely the two agree on the ground used, once lined up (median absolute deviation). */
+  spreadM: number;
+  /** Points the offset rests on. */
+  count: number;
+  /** Points where both surfaces had data. */
+  compared: number;
+  /** Rough points (vegetation, cars, structures) left out. */
+  vegetationLeftOut: number;
+  /** How much the drone surface leans against the terrain model (degrees), and what that adds up to across the site (metres). */
+  tiltDeg: number | null;
+  tiltAcrossM: number | null;
+};
+
+/**
+ * The offset that puts a drone surface on true elevation. A model built from
+ * photos without ground control floats: its heights are right relative to each
+ * other but start from an arbitrary zero. Compared with the terrain model on
+ * ground that did not move, terrain minus drone is one number. Over trees the
+ * photos see the canopy, not the ground the terrain model (lidar) has, so rough
+ * points are left out; what is left is trimmed of outliers, and the median of
+ * the rest is the offset. A plane through the differences says whether the
+ * drone model also leans (reported, not applied).
+ */
+export function groundAlignment(
+  samples: Array<{ x: number; y: number; terrain: number | null; drone: { meanM: number; roughM: number } | null }>,
+): GroundAlignment | null {
+  const both = samples.filter((s) => s.terrain != null && Number.isFinite(s.terrain) && s.drone != null);
+  if (both.length < 8) return null;
+  let ground = both.filter((s) => s.drone!.roughM < SMOOTH_GROUND_M);
+  // A site that is nearly all vegetation: fall back to its smoothest third.
+  if (ground.length < Math.max(8, 0.15 * both.length)) {
+    ground = [...both].sort((a, b) => a.drone!.roughM - b.drone!.roughM).slice(0, Math.max(8, Math.ceil(both.length / 3)));
+  }
+  let kept = ground.map((s) => ({ x: s.x, y: s.y, d: s.terrain! - s.drone!.meanM }));
+  for (let pass = 0; pass < 5; pass += 1) {
+    const mid = median(kept.map((k) => k.d))!;
+    const mad = median(kept.map((k) => Math.abs(k.d - mid)))!;
+    const limit = Math.max(3 * 1.4826 * mad, 0.05);
+    const next = kept.filter((k) => Math.abs(k.d - mid) <= limit);
+    if (next.length === kept.length || next.length < 8) break;
+    kept = next;
+  }
+  const offsetM = median(kept.map((k) => k.d))!;
+  const spreadM = median(kept.map((k) => Math.abs(k.d - offsetM)))!;
+  let tiltDeg: number | null = null;
+  let tiltAcrossM: number | null = null;
+  if (kept.length >= 20) {
+    let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sz = 0, sxz = 0, syz = 0;
+    for (const k of kept) { n += 1; sx += k.x; sy += k.y; sxx += k.x * k.x; syy += k.y * k.y; sxy += k.x * k.y; sz += k.d; sxz += k.x * k.d; syz += k.y * k.d; }
+    const plane = solvePlane(n, sx, sy, sxx, syy, sxy, sz, sxz, syz);
+    if (plane) {
+      const xs = kept.map((k) => k.x);
+      const ys = kept.map((k) => k.y);
+      tiltDeg = (Math.atan(Math.hypot(plane[1], plane[2])) * 180) / Math.PI;
+      tiltAcrossM = Math.hypot(plane[1] * (Math.max(...xs) - Math.min(...xs)), plane[2] * (Math.max(...ys) - Math.min(...ys)));
+    }
+  }
+  return { offsetM, spreadM, count: kept.length, compared: both.length, vegetationLeftOut: both.length - ground.length, tiltDeg, tiltAcrossM };
+}
+
 function inRing([lon, lat]: LonLat, ring: LonLat[]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {

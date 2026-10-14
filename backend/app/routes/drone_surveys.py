@@ -97,6 +97,8 @@ class SurveyPatch(BaseModel):
     # How well the heights agree with the terrain model on stable ground, after lining them up again.
     alignment_spread_m: float | None = Field(default=None, ge=0, le=1000)
     alignment_points: int | None = Field(default=None, ge=0, le=100_000)
+    # How the alignment went (points compared, vegetation left out, tilt), kept with the stats.
+    alignment: dict[str, Any] | None = None
     # Which survey of the same form this one is compared with (null: the terrain model).
     compare_with_survey_id: int | None = Field(default=None, ge=1)
 
@@ -325,8 +327,13 @@ def update_survey(
                 raise HTTPException(status_code=422, detail="Compare with a survey of the same form")
         sets.append("compare_with_survey_id = :compare_with")
         params["compare_with"] = other
-    if "alignment_spread_m" in provided or "alignment_points" in provided:
+    if "alignment_spread_m" in provided or "alignment_points" in provided or "alignment" in provided:
         stats = _json(current["stats_json"]) or {}
+        if "alignment" in provided:
+            blob = json.dumps(payload.alignment) if payload.alignment is not None else None
+            if blob and len(blob) > 2_000:
+                raise HTTPException(status_code=413, detail="The alignment details are too large to save")
+            stats["alignment"] = payload.alignment
         if "alignment_spread_m" in provided:
             stats["alignment_spread_m"] = payload.alignment_spread_m
         if "alignment_points" in provided:
