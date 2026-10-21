@@ -22,6 +22,7 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..roles import is_admin, is_maintenance_only, is_operational_user, is_public_only
 from ..services import public_visibility
+from ..services import maintenance_workflows as mw
 from ..services import workflow_tree as workflow_tree_svc
 from . import assessments as assessments_routes
 from . import incidents as incidents_routes
@@ -32,6 +33,12 @@ router = APIRouter(tags=["workflow-tree"])
 def _ensure_workflow_tree_access(user: dict, incident_row: dict, *, db: Session | None = None) -> None:
     if is_admin(user):
         return
+    if db is not None:
+        workflow = mw.run(db, int(incident_row["id"]))
+        if mw.can_read(user, incident_row, workflow, db=db):
+            return
+        if workflow and workflow["outcome"] != "GEOTECH":
+            raise HTTPException(404, "Incident not found")
     if is_maintenance_only(user):
         # Maintenance Crew members: own reports only.
         if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):

@@ -9,6 +9,7 @@ test("each notice opens the screen that does the same job here", () => {
   assert.equal(routeFor("/submissions/7", "SHARE_RECEIVED"), "/(tabs)/submissions/7");
   assert.equal(routeFor("/my-work?assessment=9", "ASSESSMENT_STAFF_ASSIGNMENT"), "/(tabs)/assessments");
   assert.equal(routeFor("/assessments/9", "ASSESSMENT_APPROVED_AUTHOR"), "/(tabs)/assessments");
+  assert.deepEqual(routeFor("/maintenance-work?incident=42", "MAINTENANCE_WORKFLOW"), { pathname: "/(tabs)/maintenance", params: { incident: "42" } });
 });
 
 test("steps done on the web stay in the list", () => {

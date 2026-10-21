@@ -37,6 +37,7 @@ from .routes.assessments import router as assessments_router
 from .routes.workflow_tree import router as workflow_tree_router
 from .routes.org import router as org_router
 from .routes.org_tree import router as org_tree_router
+from .routes.maintenance_workflows import router as maintenance_workflows_router
 from .routes.user_layouts import router as user_layouts_router
 from .routes.site_history import router as site_history_router
 from .routes.sharing import router as sharing_router
@@ -125,6 +126,7 @@ app.include_router(road_inventory_router)
 # owns them (org model design §7).
 app.include_router(org_router)
 app.include_router(org_tree_router)
+app.include_router(maintenance_workflows_router)
 app.include_router(user_layouts_router)
 app.include_router(site_history_router)
 app.include_router(sharing_router)

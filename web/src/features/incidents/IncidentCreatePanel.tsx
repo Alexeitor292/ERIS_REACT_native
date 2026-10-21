@@ -72,7 +72,7 @@ export default function IncidentCreatePanel({
         <div className="min-w-0">
           <h2 id="create-incident-title" className="text-base font-semibold">Report an incident</h2>
           <p className="mt-0.5 text-[13px] text-muted">
-            What was seen and where. It goes to the district's Maintenance Coordinator, who decides what happens next. The incident type is left for the on-site assessment.
+            What was seen and where. The district’s maintenance workflow decides who reviews it next. The incident type is left for the on-site assessment.
           </p>
         </div>
         <button type="button" onClick={onCancel} disabled={busy} aria-label="Close the report form" className="rounded-md border border-[var(--line)] p-1.5 hover:bg-[var(--panel-soft)] disabled:opacity-50">

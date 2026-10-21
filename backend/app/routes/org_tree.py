@@ -196,9 +196,12 @@ _KINDS = {"coordinators": "COORDINATOR", "crew": "CREW"}
 
 
 def _maintenance_payload(db: Session, actor: dict) -> dict:
+    from sqlalchemy import text
+    configured = set(db.execute(text("SELECT district FROM maintenance_workflows")).scalars())
     rights = org_tree.maintenance_rights(db, actor)
     districts = org_tree.maintenance_lists(db)
     for entry in districts:
+        entry["workflow_configured"] = entry["district"] in configured
         allowed = rights.get(entry["district"], {"crew": False, "coordinators": False})
         entry["can_manage_crew"] = allowed["crew"]
         entry["can_manage_coordinators"] = allowed["coordinators"]

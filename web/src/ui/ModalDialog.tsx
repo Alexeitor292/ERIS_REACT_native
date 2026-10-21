@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -109,7 +110,8 @@ export default function ModalDialog({
     if (event.target === event.currentTarget && !busyRef.current) onCloseRef.current();
   }
 
-  return (
+  // Escape page transition stacking contexts so dialogs cover the sticky app header.
+  return createPortal(
     <div className={overlayClassName} role="presentation" onMouseDown={onBackdropMouseDown}>
       <div
         ref={dialogRef}
@@ -123,6 +125,7 @@ export default function ModalDialog({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

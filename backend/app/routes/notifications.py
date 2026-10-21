@@ -13,16 +13,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import deny_public_only
+from ..deps import require_roles
+from ..roles import ALL_ROLE_NAMES, is_public_only
+from ..services import maintenance_workflows
 from ..services import notification_feed
 
 router = APIRouter(tags=["notifications"])
+
+
+def notification_user(db: Session = Depends(get_db), user=Depends(require_roles(ALL_ROLE_NAMES))):
+    if is_public_only(user) and not maintenance_workflows.summary(db, int(user["id"])):
+        raise HTTPException(403, "This account has no work notification feed")
+    return user
 
 
 class ReadIn(BaseModel):
@@ -40,25 +48,25 @@ def list_notifications(
     before_id: int | None = Query(None, ge=1),
     unread_only: bool = Query(False),
     db: Session = Depends(get_db),
-    user=Depends(deny_public_only),
+    user=Depends(notification_user),
 ) -> dict[str, Any]:
     return notification_feed.feed(db, int(user["id"]), limit=limit, before_id=before_id, unread_only=unread_only)
 
 
 @router.get("/notifications/unread")
-def unread(db: Session = Depends(get_db), user=Depends(deny_public_only)) -> dict[str, int]:
+def unread(db: Session = Depends(get_db), user=Depends(notification_user)) -> dict[str, int]:
     return {"unread": notification_feed.unread_count(db, int(user["id"]))}
 
 
 @router.post("/notifications/read")
-def mark_read(payload: ReadIn, db: Session = Depends(get_db), user=Depends(deny_public_only)) -> dict[str, int]:
+def mark_read(payload: ReadIn, db: Session = Depends(get_db), user=Depends(notification_user)) -> dict[str, int]:
     notification_feed.mark_read(db, int(user["id"]), payload.ids)
     db.commit()
     return {"unread": notification_feed.unread_count(db, int(user["id"]))}
 
 
 @router.post("/notifications/devices")
-def register_device(payload: DeviceIn, db: Session = Depends(get_db), user=Depends(deny_public_only)) -> dict[str, bool]:
+def register_device(payload: DeviceIn, db: Session = Depends(get_db), user=Depends(notification_user)) -> dict[str, bool]:
     # A phone belongs to whoever signed in on it last.
     db.execute(
         text(
@@ -75,7 +83,7 @@ def register_device(payload: DeviceIn, db: Session = Depends(get_db), user=Depen
 
 
 @router.post("/notifications/devices/unregister")
-def unregister_device(payload: DeviceIn, db: Session = Depends(get_db), user=Depends(deny_public_only)) -> dict[str, bool]:
+def unregister_device(payload: DeviceIn, db: Session = Depends(get_db), user=Depends(notification_user)) -> dict[str, bool]:
     db.execute(
         text("UPDATE push_devices SET is_active = 0 WHERE token = :token AND user_id = :uid"),
         {"token": payload.token.strip(), "uid": int(user["id"])},

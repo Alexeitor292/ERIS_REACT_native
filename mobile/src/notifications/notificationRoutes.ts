@@ -10,6 +10,7 @@ export function routeFor(link: string | null, kind: string): AppRoute | null {
   if (kind === "INCIDENT_COORDINATOR_REVIEW") return "/(tabs)/incidents/track";
   if (!link) return null;
   const path = link.split("?")[0];
+  if (path === "/maintenance-work") return { pathname: "/(tabs)/maintenance", params: { incident: /[?&]incident=(\d+)/.exec(link)?.[1] || "" } };
   const incident = /^\/incidents\/(\d+)$/.exec(path);
   if (incident) return { pathname: "/(tabs)/incidents/[id]", params: { id: incident[1] } };
   const submission = /^\/submissions\/(\d+)$/.exec(path);

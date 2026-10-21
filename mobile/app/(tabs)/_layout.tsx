@@ -9,6 +9,7 @@ import { clearToken, getToken } from "@/src/auth/tokenStore";
 import { apiFetch, isSessionExpiredError } from "@/src/api/client";
 import { getUnread } from "@/src/api/notifications";
 import { badgeText } from "@/src/notifications/notificationRoutes";
+import type { MaintenanceMembership } from "@/src/api/maintenanceWorkflows";
 import { useUiSettings } from '@/src/ui/UiSettingsContext';
 import {
   canReportIncident,
@@ -24,6 +25,7 @@ export default function TabLayout() {
   const pathname = usePathname();
   const [roles, setRoles] = useState<string[]>([]);
   const [rolesLoaded, setRolesLoaded] = useState(false);
+  const [maintenance, setMaintenance] = useState<MaintenanceMembership[]>([]);
   const tabBaseHeight = Math.round(54 * componentScale);
   const tabIconSize = Math.round(28 * componentScale);
   const meBtnSize = Math.round(42 * componentScale);
@@ -34,8 +36,8 @@ export default function TabLayout() {
       try {
         const token = await getToken();
         if (!token || cancelled) return;
-        const me = await apiFetch<{ roles: string[] }>("/auth/me", { token });
-        if (!cancelled) setRoles(Array.isArray(me.roles) ? me.roles : []);
+        const me = await apiFetch<{ roles: string[]; maintenance_districts?: MaintenanceMembership[] }>("/auth/me", { token });
+        if (!cancelled) { setRoles(Array.isArray(me.roles) ? me.roles : []); setMaintenance(me.maintenance_districts || []); }
       } catch (e) {
         if (!isSessionExpiredError(e) && !cancelled) {
           setRoles([]);
@@ -55,8 +57,8 @@ export default function TabLayout() {
   //
   // A read-only (Guest) account holds no operational role, so it matches none
   // of these and keeps only the read-only incident feed below.
-  const publicOnly = rolesLoaded && isPublicOnly(roles);
-  const isMaintenanceWorker = canReportIncident(roles);
+  const publicOnly = rolesLoaded && isPublicOnly(roles) && !maintenance.length;
+  const isMaintenanceWorker = canReportIncident(roles) || maintenance.some(d => d.report);
   // The Senior Specialist fills the GISA form exactly as Staff do, so without
   // these two gates a Senior Specialist would see the Assessments tab and
   // nothing it links to.
@@ -180,6 +182,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="plus.circle.fill" color={color} />,
         }}
       />
+      <Tabs.Screen name="maintenance" options={{ href: maintenance.length || roles.includes('ADMIN') ? undefined : null, title: "Maintenance", tabBarIcon: ({ color }) => <IconSymbol size={tabIconSize} name="tray.full.fill" color={color} /> }} />
 
       <Tabs.Screen
         name="incidents/track"

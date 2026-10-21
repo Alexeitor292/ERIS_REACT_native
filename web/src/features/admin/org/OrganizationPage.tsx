@@ -26,6 +26,7 @@ import {
 } from "../../../api/orgTree";
 import OfficeTreeView, { branchTitle, type AddRequest } from "./OfficeTreeView";
 import MaintenanceDistricts from "./MaintenanceDistricts";
+import DistrictWorkflows from "./DistrictWorkflows";
 import PersonPickerDialog, { type PickRule } from "./PersonPickerDialog";
 import { BranchDialog, DetailsDialog, OfficeDialog } from "./OrgTreeDialogs";
 
@@ -171,7 +172,7 @@ export default function OrganizationPage() {
       <div className="flex h-full flex-col gap-4 p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-3">
           <p className="min-w-0 flex-1 text-sm text-muted">
-            Where people sit decides their role. Anyone in no office tree and on no district list is a Guest.
+            GeoTech offices define their organization trees. Maintenance districts assign their own ERIS duties and workflows.
           </p>
           {tree ? (
             <nav className="inline-flex overflow-hidden rounded-lg border border-[var(--line)]" aria-label="Organization views">
@@ -195,6 +196,7 @@ export default function OrganizationPage() {
         {error ? <div role="alert" className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
         {notice ? <div role="status" className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div> : null}
 
+        {tab === "maintenance" && <DistrictWorkflows onPublished={() => { void getMaintenance().then(setMaintenance); }} />}
         {tab === "offices" ? (
           <>
             {offices.length ? (
@@ -247,8 +249,8 @@ export default function OrganizationPage() {
             )}
           </>
         ) : maintenance ? (
-          <MaintenanceDistricts
-            districts={maintenance.districts}
+          <details className="border-t border-[var(--line)] pt-4"><summary className="cursor-pointer text-sm font-semibold">Districts using the current coordinator process</summary><div className="pt-4"><MaintenanceDistricts
+            districts={maintenance.districts.filter(d => !d.workflow_configured)}
             onAdd={openMaintenanceAdd}
             onRemove={maintenanceRemove}
             onMakePrimary={async (district, userId) => {
@@ -259,7 +261,7 @@ export default function OrganizationPage() {
                 setError(e?.message ?? "Could not change the primary coordinator.");
               }
             }}
-          />
+          /></div></details>
         ) : (
           <p className="text-sm text-muted">Loading the maintenance lists…</p>
         )}

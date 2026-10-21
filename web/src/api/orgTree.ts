@@ -70,6 +70,7 @@ export type PersonHit = {
 };
 
 export type MaintenanceDistrict = {
+  workflow_configured?: boolean;
   district: string;
   coordinators: Array<{ id: number; full_name: string; email: string; is_primary: boolean }>;
   crew: Array<{ id: number; full_name: string; email: string }>;

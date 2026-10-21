@@ -48,6 +48,7 @@ export type UserOrg = {
 };
 
 export type Me = {
+  maintenance_districts?: Array<{ district: string; report: boolean; manage: boolean }>;
   id: number;
   email: string;
   full_name?: string;
@@ -327,6 +328,7 @@ export type IncidentAssignment = {
 };
 
 export type Incident = {
+  maintenance_workflow?: boolean;
   id: number;
   title: string;
   incident_type: string | null;

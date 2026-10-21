@@ -32,6 +32,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Qu
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ..services import maintenance_workflows as mw
 from ..db import get_db
 from ..deps import get_current_user, require_roles
 from ..roles import (
@@ -515,6 +516,7 @@ def triage_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(TRIAGE_ROLES)),
 ):
+    mw.legacy_action(db, incident_id)
     incident = incidents_routes._incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")

@@ -23,6 +23,7 @@ import {
 import type { EventGroupDetailResponse } from "../eventGroups/eventGroupTypes";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
 import { IncidentTriageDialog } from "./IncidentDecisionDialogs";
+import MaintenanceWorkflowPanel from "./MaintenanceWorkflowPanel";
 import {
   EvidenceGallery,
   Fact,
@@ -158,13 +159,14 @@ export default function IncidentDetailPage() {
   }, [operational, eventGroupId]);
 
   const title = incident?.title?.trim() || (validId ? `Incident #${incidentId}` : "Incident");
-  const offerTriage = Boolean(incident && canTriage(roles) && isAwaitingTriage(incident));
+  const offerTriage = Boolean(incident && !incident.maintenance_workflow && canTriage(roles) && isAwaitingTriage(incident));
   const revision = incident ? revisionRequest(incident) : null;
   const resolved = incident ? String(incident.status).toUpperCase() === "RESOLVED" : false;
 
   return (
     <AppShell title={title}>
       <div className="grid gap-4 p-4 md:p-5">
+        {incident?.maintenance_workflow && <MaintenanceWorkflowPanel incidentId={incident.id} description={incident.description} onChanged={() => setReloadKey(key => key + 1)} />}
         <div className="flex flex-wrap gap-2">
           <Link to="/incidents" className={btn}>← Incidents</Link>
           {incident && operational && incident.event_group_id != null ? (
