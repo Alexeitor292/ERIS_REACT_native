@@ -754,6 +754,9 @@ def _district(value: str) -> str:
 
 
 def _require_list_right(db: Session, actor: dict, district: str, kind: str) -> None:
+    from .maintenance_workflows import config
+    if config(db, district):
+        raise OrgTreeError(409, "This district uses configurable maintenance duties. Edit its workflow instead.")
     if kind == "CREW" and not can_manage_crew(db, actor, district):
         raise OrgTreeError(403, "Only this district's maintenance coordinators or an administrator can change its crew.")
     if kind == "COORDINATOR" and not can_manage_coordinators(db, actor, district):

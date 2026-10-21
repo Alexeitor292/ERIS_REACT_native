@@ -32,6 +32,7 @@ from ..roles import (
     is_public_only,
 )
 from ..services import org_directory
+from ..services import maintenance_workflows as mw
 from ..services.incident_name import incident_name
 from ..services import public_visibility
 from ..precision import coordinates_differ, normalize_post_mile, normalize_route, round_coordinate
@@ -1020,6 +1021,12 @@ def _ensure_incident_scope_access(user: dict, incident_row: dict, *, db: Session
     if "ADMIN" in set(user.get("roles") or []):
         return
     # Maintenance Crew members may only read their own reports.
+    if db is not None:
+        workflow = mw.run(db, int(incident_row["id"]))
+        if mw.can_read(user, incident_row, workflow, db=db):
+            return
+        if workflow and workflow["outcome"] != "GEOTECH":
+            raise HTTPException(403, "You do not have access to this district workflow report")
     if is_maintenance_only(user):
         if int(incident_row.get("reporter_user_id") or 0) != int(user["id"]):
             raise HTTPException(status_code=403, detail="You can only view your own incident reports")
@@ -1667,7 +1674,7 @@ def _notify_coordinator_engineer_assigned(*, db: Session, incident_id: int) -> N
 def create_incident(
     payload: IncidentCreate,
     db: Session = Depends(get_db),
-    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     district = _normalize_text(payload.district)
     county = _normalize_text(payload.county)
@@ -1686,6 +1693,7 @@ def create_incident(
         raise HTTPException(status_code=400, detail="latitude and longitude are required")
 
     district_code = _normalized_district_code(district)
+    workflow = mw.authorize_report(db, user, district_code)
     # The admin-editable org_office_districts rows, with the legacy constant as
     # the documented fallback for a district nobody has configured yet.
     office_code = org_directory.office_for_district(db, district)
@@ -1734,7 +1742,7 @@ def create_incident(
             },
         )
         new_id = int(db.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-        coordinator_ids = _routing_users_for(
+        coordinator_ids = [] if workflow else _routing_users_for(
             db=db,
             assignment_type="DISTRICT_COORDINATOR",
             district=district_code,
@@ -1755,6 +1763,8 @@ def create_incident(
                 template_code="INCIDENT_COORDINATOR_REVIEW",
                 payload={"incident_id": new_id, "district": district_code, "office_code": office_code},
             )
+        if workflow:
+            mw.start(db, new_id, district_code, int(user["id"]), workflow)
         db.commit()
         row = _incident_with_assignment(db, new_id)
         return {"incident": _serialize_incident(dict(row))}
@@ -1770,6 +1780,7 @@ def list_incident_location_candidates(
     db: Session = Depends(get_db),
     user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
+    mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -1820,6 +1831,7 @@ def link_incident_location(
     db: Session = Depends(get_db),
     user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
+    mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -1905,6 +1917,7 @@ def coordinator_request_revision(
     db: Session = Depends(get_db),
     user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
+    mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -1959,6 +1972,7 @@ def maintenance_resubmit_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(FIELD_REPORTING_ROLES)),
 ):
+    mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -2118,6 +2132,10 @@ def list_incidents(
 ):
     params: dict[str, object] = {"limit": limit}
     where_parts: list[str] = []
+    # Pre-referral reports belong to the configured maintenance work queue.
+    # Global titles must not restore a bypass around district duties.
+    if "ADMIN" not in user["roles"]:
+        where_parts.append("NOT EXISTS (SELECT 1 FROM maintenance_workflow_runs mr WHERE mr.incident_id = i.id AND (mr.outcome IS NULL OR mr.outcome <> 'GEOTECH'))")
     # A viewer sees only incidents carrying an approved assessment. A no-op for
     # every other account.
     public_visibility.scope_public_incidents(user, where_parts, params)
@@ -2145,6 +2163,7 @@ def list_incidents(
     # coordinator (or an administrator) has nothing to triage.
     work_queue = (queue or "").strip().lower()
     if work_queue == "triage":
+        where_parts.append("NOT EXISTS (SELECT 1 FROM maintenance_workflow_runs mr WHERE mr.incident_id = i.id)")
         where_parts.append("i.current_stage = 'COORDINATOR_REVIEW' AND i.status <> 'RESOLVED'")
         if "ADMIN" not in set(user.get("roles") or []):
             if has_role(user, MAINTENANCE_COORDINATOR):
@@ -2220,9 +2239,11 @@ def get_incident(
     incident = dict(row)
     # 404, not 403, for a non-public incident: a viewer must not be able to
     # enumerate in-flight work by probing ids (design §4.3).
-    public_visibility.ensure_public_incident(db, user, incident_id)
-    _ensure_incident_scope_access(user, incident, db=db)
-    return {"incident": _serialize_incident(incident), "requested_by_user_id": user["id"]}
+    workflow = mw.run(db, incident_id)
+    if not mw.can_read(user, incident, workflow, db=db):
+        public_visibility.ensure_public_incident(db, user, incident_id)
+        _ensure_incident_scope_access(user, incident, db=db)
+    return {"incident": {**_serialize_incident(incident), "maintenance_workflow": bool(workflow)}, "requested_by_user_id": user["id"]}
 
 
 @router.post("/incidents/{incident_id}/claim")
@@ -2244,6 +2265,7 @@ def assign_incident(
     # Backward-compatible endpoint for older Admin clients. Fail at the API
     # boundary with a controlled workflow response instead of leaking the
     # MariaDB trigger/SQL text when a pre-Project Incident is assigned.
+    mw.legacy_action(db, incident_id)
     project_row = db.execute(
         text("SELECT project_id FROM incidents WHERE id = :iid LIMIT 1"),
         {"iid": incident_id},
@@ -2303,6 +2325,7 @@ def coordinator_forward_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
+    mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -2498,6 +2521,7 @@ def unassign_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["ADMIN"])),
 ):
+    mw.legacy_action(db, incident_id)
     incident = _incident_with_assignment(db, incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -2604,6 +2628,8 @@ def mission_center_incident_feed(
 ):
     where_parts: list[str] = []
     params: dict[str, object] = {}
+    if "ADMIN" not in user["roles"]:
+        where_parts.append("NOT EXISTS (SELECT 1 FROM maintenance_workflow_runs mr WHERE mr.incident_id = i.id AND (mr.outcome IS NULL OR mr.outcome <> 'GEOTECH'))")
     public_visibility.scope_public_incidents(user, where_parts, params)
     if (scope or "").strip().lower() == "mobile":
         mobile_filters, mobile_params = _mobile_scope_filters(db, user)
@@ -2692,8 +2718,9 @@ def list_incident_attachments(
     ).mappings().first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    public_visibility.ensure_public_incident(db, user, incident_id)
-    _ensure_incident_scope_access(user, dict(incident), db=db)
+    if not mw.can_read(user, incident, mw.run(db, incident_id), db=db):
+        public_visibility.ensure_public_incident(db, user, incident_id)
+        _ensure_incident_scope_access(user, dict(incident), db=db)
 
     rows = db.execute(
         text(
@@ -2752,7 +2779,7 @@ async def upload_incident_attachment(
     file: UploadFile = File(...),
     kind: str = Query(default="PHOTO", max_length=16),
     db: Session = Depends(get_db),
-    user=Depends(require_roles(FIELD_REPORTING_ROLES)),
+    user=Depends(require_roles(ALL_ROLE_NAMES)),
 ):
     incident = db.execute(
         text(
@@ -2772,8 +2799,16 @@ async def upload_incident_attachment(
     ).mappings().first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    workflow = mw.run(db, incident_id, lock=True)
+    if workflow:
+        if workflow["outcome"]:
+            raise HTTPException(409, "This maintenance workflow has ended")
+        if int(incident["reporter_user_id"]) != int(user["id"]) and not mw.capability(workflow["definition"], int(user["id"]), "edit_report"):
+            raise HTTPException(403, "You do not have report editing duty")
+    elif not (set(user["roles"]) & set(FIELD_REPORTING_ROLES)):
+        raise HTTPException(403, "You do not have reporting permission")
     user_roles = set(user["roles"])
-    if "ADMIN" not in user_roles:
+    if "ADMIN" not in user_roles and not workflow:
         is_reporter = int(incident["reporter_user_id"]) == int(user["id"])
         is_assignee = incident["assignee_user_id"] is not None and int(incident["assignee_user_id"]) == int(user["id"])
         if not (is_reporter or is_assignee):
@@ -2849,6 +2884,12 @@ async def upload_incident_attachment(
                 "sort_order": int(next_sort or 0),
             },
         )
+        if workflow:
+            state = {"step_index": 0, "approved_user_ids": [], "waiting_reporter": workflow["state"]["waiting_reporter"]}
+            mw.save_state(db, workflow, state)
+            mw.event(db, district=workflow["district"], actor=int(user["id"]), action="EVIDENCE_ADDED",
+                     incident_id=incident_id, notes=file.filename, metadata={"attachment_id": attachment_id})
+            mw.notify(db, {**workflow, "state": state}, "Evidence added; maintenance review restarted", entered=True)
         db.commit()
         return {
             "incident_id": incident_id,

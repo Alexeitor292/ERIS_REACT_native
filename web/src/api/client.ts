@@ -51,7 +51,8 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
         detail = j?.detail;
         // A structured refusal (a save conflict, say) carries its message inside.
         const structured = detail && typeof detail === "object" ? (detail as { message?: string }).message : undefined;
-        msg = structured || (typeof detail === "string" ? detail : "") || j?.message || msg;
+        const validation = Array.isArray(detail) ? detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join("; ") : "";
+        msg = structured || validation || (typeof detail === "string" ? detail : "") || j?.message || msg;
       } catch {
         // ignore
       }

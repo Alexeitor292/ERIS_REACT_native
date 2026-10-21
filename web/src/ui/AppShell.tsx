@@ -102,7 +102,8 @@ function useNavSections(): NavSection[] {
   const roles = me?.roles;
   const operational = isOperationalUser(roles);
   const admin = isAdmin(roles);
-  const viewerOnly = isPublicOnly(roles);
+  const maintenance = !!me?.maintenance_districts?.length;
+  const viewerOnly = isPublicOnly(roles) && !maintenance;
 
   if (viewerOnly) {
     return [
@@ -117,6 +118,9 @@ function useNavSections(): NavSection[] {
   }
 
   const sections: NavSection[] = [];
+  if (maintenance || admin) {
+    sections.push({ label: "Maintenance", items: [{ to: "/maintenance-work", label: "Maintenance Work", icon: Inbox }] });
+  }
   if (hasWorkQueue(roles)) {
     sections.push({ label: "Workspace", items: [{ to: "/my-work", label: "My Work", icon: Inbox }] });
   }
@@ -219,7 +223,7 @@ export default function AppShell({ title, children, workspace = false }: { title
             <HeaderSearch pages={pages} searchRecords={!!me && isOperationalUser(me.roles)} />
           </div>
           <div className="flex items-center justify-end gap-1.5">
-            {me && !isPublicOnly(me.roles) ? <NotificationBell /> : null}
+            {me && (!isPublicOnly(me.roles) || !!me.maintenance_districts?.length) ? <NotificationBell /> : null}
             <span aria-hidden className="mx-1 hidden h-6 w-px bg-[var(--line)] sm:block" />
             <ProfileMenu orgLine={orgLine} />
           </div>

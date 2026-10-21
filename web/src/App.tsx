@@ -15,6 +15,7 @@ import EventGroupsPage from "./pages/EventGroupsPage";
 import EventGroupDetailPage from "./pages/EventGroupDetailPage";
 import TerrainCrossSectionsPage from "./pages/TerrainCrossSectionsPage";
 import MyWorkPage from "./features/myWork/MyWorkPage";
+import MaintenanceWorkPage from "./features/incidents/MaintenanceWorkPage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import AppErrorBoundary from "./components/AppErrorBoundary";
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+          <Route path="/maintenance-work" element={<ProtectedRoute><MaintenanceWorkPage /></ProtectedRoute>} />
           <Route
             path="/my-work"
             element={
@@ -228,7 +230,7 @@ export default function App() {
  */
 function HomeRedirect() {
   const { me } = useAuth();
-  return <Navigate to={landingPathFor(me?.roles)} replace />;
+  return <Navigate to={me?.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(me?.roles)} replace />;
 }
 
 function LegacyProjectRedirect() {

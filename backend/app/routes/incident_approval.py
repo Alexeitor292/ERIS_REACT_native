@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ..services import maintenance_workflows as mw
 from ..db import get_db
 from ..deps import require_roles
 from ..roles import ADMIN, MAINTENANCE_COORDINATOR, MAINTENANCE_CREW, STAFF, has_role, is_admin
@@ -72,6 +73,7 @@ def discard_provisional_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles([MAINTENANCE_CREW, STAFF, MAINTENANCE_COORDINATOR, ADMIN])),
 ):
+    mw.legacy_action(db, incident_id)
     """Discard an intake Incident only before it receives historical identity."""
 
     incident = event_group_routes._incident_row(db, incident_id)
@@ -136,6 +138,7 @@ def coordinator_approve_incident(
     db: Session = Depends(get_db),
     user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
 ):
+    mw.legacy_action(db, incident_id)
     group_incident = event_group_routes._incident_row(db, incident_id)
     if not group_incident:
         raise HTTPException(status_code=404, detail="Incident not found")

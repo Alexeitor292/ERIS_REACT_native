@@ -27,7 +27,9 @@ export default function ProfileMenu({ orgLine }: { orgLine: string | null }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const name = me?.full_name?.trim() || me?.email || "Signed-in user";
-  const roles = me?.roles?.map(roleLabel).join(" · ") || "ERIS user";
+  const roles = (me?.maintenance_districts?.length && me.roles.every(role => role === "GUEST"))
+    ? "District maintenance duties"
+    : me?.roles?.map(roleLabel).join(" · ") || "ERIS user";
 
   useEffect(() => {
     if (!open) return;

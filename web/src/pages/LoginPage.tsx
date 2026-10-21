@@ -30,7 +30,7 @@ export default function LoginPage() {
   if (isInitializing && token) return <AuthGateLoading />;
   // Signed in already: on to this person's own landing. Only with the account in
   // hand: a token alone would bounce off the landing page's role gate.
-  if (!isInitializing && token && me) return <Navigate to={landingPathFor(me.roles)} replace />;
+  if (!isInitializing && token && me) return <Navigate to={me.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(me.roles)} replace />;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,7 +46,7 @@ export default function LoginPage() {
       const signedIn = await login(normalizedEmail, password);
       // The mobile app's opening animation, over the landing page as it loads.
       playSplash();
-      navigate(landingPathFor(signedIn.roles), { replace: true });
+      navigate(signedIn.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(signedIn.roles), { replace: true });
     } catch (e: any) {
       setError(e?.message ?? "Sign in failed. Verify your credentials and try again.");
     } finally {

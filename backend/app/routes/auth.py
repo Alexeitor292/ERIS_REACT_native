@@ -8,6 +8,7 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..schemas.common import LoginRequest
 from ..services import org_directory
+from ..services import maintenance_workflows
 
 router = APIRouter()
 
@@ -56,6 +57,7 @@ def me(user=Depends(get_current_user), db: Session = Depends(get_db)):
     org = org_directory.resolve_user_org(db, user)
     return {
         **user,
+        "maintenance_districts": maintenance_workflows.summary(db, int(user["id"])),
         "org": {
             "office_id": org.get("office_id"),
             "office_code": org.get("office_code"),
