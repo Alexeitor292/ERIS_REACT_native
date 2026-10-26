@@ -38,8 +38,8 @@ wait_for_api() {
 case "${1:-}" in
   up)
     if podman pod exists eris; then echo "Pod eris exists; use status or an explicit stop/update." >&2; exit 2; fi
-    podman volume create eris-mariadb >/dev/null
-    podman volume create eris-seaweedfs >/dev/null
+    podman volume exists eris-mariadb || podman volume create eris-mariadb >/dev/null
+    podman volume exists eris-seaweedfs || podman volume create eris-seaweedfs >/dev/null
     podman pod create --name eris -p "${ERIS_BIND_IP}:8080:80" -p "${ERIS_BIND_IP}:9800:8333" >/dev/null
     podman run -d --restart=unless-stopped --pod eris --name eris-mariadb --env-file "$DEPLOY/db.env" \
       -v eris-mariadb:/var/lib/mysql -v "$ROOT/database/init:/docker-entrypoint-initdb.d:ro,Z" "$ERIS_DB_IMAGE" >/dev/null
