@@ -6,9 +6,9 @@ and accounts, which administrators edit in the app.
 
 | Component | Where its settings come from |
 | --- | --- |
-| Backend API and offline-scene worker | `backend/.env` when run directly (see `backend/.env.example`), or `docker/.env.proxmox` in the server stack. Read by `backend/app/config.py`. |
-| MariaDB and SeaweedFS containers | `docker/.env` (dev, from `docker/.env.example`) or `docker/.env.proxmox` (server, from `docker/.env.proxmox.example`). |
-| Web app | `VITE_*` variables at **build** time: `web/.env` for `npm run dev` and `npm run build`, or Docker build args in the server stack. |
+| Backend API and offline-scene worker | `backend/.env` when run directly, `docker/.env.proxmox` in the legacy Compose stack, or `deploy/podman/app.env` in the single-pod stack. Read by `backend/app/config.py`. |
+| MariaDB and SeaweedFS containers | `docker/.env` / `docker/.env.proxmox` for Compose, or `deploy/podman/db.env` / `storage.env` for Podman. |
+| Web app | `VITE_*` variables at **build** time: `web/.env` locally, Docker build args in Compose, or `deploy/podman/build-web.sh` flags in the Podman pipeline. |
 | Mobile app | `EXPO_PUBLIC_*` variables at **build** time: `mobile/.env` locally, EAS environment variables for EAS builds. |
 
 `VITE_*` and `EXPO_PUBLIC_*` values are compiled into the app and readable by
@@ -35,7 +35,7 @@ have no default; the process refuses to start without them.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DB_HOST` | `127.0.0.1` | MariaDB host (`mariadb` inside the server stack). |
+| `DB_HOST` | `127.0.0.1` | MariaDB host (localhost in the Podman pod; `mariadb` in the legacy Compose stack). |
 | `DB_PORT` | `3306` | MariaDB port. |
 | `DB_NAME` | `eris` | Database name. Keep `eris`: `database/init/001_create_db.sql` creates that name. |
 | `DB_USER` | `eris_user` | Application user. |
@@ -50,16 +50,25 @@ Alembic reads the same variables (`backend/migrations/env.py`).
 | `JWT_SECRET` | **required** | Signing key for session tokens. Use a long random value; changing it signs everyone out. |
 | `JWT_ALG` | `HS256` | Signing algorithm. |
 | `JWT_EXPIRES_MINUTES` | `120` | Session length. |
+| `LOCAL_LOGIN_ENABLED` | `true` | Whether the API accepts password sign-in. Turn off after SSO administrator handover if policy requires it; rebuild web with the matching flag to hide its password form. |
+| `ENTRA_ENABLED` | `false` | Enables the web Entra OIDC flow when the remaining settings are supplied. |
+| `ENTRA_AUTHORITY_HOST` | `login.microsoftonline.com` | `login.microsoftonline.com` or `login.microsoftonline.us`, matching the tenant cloud. |
+| `ENTRA_TENANT_ID` / `ENTRA_CLIENT_ID` | unset | Single-tenant and Web app registration UUIDs. |
+| `ENTRA_CLIENT_SECRET` | unset | Server-side Web app credential; certificate-based client authentication is not implemented. |
+| `ENTRA_REDIRECT_URI` | unset | Exact HTTPS callback: `https://<web-host>/api/auth/entra/callback`. |
 
-Sign-in is email and password today. The database is ready for Microsoft Entra
-ID, but no single sign-on setting exists yet; see
-[roles-and-identity.md](roles-and-identity.md).
+Entra sign-in is implemented for the web, but remains disabled in the current
+Campos Labs deployment and has not been validated against Caltrans's tenant.
+ERIS roles remain in its database and accounts are linked to Entra by tenant
+and object ID. The web stores its ERIS bearer JWT in browser `localStorage`;
+Caltrans must review that session model. See the [Podman runbook](caltrans-podman.md#entra-sign-in-and-handover)
+and [deployment briefing](caltrans-it-deployment-brief.md#identity-access-and-security-facts).
 
 ### File storage (SeaweedFS)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `S3_ENDPOINT` | `http://127.0.0.1:9800` | How the backend reaches SeaweedFS: `http://seaweedfs:8333` in the server stack, `127.0.0.1:9800` for local dev. |
+| `S3_ENDPOINT` | `http://127.0.0.1:9800` | How the backend reaches SeaweedFS: `http://seaweedfs:8333` in Compose, `http://127.0.0.1:8333` inside the Podman pod, or `127.0.0.1:9800` for local development. |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | required | S3 credentials; the same values the SeaweedFS container is started with. |
 | `S3_BUCKET` | `eris-uploads` | Photos, attachments and generated PDFs. The stack bootstrap creates it. |
 | `S3_PUBLIC_ENDPOINT` | unset | The SeaweedFS address browsers and phones use, e.g. `https://files.example.gov` or `http://<server>:9800`. File URLs are signed against it, so set it in every deployment where clients are not on the backend's host. |
@@ -178,7 +187,7 @@ with a reason. The design behind the road settings is in
 [decisions/adr-offline-road-context-source.md](decisions/adr-offline-road-context-source.md)
 and [decisions/adr-divided-highway-corridor-pairing.md](decisions/adr-divided-highway-corridor-pairing.md).
 
-## Server stack (`docker/.env.proxmox`)
+## Legacy Docker Compose server stack (`docker/.env.proxmox`)
 
 Besides every backend variable above, the Compose files read:
 
@@ -194,8 +203,9 @@ Besides every backend variable above, the Compose files read:
 | `API_BIND`, `WEB_BIND` | backend, web | Interface the API (8000) and web (5173) ports are published on. Default `0.0.0.0`. |
 | `MARIADB_BIND`, `ADMINER_BIND` | MariaDB, Adminer | Default `127.0.0.1`: not reachable from other machines. The SeaweedFS admin port is not published. |
 
-SeaweedFS's API port (9800) is always published on every interface, because file URLs
-point at it.
+In this Compose stack, SeaweedFS's API port (9800) is published on every interface
+because file URLs point at it. The Podman deployment binds the S3 port to loopback by
+default and expects a TLS gateway; see the [Podman runbook](caltrans-podman.md).
 
 ## Web app
 

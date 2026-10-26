@@ -9,6 +9,9 @@
 | [configuration.md](configuration.md) | Look up any setting of the backend, worker, server stack, web or mobile app. |
 | [development.md](development.md) | Run ERIS on your machine, run the tests, and change the database schema. |
 | [deployment.md](deployment.md) | Install, update, back up and roll back a staging or production server, set up HTTPS, and release the mobile app. |
+| [caltrans-it-deployment-brief.md](caltrans-it-deployment-brief.md) | Bring diagrams, stack/data/security facts, decisions, handouts, and anticipated questions to a Caltrans IT call. |
+| [ERIS Caltrans IT PDF briefing](../output/pdf/eris-caltrans-it-briefing.pdf) | Send or print the four-page call handout. |
+| [caltrans-podman.md](caltrans-podman.md) | Install and operate the proposed single-Podman-pod Caltrans deployment. |
 | [offline-terrain.md](offline-terrain.md) | Understand and operate offline 3D terrain packages, the road inventory, and terrain cross sections. |
 | [offline-scene-package-operator-runbook.md](offline-scene-package-operator-runbook.md) | Follow the operator procedures for terrain packages, including hand-made `.mspk` packages. |
 | [reference/gisa-data-dictionary.md](reference/gisa-data-dictionary.md) | Look up a field of the GISA technical form. |

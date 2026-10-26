@@ -7,7 +7,7 @@ drainage problem into a routed, reviewed geotechnical assessment.
 ## Components
 
 ```
- Field phones (ERIS Mobile, iOS)          Browsers (ERIS web)
+ Field phones (future Caltrans mobile)     Browsers (ERIS web)
             │                                     │
             └──────────── HTTPS ──────────────────┤
                                                   │
@@ -28,7 +28,7 @@ drainage problem into a routed, reviewed geotechnical assessment.
 | Mobile app | `mobile/` | Expo SDK 54, React Native 0.81, expo-router; ArcGIS Runtime SDK for iOS 100.15 through a native bridge |
 | Database | `database/init/`, `backend/migrations/` | MariaDB 11 |
 | File storage | — | SeaweedFS (S3-compatible) |
-| Deployment | `docker/` | Docker Compose |
+| Deployment | `deploy/podman/` (Caltrans target); `docker/` (local/legacy) | Single rootless Podman pod for Caltrans; Docker Compose remains for development and the retired Proxmox service |
 
 ## How a request is handled
 
