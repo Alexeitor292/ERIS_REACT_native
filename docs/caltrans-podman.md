@@ -62,7 +62,10 @@ needs Podman, access to the repository and Harbor, and a Jenkins
 username/password credential named `harbor-eris-robot` with push rights. Set
 `HARBOR_HOST`, `HARBOR_PROJECT` and an immutable `RELEASE_TAG`. The pipeline
 builds the API, worker and web image, validates Python syntax and the web build,
-then pushes them. The web image is built with API base `/api`, Entra enabled,
+then pushes them. The web image uses `deploy/podman/build-web.sh` to build the
+bundle in a regular Podman container and package it into nginx. This passed on
+rootless Podman 4.9.3, where a Dockerfile `RUN` failed to resolve an installed
+Lit package. The web image is built with API base `/api`, Entra enabled,
 and a selectable password form. Browser `VITE_*` values are compile-time public
 settings; changing them requires a new web image. The pipeline does **not**
 place secrets into images or deploy to a server.

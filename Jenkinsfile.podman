@@ -27,10 +27,8 @@ pipeline {
           set -eu
           podman build -t "$ERIS_REPO/api:$ERIS_TAG" backend
           podman build -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
-          podman build --build-arg VITE_API_BASE_URL=/api --build-arg VITE_API_BASE=/api \
-            --build-arg VITE_ENTRA_ENABLED="$ENTRA_ENABLED" \
-            --build-arg VITE_LOCAL_LOGIN_ENABLED="$LOCAL_LOGIN_ENABLED" \
-            -t "$ERIS_REPO/web:$ERIS_TAG" web
+          bash deploy/podman/build-web.sh "$ERIS_REPO/web:$ERIS_TAG" \
+            "$ENTRA_ENABLED" "$LOCAL_LOGIN_ENABLED"
           podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -m compileall -q app
         '''
       }

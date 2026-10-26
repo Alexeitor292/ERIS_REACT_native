@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM node:22-alpine AS prepared
 
 WORKDIR /app
 
@@ -6,6 +6,8 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+
+FROM prepared AS build
 
 ARG VITE_API_BASE_URL=http://127.0.0.1:8000
 ARG VITE_API_BASE=http://127.0.0.1:8000

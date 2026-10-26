@@ -69,9 +69,9 @@ Dockerfile now uses Node 22, which is compatible with the lockfile's
 the release's application source (later release commits changed only
 deployment scripts and line-ending rules).
 
-This workaround confirms runtime packaging, but **Jenkins' web-image build is
-still an open gate**. Reproduce it with Caltrans' approved Podman/Buildah
-version and fix or codify the build path before relying on the Jenkinsfile.
+The working two-step build is now in `deploy/podman/build-web.sh`, and the
+Jenkinsfile calls it. Re-run the pipeline on Caltrans' approved Podman/Buildah
+version before considering image publication accepted.
 
 ## Gates still open
 
