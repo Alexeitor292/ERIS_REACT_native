@@ -32,9 +32,9 @@ def main() -> int:
                 existing = db.execute(text("""
                     SELECT user_id FROM deployment_bootstrap
                     WHERE name = 'initial_admin' FOR UPDATE
-                """)).scalar_one_or_none()
+                """)).mappings().one_or_none()
                 if existing is not None:
-                    if int(existing) != int(admin["id"]):
+                    if existing["user_id"] is None or int(existing["user_id"]) != int(admin["id"]):
                         raise ValueError("bootstrap marker belongs to another user")
                     print("Existing administrator already adopted; no changes made.")
                     return 0

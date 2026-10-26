@@ -2,6 +2,13 @@
 
 To rehearse this deployment beside the existing Proxmox Compose server, use
 the [Proxmox rehearsal plan](proxmox-caltrans-rehearsal.md).
+For a populated Compose database and MinIO cutover, use the
+[Proxmox data cutover record](proxmox-podman-cutover.md). On an imported
+database, set `ERIS_ADOPT_ADMIN_EMAIL` to the exact active existing admin
+email for the first Podman start; `adopt_existing_admin` verifies the ADMIN
+role and creates the one-time marker before bootstrap runs. Remove the env
+value after success. `ERIS_DB_VOLUME` and `ERIS_STORAGE_VOLUME` can select
+new named volumes while retaining earlier rehearsal data.
 
 This is the operator runbook for a **single Linux Podman pod**. Harbor is the
 container registry; Jenkins builds and pushes the ERIS images. The pod contains

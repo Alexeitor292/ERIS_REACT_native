@@ -1,5 +1,9 @@
 # Recreate ERIS on Proxmox as a Caltrans deployment rehearsal
 
+The clean-install rehearsal was completed, then the existing Compose data was
+migrated onto the Podman VM. See the [cutover record](proxmox-podman-cutover.md)
+for the current public routes, backup locations, and rollback procedure.
+
 ## Recommended layout
 
 Keep the current Docker Compose ERIS VM intact during the rehearsal. Create a

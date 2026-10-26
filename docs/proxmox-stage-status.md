@@ -1,5 +1,9 @@
 # Proxmox Caltrans staging status — 2026-10-25
 
+This records the earlier clean-install rehearsal. VM 118 now serves the
+migrated ERIS data on the public Campos Labs hosts; see the
+[data cutover record](proxmox-podman-cutover.md) for current state and rollback.
+
 This is the current **clean-install Podman rehearsal**, not a Caltrans
 production deployment or a migration of the old ERIS data.
 
