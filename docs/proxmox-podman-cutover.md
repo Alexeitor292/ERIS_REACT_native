@@ -89,6 +89,10 @@ routes were removed from the active Caddyfile after cutover.
    migrated user, a signed legacy attachment downloaded through
    `files.camposlabs.org`, and a signed public PUT was read back from
    SeaweedFS and removed.
+   Cloudflare rejected a test request using Python's default `urllib` user
+   agent with error 1010; the same authenticated request passed with a browser
+   user agent. Test the future native mobile client's actual requests through
+   Cloudflare before declaring mobile network readiness.
 
 Check the running deployment as `eris` on VM 118:
 
@@ -143,5 +147,7 @@ the origin-only preview routes. Verify all three public hosts after rollback.
 - Configure Caltrans Entra registration and test linked, unknown, and disabled
   users before disabling local password login. The mobile Entra flow is later
   application work.
+- Confirm Cloudflare security rules permit the future native mobile client's
+  user agent and signed S3 requests; browser and curl tests do not prove that.
 - Create a second administrator, verify login, then disable the inherited
   `admin@dot.ca.gov` account if it is the default account to retire.
