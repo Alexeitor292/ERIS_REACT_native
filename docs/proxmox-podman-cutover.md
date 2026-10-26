@@ -51,6 +51,9 @@ to an approved off-host backup target and rehearse a restore before retiring
 LXC 101 or its volumes. The earlier clean Podman VM snapshot
 `podman-baseline-20261025` is a rehearsal rollback point, not a backup of the
 migrated data.
+The Proxmox backup directory also contains `Caddyfile.before` and
+`Caddyfile.after` with verified checksums. The temporary origin-only preview
+routes were removed from the active Caddyfile after cutover.
 
 ## Migration and verification record
 
