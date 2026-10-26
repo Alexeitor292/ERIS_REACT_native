@@ -20,11 +20,38 @@ disabled pending an app registration. The legacy JWT signing secret was
 carried forward so existing tokens can remain valid. Database and S3 service
 credentials are separate generated values stored in mode-600 env files.
 
-The deployed code is commit `227525cc5f5bb7bc7e45ccf7e346639206b280aa` on
-`codex/caltrans-podman-rehearsal`. The API and worker images carry the
-`227525c` tag. The web image is the previously verified local `05703af` tag;
-its source did not change between those commits. All images are local to the
-VM; Harbor publication remains a separate Caltrans acceptance gate.
+The API and worker run commit `227525cc5f5bb7bc7e45ccf7e346639206b280aa`
+with the `227525c` image tag. The web image was updated on 2026-10-26 to
+`localhost/eris/web:3d365c6` from commit `3d365c6` on
+`codex/caltrans-podman-rehearsal`. All images are local to the VM; Harbor
+publication remains a separate Caltrans acceptance gate.
+
+## 2026-10-26 web-only workflow creator update
+
+The web image was built on VM 118 from a SHA-256-verified archive of commit
+`3d365c6` using `deploy/podman/build-web.sh` with Entra disabled and local
+login enabled, matching the active environment. Only `eris-web` was replaced;
+the API, worker, MariaDB, SeaweedFS, and their active volumes were left running.
+`/opt/eris/deploy/podman/images.env` now points to the new web image. The
+previous image `localhost/eris/web:05703af` and the previous image-reference
+file `images.env.pre-web-3d365c6` remain on the VM for rollback.
+
+After the switch, the public web page referenced the new
+`/assets/index-DGEzxGtW.js` bundle, and that asset returned 200. Both
+`eris.camposlabs.org/api/health` and `api.camposlabs.org/health` returned 200.
+`verify-rehearsal.sh` confirmed five running containers, web/API health, and
+the database at Alembic head. This was a web-only release, so `/opt/eris/REVISION`
+continues to identify the API and worker source (`227525c`).
+
+To revert only this web release as `eris` on VM 118, keep the existing pod and
+run:
+
+```bash
+podman rm -f eris-web
+podman run -d --restart=unless-stopped --pod eris --name eris-web localhost/eris/web:05703af
+cp -p /opt/eris/deploy/podman/images.env.pre-web-3d365c6 /opt/eris/deploy/podman/images.env
+bash /opt/eris/deploy/podman/verify-rehearsal.sh http://192.168.20.216:8080
+```
 
 ## Source retained for rollback
 
