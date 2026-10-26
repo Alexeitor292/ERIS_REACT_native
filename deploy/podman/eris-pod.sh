@@ -25,6 +25,16 @@ run_tool() {
   podman run --rm --pod eris --env-file "$DEPLOY/app.env" "$ERIS_API_IMAGE" "$@"
 }
 
+wait_for_api() {
+  for _ in $(seq 1 90); do
+    if curl --fail --silent "http://${ERIS_BIND_IP}:8080/api/health" >/dev/null; then return 0; fi
+    sleep 2
+  done
+  echo "ERIS API did not become healthy on ${ERIS_BIND_IP}:8080" >&2
+  podman logs --tail 40 eris-api >&2 || true
+  return 1
+}
+
 case "${1:-}" in
   up)
     if podman pod exists eris; then echo "Pod eris exists; use status or an explicit stop/update." >&2; exit 2; fi
@@ -62,6 +72,7 @@ case "${1:-}" in
     podman run -d --restart=unless-stopped --pod eris --name eris-worker --env-file "$DEPLOY/app.env" \
       "$ERIS_WORKER_IMAGE" python -m app.worker.offline_scene_worker >/dev/null
     podman run -d --restart=unless-stopped --pod eris --name eris-web "$ERIS_WEB_IMAGE" >/dev/null
+    wait_for_api
     echo "ERIS pod started on ${ERIS_BIND_IP}:8080 (web/API) and :9800 (S3)."
     ;;
   status)
@@ -70,6 +81,7 @@ case "${1:-}" in
     ;;
   start)
     if podman pod exists eris; then podman pod start eris; else "$0" up; fi
+    wait_for_api
     ;;
   logs)
     podman logs "eris-${2:-api}"
