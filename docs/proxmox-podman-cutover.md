@@ -30,10 +30,10 @@ VM; Harbor publication remains a separate Caltrans acceptance gate.
 
 The old Docker Compose service is LXC 101 (`ERIS-server`, `192.168.20.75`).
 Its MariaDB and MinIO containers, volumes, and checkout remain intact.
-`eris_backend`, `eris_offline_scene_worker`, and `eris_adminer` were manually
-stopped for the final dump and remain stopped; `eris_web`, `eris_mariadb`, and
-`eris_minio` remain running. Do not run both application workers against the
-same public service during a rollback.
+All six Compose containers were stopped after the public cutover, then LXC 101
+was shut down. It is currently **stopped**. The stopped-LXC Proxmox snapshot
+`eris-compose-frozen-20261025` records the old service for rollback. Do not
+run both application workers against the same public service during a rollback.
 
 The final quiesced source backup is in
 `/root/eris-migration-final-20261025/` inside LXC 101. A second copy is in
@@ -51,6 +51,9 @@ to an approved off-host backup target and rehearse a restore before retiring
 LXC 101 or its volumes. The earlier clean Podman VM snapshot
 `podman-baseline-20261025` is a rehearsal rollback point, not a backup of the
 migrated data.
+Proxmox warned that thin volumes are overprovisioned. Actual local-lvm use
+was 53.42% after the frozen Compose snapshot; monitor it as snapshots and
+terrain data grow.
 The Proxmox backup directory also contains `Caddyfile.before` and
 `Caddyfile.after` with verified checksums. The temporary origin-only preview
 routes were removed from the active Caddyfile after cutover.
@@ -118,6 +121,9 @@ original Caddyfile, validate it, and reload Caddy. On the respective hosts:
 systemctl --user stop eris.service
 
 # Proxmox host, as root
+pct start 101
+pct exec 101 -- docker start eris_mariadb eris_minio eris_web
+# Wait for MariaDB to become healthy before starting the old API and worker.
 pct exec 101 -- docker start eris_backend eris_offline_scene_worker eris_adminer
 pct exec 102 -- cp /etc/caddy/Caddyfile.pre-eris-podman-20261025 /etc/caddy/Caddyfile
 pct exec 102 -- caddy validate --config /etc/caddy/Caddyfile
