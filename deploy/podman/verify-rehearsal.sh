@@ -11,4 +11,4 @@ done
 curl --fail --silent --show-error "$base_url/healthz" >/dev/null
 curl --fail --silent --show-error "$base_url/api/health" >/dev/null
 podman exec eris-api python -c 'from app.migrations_check import check_migration_head; check_migration_head()'
-echo "Five containers running; HTTPS web/API health passed; database is at Alembic head."
+echo "Five containers running; web/API health passed; database is at Alembic head."
