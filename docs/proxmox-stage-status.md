@@ -11,7 +11,7 @@ production deployment or a migration of the old ERIS data.
 | Existing ERIS | LXC 101 at `192.168.20.75`; Docker Compose, MariaDB and MinIO; left running and unchanged |
 | New staging host | VM 118, `eris-caltrans-stage`, Ubuntu 24.04, `192.168.20.216`, 4 vCPU, 8 GiB RAM, 80 GB disk |
 | Podman | Rootless 4.9.3 under Linux user `eris`; user lingering and `eris.service` enabled |
-| Release | `20aa106e188d454dfa877b2fd08de4af70aee481` on branch `codex/caltrans-podman-rehearsal` |
+| Release | `05703af569be7ac85db7034e0f0f2c031c0ead9a` on branch `codex/caltrans-podman-rehearsal` |
 | Checkout | `/opt/eris`; Git archive of the release, with `/opt/eris/REVISION` |
 | Web/API | [http://192.168.20.216:8080](http://192.168.20.216:8080) on the private LAN |
 | S3 | `http://192.168.20.216:9800` on the private LAN; buckets `eris-uploads` and `eris-offline-scenes` |
@@ -44,6 +44,9 @@ the seed command from restoring a disabled bootstrap account.
 - An explicit Podman stop/start and a full VM reboot both recovered. After
   reboot, the user systemd unit was active, five containers and health checks
   passed, and the initial admin marker plus the test S3 object persisted.
+- A pod removal and recreation reused both named volumes. The one-time admin
+  seed was not repeated; login, the bootstrap marker, and the S3 object still
+  passed afterward. The rebuilt web image came from the Jenkins build script.
 - The Windows workstation fetched the web page (HTTP 200), and an unsigned S3
   object request returned 403.
 
@@ -65,9 +68,8 @@ normal `podman run` container with `NODE_OPTIONS=--max-old-space-size=4096`
 passed; its output was then packaged into the nginx runtime image. The web
 Dockerfile now uses Node 22, which is compatible with the lockfile's
 `nanoid` engine requirement. The three local runtime image tags are
-`localhost/eris/{api,worker,web}:20aa106`; the image contents correspond to
-the release's application source (later release commits changed only
-deployment scripts and line-ending rules).
+`localhost/eris/{api,worker,web}:05703af`; the image contents correspond to
+the release's application source.
 
 The working two-step build is now in `deploy/podman/build-web.sh`, and the
 Jenkinsfile calls it. Re-run the pipeline on Caltrans' approved Podman/Buildah
