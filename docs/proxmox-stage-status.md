@@ -16,6 +16,7 @@ production deployment or a migration of the old ERIS data.
 | Web/API | [http://192.168.20.216:8080](http://192.168.20.216:8080) on the private LAN |
 | S3 | `http://192.168.20.216:9800` on the private LAN; buckets `eris-uploads` and `eris-offline-scenes` |
 | Data | Rootless Podman volumes `eris-mariadb` and `eris-seaweedfs` on the new VM only |
+| Baseline snapshot | Proxmox VM 118 snapshot `podman-baseline-20261025`, taken with the VM stopped after release `05703af` passed |
 
 The VM uses generated staging-only secrets. `db.env`, `storage.env`,
 `app.env`, and `images.env` are mode 600 under `/opt/eris/deploy/podman/`.
@@ -49,6 +50,10 @@ the seed command from restoring a disabled bootstrap account.
   passed afterward. The rebuilt web image came from the Jenkins build script.
 - The Windows workstation fetched the web page (HTTP 200), and an unsigned S3
   object request returned 403.
+- The stopped-VM baseline snapshot was created, the VM started again, and the
+  user service plus all five containers and checks returned to healthy.
+- The Jenkins backend security command passed: 74 tests, one deprecation
+  warning.
 
 Run the repeatable checks as `eris`:
 
@@ -88,3 +93,7 @@ version before considering image publication accepted.
 
 Use [the Proxmox rehearsal plan](proxmox-caltrans-rehearsal.md) and
 [Caltrans Podman runbook](caltrans-podman.md) for the full acceptance procedure.
+The Proxmox snapshot is a local rollback point, not an off-host backup.
+Proxmox reported that thin volumes are overprovisioned; the local-lvm thin
+pool was 53.28% physically used after the snapshot. Monitor capacity before
+running larger terrain or evidence tests.
