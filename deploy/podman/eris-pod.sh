@@ -80,7 +80,7 @@ case "${1:-}" in
     podman ps --filter pod=eris
     ;;
   start)
-    if podman pod exists eris; then podman pod start eris; else "$0" up; fi
+    if podman pod exists eris; then podman pod start eris; else bash "$0" up; fi
     wait_for_api
     ;;
   logs)
