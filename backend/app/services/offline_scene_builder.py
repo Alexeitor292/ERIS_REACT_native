@@ -12,7 +12,7 @@ Provider interface (OfflineScenePackageBuilder):
   prepare_source_data() -> fetch + clip USGS 3DEP for the AOI
   build_package()        -> assemble the bundle bytes
   validate_package()     -> structural validation that it opens as a real bundle
-  upload_and_register()  -> immutable MinIO upload + catalog registration (verified)
+  upload_and_register()  -> immutable S3 storage upload + catalog registration (verified)
 
 The heavy network/raster work is isolated in HillshadeReliefBuilder; the assembly,
 manifest, and validation are pure and unit-tested.
@@ -330,7 +330,7 @@ class OfflineScenePackageBuilder(ABC):
     def upload_and_register(
         self, db: Session, ctx: dict, package_bytes: dict | bytes, source: dict, job_id: int | None = None
     ) -> dict:
-        """Immutable MinIO upload + verified catalog registration. Only marks READY
+        """Immutable S3 storage upload + verified catalog registration. Only marks READY
         after the catalog re-verifies size + SHA-256 of the uploaded object AND (for
         a generation job) a final atomic cancellation re-check. If the job was
         cancelled, nothing is registered and the uploaded object is recorded as an
@@ -343,7 +343,7 @@ class OfflineScenePackageBuilder(ABC):
         object_key = offline_scene_svc.make_scene_object_key(
             ctx["submission_id"], ctx["package_version"], self.package_format
         )
-        bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+        bucket = settings.S3_OFFLINE_SCENES_BUCKET
         put_object_bytes(object_key=object_key, data=data, content_type="application/zip", bucket=bucket)
 
         usgs = source.get("usgs_meta") or {}

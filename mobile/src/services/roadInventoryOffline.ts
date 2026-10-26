@@ -150,7 +150,7 @@ export async function syncRoadInventoryPackage(
 
   const pkg = manifest.package;
   if (!pkg.download_url) {
-    throw new Error("Package download URL is unavailable. Check MinIO configuration.");
+    throw new Error("Package download URL is unavailable. Check object storage configuration.");
   }
 
   const compressed = await downloadRoadInventoryPackage(pkg.download_url);

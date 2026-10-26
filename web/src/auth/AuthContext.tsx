@@ -9,6 +9,7 @@ type AuthState = {
   token: string | null;
   isInitializing: boolean;
   login: (email: string, password: string) => Promise<Me>;
+  finishEntra: () => Promise<Me>;
   logout: () => void;
   refreshMe: () => Promise<void>;
 };
@@ -34,11 +35,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
+    return acceptToken(res.access_token);
+  }
+
+  async function finishEntra() {
+    const res = await api<{ access_token: string }>("/auth/entra/session", { method: "POST", credentials: "same-origin" });
+    return acceptToken(res.access_token);
+  }
+
+  async function acceptToken(accessToken: string) {
     // Who this is comes first: the pages see the token and the account together.
     // Publishing the token alone sent /login to the landing page and the landing
     // page's role gate (no account yet) back to /login, round and round until the
     // browser stopped honouring history changes, leaving a blank /login.
-    setToken(res.access_token);
+    setToken(accessToken);
     let data: Me;
     try {
       data = await api<Me>("/auth/me");
@@ -47,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
     setMe(data);
-    setTokenState(res.access_token);
+    setTokenState(accessToken);
     return data;
   }
 
@@ -145,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   const value = useMemo(
-    () => ({ me, token, isInitializing, login, logout, refreshMe }),
+    () => ({ me, token, isInitializing, login, finishEntra, logout, refreshMe }),
     [me, token, isInitializing]
   );
 

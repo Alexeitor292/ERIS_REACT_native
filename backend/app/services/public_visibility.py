@@ -285,5 +285,8 @@ VIEWER_READABLE_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/photos/{photo_id}/content"): "viewer_can_read_public_attachment",
     # Unauthenticated by design, and not viewer-specific.
     ("POST", "/auth/login"): "the login itself",
+    ("GET", "/auth/entra/start"): "starts the tenant-specific OIDC flow",
+    ("GET", "/auth/entra/callback"): "requires signed state cookie and verified Entra ID token",
+    ("POST", "/auth/entra/session"): "requires short-lived HttpOnly sign-in handoff cookie",
     ("GET", "/health"): "liveness probe, no data",
 }

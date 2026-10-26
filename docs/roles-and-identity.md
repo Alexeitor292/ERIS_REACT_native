@@ -91,13 +91,13 @@ Per-record grants sit beside the roles and never widen them:
 
 ## Accounts and sign-in
 
-**Entra ID authenticates; ERIS authorizes.** Caltrans' Microsoft Entra ID will
+**Entra ID authenticates; ERIS authorizes.** Caltrans' Microsoft Entra ID can
 prove who is signing in, and nothing more. Roles follow from organization
 placement in ERIS (the Organization page, edited by administrators and, for their
 own part of their office, by office and branch chiefs). No Entra group, app role or
 claim grants either.
 
-The database is ready for that. Migration `20260923_entra_identity` makes three
+Migration `20260923_entra_identity` makes three
 changes:
 
 - **`users.password_hash` is nullable.** An account without a password can sign
@@ -110,14 +110,13 @@ changes:
   Entra identity links to one account, and each account has one Entra
   identity.
 
-Planned flow, not built yet:
+Current web flow:
 
-1. An administrator creates the account (email, name, roles, org placement),
-   with or without a password.
-2. At the person's first Entra sign-in, ERIS validates the ID token for the
-   configured tenant and finds the pre-created account by its verified email.
-   It then records the tenant and object ID.
-3. From then on, sign-in matches on the tenant and object ID alone.
+1. An administrator creates the account with its Entra object ID and optional
+   password, then grants roles or organization placement.
+2. ERIS validates the ID token for the configured tenant, client, issuer,
+   signature and nonce, and matches the prelinked tenant and object ID.
+3. Email is never used to link or find the signed-in user.
 
 A person Entra knows, but whom no administrator has created, gets no ERIS
 access.
@@ -127,7 +126,9 @@ access.
 A fresh production database has no accounts. `database/init/` creates roles
 and organization structure only, and a test
 (`test_first_boot_init_creates_no_account`) keeps it that way. The first
-administrator comes from:
+administrator is seeded once by `python -m app.tools.bootstrap_initial_admin`
+in the [Caltrans Podman deployment](caltrans-podman.md). For manual setups,
+the original operator command remains available:
 
 ```bash
 python -m app.tools.create_admin --email jane.doe@dot.ca.gov --name "Jane Doe"

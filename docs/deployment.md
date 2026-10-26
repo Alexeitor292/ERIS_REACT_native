@@ -1,8 +1,14 @@
 # Deployment
 
+For the Caltrans single-Podman-pod target, use the
+[Caltrans Podman runbook](caltrans-podman.md). The procedure below covers the
+existing Docker Compose/Proxmox deployment.
+
 How to run ERIS on a server, for staging or production, and keep it running.
 Local development is in [development.md](development.md); every setting is
 explained in [configuration.md](configuration.md).
+For a server that already has objects in MinIO, follow
+[storage-migration.md](storage-migration.md) before starting this stack.
 
 ## Environments
 
@@ -26,8 +32,8 @@ The production stack is `docker/docker-compose.yml` plus
 | Service | Published port | What it is |
 | --- | --- | --- |
 | `mariadb` | 3306, localhost only | MariaDB 11. Data in the `eris_mariadb_data` volume. On its first start it loads `database/init/`: schema, roles, organization structure, and no accounts. |
-| `minio` | 9800 (API, all interfaces), 9801 (console, localhost only) | File storage. Data in the `eris_minio_data` volume. |
-| `minio-init` | — | One-shot job. Creates the private, versioned `eris-offline-scenes` bucket with object lock, and fails (blocking the backend and worker) if it cannot. |
+| `seaweedfs` | 9800 (S3 API, all interfaces) | File storage. Data and filer metadata in the `eris_seaweedfs_data` volume. The admin port is not published. |
+| `seaweedfs-init` | — | One-shot job. Creates the private, versioned `eris-offline-scenes` bucket with object lock, and fails (blocking the backend and worker) if it cannot. |
 | `backend` | 8000 | FastAPI (`uvicorn app.asgi:app`). Health: `GET /health`. |
 | `offline-scene-worker` | — | Builds offline 3D terrain packages from the job queue. |
 | `web` | 5173 | The built web app, served by nginx. Health: `GET /healthz`. |
@@ -65,7 +71,7 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
 
 2. **Fill in `.env.proxmox`.** At minimum: every `CHANGE_ME` value, a long random
    `JWT_SECRET` (for example `openssl rand -hex 32`), `CORS_ORIGINS`,
-   `VITE_API_BASE_URL` and `VITE_API_BASE`, `MINIO_PUBLIC_ENDPOINT` and
+   `VITE_API_BASE_URL` and `VITE_API_BASE`, `S3_PUBLIC_ENDPOINT` and
    `WEB_BASE_URL`. Keep `ENV=prod` and `STORAGE_URL_MODE=presigned`. See the
    [production checklist](#production-checklist).
 
@@ -107,7 +113,7 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
 7. **Check it:**
 
    ```bash
-   dc ps                                  # every service Up (healthy); minio-init Exited (0)
+   dc ps                                  # every service Up (healthy); seaweedfs-init Exited (0)
    curl http://127.0.0.1:8000/health      # {"ok": true}
    curl http://127.0.0.1:5173/healthz
    ```
@@ -174,13 +180,9 @@ Release notes that need action:
   the seven roles and the Administrator in one step. Nobody has to sign in again,
   and every old grant is kept in `role_consolidation_audit`. Ship the matching
   mobile build at the same time: older builds hide their tabs from every account.
-- **Private file storage.** A server running with `STORAGE_URL_MODE=public` should
-  switch to `presigned`, then close the uploads bucket to anonymous reads:
-
-  ```bash
-  dc run --rm --entrypoint sh minio-init -c \
-    'mc alias set eris http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc anonymous set none eris/eris-uploads'
-  ```
+- **Private file storage.** Use `STORAGE_URL_MODE=presigned`. The
+  `seaweedfs-init` service rejects an uploads bucket with an anonymous allow
+  policy; remove such a policy before starting the new stack.
 
 - **Saved layouts and formatted memos** (`20260924_user_saved_layouts`,
   `20260925_gisa_rich_memos`). Additive only; `alembic upgrade head` applies
@@ -220,7 +222,7 @@ Release notes that need action:
   was ("West GeoTech Office"). Full names are unchanged.
 - **Drone surveys** (`20261003_drone_surveys`). Adds
   `submission_drone_surveys`; each survey's heights and orthomosaic are stored
-  in MinIO next to the attachments. Nothing to configure. Uploads go through the
+  in SeaweedFS next to the attachments. Nothing to configure. Uploads go through the
   same connection as attachments, so the original GeoTIFFs are archived only
   under 95 MB (Cloudflare refuses larger requests). Larger files still make a
   survey: the browser reads them in bands and uploads only the lighter copy.
@@ -238,10 +240,8 @@ Release notes that need action:
   `submission_gisa.revision` (counts a form's saves) and the
   `submission_presence` table (who has a form open, where, and the memos they
   are writing). Rows expire on their own; nothing to back up or clean.
-- **Published ports.** MariaDB (3306), Adminer (8081) and the MinIO console (9801)
-  now listen on localhost only. Set `MARIADB_BIND`, `ADMINER_BIND` or
-  `MINIO_CONSOLE_BIND` in `.env.proxmox` only if another machine really needs
-  them.
+- **Published ports.** MariaDB (3306) and Adminer (8081) listen on localhost
+  only by default. SeaweedFS publishes only its S3 API on 9800.
 
 ## Rolling back
 
@@ -275,14 +275,14 @@ dc exec -T mariadb sh -c 'mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --singl
 Run it from cron at least daily, and before every update. Copy the files off the
 server.
 
-**Files.** Photos, attachments, PDFs and terrain packages live in the MinIO
+**Files.** Photos, attachments, PDFs and terrain packages live in the SeaweedFS
 volume. Back it up with the stack's writers stopped:
 
 ```bash
-dc stop backend offline-scene-worker
-docker run --rm -v "$(docker volume ls -q | grep eris_minio_data)":/data:ro -v /opt/backups:/backup alpine \
-  tar czf /backup/eris_minio_$(date +%Y%m%d_%H%M).tgz -C /data .
-dc start backend offline-scene-worker
+dc stop backend offline-scene-worker seaweedfs
+docker run --rm -v "$(docker volume ls -q | grep eris_seaweedfs_data)":/data:ro -v /opt/backups:/backup alpine \
+  tar czf /backup/eris_seaweedfs_$(date +%Y%m%d_%H%M).tgz -C /data .
+dc start seaweedfs backend offline-scene-worker
 ```
 
 ### Restoring
@@ -299,7 +299,7 @@ To rehearse an update on staging, restore a production backup there first.
 ## HTTPS and a reverse proxy
 
 Browsers and phones must reach three things: the web app (5173), the API (8000)
-and MinIO's API (9800), because file links point straight at MinIO. Put a TLS
+and SeaweedFS's API (9800), because file links point straight at SeaweedFS. Put a TLS
 reverse proxy in front with one hostname for each. With Caddy:
 
 ```caddyfile
@@ -322,7 +322,7 @@ set, in `.env.proxmox`:
 VITE_API_BASE_URL=https://api.eris.example.gov
 VITE_API_BASE=https://api.eris.example.gov
 CORS_ORIGINS=https://eris.example.gov
-MINIO_PUBLIC_ENDPOINT=https://files.eris.example.gov
+S3_PUBLIC_ENDPOINT=https://files.eris.example.gov
 WEB_BASE_URL=https://eris.example.gov
 ```
 
@@ -377,8 +377,8 @@ build without `EXPO_PUBLIC_API_URL` cannot reach any server.
 
 - [ ] `ENV=prod` (API docs and `/dev/*` routes off).
 - [ ] Unique, strong `MARIADB_ROOT_PASSWORD`, `MARIADB_PASSWORD`,
-      `MINIO_ROOT_PASSWORD` and `JWT_SECRET`; none copied from an example.
-- [ ] `STORAGE_URL_MODE=presigned`, `MINIO_PUBLIC_ENDPOINT` set, and the uploads
+      `S3_SECRET_KEY` and `JWT_SECRET`; none copied from an example.
+- [ ] `STORAGE_URL_MODE=presigned`, `S3_PUBLIC_ENDPOINT` set, and the uploads
       bucket not anonymously readable.
 - [ ] `CORS_ORIGINS`, `VITE_API_BASE_URL`, `VITE_API_BASE` and `WEB_BASE_URL`
       match the real addresses.
@@ -387,6 +387,6 @@ build without `EXPO_PUBLIC_API_URL` cannot reach any server.
       `create_admin`.
 - [ ] `VITE_ARCGIS_API_KEY` restricted to the web app's origin, if used.
 - [ ] `SMTP_*` configured, if coordinators should get approval emails.
-- [ ] Daily database and MinIO backups, copied off the server, and a restore
+- [ ] Daily database and SeaweedFS backups, copied off the server, and a restore
       tried once.
 - [ ] Mobile builds made with `EXPO_PUBLIC_API_URL` pointing at this server.

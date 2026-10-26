@@ -1,6 +1,11 @@
 # ---- env / secrets ----
 .env
 .env.*
+deploy/podman/images.env
+deploy/podman/db.env
+deploy/podman/storage.env
+deploy/podman/app.env
+deploy/podman/bootstrap.env
 **/.env
 **/.env.local
 **/.env.*.local

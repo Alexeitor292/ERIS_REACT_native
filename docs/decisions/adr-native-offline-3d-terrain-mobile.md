@@ -37,7 +37,7 @@ manual-authoring design), **this section wins**. They are retained only as histo
 - **Pipeline / deployment**: async job model (`offline_scene_jobs`), a **separate**
   worker service (safe to restart; `FOR UPDATE SKIP LOCKED`; conditional status so a
   CANCELLED job is authoritative and never yields a READY catalog row; orphaned
-  objects audited), a one-shot **`minio-init`** bootstrap that provisions the private,
+  objects audited), a one-shot **`seaweedfs-init`** bootstrap that provisions the private,
   versioned offline-scenes bucket (fail-closed) before backend/worker start, a single
   authoritative AOI ceiling + max package-size enforced at API + worker, and an admin
   ops health endpoint. Full runbook: `docs/offline-scene-package-operator-runbook.md`.
@@ -129,7 +129,7 @@ preference:
    `ARCGIS_SCENE_PACKAGE_BASE_URL` to that host.
 2. **ArcGIS Enterprise offline packaging** (a `createOfflineMapAreas`/Pro-built MSPK pipeline)
    generates bounded packages on demand; a small ERIS service would proxy/sign the URLs.
-3. Interim: pre-built `.mspk` files for known incident corridors hosted on MinIO/static and
+3. Interim: pre-built `.mspk` files for known incident corridors hosted on SeaweedFS/static and
    referenced by URL.
 
 The backend descriptor endpoint already produces the per-submission download URL + size + signature
@@ -198,14 +198,14 @@ eas build --platform android --profile development
    shows offline-unavailable. **Re-download** to confirm replacement; change incident geometry
    server-side, reconnect → verify the "update available" refresh prompt.
 
-## Addendum — real catalog + private MinIO + integrity (2026-06-27)
+## Addendum — real catalog + private SeaweedFS + integrity (2026-06-27)
 
-The placeholder "base URL means available" approach is replaced by a real, MinIO-backed
+The placeholder "base URL means available" approach is replaced by a real, SeaweedFS-backed
 catalog. See also `docs/offline-scene-package-operator-runbook.md`.
 
 **Authoritative data model.** USGS **3DEP** raster DEM is the offline elevation source;
 operators author bounded `.mspk` in **ArcGIS Pro / Enterprise**; binaries live in a **private**
-MinIO bucket **`eris-offline-scenes`** (never anonymous, not the uploads bucket); **ERIS owns
+SeaweedFS bucket **`eris-offline-scenes`** (never anonymous, not the uploads bucket); **ERIS owns
 authorization, catalog, lifecycle, and signed download**.
 
 **Catalog table `offline_scene_packages`** (init schema + Alembic `0011`, idempotent CREATE TABLE
@@ -217,13 +217,13 @@ uploaded_at, uploaded_by, retired_at, notes`. Unique `(submission_id, package_ve
 **RETIRED** (audited). The descriptor serves the **newest READY** row.
 
 **Availability is verified, never inferred.** `GET …/offline-scene-package` returns `available:true`
-**only** when a READY catalog row exists **and** a live MinIO **HEAD** confirms the object exists
+**only** when a READY catalog row exists **and** a live SeaweedFS **HEAD** confirms the object exists
 with the catalog's size. Otherwise `available:false` with a precise reason ("none prepared" /
 "missing from storage"). Values come from the catalog row, never a base-URL string.
 
 **Secure download.** `GET …/offline-scene-package/download` mints a **short-lived presigned URL**
 (default 900 s, `OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS`) only after the role/access check. Mobile
-never receives MinIO credentials; the bucket stays private. On expiry the app re-requests the grant
+never receives SeaweedFS credentials; the bucket stays private. On expiry the app re-requests the grant
 and resumes/restarts.
 
 **ADMIN registration.** `POST /admin/offline-scene-packages` (ADMIN only) HEADs the object, verifies
@@ -241,7 +241,7 @@ USGS 3DEP attribution, age, offline-ready**, a clear **"No offline package prepa
 correct **Download/Pause/Resume/Retry/Delete/Update** — no size *estimate* shown as if a package
 exists.
 
-**Config.** New `MINIO_OFFLINE_SCENES_BUCKET` (default `eris-offline-scenes`) and
+**Config.** New `S3_OFFLINE_SCENES_BUCKET` (default `eris-offline-scenes`) and
 `OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS` (default 900). `ARCGIS_SCENE_PACKAGE_BASE_URL` is removed.
 
 **Still requires ArcGIS Pro:** package *authoring* (bounded local scene + 3DEP elevation + approved
@@ -268,10 +268,9 @@ generation, removes **both** final `.mspk` and `.part`, clears resumable state, 
 registry entry. Pure-tested: restart-during-DOWNLOADING, explicit Pause, resume-after-restart,
 expired-grant retry, delete-while-PAUSED, and no-duplicate-completion.
 
-**Fail-closed MinIO + real immutability.** `docker/scripts/create-offline-scenes-bucket.sh` removes
-`|| true`: it creates the bucket **`mc mb --with-lock`** (object lock ⇒ versioning), **fails nonzero**
-unless anonymous access is verified `none` AND versioning is verified `Enabled`, and prints no success
-otherwise (object lock can only be set at creation, so a non-locked existing bucket is rejected). The
+**Fail-closed SeaweedFS + application-level immutability.** `app.storage_bootstrap` creates the
+bucket with Object Lock enabled, then verifies no anonymous allow policy, versioning, and Object Lock
+before the backend and worker start. No default retention period is configured. The
 backend **no longer silently creates** the bucket — registration `bucket_exists()`-checks and returns
 409 if it is missing/unprovisioned. Registration enforces the **canonical immutable key**
 `submissions/{submission_id}/{package_version}/scene.mspk` (a differing supplied `object_key` → 422)
@@ -284,7 +283,7 @@ value → 422), and a READY registration **requires** non-empty `elevation_datas
 `elevation_version`, `elevation_resolution`, and `basemap_or_imagery_source`.
 
 **Not done yet.** The feature is **not** validated until a real ArcGIS Pro-authored `.mspk` (USGS 3DEP)
-is hosted in private MinIO, downloaded by an **iOS EAS development build**, and opened in **Airplane
+is hosted in private SeaweedFS, downloaded by an **iOS EAS development build**, and opened in **Airplane
 Mode**. No EAS build has been made on this branch.
 
 ## Addendum — automatic package generation pipeline (2026-06-27)
@@ -310,7 +309,7 @@ prevention, returns a QUEUED job), `GET …/job` (mobile polling), `…/job/canc
 QUEUED → FETCHING_USGS_3DEP → BUILDING_TERRAIN → BUILDING_BASEMAP → PACKAGING → VERIFYING → UPLOADING →
 REGISTERING → READY / FAILED / CANCELLED. The worker safely claims jobs (`FOR UPDATE SKIP LOCKED`),
 recovers stale running jobs on startup, writes progress to the DB, and **only registers a READY catalog
-package after the bundle validates AND the verified MinIO upload + catalog SHA/size/identity checks pass**
+package after the bundle validates AND the verified SeaweedFS upload + catalog SHA/size/identity checks pass**
 (a failed build never creates a READY catalog row). Builder provider interface
 (`OfflineScenePackageBuilder`: prepare_source_data / build_package / validate_package / upload_and_register)
 with `HillshadeReliefBuilder` today; an approved licensed offline-imagery provider can be added behind the
@@ -631,13 +630,13 @@ originates from the view controller (static guard + CI).
 
 **Async packaging contract (Part B).** The start endpoint is **enqueue-only**: it
 validates, creates/reuses an idempotent durable job, and returns **HTTP 202** with the
-job id, current status, and a `status_url` — it never fetches USGS 3DEP / NAIP / MinIO
+job id, current status, and a `status_url` — it never fetches USGS 3DEP / NAIP / SeaweedFS
 inline (unit-tested). The offline-scene worker (separate container) owns all fetch /
 tiling / assembly / verify / upload / catalog registration, with the existing lease /
 heartbeat / orphan-recovery / duplicate-prevention. The app polls with short
 independent requests; a failed poll never fails the job; there is no frontend
 wall-clock timeout; the active job is restored from server state on reopen. Download
-resume/retry stays separate from generation, behind private MinIO + presigned URLs +
+resume/retry stays separate from generation, behind private SeaweedFS + presigned URLs +
 full integrity verification.
 
 **No regeneration required for existing packages.** Renderer + worker changes are

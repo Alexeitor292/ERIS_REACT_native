@@ -16,6 +16,8 @@ from starlette.testclient import TestClient
 # DB_PASS is intentionally NOT defaulted here — local runs read it from
 # backend/.env, and CI jobs set it explicitly via their env: block.
 os.environ.setdefault("JWT_SECRET", "ci_placeholder_secret")
+os.environ.setdefault("S3_ACCESS_KEY", "ci_s3_access")
+os.environ.setdefault("S3_SECRET_KEY", "ci_s3_secret")
 
 # Ensure backend/ is on sys.path so `from app.X import Y` resolves correctly
 # when pytest is run from the backend/ directory.

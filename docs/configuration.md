@@ -7,7 +7,7 @@ and accounts, which administrators edit in the app.
 | Component | Where its settings come from |
 | --- | --- |
 | Backend API and offline-scene worker | `backend/.env` when run directly (see `backend/.env.example`), or `docker/.env.proxmox` in the server stack. Read by `backend/app/config.py`. |
-| MariaDB and MinIO containers | `docker/.env` (dev, from `docker/.env.example`) or `docker/.env.proxmox` (server, from `docker/.env.proxmox.example`). |
+| MariaDB and SeaweedFS containers | `docker/.env` (dev, from `docker/.env.example`) or `docker/.env.proxmox` (server, from `docker/.env.proxmox.example`). |
 | Web app | `VITE_*` variables at **build** time: `web/.env` for `npm run dev` and `npm run build`, or Docker build args in the server stack. |
 | Mobile app | `EXPO_PUBLIC_*` variables at **build** time: `mobile/.env` locally, EAS environment variables for EAS builds. |
 
@@ -23,7 +23,7 @@ have no default; the process refuses to start without them.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ENV` | `dev` | `dev` mounts the `/dev/*` helper routes, tolerates MinIO being down at startup, and lets `create_admin` accept `mock.*` addresses. Any other value (use `prod`) disables all three. `dev`, `development`, `local`, `test` and `testing` turn API docs on by default. |
+| `ENV` | `dev` | `dev` mounts the `/dev/*` helper routes, tolerates SeaweedFS being down at startup, and lets `create_admin` accept `mock.*` addresses. Any other value (use `prod`) disables all three. `dev`, `development`, `local`, `test` and `testing` turn API docs on by default. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
 | `API_DOCS_ENABLED` | unset | Forces `/docs`, `/redoc` and `/openapi.json` on (`true`) or off (`false`). Unset: on only for the development `ENV` values above. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated web origins allowed to call the API. Set to the web app's exact origin in every deployment. |
@@ -55,17 +55,17 @@ Sign-in is email and password today. The database is ready for Microsoft Entra
 ID, but no single sign-on setting exists yet; see
 [roles-and-identity.md](roles-and-identity.md).
 
-### File storage (MinIO)
+### File storage (SeaweedFS)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MINIO_ENDPOINT` | `http://localhost:9000` | How the backend reaches MinIO: `http://minio:9000` in the server stack, `127.0.0.1:9800` for local dev. A value without a scheme is treated as plain HTTP. |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | `minioadmin` / `minio_root_password` | MinIO credentials; the same values the MinIO container is started with. |
-| `MINIO_BUCKET` | `eris-uploads` | Photos, attachments and generated PDFs. The API creates it at startup. |
-| `MINIO_PUBLIC_ENDPOINT` | unset | The MinIO address browsers and phones use, e.g. `https://files.example.gov` or `http://<server>:9800`. File URLs are signed against it, so set it in every deployment where clients are not on the backend's host. |
+| `S3_ENDPOINT` | `http://127.0.0.1:9800` | How the backend reaches SeaweedFS: `http://seaweedfs:8333` in the server stack, `127.0.0.1:9800` for local dev. |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | required | S3 credentials; the same values the SeaweedFS container is started with. |
+| `S3_BUCKET` | `eris-uploads` | Photos, attachments and generated PDFs. The stack bootstrap creates it. |
+| `S3_PUBLIC_ENDPOINT` | unset | The SeaweedFS address browsers and phones use, e.g. `https://files.example.gov` or `http://<server>:9800`. File URLs are signed against it, so set it in every deployment where clients are not on the backend's host. |
 | `STORAGE_URL_MODE` | `presigned` | `presigned`: file URLs are signed and expire after 15 minutes. `public`: permanent URLs that work only if the bucket is made anonymously readable. **Use `presigned` in production.** |
-| `MINIO_REGION` | `us-east-1` | Region used to sign URLs. Change it only if MinIO runs with another region. |
-| `MINIO_OFFLINE_SCENES_BUCKET` | `eris-offline-scenes` | Private, versioned bucket for offline 3D terrain packages. In the server stack, `minio-init` creates it with object lock and refuses to continue if it is not private. |
+| `S3_REGION` | `us-east-1` | Region used to sign URLs. Change it only if SeaweedFS runs with another region. |
+| `S3_OFFLINE_SCENES_BUCKET` | `eris-offline-scenes` | Private, versioned bucket for offline 3D terrain packages. `seaweedfs-init` verifies privacy, versioning, and Object Lock support before backend/worker start. No retention duration is set automatically. |
 
 Road-inventory packages are stored in a bucket named `road-inventory`. The name
 is fixed in code, and the API creates the bucket on first use.
@@ -186,15 +186,15 @@ Besides every backend variable above, the Compose files read:
 | --- | --- | --- |
 | `TZ` | all containers | Time zone (default `America/Los_Angeles`). |
 | `MARIADB_ROOT_PASSWORD`, `MARIADB_DATABASE`, `MARIADB_USER`, `MARIADB_PASSWORD` | MariaDB | Created on the database's first start only. The stack passes `MARIADB_*` to the backend as `DB_*`, so do not set `DB_*` separately. |
-| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | MinIO, backend, worker | Must match; set once, before the first start. |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | SeaweedFS, backend, worker | Must match; set once, before the first start. |
 | `VITE_API_BASE_URL` | web build | The API address browsers use (e.g. `https://api.example.gov`). Required. |
 | `VITE_API_BASE` | web build | Older alias of `VITE_API_BASE_URL`; set it to the same value. |
 | `VITE_CALTRANS_HIGHWAYS_URL`, `VITE_CALTRANS_POSTMILE_LAYER_URL`, `VITE_GOOGLE_MAPS_EMBED_KEY` | web build | Optional web settings (see [Web app](#web-app)). |
 | `VITE_ARCGIS_API_KEY` | web build | Browser ArcGIS key. Pass it as a **shell variable** at build time rather than in this file, because the backend loads the whole file. |
 | `API_BIND`, `WEB_BIND` | backend, web | Interface the API (8000) and web (5173) ports are published on. Default `0.0.0.0`. |
-| `MARIADB_BIND`, `ADMINER_BIND`, `MINIO_CONSOLE_BIND` | MariaDB, Adminer, MinIO console | Default `127.0.0.1`: not reachable from other machines. |
+| `MARIADB_BIND`, `ADMINER_BIND` | MariaDB, Adminer | Default `127.0.0.1`: not reachable from other machines. The SeaweedFS admin port is not published. |
 
-MinIO's API port (9800) is always published on every interface, because file URLs
+SeaweedFS's API port (9800) is always published on every interface, because file URLs
 point at it.
 
 ## Web app

@@ -1,6 +1,8 @@
 type AppConfig = {
   apiBaseUrl: string;
   tokenStorageKey: string;
+  entraEnabled: boolean;
+  localLoginEnabled: boolean;
   // Optional PUBLIC Caltrans CRS Functional Classification FeatureServer layer, offered as
   // an online "Caltrans Freeways & Expressways" context toggle on the web map. It is a
   // FUNCTIONAL CLASSIFICATION, not an ownership dataset. This is a live, streamed overlay
@@ -24,6 +26,8 @@ export const appConfig: AppConfig = {
     import.meta.env.VITE_API_BASE ??
     "http://127.0.0.1:8000",
   tokenStorageKey: import.meta.env.VITE_AUTH_TOKEN_STORAGE_KEY ?? "eris_token",
+  entraEnabled: import.meta.env.VITE_ENTRA_ENABLED === "true",
+  localLoginEnabled: import.meta.env.VITE_LOCAL_LOGIN_ENABLED !== "false",
   // OPT-IN: empty by default. A deployment that does not configure the variable gets NO
   // Caltrans layer at all (the FeatureLayer is not constructed), so it makes no request to
   // the public service. See web/.env.example for the URL to opt in with.

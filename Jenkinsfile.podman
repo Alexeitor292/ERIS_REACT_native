@@ -1,0 +1,69 @@
+// Jenkins agent needs Podman and access to the approved Harbor registry.
+pipeline {
+  agent any
+  options { timestamps(); disableConcurrentBuilds() }
+  parameters {
+    string(name: 'HARBOR_HOST', defaultValue: 'harbor.example.gov', description: 'Approved Harbor hostname')
+    string(name: 'HARBOR_PROJECT', defaultValue: 'eris', description: 'Harbor project')
+    string(name: 'RELEASE_TAG', defaultValue: '', description: 'Immutable release tag; blank uses the Jenkins build number')
+    booleanParam(name: 'ENTRA_ENABLED', defaultValue: true, description: 'Show Caltrans Entra sign-in')
+    booleanParam(name: 'LOCAL_LOGIN_ENABLED', defaultValue: true, description: 'Show password sign-in during initial handover')
+  }
+  stages {
+    stage('Validate') {
+      steps {
+        sh 'test -f backend/Dockerfile && test -f web/Dockerfile && test -f deploy/podman/eris-pod.sh'
+        sh 'bash -n deploy/podman/eris-pod.sh'
+      }
+    }
+    stage('Build') {
+      steps {
+        script {
+          env.ERIS_TAG = params.RELEASE_TAG.trim() ?: "build-${env.BUILD_NUMBER}"
+          if (!(env.ERIS_TAG ==~ /[A-Za-z0-9_.-]+/)) error('Invalid release tag')
+          env.ERIS_REPO = "${params.HARBOR_HOST}/${params.HARBOR_PROJECT}"
+        }
+        sh '''
+          set -eu
+          podman build -t "$ERIS_REPO/api:$ERIS_TAG" backend
+          podman build -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
+          podman build --build-arg VITE_API_BASE_URL=/api --build-arg VITE_API_BASE=/api \
+            --build-arg VITE_ENTRA_ENABLED="$ENTRA_ENABLED" \
+            --build-arg VITE_LOCAL_LOGIN_ENABLED="$LOCAL_LOGIN_ENABLED" \
+            -t "$ERIS_REPO/web:$ERIS_TAG" web
+          podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -m compileall -q app
+        '''
+      }
+    }
+    stage('Backend security checks') {
+      steps {
+        sh '''
+          set -eu
+          podman run --rm --network none \
+            -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder_secret \
+            -e S3_ACCESS_KEY=ci_s3_access -e S3_SECRET_KEY=ci_s3_secret \
+            -v "$WORKSPACE/backend/tests:/app/tests:ro,Z" \
+            "$ERIS_REPO/api:$ERIS_TAG" \
+            python -m pytest tests/test_entra_oidc.py tests/test_route_guards.py -q
+        '''
+      }
+    }
+    stage('Push to Harbor') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'harbor-eris-robot', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASS')]) {
+          sh '''
+            set -eu
+            printf '%s' "$HARBOR_PASS" | podman login "$HARBOR_HOST" --username "$HARBOR_USER" --password-stdin
+            podman push "$ERIS_REPO/api:$ERIS_TAG"
+            podman push "$ERIS_REPO/worker:$ERIS_TAG"
+            podman push "$ERIS_REPO/web:$ERIS_TAG"
+            podman logout "$HARBOR_HOST"
+          '''
+        }
+      }
+    }
+  }
+  post {
+    success { echo "Published ERIS images with tag ${env.ERIS_TAG}. Update deploy/podman/images.env on the target host, then follow docs/caltrans-podman.md." }
+  }
+}

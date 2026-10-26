@@ -18,7 +18,7 @@ report of the exact lon/lat -> pixel transform it used.
 Outputs: road-imagery-alignment.png, road-imagery-alignment.json
 
 Contract:
-  * Reads ONLY files inside the package. No network. No MinIO. No credentials.
+  * Reads ONLY files inside the package. No network. No S3 storage. No credentials.
   * North is UP and east is RIGHT (the package's north-up contract).
   * The report NEVER contains credentials, query strings, tokens, local paths, or secrets.
 

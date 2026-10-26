@@ -15,6 +15,8 @@ router = APIRouter()
 
 @router.post("/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    if not settings.LOCAL_LOGIN_ENABLED:
+        raise HTTPException(status_code=404, detail="Password sign-in is disabled")
     row = db.execute(text("""
         SELECT id, email, password_hash, is_active
         FROM users

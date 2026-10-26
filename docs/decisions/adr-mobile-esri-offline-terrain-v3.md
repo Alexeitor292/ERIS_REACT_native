@@ -6,7 +6,7 @@ Status: proposed/implemented on `feature/mobile-esri-offline-terrain`.
 
 New automatically generated mobile terrain packages use catalog format
 `eristerrain_esri` and ERIS bundle format version 3. The package remains an ERIS-
-managed immutable bundle stored in the private MinIO offline-scenes bucket, but it
+managed immutable bundle stored in the private SeaweedFS offline-scenes bucket, but it
 adds two authenticated CompactV2 exports for the package AOI:
 
 - `esri-terrain.tpkx` — Esri Terrain 3D (for Export), LERC elevation tiles.
@@ -33,7 +33,7 @@ into one ERIS mesh and one fixed texture.
 
 USGS 3DEP remains the authoritative analytical/provenance surface in ERIS. The
 existing USGS height grid, hillshade, road context, Road Inventory cross-section
-context, overlays, content checksums, MinIO object immutability, signed download,
+context, overlays, content checksums, SeaweedFS object immutability, signed download,
 and package catalog remain in place.
 
 This is an explicit separation of responsibilities:
@@ -60,7 +60,7 @@ package covering the same incident/AOI.
 
 Terrain 3D and World Imagery export are performed by the ERIS worker using backend-
 managed ArcGIS credentials. The credential is never written to the package,
-manifest, MinIO object metadata, or mobile registry. The phone downloads only the
+manifest, SeaweedFS object metadata, or mobile registry. The phone downloads only the
 finished ERIS package. After download, the native viewer reads both embedded TPKX
 files locally.
 

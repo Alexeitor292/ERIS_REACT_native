@@ -27,6 +27,7 @@ from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
 from .routes.auth import router as auth_router
+from .entra import router as entra_router
 from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .migrations_check import check_migration_head
@@ -94,7 +95,7 @@ async def lifespan(_app: FastAPI):
         ensure_bucket()
     except Exception as exc:
         if settings.ENV.lower() == "dev":
-            logger.warning("MinIO not available during startup: %s", exc)
+            logger.warning("S3 storage not available during startup: %s", exc)
         else:
             raise
     check_migration_head()
@@ -115,6 +116,7 @@ if settings.ENV.lower() == "dev":
 app.include_router(admin_users_router)
 app.include_router(photos_router)
 app.include_router(auth_router)
+app.include_router(entra_router)
 app.include_router(arcgis_router)
 app.include_router(gisa_router)
 app.include_router(incidents_router)
@@ -2926,7 +2928,7 @@ def _newest_ready_scene_package(db: Session, submission_id: int) -> dict | None:
 
 
 def _scene_object_present(catalog: dict) -> bool:
-    """True only when the exact MinIO object exists with the catalog's size AND a
+    """True only when the exact S3 storage object exists with the catalog's size AND a
     matching durable object identity (immutable version id, else etag). This
     detects any replacement/tamper of the object behind a registered package.
     Storage errors are treated as not-present (honest offline-unavailable)."""
@@ -2953,7 +2955,7 @@ def get_gisa_offline_scene_package(
 ):
     """Offline 3D scene-package descriptor for the mobile native viewer.
 
-    available is True ONLY when ERIS has a READY catalog row AND the exact MinIO
+    available is True ONLY when ERIS has a READY catalog row AND the exact S3 storage
     object is present with matching size + durable identity. Otherwise
     available=False with a precise reason ("no package prepared yet" / "missing
     from storage"). All values come from the catalog row — never from a base-URL
@@ -2983,7 +2985,7 @@ def download_gisa_offline_scene_package(
     user=Depends(deny_public_only),
 ):
     """Mint a SHORT-LIVED presigned URL for the newest READY package, only after
-    a role/access check. Mobile never receives MinIO credentials; the bucket stays
+    a role/access check. Mobile never receives S3 storage credentials; the bucket stays
     private. On expiry the app re-requests this to resume/retry the download."""
     require_can_view_submission(submission_id, db, user)
 
@@ -3057,7 +3059,7 @@ def generate_offline_scene_package(
     enforces edit permission, computes a bounded AOI, prevents duplicate active
     jobs, creates/reuses a durable QUEUED job, and returns immediately with the job
     id + current status + a status_url to poll. It NEVER fetches USGS 3DEP / NAIP /
-    imagery / MinIO inline — the separate offline-scene worker owns terrain fetch,
+    imagery / S3 storage inline — the separate offline-scene worker owns terrain fetch,
     imagery tiling, package assembly, verification, upload, and catalog registration.
     The frontend never holds a request open while the server builds the package."""
     require_can_edit_submission(submission_id, db, user)
@@ -3151,7 +3153,7 @@ def register_offline_scene_package(
 ):
     """ADMIN-only registration of an operator-uploaded .mspk.
 
-    Verifies the MinIO object exists, its size matches, and its SHA-256 matches
+    Verifies the S3 storage object exists, its size matches, and its SHA-256 matches
     BEFORE marking READY. Rejects missing objects, size/hash mismatch, duplicate
     versions, and invalid bounds. Retires any prior READY package for the
     submission (kept for audit). Objects are immutable — never overwritten."""
@@ -3193,10 +3195,10 @@ def offline_scene_ops_health(
     user=Depends(require_roles(["ADMIN"])),
 ):
     """ADMIN ops health for the offline-scene pipeline: queue depth, live workers,
-    unresolved orphaned objects, and private-bucket posture. Sanitized — no MinIO
+    unresolved orphaned objects, and private-bucket posture. Sanitized — no S3 storage
     credentials, endpoints, or unbounded internals are returned."""
     from .storage import bucket_exists
-    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    bucket = settings.S3_OFFLINE_SCENES_BUCKET
     try:
         bucket_ok = bool(bucket_exists(bucket))
         bucket_status = "ok" if bucket_ok else "missing"
@@ -3463,7 +3465,7 @@ def generate_submission_gisa_pdf(
         raise
     filename = f"gisa-{submission_id}.pdf"
     content_type = "application/pdf"
-    bucket = settings.MINIO_BUCKET
+    bucket = settings.S3_BUCKET
     sha256 = hashlib.sha256(pdf_bytes).hexdigest()
 
     existing = db.execute(text("""
@@ -3490,7 +3492,7 @@ def generate_submission_gisa_pdf(
             db.execute(text("""
                 UPDATE attachments
                 SET created_by_user_id = :uid,
-                    storage_provider = 'minio',
+                    storage_provider = 's3',
                     storage_bucket = :bucket,
                     storage_key = :storage_key,
                     file_name = :file_name,
@@ -3522,7 +3524,7 @@ def generate_submission_gisa_pdf(
                     created_by_user_id, storage_provider, storage_bucket, storage_key,
                     file_name, mime_type, file_size_bytes, sha256, uploaded_at
                 ) VALUES (
-                    :uid, 'minio', :bucket, :storage_key,
+                    :uid, 's3', :bucket, :storage_key,
                     :file_name, :mime_type, :size_bytes, :sha256, NOW()
                 )
             """), {

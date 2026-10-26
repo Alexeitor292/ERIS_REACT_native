@@ -14,7 +14,7 @@ Audience: ERIS GIS operators / admins. The **manual `.mspk`** workflow below is 
 optional override; ERIS provides storage, catalog, verification, secure delivery,
 automatic generation, and mobile handling.
 
-Lifecycle: **author (ArcGIS Pro) → upload (private MinIO) → register (ERIS ADMIN) →
+Lifecycle: **author (ArcGIS Pro) → upload (private SeaweedFS) → register (ERIS ADMIN) →
 field download + airplane-mode test → retire/replace**.
 
 ---
@@ -31,29 +31,27 @@ cp .env.proxmox.example .env.proxmox && $EDITOR .env.proxmox
 docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml up -d --build
 ```
 
-**Bucket bootstrap (`minio-init`):** a one-shot init service (`minio/mc`) runs the
-fail-closed `docker/scripts/bootstrap-offline-scenes-bucket.sh` **before** backend
-and `offline-scene-worker` start (they `depends_on: minio-init:
-service_completed_successfully`). It creates `eris-offline-scenes` **`mc mb
---with-lock`** (object lock + versioning) only if absent, verifies anonymous access
-is `none` and versioning is `Enabled`, and **exits nonzero** (blocking the whole
-stack) if the bucket cannot be made private + immutable. It never touches the
-uploads bucket and never recreates an existing one.
+**Bucket bootstrap (`seaweedfs-init`):** a one-shot job runs
+`python -m app.storage_bootstrap` **before** backend and worker start. It creates
+the uploads and offline-scenes buckets only when absent, enables Object Lock on
+new offline-scenes buckets, and verifies that both buckets have no anonymous
+allow policy and that offline-scenes has versioning and Object Lock. Failure
+blocks the backend and worker. It never recreates an existing bucket.
 
 **Immutability — accurate wording:** ERIS relies on **application-level
 immutability**: canonical, versioned, never-overwritten object keys
 (`submissions/{id}/{version}/scene.{ext}`) plus a strictly private bucket policy.
 The bucket is created with **object lock enabled (capability) + versioning**; a
-governed **WORM retention period** (e.g. `mc retention set`) is a separate operator
+governed **WORM retention period** is a separate operator
 decision and is **not** implied by versioning alone. Do not describe versioning by
 itself as WORM.
 
-**Standalone MinIO (non-compose):** if MinIO is managed outside this compose stack,
-run the equivalent one-time script yourself:
+**Standalone SeaweedFS (non-compose):** if SeaweedFS is managed outside this compose stack,
+run the same bootstrap module with your S3 endpoint and credentials:
 
 ```sh
-MINIO_ENDPOINT=http://<minio-host>:9800 MINIO_ROOT_USER=<u> MINIO_ROOT_PASSWORD=<p> \
-  sh docker/scripts/create-offline-scenes-bucket.sh
+S3_ENDPOINT=http://<seaweedfs-host>:8333 S3_ACCESS_KEY=<u> S3_SECRET_KEY=<p> \
+  python -m app.storage_bootstrap
 ```
 
 ### Required env (docker/.env.proxmox)
@@ -61,9 +59,9 @@ MINIO_ENDPOINT=http://<minio-host>:9800 MINIO_ROOT_USER=<u> MINIO_ROOT_PASSWORD=
 | Var | Purpose |
 |---|---|
 | `MARIADB_*` | DB name/user/password (backend + worker share). |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO credentials (backend/worker/init only; **never** sent to mobile). |
-| `MINIO_OFFLINE_SCENES_BUCKET` | Private bucket name (default `eris-offline-scenes`). |
-| `OFFLINE_SCENE_DEV_MODE` | `false` in prod → MinIO posture problems fail closed. |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | SeaweedFS credentials (backend/worker/init only; **never** sent to mobile). |
+| `S3_OFFLINE_SCENES_BUCKET` | Private bucket name (default `eris-offline-scenes`). |
+| `OFFLINE_SCENE_DEV_MODE` | `false` in prod → SeaweedFS posture problems fail closed. |
 | `OFFLINE_SCENE_MAX_RADIUS_M` | Single authoritative AOI ceiling (default `3000`). |
 | `OFFLINE_SCENE_MAX_PACKAGE_MB` | Max registered/downloadable package size (default `512`). |
 | `VITE_ARCGIS_API_KEY` | Browser-only web build arg — **must NOT** be in this env file (supply as a shell var at web build). |
@@ -72,7 +70,7 @@ MINIO_ENDPOINT=http://<minio-host>:9800 MINIO_ROOT_USER=<u> MINIO_ROOT_PASSWORD=
 
 - `GET /ops/offline-scene/health` (**ADMIN**) → `{healthy, bucket:{name,status},
   queue:{queued,running,failed}, workers:[{worker_id, age_seconds, alive, ...}],
-  orphaned_objects_unresolved, dev_mode}`. Sanitized — no MinIO creds/endpoints.
+  orphaned_objects_unresolved, dev_mode}`. Sanitized — no SeaweedFS creds/endpoints.
   `healthy` is true when the bucket is present AND at least one worker heartbeat is
   fresh.
 - Workers write a durable heartbeat at startup, after each job and while idle (not during a job) to
@@ -92,7 +90,7 @@ MINIO_ENDPOINT=http://<minio-host>:9800 MINIO_ROOT_USER=<u> MINIO_ROOT_PASSWORD=
   (auto path: re-run Prepare; manual path: register a new version). ERIS retires the
   prior READY row (kept for audit) and serves the newest READY.
 - **Bucket/stack rollback:** `docker compose ... down` then re-`up` re-runs
-  `minio-init` idempotently; an existing correctly-postured bucket is accepted as-is.
+  `seaweedfs-init` idempotently; an existing correctly-postured bucket is accepted as-is.
 
 ### Package lifecycle & cleanup
 
@@ -162,13 +160,14 @@ Get-FileHash scene.mspk -Algorithm SHA256
 ```
 Record the 64-hex digest and the exact byte size (`stat`/`Get-Item .Length`).
 
-## 7. Upload to private MinIO (immutable key)
+## 7. Upload to private SeaweedFS (immutable key)
 
 Objects are **immutable** — never overwrite. Use a **versioned** key:
 
 ```sh
 # key: submissions/{submission_id}/{package_version}/scene.mspk
-mc cp scene.mspk erisminio/eris-offline-scenes/submissions/123/v2026-06-27a/scene.mspk
+aws --endpoint-url "$S3_ENDPOINT" s3 cp scene.mspk \
+  s3://eris-offline-scenes/submissions/123/v2026-06-27a/scene.mspk
 ```
 Pick a unique `package_version` per build (e.g. a date + letter). A replacement is
 a **new** version with a **new** key.
@@ -250,7 +249,7 @@ in `context_layers.roads.source` (`provider`, `dataset`, `attribution`, `service
 
 ## Secure-download model (reference)
 
-- Mobile never receives MinIO credentials and the bucket is never anonymous.
+- Mobile never receives SeaweedFS credentials and the bucket is never anonymous.
 - The descriptor returns a **protected ERIS path** (`download_path`), not a raw URL.
 - `GET /submissions/{id}/gisa/offline-scene-package/download` mints a **short-lived
   presigned URL** (default **900 s / 15 min**, `OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS`)
@@ -258,12 +257,12 @@ in `context_layers.roads.source` (`provider`, `dataset`, `attribution`, `service
 - **Expiry/retry:** if a signed URL expires mid-download, the app re-requests the
   descriptor/grant to get a fresh URL and resumes/restarts. Pause/resume state
   (including resumable data) is persisted across app restarts.
-- **Presigning host:** grants are signed **directly against `MINIO_PUBLIC_ENDPOINT`**
+- **Presigning host:** grants are signed **directly against `S3_PUBLIC_ENDPOINT`**
   (the externally reachable host, e.g. `https://files.camposlabs.org`) using
-  `MINIO_REGION` (default `us-east-1`), so the SigV4 `Host` matches the host the
+  `S3_REGION` (default `us-east-1`), so the SigV4 `Host` matches the host the
   device connects to. There is **no** post-sign host rewrite (which would produce
   `SignatureDoesNotMatch`/403 and a tiny error body the client mis-reads as a size
-  mismatch). Internal storage ops still use the in-cluster `MINIO_ENDPOINT`.
+  mismatch). Internal storage ops still use the in-cluster `S3_ENDPOINT`.
 
 ## Verify the protected download end-to-end (post-deploy)
 
@@ -284,7 +283,7 @@ echo "object_key=$OBJECT_KEY size_bytes=$SIZE_BYTES"
 URL="$($C exec -T backend python -c "
 from app.storage import presign_get
 from app.config import settings
-print(presign_get('$OBJECT_KEY', bucket=settings.MINIO_OFFLINE_SCENES_BUCKET, expires_seconds=300))
+print(presign_get('$OBJECT_KEY', bucket=settings.S3_OFFLINE_SCENES_BUCKET, expires_seconds=300))
 ")"
 case "$URL" in https://files.camposlabs.org/*) : ;; *) echo "UNEXPECTED grant host: $URL"; exit 1;; esac
 
@@ -303,7 +302,7 @@ echo "OK: protected offline-scene download verified (200 + exact size; private).
 
 This confirms the presigned grant works through the public proxy at the exact
 catalog size, and that the package/bucket is not anonymously exposed. It never
-prints MinIO credentials.
+prints SeaweedFS credentials.
 
 ## Context layers (roads / imagery / overview)
 
@@ -535,7 +534,7 @@ the tester downloaded**. It reads only the files inside the `.eristerrain` bundl
 makes **no network requests**, so it answers one question deterministically: *is the
 package itself self-consistent?*
 
-**Retrieve the latest package from MinIO and run the diagnostic** (on the ERIS server;
+**Retrieve the latest package from SeaweedFS and run the diagnostic** (on the ERIS server;
 same `C` compose invocation as the verification block above):
 
 ```sh
@@ -551,7 +550,7 @@ echo "object_key=$OBJECT_KEY"
 URL="$($C exec -T backend python -c "
 from app.storage import presign_get
 from app.config import settings
-print(presign_get('$OBJECT_KEY', bucket=settings.MINIO_OFFLINE_SCENES_BUCKET, expires_seconds=300))
+print(presign_get('$OBJECT_KEY', bucket=settings.S3_OFFLINE_SCENES_BUCKET, expires_seconds=300))
 ")"
 curl -sS -o /tmp/package.eristerrain "$URL"
 
@@ -578,7 +577,7 @@ $C cp offline-scene-worker:/tmp/eris-alignment/road-imagery-alignment.png ./road
   bounds, road feature count and counts by `road_class`, road geometry bbox, malformed
   features dropped, the road clipping contract, the two out-of-bounds counters (below),
   source provider/dataset, output image dimensions, and the exact lon/lat→pixel transform.
-  It contains **no** credentials, query strings, tokens, local source paths, or MinIO
+  It contains **no** credentials, query strings, tokens, local source paths, or SeaweedFS
   secrets.
 
 **Roads are buffered — read the two counters correctly.** Road context is deliberately

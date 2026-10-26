@@ -1,5 +1,8 @@
 # ERIS — Emergency Response Information System
 
+Caltrans IT deployment: [single Podman pod, Harbor and Jenkins runbook](docs/caltrans-podman.md).
+Proxmox rehearsal: [recreate ERIS beside the current Compose server](docs/proxmox-caltrans-rehearsal.md).
+
 ERIS is how Caltrans Geotechnical Services and district Maintenance handle slope,
 embankment and drainage incidents on the state highway system:
 
@@ -11,16 +14,17 @@ embankment and drainage incidents on the state highway system:
 
 | Part | Folder | Stack |
 | --- | --- | --- |
-| API and terrain worker | `backend/` | Python 3.12, FastAPI, MariaDB, MinIO |
+| API and terrain worker | `backend/` | Python 3.12, FastAPI, MariaDB, SeaweedFS |
 | Web app | `web/` | React, ArcGIS Maps SDK for JavaScript |
 | Mobile app | `mobile/` | Expo / React Native, ArcGIS Runtime for iOS |
 | Database schema | `database/`, `backend/migrations/` | MariaDB 11, Alembic |
 | Server stack | `docker/` | Docker Compose |
+| Caltrans deployment | `deploy/podman/` | Single Podman pod, Harbor images, Jenkins pipeline |
 
 ## Quick start (development)
 
 ```bash
-cd docker && cp .env.example .env && docker compose up -d      # MariaDB + MinIO
+cd docker && cp .env.example .env && docker compose up -d      # MariaDB + SeaweedFS
 # load database/dev/030_mock_accounts.sql, then from backend/:
 alembic stamp 0001_baseline && alembic upgrade head && ./run.sh
 # from web/:

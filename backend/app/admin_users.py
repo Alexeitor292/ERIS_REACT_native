@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -42,7 +44,8 @@ class UserMetadataIn(BaseModel):
 class CreateUserIn(BaseModel):
     email: str
     full_name: str = Field(min_length=1, max_length=200)
-    password: str = Field(min_length=8, max_length=200)
+    password: str | None = Field(default=None, min_length=8, max_length=200)
+    entra_object_id: str | None = None
     roles: List[str] = Field(default_factory=list)
     metadata: UserMetadataIn | None = None
 
@@ -487,7 +490,19 @@ def create_user(
 
     make_admin = _only_admin(body.roles)
 
-    pw_hash = hash_password(body.password)
+    if not body.password and not body.entra_object_id:
+        raise HTTPException(status_code=422, detail="Provide a password or Entra object ID")
+    if body.entra_object_id:
+        if not settings.ENTRA_ENABLED or not settings.ENTRA_TENANT_ID:
+            raise HTTPException(status_code=422, detail="Entra is not configured")
+        try:
+            object_id = str(UUID(body.entra_object_id))
+            tenant_id = str(UUID(settings.ENTRA_TENANT_ID))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid Entra object or tenant ID") from exc
+    else:
+        object_id = tenant_id = None
+    pw_hash = hash_password(body.password) if body.password else None
 
     try:
         res = db.execute(
@@ -505,6 +520,11 @@ def create_user(
             },
         )
         user_id = int(res.lastrowid)
+        if object_id:
+            db.execute(text("""INSERT INTO user_external_identities
+                (user_id, provider, tenant_id, object_id, email_at_link, linked_by_user_id)
+                VALUES (:uid, 'ENTRA_ID', :tid, :oid, :email, :actor)"""),
+                {"uid": user_id, "tid": tenant_id, "oid": object_id, "email": email, "actor": int(_admin["id"])})
 
         # A new account sits nowhere yet: a guest (or an administrator, the one
         # role granted directly) until it is placed.
@@ -515,6 +535,9 @@ def create_user(
 
         db.commit()
         return _user_with_roles(db, user_id)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Email or Entra identity is already linked") from exc
     except Exception:
         db.rollback()
         raise

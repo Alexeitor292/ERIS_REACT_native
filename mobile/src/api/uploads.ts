@@ -2,8 +2,8 @@
  * Future: presigned PUT upload flow (not yet wired up in the app).
  *
  * Intended sequence:
- *   1. presign()         – backend returns a short-lived MinIO presigned PUT URL
- *   2. putToPresignedUrl() – client PUTs the file bytes directly to MinIO
+ *   1. presign()         – backend returns a short-lived S3 presigned PUT URL
+ *   2. putToPresignedUrl() – client PUTs the file bytes directly to object storage
  *   3. complete()        – backend registers the uploaded object as an attachment
  *
  * The current upload path uses multipart POST via uploadSubmissionAttachment()

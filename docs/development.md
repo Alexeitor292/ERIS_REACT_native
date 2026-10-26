@@ -6,12 +6,12 @@ mentioned here is described in [configuration.md](configuration.md).
 
 ## Prerequisites
 
-- Docker Desktop (MariaDB and MinIO run in containers).
+- Docker Desktop (MariaDB and SeaweedFS run in containers).
 - Python 3.12 for the backend.
 - Node.js 20 for the web and mobile apps.
 - For the iOS app: macOS with Xcode and CocoaPods.
 
-## 1. Start MariaDB and MinIO
+## 1. Start MariaDB and SeaweedFS
 
 ```bash
 cd docker
@@ -19,8 +19,8 @@ cp .env.example .env    # then replace every CHANGE_ME value
 docker compose up -d
 ```
 
-This starts MariaDB (port 3306), MinIO (API on 9800, console on 9801) and
-Adminer (8081). All but the MinIO API listen on localhost only.
+This starts MariaDB (port 3306), SeaweedFS (S3 API on 9800) and
+Adminer (8081). The SeaweedFS admin port is not published.
 
 On its **first** start MariaDB runs the files in `database/init/`: it creates the
 schema, the eight roles and the organization structure. It creates **no
@@ -60,8 +60,10 @@ pip install -r requirements.txt       # requirements-worker.txt adds the terrain
 copy .env.example .env                # bash: cp .env.example .env
 ```
 
-In `backend/.env`, make `DB_PASS`, `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`
+In `backend/.env`, make `DB_PASS`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`
 match `docker/.env`, and set `JWT_SECRET` to any long string.
+Run `python -m app.storage_bootstrap` once to provision the private offline
+scene bucket before starting the worker.
 
 Bring the database to the current schema. This is needed once on a new
 database, and again after every pull that adds a migration:
@@ -166,7 +168,7 @@ python -m pytest tests -m db
 Tests that need somebody in a role create and place them with
 `tests/org_people.py` (a role can never be granted directly).
 
-The database tests do not need MinIO. A few offline-scene tests import the GIS
+The database tests do not need SeaweedFS. A few offline-scene tests import the GIS
 packages in `requirements-worker.txt` (such as `rasterio` and `affine`); install
 that file to run them.
 

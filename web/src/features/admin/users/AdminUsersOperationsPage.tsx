@@ -27,6 +27,7 @@ export default function AdminUsersOperationsPage() {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
+  const [entraObjectId, setEntraObjectId] = useState("");
   const [resetUser, setResetUser] = useState<AdminUser | null>(null);
   const [busy, setBusy] = useState(false);
   const [rowBusy, setRowBusy] = useState<number | null>(null);
@@ -79,20 +80,21 @@ export default function AdminUsersOperationsPage() {
     setEmail("");
     setFullName("");
     setPassword("");
+    setEntraObjectId("");
   }
 
   async function createUser() {
     setError(null);
     setNotice(null);
-    if (!email.trim() || !fullName.trim() || !password) {
-      setError("Email, full name and an initial password are required.");
+    if (!email.trim() || !fullName.trim() || (!password && !entraObjectId.trim())) {
+      setError("Email, full name, and either a password or Entra object ID are required.");
       return;
     }
     setBusy(true);
     try {
       await api<AdminUser>("/admin/users", {
         method: "POST",
-        body: JSON.stringify({ email: email.trim(), full_name: fullName.trim(), password }),
+        body: JSON.stringify({ email: email.trim(), full_name: fullName.trim(), password: password || null, entra_object_id: entraObjectId.trim() || null }),
       });
       setNotice(`Created ${fullName.trim()} as a Guest. Place them on the Organization page to give them a role.`);
       closeCreate();
@@ -185,7 +187,8 @@ export default function AdminUsersOperationsPage() {
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Email *</span><input type="email" autoComplete="off" className={inputClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
               <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Full name *</span><input className={inputClass} value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
-              <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Initial password *</span><input type="password" autoComplete="new-password" className={inputClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+              <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Initial password (optional)</span><input type="password" autoComplete="new-password" className={inputClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+              <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Entra object ID (optional)</span><input className={inputClass} value={entraObjectId} onChange={(event) => setEntraObjectId(event.target.value)} placeholder="Directory user object ID" /></label>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={closeCreate} disabled={busy} className="rounded-md border border-[var(--line)] px-3 py-2 text-sm font-medium disabled:opacity-50">Cancel</button>

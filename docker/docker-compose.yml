@@ -32,23 +32,23 @@ services:
       mariadb:
         condition: service_healthy
 
-  minio:
-    image: minio/minio:latest
-    container_name: eris_minio
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.50
+    container_name: eris_seaweedfs
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    command: mini -dir=/data
     environment:
       TZ: ${TZ:-America/Los_Angeles}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET:-eris-uploads}
     ports:
-      # The API must stay reachable by browsers, phones and any reverse proxy
-      # (file URLs point at it). The admin console is localhost-only by default.
-      - "9800:9000"
-      - "${MINIO_CONSOLE_BIND:-127.0.0.1}:9801:9001"
+      # Presigned file URLs point directly to the S3 gateway.
+      - "9800:8333"
     volumes:
-      - eris_minio_data:/data
+      - eris_seaweedfs_data:/data
 
 volumes:
   eris_mariadb_data:
-  eris_minio_data:
+  eris_seaweedfs_data:
+    name: eris_seaweedfs_data

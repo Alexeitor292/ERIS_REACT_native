@@ -62,7 +62,7 @@ export type SceneAreaDescriptor = {
     basemap_or_imagery_source: string | null;
     created_at: string | null;
     uploaded_at: string | null;
-    // Protected ERIS download path (NOT a raw MinIO URL).
+    // Protected ERIS download path (not a raw object storage URL).
     download_path: string | null;
   } | null;
   content_signature: string | null;

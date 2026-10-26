@@ -23,12 +23,12 @@ services:
       DB_NAME: ${MARIADB_DATABASE}
       DB_USER: ${MARIADB_USER}
       DB_PASS: ${MARIADB_PASSWORD}
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
-      MINIO_BUCKET: ${MINIO_BUCKET:-eris-uploads}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_OFFLINE_SCENES_BUCKET: ${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT}
+      S3_BUCKET: ${S3_BUCKET:-eris-uploads}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_OFFLINE_SCENES_BUCKET: ${S3_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
       # Offline-scene policy — MUST match the worker so the API enforces the same
       # AOI/size limits at the generate + download endpoints.
       OFFLINE_SCENE_DEV_MODE: ${OFFLINE_SCENE_DEV_MODE:-false}
@@ -42,11 +42,11 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_started
       # Block startup until the private offline-scenes bucket is provisioned +
       # posture-verified (fail-closed). Zero manual host-side steps.
-      minio-init:
+      seaweedfs-init:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
@@ -58,26 +58,28 @@ services:
   # offline-scenes bucket before backend/worker start. Fails closed (nonzero) if
   # the bucket cannot be made private + immutable, blocking the dependents. Does
   # not touch the uploads bucket.
-  minio-init:
-    image: minio/mc:latest
-    container_name: eris_minio_init
+  seaweedfs-init:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: eris_seaweedfs_init
     restart: "no"
     depends_on:
-      minio:
+      seaweedfs:
         condition: service_started
     environment:
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_OFFLINE_SCENES_BUCKET: ${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
-    entrypoint: ["/bin/sh", "/scripts/bootstrap-offline-scenes-bucket.sh"]
-    volumes:
-      - ./scripts:/scripts:ro
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_OFFLINE_SCENES_BUCKET: ${S3_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
+      DB_PASS: unused-by-storage-bootstrap
+      JWT_SECRET: unused-by-storage-bootstrap
+    entrypoint: ["python", "-m", "app.storage_bootstrap"]
 
   # Automatic offline 3D scene-package generation worker. Separate process so
   # long USGS-3DEP terrain jobs never run in the API request path. Reuses the
   # backend image; claims QUEUED jobs from MariaDB and writes verified packages
-  # to the private offline-scenes MinIO bucket.
+  # to the private offline-scenes SeaweedFS bucket.
   offline-scene-worker:
     build:
       context: ../backend
@@ -96,14 +98,14 @@ services:
       DB_NAME: ${MARIADB_DATABASE}
       DB_USER: ${MARIADB_USER}
       DB_PASS: ${MARIADB_PASSWORD}
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
-      MINIO_BUCKET: ${MINIO_BUCKET:-eris-uploads}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_OFFLINE_SCENES_BUCKET: ${MINIO_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT}
+      S3_BUCKET: ${S3_BUCKET:-eris-uploads}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_OFFLINE_SCENES_BUCKET: ${S3_OFFLINE_SCENES_BUCKET:-eris-offline-scenes}
       # Production posture: dev mode OFF unless explicitly overridden. When OFF,
-      # MinIO offline-bucket posture problems fail closed rather than warn.
+      # S3 offline-bucket posture problems fail closed rather than warn.
       OFFLINE_SCENE_DEV_MODE: ${OFFLINE_SCENE_DEV_MODE:-false}
       OFFLINE_SCENE_MAX_RADIUS_M: ${OFFLINE_SCENE_MAX_RADIUS_M:-3000}
       OFFLINE_SCENE_MAX_PACKAGE_MB: ${OFFLINE_SCENE_MAX_PACKAGE_MB:-512}
@@ -149,9 +151,9 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_started
-      minio-init:
+      seaweedfs-init:
         condition: service_completed_successfully
 
   web:

@@ -140,7 +140,7 @@ def _incident_only_photo_map(db: Session, incident: dict) -> dict:
                 "captured_at": _iso(row["captured_at"]),
                 **capture,
                 "download_url": object_access_url(
-                    str(row["storage_bucket"] or settings.MINIO_BUCKET),
+                    str(row["storage_bucket"] or settings.S3_BUCKET),
                     str(row["storage_key"]),
                     expires_seconds=900,
                 ),

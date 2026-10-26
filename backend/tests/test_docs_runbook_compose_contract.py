@@ -73,7 +73,7 @@ class TestComposeServicesAreReal:
         # The whole point: the short name is NOT a service. If someone ever adds it, this
         # test should be revisited deliberately rather than the docs quietly becoming right.
         assert PHANTOM_SERVICE not in names
-        assert {"backend", "mariadb", "minio"} <= names   # sanity: we parsed a real block
+        assert {"backend", "mariadb", "seaweedfs", "seaweedfs-init"} <= names
 
     @pytest.mark.parametrize("doc", [RUNBOOK, ADR], ids=["runbook", "adr"])
     def test_no_doc_command_uses_the_phantom_worker_service(self, doc: Path):

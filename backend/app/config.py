@@ -34,27 +34,34 @@ class Settings(BaseSettings):
     DB_USER: str = Field(default="eris_user")
     DB_PASS: str  # REQUIRED
 
-    # MinIO (keys required)
-    MINIO_ENDPOINT: str = Field(default="http://localhost:9000")
-    MINIO_BUCKET: str = Field(default="eris-uploads")
+    # S3-compatible object storage (SeaweedFS in the bundled stack)
+    S3_ENDPOINT: str = Field(default="http://127.0.0.1:9800")
+    S3_BUCKET: str = Field(default="eris-uploads")
     # One file uploaded to a form (photo, video or document). Cloudflare refuses requests over 100 MB.
     MAX_UPLOAD_MB: int = Field(default=95, ge=1)
-    MINIO_ACCESS_KEY: str = Field(default="minioadmin", validation_alias="MINIO_ROOT_USER")
-    MINIO_SECRET_KEY: str = Field(default="minio_root_password", validation_alias="MINIO_ROOT_PASSWORD")
-    MINIO_PUBLIC_ENDPOINT: str | None = Field(default=None)
-    # Region used when GENERATING presigned URLs. Set explicitly (MinIO's default
+    S3_ACCESS_KEY: str = Field(min_length=1)
+    S3_SECRET_KEY: str = Field(min_length=1)
+    S3_PUBLIC_ENDPOINT: str | None = Field(default=None)
+    # Region used when GENERATING presigned URLs. Set explicitly (S3's default
     # is us-east-1) so presigning is purely local — it must NOT round-trip a
     # GetBucketLocation call to the public endpoint at sign time. Override only if
-    # the MinIO server is configured with a non-default site region.
-    MINIO_REGION: str = Field(default="us-east-1")
-    # "presigned" (default): return MinIO presigned GET URLs.
-    # "public": return deterministic direct object URLs via MINIO_PUBLIC_ENDPOINT.
+    # the S3 server is configured with a non-default site region.
+    S3_REGION: str = Field(default="us-east-1")
+    # "presigned" (default): return S3 presigned GET URLs.
+    # "public": return deterministic direct object URLs via S3_PUBLIC_ENDPOINT.
     STORAGE_URL_MODE: str = Field(default="presigned")
 
     # JWT (required)
     JWT_SECRET: str  # REQUIRED
     JWT_ALG: str = Field(default="HS256")
     JWT_EXPIRES_MINUTES: int = Field(default=120)
+    LOCAL_LOGIN_ENABLED: bool = Field(default=True)
+    ENTRA_ENABLED: bool = Field(default=False)
+    ENTRA_AUTHORITY_HOST: str = Field(default="login.microsoftonline.com")
+    ENTRA_TENANT_ID: str | None = Field(default=None)
+    ENTRA_CLIENT_ID: str | None = Field(default=None)
+    ENTRA_CLIENT_SECRET: str | None = Field(default=None)
+    ENTRA_REDIRECT_URI: str | None = Field(default=None)
 
     # PUSH NOTIFICATIONS to the ERIS mobile app go through Expo's push service
     # (https://exp.host). Off unless EXPO_PUSH_ENABLED=true: the feed itself works
@@ -123,12 +130,12 @@ class Settings(BaseSettings):
     ARCGIS_LICENSE_EXPIRES_AT: str | None = Field(default=None)
     ARCGIS_MMPK_URL: str | None = Field(default=None)
     ARCGIS_CONFIG_OFFLINE_TTL_HOURS: int = Field(default=168)
-    # Private MinIO bucket holding operator-authored offline 3D scene packages
+    # Private S3 bucket holding operator-authored offline 3D scene packages
     # (.mspk). Separate from the uploads bucket; never made anonymous/public.
     # Availability is decided by the catalog table + a live object HEAD, NOT by a
-    # base-URL string. Mobile never receives MinIO credentials — it gets a
+    # base-URL string. Mobile never receives S3 credentials — it gets a
     # short-lived presigned URL from the protected download endpoint.
-    MINIO_OFFLINE_SCENES_BUCKET: str = Field(default="eris-offline-scenes")
+    S3_OFFLINE_SCENES_BUCKET: str = Field(default="eris-offline-scenes")
     OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS: int = Field(default=900)
     # --- Automatic offline 3D package-generation pipeline (worker) ---
     OFFLINE_SCENE_WORKER_POLL_SECONDS: int = Field(default=5)
@@ -138,10 +145,10 @@ class Settings(BaseSettings):
     # double-claim. There is deliberately no in-process concurrency knob (a dead
     # setting that silently controls nothing). Default posture is a single worker.
     OFFLINE_SCENE_JOB_STALE_SECONDS: int = Field(default=900)
-    # Production posture. FALSE by default and in prod compose. When FALSE, MinIO
+    # Production posture. FALSE by default and in prod compose. When FALSE, S3
     # offline-bucket posture problems (missing bucket, anonymous access, no
     # versioning) FAIL CLOSED instead of warning; when TRUE (local/dev) they warn
-    # so a laptop run without a fully-provisioned MinIO can still iterate.
+    # so a laptop run without a fully-provisioned S3 server can still iterate.
     OFFLINE_SCENE_DEV_MODE: bool = Field(default=False)
     # Single authoritative AOI ceiling. Enforced identically at the generate
     # endpoint, job creation, AND worker execution (see offline_scene.clamp_radius_m).

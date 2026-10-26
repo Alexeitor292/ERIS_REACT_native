@@ -5,6 +5,7 @@ import AuthGateLoading from "../auth/AuthGateLoading";
 import { useAuth } from "../auth/AuthContext";
 import { landingPathFor } from "../utils/roleModel";
 import { useSignInSplash } from "../ui/SignInSplash";
+import { appConfig } from "../config";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -17,6 +18,10 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("entra") === "cancelled") {
+      setNotice("Caltrans sign-in was not completed. Try again when ready.");
+      window.history.replaceState(null, "", "/login");
+    }
     try {
       if (sessionStorage.getItem("eris_session_expired") === "1") {
         setNotice("Your ERIS session expired. Sign in again to continue.");
@@ -105,7 +110,8 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
+              {appConfig.entraEnabled ? <a href={`${appConfig.apiBaseUrl}/auth/entra/start`} className="mt-6 block rounded-md bg-[var(--brand)] px-4 py-2.5 text-center text-sm font-semibold text-white hover:brightness-95">Sign in with Caltrans Microsoft Entra</a> : null}
+              {appConfig.localLoginEnabled ? <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
                 <label className="grid gap-1.5">
                   <span className="text-xs font-semibold uppercase tracking-wide text-muted">Email</span>
                   <input
@@ -135,7 +141,7 @@ export default function LoginPage() {
                 <button type="submit" disabled={busy} className="mt-2 rounded-md bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60">
                   {busy ? "Signing in…" : "Sign in"}
                 </button>
-              </form>
+              </form> : null}
 
               <div className="mt-6 border-t border-[var(--line)] pt-4 text-xs leading-5 text-muted">
                 If you cannot access ERIS, contact your application administrator. Do not share credentials or create duplicate accounts.
