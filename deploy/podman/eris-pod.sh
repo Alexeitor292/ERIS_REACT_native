@@ -9,7 +9,7 @@ for file in images.env db.env storage.env app.env; do
 done
 config_files=("$DEPLOY/images.env" "$DEPLOY/db.env" "$DEPLOY/storage.env" "$DEPLOY/app.env")
 if [[ -f "$DEPLOY/bootstrap.env" ]]; then config_files+=("$DEPLOY/bootstrap.env"); fi
-if awk '^[[:space:]]*# {next} /CHANGE_ME|example[.]gov|00000000-0000-0000-0000-000000000000/ {found=1} END {exit !found}' "${config_files[@]}"; then
+if awk '/^[[:space:]]*#/ {next} /CHANGE_ME|example[.]gov|00000000-0000-0000-0000-000000000000/ {found=1} END {exit !found}' "${config_files[@]}"; then
   echo "Deployment configuration still contains example values" >&2
   exit 2
 fi
