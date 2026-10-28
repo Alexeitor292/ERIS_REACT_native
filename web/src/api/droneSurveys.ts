@@ -1,4 +1,3 @@
-import { getToken } from "../auth/token";
 import { appConfig } from "../config";
 import { api } from "./client";
 
@@ -128,8 +127,8 @@ export function archiveOriginal(submissionId: number, file: File) {
 }
 
 async function fetchBinary(path: string): Promise<Response> {
-  const token = getToken();
-  const res = await fetch(`${appConfig.apiBaseUrl}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  // The session cookie authenticates this read.
+  const res = await fetch(`${appConfig.apiBaseUrl}${path}`, { credentials: "same-origin" });
   if (!res.ok) throw new Error(`Could not load the drone survey (${res.status}).`);
   return res;
 }

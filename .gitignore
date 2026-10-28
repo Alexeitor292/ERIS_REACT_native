@@ -1,12 +1,30 @@
 # ---- env / secrets ----
 .env
 .env.*
+deploy/podman/images.env
+deploy/podman/db.env
+deploy/podman/storage.env
+deploy/podman/app.env
+deploy/podman/release.env
+deploy/podman/volumes.env
+deploy/podman/images.env.previous
+deploy/podman/releases.log
+deploy/podman/bootstrap.env
+# Entra certificate/key and any other runtime secret files; never commit.
+deploy/podman/secrets/
+*.key
+*.pem
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+cosign.key
 **/.env
 **/.env.local
 **/.env.*.local
 !/backend/.env.example
-!/docker/.env.example
-!/docker/.env.proxmox.example
+!/deploy/compose/.env.example
+!/deploy/compose/.env.proxmox.example
 !/web/.env.example
 !/mobile/.env.example
 

@@ -430,7 +430,7 @@ def submission_photo_map(submission_id: int = Path(..., ge=1), db: Session = Dep
             "can_edit_correction": can_edit_photo,
             "captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
             **capture,
-            "download_url": object_access_url(str(row["storage_bucket"] or settings.MINIO_BUCKET), str(row["storage_key"]), expires_seconds=900),
+            "download_url": object_access_url(str(row["storage_bucket"] or settings.S3_BUCKET), str(row["storage_key"]), expires_seconds=900),
         }
 
     photos = list(deduped.values())

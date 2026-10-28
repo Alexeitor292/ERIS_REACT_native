@@ -20,13 +20,14 @@ from pypdf.generic import ContentStream
 
 from .db import get_db
 from .config import settings
-from .auth import decode_token
 from .deps import deny_public_only, get_current_user, require_roles
+from .sessions import check_origin
 from .storage import ensure_bucket, ensure_bucket_exists, bucket_exists, make_object_key, put_object_stream, put_object_bytes, presign_get, get_object_bytes, object_access_url, stat_object, sha256_of_object
 from .dev_routes import router as dev_router
 from .admin_users import router as admin_users_router
 from .photos import router as photos_router
 from .routes.auth import router as auth_router
+from .entra import router as entra_router
 from .routes.arcgis import router as arcgis_router
 from .routes.gisa import router as gisa_router
 from .migrations_check import check_migration_head
@@ -50,7 +51,6 @@ from .roles import GISA_AUTHOR_ROLES, OPERATIONAL_ROLES, is_public_only
 from .services import form_access, form_saves, public_visibility
 from .services import rich_text as rich_text_svc
 from .precision import normalize_post_mile, normalize_route, round_coordinate
-from .user_metadata import parse_user_metadata
 from .schemas.common import (
     ElevationProfileRequest,
     GeometryResponse,
@@ -94,7 +94,7 @@ async def lifespan(_app: FastAPI):
         ensure_bucket()
     except Exception as exc:
         if settings.ENV.lower() == "dev":
-            logger.warning("MinIO not available during startup: %s", exc)
+            logger.warning("S3 storage not available during startup: %s", exc)
         else:
             raise
     check_migration_head()
@@ -115,6 +115,7 @@ if settings.ENV.lower() == "dev":
 app.include_router(admin_users_router)
 app.include_router(photos_router)
 app.include_router(auth_router)
+app.include_router(entra_router)
 app.include_router(arcgis_router)
 app.include_router(gisa_router)
 app.include_router(incidents_router)
@@ -142,6 +143,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def refuse_cross_site_writes(request: Request, call_next):
+    """Defence in depth beside SameSite cookies and the CSRF token: a browser
+    write whose Origin is not ERIS is refused before any route runs, including
+    the unauthenticated sign-in endpoints (login CSRF)."""
+    try:
+        check_origin(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    response = await call_next(request)
+    # API responses carry records and personal data: no browser or proxy may
+    # cache them unless a route says otherwise, and none is a document to sniff.
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
 @app.exception_handler(HTTPException)
 async def eris_http_exception_handler(request: Request, exc: HTTPException):
     if int(exc.status_code) >= 500:
@@ -156,7 +174,9 @@ async def eris_http_exception_handler(request: Request, exc: HTTPException):
         # clients know which upstream service failed.  500/502/504 mask the detail.
         detail = exc.detail if exc.status_code == 503 else GENERIC_SERVER_ERROR_DETAIL
         return JSONResponse(status_code=exc.status_code, content={"detail": detail})
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    # Keep the exception's headers (Retry-After on a 429, for one).
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail},
+                        headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(Exception)
@@ -305,48 +325,6 @@ def get_submission_status(db: Session, submission_id: int) -> str:
     if not status_value:
         raise HTTPException(status_code=404, detail="Submission not found")
     return str(status_value)
-
-
-def resolve_user_from_request_or_token(request: Request, db: Session, access_token: str | None) -> dict:
-    token = (access_token or "").strip()
-    if not token:
-        auth_header = (request.headers.get("Authorization") or "").strip()
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[7:].strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing auth token")
-
-    try:
-        payload = decode_token(token, settings.JWT_SECRET, settings.JWT_ALG)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    sub = payload.get("sub")
-    if not sub:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
-    user = db.execute(text("""
-        SELECT id, email, full_name, is_active, metadata_json
-        FROM users
-        WHERE id = :id
-    """), {"id": int(sub)}).mappings().first()
-    if not user or int(user["is_active"]) != 1:
-        raise HTTPException(status_code=401, detail="User inactive or not found")
-
-    roles = db.execute(text("""
-        SELECT r.name
-        FROM user_roles ur
-        JOIN roles r ON r.id = ur.role_id
-        WHERE ur.user_id = :id
-    """), {"id": int(sub)}).scalars().all()
-
-    return {
-        "id": int(user["id"]),
-        "email": user["email"],
-        "full_name": user["full_name"],
-        "metadata": parse_user_metadata(user.get("metadata_json")),
-        "roles": list(roles),
-    }
 
 
 def _safe_json_get(url: str, timeout: float = 6.0) -> dict | None:
@@ -2926,7 +2904,7 @@ def _newest_ready_scene_package(db: Session, submission_id: int) -> dict | None:
 
 
 def _scene_object_present(catalog: dict) -> bool:
-    """True only when the exact MinIO object exists with the catalog's size AND a
+    """True only when the exact S3 storage object exists with the catalog's size AND a
     matching durable object identity (immutable version id, else etag). This
     detects any replacement/tamper of the object behind a registered package.
     Storage errors are treated as not-present (honest offline-unavailable)."""
@@ -2953,7 +2931,7 @@ def get_gisa_offline_scene_package(
 ):
     """Offline 3D scene-package descriptor for the mobile native viewer.
 
-    available is True ONLY when ERIS has a READY catalog row AND the exact MinIO
+    available is True ONLY when ERIS has a READY catalog row AND the exact S3 storage
     object is present with matching size + durable identity. Otherwise
     available=False with a precise reason ("no package prepared yet" / "missing
     from storage"). All values come from the catalog row — never from a base-URL
@@ -2983,7 +2961,7 @@ def download_gisa_offline_scene_package(
     user=Depends(deny_public_only),
 ):
     """Mint a SHORT-LIVED presigned URL for the newest READY package, only after
-    a role/access check. Mobile never receives MinIO credentials; the bucket stays
+    a role/access check. Mobile never receives S3 storage credentials; the bucket stays
     private. On expiry the app re-requests this to resume/retry the download."""
     require_can_view_submission(submission_id, db, user)
 
@@ -3057,7 +3035,7 @@ def generate_offline_scene_package(
     enforces edit permission, computes a bounded AOI, prevents duplicate active
     jobs, creates/reuses a durable QUEUED job, and returns immediately with the job
     id + current status + a status_url to poll. It NEVER fetches USGS 3DEP / NAIP /
-    imagery / MinIO inline — the separate offline-scene worker owns terrain fetch,
+    imagery / S3 storage inline — the separate offline-scene worker owns terrain fetch,
     imagery tiling, package assembly, verification, upload, and catalog registration.
     The frontend never holds a request open while the server builds the package."""
     require_can_edit_submission(submission_id, db, user)
@@ -3151,7 +3129,7 @@ def register_offline_scene_package(
 ):
     """ADMIN-only registration of an operator-uploaded .mspk.
 
-    Verifies the MinIO object exists, its size matches, and its SHA-256 matches
+    Verifies the S3 storage object exists, its size matches, and its SHA-256 matches
     BEFORE marking READY. Rejects missing objects, size/hash mismatch, duplicate
     versions, and invalid bounds. Retires any prior READY package for the
     submission (kept for audit). Objects are immutable — never overwritten."""
@@ -3193,10 +3171,10 @@ def offline_scene_ops_health(
     user=Depends(require_roles(["ADMIN"])),
 ):
     """ADMIN ops health for the offline-scene pipeline: queue depth, live workers,
-    unresolved orphaned objects, and private-bucket posture. Sanitized — no MinIO
+    unresolved orphaned objects, and private-bucket posture. Sanitized — no S3 storage
     credentials, endpoints, or unbounded internals are returned."""
     from .storage import bucket_exists
-    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    bucket = settings.S3_OFFLINE_SCENES_BUCKET
     try:
         bucket_ok = bool(bucket_exists(bucket))
         bucket_status = "ok" if bucket_ok else "missing"
@@ -3463,7 +3441,7 @@ def generate_submission_gisa_pdf(
         raise
     filename = f"gisa-{submission_id}.pdf"
     content_type = "application/pdf"
-    bucket = settings.MINIO_BUCKET
+    bucket = settings.S3_BUCKET
     sha256 = hashlib.sha256(pdf_bytes).hexdigest()
 
     existing = db.execute(text("""
@@ -3490,7 +3468,7 @@ def generate_submission_gisa_pdf(
             db.execute(text("""
                 UPDATE attachments
                 SET created_by_user_id = :uid,
-                    storage_provider = 'minio',
+                    storage_provider = 's3',
                     storage_bucket = :bucket,
                     storage_key = :storage_key,
                     file_name = :file_name,
@@ -3522,7 +3500,7 @@ def generate_submission_gisa_pdf(
                     created_by_user_id, storage_provider, storage_bucket, storage_key,
                     file_name, mime_type, file_size_bytes, sha256, uploaded_at
                 ) VALUES (
-                    :uid, 'minio', :bucket, :storage_key,
+                    :uid, 's3', :bucket, :storage_key,
                     :file_name, :mime_type, :size_bytes, :sha256, NOW()
                 )
             """), {
@@ -3666,17 +3644,16 @@ def photo_download(
     return attachment_download_url(photo_id, db, user)
 
 
-# FALLBACK / DEPRECATED (alpha): proxies attachment bytes through FastAPI.
-# Clients should use /attachments/{id}/download-url and load files directly from storage.
-# Kept for backward-compatibility during the alpha transition; remove after clients migrate.
+# Proxies attachment bytes through FastAPI, for callers that cannot read the
+# storage links (the web's DOCX export, a preview fallback). Authenticated like
+# every other route: session cookie or Authorization header, never a token in
+# the URL, where gateway access logs would record it.
 @app.get("/attachments/{attachment_id}/content")
 def attachment_content(
     attachment_id: int = Path(..., ge=1),
-    request: Request = None,
-    access_token: str | None = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
-    user = resolve_user_from_request_or_token(request, db, access_token)
     row = db.execute(text("""
         SELECT id, storage_bucket, storage_key
         FROM attachments
@@ -3717,11 +3694,10 @@ def attachment_content(
 @app.get("/photos/{photo_id}/content")
 def photo_content(
     photo_id: int = Path(..., ge=1),
-    request: Request = None,
-    access_token: str | None = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
-    return attachment_content(photo_id, request, access_token, db)
+    return attachment_content(photo_id, db, user)
 
 
 # ----------------------------

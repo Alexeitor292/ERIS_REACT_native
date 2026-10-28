@@ -355,7 +355,7 @@ class AssessmentFinalizeRequest(BaseModel):
 
 
 class OfflineScenePackageRegister(BaseModel):
-    """ADMIN registration of an operator-authored, MinIO-stored .mspk package.
+    """ADMIN registration of an operator-authored, S3 storage-stored .mspk package.
 
     The object must already be uploaded to the private offline-scenes bucket.
     ERIS HEADs it, verifies size + SHA-256, then marks it READY (retiring any

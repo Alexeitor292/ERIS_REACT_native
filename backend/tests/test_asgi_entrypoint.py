@@ -19,6 +19,11 @@ print(json.dumps({
 def _probe(*, env_name: str, docs_enabled: str | None):
     env = os.environ.copy()
     env["ENV"] = env_name
+    if env_name == "prod":
+        # Production refuses to start with the short CI placeholder key or
+        # without HTTPS (its session cookies are Secure).
+        env["JWT_SECRET"] = "p" * 64
+        env["WEB_BASE_URL"] = "https://eris.example.test"
     if docs_enabled is None:
         env.pop("API_DOCS_ENABLED", None)
     else:

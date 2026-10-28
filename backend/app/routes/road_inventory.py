@@ -67,7 +67,7 @@ def create_import_job_route(
     db: Session = Depends(get_db),
     user=Depends(require_roles(["ADMIN"])),
 ):
-    """Store Excel in MinIO, create a queued import job, return 202.
+    """Store Excel in S3 storage, create a queued import job, return 202.
 
     Background processing: parse Excel + bulk insert road_segments.
     Poll GET /road-inventory/import-jobs/{job_uuid} to track progress.
@@ -98,7 +98,7 @@ def create_import_job_route(
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Road inventory storage is unavailable. Please check MinIO bucket configuration.",
+            detail="Road inventory storage is unavailable. Please check S3 storage bucket configuration.",
         )
 
     tag = version_tag.strip() or None
@@ -235,7 +235,7 @@ def upload_road_inventory(
             detail=str(exc),
         ) from exc
 
-    # Archive raw Excel in MinIO (non-fatal: version record is inserted regardless)
+    # Archive raw Excel in S3 storage (non-fatal: version record is inserted regardless)
     object_key = f"uploads/{uuid.uuid4()}.xlsx"
     sha256 = hashlib.sha256(file_bytes).hexdigest()
     try:

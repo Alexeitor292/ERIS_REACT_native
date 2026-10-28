@@ -7,6 +7,8 @@ gets in; everyone after them is added from the admin pages.
 
     python -m app.tools.create_admin --email jane.doe@dot.ca.gov --name "Jane Doe"
     python -m app.tools.create_admin --email jane.doe@dot.ca.gov --name "Jane Doe" --sso-only
+    python -m app.tools.create_admin --email jane.doe@dot.ca.gov --name "Jane Doe" \
+        --entra-object-id 3f0c...   # Entra-only deployments: link and grant ADMIN
 
 Contract:
   * The password is read from a hidden prompt (asked twice), or from
@@ -15,6 +17,11 @@ Contract:
     list, and it is never printed.
   * ``--sso-only`` creates the account with no password: password login refuses
     it, and it signs in through Entra ID once that is enabled.
+  * ``--entra-object-id`` (implies ``--sso-only``) also links the account to that
+    Entra user in ``ENTRA_TENANT_ID``. This is the recovery path for an
+    Entra-only deployment (``LOCAL_LOGIN_ENABLED=false``), which refuses to set
+    a password. An account already linked to a different Entra identity is
+    refused rather than relinked.
   * Idempotent. An existing account is granted ADMIN and reactivated, its
     password changes only when one is given, and no other role is touched.
   * Refuses a ``mock.*`` address outside ``ENV=dev``: those are the development
@@ -27,6 +34,7 @@ import argparse
 import getpass
 import os
 import sys
+from uuid import UUID
 
 from sqlalchemy import text
 
@@ -57,8 +65,12 @@ def check_password(password: str) -> str:
     return password
 
 
-def ensure_admin(db, *, email: str, full_name: str | None, password_hash: str | None) -> tuple[int, bool]:
-    """Create the account or promote it, and grant ADMIN. Returns ``(user_id, created)``."""
+def ensure_admin(db, *, email: str, full_name: str | None, password_hash: str | None,
+                 entra: tuple[str, str] | None = None) -> tuple[int, bool]:
+    """Create the account or promote it, and grant ADMIN. Returns ``(user_id, created)``.
+
+    ``entra`` is ``(tenant_id, object_id)`` to link the account to.
+    """
     row = db.execute(text("SELECT id FROM users WHERE email = :e"), {"e": email}).first()
     created = row is None
     if created:
@@ -80,6 +92,22 @@ def ensure_admin(db, *, email: str, full_name: str | None, password_hash: str | 
             sets.append("full_name = :n")
             params["n"] = full_name.strip()
         db.execute(text(f"UPDATE users SET {', '.join(sets)} WHERE id = :id"), params)
+
+    if entra:
+        tenant_id, object_id = entra
+        linked = db.execute(
+            text("SELECT tenant_id, object_id FROM user_external_identities WHERE user_id = :u AND provider = 'ENTRA_ID'"),
+            {"u": user_id},
+        ).first()
+        if linked and (str(linked[0]), str(linked[1])) != (tenant_id, object_id):
+            db.rollback()
+            raise AdminSetupError("this account is linked to a different Entra identity; refusing to relink it")
+        if not linked:
+            db.execute(
+                text("""INSERT INTO user_external_identities (user_id, provider, tenant_id, object_id, email_at_link)
+                        VALUES (:u, 'ENTRA_ID', :t, :o, :e)"""),
+                {"u": user_id, "t": tenant_id, "o": object_id, "e": email},
+            )
 
     db.execute(
         text("INSERT IGNORE INTO user_roles (user_id, role_id) SELECT :u, id FROM roles WHERE name = :r"),
@@ -123,6 +151,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="no password: the account signs in through Entra ID only",
     )
+    parser.add_argument(
+        "--entra-object-id",
+        help="link the account to this Entra user object ID (implies --sso-only)",
+    )
     return parser.parse_args(argv)
 
 
@@ -133,9 +165,19 @@ def main(argv: list[str] | None = None) -> int:
         email = normalize_email(args.email)
         if email.startswith("mock.") and settings.ENV.lower() != "dev":
             raise AdminSetupError("a mock.* account is a development account; refusing outside ENV=dev")
-        password_hash = None if args.sso_only else hash_password(_read_password())
+        entra = None
+        if args.entra_object_id:
+            try:
+                entra = (str(UUID(settings.ENTRA_TENANT_ID or "")), str(UUID(args.entra_object_id)))
+            except ValueError as exc:
+                raise AdminSetupError("--entra-object-id and ENTRA_TENANT_ID must be UUIDs") from exc
+        sso_only = args.sso_only or entra is not None
+        if not sso_only and not settings.LOCAL_LOGIN_ENABLED:
+            raise AdminSetupError("LOCAL_LOGIN_ENABLED is false: pass --entra-object-id instead of a password")
+        password_hash = None if sso_only else hash_password(_read_password())
         db = SessionLocal()
-        user_id, created = ensure_admin(db, email=email, full_name=args.name, password_hash=password_hash)
+        user_id, created = ensure_admin(db, email=email, full_name=args.name, password_hash=password_hash,
+                                        entra=entra)
     except AdminSetupError as exc:
         print(f"create_admin: {exc}", file=sys.stderr)
         return 2
@@ -147,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
             db.close()
 
     action = "Created" if created else "Updated"
-    sign_in = "Entra ID only" if args.sso_only else "password"
+    sign_in = "Entra ID only" if (args.sso_only or args.entra_object_id) else "password"
     print(f"{action} administrator {email} (user {user_id}; sign-in: {sign_in}).")
     return 0
 

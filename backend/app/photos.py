@@ -202,17 +202,17 @@ async def _store_submission_attachment(*, submission_id: int, file: UploadFile, 
 
     sha = hashlib.sha256(content).hexdigest()
     object_key = make_object_key(file.filename or "attachment.bin")
-    put_object_bytes(object_key=object_key, data=content, content_type=mime_type, bucket=settings.MINIO_BUCKET)
+    put_object_bytes(object_key=object_key, data=content, content_type=mime_type, bucket=settings.S3_BUCKET)
 
     db.execute(text("""
         INSERT INTO attachments (
           created_by_user_id, storage_provider, storage_bucket, storage_key,
           file_name, mime_type, file_size_bytes, sha256, captured_at, uploaded_at
         ) VALUES (
-          :uid, 'minio', :bucket, :key, :fname, :mime, :size, :sha, :captured_at, NOW()
+          :uid, 's3', :bucket, :key, :fname, :mime, :size, :sha, :captured_at, NOW()
         )
     """), {
-        "uid": user["id"], "bucket": settings.MINIO_BUCKET, "key": object_key,
+        "uid": user["id"], "bucket": settings.S3_BUCKET, "key": object_key,
         "fname": file.filename or "attachment", "mime": mime_type,
         "size": len(content), "sha": sha,
         "captured_at": capture_metadata.get("captured_at") if capture_metadata else None,

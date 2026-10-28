@@ -1,50 +1,23 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from .db import get_db
-from .config import settings
-from .auth import decode_token
 from .roles import is_public_only
+from .sessions import authenticate
 from .user_metadata import parse_user_metadata
 
 bearer = HTTPBearer(auto_error=False)
 
-def get_current_user(
-    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
-    db: Session = Depends(get_db),
-):
-    if creds is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
 
-    token = creds.credentials
-    try:
-        payload = decode_token(token, settings.JWT_SECRET, settings.JWT_ALG)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-    sub = payload.get("sub")
-    if not sub:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
-
-    # sub is user id as string
-    user = db.execute(text("""
-        SELECT id, email, full_name, is_active, metadata_json
-        FROM users
-        WHERE id = :id
-    """), {"id": int(sub)}).mappings().first()
-
-    if not user or int(user["is_active"]) != 1:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or not found")
-
+def user_with_roles(db, user: dict) -> dict:
     roles = db.execute(text("""
         SELECT r.name
         FROM user_roles ur
         JOIN roles r ON r.id = ur.role_id
         WHERE ur.user_id = :id
-    """), {"id": int(sub)}).scalars().all()
-
+    """), {"id": int(user["id"])}).scalars().all()
     return {
         "id": int(user["id"]),
         "email": user["email"],
@@ -52,6 +25,25 @@ def get_current_user(
         "metadata": parse_user_metadata(user.get("metadata_json")),
         "roles": list(roles),
     }
+
+
+def current_session(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: Session = Depends(get_db),
+):
+    """(user, session) from the session cookie or a native client's bearer token.
+
+    Roles and the active flag are read from the database on every request, so
+    a role change or a disabled account takes effect at once.
+    """
+    user, session = authenticate(request, db, creds.credentials if creds else None)
+    return user_with_roles(db, user), session
+
+
+def get_current_user(signed_in=Depends(current_session)):
+    return signed_in[0]
+
 
 def deny_public_only(user=Depends(get_current_user)):
     """Refuse a read-only Viewer, and nobody else.

@@ -542,7 +542,7 @@ class TestImportJobs:
         assert resp.status_code == 503
         assert resp.json()["detail"] in {
             "Internal server error",
-            "Road inventory storage is unavailable. Please check MinIO bucket configuration.",
+            "Road inventory storage is unavailable. Please check S3 storage bucket configuration.",
         }
 
     def test_run_import_job_failure(self, client_db, admin_token):

@@ -7,16 +7,16 @@ Authoritative model (automatic generation — no manual ArcGIS Pro authoring):
     `eristerrain` package (worker: fetch 3DEP -> build height grid + hillshade ->
     validate -> upload -> register). `.mspk` remains an optional future
     enterprise/ArcGIS path handled by the same catalog/download layer.
-  * The package binary lives in a PRIVATE MinIO bucket (eris-offline-scenes) under
+  * The package binary lives in a PRIVATE S3 storage bucket (eris-offline-scenes) under
     an immutable key submissions/{submission_id}/{package_version}/scene.{ext}.
   * ERIS owns the authorization, catalog, lifecycle, and signed-download layer.
 
 A submission is "available for offline 3D" ONLY when ERIS has a READY catalog row
-AND the exact MinIO object still exists with the catalog's size + durable identity.
+AND the exact S3 storage object still exists with the catalog's size + durable identity.
 Availability is NEVER inferred from a configured base URL.
 
-This module is pure (no DB, no MinIO, no settings import) so it unit-tests in the
-no-DB job; the DB catalog rows and MinIO HEAD are supplied by the endpoint/worker
+This module is pure (no DB, no S3 storage, no settings import) so it unit-tests in the
+no-DB job; the DB catalog rows and S3 storage HEAD are supplied by the endpoint/worker
 layer, and the authoritative configured maxima are INJECTED by those callers.
 """
 
@@ -327,7 +327,7 @@ def descriptor_from_catalog(
 ) -> dict:
     """Build the descriptor from the newest READY catalog row.
 
-    available is True ONLY when a READY catalog row exists AND its MinIO object is
+    available is True ONLY when a READY catalog row exists AND its S3 storage object is
     present (object_present). Otherwise available is False with a precise reason.
     All values come from the catalog row — never from a base-URL string.
     """
@@ -372,7 +372,7 @@ def descriptor_from_catalog(
             "created_at": _s(catalog.get("created_at")),
             "uploaded_at": _s(catalog.get("uploaded_at")),
             # Protected, role-checked download (short-lived presigned URL minted by
-            # the download endpoint). Mobile never receives MinIO credentials.
+            # the download endpoint). Mobile never receives S3 storage credentials.
             "download_path": download_path,
         },
         "content_signature": catalog.get("content_signature"),

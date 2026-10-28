@@ -16,12 +16,26 @@ from starlette.testclient import TestClient
 # DB_PASS is intentionally NOT defaulted here — local runs read it from
 # backend/.env, and CI jobs set it explicitly via their env: block.
 os.environ.setdefault("JWT_SECRET", "ci_placeholder_secret")
+os.environ.setdefault("S3_ACCESS_KEY", "ci_s3_access")
+os.environ.setdefault("S3_SECRET_KEY", "ci_s3_secret")
 
 # Ensure backend/ is on sys.path so `from app.X import Y` resolves correctly
 # when pytest is run from the backend/ directory.
 _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
+
+
+@pytest.fixture(autouse=True)
+def sign_in_rate_limit_off(monkeypatch):
+    """The suite signs in far more often than a person could; tests of the
+    limit itself (test_rate_limit.py) turn it back on."""
+    from app.rate_limit import sign_in_limiter
+
+    sign_in_limiter.reset()
+    monkeypatch.setattr(sign_in_limiter, "limit", 0)
+    yield sign_in_limiter
+    sign_in_limiter.reset()
 
 
 @pytest.fixture(autouse=True)

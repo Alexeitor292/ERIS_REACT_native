@@ -1,0 +1,17 @@
+{
+  "default": [{ "type": "reject" }],
+  "transports": {
+    "docker": {
+      "harbor.example.gov/eris": [
+        {
+          "type": "sigstoreSigned",
+          "keyPath": "/opt/eris/deploy/podman/signature-policy/cosign.pub",
+          "signedIdentity": { "type": "matchRepository" }
+        }
+      ]
+    },
+    "containers-storage": {
+      "": [{ "type": "insecureAcceptAnything" }]
+    }
+  }
+}

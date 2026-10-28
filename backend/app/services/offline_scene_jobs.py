@@ -185,7 +185,7 @@ def record_orphaned_object(
 ) -> None:
     """Record an immutable object that was uploaded but intentionally NOT registered
     (e.g. the job was cancelled between upload and registration). Operators reconcile
-    these out-of-band, respecting MinIO retention/versioning — ERIS never presents
+    these out-of-band, respecting S3 storage retention/versioning — ERIS never presents
     them as downloadable (no READY catalog row references them)."""
     db.execute(
         text("""

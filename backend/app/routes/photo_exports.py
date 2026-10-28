@@ -72,7 +72,7 @@ def export_photo_with_effective_metadata(
         raise HTTPException(status_code=415, detail="Corrected metadata export currently supports JPEG photos only")
 
     effective = _effective_capture(row)
-    bucket = str(row["storage_bucket"] or settings.MINIO_BUCKET)
+    bucket = str(row["storage_bucket"] or settings.S3_BUCKET)
     object_key = str(row["storage_key"] or "")
     if not object_key:
         raise HTTPException(status_code=409, detail="Photo attachment has no storage object")

@@ -223,11 +223,11 @@ async def create_survey(
             raise HTTPException(status_code=422, detail="The orthomosaic needs its four corners")
 
     patch_key = make_object_key("drone-patch.bin")
-    put_object_bytes(object_key=patch_key, data=data, content_type="application/octet-stream", bucket=settings.MINIO_BUCKET)
+    put_object_bytes(object_key=patch_key, data=data, content_type="application/octet-stream", bucket=settings.S3_BUCKET)
     overlay_key = None
     if overlay_bytes is not None:
         overlay_key = make_object_key("drone-ortho." + overlay_mime.split("/")[1])
-        put_object_bytes(object_key=overlay_key, data=overlay_bytes, content_type=overlay_mime, bucket=settings.MINIO_BUCKET)
+        put_object_bytes(object_key=overlay_key, data=overlay_bytes, content_type=overlay_mime, bucket=settings.S3_BUCKET)
 
     result = db.execute(
         text(
@@ -266,7 +266,7 @@ def get_patch(
 ) -> Response:
     _can_view(submission_id, db, user)
     row = _row(db, submission_id, survey_id)
-    data, _ = get_object_bytes(object_key=row["patch_object_key"], bucket=settings.MINIO_BUCKET)
+    data, _ = get_object_bytes(object_key=row["patch_object_key"], bucket=settings.S3_BUCKET)
     return Response(content=data, media_type="application/octet-stream", headers={"Cache-Control": "private, max-age=86400"})
 
 
@@ -278,7 +278,7 @@ def get_overlay(
     row = _row(db, submission_id, survey_id)
     if not row["overlay_object_key"]:
         raise HTTPException(status_code=404, detail="This survey has no orthomosaic")
-    data, _ = get_object_bytes(object_key=row["overlay_object_key"], bucket=settings.MINIO_BUCKET)
+    data, _ = get_object_bytes(object_key=row["overlay_object_key"], bucket=settings.S3_BUCKET)
     return Response(content=data, media_type=row["overlay_mime"] or "image/webp", headers={"Cache-Control": "private, max-age=86400"})
 
 
@@ -355,7 +355,7 @@ def delete_survey(
     db.execute(text("DELETE FROM submission_drone_surveys WHERE id = :id"), {"id": int(survey_id)})
     db.commit()
     # The patch and image go with it; the original files stay attachments of the form.
-    remove_object_quietly(object_key=row["patch_object_key"], bucket=settings.MINIO_BUCKET)
+    remove_object_quietly(object_key=row["patch_object_key"], bucket=settings.S3_BUCKET)
     if row["overlay_object_key"]:
-        remove_object_quietly(object_key=row["overlay_object_key"], bucket=settings.MINIO_BUCKET)
+        remove_object_quietly(object_key=row["overlay_object_key"], bucket=settings.S3_BUCKET)
     return {"deleted": int(survey_id)}

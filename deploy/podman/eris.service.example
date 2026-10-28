@@ -1,0 +1,18 @@
+[Unit]
+Description=ERIS single Podman pod
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# For a remote TLS gateway, set ERIS_BIND_IP to this host's private interface IP.
+# Environment=ERIS_BIND_IP=10.0.0.5
+# After `eris-pod.sh restore` into new volume names, name them here too.
+# Environment=ERIS_DB_VOLUME=eris-mariadb-restored ERIS_STORAGE_VOLUME=eris-seaweedfs-restored
+ExecStart=/usr/bin/bash /opt/eris/deploy/podman/eris-pod.sh start
+ExecStop=/usr/bin/bash /opt/eris/deploy/podman/eris-pod.sh stop
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

@@ -203,7 +203,7 @@ export function OfflineTerrainPanel({
     try {
       const t = await getToken();
       if (!t) throw new Error("Not signed in.");
-      // Mint a short-lived presigned URL (role-checked); MinIO stays private.
+      // Mint a short-lived presigned URL (role-checked); storage stays private.
       const grant = await getOfflineSceneDownloadGrant(t, String(submissionId));
       const result = await downloadOfflineSceneArea({
         descriptor,

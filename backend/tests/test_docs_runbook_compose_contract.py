@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-COMPOSE_FILES = [REPO / "docker" / "docker-compose.yml", REPO / "docker" / "docker-compose.proxmox.yml"]
-RUNBOOK = REPO / "docs" / "offline-scene-package-operator-runbook.md"
+COMPOSE_FILES = [REPO / "deploy" / "compose" / "docker-compose.yml", REPO / "deploy" / "compose" / "docker-compose.proxmox.yml"]
+RUNBOOK = REPO / "docs" / "operations" / "offline-scene-packages.md"
 ADR = REPO / "docs" / "decisions" / "adr-offline-road-context-source.md"
 
 WORKER_SERVICE = "offline-scene-worker"
@@ -73,7 +73,7 @@ class TestComposeServicesAreReal:
         # The whole point: the short name is NOT a service. If someone ever adds it, this
         # test should be revisited deliberately rather than the docs quietly becoming right.
         assert PHANTOM_SERVICE not in names
-        assert {"backend", "mariadb", "minio"} <= names   # sanity: we parsed a real block
+        assert {"backend", "mariadb", "seaweedfs", "seaweedfs-init"} <= names
 
     @pytest.mark.parametrize("doc", [RUNBOOK, ADR], ids=["runbook", "adr"])
     def test_no_doc_command_uses_the_phantom_worker_service(self, doc: Path):

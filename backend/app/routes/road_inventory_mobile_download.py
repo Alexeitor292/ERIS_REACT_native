@@ -20,7 +20,7 @@ def download_current_mobile_package(
 ):
     """Download the current published road-inventory package through ERIS.
 
-    Mobile clients must not depend on anonymous/direct MinIO access. The object
+    Mobile clients must not depend on anonymous/direct S3 storage access. The object
     store remains private; ERIS authenticates the caller and streams the package
     bytes from the server-side storage connection.
     """

@@ -285,5 +285,13 @@ VIEWER_READABLE_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/photos/{photo_id}/content"): "viewer_can_read_public_attachment",
     # Unauthenticated by design, and not viewer-specific.
     ("POST", "/auth/login"): "the login itself",
+    ("GET", "/auth/entra/start"): "starts the tenant-specific OIDC flow",
+    ("GET", "/auth/entra/callback"): "requires signed state cookie and verified Entra ID token",
+    ("GET", "/auth/config"): "which sign-in methods are enabled; no account data",
+    ("POST", "/auth/entra/native"): "requires an Entra access token issued to the ERIS mobile app",
+    # Authenticated, and open to every role on purpose: a viewer must be able
+    # to sign out. They only end the caller's own sessions.
+    ("POST", "/auth/logout"): "ends the caller's current session only",
+    ("POST", "/auth/sessions/revoke-all"): "ends the caller's own sessions only",
     ("GET", "/health"): "liveness probe, no data",
 }

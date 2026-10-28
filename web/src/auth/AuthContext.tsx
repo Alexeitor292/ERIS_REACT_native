@@ -1,152 +1,105 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { api } from "../api/client";
-import { getToken, setToken, clearToken, getTokenExpiryMs } from "./token";
+import { api, ApiError, apiUrl } from "../api/client";
+import { csrfHeaders } from "./token";
 
 import type { Me } from "../api/types";
 
+// The session is an HttpOnly cookie the browser sends by itself; this context
+// never sees it. "Signed in" means the API answered /auth/me. The server ends
+// idle and expired sessions, and the next request's 401 brings the person
+// back to the sign-in page.
 type AuthState = {
   me: Me | null;
-  token: string | null;
+  signedIn: boolean;
   isInitializing: boolean;
   login: (email: string, password: string) => Promise<Me>;
-  logout: () => void;
+  finishEntra: () => Promise<Me>;
+  logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
 
+async function fetchMe(): Promise<Me | null> {
+  try {
+    return await api<Me>("/auth/me");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(getToken());
   const [me, setMe] = useState<Me | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
   async function refreshMe() {
-    if (!getToken()) {
-      setMe(null);
-      return;
-    }
-    const data = await api<Me>("/auth/me");
-    setMe(data);
+    setMe(await fetchMe());
   }
 
-  async function login(email: string, password: string) {
-    const res = await api<{ access_token: string; token_type: string }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-    // Who this is comes first: the pages see the token and the account together.
-    // Publishing the token alone sent /login to the landing page and the landing
-    // page's role gate (no account yet) back to /login, round and round until the
-    // browser stopped honouring history changes, leaving a blank /login.
-    setToken(res.access_token);
-    let data: Me;
-    try {
-      data = await api<Me>("/auth/me");
-    } catch (error) {
-      clearToken();
-      throw error;
-    }
+  async function establish(): Promise<Me> {
+    const data = await fetchMe();
+    if (!data) throw new Error("Sign-in did not complete. Try again.");
     setMe(data);
-    setTokenState(res.access_token);
     return data;
   }
 
-  function logout() {
-    clearToken();
-    setTokenState(null);
-    setMe(null);
-    setIsInitializing(false);
+  async function login(email: string, password: string) {
+    // The response sets the session cookies; no credential reaches this code.
+    await api("/auth/login", { method: "POST", headers: { "X-ERIS-Client": "web" }, body: JSON.stringify({ email, password }) });
+    return establish();
   }
 
-  function onSessionExpired() {
-    clearToken();
-    setTokenState(null);
+  async function finishEntra() {
+    // The Entra callback already set the session cookies.
+    return establish();
+  }
+
+  async function logout() {
+    // End the session on the server (it clears the cookies), then locally.
+    // Not through api(): a session that already expired is not an error here.
+    try {
+      await fetch(apiUrl("/auth/logout"), { method: "POST", credentials: "same-origin", headers: csrfHeaders("POST") });
+    } catch {
+      // Offline: the server ends the session at its idle timeout.
+    }
     setMe(null);
     setIsInitializing(false);
     try {
-      sessionStorage.setItem("eris_session_expired", "1");
+      sessionStorage.setItem("eris_signed_out", "1");
     } catch {
       // Browser storage may be unavailable under hardened/private policies.
     }
-    if (window.location.pathname !== "/login") {
-      window.location.href = "/login";
-    }
+    window.location.href = "/login";
   }
 
   useEffect(() => {
     let cancelled = false;
-
-    async function initializeSession() {
-      const storedToken = getToken();
-      if (!storedToken) {
-        if (!cancelled) {
-          setMe(null);
-          setIsInitializing(false);
-        }
-        return;
-      }
-
-      const expMs = getTokenExpiryMs(storedToken);
-      if (expMs != null && Date.now() >= expMs) {
-        if (!cancelled) onSessionExpired();
-        return;
-      }
-
-      try {
-        const data = await api<Me>("/auth/me");
-        if (!cancelled) setMe(data);
-      } catch {
-        if (!cancelled) {
-          clearToken();
-          setTokenState(null);
-          setMe(null);
-        }
-      } finally {
-        if (!cancelled) setIsInitializing(false);
-      }
+    try {
+      // Earlier releases kept a bearer token in localStorage; remove any left behind.
+      localStorage.removeItem("eris_token");
+    } catch {
+      // Storage may be unavailable under hardened/private policies.
     }
-
-    initializeSession();
+    fetchMe()
+      .then((data) => {
+        if (!cancelled) setMe(data);
+      })
+      .catch(() => {
+        if (!cancelled) setMe(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsInitializing(false);
+      });
     return () => {
       cancelled = true;
     };
-    // Persisted-session validation should run once at application start.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!token) return;
-
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const check = () => {
-      const liveToken = getToken();
-      if (!liveToken) return;
-      const expMs = getTokenExpiryMs(liveToken);
-      if (expMs == null) return;
-      if (Date.now() >= expMs) {
-        onSessionExpired();
-        return;
-      }
-      const msUntilExpire = Math.max(expMs - Date.now(), 0);
-      timer = setTimeout(check, msUntilExpire + 50);
-    };
-
-    check();
-    const onVisible = () => check();
-    window.addEventListener("focus", onVisible);
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      if (timer) clearTimeout(timer);
-      window.removeEventListener("focus", onVisible);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [token]);
-
   const value = useMemo(
-    () => ({ me, token, isInitializing, login, logout, refreshMe }),
-    [me, token, isInitializing]
+    () => ({ me, signedIn: me != null, isInitializing, login, finishEntra, logout, refreshMe }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [me, isInitializing]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
