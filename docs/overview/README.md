@@ -99,7 +99,7 @@ flowchart TB
 | Expo app (reference) | React Native / Expo; being replaced by the Swift app | `mobile/` | [Expo app](../development/mobile-expo.md) |
 | API | Python 3.12, FastAPI, SQLAlchemy (hand-written SQL), Alembic | `backend/app/` | [Backend guide](../development/backend.md) |
 | Terrain worker | Same code base, GIS stack (rasterio, numpy) | `backend/app/worker/` | [Offline terrain](../architecture/offline-terrain.md) |
-| Database | MariaDB 11, about 75 tables | `database/`, `backend/migrations/` | [Data model](../data/README.md) |
+| Database | MariaDB 11, 61 tables | `database/`, `backend/migrations/` | [Data model](../data/README.md) |
 | Object storage | SeaweedFS (S3 API): photos, files, PDFs, terrain packages | — | [Data model](../data/README.md#object-storage) |
 | Deployment | One rootless Podman pod (Caltrans); Docker Compose (development) | `deploy/` | [Operations](../operations/README.md) |
 

@@ -1,6 +1,6 @@
 # Data model
 
-ERIS keeps structured data in **MariaDB 11** (about 75 tables) and file bytes
+ERIS keeps structured data in **MariaDB 11** (61 tables) and file bytes
 in **SeaweedFS** object storage (S3 API). Tables hold the bucket and key of
 each file, never the bytes.
 
