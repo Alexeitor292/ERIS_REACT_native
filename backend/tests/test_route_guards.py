@@ -182,8 +182,6 @@ class TestTerrainCrossSectionsAreRoleGuarded:
 
 
 DENY_LIST_ROUTES = [
-    # A write behind a read gate: it renders a PDF and inserts an attachment.
-    ("POST", "/submissions/{submission_id}/gisa/pdf"),
     # Personnel data — who else can see this record — not the record.
     ("GET", "/submissions/{submission_id}/shared-with"),
     ("GET", "/submissions/{submission_id}/permissions"),
@@ -257,7 +255,6 @@ class TestTheAllowListCoversTheViewersRecord:
             ("GET", "/submissions"),
             ("GET", "/submissions/{submission_id}"),
             ("GET", "/submissions/{submission_id}/geometry"),
-            ("GET", "/submissions/{submission_id}/gisa/pdf"),
             ("GET", "/submissions/{submission_id}/photo-map"),
             ("GET", "/attachments/{attachment_id}/download-url"),
             ("GET", "/attachments/{attachment_id}/content"),

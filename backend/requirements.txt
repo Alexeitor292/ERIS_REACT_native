@@ -14,8 +14,6 @@ cryptography>=42
 argon2-cffi
 python-multipart
 email-validator
-reportlab
-pypdf
 openpyxl>=3.1
 Pillow>=12.3,<13
 alembic>=1.13,<2.0

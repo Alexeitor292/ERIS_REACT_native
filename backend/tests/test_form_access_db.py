@@ -89,7 +89,7 @@ def test_work_in_progress_opens_only_to_its_route(client_db, tokens, ids):
         refused = client_db.get(f"/submissions/{sid}", headers=_auth(tokens[who]))
         assert refused.status_code == 403 and "in progress" in refused.json()["detail"], who
         assert not _listed(client_db, tokens[who], sid), who
-        for path in (f"/submissions/{sid}/photo-map", f"/submissions/{sid}/drone-surveys", f"/submissions/{sid}/gisa/pdf"):
+        for path in (f"/submissions/{sid}/photo-map", f"/submissions/{sid}/drone-surveys"):
             assert client_db.get(path, headers=_auth(tokens[who])).status_code == 403, (who, path)
         file = client_db.get(f"/attachments/{attachment}/download-url", headers=_auth(tokens[who]))
         assert file.status_code == 403, (who, file.text)

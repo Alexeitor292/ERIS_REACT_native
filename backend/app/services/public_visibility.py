@@ -174,9 +174,8 @@ def viewer_can_read_public_submission(db: Session, user: dict, submission_id: in
     endpoints §4.5 allows. It deliberately does NOT reuse
     ``main.can_view_submission``: that helper has eleven call sites and
     photo-map's twin has three more, and widening either would grant all fourteen
-    at once — including ``POST /submissions/{id}/gisa/pdf`` (a write behind a
-    read gate) and ``/shared-with`` + ``/permissions`` (personnel data, not the
-    record).
+    at once — including writes behind a read gate and ``/shared-with`` +
+    ``/permissions`` (personnel data, not the record).
 
     The submission -> assessment join matches ``linked_assessment_for_submission``
     (``main.py``): the assessment's own ``submission_id`` plus every
@@ -273,7 +272,6 @@ VIEWER_READABLE_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/submissions"): "scope narrowed to public assessments in the handler",
     ("GET", "/submissions/{submission_id}"): "viewer_can_read_public_submission",
     ("GET", "/submissions/{submission_id}/geometry"): "viewer_can_read_public_submission",
-    ("GET", "/submissions/{submission_id}/gisa/pdf"): "viewer_can_read_public_submission",
     ("GET", "/submissions/{submission_id}/photo-map"): "viewer_can_read_public_submission",
     (
         "GET",

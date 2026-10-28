@@ -5,8 +5,8 @@ Sketch notes as formatted documents (HTML). Each is stored twice:
 
 * ``<field>_html`` — the formatted document, sanitized here against a fixed
   allow-list, so nothing stored can run script in anyone's browser;
-* ``<field>`` — a plain-text mirror derived from it, which the GISA PDF, the
-  submit checks and the mobile app keep reading unchanged.
+* ``<field>`` — a plain-text mirror derived from it, which the submit checks
+  and the mobile app keep reading unchanged.
 
 The mirror is always derived on the server from the sanitized HTML, so the two
 cannot drift through the web app. If the mobile app later edits the plain text,
