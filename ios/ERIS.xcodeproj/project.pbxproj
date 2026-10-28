@@ -1,0 +1,406 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4096957882DF657855E7DBEA /* IncidentViews.swift */; };
+		0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8179064C0312B2FDA75A3216 /* AppModel.swift */; };
+		19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C467160FFD1AAD51AA080E35 /* LocationProvider.swift */; };
+		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
+		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
+		71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */; };
+		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
+		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
+		FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */; };
+		FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateIncidentView.swift; sourceTree = "<group>"; };
+		2E8560894A4728D677214030 /* RootViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootViews.swift; sourceTree = "<group>"; };
+		4096957882DF657855E7DBEA /* IncidentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentViews.swift; sourceTree = "<group>"; };
+		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
+		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MSALTokenProvider.swift; sourceTree = "<group>"; };
+		A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ERISApp.swift; sourceTree = "<group>"; };
+		C467160FFD1AAD51AA080E35 /* LocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationProvider.swift; sourceTree = "<group>"; };
+		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
+		FDA966222712234613820962 /* ERIS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ERIS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4F7B8F1CAD22E904878E36B3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */,
+				59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1D1C589ED65070065F2FAC80 /* Platform */ = {
+			isa = PBXGroup;
+			children = (
+				6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */,
+				C467160FFD1AAD51AA080E35 /* LocationProvider.swift */,
+				947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */,
+			);
+			path = Platform;
+			sourceTree = "<group>";
+		};
+		5EF800605951421C4C5EE35C = {
+			isa = PBXGroup;
+			children = (
+				F9DEBD70583A81B14BE4150A /* ERIS */,
+				F14F713A7C0041A970AC8DA9 /* Packages */,
+				699684895EF07E22E9F48C30 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		699684895EF07E22E9F48C30 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				FDA966222712234613820962 /* ERIS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9CB74D24D3B4FCC512E32303 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				8179064C0312B2FDA75A3216 /* AppModel.swift */,
+				A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		B8D9D5B27A55884192FCCD07 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */,
+				4096957882DF657855E7DBEA /* IncidentViews.swift */,
+				2E8560894A4728D677214030 /* RootViews.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		F14F713A7C0041A970AC8DA9 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				DFF20351D38B6B00AD59CF87 /* ERISKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		F9DEBD70583A81B14BE4150A /* ERIS */ = {
+			isa = PBXGroup;
+			children = (
+				9CB74D24D3B4FCC512E32303 /* App */,
+				1D1C589ED65070065F2FAC80 /* Platform */,
+				B8D9D5B27A55884192FCCD07 /* Views */,
+			);
+			path = ERIS;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		634440038F12669308F06EEF /* ERIS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54A58D3B059BECCE9E284AFD /* Build configuration list for PBXNativeTarget "ERIS" */;
+			buildPhases = (
+				03076559F545176DBAC4065A /* Sources */,
+				4F7B8F1CAD22E904878E36B3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ERIS;
+			packageProductDependencies = (
+				C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */,
+				64D9E0837A5828840AA493A6 /* MSAL */,
+			);
+			productName = ERIS;
+			productReference = FDA966222712234613820962 /* ERIS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		30A056B4BD208D7D30B0C943 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					634440038F12669308F06EEF = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 6B56A714CA9218E0F2586F07 /* Build configuration list for PBXProject "ERIS" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5EF800605951421C4C5EE35C;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D1BEB79AFB31B42D07585D5F /* XCRemoteSwiftPackageReference "microsoft-authentication-library-for-objc" */,
+				4F417B9CD78D4EF9D4D546D8 /* XCLocalSwiftPackageReference "ERISKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 699684895EF07E22E9F48C30 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				634440038F12669308F06EEF /* ERIS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		03076559F545176DBAC4065A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */,
+				71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */,
+				FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */,
+				081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */,
+				903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */,
+				19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */,
+				FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */,
+				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4AE485FE3FD8D750DFE6D58B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Release.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				ERIS_API_BASE_URL = "https://eris-stage.example.gov/api";
+				INFOPLIST_FILE = ERIS/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		8D486936B110B07D176E237A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		96F97FCD07A7CDC978414363 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F18665EE9157B6822FDBF299 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Debug.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				ERIS_API_BASE_URL = "https://eris-stage.example.gov/api";
+				INFOPLIST_FILE = ERIS/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		54A58D3B059BECCE9E284AFD /* Build configuration list for PBXNativeTarget "ERIS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F18665EE9157B6822FDBF299 /* Debug */,
+				4AE485FE3FD8D750DFE6D58B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6B56A714CA9218E0F2586F07 /* Build configuration list for PBXProject "ERIS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8D486936B110B07D176E237A /* Debug */,
+				96F97FCD07A7CDC978414363 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		4F417B9CD78D4EF9D4D546D8 /* XCLocalSwiftPackageReference "ERISKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ERISKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D1BEB79AFB31B42D07585D5F /* XCRemoteSwiftPackageReference "microsoft-authentication-library-for-objc" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/AzureAD/microsoft-authentication-library-for-objc";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		64D9E0837A5828840AA493A6 /* MSAL */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D1BEB79AFB31B42D07585D5F /* XCRemoteSwiftPackageReference "microsoft-authentication-library-for-objc" */;
+			productName = MSAL;
+		};
+		C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ERISKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 30A056B4BD208D7D30B0C943 /* Project object */;
+}
