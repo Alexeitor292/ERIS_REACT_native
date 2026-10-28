@@ -273,6 +273,7 @@ VIEWER_READABLE_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/submissions/{submission_id}"): "viewer_can_read_public_submission",
     ("GET", "/submissions/{submission_id}/geometry"): "viewer_can_read_public_submission",
     ("GET", "/submissions/{submission_id}/photo-map"): "viewer_can_read_public_submission",
+    ("GET", "/submissions/{submission_id}/cracks"): "viewer_can_read_public_submission",
     (
         "GET",
         "/submissions/{submission_id}/photo-map/photos/{attachment_id}/corrected-export",

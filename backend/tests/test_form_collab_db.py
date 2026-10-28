@@ -30,7 +30,7 @@ def form(client_db, pair):
     sid = client_db.post("/submissions", json={"title": f"Collab {uuid.uuid4().hex[:6]}"}, headers=owner["headers"]).json()["submission_id"]
     first = client_db.patch(
         f"/submissions/{sid}/gisa",
-        json={"ea": "0A1234", "crack_length_ft": 3, "material_soil": True, "est_soil_pct": 40, "water_dry": True},
+        json={"ea": "0A1234", "settlement_in": 3, "material_soil": True, "est_soil_pct": 40, "water_dry": True},
         headers=owner["headers"],
     )
     assert first.status_code == 200, first.text
@@ -57,21 +57,21 @@ def test_a_field_changed_since_you_opened_it_is_refused_and_the_rest_saves(clien
     opened_by_colleague = _gisa(client_db, form, colleague)
     revision = opened_by_owner["revision"]
 
-    assert _save(client_db, form, colleague, {"crack_length_ft": 5}, opened_by_colleague).status_code == 200
+    assert _save(client_db, form, colleague, {"settlement_in": 5}, opened_by_colleague).status_code == 200
 
-    clash = _save(client_db, form, owner, {"crack_length_ft": 7}, opened_by_owner)
+    clash = _save(client_db, form, owner, {"settlement_in": 7}, opened_by_owner)
     assert clash.status_code == 409, clash.text
     detail = clash.json()["detail"]
-    assert [c["field"] for c in detail["conflicts"]] == ["crack_length_ft"] and float(detail["conflicts"][0]["theirs"]) == 5
+    assert [c["field"] for c in detail["conflicts"]] == ["settlement_in"] and float(detail["conflicts"][0]["theirs"]) == 5
     assert detail["saved_by"] and detail["revision"] == revision + 1
 
     # A field nobody else touched saves, and leaves the colleague's change alone.
     assert _save(client_db, form, owner, {"ea": "0B5678"}, opened_by_owner).status_code == 200
     now = _gisa(client_db, form, owner)
-    assert now["ea"] == "0B5678" and float(now["crack_length_ft"]) == 5 and now["revision"] == revision + 2
+    assert now["ea"] == "0B5678" and float(now["settlement_in"]) == 5 and now["revision"] == revision + 2
 
     # Keeping theirs out of the way: saving over it from what they saved goes through.
-    assert _save(client_db, form, owner, {"crack_length_ft": 7}, now).status_code == 200
+    assert _save(client_db, form, owner, {"settlement_in": 7}, now).status_code == 200
 
 
 def test_a_save_of_one_linked_field_keeps_the_others(client_db, pair, form):

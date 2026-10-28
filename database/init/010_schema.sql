@@ -466,11 +466,9 @@ CREATE TABLE IF NOT EXISTS submission_gisa (
 
     -- Section D: Pavement / Ground condition metrics
     pavement_ground_annotation_layout_json JSON NULL COMMENT 'JSON blob storing drag-placed annotation positions for the pavement diagram',
+    -- Each crack is its own row in submission_gisa_cracks; this is the
+    -- "Pavement/Ground Cracks" answer itself.
     pavement_ground_cracks TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
-    crack_length_ft DECIMAL(10,2) NULL,
-    crack_horizontal_in DECIMAL(10,2) NULL,
-    crack_vertical_in DECIMAL(10,2) NULL,
-    crack_depth_in DECIMAL(10,2) NULL,
     settlement_in DECIMAL(10,2) NULL,
     bulge_in DECIMAL(10,2) NULL,
     indented_by_rocks TINYINT NOT NULL DEFAULT 0 COMMENT 'Boolean (0=No, 1=Yes)',
@@ -676,6 +674,61 @@ CREATE TABLE IF NOT EXISTS submission_gisa_actions (
     INDEX idx_gisa_actions_code (action_code),
     CONSTRAINT chk_gisa_actions_group
       CHECK (action_group IN ('IMMEDIATE', 'FOLLOW_UP'))
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS submission_gisa_cracks (
+    -- One row per pavement/ground crack. GISA-001 asks to "map cracks":
+    -- each crack's location, length, width, horizontal and vertical
+    -- displacement, depth and direction. Every crack is its own record with the
+    -- same fields; see Alembic 20261029_submission_cracks.
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    -- Made by the client, so a retried or offline-queued create is recognised.
+    client_uuid CHAR(36) NOT NULL,
+    sort_order INT NOT NULL,
+    label VARCHAR(80) NULL,
+    latitude DECIMAL(10,7) NULL,
+    longitude DECIMAL(10,7) NULL,
+    location_source VARCHAR(16) NULL, -- PHOTO (approximate) | MAP | MANUAL
+    geometry_json JSON NULL,          -- the mapped trace, GeoJSON Point or LineString
+    trend_deg DECIMAL(5,1) NULL,      -- compass direction of the crack line, 0 to < 180
+    orientation VARCHAR(16) NULL,     -- relative to the roadway
+    length_ft DECIMAL(10,2) NULL,
+    width_in DECIMAL(10,2) NULL,
+    horizontal_disp_in DECIMAL(10,2) NULL,
+    vertical_disp_in DECIMAL(10,2) NULL,
+    depth_in DECIMAL(10,2) NULL,
+    notes TEXT NULL,
+    photo_attachment_id BIGINT NULL,  -- the crack's photo, an ordinary form photo
+    annotations_json JSON NULL,       -- shapes drawn over that photo, in 0..1 image coordinates
+    revision INT NOT NULL DEFAULT 1,
+    created_by_user_id BIGINT NOT NULL,
+    updated_by_user_id BIGINT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT uq_gisa_crack_client_uuid UNIQUE (client_uuid),
+    CONSTRAINT fk_gisa_crack_submission
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_gisa_crack_photo
+      FOREIGN KEY (photo_attachment_id) REFERENCES attachments(id) ON DELETE SET NULL,
+    CONSTRAINT fk_gisa_crack_creator
+      FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_gisa_crack_editor
+      FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_gisa_crack_submission (submission_id, sort_order, id),
+    CONSTRAINT chk_gisa_crack_location_pair
+      CHECK ((latitude IS NULL) = (longitude IS NULL)),
+    CONSTRAINT chk_gisa_crack_lat CHECK (latitude IS NULL OR (latitude >= -90 AND latitude <= 90)),
+    CONSTRAINT chk_gisa_crack_lon CHECK (longitude IS NULL OR (longitude >= -180 AND longitude <= 180)),
+    CONSTRAINT chk_gisa_crack_location_source
+      CHECK (location_source IS NULL OR location_source IN ('PHOTO', 'MAP', 'MANUAL')),
+    CONSTRAINT chk_gisa_crack_trend CHECK (trend_deg IS NULL OR (trend_deg >= 0 AND trend_deg < 180)),
+    CONSTRAINT chk_gisa_crack_orientation
+      CHECK (orientation IS NULL OR orientation IN ('LONGITUDINAL', 'TRANSVERSE', 'DIAGONAL', 'ARCUATE', 'OTHER')),
+    CONSTRAINT chk_gisa_crack_measures CHECK (
+      (length_ft IS NULL OR length_ft >= 0) AND (width_in IS NULL OR width_in >= 0)
+      AND (horizontal_disp_in IS NULL OR horizontal_disp_in >= 0)
+      AND (vertical_disp_in IS NULL OR vertical_disp_in >= 0) AND (depth_in IS NULL OR depth_in >= 0))
 ) ENGINE=InnoDB;
 
 -- Offline 3D scene-package catalog.

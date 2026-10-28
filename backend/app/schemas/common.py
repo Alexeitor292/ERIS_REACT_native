@@ -62,10 +62,6 @@ class GisaDraftPatch(BaseModel):
     lanes_closed_count: int | None = None
     open_highway_traffic_lanes_count: int | None = None
     pavement_ground_cracks: bool | None = None
-    crack_length_ft: float | None = None
-    crack_horizontal_in: float | None = None
-    crack_vertical_in: float | None = None
-    crack_depth_in: float | None = None
     settlement_in: float | None = None
     bulge_in: float | None = None
     indented_by_rocks: bool | None = None

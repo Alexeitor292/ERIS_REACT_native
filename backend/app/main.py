@@ -38,6 +38,7 @@ from .routes.site_history import router as site_history_router
 from .routes.sharing import router as sharing_router
 from .routes.notifications import router as notifications_router
 from .routes.drone_surveys import router as drone_surveys_router
+from .routes.cracks import list_cracks, router as cracks_router
 from .routes.form_presence import router as form_presence_router
 from .routes.road_inventory import router as road_inventory_router
 from .permissions import is_admin, is_operational_user, require_is_owner_or_admin
@@ -127,6 +128,7 @@ app.include_router(site_history_router)
 app.include_router(sharing_router)
 app.include_router(notifications_router)
 app.include_router(drone_surveys_router)
+app.include_router(cracks_router)
 app.include_router(form_presence_router)
 
 app.add_middleware(
@@ -573,7 +575,6 @@ def get_gisa(db: Session, submission_id: int, *, for_update: bool = False) -> di
           latitude, longitude,
           distribution_code, highway_status_cause, highway_status_code, lanes_closed_count, open_highway_traffic_lanes_count,
           pavement_ground_cracks,
-          crack_length_ft, crack_horizontal_in, crack_vertical_in, crack_depth_in,
           settlement_in, bulge_in, indented_by_rocks,
           pavement_ground_annotation_layout_json,
           failure_rock_fall, failure_topple, failure_slide, failure_spread, failure_flow,
@@ -1157,6 +1158,8 @@ def get_submission(
         "gisa": gisa,
         "incident_types": incident_types,
         "actions": actions,
+        # Each crack is its own record; see routes/cracks.py.
+        "cracks": list_cracks(db, submission_id),
         "photos": photo_items,
         "attachments": [dict(a) for a in attachments],
         "workflow_events": [dict(e) for e in events],
