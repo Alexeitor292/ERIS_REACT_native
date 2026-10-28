@@ -8,9 +8,9 @@ type Props = {
 };
 
 export default function ProtectedRoute({ children }: Props) {
-  const { token, isInitializing } = useAuth();
+  const { signedIn, isInitializing } = useAuth();
 
   if (isInitializing) return <AuthGateLoading />;
-  if (!token) return <Navigate to="/login" replace />;
+  if (!signedIn) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }

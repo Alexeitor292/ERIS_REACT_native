@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, apiUrl } from "../../../api/client";
-import { getToken } from "../../../auth/token";
+import { csrfHeaders } from "../../../auth/token";
 import { areaOf, fieldOf } from "./presenceDom";
 import { memoWriters, type PresenceOther, type PresenceReply } from "./presenceModel";
 
@@ -103,11 +103,11 @@ export function useFormPresence({ submissionId, enabled, memos }: { submissionId
     void beat();
     const every = window.setInterval(() => void beat(), BEAT_MS);
     const leave = () => {
-      const token = getToken();
       void fetch(apiUrl(`/submissions/${submissionId}/presence/${sessionId}`), {
         method: "DELETE",
         keepalive: true,
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: "same-origin",
+        headers: csrfHeaders("DELETE"),
       }).catch(() => undefined);
     };
     window.addEventListener("pagehide", leave);

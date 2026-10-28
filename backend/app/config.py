@@ -51,10 +51,14 @@ class Settings(BaseSettings):
     # "public": return deterministic direct object URLs via S3_PUBLIC_ENDPOINT.
     STORAGE_URL_MODE: str = Field(default="presigned")
 
-    # JWT (required)
+    # Server signing key (required): signs the Entra sign-in state cookie and
+    # derives each session's CSRF token. Sessions themselves are random
+    # server-side records (app/sessions.py), not signed tokens.
     JWT_SECRET: str  # REQUIRED
-    JWT_ALG: str = Field(default="HS256")
-    JWT_EXPIRES_MINUTES: int = Field(default=120)
+    # NIST SP 800-63B AAL2: reauthenticate after 30 minutes idle and 12 hours
+    # in total. With Entra single sign-on a reauthentication is usually silent.
+    SESSION_IDLE_MINUTES: int = Field(default=30)
+    SESSION_ABSOLUTE_MINUTES: int = Field(default=720)
     LOCAL_LOGIN_ENABLED: bool = Field(default=True)
     ENTRA_ENABLED: bool = Field(default=False)
     ENTRA_AUTHORITY_HOST: str = Field(default="login.microsoftonline.com")
@@ -62,6 +66,15 @@ class Settings(BaseSettings):
     ENTRA_CLIENT_ID: str | None = Field(default=None)
     ENTRA_CLIENT_SECRET: str | None = Field(default=None)
     ENTRA_REDIRECT_URI: str | None = Field(default=None)
+    # Certificate credential (PEM files; the certificate is uploaded to the app
+    # registration). Required in production; a client secret is accepted only
+    # outside ENV=prod.
+    ENTRA_CLIENT_CERT_FILE: str | None = Field(default=None)
+    ENTRA_CLIENT_KEY_FILE: str | None = Field(default=None)
+    # Mobile: a separate public client registration, which requests this ERIS
+    # API scope (exposed by the web app registration) through the system browser.
+    ENTRA_MOBILE_CLIENT_ID: str | None = Field(default=None)
+    ENTRA_API_SCOPE: str | None = Field(default=None)
 
     # PUSH NOTIFICATIONS to the ERIS mobile app go through Expo's push service
     # (https://exp.host). Off unless EXPO_PUSH_ENABLED=true: the feed itself works
@@ -71,6 +84,15 @@ class Settings(BaseSettings):
     EXPO_PUSH_ENABLED: bool = Field(default=False)
     EXPO_ACCESS_TOKEN: str | None = Field(default=None)
     EXPO_PUSH_URL: str = Field(default="https://exp.host/--/api/v2/push/send")
+    # Native iOS app: Apple Push Notification service with token-based auth.
+    # The .p8 auth key from the Caltrans Apple developer account goes in the
+    # private secrets folder (APNS_KEY_FILE=/run/secrets/eris/apns-auth-key.p8).
+    APNS_ENABLED: bool = Field(default=False)
+    APNS_KEY_FILE: str | None = Field(default=None)
+    APNS_KEY_ID: str | None = Field(default=None)
+    APNS_TEAM_ID: str | None = Field(default=None)
+    # The app's bundle identifier.
+    APNS_TOPIC: str | None = Field(default=None)
 
     # --- Outbound email for the incident-notification outbox (design §6.4) -----
     # EMAIL IS DISABLED WHENEVER SMTP_HOST IS UNSET — the dev and CI default, and
@@ -414,6 +436,30 @@ class Settings(BaseSettings):
                 "SMTP_SSL and SMTP_STARTTLS are mutually exclusive: set SMTP_STARTTLS=false "
                 "to use implicit TLS (port 465), or SMTP_SSL=false to upgrade with STARTTLS."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_production_session(self):
+        # Production refuses to start on a guessable signing key or an
+        # unbounded session rather than discovering it in a security review.
+        if self.ENV.strip().lower() != "prod":
+            return self
+        secret = self.JWT_SECRET or ""
+        if len(secret) < 32 or "CHANGE_ME" in secret:
+            raise ValueError("ENV=prod requires JWT_SECRET of at least 32 random characters")
+        if not 5 <= self.SESSION_ABSOLUTE_MINUTES <= 720:
+            raise ValueError("ENV=prod requires SESSION_ABSOLUTE_MINUTES between 5 and 720")
+        if not 5 <= self.SESSION_IDLE_MINUTES <= self.SESSION_ABSOLUTE_MINUTES:
+            raise ValueError("ENV=prod requires SESSION_IDLE_MINUTES between 5 and SESSION_ABSOLUTE_MINUTES")
+        if not self.WEB_BASE_URL.lower().startswith("https://"):
+            raise ValueError("ENV=prod requires an https:// WEB_BASE_URL (session cookies are Secure)")
+        if self.APNS_ENABLED and not (self.APNS_KEY_FILE and self.APNS_KEY_ID and self.APNS_TEAM_ID and self.APNS_TOPIC):
+            raise ValueError("APNS_ENABLED requires APNS_KEY_FILE, APNS_KEY_ID, APNS_TEAM_ID and APNS_TOPIC")
+        if self.ENTRA_ENABLED:
+            if not (self.ENTRA_CLIENT_CERT_FILE and self.ENTRA_CLIENT_KEY_FILE):
+                raise ValueError("ENV=prod with Entra requires ENTRA_CLIENT_CERT_FILE and ENTRA_CLIENT_KEY_FILE")
+            if self.ENTRA_CLIENT_SECRET:
+                raise ValueError("ENV=prod uses the Entra certificate credential: remove ENTRA_CLIENT_SECRET")
         return self
 
     def cors_origins_list(self) -> list[str]:

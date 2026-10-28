@@ -104,7 +104,7 @@ Optional helpers:
 ```bash
 cd web
 npm ci
-cp .env.example .env      # VITE_API_BASE_URL=http://127.0.0.1:8000 is the default
+cp .env.example .env      # VITE_API_BASE_URL=/api; the dev server proxies it to 127.0.0.1:8000
 npm run dev               # http://localhost:5173 (web/run.ps1 and run.sh do the same)
 ```
 

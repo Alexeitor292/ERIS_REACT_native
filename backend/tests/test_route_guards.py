@@ -65,6 +65,17 @@ def _guards(route: APIRoute) -> set[str]:
     return found
 
 
+def _authenticated(route: APIRoute) -> bool:
+    """The route's dependency tree resolves the signed-in session."""
+    stack = list(route.dependant.dependencies)
+    while stack:
+        dependency = stack.pop()
+        if dependency.call in (deps.get_current_user, deps.current_session):
+            return True
+        stack.extend(dependency.dependencies)
+    return False
+
+
 def _route_keys(route: APIRoute) -> list[tuple[str, str]]:
     return [(method, route.path) for method in sorted(route.methods - {"HEAD", "OPTIONS"})]
 
@@ -119,14 +130,35 @@ class TestEveryRouteIsGuarded:
         for key, reason in VIEWER_READABLE_ROUTES.items():
             assert isinstance(reason, str) and reason.strip(), f"{key} has no stated reason"
 
+    def test_every_route_but_the_sign_in_and_health_needs_a_session(self, app_routes):
+        # Being on the viewer allow list waives the ROLE guard, never
+        # authentication. A route that forgets its session dependency (as
+        # /photos/{id}/content once did) would otherwise pass the census.
+        public = {
+            ("GET", "/health"), ("GET", "/auth/config"), ("POST", "/auth/login"),
+            ("GET", "/auth/entra/start"), ("GET", "/auth/entra/callback"), ("POST", "/auth/entra/native"),
+        }
+        unauthenticated = []
+        for route in app_routes:
+            if _authenticated(route):
+                continue
+            for key in _route_keys(route):
+                if key not in public:
+                    unauthenticated.append(f"{key[0]} {key[1]}")
+        assert not unauthenticated, f"Routes reachable without a session: {sorted(unauthenticated)}"
+
     def test_the_allow_list_admits_no_writes(self, app_routes):
         # Every writing method must be guarded by a role list or an explicit
-        # refusal — except the two authentication exchanges, which cannot
-        # require a bearer token before the user has one.
+        # refusal — except sign-in (password and mobile Entra), which cannot
+        # require a session before the user has one, and sign-out, which every role must be able to do to
+        # its own sessions.
         allowed_writes = {
             key for key in VIEWER_READABLE_ROUTES if key[0] in {"POST", "PUT", "PATCH", "DELETE"}
         }
-        assert allowed_writes == {("POST", "/auth/login"), ("POST", "/auth/entra/session")}, allowed_writes
+        assert allowed_writes == {
+            ("POST", "/auth/login"), ("POST", "/auth/entra/native"),
+            ("POST", "/auth/logout"), ("POST", "/auth/sessions/revoke-all"),
+        }, allowed_writes
 
 
 # ---------------------------------------------------------------------------

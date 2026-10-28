@@ -1,6 +1,5 @@
 type AppConfig = {
   apiBaseUrl: string;
-  tokenStorageKey: string;
   entraEnabled: boolean;
   localLoginEnabled: boolean;
   // Optional PUBLIC Caltrans CRS Functional Classification FeatureServer layer, offered as
@@ -25,7 +24,6 @@ export const appConfig: AppConfig = {
     import.meta.env.VITE_API_BASE_URL ??
     import.meta.env.VITE_API_BASE ??
     "http://127.0.0.1:8000",
-  tokenStorageKey: import.meta.env.VITE_AUTH_TOKEN_STORAGE_KEY ?? "eris_token",
   entraEnabled: import.meta.env.VITE_ENTRA_ENABLED === "true",
   localLoginEnabled: import.meta.env.VITE_LOCAL_LOGIN_ENABLED !== "false",
   // OPT-IN: empty by default. A deployment that does not configure the variable gets NO

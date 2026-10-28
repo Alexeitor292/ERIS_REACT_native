@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from .db import get_db
 from .deps import require_roles
 from .services import org_tree
 from .auth import hash_password
+from .sessions import revoke_all
 from .roles import (
     ADMIN,
     ALL_ROLES,
@@ -28,6 +30,7 @@ from .services import org_directory
 from .user_metadata import normalize_district_code, normalize_office_code, parse_user_metadata, user_metadata_json
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+audit = logging.getLogger("eris.auth")
 
 ASSESSMENT_ASSIGNMENT_DIRECTORY_ROLES = [OFFICE_CHIEF, BRANCH_CHIEF] + [ADMIN]
 
@@ -490,6 +493,9 @@ def create_user(
 
     make_admin = _only_admin(body.roles)
 
+    if body.password and not settings.LOCAL_LOGIN_ENABLED:
+        # SSO-only deployment: no password may exist to be phished or reused.
+        raise HTTPException(status_code=422, detail="Password sign-in is disabled; link the person's Entra object ID instead")
     if not body.password and not body.entra_object_id:
         raise HTTPException(status_code=422, detail="Provide a password or Entra object ID")
     if body.entra_object_id:
@@ -555,13 +561,21 @@ def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     fields = {}
+    disabling = False
     if body.full_name is not None:
         fields["full_name"] = body.full_name
     if body.is_active is not None:
         fields["is_active"] = 1 if body.is_active else 0
+        disabling = not body.is_active and bool(int(u["is_active"]))
         if not body.is_active:
+            # Administrator handover: an admin who disables their own account,
+            # or the last active admin, locks everyone out of role management.
+            if int(user_id) == int(_admin["id"]):
+                raise HTTPException(status_code=409, detail="You cannot disable your own account.")
             # A chief cannot just vanish: their branch or office would be left without one.
             try:
+                if ADMIN in _get_user_roles(db, user_id):
+                    org_tree.guard_last_admin(db, user_id)
                 org_tree.guard_leaving(db, user_id)
             except org_tree.OrgTreeError as exc:
                 raise HTTPException(status_code=exc.status, detail=exc.message)
@@ -614,6 +628,9 @@ def update_user(
 
     try:
         db.execute(text(f"UPDATE users SET {sets} WHERE id = :id"), fields)
+        if disabling:
+            # Also end its sessions, so re-enabling later does not revive them.
+            revoke_all(db, user_id, reason="disabled")
         if profile_fields:
             columns = ["user_id"] + list(profile_fields)
             placeholders = ", ".join(f":{column}" for column in columns)
@@ -632,6 +649,8 @@ def update_user(
             # when only one of them was edited.
             org_directory.mirror_metadata_from_profile(db, int(user_id))
         db.commit()
+        if disabling:
+            audit.info("account_disabled user_id=%s by_user_id=%s", int(user_id), int(_admin["id"]))
         return _user_with_roles(db, user_id)
     except HTTPException:
         db.rollback()
@@ -674,6 +693,8 @@ def reset_password(
     db: Session = Depends(get_db),
     _admin=Depends(require_roles(["ADMIN"])),
 ):
+    if not settings.LOCAL_LOGIN_ENABLED:
+        raise HTTPException(status_code=409, detail="Password sign-in is disabled; people sign in through Entra")
     u = _get_user_row(db, user_id)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
@@ -685,8 +706,33 @@ def reset_password(
             text("UPDATE users SET password_hash = :ph WHERE id = :id"),
             {"ph": pw_hash, "id": user_id},
         )
+        # A reset usually means the old password was exposed: end its sessions.
+        revoke_all(db, user_id, reason="password_reset")
         db.commit()
         return {"ok": True}
     except Exception:
         db.rollback()
         raise
+
+
+@router.post("/users/{user_id}/revoke-sessions")
+def revoke_sessions(
+    user_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_roles(["ADMIN"])),
+):
+    """End every ERIS session the account holds, without disabling it.
+
+    For offboarding and suspected token exposure: disabling the person in Entra
+    stops new sign-ins but does not end an ERIS token already issued.
+    """
+    if not _get_user_row(db, user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        revoke_all(db, user_id, reason="admin_revoke")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    audit.info("sessions_revoked user_id=%s by_user_id=%s", int(user_id), int(_admin["id"]))
+    return {"ok": True}

@@ -3,7 +3,7 @@
 // /attachments. XMLHttpRequest rather than fetch, for upload progress.
 
 import { apiUrl } from "../../api/client";
-import { getToken } from "../../auth/token";
+import { csrfHeaders } from "../../auth/token";
 
 /** The server's limit per file (MAX_UPLOAD_MB); Cloudflare refuses requests over 100 MB. */
 export const MAX_UPLOAD_MB = 95;
@@ -36,8 +36,8 @@ export function uploadSection(
     }
     const xhr = new XMLHttpRequest();
     xhr.open("POST", apiUrl(path));
-    const token = getToken();
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    // Same-origin XHR sends the session cookie; the write also needs its CSRF token.
+    for (const [name, value] of Object.entries(csrfHeaders("POST"))) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(event.loaded / event.total);
     };

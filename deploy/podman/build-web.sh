@@ -26,4 +26,6 @@ podman run --rm --network none \
   -v "$scratch/dist:/app/dist:Z" \
   "$builder_image" npm run build
 cp "$root/web/nginx.conf" "$scratch/nginx.conf"
-podman build -f "$root/web/Dockerfile.runtime" -t "$image" "$scratch"
+podman build -f "$root/web/Dockerfile.runtime" \
+  --label "org.opencontainers.image.revision=${ERIS_SOURCE_REVISION:-unknown}" \
+  -t "$image" "$scratch"

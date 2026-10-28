@@ -134,6 +134,10 @@ export default function TabLayout() {
 
   const onLogout = () => {
     closeMenu(async () => {
+      // End this device's session on the server, not just locally; offline,
+      // it ends at its absolute expiry. Other devices stay signed in.
+      const token = await getToken().catch(() => null);
+      if (token) await apiFetch("/auth/logout", { method: "POST", token }).catch(() => undefined);
       await clearToken();
       router.replace("/(auth)/login");
     });

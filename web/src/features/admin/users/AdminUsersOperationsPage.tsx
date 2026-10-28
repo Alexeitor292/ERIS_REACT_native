@@ -33,6 +33,15 @@ export default function AdminUsersOperationsPage() {
   const [rowBusy, setRowBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // SSO-only deployments (Caltrans): the API refuses to set any password, so
+  // the page does not offer one. Assumed SSO-only until the API says otherwise.
+  const [passwordsAllowed, setPasswordsAllowed] = useState(false);
+
+  useEffect(() => {
+    api<{ local_login_enabled: boolean }>("/auth/config")
+      .then((config) => setPasswordsAllowed(!!config.local_login_enabled))
+      .catch(() => setPasswordsAllowed(false));
+  }, []);
 
   const inputClass = "w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
   const smallButton = "rounded border border-[var(--line)] px-2.5 py-1.5 text-xs font-semibold hover:bg-[var(--panel-soft)] disabled:cursor-not-allowed disabled:opacity-40";
@@ -87,7 +96,9 @@ export default function AdminUsersOperationsPage() {
     setError(null);
     setNotice(null);
     if (!email.trim() || !fullName.trim() || (!password && !entraObjectId.trim())) {
-      setError("Email, full name, and either a password or Entra object ID are required.");
+      setError(passwordsAllowed
+        ? "Email, full name, and either a password or Entra object ID are required."
+        : "Email, full name and the person's Entra object ID are required.");
       return;
     }
     setBusy(true);
@@ -133,6 +144,23 @@ export default function AdminUsersOperationsPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update the account.");
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  // Offboarding: disabling someone in Entra stops new sign-ins, but only this
+  // (or disabling the ERIS account) ends a session ERIS already issued.
+  async function revokeSessions(user: AdminUser) {
+    if (!window.confirm(`Sign ${user.full_name} out of ERIS on every device? Their account stays active.`)) return;
+    setRowBusy(user.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api(`/admin/users/${user.id}/revoke-sessions`, { method: "POST" });
+      setNotice(`${user.full_name} has been signed out everywhere.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to sign the account out.");
     } finally {
       setRowBusy(null);
     }
@@ -187,8 +215,8 @@ export default function AdminUsersOperationsPage() {
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Email *</span><input type="email" autoComplete="off" className={inputClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
               <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Full name *</span><input className={inputClass} value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
-              <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Initial password (optional)</span><input type="password" autoComplete="new-password" className={inputClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-              <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Entra object ID (optional)</span><input className={inputClass} value={entraObjectId} onChange={(event) => setEntraObjectId(event.target.value)} placeholder="Directory user object ID" /></label>
+              {passwordsAllowed ? <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">Initial password (optional)</span><input type="password" autoComplete="new-password" className={inputClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label> : null}
+              <label className="grid gap-1.5"><span className="text-xs font-semibold uppercase tracking-wide text-muted">{passwordsAllowed ? "Entra object ID (optional)" : "Entra object ID *"}</span><input className={inputClass} value={entraObjectId} onChange={(event) => setEntraObjectId(event.target.value)} placeholder="Directory user object ID" /></label>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={closeCreate} disabled={busy} className="rounded-md border border-[var(--line)] px-3 py-2 text-sm font-medium disabled:opacity-50">Cancel</button>
@@ -258,7 +286,8 @@ export default function AdminUsersOperationsPage() {
                     </td>
                     <td className="px-3 py-3 text-right">
                       <div className="inline-flex flex-wrap justify-end gap-1.5">
-                        <button type="button" onClick={() => setResetUser(user)} disabled={rowWorking} className={smallButton}>Reset password</button>
+                        {passwordsAllowed ? <button type="button" onClick={() => setResetUser(user)} disabled={rowWorking} className={smallButton}>Reset password</button> : null}
+                        {user.is_active ? <button type="button" onClick={() => void revokeSessions(user)} disabled={rowWorking} className={smallButton}>Sign out everywhere</button> : null}
                         <button type="button" onClick={() => void setActive(user, !user.is_active)} disabled={rowWorking} className={`rounded border px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${user.is_active ? "border-[color:color-mix(in_oklab,var(--bad)_45%,var(--line))] text-[var(--bad)]" : "border-[color:color-mix(in_oklab,var(--good)_45%,var(--line))] text-[var(--good)]"}`}>
                           {user.is_active ? "Disable" : "Enable"}
                         </button>

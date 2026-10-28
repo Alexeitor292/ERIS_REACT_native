@@ -1,4 +1,5 @@
-"""Push notifications to the ERIS mobile app, through Expo's push service.
+"""Push notifications to the ERIS mobile app: APNs for the native iOS app,
+Expo's push service for the Expo reference app.
 
 The feed (``services/notification_feed.py``) is the record; push is only the
 phone's lock-screen alert for it. A background loop started with the API sends
@@ -7,8 +8,10 @@ every new feed row to the phones its person has registered
 FAILED when Expo refused it), and retires a token Expo reports as no longer
 registered.
 
-Like email, it is off by default (``EXPO_PUSH_ENABLED``), never raises into a
-request, and never logs a token or a message body.
+Like email, it is off by default (``APNS_ENABLED``, ``EXPO_PUSH_ENABLED``),
+never raises into a request, and never logs a token or a message body. A device
+goes to APNs when it registered as platform ``apns``/``apns-sandbox``, and to
+Expo otherwise.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ import urllib.request
 from sqlalchemy import bindparam, text
 
 from ..config import settings
+from . import apns
 
 logger = logging.getLogger("eris.push")
 
@@ -31,7 +35,7 @@ _started = False
 
 
 def enabled() -> bool:
-    return bool(settings.EXPO_PUSH_ENABLED)
+    return bool(settings.EXPO_PUSH_ENABLED) or apns.configured()
 
 
 def _post(messages: list[dict]) -> list[dict]:
@@ -58,27 +62,46 @@ def send_pending(db) -> dict:
     if not rows:
         return {"sent": 0, "none": 0, "failed": 0}
     users = sorted({int(row["user_id"]) for row in rows})
-    tokens: dict[int, list[str]] = {}
-    for user_id, token in db.execute(
-        text("SELECT user_id, token FROM push_devices WHERE is_active = 1 AND user_id IN :ids").bindparams(bindparam("ids", expanding=True)),
+    use_apns = apns.configured()
+    tokens: dict[int, list[tuple[str, str | None]]] = {}
+    for user_id, token, platform in db.execute(
+        text("SELECT user_id, token, platform FROM push_devices WHERE is_active = 1 AND user_id IN :ids").bindparams(bindparam("ids", expanding=True)),
         {"ids": users},
     ).all():
-        tokens.setdefault(int(user_id), []).append(str(token))
+        platform = (platform or "").lower() or None
+        # An iOS device token goes to APNs only when APNs is configured.
+        if platform in apns.PLATFORMS and not use_apns:
+            continue
+        tokens.setdefault(int(user_id), []).append((str(token), platform))
 
     messages, owners = [], []
+    apple, apple_owners = [], []
     states: dict[int, str] = {}
     for row in rows:
         mine = tokens.get(int(row["user_id"]), [])
         if not mine:
             states[int(row["id"])] = "NONE"
             continue
-        for token in mine:
+        for token, platform in mine:
+            if platform in apns.PLATFORMS:
+                apple.append((platform, token, apns.payload(row["title"], row["body"] or "", row["link"], int(row["id"]))))
+                apple_owners.append((int(row["id"]), token))
+                continue
             messages.append({"to": token, "title": row["title"], "body": row["body"] or "", "sound": "default", "data": {"link": row["link"], "id": int(row["id"])}})
             owners.append((int(row["id"]), token))
         states[int(row["id"])] = "SENT"
 
     retired: set[str] = set()
     failed = 0
+    if apple:
+        for (notification_id, token), result in zip(apple_owners, apns.send(apple)):
+            if result.retry_later:
+                states.pop(notification_id, None)
+            elif not result.delivered:
+                if result.retire_token:
+                    retired.add(token)
+                states[notification_id] = "FAILED"
+                failed += 1
     for start in range(0, len(messages), _BATCH):
         chunk, chunk_owners = messages[start:start + _BATCH], owners[start:start + _BATCH]
         try:

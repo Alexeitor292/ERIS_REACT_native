@@ -12,6 +12,8 @@
 | [caltrans-it-deployment-brief.md](caltrans-it-deployment-brief.md) | Bring diagrams, stack/data/security facts, decisions, handouts, and anticipated questions to a Caltrans IT call. |
 | [ERIS Caltrans IT PDF briefing](../output/pdf/eris-caltrans-it-briefing.pdf) | Send or print the four-page call handout. |
 | [caltrans-podman.md](caltrans-podman.md) | Install and operate the proposed single-Podman-pod Caltrans deployment. |
+| [ios-native-app.md](ios-native-app.md) | Build the native Swift ERIS iOS app: MSAL sign-in, the API contract, what to port, and acceptance on the Caltrans Mac mini. |
+| [caltrans-readiness-audit.md](caltrans-readiness-audit.md) | See which deployment gaps were closed on 2026-10-28, which remain open, and how each was tested. |
 | [offline-terrain.md](offline-terrain.md) | Understand and operate offline 3D terrain packages, the road inventory, and terrain cross sections. |
 | [offline-scene-package-operator-runbook.md](offline-scene-package-operator-runbook.md) | Follow the operator procedures for terrain packages, including hand-made `.mspk` packages. |
 | [reference/gisa-data-dictionary.md](reference/gisa-data-dictionary.md) | Look up a field of the GISA technical form. |

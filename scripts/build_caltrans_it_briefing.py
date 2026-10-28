@@ -156,7 +156,7 @@ def page_frame(canvas, doc):
     canvas.rect(0, h - 10, w, 10, fill=1, stroke=0)
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(GRAY)
-    canvas.drawString(42, 29, "ERIS | Caltrans IT discussion copy | 26 Oct 2026")
+    canvas.drawString(42, 29, "ERIS | Caltrans IT discussion copy | 28 Oct 2026")
     canvas.drawRightString(w - 42, 29, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -166,7 +166,7 @@ story = []
 # Page 1: the pitch and architecture.
 story += [p("CALTRANS IT DISCUSSION / ARCHITECTURE", "KickerX"),
           p("ERIS deployment briefing", "TitleX"),
-          p("One Linux Podman pod, five containers, two persistent data volumes. Caltrans owns the platform and security boundary; the ERIS team supplies application code and deployment artifacts."),
+          p("One Linux Podman pod, five containers, two persistent data volumes. Staff sign in only through Caltrans Entra single sign-on, with no ERIS passwords. Caltrans owns the platform and security boundary; the ERIS team supplies application code and deployment artifacts."),
           callout("First decision: does Caltrans mean a Podman pod on a Linux VM, or a Kubernetes/OpenShift Pod? These artifacts implement Podman. Confirm that MariaDB and object storage may run in the same pod."),
           Spacer(1, 13), runtime_diagram(), Spacer(1, 8),
           p("Evidence uploads follow browser to FastAPI to private S3. The separate file hostname serves short-lived signed downloads through the TLS gateway.", "SmallX"),
@@ -186,17 +186,18 @@ story += [p("DATA / IDENTITY / SECURITY", "KickerX"),
           table(["Area", "ERIS today", "Caltrans decision"], [
               ("Data", "MariaDB holds accounts, roles, incidents, assessments, workflows and metadata. SeaweedFS holds photos, attachments, PDFs and terrain packages.", "Classification, retention, legal hold, and whether to import any existing data."),
               ("Recovery", "Two persistent named volumes; the database and object store must be restored together with runtime secrets.", "Encrypted off-host backup, RPO/RTO, restore drill and single-host failure plan."),
-              ("Entra", "Web OIDC authorization code + PKCE, single tenant, exact callback. ERIS roles are local; users link by tenant + object ID.", "Tenant/cloud, Web app, first admin object ID, MFA/Conditional Access tests. Current server exchange requires a client secret."),
-              ("Sessions", "ERIS HS256 bearer token, 120-minute default, currently kept in browser localStorage. API checks ERIS active flag and roles every request.", "Review token storage, lifetime and offboarding. Entra disable alone does not revoke an already-issued ERIS token."),
+              ("Entra", "SSO only: no ERIS passwords. Web OIDC code + PKCE, single tenant. The API authenticates with a <b>certificate</b> (no client secret). ERIS roles are local; users link by tenant + object ID.", "Tenant/cloud, Web app, certificate issuer and rotation, first admin object ID. MFA via Conditional Access; Assignment required."),
+              ("Mobile", "Native Swift iOS app (in development): MSAL via Microsoft Authenticator, public client, no secret. Server exchange to a revocable ERIS session is built.", "Register ERIS Mobile (iOS, bundle ID), SSO plug-in allow-list, distribution channel."),
+              ("Sessions", "Server-side sessions in an HttpOnly, Secure, SameSite=Strict cookie that scripts cannot read; CSRF token on writes. 30 min idle / 12 h absolute. Per-device sign-out; admin revoke ends all.", "Confirm the limits. Disabling only in Entra blocks new sign-ins; offboarding also disables the ERIS account."),
               ("Files / TLS", "Private S3 buckets; 15-minute signed URLs. Internal pod traffic is localhost HTTP/TCP.", "TLS gateway, signed-URL forwarding, HSTS/CSP, rate limits/WAF, at-rest encryption and log redaction."),
-              ("Supply chain", "Jenkinsfile builds and pushes three ERIS images; IT mirrors MariaDB and SeaweedFS.", "Scan/license/SBOM/signing policy, digest approval and release promotion owner."),
+              ("Supply chain", "All five images: CycloneDX SBOM, fixable HIGH/CRITICAL and secret gate (Trivy) before push, cosign signature and signed SBOM attestation. Hosts enforce signatures and pinned digests.", "Signing key owner, mirrored tool images, severity and exception approvals, digest approval."),
           ], [75, 224, 229], first_col_bold=True),
           Spacer(1, 11),
-          callout("Security gate: ERIS browser tokens are in localStorage. OWASP advises against storing authentication tokens there. If Caltrans requires HttpOnly server sessions or certificate-based Entra client authentication, plan and test those code changes before production."),
+          callout("Implemented and tested in code, not yet approved by Caltrans: Entra-only sign-in, HttpOnly server-side sessions (OWASP), certificate client credential, signed and SBOM-attested images behind a vulnerability gate, and checksummed backup/restore. Each still needs a staging test in Caltrans's tenant and infrastructure."),
           Spacer(1, 10),
           p("First administrator and handover", "SubX"),
-          p("Fresh install creates schema and roles, not demo users. One initial admin is seeded once, preferably linked to the supplied Entra object ID. Create and verify at least two named SSO admins, disable the initial admin, remove its temporary credential, and then disable local password sign-in in the API and rebuilt web image."),
-          p("Web callback: https://&lt;web-host&gt;/api/auth/entra/callback. A future mobile app needs a separate native/public Entra registration and PKCE flow; it is not part of this release.", "SmallX"),
+          p("Fresh install creates schema and roles, not demo users. One initial admin is seeded once from the Entra object ID IT supplies; ERIS refuses to set any password. Create and verify at least two named Entra admins (ERIS refuses to disable the last one), delete bootstrap.env, and record a passing eris-pod.sh handover-check."),
+          p("Web callback: https://&lt;web-host&gt;/api/auth/entra/callback. iOS redirect (MSAL): msauth.&lt;bundle-id&gt;://auth, on the separate ERIS Mobile public client (iOS platform).", "SmallX"),
           PageBreak()]
 
 # Page 3: release and handoffs.
@@ -205,21 +206,21 @@ story += [p("DELIVERY / ACCEPTANCE", "KickerX"),
           table(["Step", "Work and evidence"], [
               ("1. Decide", "Agree Podman interpretation, data scope, host/storage, gateway names, Entra policy, Harbor/Jenkins gates, security review and recovery targets."),
               ("2. Stage", "Caltrans provisions Linux/rootless Podman, two volumes, DNS/TLS gateway, firewall/egress, Entra test registration, Harbor/Jenkins and backup target."),
-              ("3. Build", "On an approved Linux Podman agent, Jenkins builds and pushes API, worker and web from an immutable commit. IT mirrors MariaDB/SeaweedFS; scans/approves and pins five digests."),
-              ("4. Configure", "IT supplies runtime secrets through its approved channel. Set exact web, S3 and callback URLs; match DB and S3 credentials across env files."),
-              ("5. Install", "Run eris-pod.sh up. It initializes schema/roles, runs Alembic, creates private buckets, seeds one admin, and starts the five containers."),
-              ("6. Prove", "Check HTTPS web/API, evidence upload through API and signed S3 download, Entra linked/unknown/disabled users, roles, incident path, restart, reboot, matched backup/restore and rollback."),
-              ("7. Handover", "Verify two named Entra admins, disable initial admin and local login, rotate handover secrets, record monitoring/support owners, then schedule production cutover."),
+              ("3. Build", "Jenkins builds API, worker and web from an immutable commit; all five images (with IT's MariaDB/SeaweedFS mirrors) pass the SBOM and vulnerability gate, then are pushed, signed and attested. IT approves the five digests."),
+              ("4. Configure", "IT supplies runtime secrets and the Entra client certificate through its approved channel and installs the signature policy. Set exact web, S3 and callback URLs."),
+              ("5. Install", "eris-pod.sh pull (signatures enforced), then up: schema, Alembic, private buckets, one Entra-linked admin, five containers. cert-check confirms the certificate."),
+              ("6. Prove", "verify-rehearsal.sh in production mode, then manual: Entra linked/unknown/unassigned/disabled users and MFA, mobile sign-in, upload and signed download, restart, reboot, backup/restore, rollback."),
+              ("7. Handover", "Two named Entra admins, passing handover-check, rotated handover secrets, monitoring/support owners. Production release: the staging-proven digests, after approval."),
           ], [83, 445], first_col_bold=True),
           Spacer(1, 12),
           p("Who hands over what", "SectionX"),
           table(["ERIS team supplies", "Caltrans IT supplies / approves"], [
               ("Approved source commit, Jenkinsfile, Podman scripts, env templates and operator runbook.", "Linux host/service account, DNS/TLS gateway, private networking, firewall and egress."),
-              ("Architecture/data/security packet, application tests, bootstrap and rollback procedures.", "Harbor/Jenkins, mirrored third-party images, scan/sign/SBOM gate and five image digests."),
-              ("Application support and fixes found during staged acceptance.", "Entra app registration, secret delivery, backup/restore, logging, alerts and change approval."),
+              ("Architecture/data/security packet, application tests, bootstrap and rollback procedures.", "Harbor/Jenkins, cosign key, mirrored third-party and tool images, gate exceptions and five digests."),
+              ("Application support and fixes found during staged acceptance.", "Entra web and mobile registrations, client certificate, backup/restore, logging, alerts and change approval."),
           ], [264, 264]),
           Spacer(1, 10),
-          p("Never place populated env files, passwords, robot secrets or the initial admin credential in email, tickets, images or a repository. The supplied Jenkins pipeline does not deploy or perform a complete security scan.", "SmallX"),
+          p("Never place populated env files, private keys, robot secrets or the cosign key in email, tickets, images or a repository. Releases: one command per host (eris-pod.sh release) pulls signed digests, backs up, migrates, verifies and rolls back by itself on failure. Jenkins can trigger it to staging, then production after approval, through a forced-command SSH key with no shell.", "SmallX"),
           PageBreak()]
 
 # Page 4: call sheet.
@@ -230,27 +231,28 @@ story += [p("CALL SHEET / DECISION LOG", "KickerX"),
               ("1", "What data classification and network zone apply? Clean install or approved data import?"),
               ("1", "Who owns host, rootless service account, CPU/RAM/disk, patching and SELinux policy?"),
               ("1", "What are the web and file HTTPS names, gateway placement, certificates and firewall rules?"),
-              ("1", "Which Entra tenant/cloud, Web app owner, callback, first admin object ID and credential policy?"),
-              ("1", "Will security accept localStorage JWTs, 120-minute sessions and manual ERIS offboarding?"),
-              ("1", "Who owns Harbor/Jenkins, image mirroring, digest pinning, scans, licenses, SBOMs and signing?"),
+              ("1", "Which Entra tenant/cloud, Web app owner, callback, first admin object ID, client certificate issuer and rotation?"),
+              ("1", "Do 30-minute idle / 12-hour sessions meet policy? Who disables ERIS accounts at offboarding?"),
+              ("1", "Who owns Harbor/Jenkins, the cosign key, gate exceptions? May Jenkins release over SSH, and who approves production?"),
               ("1", "What are the matched backup target, retention, RPO/RTO and restore-test owner?"),
               ("1", "Is one host's service interruption acceptable, or is a failover target required?"),
               ("1", "Is browser 3D ArcGIS or Esri offline processing in scope? Who supplies the restricted API key?"),
-              ("2", "Which Entra, GIS, SMTP and future mobile services may the host and clients reach?"),
+              ("2", "iOS app: compliant-device CA for ERIS, SSO allow-list, ERIS Mobile, enterprise profile renewal, APNs key, egress."),
               ("2", "Who owns SIEM, WAF/security headers, incident response, accessibility/privacy review and go-live approval?"),
           ], [47, 481]),
           Spacer(1, 12),
           p("Likely questions from IT", "SectionX"),
           table(["They may ask", "Your answer"], [
               ("Is it one image?", "No. One Podman pod, five containers, two persistent volumes."),
-              ("Who provides images?", "Caltrans Jenkins builds our three images; IT mirrors MariaDB/SeaweedFS; host pulls approved Harbor digests."),
+              ("Who provides images?", "Caltrans Jenkins builds our three; IT mirrors MariaDB/SeaweedFS. All five are gated, signed and pulled by digest."),
               ("SeaweedFS license?", "Upstream 4.50 source is Apache-2.0; IT must review the exact image and dependencies. Enterprise is not proposed."),
               ("Is it highly available?", "No. One host needs a tested matched backup and recovery plan."),
-              ("Is Entra live already?", "Implemented and tested in code, but not validated against Caltrans's tenant; current Proxmox uses local login."),
-              ("Is mobile ready?", "No Caltrans mobile release yet. Reserve API/S3 reachability; native Entra flow is future work."),
+              ("Do people use passwords?", "No. Entra SSO only; MFA and device rules come from Caltrans Conditional Access."),
+              ("Is Entra live already?", "Implemented and tested in code, not yet against Caltrans's tenant; the Proxmox rehearsal has no Entra."),
+              ("Is mobile ready?", "Not yet: native Swift iPhone app (MSAL, APNs push) via Intune/Company Portal. Server side is done."),
           ], [130, 398]),
           Spacer(1, 10),
-          p("Take into the meeting: this handout, the editable technical packet, Podman runbook, Jenkinsfile, env templates (unpopulated), and a specific source commit. The Jenkins job needs a Linux Podman agent, Harbor access, its push credential and capacity for a 4 GiB Node heap. After decisions: circulate hostnames/ports, approved digests, a non-secret config worksheet and staged acceptance/restore evidence.", "SmallX"),
+          p("Take into the meeting: this handout, the technical packet, Podman runbook, readiness audit, Jenkinsfile, env templates (unpopulated) and a specific source commit. The Jenkins job needs a Linux Podman agent, Harbor push robot, cosign key credentials and a 4 GiB Node heap. After decisions: hostnames/ports, signed digests with SBOMs, a non-secret config worksheet and staged acceptance/restore evidence.", "SmallX"),
           ]
 
 doc = SimpleDocTemplate(str(OUTPUT), pagesize=letter,

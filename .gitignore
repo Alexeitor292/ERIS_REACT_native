@@ -5,7 +5,15 @@ deploy/podman/images.env
 deploy/podman/db.env
 deploy/podman/storage.env
 deploy/podman/app.env
+deploy/podman/release.env
+deploy/podman/volumes.env
+deploy/podman/images.env.previous
+deploy/podman/releases.log
 deploy/podman/bootstrap.env
+# Entra certificate/key and any other runtime secret files; never commit.
+deploy/podman/secrets/
+*.key
+cosign.key
 **/.env
 **/.env.local
 **/.env.*.local

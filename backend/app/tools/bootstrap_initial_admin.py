@@ -13,7 +13,7 @@ from .create_admin import AdminSetupError, normalize_email, check_password
 
 
 def bootstrap(db, *, email: str, name: str, password: str | None, tenant_id: str | None,
-              object_id: str | None) -> bool:
+              object_id: str | None, allow_password: bool = True) -> bool:
     # Check first so later releases do not require keeping bootstrap secrets.
     if db.execute(text("SELECT 1 FROM deployment_bootstrap WHERE name = 'initial_admin' FOR UPDATE")).first():
         return False
@@ -24,6 +24,9 @@ def bootstrap(db, *, email: str, name: str, password: str | None, tenant_id: str
         raise AdminSetupError("Entra object ID requires ENTRA_TENANT_ID")
     if object_id:
         tenant_id, object_id = str(UUID(tenant_id)), str(UUID(object_id))
+    if password and not allow_password:
+        raise AdminSetupError("LOCAL_LOGIN_ENABLED is false: remove ERIS_BOOTSTRAP_ADMIN_PASSWORD and set "
+                              "ERIS_BOOTSTRAP_ADMIN_ENTRA_OBJECT_ID")
     if not password and not object_id:
         raise AdminSetupError("initial admin needs a password or a prelinked Entra object ID")
     # The row is a permanent guard, including after the initial account is disabled.
@@ -48,6 +51,8 @@ def bootstrap(db, *, email: str, name: str, password: str | None, tenant_id: str
 
 
 def main() -> int:
+    from ..config import settings
+
     try:
         with SessionLocal() as db:
             with db.begin():
@@ -58,6 +63,7 @@ def main() -> int:
                     password=os.environ.get("ERIS_BOOTSTRAP_ADMIN_PASSWORD"),
                     tenant_id=os.environ.get("ENTRA_TENANT_ID"),
                     object_id=os.environ.get("ERIS_BOOTSTRAP_ADMIN_ENTRA_OBJECT_ID"),
+                    allow_password=bool(settings.LOCAL_LOGIN_ENABLED),
                 )
         print("Initial administrator created." if created else "Initial administrator already seeded; no changes made.")
         return 0

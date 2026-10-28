@@ -125,6 +125,27 @@ def sync_roles(db: Session, user_id: int) -> set[str]:
     return roles
 
 
+def guard_last_admin(db: Session, user_id: int) -> None:
+    """Refuse a change that would leave no active administrator.
+
+    Used both when ADMIN is removed and when an administrator account is
+    disabled: either way, with no other active administrator nobody could
+    grant roles or recover accounts without direct database access.
+    """
+    others = db.execute(
+        text(
+            """
+            SELECT COUNT(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+              JOIN users u ON u.id = ur.user_id
+             WHERE r.name = 'ADMIN' AND u.is_active = 1 AND u.id <> :uid
+            """
+        ),
+        {"uid": int(user_id)},
+    ).scalar()
+    if not others:
+        raise OrgTreeError(409, "This is the last administrator.")
+
+
 def set_admin(db: Session, *, actor_id: int, user_id: int, is_admin: bool) -> set[str]:
     """Grant or remove ADMIN, then re-derive. Refuses to strand the system without one."""
     if not db.execute(text("SELECT 1 FROM users WHERE id = :uid"), {"uid": int(user_id)}).scalar():
@@ -133,18 +154,7 @@ def set_admin(db: Session, *, actor_id: int, user_id: int, is_admin: bool) -> se
     if not is_admin and "ADMIN" in held:
         if int(user_id) == int(actor_id):
             raise OrgTreeError(409, "You cannot remove your own administrator access.")
-        others = db.execute(
-            text(
-                """
-                SELECT COUNT(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-                  JOIN users u ON u.id = ur.user_id
-                 WHERE r.name = 'ADMIN' AND u.is_active = 1 AND u.id <> :uid
-                """
-            ),
-            {"uid": int(user_id)},
-        ).scalar()
-        if not others:
-            raise OrgTreeError(409, "This is the last administrator.")
+        guard_last_admin(db, user_id)
     admin_id = db.execute(text("SELECT id FROM roles WHERE name = 'ADMIN'")).scalar()
     db.execute(
         text("DELETE FROM user_roles WHERE user_id = :uid AND role_id = :rid"),

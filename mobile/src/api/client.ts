@@ -71,7 +71,8 @@ export async function apiFetch<T = any>(
     throw error;
   }
 
-  if (res.status === 401 && normalizedPath !== "/auth/login") {
+  // Sign-in endpoints answer 401 for a failed sign-in, not an expired session.
+  if (res.status === 401 && normalizedPath !== "/auth/login" && normalizedPath !== "/auth/entra/native") {
     await handleUnauthorized();
     throw new SessionExpiredError();
   }

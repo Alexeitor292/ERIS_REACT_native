@@ -1,0 +1,6 @@
+# Copy to ~/.config/containers/registries.d/eris.yaml for the ERIS service
+# account. Podman then looks for the cosign signatures that Jenkins attached in
+# Harbor, and policy.json requires one for every image in the ERIS project.
+docker:
+  harbor.example.gov:
+    use-sigstore-attachments: true
