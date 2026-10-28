@@ -58,6 +58,10 @@ line-of-business app (see the spec for renewal dates).
   a screenshot of each:
   `TEST_RUNNER_ERIS_SCREENSHOT_DIR=/tmp/shots xcodebuild test -project ios/ERIS.xcodeproj -scheme ERIS -destination 'platform=iOS Simulator,name=iPhone 17'`.
   Add a step there for each new screen.
+- **App icon.** `ERIS/Assets.xcassets/AppIcon.appiconset/AppIcon.png` is the web portal's logo
+  (`web/public/eris-logo.svg`) rendered on its yellow, edge to edge, by
+  `swift ios/scripts/render-app-icon.swift web/public/eris-logo.svg ios/ERIS/Assets.xcassets/AppIcon.appiconset/AppIcon.png 1024`.
+  Rerun it if the logo changes.
 - **Parity fixtures.** `node ios/scripts/make-parity-fixtures.mjs` (Node 22.18+) runs the Expo app's
   TypeScript helpers and writes `ERISKit/Tests/ERISKitTests/Fixtures/gisa-helpers.json`; the Swift
   tests check the ports against it. Rerun it when those TypeScript files change.
