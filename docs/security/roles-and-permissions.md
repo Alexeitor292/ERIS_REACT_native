@@ -28,7 +28,7 @@ Coordinator and its crew list Maintenance Crew; placed nowhere, Guest. Every cha
 place rewrites the person's `user_roles` at once, so the guards below keep reading
 `user_roles` unchanged. Administrator is the only role granted directly (Administration ›
 Users). The page, who may edit which part, and the migration that placed existing
-accounts are in [organization.md](organization.md).
+accounts are in [organization.md](../user-guides/administration.md).
 
 Rules that hold across the system:
 
@@ -127,7 +127,7 @@ A fresh production database has no accounts. `database/init/` creates roles
 and organization structure only, and a test
 (`test_first_boot_init_creates_no_account`) keeps it that way. The first
 administrator is seeded once by `python -m app.tools.bootstrap_initial_admin`
-in the [Caltrans Podman deployment](caltrans-podman.md). For manual setups,
+in the [Caltrans Podman deployment](../operations/caltrans-podman.md). For manual setups,
 the original operator command remains available:
 
 ```bash

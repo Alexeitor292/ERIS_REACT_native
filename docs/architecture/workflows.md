@@ -2,9 +2,9 @@
 
 How work moves through ERIS: from a field report, through triage, into an Incident
 Group and an assessment, to approval. Role names are those in
-[roles-and-identity.md](roles-and-identity.md); organization data (offices,
+[roles-and-identity.md](../security/roles-and-permissions.md); organization data (offices,
 branches, district coverage) is maintained as described in
-[organization.md](organization.md).
+[organization.md](../user-guides/administration.md).
 
 ## 1. Field report
 
@@ -224,7 +224,7 @@ give, notices to read, and how it went for the sharer and the recipient). The
 web portal shows it under the bell at the top of every page, with a full list at
 *Notifications*; the mobile app shows the same feed under its bell, and phones
 get it as push notifications once push is set up (see
-[configuration.md](configuration.md#push-notifications-mobile-app)). Selecting a
+[configuration.md](../operations/configuration.md#push-notifications-mobile-app)). Selecting a
 notice opens the page where it is acted on and marks it read. Nobody is told
 about their own action. Notices read by the incident's name. A notice asking
 for a step (triage, route, assign, fill in, review, revise) knows when the step
@@ -244,13 +244,13 @@ assessment instead.
 
 Until its assessment is approved, a technical form opens only to the people
 working on it: its owner, the chiefs on its route, whoever is assigned, and
-administrators (see [roles-and-identity.md](roles-and-identity.md)). Anyone
+administrators (see [roles-and-identity.md](../security/roles-and-permissions.md)). Anyone
 can still see that the assessment exists and where it stands.
 
 A form's owner can **share** it with named people, who can then view and edit
 it. Branch chiefs approve shares into or out of their branch, and office chiefs
 are told when one leaves their office or involves a Senior Specialist (see
-[roles-and-identity.md](roles-and-identity.md#special-permits)). The **Sharing**
+[roles-and-identity.md](../security/roles-and-permissions.md#special-permits)). The **Sharing**
 card shows, before sharing, what it would take, and afterwards where each share
 stands.
 

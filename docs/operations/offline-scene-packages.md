@@ -25,7 +25,7 @@ The full stack comes up with one command; the private offline-scenes bucket is
 provisioned automatically — **no host-side script to remember**.
 
 ```sh
-cd docker
+cd deploy/compose
 # One-time: copy the env template and fill in secrets (see "Required env" below).
 cp .env.proxmox.example .env.proxmox && $EDITOR .env.proxmox
 docker compose --env-file .env.proxmox -f docker-compose.yml -f docker-compose.proxmox.yml up -d --build
@@ -54,7 +54,7 @@ S3_ENDPOINT=http://<seaweedfs-host>:8333 S3_ACCESS_KEY=<u> S3_SECRET_KEY=<p> \
   python -m app.storage_bootstrap
 ```
 
-### Required env (docker/.env.proxmox)
+### Required env (deploy/compose/.env.proxmox)
 
 | Var | Purpose |
 |---|---|
@@ -269,8 +269,8 @@ in `context_layers.roads.source` (`provider`, `dataset`, `attribution`, `service
 Run on the ERIS server after deploy. `C` is the compose invocation:
 
 ```sh
-C="docker compose --env-file docker/.env.proxmox -f docker/docker-compose.yml -f docker/docker-compose.proxmox.yml"
-set -a; . docker/.env.proxmox; set +a   # load MARIADB_ROOT_PASSWORD etc.
+C="docker compose --env-file deploy/compose/.env.proxmox -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.proxmox.yml"
+set -a; . deploy/compose/.env.proxmox; set +a   # load MARIADB_ROOT_PASSWORD etc.
 
 # 1) Newest READY package: object key + authoritative catalog size.
 read OBJECT_KEY SIZE_BYTES <<EOF
@@ -473,7 +473,7 @@ device in Airplane Mode.
 
 ### Caltrans CRS Functional Classification source — select, verify, revert
 
-Select the optional Caltrans source (worker env / `docker/.env.proxmox`), then redeploy
+Select the optional Caltrans source (worker env / `deploy/compose/.env.proxmox`), then redeploy
 the `offline-scene-worker`:
 
 ```sh
@@ -538,8 +538,8 @@ package itself self-consistent?*
 same `C` compose invocation as the verification block above):
 
 ```sh
-C="docker compose --env-file docker/.env.proxmox -f docker/docker-compose.yml -f docker/docker-compose.proxmox.yml"
-set -a; . docker/.env.proxmox; set +a
+C="docker compose --env-file deploy/compose/.env.proxmox -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.proxmox.yml"
+set -a; . deploy/compose/.env.proxmox; set +a
 
 # 1) Newest READY package (the catalog is the source of truth).
 OBJECT_KEY="$($C exec -T mariadb mariadb -u root -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE" -N -B -e \

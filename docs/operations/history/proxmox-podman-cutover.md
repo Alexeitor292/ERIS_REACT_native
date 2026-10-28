@@ -1,5 +1,7 @@
 # ERIS Proxmox data cutover to Podman — 2026-10-25
 
+> **Historical record.** Commands and paths are as they were at the time. Since then `docker/` moved to `deploy/compose/` and `Jenkinsfile.podman` to `deploy/ci/`; see the [Caltrans Podman runbook](../caltrans-podman.md) for current procedures.
+
 ## Current routing and service
 
 The existing Cloudflare tunnel and public hostnames were retained. The tunnel

@@ -1,7 +1,7 @@
 # ERIS — Emergency Response Information System
 
-Caltrans IT deployment: [single Podman pod, Harbor and Jenkins runbook](docs/caltrans-podman.md).
-Proxmox rehearsal: [recreate ERIS beside the current Compose server](docs/proxmox-caltrans-rehearsal.md).
+Caltrans IT deployment: [single Podman pod, Harbor and Jenkins runbook](docs/operations/caltrans-podman.md).
+Proxmox rehearsal: [recreate ERIS beside the current Compose server](docs/operations/history/proxmox-caltrans-rehearsal.md).
 
 ERIS is how Caltrans Geotechnical Services and district Maintenance handle slope,
 embankment and drainage incidents on the state highway system:
@@ -24,7 +24,7 @@ embankment and drainage incidents on the state highway system:
 ## Quick start (development)
 
 ```bash
-cd docker && cp .env.example .env && docker compose up -d      # MariaDB + SeaweedFS
+cd deploy/compose && cp .env.example .env && docker compose up -d      # MariaDB + SeaweedFS
 # load database/dev/030_mock_accounts.sql, then from backend/:
 alembic stamp 0001_baseline && alembic upgrade head && ./run.sh
 # from web/:
@@ -32,7 +32,7 @@ npm ci && npm run dev                                           # http://localho
 ```
 
 The full steps, including the Windows commands, are in
-[docs/development.md](docs/development.md).
+[docs/development.md](docs/development/getting-started.md).
 
 ## Documentation
 

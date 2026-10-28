@@ -6,8 +6,8 @@ and accounts, which administrators edit in the app.
 
 | Component | Where its settings come from |
 | --- | --- |
-| Backend API and offline-scene worker | `backend/.env` when run directly, `docker/.env.proxmox` in the legacy Compose stack, or `deploy/podman/app.env` in the single-pod stack. Read by `backend/app/config.py`. |
-| MariaDB and SeaweedFS containers | `docker/.env` / `docker/.env.proxmox` for Compose, or `deploy/podman/db.env` / `storage.env` for Podman. |
+| Backend API and offline-scene worker | `backend/.env` when run directly, `deploy/compose/.env.proxmox` in the legacy Compose stack, or `deploy/podman/app.env` in the single-pod stack. Read by `backend/app/config.py`. |
+| MariaDB and SeaweedFS containers | `deploy/compose/.env` / `deploy/compose/.env.proxmox` for Compose, or `deploy/podman/db.env` / `storage.env` for Podman. |
 | Web app | `VITE_*` variables at **build** time: `web/.env` locally, Docker build args in Compose, or `deploy/podman/build-web.sh` flags in the Podman pipeline. |
 | Mobile app | `EXPO_PUBLIC_*` variables at **build** time: `mobile/.env` locally, EAS environment variables for EAS builds. |
 
@@ -68,7 +68,7 @@ Campos Labs deployment and has not been validated against Caltrans's tenant.
 ERIS roles remain in its database and accounts are linked to Entra by tenant
 and object ID. Sessions are server-side and held by the web in an HttpOnly
 cookie; scripts never see them. See the [Podman runbook](caltrans-podman.md#entra-sign-in-and-handover)
-and [deployment briefing](caltrans-it-deployment-brief.md#identity-access-and-security-facts).
+and [deployment briefing](../caltrans/it-deployment-brief.md#identity-access-and-security-facts).
 
 ### File storage (SeaweedFS)
 
@@ -109,7 +109,7 @@ start with `mock.` are never handed to a real relay.
 
 To retry undelivered messages on a schedule, run
 `python -m app.tools.flush_email_outbox` from cron (see
-[deployment.md](deployment.md#email)).
+[deployment.md](compose-deployment.md#email)).
 
 ### Push notifications (mobile app)
 
@@ -167,7 +167,7 @@ nothing needs credentials.
 
 ### Offline 3D terrain packages
 
-These govern the offline-scene worker (see [offline-terrain.md](offline-terrain.md)).
+These govern the offline-scene worker (see [offline-terrain.md](../architecture/offline-terrain.md)).
 The ones an operator is likely to change:
 
 | Variable | Default | Purpose |
@@ -190,10 +190,10 @@ route chaining (`OFFLINE_SCENE_ROUTE_CHAIN_*`) and tiled imagery
 (`OFFLINE_SCENE_IMAGERY_*`). Their defaults and meaning are commented in
 `backend/app/config.py`; the defaults are the tested values, so change them only
 with a reason. The design behind the road settings is in
-[decisions/adr-offline-road-context-source.md](decisions/adr-offline-road-context-source.md)
-and [decisions/adr-divided-highway-corridor-pairing.md](decisions/adr-divided-highway-corridor-pairing.md).
+[decisions/adr-offline-road-context-source.md](../decisions/adr-offline-road-context-source.md)
+and [decisions/adr-divided-highway-corridor-pairing.md](../decisions/adr-divided-highway-corridor-pairing.md).
 
-## Legacy Docker Compose server stack (`docker/.env.proxmox`)
+## Legacy Docker Compose server stack (`deploy/compose/.env.proxmox`)
 
 Besides every backend variable above, the Compose files read:
 

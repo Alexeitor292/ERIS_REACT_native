@@ -1,8 +1,8 @@
 # Caltrans deployment readiness audit — 2026-10-28
 
-An audit of the implementation against the [IT briefing](caltrans-it-deployment-brief.md),
-the [Podman runbook](caltrans-podman.md), [`Jenkinsfile.podman`](../Jenkinsfile.podman) and
-[`deploy/podman`](../deploy/podman). It records what changed on the
+An audit of the implementation against the [IT briefing](it-deployment-brief.md),
+the [Podman runbook](../operations/caltrans-podman.md), [`Jenkinsfile.podman`](../../deploy/ci/Jenkinsfile.podman) and
+[`deploy/podman`](../../deploy/podman). It records what changed on the
 `claude/caltrans-deployment-readiness` branch, what remains open, and how each change was
 tested. It does **not** claim Caltrans approval of Podman, the security design, or the
 network configuration, and nothing here was applied to the running Proxmox rehearsal.
@@ -38,7 +38,7 @@ network configuration, and nothing here was applied to the running Proxmox rehea
   the offboarding procedure must also disable the ERIS account.
 - **Native iOS app.** The Caltrans iOS app will be rewritten in Swift (MSAL for iOS with the
   Authenticator broker, ArcGIS Maps SDK for Swift) on the Caltrans Mac mini; see
-  [ios-native-app.md](ios-native-app.md) for the API contract, porting map and acceptance
+  [ios-native-app.md](../development/ios.md) for the API contract, porting map and acceptance
   steps. A check on a Caltrans-issued iPhone (2026-10-28) found Intune enrollment,
   "Can access company resources", Authenticator signed in, no app-protection prompts, and an
   immediate Safari sign-in to My Apps: device-compliance Conditional Access, not MAM. Caltrans

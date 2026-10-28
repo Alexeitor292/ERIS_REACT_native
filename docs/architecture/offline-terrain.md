@@ -2,10 +2,10 @@
 
 The GIS side of ERIS: offline 3D terrain packages for the phone, the road
 inventory the phones download, elevation data on technical forms, and terrain
-cross sections. Settings are in [configuration.md](configuration.md#offline-3d-terrain-packages);
+cross sections. Settings are in [configuration.md](../operations/configuration.md#offline-3d-terrain-packages);
 step-by-step operator procedures, including hand-made `.mspk` packages, are in
-[offline-scene-package-operator-runbook.md](offline-scene-package-operator-runbook.md).
-The reasoning behind the design is in [decisions/](decisions/).
+[offline-scene-package-operator-runbook.md](../operations/offline-scene-packages.md).
+The reasoning behind the design is in [decisions/](../decisions).
 
 ## Offline 3D terrain packages
 

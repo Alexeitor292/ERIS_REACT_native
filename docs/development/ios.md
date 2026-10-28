@@ -6,7 +6,7 @@ distribution and published through **Intune as a line-of-business app**; staff i
 **Company Portal**. There is no Android app and none is planned. Push notifications are
 allowed and use Apple Push Notification service (APNs).
 It is built in Xcode on the Caltrans-issued Mac mini. Expo/React Native is not used for the
-Caltrans release. The Expo project in [`mobile/`](../mobile) stays as the **reference
+Caltrans release. The Expo project in [`mobile/`](../../mobile) stays as the **reference
 implementation** until the Swift app reaches parity. Its TypeScript logic and unit tests are
 the behaviour to match.
 
@@ -41,7 +41,7 @@ later requires app protection, the Intune App SDK builds on MSAL.
 ### Entra registration (IT)
 
 The **ERIS Mobile** app registration (public client, single tenant), described in the
-[runbook](caltrans-podman.md#mobile-sign-in-entra):
+[runbook](../operations/caltrans-podman.md#mobile-sign-in-entra):
 
 - **Authentication → Add a platform → iOS / macOS**, with the app's **bundle ID** (for
   example `gov.ca.dot.eris`). Entra generates the redirect URI

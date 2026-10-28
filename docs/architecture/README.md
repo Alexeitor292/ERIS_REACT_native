@@ -43,7 +43,7 @@ drainage problem into a routed, reviewed geotechnical assessment.
   roles it admits (`require_roles`), refuses read-only Guests (`deny_public_only`),
   or is one of a reviewed list of routes Guests may read. A test walks the whole
   route table to keep that true. Beyond the role, handlers check scope (district,
-  office, assignment) and ownership. See [roles-and-identity.md](roles-and-identity.md).
+  office, assignment) and ownership. See [roles-and-identity.md](../security/roles-and-permissions.md).
 - **Files.** Uploads go through the API into SeaweedFS. Downloads are short-lived
   signed SeaweedFS URLs, so file bytes do not pass through the API.
 - **Startup.** The API checks the SeaweedFS bucket (fatal outside `ENV=dev`), refuses

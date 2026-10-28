@@ -96,7 +96,7 @@ Authentication: the web sends its HttpOnly session cookie plus `X-CSRF-Token` on
 | --- | --- | --- | --- |
 | `GET` | `/attachments/{attachment_id}/content` | Signed in (record rules apply) | Attachment content |
 | `GET` | `/attachments/{attachment_id}/download-url` | Signed in (record rules apply) | Attachment download url |
-| `GET` | `/photos/{photo_id}/content` | Public | Photo content |
+| `GET` | `/photos/{photo_id}/content` | Signed in (record rules apply) | Photo content |
 | `GET` | `/photos/{photo_id}/download` | Signed in (record rules apply) | Photo download |
 
 ## Dev

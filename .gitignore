@@ -18,8 +18,8 @@ cosign.key
 **/.env.local
 **/.env.*.local
 !/backend/.env.example
-!/docker/.env.example
-!/docker/.env.proxmox.example
+!/deploy/compose/.env.example
+!/deploy/compose/.env.proxmox.example
 !/web/.env.example
 !/mobile/.env.example
 

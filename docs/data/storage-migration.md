@@ -15,7 +15,7 @@ schema compatibility; their values are ordinary S3 bucket names.
 1. Back up MariaDB and the old MinIO volume using the previous deployment's
    backup procedure. Save the current `.env.proxmox` securely so the old S3
    credentials remain available. Do not run `docker compose down -v`.
-2. Check out the SeaweedFS version of ERIS and edit `docker/.env.proxmox`: rename
+2. Check out the SeaweedFS version of ERIS and edit `deploy/compose/.env.proxmox`: rename
    `MINIO_ROOT_USER` to `S3_ACCESS_KEY`, `MINIO_ROOT_PASSWORD` to
    `S3_SECRET_KEY`, `MINIO_BUCKET` to `S3_BUCKET`,
    `MINIO_PUBLIC_ENDPOINT` to `S3_PUBLIC_ENDPOINT`, and

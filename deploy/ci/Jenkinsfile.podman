@@ -157,7 +157,7 @@ pipeline {
       // SBOMs and scan reports are evidence even when the gate fails.
       archiveArtifacts artifacts: 'release/**', allowEmptyArchive: true, fingerprint: true
     }
-    success { echo "Published ERIS ${env.ERIS_TAG}: release/release-images.env, release/sbom/, release/cosign.pub. Follow docs/caltrans-podman.md to approve and deploy." }
+    success { echo "Published ERIS ${env.ERIS_TAG}: release/release-images.env, release/sbom/, release/cosign.pub. Follow docs/operations/caltrans-podman.md to approve and deploy." }
   }
 }
 

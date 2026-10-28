@@ -6,8 +6,8 @@ their role**: nobody is given a work role any other way. All of it is data edite
 on the **Organization** page of the web app, not constants in the code or rows
 somebody writes in SQL.
 
-Roles themselves are described in [roles-and-identity.md](roles-and-identity.md),
-and how routing uses this data in [workflows.md](workflows.md).
+Roles themselves are described in [roles-and-identity.md](../security/roles-and-permissions.md),
+and how routing uses this data in [workflows.md](../architecture/workflows.md).
 
 ---
 

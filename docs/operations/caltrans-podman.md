@@ -1,9 +1,9 @@
 # Caltrans single-Podman-pod deployment
 
 To rehearse this deployment beside the existing Proxmox Compose server, use
-the [Proxmox rehearsal plan](proxmox-caltrans-rehearsal.md).
+the [Proxmox rehearsal plan](history/proxmox-caltrans-rehearsal.md).
 For a populated Compose database and MinIO cutover, use the
-[Proxmox data cutover record](proxmox-podman-cutover.md). On an imported
+[Proxmox data cutover record](history/proxmox-podman-cutover.md). On an imported
 database, set `ERIS_ADOPT_ADMIN_EMAIL` to the exact active existing admin
 email for the first Podman start; `adopt_existing_admin` verifies the ADMIN
 role and creates the one-time marker before bootstrap runs. Remove the env
@@ -36,7 +36,7 @@ Record these before production cutover:
 
 Place this repository on the host at `/opt/eris` (or another readable path).
 The deployment script resolves its location, so the path is not fixed. Copy
-the five examples in [`deploy/podman`](../deploy/podman) to files without
+the five examples in [`deploy/podman`](../../deploy/podman) to files without
 `.example` and set `chmod 600` on `db.env`, `storage.env`, `app.env`, and
 `bootstrap.env`.
 Never commit these files or the `secrets/` folder, or put credentials in
@@ -70,7 +70,7 @@ successful start.
 
 ## Jenkins and Harbor
 
-Use [`Jenkinsfile.podman`](../Jenkinsfile.podman) as a Pipeline job on an
+Use [`Jenkinsfile.podman`](../../deploy/ci/Jenkinsfile.podman) as a Pipeline job on an
 approved Linux agent with Podman, repository and Harbor access, and room for
 the web build's 4 GiB Node heap. It needs three Jenkins credentials:
 
@@ -95,12 +95,12 @@ For each release (`HARBOR_HOST`, `HARBOR_PROJECT`, an immutable `RELEASE_TAG`):
 3. **Backend security tests.** Sessions, CSRF, route guards, Entra
    certificate, mobile token exchange and handover.
 4. **SBOM and vulnerability gate**
-   ([`deploy/ci/release-gate.sh`](../deploy/ci/release-gate.sh)).
+   ([`deploy/ci/release-gate.sh`](../../deploy/ci/release-gate.sh)).
    [Trivy](https://trivy.dev/) writes a CycloneDX SBOM of every package in each
    image. The build fails on a `TRIVY_SEVERITY` (default HIGH,CRITICAL)
    vulnerability that has a fix available, or on any secret embedded in an
    image. Nothing is pushed if this fails. Accepted exceptions go in
-   [`.trivyignore`](../.trivyignore), each with a reason, an approver and an
+   [`.trivyignore`](../../.trivyignore), each with a reason, an approver and an
    expiry, reviewed like code.
 5. **Publish, sign and attest.**
    - The IT-approved MariaDB and SeaweedFS mirrors (`MARIADB_SOURCE`,
@@ -190,7 +190,7 @@ fix the cause before proceeding. The named `eris-mariadb` and `eris-seaweedfs`
 volumes persist even if the pod is removed.
 
 For unattended restart, install
-[`eris.service.example`](../deploy/podman/eris.service.example) as the
+[`eris.service.example`](../../deploy/podman/eris.service.example) as the
 dedicated account's user systemd unit, adjusting `/opt/eris` if needed. Enable
 it with `systemctl --user enable --now eris.service` and configure user
 lingering according to IT policy. Its `start` action starts an existing pod or
@@ -396,7 +396,7 @@ Jenkins archives) in one step:
 
 Every outcome is appended to `deploy/podman/releases.log`. Settings come from
 `deploy/podman/release.env` (copy
-[`release.env.example`](../deploy/podman/release.env.example); no secrets).
+[`release.env.example`](../../deploy/podman/release.env.example); no secrets).
 The release takes the service down for the backup and restart, so schedule it
 in the change window. If even the rollback fails, the command says so and the
 pre-release backup is the recovery point.
@@ -409,7 +409,7 @@ bash deploy/podman/eris-pod.sh release /path/to/release-images.env
 
 With `DEPLOY_TO=staging` or `staging-then-production`, the pipeline sends the
 release file it just built and signed to each host's
-[`deploy-hook.sh`](../deploy/podman/deploy-hook.sh) over SSH. The production
+[`deploy-hook.sh`](../../deploy/podman/deploy-hook.sh) over SSH. The production
 release is the same digests that just passed staging, sent only after a named
 approver in `PRODUCTION_APPROVERS` approves it in Jenkins; put the change
 ticket in the approval comment. A failed release on either host fails the
@@ -512,7 +512,7 @@ Intune line-of-business app through Company Portal. There is no Android app. Pus
 through APNs (`APNS_*` settings; the `.p8` key goes in `deploy/podman/secrets`; outbound
 `api.push.apple.com:443`). It signs in with **MSAL for iOS
 through Microsoft Authenticator** against the same server endpoint. The
-[iOS app specification](ios-native-app.md) is the build contract, and records an iPhone check
+[iOS app specification](../development/ios.md) is the build contract, and records an iPhone check
 indicating that Caltrans relies on device compliance, not app protection. The Expo app
 described below is the reference implementation until the Swift app reaches parity.
 

@@ -1,5 +1,7 @@
 # Proxmox Caltrans staging status — 2026-10-25
 
+> **Historical record.** Commands and paths are as they were at the time. Since then `docker/` moved to `deploy/compose/` and `Jenkinsfile.podman` to `deploy/ci/`; see the [Caltrans Podman runbook](../caltrans-podman.md) for current procedures.
+
 This records the earlier clean-install rehearsal. VM 118 now serves the
 migrated ERIS data on the public Campos Labs hosts; see the
 [data cutover record](proxmox-podman-cutover.md) for current state and rollback.
@@ -96,7 +98,7 @@ version before considering image publication accepted.
 | Mobile/network | Confirm a phone on the intended network reaches the API and signed S3 URL. The native mobile Entra flow remains future application work. |
 
 Use [the Proxmox rehearsal plan](proxmox-caltrans-rehearsal.md) and
-[Caltrans Podman runbook](caltrans-podman.md) for the full acceptance procedure.
+[Caltrans Podman runbook](../caltrans-podman.md) for the full acceptance procedure.
 The Proxmox snapshot is a local rollback point, not an off-host backup.
 Proxmox reported that thin volumes are overprovisioned; the local-lvm thin
 pool was 53.28% physically used after the snapshot. Monitor capacity before

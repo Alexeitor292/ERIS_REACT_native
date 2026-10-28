@@ -2,7 +2,7 @@
 
 How to run ERIS on your own machine, test it, and change the database schema.
 Commands are shown for PowerShell and bash where they differ. Every setting
-mentioned here is described in [configuration.md](configuration.md).
+mentioned here is described in [configuration.md](../operations/configuration.md).
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ mentioned here is described in [configuration.md](configuration.md).
 ## 1. Start MariaDB and SeaweedFS
 
 ```bash
-cd docker
+cd deploy/compose
 cp .env.example .env    # then replace every CHANGE_ME value
 docker compose up -d
 ```
@@ -45,7 +45,7 @@ the mock accounts in their places (roles come only from where people sit):
 docker exec -i eris_mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' < database/dev/040_mock_placements.sql
 ```
  The accounts, all with password
-`password`, are listed in [roles-and-identity.md](roles-and-identity.md#mock-accounts-development-and-test-only).
+`password`, are listed in [roles-and-identity.md](../security/roles-and-permissions.md#mock-accounts-development-and-test-only).
 
 A database seeded before the `mock.*` addresses can be renamed in place with
 `database/dev/rename_local_accounts.sql`.
@@ -61,7 +61,7 @@ copy .env.example .env                # bash: cp .env.example .env
 ```
 
 In `backend/.env`, make `DB_PASS`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`
-match `docker/.env`, and set `JWT_SECRET` to any long string.
+match `deploy/compose/.env`, and set `JWT_SECRET` to any long string.
 Run `python -m app.storage_bootstrap` once to provision the private offline
 scene bucket before starting the worker.
 
@@ -89,7 +89,7 @@ Interactive API documentation is at http://127.0.0.1:8000/docs while
 Optional helpers:
 
 - `python -m app.tools.create_admin --email ... --name ...` creates or promotes
-  an administrator (see [deployment.md](deployment.md#fresh-installation)).
+  an administrator (see [deployment.md](../operations/compose-deployment.md#fresh-installation)).
 - `python scripts/seed_demo_org_roster.py --i-understand-this-is-demo-data`
   fills the organization with 27 invented people (`mock.demo.*@dot.ca.gov`), so
   the office, branch and person pickers have something to show. `--remove`

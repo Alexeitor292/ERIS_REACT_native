@@ -461,14 +461,14 @@ jobs:
       - name: Ensure PyYAML for the isolation check
         run: python3 -m pip install --quiet pyyaml
       - name: Validate base compose
-        run: docker compose --env-file docker/.env.example -f docker/docker-compose.yml config >/dev/null
+        run: docker compose --env-file deploy/compose/.env.example -f deploy/compose/docker-compose.yml config >/dev/null
       - name: Provide .env.proxmox for validation
         # The proxmox services reference `env_file: .env.proxmox` (the real file,
         # gitignored); seed it from the committed example so `config` can resolve it.
-        working-directory: docker
+        working-directory: deploy/compose
         run: cp .env.proxmox.example .env.proxmox
       - name: Validate production (proxmox) compose overlay
-        working-directory: docker
+        working-directory: deploy/compose
         run: docker compose --env-file .env.proxmox.example -f docker-compose.yml -f docker-compose.proxmox.yml config > /tmp/rendered.yml
       - name: Assert minio-init bootstrap gates backend + worker
         run: |

@@ -1,5 +1,7 @@
 # Recreate ERIS on Proxmox as a Caltrans deployment rehearsal
 
+> **Historical record.** Commands and paths are as they were at the time. Since then `docker/` moved to `deploy/compose/` and `Jenkinsfile.podman` to `deploy/ci/`; see the [Caltrans Podman runbook](../caltrans-podman.md) for current procedures.
+
 The clean-install rehearsal was completed, then the existing Compose data was
 migrated onto the Podman VM. See the [cutover record](proxmox-podman-cutover.md)
 for the current public routes, backup locations, and rollback procedure.
@@ -10,7 +12,7 @@ Keep the current Docker Compose ERIS VM intact during the rehearsal. Create a
 **separate Linux VM** on the same Proxmox host for a single Podman pod. Give it
 its own disks/volumes, DNS names, TLS certificates, credentials, and Entra web
 app registration. Use the exact ERIS release commit and image digests intended
-for Caltrans. This exercises the [Caltrans Podman runbook](caltrans-podman.md)
+for Caltrans. This exercises the [Caltrans Podman runbook](../caltrans-podman.md)
 without putting the existing service or its data at risk. A VM also avoids
 nested-container storage and user-namespace differences that an LXC guest can
 introduce; Podman rootless needs working subordinate UID/GID ranges and local
@@ -57,14 +59,14 @@ available until the new VM passes the acceptance gate below.
 1. Use the closest practical match to the proposed Caltrans Linux OS and
    Podman version. Allocate dedicated local disk for Podman named volumes and
    separate off-host backup capacity. Start with the resource guidance in the
-   [Caltrans runbook](caltrans-podman.md#decisions-to-obtain-from-caltrans-it).
+   [Caltrans runbook](../caltrans-podman.md#decisions-to-obtain-from-caltrans-it).
 2. Create a dedicated rootless service account and check `podman info`,
    subordinate UID/GID mappings, and user systemd. Install the repository at
    `/opt/eris` as that account. First review and commit the current deployment
    changes, then use that immutable release commit rather than a moving branch
    during a test cycle.
 3. Publish the three ERIS images through
-   [`Jenkinsfile.podman`](../Jenkinsfile.podman) to a **test Harbor project** if
+   [`Jenkinsfile.podman`](../../../deploy/ci/Jenkinsfile.podman) to a **test Harbor project** if
    Caltrans makes one available. Mirror approved MariaDB and SeaweedFS images
    there too. If Harbor access is not yet available, use a private OCI test
    registry or local Podman image tags for runtime testing, then repeat the
@@ -76,7 +78,7 @@ available until the new VM passes the acceptance gate below.
    registration is available, use a temporary local-login staging build and
    leave Entra acceptance explicitly pending.
 5. Fill the five env files in `deploy/podman/` with **staging-only** credentials
-   and URLs, then follow [First installation](caltrans-podman.md#first-installation).
+   and URLs, then follow [First installation](../caltrans-podman.md#first-installation).
    The init SQL seeds roles and minimum organization data, not demo users.
    Create realistic synthetic users through the admin UI; never load
    `database/dev/030_mock_accounts.sql` into a production-mode rehearsal.
@@ -117,7 +119,7 @@ Keep it running while the new VM is built and tested. Once the rehearsal passes,
 choose whether to retain it as a historical reference or retire it after
 backups and retention are agreed. If the goal is to preserve its real ERIS
 records, first inventory its database revision and storage backend. For a
-MinIO source, follow the [object-storage migration](storage-migration.md) on
+MinIO source, follow the [object-storage migration](../../data/storage-migration.md) on
 an isolated copy; the copy tool verifies objects and updates catalog version
 identifiers. Then rehearse the database upgrade and import into new, empty
 Podman volumes. The current fresh-install bootstrap intentionally refuses an

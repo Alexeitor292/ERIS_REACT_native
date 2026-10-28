@@ -5,7 +5,7 @@ services:
 
   backend:
     build:
-      context: ../backend
+      context: ../../backend
       dockerfile: Dockerfile
     container_name: eris_backend
     restart: unless-stopped
@@ -60,7 +60,7 @@ services:
   # not touch the uploads bucket.
   seaweedfs-init:
     build:
-      context: ../backend
+      context: ../../backend
       dockerfile: Dockerfile
     container_name: eris_seaweedfs_init
     restart: "no"
@@ -82,7 +82,7 @@ services:
   # to the private offline-scenes SeaweedFS bucket.
   offline-scene-worker:
     build:
-      context: ../backend
+      context: ../../backend
       dockerfile: Dockerfile.worker
     container_name: eris_offline_scene_worker
     restart: unless-stopped
@@ -158,7 +158,7 @@ services:
 
   web:
     build:
-      context: ../web
+      context: ../../web
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}

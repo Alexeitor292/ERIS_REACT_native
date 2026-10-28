@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Supply-chain gate for ERIS images, run by Jenkinsfile.podman on a Linux
+# Supply-chain gate for ERIS images, run by deploy/ci/Jenkinsfile.podman on a Linux
 # Podman agent. The tools run as pinned containers, so nothing is installed on
 # the agent; mirror both tool images into Harbor and point the variables there.
 #

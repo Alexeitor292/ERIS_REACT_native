@@ -224,7 +224,7 @@ case "${1:-}" in
       echo "Rolled back. Now on volumes $rollback_db and $rollback_storage (recorded in volumes.env)." >&2
     else
       release_log "release FAILED $new_api; ROLLBACK FAILED, manual recovery from $pre"
-      echo "ROLLBACK FAILED: recover manually from $pre (docs/caltrans-podman.md, Backup and restore)" >&2
+      echo "ROLLBACK FAILED: recover manually from $pre (docs/operations/caltrans-podman.md, Backup and restore)" >&2
     fi
     exit 1
     ;;

@@ -20,8 +20,8 @@ from reportlab.platypus import (
 from reportlab.graphics.shapes import Drawing, Line, Polygon, Rect, String
 
 
-ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "output" / "pdf" / "eris-caltrans-it-briefing.pdf"
+ROOT = Path(__file__).resolve().parents[2]
+OUTPUT = ROOT / "docs" / "caltrans" / "eris-caltrans-it-briefing.pdf"
 OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 
 NAVY = colors.HexColor("#17324D")

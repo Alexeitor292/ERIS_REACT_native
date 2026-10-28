@@ -15,7 +15,7 @@ services:
       - "${MARIADB_BIND:-127.0.0.1}:3306:3306"
     volumes:
       - eris_mariadb_data:/var/lib/mysql
-      - ../database/init:/docker-entrypoint-initdb.d:ro
+      - ../../database/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s

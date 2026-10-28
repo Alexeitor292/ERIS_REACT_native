@@ -5,10 +5,10 @@ For the Caltrans single-Podman-pod target, use the
 existing Docker Compose/Proxmox deployment.
 
 How to run ERIS on a server, for staging or production, and keep it running.
-Local development is in [development.md](development.md); every setting is
+Local development is in [development.md](../development/getting-started.md); every setting is
 explained in [configuration.md](configuration.md).
 For a server that already has objects in MinIO, follow
-[storage-migration.md](storage-migration.md) before starting this stack.
+[storage-migration.md](../data/storage-migration.md) before starting this stack.
 
 ## Environments
 
@@ -19,15 +19,15 @@ For a server that already has objects in MinIO, follow
 | Production | The production server | Live use | Real accounts only. Never load anything from `database/dev/`. |
 
 Staging and production use the **same procedure and the same files**. Each has
-its own `docker/.env.proxmox`, with its own passwords, secrets and addresses.
+its own `deploy/compose/.env.proxmox`, with its own passwords, secrets and addresses.
 Every container in the stack has a fixed name (`eris_backend`, `eris_mariadb`
 and so on), so staging and production cannot share one Docker host: give each
 its own VM or container.
 
 ## The server stack
 
-The production stack is `docker/docker-compose.yml` plus
-`docker/docker-compose.proxmox.yml`, configured by `docker/.env.proxmox`:
+The production stack is `deploy/compose/docker-compose.yml` plus
+`deploy/compose/docker-compose.proxmox.yml`, configured by `deploy/compose/.env.proxmox`:
 
 | Service | Published port | What it is |
 | --- | --- | --- |
@@ -39,7 +39,7 @@ The production stack is `docker/docker-compose.yml` plus
 | `web` | 5173 | The built web app, served by nginx. Health: `GET /healthz`. |
 | `adminer` | 8081, localhost only | Database browser. Only started with `--profile devtools`. |
 
-The backend and worker receive every variable in `docker/.env.proxmox` (Compose
+The backend and worker receive every variable in `deploy/compose/.env.proxmox` (Compose
 `env_file`). The web app's `VITE_*` values are **build arguments**: they are
 baked into the image, so changing one means rebuilding `web`.
 
@@ -57,7 +57,7 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
 - Disk for the two volumes (photos and offline terrain packages grow over time)
   and for backups.
 - Outbound HTTPS from the worker to the USGS, Census and Caltrans GIS services
-  it builds terrain packages from (see [offline-terrain.md](offline-terrain.md)).
+  it builds terrain packages from (see [offline-terrain.md](../architecture/offline-terrain.md)).
 
 ## Fresh installation
 
@@ -124,7 +124,7 @@ alias dc='docker compose --env-file .env.proxmox -f docker-compose.yml -f docker
 
 ```bash
 cd /opt/eris && git pull
-cd docker
+cd deploy/compose
 
 # 1. Back up the database (see Backups).
 dc exec -T mariadb sh -c 'mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction --routines "$MARIADB_DATABASE"' \
