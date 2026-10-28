@@ -77,12 +77,10 @@ def render() -> str:
         from app.main import app
     from app import deps
     from app.services.public_visibility import VIEWER_READABLE_ROUTES
-    from fastapi.routing import APIRoute
+    from tests.route_table import api_routes
 
     rows = defaultdict(list)
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in api_routes(app):
         first = route.path.strip("/").split("/")[0] or "health"
         area = AREAS.get(first, first.replace("-", " ").capitalize())
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):

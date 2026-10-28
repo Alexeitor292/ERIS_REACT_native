@@ -156,6 +156,28 @@ jobs:
               || { echo "missing table $t at head"; exit 1; }
           done
 
+  dependency-audit:
+    name: Dependency audit (Python + web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Known vulnerabilities in what ERIS ships. Jenkins scans the built images
+      # again (Trivy) before release; this catches them at the pull request.
+      # A finding with no fix yet: see docs/security/supply-chain.md.
+      - name: Python (API and worker)
+        run: |
+          pip install --quiet pip-audit
+          pip-audit -r backend/requirements.txt -r backend/requirements-worker.txt --progress-spinner off
+      - name: Web (runtime and build tools)
+        working-directory: web
+        run: npm audit --audit-level=high
+
   worker-image:
     name: Worker image (build + imports + decode fixture)
     runs-on: ubuntu-latest

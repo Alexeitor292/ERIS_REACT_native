@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 
 import httpx
-from jose import jwt
+import jwt
 
 from ..config import settings
 

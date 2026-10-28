@@ -70,7 +70,7 @@ pipeline {
             "$ERIS_REPO/api:$ERIS_TAG" \
             python -m pytest tests/test_entra_oidc.py tests/test_route_guards.py \
               tests/test_session_security.py tests/test_admin_handover.py \
-              tests/test_entra_certificate_and_mobile.py tests/test_apns_push.py -q
+              tests/test_entra_certificate_and_mobile.py tests/test_apns_push.py tests/test_rate_limit.py -q
         '''
       }
     }

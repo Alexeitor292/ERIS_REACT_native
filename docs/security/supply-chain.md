@@ -23,7 +23,7 @@ flowchart LR
 
 | Step | Where | Fails the release when |
 | --- | --- | --- |
-| Pull request checks | GitHub Actions `ci.yml`, `docs.yml` | Any test, type check, migration or docs check fails |
+| Pull request checks | GitHub Actions `ci.yml`, `docs.yml` | Any test, type check, migration or docs check fails, or `dependency-audit` finds a known vulnerability (`pip-audit`, `npm audit --audit-level=high`) |
 | Validate | Stage *Validate* | A shell script has a syntax error, or the deployment and release-gate script tests (stub Podman) fail |
 | Build | Stage *Build* | An image fails to build or the API code fails to compile |
 | Security tests | Stage *Backend security checks* | Any session, Entra, route-guard, handover or push test fails inside the image that will ship |

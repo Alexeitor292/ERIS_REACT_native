@@ -98,7 +98,7 @@ flowchart LR
 ```mermaid
 flowchart TB
     req["Request"] --> l1["1. TLS gateway<br/>HTTPS only, HSTS"]
-    l1 --> l2["2. nginx<br/>security headers, 100 MB body limit"]
+    l1 --> l2["2. nginx<br/>security headers, 100 MB body limit<br/>sign-in routes: per-client rate limit"]
     l2 --> l3["3. Cross-site write refusal<br/>Origin and Sec-Fetch-Site"]
     l3 --> l4["4. Session lookup<br/>SHA-256 of the credential,<br/>revoked? expired? idle? account active?"]
     l4 --> l5["5. CSRF<br/>cookie sessions: X-CSRF-Token = HMAC(session)"]
@@ -137,6 +137,9 @@ flowchart TB
 | Hosting | Rootless Podman, internal ports unpublished, env files 600, secrets 700 | `eris-pod.sh` | `verify-rehearsal.sh` |
 | Push | APNs token auth, key file mounted read-only, dead tokens retired | `services/apns.py`, `services/push.py` | `tests/test_apns_push.py` |
 | Audit | `eris.auth` logger: sign-ins by user ID, refusals with tenant and object ID, never tokens | `routes/auth.py`, `entra.py` | `tests/test_entra_oidc.py` |
+| Abuse | Per-client sliding-window limit on every sign-in route; 429 with `Retry-After` | `app/rate_limit.py` | `tests/test_rate_limit.py` |
+| Browser | `nosniff`, referrer policy, framing limits, Permissions-Policy, Cross-Origin-Opener-Policy, report-only CSP; API responses `no-store` | `web/nginx.conf`, `main.py` | `tests/test_web_nginx_headers.py`, `tests/test_rate_limit.py` |
+| Dependencies | Known-vulnerability audit of Python and web dependencies on every pull request | `.github/workflows/ci.yml` (`dependency-audit`) | CI |
 
 ## Threat model (STRIDE)
 
@@ -152,7 +155,7 @@ flowchart TB
 | Information disclosure | A presigned file link is forwarded | URLs expire in about 15 minutes and are issued only after visibility checks | Gateway must not log query strings |
 | Information disclosure | A Guest reads unapproved work | `public_visibility` filters every list and record | Low; tested |
 | Information disclosure | Backups leak | Backups contain secrets: encrypt and store off-host per Caltrans policy | IT |
-| **Denial of service** | Flooding the API or uploads | Caltrans gateway/WAF; 100 MB body limit; worker processes one job at a time | No application rate limiting yet (see open items) |
+| **Denial of service** | Flooding the sign-in routes, the API or uploads | Per-client limit on every sign-in route (429); Caltrans gateway/WAF; 100 MB body limit; Starlette 1.x bounds form parsing; worker processes one job at a time | Authenticated routes rely on the gateway; the limit is per API process |
 | **Elevation of privilege** | A new route is added without a guard | Route-guard census test fails the build | Low |
 | Elevation of privilege | A user changes their own role | Only administrators manage roles; roles are re-read on every request | Low |
 | Elevation of privilege | A compromised Jenkins runs commands on the host | SSH forced command limited to `deploy-hook.sh release`, which only accepts signed digests | Jenkins credential custody (IT) |
@@ -163,8 +166,8 @@ These are known and tracked; none is hidden:
 
 | Item | Why it matters | Proposed fix |
 | --- | --- | --- |
-| No application-level rate limiting on sign-in routes | Brute force is already blocked by Entra, but the native exchange could be hammered | Rate limit at the Caltrans gateway, or add a small per-IP limiter on `/auth/*` |
-| Content-Security-Policy is `frame-ancestors` only | A full CSP limits the damage of any future XSS | Ship a report-only CSP, collect reports in staging, then enforce |
+| The full Content-Security-Policy is **report-only** | Enforced, it stops injected scripts running even if an XSS bug appears | Exercise every screen on staging with DevTools open, add any source the console reports to `web/nginx.conf`, then rename the header to enforce it |
+| The sign-in limit needs the gateway's `X-Forwarded-For` | Without it every client shares one limit | Confirm the gateway sends it, set `TRUSTED_PROXY_HOPS=2` ([configuration](../operations/configuration.md#authentication)) |
 | Logs stay on the host | Investigations need retained, tamper-resistant logs | Forward container logs to the Caltrans SIEM |
 | The iPhone app is not yet through Caltrans app review | MAM/Intune app protection policy is IT's decision | See [iOS](../development/ios.md) |
 | Rehearsal infrastructure is personal | Not a Caltrans environment | Shut down per the [handover checklist](../handover/README.md#before-the-original-author-leaves-checklist) |

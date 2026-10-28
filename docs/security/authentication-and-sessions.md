@@ -150,6 +150,17 @@ it could read.
 | Disable account | Administration → Users | Every session; future sign-ins refused |
 | Disable only in Entra | Entra admin center | New sign-ins only. Existing ERIS sessions last until they expire. **Always disable in ERIS too.** |
 
+## Rate limiting
+
+Every anonymous sign-in route (`/auth/login`, `/auth/entra/start`,
+`/auth/entra/callback`, `/auth/entra/native`) shares a per-client sliding
+window of `AUTH_RATE_LIMIT_PER_MINUTE` requests (30). Beyond it the API answers
+429 with `Retry-After`. The client is the address the outermost trusted proxy
+recorded in `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`: 2 behind the Caltrans
+gateway and nginx), so a client cannot dodge the limit by sending its own
+header. The window lives in the API process (`app/rate_limit.py`); the image
+runs one process. The Caltrans gateway or WAF limits everything else.
+
 ## Code map
 
 | File | Responsibility |
@@ -161,6 +172,7 @@ it could read.
 | `backend/app/routes/auth.py` | `/auth/config`, `/auth/login`, `/auth/logout`, `/auth/sessions/revoke-all`, `/auth/me` |
 | `backend/app/admin_users.py` | Linking accounts, disabling, admin revoke, last-admin protection |
 | `backend/app/config.py` | Production refusals for unsafe session and Entra settings |
+| `backend/app/rate_limit.py` | Per-client limit on the sign-in routes |
 | `web/src/auth/` | `AuthContext` (session = `/auth/me`), CSRF header, route guards |
 | `web/src/api/client.ts` | Sends cookies and CSRF; redirects to sign-in on 401 |
 | `ios/ERISKit/Sources/ERISKit/Auth/` | MSAL token → native session; Keychain storage; renewal on 401 |

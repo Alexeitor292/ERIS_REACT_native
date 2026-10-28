@@ -50,6 +50,8 @@ Alembic reads the same variables (`backend/migrations/env.py`).
 | `JWT_SECRET` | **required** | Server signing key (Entra sign-in state, CSRF tokens). At least 32 random characters with `ENV=prod`. |
 | `SESSION_IDLE_MINUTES` | `30` | A web session ends after this long without a request. |
 | `SESSION_ABSOLUTE_MINUTES` | `720` | Every session ends this long after sign-in; `ENV=prod` allows at most 720. |
+| `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Sign-in requests (`/auth/login`, `/auth/entra/start`, `/callback`, `/native`) one client address may make per minute; beyond it the API answers 429 with `Retry-After`. One Entra sign-in is two requests. `0` turns the limit off. |
+| `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front of the API append to `X-Forwarded-For`, so the limit applies to the real client: `1` = the pod's nginx only, `2` = Caltrans TLS gateway + nginx (the Caltrans template). If the gateway does not send `X-Forwarded-For`, use `1`: all clients then share one limit, so raise it. `0` ignores the header. |
 | `LOCAL_LOGIN_ENABLED` | `true` | Password sign-in, for development and rehearsals. The Caltrans template sets `false`: Entra only, and the API refuses to set or reset passwords. The web follows the API's setting. |
 | `ENTRA_ENABLED` | `false` | Enables the web Entra OIDC flow when the remaining settings are supplied. |
 | `ENTRA_AUTHORITY_HOST` | `login.microsoftonline.com` | `login.microsoftonline.com` or `login.microsoftonline.us`, matching the tenant cloud. |

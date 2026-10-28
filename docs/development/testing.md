@@ -63,6 +63,7 @@ export JWT_SECRET=dev_placeholder_secret DB_PASS=x S3_ACCESS_KEY=x S3_SECRET_KEY
 | `ci.yml` | Web | `npm test`, TypeScript check, production build |
 | `ci.yml` | Mobile, iOS native compile | Expo source contracts, lint, types, Jest, prebuild, simulator compile |
 | `ci.yml` | Compose | Both Compose files render; the backend never receives the browser ArcGIS key |
+| `ci.yml` | Dependency audit | No known vulnerability in Python (`pip-audit`) or web (`npm audit`, high and above) dependencies |
 | `docs.yml` | Docs | Links resolve; API reference, ERD and schema reference match the code and a migrated database |
 | four `*-contract.yml` | Mobile contracts | Offline terrain, incident map and site photo map contracts |
 | Jenkins | Validate, Backend security checks | Script tests; the security suite inside the built API image |
@@ -78,6 +79,8 @@ fix or quarantine it in its own pull request; do not merge around it.
 | `test_session_security.py` | Cookie flags, CSRF, cross-site refusal, expiry, revocation, production config refusals |
 | `test_entra_oidc.py`, `test_entra_certificate_and_mobile.py` | Every token check in the sign-in flows |
 | `test_admin_handover.py` | No admin passwords, last-admin protection, handover check |
+| `test_rate_limit.py` | Every sign-in route is rate limited; 429 with `Retry-After`; client address from trusted proxies only |
+| `test_web_nginx_headers.py` | Every nginx response carries the security headers (nginx drops them in locations with their own) |
 | `test_viewer_visibility_db.py` | Guests see approved records only |
 | `test_routing_v2_*.py` | Assessment routing authority, eligibility, notifications, transactions |
 | `test_seed_shape_db.py`, `test_init_schema_db_agnostic.py` | Seed data never creates accounts; init SQL stays portable |

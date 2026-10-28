@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import HTTPException
-from jose import jwt
+import jwt
 from starlette.requests import Request
 from starlette.testclient import TestClient
 
