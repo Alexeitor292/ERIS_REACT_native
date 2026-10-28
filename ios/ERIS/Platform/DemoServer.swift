@@ -88,6 +88,11 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             return (200, ["items": DemoData.submissions])
         case ("GET", let p) where p.count == 2 && p[0] == "submissions":
             return p[1] == "501" ? (200, submissionDetail) : notFound
+        case ("POST", ["submissions", "501", "gisa", "elevation-profile"]):
+            let bearing = body["road_bearing_deg"] as? Double
+            let profile = DemoData.elevationProfile(bearing: bearing ?? 47.6, source: bearing == nil ? "arcgis_postmile_geometry" : "request")
+            gisa["elevation_profile"] = profile
+            return (200, ["elevation_profile": profile])
         case ("GET", ["gisa", "lookups"]):
             return (200, DemoData.lookups)
         case ("PATCH", ["submissions", "501", "gisa"]):
@@ -359,7 +364,26 @@ enum DemoData {
         "failure_slide": 1, "material_soil": 1, "est_clay_pct": 40.0, "est_silt_pct": 60.0, "vegetation_trees": 30.0,
         "pavement_ground_cracks": 1, "settlement_in": 2.0,
         "geotechnical_assessment_notes": "Cut slope failure onto the shoulder.",
+        "measure_slope_height_ft": 32.0, "measure_original_slope_deg": 34.0,
+        "road_inventory_context": ["dataset_version_id": 3, "segment_id": 812, "match_method": "nearest_segment",
+                                   "checked_at": "2026-10-27 15:05:00",
+                                   "snapshot": ["county_code": "ALA", "route_name": "880", "begin_pm": 11.2, "end_pm": 13.0,
+                                                "terrain_code": "R", "left_lanes": 4, "right_lanes": 4]],
+        "elevation_profile": elevationProfile(bearing: 47.6, source: "arcgis_postmile_geometry"),
     ]
+
+    /// Ground across the road: a cut slope rising on the right.
+    static func elevationProfile(bearing: Double, source: String) -> [String: Any] {
+        let points: [[String: Any]] = stride(from: -30.0, through: 30.0, by: 5.0).map { offset in
+            ["offset_m": offset, "lat": 37.7312, "lon": -122.1975, "source": "usgs_3dep",
+             "elevation_ft": 40 + (offset > 0 ? offset * 0.9 : offset * 0.1)]
+        }
+        return ["source": "usgs_3dep", "checked_at": "2026-10-27 15:05:00", "classification": "CUT",
+                "classification_reason": NSNull(), "confidence": 0.82, "error": NSNull(),
+                "profile": ["points": points, "metadata": ["road_bearing_deg_used": bearing, "road_bearing_source": source,
+                                                           "half_width_m": 30, "spacing_m": 5,
+                                                           "classification_requires_bearing": true]]]
+    }
 
     static let lookups: [String: Any] = [
         // As backend/app/constants/gisa_lookups.py lists them.

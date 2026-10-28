@@ -59,18 +59,18 @@ final class CrackTests: XCTestCase {
         XCTAssertEqual(try draft.changes(from: crack).get(),
                        ["latitude": .number(37.732), "longitude": .number(-122.1975), "location_source": .string("MANUAL")])
         draft.latitude = ""
-        XCTAssertEqual(draft.changes(from: crack), .failure(CrackProblem(message: "Enter both latitude and longitude, or neither.")))
+        XCTAssertEqual(draft.changes(from: crack), .failure(InputProblem(message: "Enter both latitude and longitude, or neither.")))
     }
 
     func testAValueTheServerWouldRefuseIsNamedBeforeSaving() throws {
         let crack = try crack()
         var draft = CrackDraft(crack)
         draft[.lengthFt] = "-2"
-        XCTAssertEqual(draft.changes(from: crack), .failure(CrackProblem(message: "Length must be a number from 0 to 100000.")))
+        XCTAssertEqual(draft.changes(from: crack), .failure(InputProblem(message: "Length must be a number from 0 to 100000.")))
         draft = CrackDraft(crack)
         draft.trendDeg = "360"
         XCTAssertEqual(draft.changes(from: crack),
-                       .failure(CrackProblem(message: "Direction must be a number from 0 to less than 360.")))
+                       .failure(InputProblem(message: "Direction must be a number from 0 to less than 360.")))
     }
 
     func testALabelFollowsTheMeasureItNames() throws {

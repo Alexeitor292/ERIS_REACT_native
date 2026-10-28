@@ -103,7 +103,8 @@ struct SubmissionDetailView: View {
     private func content(_ detail: SubmissionDetail, _ editor: Binding<GisaEditor>) -> some View {
         let canEdit = detail.submission.isEditable
         let form = editor.wrappedValue.form
-        return List {
+        // Built in parts: as one expression it took the type checker too long for CI.
+        return crackWiring(List {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(SubmissionDescriptor.text(district: form["district"], county: form["county"], route: form["route"],
@@ -124,8 +125,8 @@ struct SubmissionDetailView: View {
             case .header:
                 GisaHeaderSections(editor: editor, canEdit: canEdit)
             case .body:
+                // Every Body field is editable here; saving keeps any the screen does not show.
                 GisaBodySections(editor: editor, canEdit: canEdit, lookups: lookups)
-                GisaSavedValuesSection(detail: detail, step: step)
             case .gallery:
                 GisaGallerySection(detail: detail)
             default:
@@ -147,30 +148,7 @@ struct SubmissionDetailView: View {
                 case .library: librarySection = section
                 }
             },
-            open: { openPhoto = $0 }))
-        .environment(\.gisaCracks, GisaCrackContext(
-            submissionId: submissionId, cracks: cracks, canEdit: canEdit, adding: addingCrack,
-            add: { source in
-                switch source {
-                case .camera: cameraSection = PhotoTarget(sectionKey: "pavement_ground_status", forCrack: true)
-                case .library:
-                    libraryForCrack = true
-                    librarySection = "pavement_ground_status"
-                case .noPhoto: Task { await addCrack(photo: nil) }
-                }
-            },
-            open: { openCrack = CrackRoute(id: $0.id) }))
-        .navigationDestination(item: $openCrack) { route in
-            if let index = cracks.firstIndex(where: { $0.id == route.id }) {
-                CrackEditorView(submissionId: submissionId, crack: cracks[index], index: index, canEdit: canEdit,
-                                onSaved: { saved in
-                                    if let at = cracks.firstIndex(where: { $0.id == saved.id }) { cracks[at] = saved }
-                                },
-                                onDeleted: { cracks.removeAll { $0.id == route.id } })
-            } else {
-                Text("This crack is no longer on the form.").foregroundStyle(.secondary)
-            }
-        }
+            open: { openPhoto = $0 })), canEdit: canEdit)
         .toolbar {
             if canEdit {
                 Button(saving ? "Saving…" : "Save") { Task { await save() } }
@@ -178,6 +156,35 @@ struct SubmissionDetailView: View {
             }
         }
         .keyboardDoneButton()
+    }
+
+    /// The cracks' context for the Pavement / Ground Status section, and the
+    /// crack screen it opens.
+    private func crackWiring<Content: View>(_ content: Content, canEdit: Bool) -> some View {
+        content
+            .environment(\.gisaCracks, GisaCrackContext(
+                submissionId: submissionId, cracks: cracks, canEdit: canEdit, adding: addingCrack,
+                add: { source in
+                    switch source {
+                    case .camera: cameraSection = PhotoTarget(sectionKey: "pavement_ground_status", forCrack: true)
+                    case .library:
+                        libraryForCrack = true
+                        librarySection = "pavement_ground_status"
+                    case .noPhoto: Task { await addCrack(photo: nil) }
+                    }
+                },
+                open: { openCrack = CrackRoute(id: $0.id) }))
+            .navigationDestination(item: $openCrack) { route in
+                if let index = cracks.firstIndex(where: { $0.id == route.id }) {
+                    CrackEditorView(submissionId: submissionId, crack: cracks[index], index: index, canEdit: canEdit,
+                                    onSaved: { saved in
+                                        if let at = cracks.firstIndex(where: { $0.id == saved.id }) { cracks[at] = saved }
+                                    },
+                                    onDeleted: { cracks.removeAll { $0.id == route.id } })
+                } else {
+                    Text("This crack is no longer on the form.").foregroundStyle(.secondary)
+                }
+            }
     }
 
     private func load() async {
@@ -297,6 +304,9 @@ enum GisaStep: Int, CaseIterable, Identifiable {
         .union(GisaEditor.vegetationKeys.map(\.0)).union(GisaEditor.drainageChoices.map(\.0))
         .union(GisaEditor.waterContentChoices.map(\.0)).union(GisaEditor.flowingChoices.map(\.0))
         .union(GisaEditor.impactRows.flatMap { [$0.0, $0.1] })
+        .union(GisaEditor.measurementFields.map(\.0))
+        // Shown in Measurements as the road inventory card and the elevation profile.
+        .union(["road_inventory_context", "elevation_profile"])
     static let assessmentKeys: Set = ["record_of_event_notes", "maintenance_history_notes", "observations_notes",
                                       "geotechnical_assessment_notes", "sketchpad_notes"]
 
@@ -537,6 +547,7 @@ struct GisaBodySections: View {
         GisaMaterialSection(editor: $editor, canEdit: canEdit)
         GisaPavementSection(editor: $editor, canEdit: canEdit)
         GisaVegetationWaterSections(editor: $editor, canEdit: canEdit)
+        GisaMeasurementsSection(editor: $editor, canEdit: canEdit)
     }
 }
 

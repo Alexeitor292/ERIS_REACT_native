@@ -206,13 +206,13 @@ public struct CrackDraft: Equatable, Sendable {
 
     /// The PATCH body for what changed since `crack`, or the first value the
     /// server would refuse. Empty when nothing changed.
-    public func changes(from crack: Crack) -> Result<[String: JSONValue], CrackProblem> {
+    public func changes(from crack: Crack) -> Result<[String: JSONValue], InputProblem> {
         var out: [String: JSONValue] = [:]
         func number(_ text: String, _ name: String, _ min: Double, _ max: Double, below: Bool = false) throws -> Double? {
             let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !raw.isEmpty else { return nil }
             guard let value = JS.number(raw), value >= min, below ? value < max : value <= max else {
-                throw CrackProblem(message: "\(name) must be a number from \(JS.numberText(min)) to \(below ? "less than \(JS.numberText(max))" : JS.numberText(max)).")
+                throw InputProblem(message: "\(name) must be a number from \(JS.numberText(min)) to \(below ? "less than \(JS.numberText(max))" : JS.numberText(max)).")
             }
             return value
         }
@@ -232,7 +232,7 @@ public struct CrackDraft: Equatable, Sendable {
             if orientation != crack.orientation { out["orientation"] = json(orientation?.rawValue) }
             let lat = try number(latitude, "Latitude", -90, 90)
             let lon = try number(longitude, "Longitude", -180, 180)
-            if (lat == nil) != (lon == nil) { throw CrackProblem(message: "Enter both latitude and longitude, or neither.") }
+            if (lat == nil) != (lon == nil) { throw InputProblem(message: "Enter both latitude and longitude, or neither.") }
             if lat != crack.latitude || lon != crack.longitude {
                 out["latitude"] = json(lat)
                 out["longitude"] = json(lon)
@@ -244,16 +244,17 @@ public struct CrackDraft: Equatable, Sendable {
             if annotations != crack.annotations {
                 out["annotations_json"] = try annotations.map { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode($0)) } ?? .null
             }
-        } catch let problem as CrackProblem {
+        } catch let problem as InputProblem {
             return .failure(problem)
         } catch {
-            return .failure(CrackProblem(message: String(describing: error)))
+            return .failure(InputProblem(message: String(describing: error)))
         }
         return .success(out)
     }
 }
 
-public struct CrackProblem: Error, Equatable, Sendable {
+/// A typed value that cannot be sent, and why.
+public struct InputProblem: Error, Equatable, Sendable {
     public let message: String
 }
 

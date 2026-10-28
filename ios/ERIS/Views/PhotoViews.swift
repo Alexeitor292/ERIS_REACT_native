@@ -68,6 +68,7 @@ struct GisaSectionPhotos: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(photos.busySection != nil)
+                    .accessibilityIdentifier("add-photo-\(sectionKey)")
                 }
             }
         }

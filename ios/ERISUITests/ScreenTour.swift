@@ -81,10 +81,21 @@ final class ScreenTour: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    /// Scrolls down until the element is on screen (lists load rows lazily).
+    /// Scrolls until the element is clear of the navigation bar and the
+    /// floating tab bar (lists load rows lazily, and a row under the tab bar
+    /// counts as hittable but its tap lands on the tab bar).
     @discardableResult
     private func reveal(_ element: XCUIElement) -> XCUIElement {
-        for _ in 0..<8 where !(element.exists && element.isHittable) { app.swipeUp() }
+        for _ in 0..<12 {
+            guard element.exists else { app.swipeUp(velocity: .slow); continue }
+            let top = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame.maxY : 0
+            let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY : app.frame.maxY
+            let frame = element.frame
+            if frame.minY < top { app.swipeDown(velocity: .slow) }
+            else if frame.maxY > bottom - 8 { app.swipeUp(velocity: .slow) }
+            else if element.isHittable { break }
+            else { app.swipeUp(velocity: .slow) }
+        }
         return element
     }
 
@@ -93,6 +104,16 @@ final class ScreenTour: XCTestCase {
         tap(field)
         let current = (field.value as? String) ?? ""
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + text)
+        // Put the keyboard away with its Done button, as a person would.
+        let done = app.toolbars.buttons["Done"]
+        if done.exists { done.tap() } else if app.keyboards.count > 0 { app.buttons["Done"].firstMatch.tap() }
+    }
+
+    /// Scrolls up until the element is on screen.
+    @discardableResult
+    private func revealAbove(_ element: XCUIElement) -> XCUIElement {
+        for _ in 0..<6 where !(element.exists && element.isHittable) { app.swipeDown() }
+        return element
     }
 
     /// A switch turns on only when its knob end is tapped, not the row's label.
@@ -216,13 +237,13 @@ final class ScreenTour: XCTestCase {
         tap(app.buttons["Done"])
 
         // The simulator has no camera: the camera says so instead of failing.
-        tap(reveal(app.buttons["Add Photo"]))
+        tap(reveal(app.buttons["add-photo-material"]))
         tap(app.buttons["Take Photo"])
         XCTAssertTrue(text(containing: "This device has no rear camera").waitForExistence(timeout: 10))
         tap(app.buttons["Close"])
 
         // A library photo is filed under the section.
-        tap(reveal(app.buttons["Add Photo"]))
+        tap(reveal(app.buttons["add-photo-material"]))
         tap(app.buttons["Choose from Library"])
         // The system picker's grid is not exposed element by element: wait for
         // the picker, then tap its first photo by position.
@@ -301,6 +322,29 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
         app.alerts.buttons["OK"].tap()
         XCTAssertTrue(reveal(app.buttons["Seep"]).isSelected, "still chosen after the reload")
+    }
+
+    func testMeasurements() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Body"])
+        XCTAssertTrue(reveal(text(containing: "Road inventory context active")).exists)
+        XCTAssertTrue(reveal(text(containing: "48° · auto-detected from map")).exists)
+        snap("gisa-measurements-profile")
+
+        // A manual bearing overrides detection.
+        tap(reveal(app.buttons["Set road orientation manually"]))
+        replace(reveal(app.textFields["Bearing (°)"]), with: "120")
+        tap(reveal(app.buttons["Refresh Elevation Profile"]))
+        XCTAssertTrue(app.buttons["Refresh Elevation Profile"].waitForExistence(timeout: 10))
+        XCTAssertTrue(revealAbove(text(containing: "120° · manual override")).exists)
+        snap("gisa-measurements-refreshed")
+
+        replace(reveal(app.textFields["Landslide Width, ft (Wd)"]), with: "45")
+        snap("gisa-measurements-fields")
+        tap(app.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

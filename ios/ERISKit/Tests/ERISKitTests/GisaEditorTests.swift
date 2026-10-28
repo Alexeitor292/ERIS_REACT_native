@@ -335,3 +335,78 @@ final class GisaWaterTests: XCTestCase {
         XCTAssertEqual(request.body["impact_impacted_adj_utilities"], .null, "a cleared answer is sent as no answer")
     }
 }
+
+/// Step 2: Measurements.
+final class GisaMeasurementTests: XCTestCase {
+    private let gisa: [String: JSONValue] = [
+        "road_inventory_context": .object([
+            "dataset_version_id": .number(3), "segment_id": .number(812), "match_method": .string("nearest_segment"),
+            "snapshot": .object(["county_code": .string("ALA"), "route_name": .string("880"), "begin_pm": .number(11.2),
+                                 "end_pm": .number(13), "THY_TERRAIN_CODE": .string("r"), "left_lanes": .number(4)]),
+        ]),
+        "elevation_profile": .object([
+            "source": .string("usgs_3dep"), "checked_at": .string("2026-10-27 15:00:00"), "classification": .string("CUT"),
+            "classification_reason": .null, "confidence": .number(0.82), "error": .null,
+            "profile": .object([
+                "points": .array([
+                    .object(["offset_m": .number(10), "lat": .number(37.7), "lon": .number(-122.2), "elevation_ft": .number(52), "source": .string("usgs")]),
+                    .object(["offset_m": .number(-10), "lat": .number(37.7), "lon": .number(-122.2), "elevation_ft": .number(40), "source": .string("usgs")]),
+                    .object(["offset_m": .number(0), "lat": .number(37.7), "lon": .number(-122.2), "elevation_ft": .null, "source": .string("usgs")]),
+                ]),
+                "metadata": .object(["road_bearing_deg_used": .number(47.6), "road_bearing_source": .string("arcgis_postmile_geometry"),
+                                     "half_width_m": .number(30), "spacing_m": .number(5), "classification_requires_bearing": .bool(true)]),
+            ]),
+        ]),
+    ]
+
+    func testTheMeasurementsAreTheEightOnTheForm() {
+        XCTAssertEqual(GisaEditor.measurementFields.count, 8)
+        XCTAssertEqual(Set(GisaEditor.measurementFields.map(\.0)),
+                       Set(GisaForm.fields.map(\.key).filter { $0.hasPrefix("measure_") }))
+    }
+
+    func testTheRoadInventoryCardShowsWhatIsKnown() throws {
+        let context = try XCTUnwrap(RoadInventoryContext(gisa: gisa))
+        XCTAssertEqual(context.rows.map(\.label), ["County", "Route", "Postmile range", "Terrain", "Lanes", "Match method"])
+        XCTAssertEqual(context.rows.map(\.value), ["ALA", "880", "11.2 – 13 mi", "Rolling (R)", "4 LT / ? RT", "nearest_segment"])
+        XCTAssertNil(RoadInventoryContext(gisa: ["road_inventory_context": .null]))
+        XCTAssertEqual(RoadInventoryContext.terrainLabel("Q"), "Q")
+        XCTAssertEqual(RoadInventoryContext.terrainLabel(nil), "—")
+    }
+
+    func testTheElevationProfileExplainsItself() throws {
+        let profile = try XCTUnwrap(ElevationProfile(gisa: gisa))
+        XCTAssertEqual(profile.orientationNote, "48° · auto-detected from map")
+        XCTAssertEqual(profile.confidenceText, "82%")
+        XCTAssertNil(profile.reasonNote)
+        XCTAssertEqual(profile.chartPoints.map(\.offsetM), [-10, 10], "points without an elevation are left out")
+        XCTAssertNil(ElevationProfile(gisa: [:]))
+    }
+
+    func testAnUnclassifiedProfileSaysWhy() throws {
+        let profile = try JSONDecoder().decode(ElevationProfile.self, from: Data("""
+        {"source": null, "checked_at": null, "classification": "UNKNOWN", "classification_reason": "ROAD_BEARING_UNAVAILABLE",
+         "confidence": null, "profile": null, "error": null}
+        """.utf8))
+        XCTAssertEqual(profile.reasonNote, "Road bearing could not be resolved, so only center elevation is available.")
+        XCTAssertEqual(profile.orientationNote, "not detected yet — tap Refresh to auto-detect")
+    }
+
+    func testATypedBearingMustBeACompassDirection() {
+        XCTAssertEqual(ElevationProfile.bearing(""), .success(nil))
+        XCTAssertEqual(ElevationProfile.bearing(" 90 "), .success(90))
+        XCTAssertEqual(ElevationProfile.bearing("360"), .failure(InputProblem(message: "Bearing must be 0–359°")))
+    }
+
+    func testRefreshingAsksTheServerAgain() async throws {
+        let transport = FakeTransport { _ in
+            .init(status: 200, body: #"{"elevation_profile": {"source": "usgs", "checked_at": null, "classification": "FILL", "confidence": 0.5, "profile": null, "error": null}}"#)
+        }
+        let api = SubmissionsAPI(api: APIClient(baseURL: base, store: MemorySessionStore(token: "t"), transport: transport))
+        let profile = try await api.refreshElevationProfile(501, roadBearing: 120)
+        XCTAssertEqual(profile.classification, "FILL")
+        let body = try JSONDecoder().decode([String: JSONValue].self, from: try XCTUnwrap(transport.requests[0].httpBody))
+        XCTAssertEqual(body, ["force": .bool(true), "road_bearing_deg": .number(120)])
+        XCTAssertEqual(transport.requests[0].url?.path, "/api/submissions/501/gisa/elevation-profile")
+    }
+}

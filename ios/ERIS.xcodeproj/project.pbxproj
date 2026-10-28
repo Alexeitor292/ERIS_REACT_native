@@ -10,6 +10,7 @@
 		081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4096957882DF657855E7DBEA /* IncidentViews.swift */; };
 		0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8179064C0312B2FDA75A3216 /* AppModel.swift */; };
 		19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C467160FFD1AAD51AA080E35 /* LocationProvider.swift */; };
+		1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */; };
 		2B6167462B0624A10A806B75 /* CrackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEEB54A5C523456E696A8B6E /* CrackViews.swift */; };
 		2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */; };
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
@@ -58,6 +59,7 @@
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
 		E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
 		EFF8C7FF82BD8D82D61D7DE0 /* ERISUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ERISUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementViews.swift; sourceTree = "<group>"; };
 		FDA966222712234613820962 /* ERIS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ERIS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -130,6 +132,7 @@
 				165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */,
 				AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
+				FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */,
 				9B0406C2726AB58967A07E70 /* PhotoViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
 				B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */,
@@ -268,6 +271,7 @@
 				19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */,
 				FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */,
 				2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */,
+				1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */,
 				9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */,
 				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,
 				E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */,

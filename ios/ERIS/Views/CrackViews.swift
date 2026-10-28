@@ -157,7 +157,7 @@ struct CrackEditorView: View {
         _draft = State(initialValue: CrackDraft(crack))
     }
 
-    private var changes: Result<[String: JSONValue], CrackProblem> { draft.changes(from: crack) }
+    private var changes: Result<[String: JSONValue], InputProblem> { draft.changes(from: crack) }
     private var dirty: Bool {
         if case .success(let changes) = changes { return !changes.isEmpty }
         return true
