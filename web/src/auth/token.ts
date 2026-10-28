@@ -1,27 +1,30 @@
-const KEY = "eris_token";
+// The ERIS session lives in an HttpOnly cookie that page scripts cannot read,
+// so a cross-site-scripting bug cannot steal it. What scripts do read is the
+// session's CSRF token, which every state-changing request must echo in a
+// header: another site can make the browser send the cookie, but it can
+// neither read this value nor set the header.
 
-export function getToken(): string | null {
-  return localStorage.getItem(KEY);
-}
+const CSRF_COOKIES = ["__Host-eris_csrf", "eris_csrf"];
+export const CSRF_HEADER = "X-CSRF-Token";
+const UNSAFE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-export function setToken(token: string) {
-  localStorage.setItem(KEY, token);
-}
-
-export function clearToken() {
-  localStorage.removeItem(KEY);
-}
-
-export function getTokenExpiryMs(token: string): number | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded)) as { exp?: number };
-    if (typeof payload.exp !== "number") return null;
-    return payload.exp * 1000;
-  } catch {
-    return null;
+export function readCsrfToken(cookieString: string): string | null {
+  for (const part of cookieString.split(";")) {
+    const index = part.indexOf("=");
+    if (index < 0) continue;
+    const name = part.slice(0, index).trim();
+    if (CSRF_COOKIES.includes(name)) return decodeURIComponent(part.slice(index + 1).trim());
   }
+  return null;
+}
+
+export function csrfToken(): string | null {
+  return typeof document === "undefined" ? null : readCsrfToken(document.cookie);
+}
+
+/** The CSRF header for a request of this method (none for reads). */
+export function csrfHeaders(method = "GET"): Record<string, string> {
+  if (!UNSAFE.has(method.toUpperCase())) return {};
+  const token = csrfToken();
+  return token ? { [CSRF_HEADER]: token } : {};
 }

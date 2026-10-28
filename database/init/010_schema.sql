@@ -24,6 +24,28 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- Server-side sign-in sessions (migration 20261028_user_sessions). Only the
+-- SHA-256 of each session credential is stored. Times are UTC.
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    client VARCHAR(16) NOT NULL,
+    auth_method VARCHAR(16) NOT NULL,
+    created_at DATETIME NOT NULL,
+    last_seen_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked_at DATETIME NULL,
+    revoked_reason VARCHAR(32) NULL,
+    user_agent VARCHAR(255) NULL,
+    created_ip VARCHAR(45) NULL,
+    CONSTRAINT uq_user_sessions_token UNIQUE (token_hash),
+    CONSTRAINT fk_user_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT chk_user_sessions_client CHECK (client IN ('web', 'bearer')),
+    INDEX ix_user_sessions_user (user_id, revoked_at),
+    INDEX ix_user_sessions_expiry (expires_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS deployment_bootstrap (
     name VARCHAR(64) PRIMARY KEY,
     completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

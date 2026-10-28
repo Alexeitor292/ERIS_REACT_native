@@ -287,6 +287,11 @@ VIEWER_READABLE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/auth/login"): "the login itself",
     ("GET", "/auth/entra/start"): "starts the tenant-specific OIDC flow",
     ("GET", "/auth/entra/callback"): "requires signed state cookie and verified Entra ID token",
-    ("POST", "/auth/entra/session"): "requires short-lived HttpOnly sign-in handoff cookie",
+    ("GET", "/auth/config"): "which sign-in methods are enabled; no account data",
+    ("POST", "/auth/entra/native"): "requires an Entra access token issued to the ERIS mobile app",
+    # Authenticated, and open to every role on purpose: a viewer must be able
+    # to sign out. They only end the caller's own sessions.
+    ("POST", "/auth/logout"): "ends the caller's current session only",
+    ("POST", "/auth/sessions/revoke-all"): "ends the caller's own sessions only",
     ("GET", "/health"): "liveness probe, no data",
 }

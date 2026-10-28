@@ -32,9 +32,12 @@ drainage problem into a routed, reviewed geotechnical assessment.
 
 ## How a request is handled
 
-- **Sign-in.** `POST /auth/login` checks an Argon2 password hash and returns a JWT
-  (HS256, 120 minutes by default). Clients send it as `Authorization: Bearer`.
-  The web keeps it in `localStorage`, the phone in secure storage.
+- **Sign-in.** Caltrans signs in through Entra OIDC (`/auth/entra/*`); password
+  sign-in (`POST /auth/login`, Argon2) exists for development and rehearsals
+  only. Either way the API creates a server-side session (`user_sessions`,
+  `app/sessions.py`). Browsers hold it in an HttpOnly, SameSite=Strict cookie
+  and send a CSRF token on writes; the phone holds it as a bearer token in
+  secure storage. Sessions expire after 30 idle minutes (web) and 12 hours.
 - **Authorization.** On every request the backend loads the account's roles
   from the database, so role changes apply immediately. Each route names the
   roles it admits (`require_roles`), refuses read-only Guests (`deny_public_only`),

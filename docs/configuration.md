@@ -47,21 +47,27 @@ Alembic reads the same variables (`backend/migrations/env.py`).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `JWT_SECRET` | **required** | Signing key for session tokens. Use a long random value; changing it signs everyone out. |
-| `JWT_ALG` | `HS256` | Signing algorithm. |
-| `JWT_EXPIRES_MINUTES` | `120` | Session length. |
-| `LOCAL_LOGIN_ENABLED` | `true` | Whether the API accepts password sign-in. Turn off after SSO administrator handover if policy requires it; rebuild web with the matching flag to hide its password form. |
+| `JWT_SECRET` | **required** | Server signing key (Entra sign-in state, CSRF tokens). At least 32 random characters with `ENV=prod`. |
+| `SESSION_IDLE_MINUTES` | `30` | A web session ends after this long without a request. |
+| `SESSION_ABSOLUTE_MINUTES` | `720` | Every session ends this long after sign-in; `ENV=prod` allows at most 720. |
+| `LOCAL_LOGIN_ENABLED` | `true` | Password sign-in, for development and rehearsals. The Caltrans template sets `false`: Entra only, and the API refuses to set or reset passwords. The web follows the API's setting. |
 | `ENTRA_ENABLED` | `false` | Enables the web Entra OIDC flow when the remaining settings are supplied. |
 | `ENTRA_AUTHORITY_HOST` | `login.microsoftonline.com` | `login.microsoftonline.com` or `login.microsoftonline.us`, matching the tenant cloud. |
 | `ENTRA_TENANT_ID` / `ENTRA_CLIENT_ID` | unset | Single-tenant and Web app registration UUIDs. |
-| `ENTRA_CLIENT_SECRET` | unset | Server-side Web app credential; certificate-based client authentication is not implemented. |
+| `ENTRA_CLIENT_CERT_FILE` / `ENTRA_CLIENT_KEY_FILE` | unset | PEM certificate and RSA key (2048+ bits) the API signs Entra client assertions with. Required with `ENV=prod`. |
+| `ENTRA_CLIENT_SECRET` | unset | Development only; refused with `ENV=prod`. |
+| `APNS_ENABLED` | `false` | Push to the native iOS app through APNs. Needs the four settings below; `ENV=prod` refuses it otherwise. |
+| `APNS_KEY_FILE` / `APNS_KEY_ID` / `APNS_TEAM_ID` | unset | The `.p8` APNs auth key (in the private secrets folder), its Key ID, and the Apple Team ID. |
+| `APNS_TOPIC` | unset | The iOS app's bundle identifier. |
+| `ENTRA_MOBILE_CLIENT_ID` | unset | The ERIS Mobile public client. Unset keeps mobile Entra sign-in off. |
+| `ENTRA_API_SCOPE` | `api://<ENTRA_CLIENT_ID>/access_as_user` | The ERIS API scope the mobile app requests and the API requires. |
 | `ENTRA_REDIRECT_URI` | unset | Exact HTTPS callback: `https://<web-host>/api/auth/entra/callback`. |
 
 Entra sign-in is implemented for the web, but remains disabled in the current
 Campos Labs deployment and has not been validated against Caltrans's tenant.
 ERIS roles remain in its database and accounts are linked to Entra by tenant
-and object ID. The web stores its ERIS bearer JWT in browser `localStorage`;
-Caltrans must review that session model. See the [Podman runbook](caltrans-podman.md#entra-sign-in-and-handover)
+and object ID. Sessions are server-side and held by the web in an HttpOnly
+cookie; scripts never see them. See the [Podman runbook](caltrans-podman.md#entra-sign-in-and-handover)
 and [deployment briefing](caltrans-it-deployment-brief.md#identity-access-and-security-facts).
 
 ### File storage (SeaweedFS)
@@ -213,7 +219,8 @@ Read at build time (`npm run dev`, `npm run build`, or the web Docker image).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | `http://127.0.0.1:8000` | Backend address. |
+| `VITE_API_BASE_URL` | `/api` | Backend address. Keep it same-origin: the session cookie is not sent to another origin. |
+| `VITE_DEV_API_TARGET` | `http://127.0.0.1:8000` | Where `npm run dev` proxies `/api`. |
 | `VITE_API_BASE` | — | Older alias, used only if `VITE_API_BASE_URL` is unset. |
 | `VITE_ARCGIS_API_KEY` | empty | Browser-safe ArcGIS key for the 3D terrain view. Optional in development; set it in production and restrict it to the site's origin in the ArcGIS dashboard. |
 | `VITE_CALTRANS_POSTMILE_LAYER_URL` | public Caltrans SHN Postmiles Tenth layer | Layer the "Report an incident" form uses to convert between coordinates and route/postmile. Change only to use a mirror. |

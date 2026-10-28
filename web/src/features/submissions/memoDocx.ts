@@ -9,7 +9,6 @@
 import type { JSONContent } from "@tiptap/core";
 
 import { apiUrl } from "../../api/client";
-import { getToken } from "../../auth/token";
 import { figureText, stripFigurePrefix } from "./memoFigureModel";
 
 const ALT_PREFIX = "eris-attachment:";
@@ -19,10 +18,7 @@ const TEXT_WIDTH_PX = 624;
 
 /** The photo's bytes, through the API (the storage links are not readable from scripts). */
 export async function fetchAttachmentBytes(attachmentId: number): Promise<ArrayBuffer> {
-  const token = getToken();
-  const response = await fetch(apiUrl(`/attachments/${attachmentId}/content`), {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const response = await fetch(apiUrl(`/attachments/${attachmentId}/content`), { credentials: "same-origin" });
   if (!response.ok) throw new Error(`Photo #${attachmentId} could not be read (${response.status}).`);
   return response.arrayBuffer();
 }

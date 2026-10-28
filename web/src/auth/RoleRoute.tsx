@@ -21,11 +21,11 @@ type Props = {
  * that was refused — a redirect loop is not an explanation (org model design §8).
  */
 export default function RoleRoute({ roles, children }: Props) {
-  const { me, token, isInitializing } = useAuth();
+  const { me, signedIn, isInitializing } = useAuth();
   const { pathname } = useLocation();
 
   if (isInitializing) return <AuthGateLoading />;
-  if (!token) return <Navigate to="/login" replace />;
+  if (!signedIn) return <Navigate to="/login" replace />;
   if (!me) return <Navigate to="/login" replace />;
 
   const allowed = roles.some((role) => me.roles?.includes(role));

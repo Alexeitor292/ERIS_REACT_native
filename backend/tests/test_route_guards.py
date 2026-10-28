@@ -121,12 +121,16 @@ class TestEveryRouteIsGuarded:
 
     def test_the_allow_list_admits_no_writes(self, app_routes):
         # Every writing method must be guarded by a role list or an explicit
-        # refusal — except the two authentication exchanges, which cannot
-        # require a bearer token before the user has one.
+        # refusal — except sign-in (password and mobile Entra), which cannot
+        # require a session before the user has one, and sign-out, which every role must be able to do to
+        # its own sessions.
         allowed_writes = {
             key for key in VIEWER_READABLE_ROUTES if key[0] in {"POST", "PUT", "PATCH", "DELETE"}
         }
-        assert allowed_writes == {("POST", "/auth/login"), ("POST", "/auth/entra/session")}, allowed_writes
+        assert allowed_writes == {
+            ("POST", "/auth/login"), ("POST", "/auth/entra/native"),
+            ("POST", "/auth/logout"), ("POST", "/auth/sessions/revoke-all"),
+        }, allowed_writes
 
 
 # ---------------------------------------------------------------------------
