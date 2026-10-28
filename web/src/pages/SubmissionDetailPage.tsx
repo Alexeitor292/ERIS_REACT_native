@@ -68,6 +68,8 @@ import { isAssessmentAuthor, isOperationalUser, isPublicOnly } from "../utils/ro
 import ActionChecklist from "../features/submissions/ActionChecklist";
 import { CompositionBar, DateField, FieldGroup, InlineField, NumberField, OptionTile, PanelChoice, Segmented, SliderField, Stepper } from "../features/submissions/gisaFields";
 import MemosPanel from "../features/submissions/MemosPanel";
+import CrackList from "../features/submissions/cracks/CrackList";
+import type { Crack } from "../features/submissions/cracks/crackModel";
 import SubmissionRecordCard from "../features/submissions/SubmissionRecordCard";
 import { chooseMemoContent, RICH_MEMO_KEYS, type RichMemoKey } from "../features/submissions/memoContentModel";
 import SavedLayoutsMenu from "../features/submissions/SavedLayoutsMenu";
@@ -123,7 +125,7 @@ function formFromDetail(d: SubmissionDetail): LoadedForm {
       date_incident_reported: t(gisa.date_incident_reported),
       district_contact: districtContactText,
       latitude: formatCoordinate(gisa.latitude), longitude: formatCoordinate(gisa.longitude), distribution_code: t(gisa.distribution_code), highway_status_cause: t(gisa.highway_status_cause), highway_status_code: t(gisa.highway_status_code), lanes_closed_count: t(gisa.lanes_closed_count), open_highway_traffic_lanes_count: t(gisa.open_highway_traffic_lanes_count),
-      pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), crack_length_ft: t(gisa.crack_length_ft), crack_horizontal_in: t(gisa.crack_horizontal_in), crack_vertical_in: t(gisa.crack_vertical_in), crack_depth_in: t(gisa.crack_depth_in), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
+      pavement_ground_cracks: boolToTri(gisa.pavement_ground_cracks), settlement_in: t(gisa.settlement_in), bulge_in: t(gisa.bulge_in), indented_by_rocks: boolToTri(gisa.indented_by_rocks),
       failure_rock_fall: incidentTri("failure_rock_fall", gisa.failure_rock_fall), failure_topple: incidentTri("failure_topple", gisa.failure_topple), failure_slide: incidentTri("failure_slide", gisa.failure_slide), failure_spread: incidentTri("failure_spread", gisa.failure_spread), failure_flow: incidentTri("failure_flow", gisa.failure_flow), failure_compound: incidentTri("failure_compound", gisa.failure_compound), failure_erosion: incidentTri("failure_erosion", gisa.failure_erosion), failure_surficial_failure: incidentTri("failure_surficial_failure", gisa.failure_surficial_failure), failure_scoured_toe: incidentTri("failure_scoured_toe", gisa.failure_scoured_toe), failure_washout: incidentTri("failure_washout", gisa.failure_washout),
       incident_type_description: t(gisa.incident_type_description),
       distribution_advancing: boolToTri(gisa.distribution_advancing), distribution_retrogressive: boolToTri(gisa.distribution_retrogressive), distribution_enlarging: boolToTri(gisa.distribution_enlarging), distribution_widening: boolToTri(gisa.distribution_widening), distribution_moving: boolToTri(gisa.distribution_moving), distribution_confined: boolToTri(gisa.distribution_confined),
@@ -171,7 +173,7 @@ function gisaPayload(draft: Draft, memos: Record<RichMemoKey, string>): Record<s
   return {
     report_date: nt(draft.report_date), district: nt(draft.district), county: nt(draft.county), route: normalizeRouteValue(draft.route), post_mile: normalizePostMileValue(draft.post_mile), ea: nt(draft.ea), project_id: nt(draft.project_id), date_incident_reported: nt(draft.date_incident_reported), district_contact: nt(draft.district_contact),
     latitude: normalizeCoordinateValue(nf(draft.latitude, "Latitude")), longitude: normalizeCoordinateValue(nf(draft.longitude, "Longitude")), distribution_code: nt(draft.distribution_code), highway_status_cause: nt(draft.highway_status_cause), highway_status_code: nt(draft.highway_status_code), lanes_closed_count: ni(draft.lanes_closed_count, "Lanes closed count"), open_highway_traffic_lanes_count: ni(draft.open_highway_traffic_lanes_count, "Open highway lanes"),
-    pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), crack_length_ft: nf(draft.crack_length_ft, "Crack length"), crack_horizontal_in: nf(draft.crack_horizontal_in, "Crack horizontal"), crack_vertical_in: nf(draft.crack_vertical_in, "Crack vertical"), crack_depth_in: nf(draft.crack_depth_in, "Crack depth"), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
+    pavement_ground_cracks: triToBool(draft.pavement_ground_cracks), settlement_in: nf(draft.settlement_in, "Settlement"), bulge_in: nf(draft.bulge_in, "Bulge"), indented_by_rocks: triToBool(draft.indented_by_rocks),
     failure_rock_fall: triToBool(draft.failure_rock_fall), failure_topple: triToBool(draft.failure_topple), failure_slide: triToBool(draft.failure_slide), failure_spread: triToBool(draft.failure_spread), failure_flow: triToBool(draft.failure_flow), failure_compound: triToBool(draft.failure_compound), failure_erosion: triToBool(draft.failure_erosion), failure_surficial_failure: triToBool(draft.failure_surficial_failure), failure_scoured_toe: triToBool(draft.failure_scoured_toe), failure_washout: triToBool(draft.failure_washout), incident_type_description: nt(draft.incident_type_description),
     distribution_advancing: triToBool(draft.distribution_advancing), distribution_retrogressive: triToBool(draft.distribution_retrogressive), distribution_enlarging: triToBool(draft.distribution_enlarging), distribution_widening: triToBool(draft.distribution_widening), distribution_moving: triToBool(draft.distribution_moving), distribution_confined: triToBool(draft.distribution_confined),
     material_rock: triToBool(draft.material_rock), material_soil: triToBool(draft.material_soil), material_bedding: triToBool(draft.material_bedding), material_joints: triToBool(draft.material_joints), material_fractures: triToBool(draft.material_fractures),
@@ -259,6 +261,7 @@ function shownValue(key: string, value: unknown): string {
 }
 
 const NO_ONE: readonly PresenceOther[] = [];
+const NO_CRACKS: Crack[] = [];
 
 const EMPTY_MEMOS: Record<RichMemoKey, string> = {
   observations_notes: "",
@@ -1021,11 +1024,6 @@ export default function SubmissionDetailPage() {
         : { ...prev, [key]: value, material_soil: "YES", material_rock: "NO", material_bedding: "NO", material_joints: "NO", material_fractures: "NO" }
     );
   };
-  /** A crack measurement means there are cracks. */
-  const setCrackMeasure = (key: "crack_length_ft" | "crack_horizontal_in" | "crack_vertical_in" | "crack_depth_in", value: string) => {
-    if (!canEdit) return;
-    setDraft((prev) => ({ ...prev, [key]: value, ...(value.trim() !== "" ? { pavement_ground_cracks: "YES" as const } : {}) }));
-  };
   const setWaterContent = (key: typeof baseWaterKeys[number] | "") => {
     if (!canEdit) return;
     setDraft((prev) => {
@@ -1083,17 +1081,6 @@ export default function SubmissionDetailPage() {
       setDraft((prev) => ({ ...prev, open_highway_traffic_lanes_count: "" }));
     }
   }, [openHighwayTrafficSelected, draft.open_highway_traffic_lanes_count]);
-  useEffect(() => {
-    if (draft.pavement_ground_cracks === "NO") {
-      setDraft((prev) => ({
-        ...prev,
-        crack_length_ft: "",
-        crack_horizontal_in: "",
-        crack_vertical_in: "",
-        crack_depth_in: "",
-      }));
-    }
-  }, [draft.pavement_ground_cracks]);
   useEffect(() => {
     const items = Object.entries(INCIDENT_TYPE_CODE_BY_FORM_KEY)
       .filter(([k]) => draft[k] === "YES")
@@ -1487,13 +1474,10 @@ export default function SubmissionDetailPage() {
                 <Segmented label="Indented by rocks" options={YES_NO} value={triValue(draft.indented_by_rocks)} onChange={(value) => setDraft((d) => ({ ...d, indented_by_rocks: triFrom(value) }))} />
               </InlineField>
             </div>
-            <FieldGroup title="Crack" className={draft.pavement_ground_cracks === "NO" ? "opacity-60" : ""}>
-              <div className="grid gap-x-4 gap-y-2 @lg:grid-cols-2">
-                <NumberField label="Length" unit="ft" value={draft.crack_length_ft} onChange={(value) => setCrackMeasure("crack_length_ft", value)} />
-                <SliderField label="Depth" unit="in" max={48} step={0.5} value={draft.crack_depth_in} onChange={(value) => setCrackMeasure("crack_depth_in", value)} />
-                <SliderField label="Horizontal displacement" unit="in" max={24} step={0.25} value={draft.crack_horizontal_in} onChange={(value) => setCrackMeasure("crack_horizontal_in", value)} />
-                <SliderField label="Vertical displacement" unit="in" max={24} step={0.25} value={draft.crack_vertical_in} onChange={(value) => setCrackMeasure("crack_vertical_in", value)} />
-              </div>
+            {/* Each crack is its own record, saved on its own (features/submissions/cracks). */}
+            <FieldGroup title="Cracks">
+              <CrackList submissionId={Number(id)} initial={data?.cracks ?? NO_CRACKS} canEdit={canEdit}
+                photos={memoPhotos} resolver={resolver} />
             </FieldGroup>
             <FieldGroup title="Deformation">
               <div className="grid gap-x-4 gap-y-2 @lg:grid-cols-2">
