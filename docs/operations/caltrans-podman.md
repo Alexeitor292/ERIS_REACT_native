@@ -70,9 +70,34 @@ successful start.
 
 ## Jenkins and Harbor
 
-Use [`Jenkinsfile.podman`](../../deploy/ci/Jenkinsfile.podman) as a Pipeline job on an
-approved Linux agent with Podman, repository and Harbor access, and room for
-the web build's 4 GiB Node heap. It needs three Jenkins credentials:
+No Jenkins job exists yet: everything it needs is in this repository.
+
+### Creating the Jenkins job
+
+1. **New Item** → name `eris` → **Pipeline**.
+2. **Pipeline** → **Definition:** *Pipeline script from SCM*, **SCM:** Git.
+   - **Repository URL:** the Caltrans copy of this repository, with a
+     read-only credential.
+   - **Branch Specifier:** `*/main`.
+   - **Script Path:** `deploy/ci/Jenkinsfile.podman`.
+3. **Agent:** an approved Linux agent with Podman, repository and Harbor
+   access, and room for the web build's 4 GiB Node heap. The pipeline runs
+   its tools (Trivy, cosign) as containers, so nothing else is installed.
+4. **Credentials:** the three below for publishing; for deploying, also
+   `eris-deploy-staging`, `eris-deploy-production` (SSH username with
+   private key, one key per host) and `eris-known-hosts` (secret file)
+   ([releases from Jenkins](#releases-from-jenkins-no-shell-access-for-jenkins)).
+5. **Save**, then **Build with Parameters**. The first run lists the
+   parameters; set `HARBOR_HOST`, `HARBOR_PROJECT`, `MARIADB_SOURCE` and
+   `SEAWEEDFS_SOURCE` to the Caltrans values and leave `DEPLOY_TO=none`
+   until a staging host is ready.
+
+Success: the build is green and archives `release/release-images.env`, the
+SBOMs and the scan reports (below).
+
+### What the pipeline does
+
+The job needs these three Jenkins credentials to publish:
 
 | Credential ID | Type | Holds |
 | --- | --- | --- |
@@ -131,8 +156,9 @@ same-origin). The login page asks the API (`/api/auth/config`) which sign-in
 methods are on; the `ENTRA_ENABLED`/`LOCAL_LOGIN_ENABLED` build parameters
 (defaults true/false) are only a fallback if that request fails. Other browser
 `VITE_*` values are compile-time public settings; changing them requires a new
-web image. The pipeline does **not** place secrets into images or deploy to a
-server.
+web image. The pipeline never places secrets in images. It deploys only when
+`DEPLOY_TO` is `staging` or `staging-then-production`, and then only through
+each host's `deploy-hook.sh`.
 
 ### On the host: pinned digests and enforced signatures
 
