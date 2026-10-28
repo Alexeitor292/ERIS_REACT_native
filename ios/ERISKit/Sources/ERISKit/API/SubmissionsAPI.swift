@@ -182,11 +182,6 @@ public struct SubmissionsAPI: Sendable {
         try await api.get("/submissions/\(id)", preservingKeys: true, as: SubmissionDetail.self)
     }
 
-    /// The latest generated GISA PDF, as a presigned link (fetch it without the ERIS token).
-    public func gisaPDF(_ id: Int) async throws -> DownloadLink {
-        try await api.get("/submissions/\(id)/gisa/pdf", as: DownloadLink.self)
-    }
-
     /// A presigned storage link for an attachment, valid about 15 minutes.
     public func attachmentLink(_ attachmentId: Int) async throws -> DownloadLink {
         try await api.get("/attachments/\(attachmentId)/download-url", as: DownloadLink.self)

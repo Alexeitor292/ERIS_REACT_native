@@ -104,8 +104,6 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("PUT", ["submissions", "501", "gisa", "actions"]):
             submissionActions = body
             return (200, body)
-        case ("GET", ["submissions", "501", "gisa", "pdf"]):
-            return notFound
         case ("GET", ["assessments"]):
             return (200, ["items": assessments.filter { matches($0, queue: query.first { $0.name == "queue" }?.value) }])
         case ("GET", let p) where p.count == 2 && p[0] == "assessments":

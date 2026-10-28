@@ -1,5 +1,4 @@
 import ERISKit
-import SafariServices
 import SwiftUI
 
 /// GISA submissions this person can see; each opens in the GISA editor.
@@ -91,16 +90,4 @@ struct AttachmentThumbnail: View {
             }
         }
     }
-}
-
-struct IdentifiableURL: Identifiable {
-    let url: URL
-    var id: String { url.absoluteString }
-}
-
-struct SafariView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
-    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }

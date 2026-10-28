@@ -16,7 +16,6 @@ struct SubmissionDetailView: View {
     @State private var error: String?
     @State private var alert: GisaEditor.SaveProblem?
     @State private var saving = false
-    @State private var browserURL: IdentifiableURL?
     @State private var cameraSection: PhotoTarget?
     @State private var librarySection: String?
     @State private var libraryItem: PhotosPickerItem?
@@ -54,7 +53,6 @@ struct SubmissionDetailView: View {
         .navigationTitle(detail?.submission.status == "DRAFT" ? "Draft" : "Submission")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
-        .sheet(item: $browserURL) { SafariView(url: $0.url) }
     }
 
     /// Taking, choosing and opening section photos.
@@ -119,7 +117,7 @@ struct SubmissionDetailView: View {
                 GisaBodySections(editor: editor, canEdit: canEdit, lookups: lookups)
                 GisaSavedValuesSection(detail: detail, step: step)
             case .gallery:
-                GisaGallerySection(detail: detail, openPDF: { Task { await openPDF() } })
+                GisaGallerySection(detail: detail)
             default:
                 GisaSavedValuesSection(detail: detail, step: step)
             }
@@ -203,16 +201,6 @@ struct SubmissionDetailView: View {
         }
     }
 
-    private func openPDF() async {
-        do {
-            let link = try await SubmissionsAPI(api: model.api).gisaPDF(submissionId)
-            if let url = URL(string: link.downloadUrl) { browserURL = IdentifiableURL(url: url) }
-        } catch APIError.notFound {
-            alert = .init(title: "No PDF yet", message: "No GISA PDF has been generated yet.")
-        } catch {
-            alert = .init(title: "PDF unavailable", message: model.handle(error))
-        }
-    }
 }
 
 /// The editor's five steps.
@@ -711,7 +699,6 @@ struct GisaSavedValuesSection: View {
 
 struct GisaGallerySection: View {
     let detail: SubmissionDetail
-    let openPDF: () -> Void
 
     var body: some View {
         Section("Photos") {
@@ -722,9 +709,6 @@ struct GisaGallerySection: View {
             } else {
                 Text("No photos yet.").foregroundStyle(.secondary)
             }
-        }
-        Section {
-            Button("Open latest GISA PDF", action: openPDF)
         }
     }
 }
