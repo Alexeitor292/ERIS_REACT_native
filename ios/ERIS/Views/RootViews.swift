@@ -69,7 +69,7 @@ struct MainTabView: View {
     @State private var incidentPath: [Int] = []
 
     enum Tab: Hashable {
-        case incidents, notifications, account
+        case incidents, submissions, notifications, account
     }
 
     var body: some View {
@@ -77,6 +77,9 @@ struct MainTabView: View {
             NavigationStack(path: $incidentPath) { IncidentsView(me: me) }
                 .tabItem { Label("Incidents", systemImage: "exclamationmark.triangle") }
                 .tag(Tab.incidents)
+            NavigationStack { SubmissionsView() }
+                .tabItem { Label("Submissions", systemImage: "doc.text") }
+                .tag(Tab.submissions)
             NavigationStack { NotificationsView() }
                 .tabItem { Label("Notifications", systemImage: "bell") }
                 .badge(NotificationRoutes.badgeText(model.unread) ?? "")
@@ -88,10 +91,17 @@ struct MainTabView: View {
         .onChange(of: model.pendingRoute) { _, route in
             // A tapped notification opens its incident. Other screens arrive
             // in later phases of the port; until then the feed stays open.
-            guard case .incident(let id) = route else { return }
-            model.pendingRoute = nil
-            tab = .incidents
-            incidentPath = [id]
+            switch route {
+            case .incident(let id):
+                model.pendingRoute = nil
+                tab = .incidents
+                incidentPath = [id]
+            case .submission:
+                model.pendingRoute = nil
+                tab = .submissions
+            default:
+                return
+            }
         }
     }
 }

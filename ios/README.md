@@ -31,10 +31,23 @@ line-of-business app (see the spec for renewal dates).
 | --- | --- |
 | Sign-in (MSAL + exchange), silent renewal, sign-out, Keychain | Ported |
 | Push registration and notification routing | Ported |
-| Incidents: list and detail (read) | Ported |
-| Notifications feed | Ported |
 | Role rules (`roleModel.ts`) with tests | Ported |
-| Incident create/edit, triage and assignment actions | Next |
-| Submissions (GISA), drafts, offline queue and sync | Next |
-| Assessments, maintenance work, road inventory | Next |
+| Incidents: list, detail, report (GPS + Caltrans postmile + photos), claim/forward/revision/resolve | Ported; needs device test |
+| Notifications feed | Ported |
+| Submissions: list, read-only detail (GISA fields, photos, latest PDF) | Ported; GISA editor not yet |
+| Assessments: model, worklist queues by role (ERISKit only) | Model ported; screen next |
+| GISA editor (`mobile/app/(tabs)/submissions/[id].tsx`, ~7,100 lines) | Next, in sections |
+| Drafts, offline queue and sync (`mobile/src/offline`) | Next |
+| Maintenance work, road inventory | Next |
 | Maps and offline terrain (ArcGIS Maps SDK for Swift) | Later; rewrite of `mobile/plugins/arcgis-ios` |
+
+## Working on it on the Mac
+
+- `cd ios/ERISKit && swift test` runs the core tests in seconds.
+- Without XcodeGen installed, use the `ERIS.xcodeproj` CI committed; after changing
+  `project.yml`, push and let CI regenerate it (or install the XcodeGen release
+  binary into `~/bin`, which needs no admin rights).
+- Port one screen at a time. Put logic and API calls in `ERISKit` with tests ported
+  from the matching `*.test.ts`; keep SwiftUI views thin.
+- The server contract is `docs/ios-native-app.md`; never put a token in a URL, and
+  decode GISA forms with `preservingKeys: true`.

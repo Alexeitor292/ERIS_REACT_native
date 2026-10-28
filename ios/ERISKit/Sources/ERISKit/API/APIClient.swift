@@ -106,6 +106,10 @@ public final class APIClient: @unchecked Sendable {
         return decoder
     }()
 
+    /// For responses whose keys are data, not field names (a GISA form): keys
+    /// stay exactly as the server sent them.
+    let rawDecoder = JSONDecoder()
+
     let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -124,8 +128,9 @@ public final class APIClient: @unchecked Sendable {
         set { lock.locked { renew = newValue } }
     }
 
-    public func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], as type: T.Type = T.self) async throws -> T {
-        try await request("GET", path, query: query, as: type)
+    public func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], preservingKeys: Bool = false,
+                                  as type: T.Type = T.self) async throws -> T {
+        try await request("GET", path, query: query, preservingKeys: preservingKeys, as: type)
     }
 
     public func post<T: Decodable, Body: Encodable>(_ path: String, json body: Body, as type: T.Type = T.self) async throws -> T {
@@ -144,6 +149,7 @@ public final class APIClient: @unchecked Sendable {
         contentType: String = "application/json",
         authenticated: Bool = true,
         allowRenewal: Bool = true,
+        preservingKeys: Bool = false,
         as type: T.Type = T.self
     ) async throws -> T {
         var renewed = false
@@ -153,7 +159,7 @@ public final class APIClient: @unchecked Sendable {
             let (data, response) = try await transport.send(request)
             switch response.statusCode {
             case 200..<300:
-                return try decode(type, from: data)
+                return try decode(type, from: data, preservingKeys: preservingKeys)
             case 401:
                 if authenticated, allowRenewal, !renewed, let renew = reauthenticate {
                     renewed = true
@@ -200,10 +206,10 @@ public final class APIClient: @unchecked Sendable {
         return request
     }
 
-    func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, from data: Data, preservingKeys: Bool = false) throws -> T {
         let payload = data.isEmpty ? Data("{}".utf8) : data
         do {
-            return try decoder.decode(type, from: payload)
+            return try (preservingKeys ? rawDecoder : decoder).decode(type, from: payload)
         } catch {
             throw APIError.decoding(String(describing: error))
         }
