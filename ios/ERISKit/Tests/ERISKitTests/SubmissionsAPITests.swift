@@ -28,7 +28,7 @@ final class SubmissionsAPITests: XCTestCase {
         let (submissions, _) = makeAPI(body: """
         {"submission": {"id": 5, "status": "SUBMITTED", "title": "PLA-80 slipout", "can_edit": false, "can_review": true},
          "gisa": {"district": "03", "slope_height_ft": 25, "rock_present": true, "notes": "", "nested": {"a": 1}},
-         "incident_types": ["SLIPOUT"], "actions": [],
+         "incident_types": ["SLIPOUT"], "actions": {"immediate": [], "follow_up": []},
          "photos": [{"id": 9, "kind": "PHOTO", "file_name": "p1.jpg", "mime_type": "image/jpeg", "section_key": "site"}],
          "attachments": [], "workflow_events": [], "context": null}
         """)

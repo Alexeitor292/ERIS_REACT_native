@@ -12,6 +12,8 @@ let package = Package(
     ],
     targets: [
         .target(name: "ERISKit"),
-        .testTarget(name: "ERISKitTests", dependencies: ["ERISKit"]),
+        // Fixtures/ holds parity data written from the Expo app's TypeScript by
+        // ios/scripts/make-parity-fixtures.mjs.
+        .testTarget(name: "ERISKitTests", dependencies: ["ERISKit"], resources: [.copy("Fixtures")]),
     ]
 )
