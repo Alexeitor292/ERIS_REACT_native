@@ -1,6 +1,7 @@
 import ERISKit
 import Foundation
-import MSAL
+// MSAL predates Swift concurrency; its completion handlers run on the main queue.
+@preconcurrency import MSAL
 import UIKit
 
 /// Entra access tokens for the ERIS API scope through MSAL. MSAL signs in

@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// Show the alert while ERIS is open, and refresh the badge.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        await MainActor.run { Task { await model?.refreshUnread() } }
+        Task { @MainActor in await self.model?.refreshUnread() }
         return [.banner, .sound, .list]
     }
 
