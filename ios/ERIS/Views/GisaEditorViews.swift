@@ -30,6 +30,18 @@ struct SubmissionDetailView: View {
     }
 
     var body: some View {
+        photoFlows(screen)
+            .alert(alert?.title ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
+                Button("OK", role: .cancel) { alert = nil }
+            } message: {
+                Text(alert?.message ?? "")
+            }
+    }
+
+    // The body is split into parts: as one expression it took the type
+    // checker long enough to risk failing the slower Xcode 16 build in CI.
+
+    private var screen: some View {
         Group {
             if let detail, let editor = Binding($editor) {
                 content(detail, editor)
@@ -43,35 +55,40 @@ struct SubmissionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .sheet(item: $browserURL) { SafariView(url: $0.url) }
-        .sheet(item: $openPhoto) { PhotoDetailView(submissionId: submissionId, attachment: $0) }
-        .fullScreenCover(item: $cameraSection) { target in
-            MappedCameraScreen(onCaptured: { capture in
-                cameraSection = nil
-                Task { await upload(capture, to: target.sectionKey) }
-            }, onCancel: { cameraSection = nil })
-        }
-        .photosPicker(isPresented: Binding(get: { librarySection != nil }, set: { if !$0 && libraryItem == nil { librarySection = nil } }),
-                      selection: $libraryItem, matching: .images)
-        .onChange(of: libraryItem) { _, item in
-            guard let item, let section = librarySection else { return }
-            libraryItem = nil
-            librarySection = nil
-            Task {
-                do {
-                    guard let photo = try await LibraryPhoto.load(item) else {
-                        alert = .init(title: "Photo unavailable", message: "That photo could not be read.")
-                        return
-                    }
-                    await upload(photo, to: section)
-                } catch {
-                    alert = .init(title: "Photo unavailable", message: error.localizedDescription)
-                }
+    }
+
+    /// Taking, choosing and opening section photos.
+    private func photoFlows<Screen: View>(_ screen: Screen) -> some View {
+        screen
+            .sheet(item: $openPhoto) { PhotoDetailView(submissionId: submissionId, attachment: $0) }
+            .fullScreenCover(item: $cameraSection) { target in
+                MappedCameraScreen(onCaptured: { capture in
+                    cameraSection = nil
+                    Task { await upload(capture, to: target.sectionKey) }
+                }, onCancel: { cameraSection = nil })
             }
-        }
-        .alert(alert?.title ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
-            Button("OK", role: .cancel) { alert = nil }
-        } message: {
-            Text(alert?.message ?? "")
+            .photosPicker(isPresented: libraryOpen, selection: $libraryItem, matching: .images)
+            .onChange(of: libraryItem) { _, item in
+                guard let item, let section = librarySection else { return }
+                libraryItem = nil
+                librarySection = nil
+                Task { await uploadLibraryPhoto(item, to: section) }
+            }
+    }
+
+    private var libraryOpen: Binding<Bool> {
+        Binding(get: { librarySection != nil }, set: { if !$0 && libraryItem == nil { librarySection = nil } })
+    }
+
+    private func uploadLibraryPhoto(_ item: PhotosPickerItem, to section: String) async {
+        do {
+            guard let photo = try await LibraryPhoto.load(item) else {
+                alert = .init(title: "Photo unavailable", message: "That photo could not be read.")
+                return
+            }
+            await upload(photo, to: section)
+        } catch {
+            alert = .init(title: "Photo unavailable", message: error.localizedDescription)
         }
     }
 
@@ -620,9 +637,17 @@ struct ChipFlow: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        // Spelled out step by step: as one expression it outran the type
+        // checker of Xcode 16 in CI.
         let rows = arrange(subviews, width: proposal.width ?? .infinity)
-        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0,
-                      height: rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0)))
+        var widest: CGFloat = 0
+        var height: CGFloat = 0
+        for row in rows {
+            widest = max(widest, row.width)
+            height += row.height
+        }
+        let gaps = CGFloat(max(rows.count - 1, 0)) * spacing
+        return CGSize(width: proposal.width ?? widest, height: height + gaps)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
