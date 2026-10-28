@@ -35,6 +35,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: gov.ca.dot.eris
         INFOPLIST_FILE: ERIS/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
+        # No app icon yet: the Expo project only has the template icon. Add an
+        # AppIcon set to ERIS/Assets.xcassets and remove this line before the
+        # Intune release, which shows the icon in Company Portal.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
         # The ERIS API this build talks to; set per environment before archiving.
         ERIS_API_BASE_URL: https://eris-stage.example.gov/api
         CODE_SIGN_STYLE: Automatic

@@ -14,6 +14,7 @@
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
 		5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BD4538642D56D52AACFE19 /* DemoServer.swift */; };
 		71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */; };
+		74DFDD6D0707CC1ED7EE68AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */; };
 		7E0DE5A23DD0C9E77EE2F077 /* ScreenTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */; };
 		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
@@ -47,6 +48,7 @@
 		AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisaEditorViews.swift; sourceTree = "<group>"; };
 		B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmissionViews.swift; sourceTree = "<group>"; };
 		C467160FFD1AAD51AA080E35 /* LocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationProvider.swift; sourceTree = "<group>"; };
+		C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
 		E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
 		EFF8C7FF82BD8D82D61D7DE0 /* ERISUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ERISUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -137,6 +139,7 @@
 		F9DEBD70583A81B14BE4150A /* ERIS */ = {
 			isa = PBXGroup;
 			children = (
+				C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */,
 				9CB74D24D3B4FCC512E32303 /* App */,
 				1D1C589ED65070065F2FAC80 /* Platform */,
 				B8D9D5B27A55884192FCCD07 /* Views */,
@@ -170,6 +173,7 @@
 			buildConfigurationList = 54A58D3B059BECCE9E284AFD /* Build configuration list for PBXNativeTarget "ERIS" */;
 			buildPhases = (
 				03076559F545176DBAC4065A /* Sources */,
+				1719FBE1AF6F943612B7A404 /* Resources */,
 				4F7B8F1CAD22E904878E36B3 /* Frameworks */,
 			);
 			buildRules = (
@@ -227,6 +231,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		1719FBE1AF6F943612B7A404 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				74DFDD6D0707CC1ED7EE68AB /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		03076559F545176DBAC4065A /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -269,7 +284,7 @@
 		4AE485FE3FD8D750DFE6D58B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Release.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -447,7 +462,7 @@
 		F18665EE9157B6822FDBF299 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Debug.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;

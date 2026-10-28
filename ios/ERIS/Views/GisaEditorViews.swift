@@ -61,6 +61,9 @@ struct SubmissionDetailView: View {
             switch step {
             case .header:
                 GisaHeaderSections(editor: editor, canEdit: canEdit)
+            case .body:
+                GisaBodySections(editor: editor, canEdit: canEdit, lookups: lookups)
+                GisaSavedValuesSection(detail: detail, step: step)
             case .gallery:
                 GisaGallerySection(detail: detail, openPDF: { Task { await openPDF() } })
             default:
@@ -149,6 +152,10 @@ enum GisaStep: Int, CaseIterable, Identifiable {
 
     static let headerKeys: Set = ["report_date", "district", "county", "route", "post_mile", "ea", "project_id",
                                   "date_incident_reported", "district_contact", "latitude", "longitude", "geometry_json"]
+    /// Body fields already editable here, so not repeated as saved values.
+    static let portedBodyKeys = Set(["distribution_code", "highway_status_cause", "highway_status_code",
+                                     "lanes_closed_count", "incident_type_description"])
+        .union(GisaForm.incidentTypeCodes.map(\.key))
     static let assessmentKeys: Set = ["record_of_event_notes", "maintenance_history_notes", "observations_notes",
                                       "geotechnical_assessment_notes", "sketchpad_notes"]
 
@@ -163,6 +170,7 @@ enum GisaStep: Int, CaseIterable, Identifiable {
         switch self {
         case .assessment: return Self.assessmentKeys.contains(key)
         case .body: return !Self.headerKeys.contains(key) && !Self.assessmentKeys.contains(key) && !key.hasSuffix("_html")
+            && !Self.portedBodyKeys.contains(key)
             && !["submission_id", "location_id", "updated_by_user_id", "revision", "created_at", "updated_at"].contains(key)
         default: return false
         }
@@ -263,6 +271,10 @@ struct GisaHeaderSections: View {
                 }
                 Text("Geometry: \(form["geometry_json"].trimmingCharacters(in: .whitespaces).isEmpty ? "None" : "Available")")
                     .font(.caption).foregroundStyle(.secondary)
+                // The Expo app opens its ArcGIS map editor from this preview; that
+                // and the Site Photo Map come with the ArcGIS Maps SDK port.
+                Text("The map editor (pin and polygon) is not on iPhone yet. Set the location with Lat/Lon or Northing/Easting below.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Button("Open in Google Maps") { if let url = form.googleMapsURL { openURL(url) } }
                 .disabled(form.googleMapsURL == nil)
@@ -318,6 +330,133 @@ struct GisaHeaderSections: View {
     }
 }
 
+// MARK: - Step 2: GISA Body
+
+struct GisaBodySections: View {
+    @Binding var editor: GisaEditor
+    let canEdit: Bool
+    let lookups: GisaLookups
+
+    private func binding(_ key: String) -> Binding<String> {
+        Binding(get: { editor.form[key] }, set: { editor.set(key, $0) })
+    }
+
+    var body: some View {
+        Section("Distribution") {
+            ChipFlow {
+                ForEach(lookups.distribution) { option in
+                    GisaChip(label: option.label, icon: "Distribution/\(option.code)",
+                             on: editor.form["distribution_code"] == option.code, enabled: canEdit) {
+                        editor.toggleDistribution(option.code)
+                    }
+                }
+            }
+        }
+
+        Section {
+            GisaTextField(label: "Cause Of Highway Status", value: binding("highway_status_cause"), editable: canEdit,
+                          error: editor.errors["highway_status_cause"])
+            if editor.showsHighwayStatusOptions {
+                ChipFlow {
+                    ForEach(lookups.highwayStatus) { option in
+                        GisaChip(label: option.label, on: editor.form["highway_status_code"] == option.code,
+                                 enabled: canEdit) { editor.toggleHighwayStatus(option.code) }
+                    }
+                }
+                if editor.asksLanesClosedCount {
+                    GisaChoiceField(label: "Lane(s) Closed Count", value: editor.form["lanes_closed_count"],
+                                    editable: canEdit, options: GisaEditor.lanesClosedCounts.map { ($0, $0) },
+                                    placeholder: "Select lanes closed", error: editor.errors["lanes_closed_count"]) {
+                        editor.set("lanes_closed_count", $0)
+                    }
+                }
+            } else {
+                Text("Enter the cause above to reveal the highway status options.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Highway Status")
+        }
+
+        Section("Incident Type") {
+            ChipFlow {
+                ForEach(GisaEditor.incidentTypeOptions) { option in
+                    GisaChip(label: option.label, on: editor.isIncidentTypeOn(option), enabled: canEdit) {
+                        editor.toggleIncidentType(option)
+                    }
+                }
+            }
+            GisaTextField(label: "Incident Type Description", value: binding("incident_type_description"),
+                          editable: canEdit, error: editor.errors["incident_type_description"], axis: .vertical)
+        }
+    }
+}
+
+/// A choice shown as a capsule that is on or off, as the Expo editor's Chip.
+struct GisaChip: View {
+    let label: String
+    var icon: String?
+    let on: Bool
+    let enabled: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                if let icon, UIImage(named: icon) != nil {
+                    Image(icon).resizable().scaledToFit().frame(width: 22, height: 22)
+                }
+                Text(label).font(.subheadline.weight(on ? .semibold : .regular))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .background(on ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled || on ? 1 : 0.6)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// Lays chips out in rows, wrapping at the edge.
+struct ChipFlow: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0,
+                      height: rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [(indices: [Int], width: CGFloat, height: CGFloat)] {
+        var rows: [(indices: [Int], width: CGFloat, height: CGFloat)] = []
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if let last = rows.last, last.width + spacing + size.width <= width {
+                rows[rows.count - 1] = (last.indices + [index], last.width + spacing + size.width, max(last.height, size.height))
+            } else {
+                rows.append(([index], size.width, size.height))
+            }
+        }
+        return rows
+    }
+}
+
 // MARK: - Steps not yet ported, and the gallery
 
 /// The saved values of a step that is not editable on iPhone yet.
@@ -327,7 +466,9 @@ struct GisaSavedValuesSection: View {
 
     var body: some View {
         Section {
-            Text("This step is being ported to iPhone. Its saved values are shown here, and saving keeps them as they are.")
+            Text(step == .body
+                 ? "The rest of this step is being ported to iPhone. Its saved values are shown below, and saving keeps them as they are."
+                 : "This step is being ported to iPhone. Its saved values are shown here, and saving keeps them as they are.")
                 .font(.callout).foregroundStyle(.secondary)
         }
         if let gisa = detail.gisa, gisa.keys.contains(where: step.showsSavedValue) {
@@ -378,6 +519,7 @@ struct GisaTextField: View {
     var editable = true
     var keyboard: UIKeyboardType = .default
     let error: String?
+    var axis: Axis = .horizontal
     var onEndEditing: (() -> Void)?
     @FocusState private var focused: Bool
 
@@ -385,7 +527,8 @@ struct GisaTextField: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             // The label sits above the field, so it is not repeated inside it.
-            TextField(label, text: $value, prompt: Text(""))
+            TextField(label, text: $value, prompt: Text(""), axis: axis)
+                .accessibilityLabel(label)
                 .keyboardType(keyboard)
                 .focused($focused)
                 .disabled(!editable)

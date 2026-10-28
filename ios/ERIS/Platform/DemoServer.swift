@@ -212,8 +212,14 @@ enum DemoData {
     ]
 
     static let lookups: [String: Any] = [
-        "distribution": [["code": "ADVANCING", "label": "Advancing"], ["code": "CONFINED", "label": "Confined"]],
-        "highway_status": [["code": "OPEN", "label": "Open"], ["code": "ONE_WAY", "label": "One-way traffic control"]],
+        // As backend/app/constants/gisa_lookups.py lists them.
+        "distribution": [["code": "ADVANCING", "label": "Advancing"], ["code": "RETROGRESSING", "label": "Retrogressing"],
+                         ["code": "ENLARGING", "label": "Enlarging"], ["code": "WIDENING", "label": "Widening"],
+                         ["code": "MOVING", "label": "Moving"], ["code": "CONFINED", "label": "Confined"]],
+        "highway_status": [["code": "OPEN", "label": "Open"], ["code": "SHOULDER_CLOSED", "label": "Shoulder Closed"],
+                           ["code": "LANES_CLOSED", "label": "Lane(s) Closed"],
+                           ["code": "ONE_WAY_CLOSED", "label": "One-way Closed"],
+                           ["code": "TWO_WAY_CLOSED", "label": "Two-way Closed"]],
         "incident_types": [["code": "SLIDE", "label": "Slide"], ["code": "HEAVING", "label": "Heaving"]],
         "actions": ["immediate": [["code": "CLOSE_LANE", "label": "Close lane"]],
                     "follow_up": [["code": "MONITOR", "label": "Monitor"]]],

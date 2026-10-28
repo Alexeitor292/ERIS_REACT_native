@@ -115,6 +115,33 @@ final class ScreenTour: XCTestCase {
         snap("gisa-location")
     }
 
+    func testGisaBodyDistributionHighwayAndIncidentType() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Body"])
+        tap(app.buttons["Widening"])
+        // The status choices wait for a cause.
+        XCTAssertTrue(app.staticTexts["Enter the cause above to reveal the highway status options."].waitForExistence(timeout: 10))
+        let cause = app.textFields["Cause Of Highway Status"]
+        tap(cause)
+        cause.typeText("Debris on the shoulder\n")
+        tap(app.buttons["Lane(s) Closed"])
+        tap(row("Lane(s) Closed Count"))
+        tap(app.buttons["2"])
+        snap("gisa-body-distribution-highway")
+        app.swipeUp()
+        tap(app.buttons["Washout"])
+        tap(app.buttons["Slide"])
+        snap("gisa-body-incident-type")
+        tap(app.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+        app.alerts.buttons["OK"].tap()
+        // After the reload the choices are still there.
+        XCTAssertTrue(app.buttons["Washout"].isSelected)
+        XCTAssertFalse(app.buttons["Slide"].isSelected)
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         tap(app.tabBars.buttons["Assessments"])

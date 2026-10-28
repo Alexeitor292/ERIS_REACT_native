@@ -140,3 +140,73 @@ final class SubmissionDescriptorTests: XCTestCase {
                                                 createdAt: "2026-10-28T09:00:00").hasPrefix("04-ALA-080-1.00 - "))
     }
 }
+
+/// Step 2: Distribution, Highway Status and Incident Type.
+final class GisaBodyTests: XCTestCase {
+    private func editor(_ gisa: String = "null", incidentTypes: String = "[]",
+                        actions: String = #"{"immediate": [], "follow_up": []}"#) throws -> GisaEditor {
+        GisaEditor(detail: try JSONDecoder().decode(SubmissionDetail.self, from: Data("""
+        {"submission": {"id": 1, "status": "DRAFT", "can_edit": true}, "gisa": \(gisa),
+         "incident_types": \(incidentTypes), "actions": \(actions)}
+        """.utf8)))
+    }
+
+    func testTheIncidentTypeListMatchesTheExpoEditor() {
+        XCTAssertEqual(GisaEditor.incidentTypeOptions.map(\.label),
+                       ["Rock Fall", "Topple", "Slide", "Spread", "Flow", "Compound", "Erosion", "Surficial Sloughing",
+                        "Scoured Toe", "Washout", "Sink Hole", "Depression", "Heaving"])
+        XCTAssertEqual(GisaEditor.incidentTypeOptions.filter { $0.key == nil }.map(\.code), ["SINK_HOLE", "DEPRESSION", "HEAVING"])
+    }
+
+    func testAnIncidentTypeTogglesInTheListAndOnItsTickBox() throws {
+        var editor = try editor()
+        let slide = try XCTUnwrap(GisaEditor.incidentTypeOptions.first { $0.code == "SLIDE" })
+        let heaving = try XCTUnwrap(GisaEditor.incidentTypeOptions.first { $0.code == "HEAVING" })
+        editor.toggleIncidentType(slide)
+        editor.toggleIncidentType(heaving)
+        XCTAssertTrue(editor.isIncidentTypeOn(slide))
+        XCTAssertEqual(editor.form["failure_slide"], "YES")
+        XCTAssertEqual(editor.listedIncidentTypes, ["SLIDE", "HEAVING"])
+        editor.toggleIncidentType(slide)
+        XCTAssertFalse(editor.isIncidentTypeOn(slide))
+        XCTAssertEqual(editor.form["failure_slide"], "NO")
+        XCTAssertEqual(editor.form.incidentTypeItems(listed: editor.listedIncidentTypes), ["HEAVING"])
+    }
+
+    func testAFlagSetOnTheServerShowsItsTypeAsOn() throws {
+        let editor = try editor(#"{"failure_topple": 1}"#)
+        XCTAssertTrue(editor.isIncidentTypeOn(GisaEditor.incidentTypeOptions[1]))
+    }
+
+    func testDistributionIsOneChoiceThatCanBeCleared() throws {
+        var editor = try editor()
+        editor.toggleDistribution("ADVANCING")
+        editor.toggleDistribution("CONFINED")
+        XCTAssertEqual(editor.form["distribution_code"], "CONFINED")
+        editor.toggleDistribution("CONFINED")
+        XCTAssertEqual(editor.form["distribution_code"], "")
+    }
+
+    func testHighwayStatusOptionsAppearOnceThereIsSomethingToSay() throws {
+        var editor = try editor()
+        XCTAssertFalse(editor.showsHighwayStatusOptions)
+        editor.set("highway_status_cause", "  ")
+        XCTAssertFalse(editor.showsHighwayStatusOptions)
+        editor.set("highway_status_cause", "Debris on the shoulder")
+        XCTAssertTrue(editor.showsHighwayStatusOptions)
+        XCTAssertTrue(try self.editor(actions: #"{"immediate": [], "follow_up": ["OPEN_HIGHWAY_TRAFFIC"]}"#).showsHighwayStatusOptions)
+        XCTAssertTrue(try self.editor(#"{"lanes_closed_count": 2}"#).showsHighwayStatusOptions)
+    }
+
+    func testALaneCountBelongsOnlyToLanesClosed() throws {
+        var editor = try editor()
+        editor.toggleHighwayStatus("LANES_CLOSED")
+        XCTAssertTrue(editor.asksLanesClosedCount)
+        editor.set("lanes_closed_count", "2")
+        editor.toggleHighwayStatus("SHOULDER_CLOSED")
+        XCTAssertEqual(editor.form["highway_status_code"], "SHOULDER_CLOSED")
+        XCTAssertEqual(editor.form["lanes_closed_count"], "")
+        editor.toggleHighwayStatus("SHOULDER_CLOSED")
+        XCTAssertEqual(editor.form["highway_status_code"], "")
+    }
+}
