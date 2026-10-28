@@ -133,13 +133,21 @@ public struct MultipartForm: Sendable {
 
     public var contentType: String { "multipart/form-data; boundary=\(boundary)" }
 
-    public init(file: Data, fieldName: String, fileName: String, mimeType: String,
+    /// `fields` are plain text parts sent before the file (for example
+    /// `capture_metadata_json`).
+    public init(file: Data, fieldName: String, fileName: String, mimeType: String, fields: [(String, String)] = [],
                 boundary: String = "ERIS-\(UUID().uuidString)") {
         self.boundary = boundary
         // Quotes and line breaks in a file name would break the header.
         let safeName = fileName.replacingOccurrences(of: "\"", with: "_")
             .replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
         var body = Data()
+        for (name, value) in fields {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
+            body.append(Data(value.utf8))
+            body.append(Data("\r\n".utf8))
+        }
         body.append(Data("--\(boundary)\r\n".utf8))
         body.append(Data("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(safeName)\"\r\n".utf8))
         body.append(Data("Content-Type: \(mimeType)\r\n\r\n".utf8))
