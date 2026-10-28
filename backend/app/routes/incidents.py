@@ -2764,7 +2764,7 @@ def list_incident_attachments(
                 "heading_reference": row["heading_reference"],
                 "location_source": row["location_source"],
                 "download_url": object_access_url(
-                    str(row["storage_bucket"] or settings.MINIO_BUCKET),
+                    str(row["storage_bucket"] or settings.S3_BUCKET),
                     str(row["storage_key"]),
                     expires_seconds=900,
                 ),
@@ -2833,7 +2833,7 @@ async def upload_incident_attachment(
         object_key=object_key,
         data=content,
         content_type=mime_type,
-        bucket=settings.MINIO_BUCKET,
+        bucket=settings.S3_BUCKET,
     )
     sha = hashlib.sha256(content).hexdigest()
 
@@ -2845,13 +2845,13 @@ async def upload_incident_attachment(
                   created_by_user_id, storage_provider, storage_bucket, storage_key,
                   file_name, mime_type, file_size_bytes, sha256, uploaded_at
                 ) VALUES (
-                  :uid, 'minio', :bucket, :key, :fname, :mime, :size, :sha, NOW()
+                  :uid, 's3', :bucket, :key, :fname, :mime, :size, :sha, NOW()
                 )
                 """
             ),
             {
                 "uid": user["id"],
-                "bucket": settings.MINIO_BUCKET,
+                "bucket": settings.S3_BUCKET,
                 "key": object_key,
                 "fname": file.filename or "incident_attachment",
                 "mime": mime_type,

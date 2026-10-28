@@ -47,7 +47,7 @@ pytestmark = pytest.mark.db
 _RUN = uuid.uuid4().hex[:8]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_MIGRATIONS_DOC = _REPO_ROOT / "docs" / "deployment.md"
+_MIGRATIONS_DOC = _REPO_ROOT / "docs" / "operations" / "compose-deployment.md"
 
 
 # ---------------------------------------------------------------------------

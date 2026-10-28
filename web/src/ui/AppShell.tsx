@@ -1,6 +1,7 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  ChevronDown,
   ClipboardCheck,
   Inbox,
   Layers,
@@ -22,6 +23,7 @@ import { useUiSettings } from "./UiSettingsContext";
 import HeaderSearch from "./HeaderSearch";
 import ProfileMenu from "./ProfileMenu";
 import { navigateWithTransition, pageRendered } from "./pageTransition";
+import { currentPageLabel, documentTitle } from "./shellModel";
 import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
 import type { UserOrg } from "../api/types";
@@ -192,6 +194,44 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
+/**
+ * Below the desktop breakpoint the navigation folds into one button naming the
+ * current page, so a phone opens straight onto the page's content. It closes
+ * itself after a choice, and with Escape.
+ */
+function MobileNavigation({ pages }: { pages: NavEntry[] }) {
+  const { pathname } = useLocation();
+  const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(false), [pathname]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  return (
+    <nav className="lg:hidden" aria-label="Main">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="eris-mobile-navigation"
+        onClick={() => setOpen((value) => !value)}
+        className="product-card flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Menu</span>
+          <span className="truncate">{currentPageLabel(pages, pathname)}</span>
+        </span>
+        <ChevronDown size={16} aria-hidden className={cn("shrink-0 text-muted transition-transform", open && "rotate-180")} />
+      </button>
+      <div id="eris-mobile-navigation" hidden={!open} className="product-card mt-2 p-3">
+        <SidebarNavigation />
+      </div>
+    </nav>
+  );
+}
 
 export default function AppShell({ title, children, workspace = false }: { title: string; children: ReactNode; workspace?: boolean }) {
   const { me, logout } = useAuth();
@@ -206,10 +246,16 @@ export default function AppShell({ title, children, workspace = false }: { title
     pageRendered();
   }, [pathname]);
 
+  // The tab names the page, so several ERIS tabs and the history stay readable.
+  useEffect(() => {
+    document.title = documentTitle(title);
+  }, [title]);
+
   const orgLine = orgIdentityLine(me?.org);
 
   return (
     <div className={cn("flex flex-col text-[var(--ink)]", workspace ? "min-h-screen lg:h-screen lg:overflow-hidden" : "min-h-screen")}>
+      <a href="#main-content" className="eris-skip-link">Skip to main content</a>
       <header className="sticky top-0 z-30 shrink-0 border-b border-[var(--line)] bg-[color:color-mix(in_oklab,var(--panel)_86%,transparent)] backdrop-blur-xl" style={{ viewTransitionName: "eris-header" }}>
         <div className="mx-auto grid h-16 w-full max-w-[1900px] grid-cols-[auto_1fr_auto] items-center gap-4 px-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6">
           <div className="flex min-w-0 items-center gap-3">
@@ -231,7 +277,7 @@ export default function AppShell({ title, children, workspace = false }: { title
       </header>
 
       <div className={cn("mx-auto flex w-full max-w-[1900px] flex-1 flex-col px-4 md:px-6 lg:flex-row", workspace ? "gap-3 py-3 lg:min-h-0 lg:gap-4" : "gap-4 py-6 lg:gap-6")}>
-        <aside className="lg:hidden"><div className="product-card p-3"><div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div><SidebarNavigation /></div></aside>
+        <MobileNavigation pages={pages} />
         <aside className={cn("hidden shrink-0 transition-[width] duration-200 ease-out lg:block", navExpanded ? "w-64" : "w-16")} style={{ viewTransitionName: "eris-nav" }}>
           <div className="product-card sticky top-[82px] p-2">
             <div className={cn("mb-3 flex items-center", navExpanded ? "justify-between px-1" : "justify-center")}>
@@ -250,7 +296,7 @@ export default function AppShell({ title, children, workspace = false }: { title
             <SidebarNavigation collapsed={!navExpanded} />
           </div>
         </aside>
-        <main className={cn("min-w-0 flex-1", workspace ? "lg:flex lg:min-h-0 lg:flex-col" : "")} style={{ viewTransitionName: "eris-page" }}>
+        <main id="main-content" tabIndex={-1} className={cn("min-w-0 flex-1 focus:outline-none", workspace ? "lg:flex lg:min-h-0 lg:flex-col" : "")} style={{ viewTransitionName: "eris-page" }}>
           <div className={workspace ? "mb-2 shrink-0" : "mb-4"}><h1 className={workspace ? "text-lg font-semibold" : "text-xl font-semibold"}>{title}</h1></div>
           <div className={cn("product-card overflow-hidden", workspace ? "lg:min-h-0 lg:flex-1" : "min-h-full")}>{children}</div>
         </main>

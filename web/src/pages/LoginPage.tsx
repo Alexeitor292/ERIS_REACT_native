@@ -5,32 +5,102 @@ import AuthGateLoading from "../auth/AuthGateLoading";
 import { useAuth } from "../auth/AuthContext";
 import { landingPathFor } from "../utils/roleModel";
 import { useSignInSplash } from "../ui/SignInSplash";
+import { appConfig } from "../config";
+import { api } from "../api/client";
+import { shouldStartSingleSignOn } from "./loginModel";
+
+type SignInMethods = { local_login_enabled: boolean; entra_enabled: boolean };
+
+// Fixed reasons the API's Entra callback sends back; never Entra's own text.
+const ENTRA_NOTICES: Record<string, string> = {
+  cancelled: "Caltrans sign-in was not completed. Try again when ready.",
+  failed: "Caltrans sign-in could not be verified. Try again; if it keeps failing, contact the ERIS administrator.",
+  not_linked: "Your Caltrans account is not linked to an active ERIS account. Ask an ERIS administrator for access.",
+  unavailable: "Caltrans sign-in is not available right now. Contact the ERIS administrator.",
+  busy: "Too many sign-in attempts from this network. Wait a minute, then sign in again.",
+};
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login, token, me, isInitializing } = useAuth();
+  const { login, signedIn, me, isInitializing } = useAuth();
   const playSplash = useSignInSplash();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
+  // The API decides which sign-in methods exist, so turning password sign-in
+  // off after handover needs no web rebuild. Until it answers (or if it cannot),
+  // the build-time settings stand.
+  const [methods, setMethods] = useState<SignInMethods>({
+    local_login_enabled: appConfig.localLoginEnabled,
+    entra_enabled: appConfig.entraEnabled,
+  });
+  const [methodsKnown, setMethodsKnown] = useState(false);
+  // Read once on arrival: why this page is showing, if it was sent here.
+  const [arrival] = useState(() => {
+    const entraReason = new URLSearchParams(window.location.search).get("entra");
+    let signedOut = false;
+    let expired = false;
     try {
-      if (sessionStorage.getItem("eris_session_expired") === "1") {
-        setNotice("Your ERIS session expired. Sign in again to continue.");
-        sessionStorage.removeItem("eris_session_expired");
-      }
+      signedOut = sessionStorage.getItem("eris_signed_out") === "1";
+      expired = sessionStorage.getItem("eris_session_expired") === "1";
+      sessionStorage.removeItem("eris_signed_out");
+      sessionStorage.removeItem("eris_session_expired");
     } catch {
       // Browser storage may be unavailable under hardened/private policies.
     }
+    return { entraReason, signedOut, expired };
+  });
+  const [redirecting, setRedirecting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<SignInMethods>("/auth/config")
+      .then((live) => {
+        if (!cancelled) setMethods({ local_login_enabled: !!live.local_login_enabled, entra_enabled: !!live.entra_enabled });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setMethodsKnown(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  if (isInitializing && token) return <AuthGateLoading />;
-  // Signed in already: on to this person's own landing. Only with the account in
-  // hand: a token alone would bounce off the landing page's role gate.
-  if (!isInitializing && token && me) return <Navigate to={me.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(me.roles)} replace />;
+  useEffect(() => {
+    if (arrival.entraReason) {
+      setNotice(ENTRA_NOTICES[arrival.entraReason] ?? ENTRA_NOTICES.failed);
+      window.history.replaceState(null, "", "/login");
+    } else if (arrival.signedOut) {
+      setNotice("You have signed out of ERIS.");
+    } else if (arrival.expired) {
+      setNotice("Your ERIS session expired. Sign in again to continue.");
+    }
+  }, [arrival]);
+
+  // Caltrans SSO-only deployments go straight to Entra, like other Caltrans
+  // web apps: on a managed Windows device Entra usually signs the person in
+  // with their dot.ca.gov account and applies MFA and Conditional Access.
+  const autoStart = shouldStartSingleSignOn({
+    methodsKnown,
+    entraEnabled: methods.entra_enabled,
+    localLoginEnabled: methods.local_login_enabled,
+    signedIn,
+    isInitializing,
+    entraReason: arrival.entraReason,
+    signedOut: arrival.signedOut,
+  });
+  useEffect(() => {
+    if (!autoStart) return;
+    setRedirecting(true);
+    window.location.assign(`${appConfig.apiBaseUrl}/auth/entra/start`);
+  }, [autoStart]);
+
+  if (isInitializing || redirecting) return <AuthGateLoading />;
+  // Signed in already: on to this person's own landing.
+  if (signedIn && me) return <Navigate to={me.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(me.roles)} replace />;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,10 +113,10 @@ export default function LoginPage() {
 
     setBusy(true);
     try {
-      const signedIn = await login(normalizedEmail, password);
+      const account = await login(normalizedEmail, password);
       // The mobile app's opening animation, over the landing page as it loads.
       playSplash();
-      navigate(signedIn.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(signedIn.roles), { replace: true });
+      navigate(account.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(account.roles), { replace: true });
     } catch (e: any) {
       setError(e?.message ?? "Sign in failed. Verify your credentials and try again.");
     } finally {
@@ -105,7 +175,8 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
+              {methods.entra_enabled ? <a href={`${appConfig.apiBaseUrl}/auth/entra/start`} className="mt-6 block rounded-md bg-[var(--brand)] px-4 py-2.5 text-center text-sm font-semibold text-white hover:brightness-95">Sign in with Caltrans Microsoft Entra</a> : null}
+              {methods.local_login_enabled ? <form className="mt-6 grid gap-4" onSubmit={onSubmit}>
                 <label className="grid gap-1.5">
                   <span className="text-xs font-semibold uppercase tracking-wide text-muted">Email</span>
                   <input
@@ -135,7 +206,7 @@ export default function LoginPage() {
                 <button type="submit" disabled={busy} className="mt-2 rounded-md bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60">
                   {busy ? "Signing in…" : "Sign in"}
                 </button>
-              </form>
+              </form> : null}
 
               <div className="mt-6 border-t border-[var(--line)] pt-4 text-xs leading-5 text-muted">
                 If you cannot access ERIS, contact your application administrator. Do not share credentials or create duplicate accounts.

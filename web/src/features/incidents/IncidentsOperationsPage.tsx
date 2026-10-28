@@ -224,6 +224,7 @@ export default function IncidentsOperationsPage() {
     <button
       type="button"
       onClick={() => setTab(key)}
+      aria-pressed={tab === key}
       className={`whitespace-nowrap px-4 py-2 text-sm font-semibold ${key !== "records" ? "border-l border-[var(--line)]" : ""} ${tab === key ? "bg-[var(--brand)] text-white" : "bg-[var(--panel)] text-[var(--ink)] hover:bg-[var(--panel-soft)]"}`}
     >
       {label}
@@ -232,19 +233,21 @@ export default function IncidentsOperationsPage() {
 
   return (
     <AppShell title="Incidents">
-      <div className="grid gap-4 p-4 md:p-5">
+      {/* minmax(0, 1fr): a wide table or tab row scrolls inside its box on a
+          phone instead of pushing the whole page sideways. */}
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-2">
           {/* "Awaiting intake" is not rendered for a viewer at all. An empty or
               disabled tab would still tell them how much untriaged work exists. */}
           {viewer ? null : (
-            <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-[var(--line)]">
+            <div role="group" aria-label="Which incidents" className="inline-flex max-w-full overflow-x-auto rounded-lg border border-[var(--line)]">
               {tabButton("records", `Incident records (${standingCounts.RECORD})`)}
               {tabButton("intake", `Awaiting intake (${standingCounts.FIELD_REPORT})`)}
               {tabButton("closed", `Closed at triage (${standingCounts.CLOSED_AT_TRIAGE})`)}
             </div>
           )}
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, county, route, or description" className="min-w-[220px] flex-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "ALL" | IncidentStatus)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, county, route, or description" aria-label="Search incidents" className="min-w-0 basis-full flex-1 sm:basis-auto sm:min-w-[220px] rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "ALL" | IncidentStatus)} aria-label="Status" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm">
             <option value="ALL">All statuses</option>
             <option value="NEW">New</option>
             <option value="IN_PROGRESS">In progress</option>

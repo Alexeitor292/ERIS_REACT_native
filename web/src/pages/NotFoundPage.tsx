@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { landingPathFor } from "../utils/roleModel";
 
 export default function NotFoundPage() {
-  const { me, token } = useAuth();
+  const { me, signedIn } = useAuth();
   // Role-aware, for the same reason the refusal surface is: offering a read-only
   // viewer "Open submissions" points them at a page they may not have.
   const landing = landingPathFor(me?.roles);
@@ -22,10 +22,10 @@ export default function NotFoundPage() {
           </p>
 
           <div className="mt-7 flex flex-wrap justify-center gap-2">
-            <Link to={token ? landing : "/login"} className="rounded-md bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95">
-              {token ? landingLabel : "Go to sign in"}
+            <Link to={signedIn ? landing : "/login"} className="rounded-md bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95">
+              {signedIn ? landingLabel : "Go to sign in"}
             </Link>
-            {token ? (
+            {signedIn ? (
               <Link to="/assessments" className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-4 py-2.5 text-sm font-semibold hover:bg-[var(--panel-soft)]">
                 Open assessments
               </Link>

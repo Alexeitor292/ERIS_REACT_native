@@ -1,0 +1,10 @@
+# Accepted vulnerability exceptions for the ERIS release gate (deploy/ci/release-gate.sh).
+# The gate fails on fixable HIGH/CRITICAL vulnerabilities and on embedded secrets.
+# Add an exception only with security approval, one ID per line, and a comment
+# giving the reason, the approver and an expiry date, for example:
+#
+#   # Not reachable: ERIS never parses untrusted XML with this library.
+#   # Approved: <name>, Caltrans security, 2026-11-02. Expires 2027-02-01.
+#   CVE-0000-00000
+#
+# Review this file at every release; remove expired entries.

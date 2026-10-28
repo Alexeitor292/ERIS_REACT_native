@@ -7,6 +7,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useFocusEffect, useLocalSearchParams, router, useNavigation, usePathname } from "expo-router";
 
 import { apiFetch, isSessionExpiredError } from "../../../src/api/client";
+import { attachmentContentUrl, attachmentImageSource, type AttachmentImageSource } from "../../../src/api/attachmentUrls";
 import { getApiBaseUrl } from "../../../src/api/baseUrl";
 import { getToken } from "../../../src/auth/tokenStore";
 import { buildTerrainGrid, fetchElevationProfile, generateSubmissionGisaPdf, getGisaLookups, getSubmission, getSubmissionGisaPdf, getSubmissionPhotoMap, notifyCoordinator as notifyCoordinatorApi, patchSubmission, replaceActions, replaceIncidentTypes, reviewSubmission, submitSubmission, uploadSubmissionAttachment, type GisaElevationProfile, type GisaRoadInventoryContext, type GisaTerrainGrid } from "../../../src/api/submissions";
@@ -1721,7 +1722,7 @@ function PavementGroundAnnotator({
   canEdit: boolean;
   busy: boolean;
   palette: AnnotationPalette;
-  imageSource?: { uri: string } | null;
+  imageSource?: AttachmentImageSource | null;
   imageName?: string | null;
   onUploadPhoto: () => void;
   setVal: (key: keyof FormState, value: string) => void;
@@ -2404,8 +2405,9 @@ export default function SubmissionDetailScreen() {
         const resp = await apiFetch<{ download_url: string }>(`/attachments/${p.id}/download-url`, { token: authToken });
         next[p.id] = resp.download_url;
       } catch {
-        // fallback to content proxy if download-url fails (e.g. offline or permission error)
-        next[p.id] = `${apiBaseUrl}/attachments/${p.id}/content?access_token=${encodeURIComponent(authToken)}`;
+        // Fall back to the API's content proxy (loaded with an Authorization
+        // header, never a token in the URL) if download-url fails.
+        next[p.id] = attachmentContentUrl(apiBaseUrl, p.id);
       }
     }));
     setPhotoUrls(next);
@@ -2446,9 +2448,8 @@ export default function SubmissionDetailScreen() {
     if (isLocalAttachmentUri(localUri)) return localUri;
     const remoteUri = photoUrls[attachmentId];
     if (remoteUri) return remoteUri;
-    const queryToken = encodeURIComponent(token || "");
-    return `${apiBaseUrl}/attachments/${attachmentId}/content?access_token=${queryToken}`;
-  }, [apiBaseUrl, localAttachmentUris, photoUrls, token]);
+    return attachmentContentUrl(apiBaseUrl, attachmentId);
+  }, [apiBaseUrl, localAttachmentUris, photoUrls]);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -4096,13 +4097,6 @@ export default function SubmissionDetailScreen() {
     if (next === "YES") setVal(impactedKey as keyof FormState, "");
   };
 
-  function remoteAttachmentUri(attachmentId: number) {
-    const remoteUri = photoUrls[attachmentId];
-    if (remoteUri) return remoteUri;
-    const queryToken = encodeURIComponent(token || "");
-    return `${apiBaseUrl}/attachments/${attachmentId}/content?access_token=${queryToken}`;
-  }
-
   function handleAttachmentPreviewError(attachmentId: number) {
     const localUri = localAttachmentUris[attachmentId];
     if (isLocalAttachmentUri(localUri)) {
@@ -4126,25 +4120,28 @@ export default function SubmissionDetailScreen() {
     setFailedPreviewIds((prev) => ({ ...prev, [attachmentId]: true }));
   }
 
-  function previewSource(photoId: number) {
-    const uri = getAttachmentUri(photoId);
-    return { uri } as const;
+  function previewSource(photoId: number): AttachmentImageSource {
+    return attachmentImageSource(getAttachmentUri(photoId), apiBaseUrl, token);
   }
 
   async function openPhotoFallback(photoId: number) {
-    const url = getAttachmentUri(photoId);
-    const remoteUrl = remoteAttachmentUri(photoId);
-    try {
-      await Linking.openURL(url);
-    } catch {
-      if (remoteUrl && remoteUrl !== url) {
-        try {
-          await Linking.openURL(remoteUrl);
-          return;
-        } catch {
-          // Fall through to the user-facing alert below.
-        }
+    const localUri = localAttachmentUris[photoId];
+    if (isLocalAttachmentUri(localUri)) {
+      try {
+        await Linking.openURL(localUri);
+        return;
+      } catch {
+        // Fall through to the server copy.
       }
+    }
+    // Another app cannot send our Authorization header, so open a freshly
+    // signed storage URL (the cached one may have expired) rather than the API.
+    try {
+      if (!token) throw new Error("Not signed in");
+      const resp = await apiFetch<{ download_url: string }>(`/attachments/${photoId}/download-url`, { token });
+      await Linking.openURL(resp.download_url);
+    } catch (err: any) {
+      if (isSessionExpiredError(err)) return;
       Alert.alert("Preview unavailable", "Could not open this image on this device.");
     }
   }
@@ -5738,7 +5735,7 @@ export default function SubmissionDetailScreen() {
                 source={
                   fullscreenPhoto.isLocal
                     ? { uri: fullscreenPhoto.uri }
-                    : { uri: fullscreenPhoto.uri, headers: { Authorization: `Bearer ${token}` } }
+                    : attachmentImageSource(fullscreenPhoto.uri, apiBaseUrl, token)
                 }
                 style={styles.fullscreenImage}
                 resizeMode="contain"

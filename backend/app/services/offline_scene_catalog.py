@@ -2,7 +2,7 @@
 Offline scene-package catalog registration (shared by the ADMIN endpoint and the
 automatic generation worker).
 
-Verifies the MinIO object (exists, size, SHA-256) and the canonical immutable key
+Verifies the S3 storage object (exists, size, SHA-256) and the canonical immutable key
 BEFORE marking a package READY, retires any prior READY version, and records
 durable object identity + provenance. Raises PackageRegistrationError (with an
 HTTP-ish status_code) on any rejection so callers can map it.
@@ -66,7 +66,7 @@ def register_ready_package(
     if not offline_scene_svc.validate_bounds(min_lat, min_lon, max_lat, max_lon):
         raise PackageRegistrationError("Invalid bounds (need min < max, within lat/lon ranges).", 422)
 
-    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    bucket = settings.S3_OFFLINE_SCENES_BUCKET
     canonical_key = offline_scene_svc.make_scene_object_key(submission_id, package_version, package_format)
     if object_key is not None and object_key != canonical_key:
         raise PackageRegistrationError(
@@ -94,7 +94,7 @@ def register_ready_package(
     # HEAD: exists + size.
     st = stat_object(object_key=key, bucket=bucket)
     if st is None:
-        raise PackageRegistrationError(f"MinIO object not found: {bucket}/{key}", 404)
+        raise PackageRegistrationError(f"S3 storage object not found: {bucket}/{key}", 404)
     if int(st["size"]) != int(size_bytes):
         raise PackageRegistrationError(
             f"Object size mismatch: stored {st['size']} bytes != expected {size_bytes}.", 409

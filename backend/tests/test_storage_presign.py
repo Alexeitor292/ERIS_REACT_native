@@ -4,7 +4,7 @@ Regression for the real-device download failure: presigning against the internal
 host and rewriting the URL host afterward invalidates the SigV4 signature (the
 Host is signed), so the public proxy returns 403 and the client writes a tiny
 error body ("got 535 bytes, expected 670547"). The URL must be signed DIRECTLY
-against the externally reachable host (MINIO_PUBLIC_ENDPOINT).
+against the externally reachable host (S3_PUBLIC_ENDPOINT).
 
 minio-py generates presigned URLs locally (no network for non-AWS hosts), so these
 run in the non-DB suite.
@@ -29,10 +29,10 @@ def _presign():
 
 
 def test_presign_signs_against_public_endpoint(monkeypatch):
-    monkeypatch.setattr(settings, "MINIO_ENDPOINT", "http://minio:9000")
-    monkeypatch.setattr(settings, "MINIO_PUBLIC_ENDPOINT", "https://files.camposlabs.org")
-    monkeypatch.setattr(settings, "MINIO_ACCESS_KEY", "minioadmin")
-    monkeypatch.setattr(settings, "MINIO_SECRET_KEY", "minio_root_password")
+    monkeypatch.setattr(settings, "S3_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr(settings, "S3_PUBLIC_ENDPOINT", "https://files.camposlabs.org")
+    monkeypatch.setattr(settings, "S3_ACCESS_KEY", "minioadmin")
+    monkeypatch.setattr(settings, "S3_SECRET_KEY", "minio_root_password")
 
     url = _presign()
     parts = urlparse(url)
@@ -48,10 +48,10 @@ def test_presign_signs_against_public_endpoint(monkeypatch):
 
 
 def test_presign_falls_back_to_internal_endpoint_when_no_public(monkeypatch):
-    monkeypatch.setattr(settings, "MINIO_ENDPOINT", "http://minio:9000")
-    monkeypatch.setattr(settings, "MINIO_PUBLIC_ENDPOINT", None)
-    monkeypatch.setattr(settings, "MINIO_ACCESS_KEY", "minioadmin")
-    monkeypatch.setattr(settings, "MINIO_SECRET_KEY", "minio_root_password")
+    monkeypatch.setattr(settings, "S3_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr(settings, "S3_PUBLIC_ENDPOINT", None)
+    monkeypatch.setattr(settings, "S3_ACCESS_KEY", "minioadmin")
+    monkeypatch.setattr(settings, "S3_SECRET_KEY", "minio_root_password")
 
     url = _presign()
     parts = urlparse(url)
@@ -62,8 +62,8 @@ def test_presign_falls_back_to_internal_endpoint_when_no_public(monkeypatch):
 
 def test_presign_preserves_https_public_endpoint(monkeypatch):
     # An empty-string public endpoint is treated as unset (fallback to internal).
-    monkeypatch.setattr(settings, "MINIO_ENDPOINT", "http://minio:9000")
-    monkeypatch.setattr(settings, "MINIO_PUBLIC_ENDPOINT", "   ")
-    monkeypatch.setattr(settings, "MINIO_ACCESS_KEY", "minioadmin")
-    monkeypatch.setattr(settings, "MINIO_SECRET_KEY", "minio_root_password")
+    monkeypatch.setattr(settings, "S3_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr(settings, "S3_PUBLIC_ENDPOINT", "   ")
+    monkeypatch.setattr(settings, "S3_ACCESS_KEY", "minioadmin")
+    monkeypatch.setattr(settings, "S3_SECRET_KEY", "minio_root_password")
     assert urlparse(_presign()).netloc == "minio:9000"

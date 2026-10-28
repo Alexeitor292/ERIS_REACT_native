@@ -22,7 +22,7 @@ from ..db import get_db
 from ..deps import require_roles
 from ..roles import ALL_ROLE_NAMES, is_public_only
 from ..services import maintenance_workflows
-from ..services import notification_feed
+from ..services import apns, notification_feed
 
 router = APIRouter(tags=["notifications"])
 
@@ -67,6 +67,9 @@ def mark_read(payload: ReadIn, db: Session = Depends(get_db), user=Depends(notif
 
 @router.post("/notifications/devices")
 def register_device(payload: DeviceIn, db: Session = Depends(get_db), user=Depends(notification_user)) -> dict[str, bool]:
+    platform = (payload.platform or "").strip().lower()
+    if platform in apns.PLATFORMS and not apns.DEVICE_TOKEN.match(payload.token.strip()):
+        raise HTTPException(status_code=422, detail="An APNs device token is 64+ hexadecimal characters")
     # A phone belongs to whoever signed in on it last.
     db.execute(
         text(

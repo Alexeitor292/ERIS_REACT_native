@@ -1,7 +1,7 @@
 """Road inventory mobile package generation service.
 
 Generates a gzip-compressed JSON package for a published road inventory dataset
-and stores it in MinIO. One json_gz package row per dataset is maintained in
+and stores it in S3 storage. One json_gz package row per dataset is maintained in
 road_inventory_packages via upsert.
 
 Schema v2 extends the existing road-segment snapshot with a Caltrans SHN

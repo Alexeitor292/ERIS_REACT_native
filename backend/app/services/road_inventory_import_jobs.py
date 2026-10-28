@@ -118,7 +118,7 @@ def run_import_job(job_uuid: str) -> None:
         if not job:
             return
 
-        # Fetch raw Excel from MinIO
+        # Fetch raw Excel from S3 storage
         try:
             file_bytes, _ = get_object_bytes(
                 object_key=job["storage_key"],

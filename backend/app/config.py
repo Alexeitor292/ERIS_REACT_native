@@ -34,27 +34,54 @@ class Settings(BaseSettings):
     DB_USER: str = Field(default="eris_user")
     DB_PASS: str  # REQUIRED
 
-    # MinIO (keys required)
-    MINIO_ENDPOINT: str = Field(default="http://localhost:9000")
-    MINIO_BUCKET: str = Field(default="eris-uploads")
+    # S3-compatible object storage (SeaweedFS in the bundled stack)
+    S3_ENDPOINT: str = Field(default="http://127.0.0.1:9800")
+    S3_BUCKET: str = Field(default="eris-uploads")
     # One file uploaded to a form (photo, video or document). Cloudflare refuses requests over 100 MB.
     MAX_UPLOAD_MB: int = Field(default=95, ge=1)
-    MINIO_ACCESS_KEY: str = Field(default="minioadmin", validation_alias="MINIO_ROOT_USER")
-    MINIO_SECRET_KEY: str = Field(default="minio_root_password", validation_alias="MINIO_ROOT_PASSWORD")
-    MINIO_PUBLIC_ENDPOINT: str | None = Field(default=None)
-    # Region used when GENERATING presigned URLs. Set explicitly (MinIO's default
+    S3_ACCESS_KEY: str = Field(min_length=1)
+    S3_SECRET_KEY: str = Field(min_length=1)
+    S3_PUBLIC_ENDPOINT: str | None = Field(default=None)
+    # Region used when GENERATING presigned URLs. Set explicitly (S3's default
     # is us-east-1) so presigning is purely local — it must NOT round-trip a
     # GetBucketLocation call to the public endpoint at sign time. Override only if
-    # the MinIO server is configured with a non-default site region.
-    MINIO_REGION: str = Field(default="us-east-1")
-    # "presigned" (default): return MinIO presigned GET URLs.
-    # "public": return deterministic direct object URLs via MINIO_PUBLIC_ENDPOINT.
+    # the S3 server is configured with a non-default site region.
+    S3_REGION: str = Field(default="us-east-1")
+    # "presigned" (default): return S3 presigned GET URLs.
+    # "public": return deterministic direct object URLs via S3_PUBLIC_ENDPOINT.
     STORAGE_URL_MODE: str = Field(default="presigned")
 
-    # JWT (required)
+    # Server signing key (required): signs the Entra sign-in state cookie and
+    # derives each session's CSRF token. Sessions themselves are random
+    # server-side records (app/sessions.py), not signed tokens.
     JWT_SECRET: str  # REQUIRED
-    JWT_ALG: str = Field(default="HS256")
-    JWT_EXPIRES_MINUTES: int = Field(default=120)
+    # NIST SP 800-63B AAL2: reauthenticate after 30 minutes idle and 12 hours
+    # in total. With Entra single sign-on a reauthentication is usually silent.
+    SESSION_IDLE_MINUTES: int = Field(default=30)
+    SESSION_ABSOLUTE_MINUTES: int = Field(default=720)
+    # Sign-in requests one client address may make per minute (app/rate_limit.py);
+    # 0 turns the limit off. One Entra sign-in is two requests (start, callback).
+    AUTH_RATE_LIMIT_PER_MINUTE: int = Field(default=30, ge=0)
+    # Proxies in front of the API that append to X-Forwarded-For: 1 = the pod's
+    # nginx only (development, a gateway that does not forward the client
+    # address), 2 = the Caltrans TLS gateway + nginx. 0 ignores the header.
+    TRUSTED_PROXY_HOPS: int = Field(default=1, ge=0, le=5)
+    LOCAL_LOGIN_ENABLED: bool = Field(default=True)
+    ENTRA_ENABLED: bool = Field(default=False)
+    ENTRA_AUTHORITY_HOST: str = Field(default="login.microsoftonline.com")
+    ENTRA_TENANT_ID: str | None = Field(default=None)
+    ENTRA_CLIENT_ID: str | None = Field(default=None)
+    ENTRA_CLIENT_SECRET: str | None = Field(default=None)
+    ENTRA_REDIRECT_URI: str | None = Field(default=None)
+    # Certificate credential (PEM files; the certificate is uploaded to the app
+    # registration). Required in production; a client secret is accepted only
+    # outside ENV=prod.
+    ENTRA_CLIENT_CERT_FILE: str | None = Field(default=None)
+    ENTRA_CLIENT_KEY_FILE: str | None = Field(default=None)
+    # Mobile: a separate public client registration, which requests this ERIS
+    # API scope (exposed by the web app registration) through the system browser.
+    ENTRA_MOBILE_CLIENT_ID: str | None = Field(default=None)
+    ENTRA_API_SCOPE: str | None = Field(default=None)
 
     # PUSH NOTIFICATIONS to the ERIS mobile app go through Expo's push service
     # (https://exp.host). Off unless EXPO_PUSH_ENABLED=true: the feed itself works
@@ -64,6 +91,15 @@ class Settings(BaseSettings):
     EXPO_PUSH_ENABLED: bool = Field(default=False)
     EXPO_ACCESS_TOKEN: str | None = Field(default=None)
     EXPO_PUSH_URL: str = Field(default="https://exp.host/--/api/v2/push/send")
+    # Native iOS app: Apple Push Notification service with token-based auth.
+    # The .p8 auth key from the Caltrans Apple developer account goes in the
+    # private secrets folder (APNS_KEY_FILE=/run/secrets/eris/apns-auth-key.p8).
+    APNS_ENABLED: bool = Field(default=False)
+    APNS_KEY_FILE: str | None = Field(default=None)
+    APNS_KEY_ID: str | None = Field(default=None)
+    APNS_TEAM_ID: str | None = Field(default=None)
+    # The app's bundle identifier.
+    APNS_TOPIC: str | None = Field(default=None)
 
     # --- Outbound email for the incident-notification outbox (design §6.4) -----
     # EMAIL IS DISABLED WHENEVER SMTP_HOST IS UNSET — the dev and CI default, and
@@ -123,12 +159,12 @@ class Settings(BaseSettings):
     ARCGIS_LICENSE_EXPIRES_AT: str | None = Field(default=None)
     ARCGIS_MMPK_URL: str | None = Field(default=None)
     ARCGIS_CONFIG_OFFLINE_TTL_HOURS: int = Field(default=168)
-    # Private MinIO bucket holding operator-authored offline 3D scene packages
+    # Private S3 bucket holding operator-authored offline 3D scene packages
     # (.mspk). Separate from the uploads bucket; never made anonymous/public.
     # Availability is decided by the catalog table + a live object HEAD, NOT by a
-    # base-URL string. Mobile never receives MinIO credentials — it gets a
+    # base-URL string. Mobile never receives S3 credentials — it gets a
     # short-lived presigned URL from the protected download endpoint.
-    MINIO_OFFLINE_SCENES_BUCKET: str = Field(default="eris-offline-scenes")
+    S3_OFFLINE_SCENES_BUCKET: str = Field(default="eris-offline-scenes")
     OFFLINE_SCENE_DOWNLOAD_TTL_SECONDS: int = Field(default=900)
     # --- Automatic offline 3D package-generation pipeline (worker) ---
     OFFLINE_SCENE_WORKER_POLL_SECONDS: int = Field(default=5)
@@ -138,10 +174,10 @@ class Settings(BaseSettings):
     # double-claim. There is deliberately no in-process concurrency knob (a dead
     # setting that silently controls nothing). Default posture is a single worker.
     OFFLINE_SCENE_JOB_STALE_SECONDS: int = Field(default=900)
-    # Production posture. FALSE by default and in prod compose. When FALSE, MinIO
+    # Production posture. FALSE by default and in prod compose. When FALSE, S3
     # offline-bucket posture problems (missing bucket, anonymous access, no
     # versioning) FAIL CLOSED instead of warning; when TRUE (local/dev) they warn
-    # so a laptop run without a fully-provisioned MinIO can still iterate.
+    # so a laptop run without a fully-provisioned S3 server can still iterate.
     OFFLINE_SCENE_DEV_MODE: bool = Field(default=False)
     # Single authoritative AOI ceiling. Enforced identically at the generate
     # endpoint, job creation, AND worker execution (see offline_scene.clamp_radius_m).
@@ -407,6 +443,30 @@ class Settings(BaseSettings):
                 "SMTP_SSL and SMTP_STARTTLS are mutually exclusive: set SMTP_STARTTLS=false "
                 "to use implicit TLS (port 465), or SMTP_SSL=false to upgrade with STARTTLS."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_production_session(self):
+        # Production refuses to start on a guessable signing key or an
+        # unbounded session rather than discovering it in a security review.
+        if self.ENV.strip().lower() != "prod":
+            return self
+        secret = self.JWT_SECRET or ""
+        if len(secret) < 32 or "CHANGE_ME" in secret:
+            raise ValueError("ENV=prod requires JWT_SECRET of at least 32 random characters")
+        if not 5 <= self.SESSION_ABSOLUTE_MINUTES <= 720:
+            raise ValueError("ENV=prod requires SESSION_ABSOLUTE_MINUTES between 5 and 720")
+        if not 5 <= self.SESSION_IDLE_MINUTES <= self.SESSION_ABSOLUTE_MINUTES:
+            raise ValueError("ENV=prod requires SESSION_IDLE_MINUTES between 5 and SESSION_ABSOLUTE_MINUTES")
+        if not self.WEB_BASE_URL.lower().startswith("https://"):
+            raise ValueError("ENV=prod requires an https:// WEB_BASE_URL (session cookies are Secure)")
+        if self.APNS_ENABLED and not (self.APNS_KEY_FILE and self.APNS_KEY_ID and self.APNS_TEAM_ID and self.APNS_TOPIC):
+            raise ValueError("APNS_ENABLED requires APNS_KEY_FILE, APNS_KEY_ID, APNS_TEAM_ID and APNS_TOPIC")
+        if self.ENTRA_ENABLED:
+            if not (self.ENTRA_CLIENT_CERT_FILE and self.ENTRA_CLIENT_KEY_FILE):
+                raise ValueError("ENV=prod with Entra requires ENTRA_CLIENT_CERT_FILE and ENTRA_CLIENT_KEY_FILE")
+            if self.ENTRA_CLIENT_SECRET:
+                raise ValueError("ENV=prod uses the Entra certificate credential: remove ENTRA_CLIENT_SECRET")
         return self
 
     def cors_origins_list(self) -> list[str]:

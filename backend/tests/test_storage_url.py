@@ -3,7 +3,7 @@ No-DB tests for storage URL generation helpers.
 
 Covers:
   - object_public_url() builds the correct direct URL
-  - object_public_url() raises when MINIO_PUBLIC_ENDPOINT is missing
+  - object_public_url() raises when S3_PUBLIC_ENDPOINT is missing
   - object_access_url() routes to presign_get in presigned mode
   - object_access_url() routes to object_public_url in public mode
   - /attachments/{id}/download-url response shape (no real DB required; 401 expected)
@@ -17,7 +17,7 @@ class TestObjectPublicUrl:
         from app import config
         from app.storage import object_public_url
 
-        with patch.object(config.settings, "MINIO_PUBLIC_ENDPOINT", "http://10.0.0.1:9800"):
+        with patch.object(config.settings, "S3_PUBLIC_ENDPOINT", "http://10.0.0.1:9800"):
             url = object_public_url("eris-uploads", "uploads/abc123.jpg")
 
         assert url == "http://10.0.0.1:9800/eris-uploads/uploads/abc123.jpg"
@@ -26,7 +26,7 @@ class TestObjectPublicUrl:
         from app import config
         from app.storage import object_public_url
 
-        with patch.object(config.settings, "MINIO_PUBLIC_ENDPOINT", "http://10.0.0.1:9800/"):
+        with patch.object(config.settings, "S3_PUBLIC_ENDPOINT", "http://10.0.0.1:9800/"):
             url = object_public_url("eris-uploads", "uploads/abc123.jpg")
 
         assert url == "http://10.0.0.1:9800/eris-uploads/uploads/abc123.jpg"
@@ -35,7 +35,7 @@ class TestObjectPublicUrl:
         from app import config
         from app.storage import object_public_url
 
-        with patch.object(config.settings, "MINIO_PUBLIC_ENDPOINT", "http://10.0.0.1:9800"):
+        with patch.object(config.settings, "S3_PUBLIC_ENDPOINT", "http://10.0.0.1:9800"):
             url = object_public_url("eris-uploads", "/uploads/abc123.jpg")
 
         assert url == "http://10.0.0.1:9800/eris-uploads/uploads/abc123.jpg"
@@ -44,16 +44,16 @@ class TestObjectPublicUrl:
         from app import config
         from app.storage import object_public_url
 
-        with patch.object(config.settings, "MINIO_PUBLIC_ENDPOINT", None):
-            with pytest.raises(RuntimeError, match="MINIO_PUBLIC_ENDPOINT"):
+        with patch.object(config.settings, "S3_PUBLIC_ENDPOINT", None):
+            with pytest.raises(RuntimeError, match="S3_PUBLIC_ENDPOINT"):
                 object_public_url("eris-uploads", "uploads/abc123.jpg")
 
     def test_raises_when_endpoint_empty_string(self):
         from app import config
         from app.storage import object_public_url
 
-        with patch.object(config.settings, "MINIO_PUBLIC_ENDPOINT", ""):
-            with pytest.raises(RuntimeError, match="MINIO_PUBLIC_ENDPOINT"):
+        with patch.object(config.settings, "S3_PUBLIC_ENDPOINT", ""):
+            with pytest.raises(RuntimeError, match="S3_PUBLIC_ENDPOINT"):
                 object_public_url("eris-uploads", "uploads/abc123.jpg")
 
 
@@ -72,7 +72,7 @@ class TestObjectAccessUrl:
         from app import config, storage
 
         with patch.object(config.settings, "STORAGE_URL_MODE", "public"):
-            with patch.object(config.settings, "MINIO_PUBLIC_ENDPOINT", "http://10.0.0.1:9800"):
+            with patch.object(config.settings, "S3_PUBLIC_ENDPOINT", "http://10.0.0.1:9800"):
                 url = storage.object_access_url("my-bucket", "uploads/key.jpg", expires_seconds=600)
 
         assert url == "http://10.0.0.1:9800/my-bucket/uploads/key.jpg"
@@ -81,8 +81,8 @@ class TestObjectAccessUrl:
         from app import config, storage
 
         with patch.object(config.settings, "STORAGE_URL_MODE", "public"):
-            with patch.object(config.settings, "MINIO_PUBLIC_ENDPOINT", None):
-                with pytest.raises(RuntimeError, match="MINIO_PUBLIC_ENDPOINT"):
+            with patch.object(config.settings, "S3_PUBLIC_ENDPOINT", None):
+                with pytest.raises(RuntimeError, match="S3_PUBLIC_ENDPOINT"):
                     storage.object_access_url("my-bucket", "uploads/key.jpg")
 
     def test_default_mode_is_presigned(self):
@@ -131,7 +131,7 @@ class TestEnsureBucketExists:
 
         with patch("app.storage._client") as mk:
             mk.return_value.bucket_exists.side_effect = s3err
-            with pytest.raises(RuntimeError, match="MinIO ensure_bucket_exists failed"):
+            with pytest.raises(RuntimeError, match="S3 storage ensure_bucket_exists failed"):
                 ensure_bucket_exists("road-inventory")
 
     def test_s3error_on_make_bucket_raises_runtime_error(self):
@@ -149,5 +149,5 @@ class TestEnsureBucketExists:
         with patch("app.storage._client") as mk:
             mk.return_value.bucket_exists.return_value = False
             mk.return_value.make_bucket.side_effect = s3err
-            with pytest.raises(RuntimeError, match="MinIO ensure_bucket_exists failed"):
+            with pytest.raises(RuntimeError, match="S3 storage ensure_bucket_exists failed"):
                 ensure_bucket_exists("road-inventory")

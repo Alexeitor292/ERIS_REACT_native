@@ -196,7 +196,7 @@ export default function OrganizationPage() {
         {error ? <div role="alert" className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
         {notice ? <div role="status" className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div> : null}
 
-        {tab === "maintenance" && <DistrictWorkflows onPublished={() => { void getMaintenance().then(setMaintenance); }} />}
+        {tab === "maintenance" && <DistrictWorkflows maintenance={maintenance} onPublished={() => { void getMaintenance().then(setMaintenance); }} />}
         {tab === "offices" ? (
           <>
             {offices.length ? (

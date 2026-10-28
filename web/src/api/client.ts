@@ -1,4 +1,4 @@
-import { getToken, clearToken } from "../auth/token";
+import { csrfHeaders } from "../auth/token";
 import { appConfig } from "../config";
 
 const API_BASE = appConfig.apiBaseUrl;
@@ -18,17 +18,16 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
-  const token = getToken();
-
   const headers = new Headers(init.headers || {});
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   if (!headers.has("Content-Type") && init.body && !isFormData) headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  // The session travels in its HttpOnly cookie; writes also carry its CSRF token.
+  for (const [name, value] of Object.entries(csrfHeaders(init.method))) headers.set(name, value);
 
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetch(url, { ...init, headers, credentials: "same-origin" });
 
-  if (res.status === 401 && normalizedPath !== "/auth/login") {
-    clearToken();
+  // /auth/me is how the app asks "am I signed in?": a 401 there is an answer, not an expiry.
+  if (res.status === 401 && normalizedPath !== "/auth/login" && normalizedPath !== "/auth/me") {
     try {
       sessionStorage.setItem("eris_session_expired", "1");
     } catch {

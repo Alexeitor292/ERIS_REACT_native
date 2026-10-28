@@ -23,12 +23,9 @@ Schema only; no sign-in flow is switched on here.
     change and must never identify anyone. One Entra identity per account, and
     one account per Entra identity.
 
-The intended flow, for when it is built: an administrator creates the account
-(email, name, roles, org placement) — with or without a password. At the
-person's first Entra sign-in ERIS validates the ID token for the configured
-tenant, finds the pre-created account by its verified email, records the
-tenant and object ID here, and from then on matches on those alone. A person
-Entra knows but no administrator has created gets no ERIS access.
+The implemented flow requires an administrator to prelink the tenant and
+object ID. Entra's email claim is never an identity key. A person Entra knows
+but no administrator has created gets no ERIS access.
 """
 
 from alembic import op

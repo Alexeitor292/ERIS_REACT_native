@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
+import EntraCompletePage from "./pages/EntraCompletePage";
 import SubmissionsPage from "./pages/SubmissionsPage";
 import SubmissionDetailPage from "./pages/SubmissionDetailPage";
 import SubmissionPhotoEvidencePage from "./pages/SubmissionPhotoEvidencePage";
@@ -56,6 +57,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/entra/complete" element={<EntraCompletePage />} />
           <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="/maintenance-work" element={<ProtectedRoute><MaintenanceWorkPage /></ProtectedRoute>} />
           <Route

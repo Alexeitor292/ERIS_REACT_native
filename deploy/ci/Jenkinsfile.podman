@@ -1,0 +1,181 @@
+// Jenkins agent needs Linux, Podman and access to the approved Harbor registry.
+// Supply chain: every one of the five images is scanned (SBOM + vulnerability and
+// secret gate), signed by digest with the Caltrans cosign key, and its SBOM is
+// attached as a signed attestation. A failed gate stops the release before push.
+pipeline {
+  agent any
+  options { timestamps(); disableConcurrentBuilds() }
+  parameters {
+    string(name: 'HARBOR_HOST', defaultValue: 'harbor.example.gov', description: 'Approved Harbor hostname')
+    string(name: 'HARBOR_PROJECT', defaultValue: 'eris', description: 'Harbor project')
+    string(name: 'RELEASE_TAG', defaultValue: '', description: 'Immutable release tag; blank uses the Jenkins build number')
+    string(name: 'MARIADB_SOURCE', defaultValue: 'harbor.example.gov/eris/mariadb:11', description: 'IT-approved MariaDB mirror in Harbor (scanned and signed with the release)')
+    string(name: 'SEAWEEDFS_SOURCE', defaultValue: 'harbor.example.gov/eris/seaweedfs:4.50', description: 'IT-approved SeaweedFS mirror in Harbor (scanned and signed with the release)')
+    string(name: 'TRIVY_IMAGE', defaultValue: 'docker.io/aquasec/trivy:0.58.1', description: 'Scanner image; mirror into Harbor and pin by digest')
+    string(name: 'COSIGN_IMAGE', defaultValue: 'ghcr.io/sigstore/cosign/cosign:v2.4.1', description: 'Signing image; mirror into Harbor and pin by digest')
+    string(name: 'TRIVY_DB_REPOSITORY', defaultValue: '', description: 'Harbor mirror of the Trivy vulnerability database (blank: Trivy default)')
+    string(name: 'TRIVY_SEVERITY', defaultValue: 'HIGH,CRITICAL', description: 'Fixable severities that fail the gate')
+    choice(name: 'DEPLOY_TO', choices: ['none', 'staging', 'staging-then-production'], description: 'After publishing: release to staging, then (after approval) the same digests to production')
+    string(name: 'STAGING_HOST', defaultValue: '', description: 'ERIS staging host (SSH, service account with deploy-hook.sh forced command)')
+    string(name: 'PRODUCTION_HOST', defaultValue: '', description: 'ERIS production host')
+    string(name: 'PRODUCTION_APPROVERS', defaultValue: 'eris-release-approvers', description: 'Jenkins users/groups allowed to approve a production release')
+    booleanParam(name: 'ENTRA_ENABLED', defaultValue: true, description: 'Fallback only: the web asks the API (/api/auth/config) which sign-in methods are on')
+    booleanParam(name: 'LOCAL_LOGIN_ENABLED', defaultValue: false, description: 'Fallback only: the web asks the API (/api/auth/config) which sign-in methods are on')
+  }
+  environment {
+    TRIVY_CACHE_DIR = "${WORKSPACE}/.cache/trivy"
+    RELEASE_DIR = "${WORKSPACE}/release"
+  }
+  stages {
+    stage('Validate') {
+      steps {
+        sh 'test -f backend/Dockerfile && test -f web/Dockerfile && test -f deploy/podman/eris-pod.sh'
+        sh 'for script in deploy/podman/*.sh deploy/podman/tests/*.sh deploy/ci/*.sh deploy/ci/tests/*.sh; do bash -n "$script"; done'
+        // Deployment and release-gate scripts against stub podman/curl.
+        sh '''
+          set -eu
+          bash deploy/podman/tests/test-eris-pod.sh
+          bash deploy/podman/tests/test-verify-rehearsal.sh
+          bash deploy/ci/tests/test-release-gate.sh
+        '''
+      }
+    }
+    stage('Build') {
+      steps {
+        script {
+          env.ERIS_TAG = params.RELEASE_TAG.trim() ?: "build-${env.BUILD_NUMBER}"
+          if (!(env.ERIS_TAG ==~ /[A-Za-z0-9_.-]+/)) error('Invalid release tag')
+          env.ERIS_REPO = "${params.HARBOR_HOST}/${params.HARBOR_PROJECT}"
+          env.ERIS_SOURCE_REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+        }
+        sh '''
+          set -eu
+          labels="--label org.opencontainers.image.revision=$ERIS_SOURCE_REVISION --label org.opencontainers.image.version=$ERIS_TAG"
+          podman build $labels -t "$ERIS_REPO/api:$ERIS_TAG" backend
+          podman build $labels -f backend/Dockerfile.worker -t "$ERIS_REPO/worker:$ERIS_TAG" backend
+          bash deploy/podman/build-web.sh "$ERIS_REPO/web:$ERIS_TAG" \
+            "$ENTRA_ENABLED" "$LOCAL_LOGIN_ENABLED"
+          podman run --rm --entrypoint python "$ERIS_REPO/api:$ERIS_TAG" -m compileall -q app
+        '''
+      }
+    }
+    stage('Backend security checks') {
+      steps {
+        sh '''
+          set -eu
+          podman run --rm --network none \
+            -e DB_PASS=ci_placeholder -e JWT_SECRET=ci_placeholder_secret \
+            -e S3_ACCESS_KEY=ci_s3_access -e S3_SECRET_KEY=ci_s3_secret \
+            -v "$WORKSPACE/backend/tests:/app/tests:ro,Z" \
+            "$ERIS_REPO/api:$ERIS_TAG" \
+            python -m pytest tests/test_entra_oidc.py tests/test_route_guards.py \
+              tests/test_session_security.py tests/test_admin_handover.py \
+              tests/test_entra_certificate_and_mobile.py tests/test_apns_push.py tests/test_rate_limit.py -q
+        '''
+      }
+    }
+    stage('SBOM and vulnerability gate') {
+      steps {
+        // Before anything is pushed: a failure here publishes nothing.
+        sh '''
+          set -eu
+          rm -rf "$RELEASE_DIR" && mkdir -p "$RELEASE_DIR/sbom"
+          for image in api worker web; do
+            bash deploy/ci/release-gate.sh scan "$ERIS_REPO/$image:$ERIS_TAG" "$image" "$RELEASE_DIR/sbom"
+          done
+        '''
+      }
+    }
+    stage('Publish, sign and attest') {
+      steps {
+        withCredentials([
+          usernamePassword(credentialsId: 'harbor-eris-robot', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASS'),
+          file(credentialsId: 'eris-cosign-key', variable: 'COSIGN_KEY_FILE'),
+          string(credentialsId: 'eris-cosign-password', variable: 'COSIGN_PASSWORD')
+        ]) {
+          sh '''
+            set -eu
+            export REGISTRY_AUTH_FILE="$(mktemp -d)/auth.json"
+            trap 'podman logout --authfile "$REGISTRY_AUTH_FILE" "$HARBOR_HOST" >/dev/null 2>&1 || true; rm -f "$REGISTRY_AUTH_FILE"' EXIT
+            printf '%s' "$HARBOR_PASS" | podman login --authfile "$REGISTRY_AUTH_FILE" "$HARBOR_HOST" \
+              --username "$HARBOR_USER" --password-stdin
+
+            # The IT-approved third-party mirrors go through the same gate.
+            for pair in "mariadb=$MARIADB_SOURCE" "seaweedfs=$SEAWEEDFS_SOURCE"; do
+              name="${pair%%=*}" source="${pair#*=}"
+              podman pull --authfile "$REGISTRY_AUTH_FILE" "$source"
+              bash deploy/ci/release-gate.sh scan "$source" "$name" "$RELEASE_DIR/sbom"
+              echo "${source%:*}@$(podman image inspect --format '{{.Digest}}' "$source")" > "$RELEASE_DIR/$name.ref"
+            done
+
+            # Record the digest Harbor stored, so hosts pin and sign exactly these bytes.
+            for image in api worker web; do
+              podman push --authfile "$REGISTRY_AUTH_FILE" --digestfile "$RELEASE_DIR/$image.digest" "$ERIS_REPO/$image:$ERIS_TAG"
+              echo "$ERIS_REPO/$image@$(cat "$RELEASE_DIR/$image.digest")" > "$RELEASE_DIR/$image.ref"
+            done
+
+            bash deploy/ci/release-gate.sh public-key "$RELEASE_DIR/cosign.pub"
+            for name in api worker web mariadb seaweedfs; do
+              ref="$(cat "$RELEASE_DIR/$name.ref")"
+              bash deploy/ci/release-gate.sh sign "$ref" "$RELEASE_DIR/sbom/$name.cdx.json"
+              bash deploy/ci/release-gate.sh verify "$ref" "$RELEASE_DIR/cosign.pub"
+            done
+
+            {
+              echo "# ERIS $ERIS_TAG built from $ERIS_SOURCE_REVISION; all five images scanned,"
+              echo "# signed and SBOM-attested. Copy into images.env after IT approval."
+              echo "ERIS_API_IMAGE=$(cat "$RELEASE_DIR/api.ref")"
+              echo "ERIS_WORKER_IMAGE=$(cat "$RELEASE_DIR/worker.ref")"
+              echo "ERIS_WEB_IMAGE=$(cat "$RELEASE_DIR/web.ref")"
+              echo "ERIS_DB_IMAGE=$(cat "$RELEASE_DIR/mariadb.ref")"
+              echo "ERIS_STORAGE_IMAGE=$(cat "$RELEASE_DIR/seaweedfs.ref")"
+              echo "ERIS_REQUIRE_DIGESTS=true"
+            } > "$RELEASE_DIR/release-images.env"
+          '''
+        }
+      }
+    }
+    stage('Deploy to staging') {
+      when { expression { params.DEPLOY_TO != 'none' } }
+      steps {
+        deployRelease('staging', params.STAGING_HOST)
+      }
+    }
+    stage('Deploy to production') {
+      when { expression { params.DEPLOY_TO == 'staging-then-production' } }
+      steps {
+        // The digests just proven in staging, after a named approval; record the
+        // change ticket in the approval comment.
+        input message: "Release ERIS ${env.ERIS_TAG} (verified in staging) to production?",
+              ok: 'Release to production', submitter: params.PRODUCTION_APPROVERS
+        deployRelease('production', params.PRODUCTION_HOST)
+      }
+    }
+  }
+  post {
+    always {
+      // SBOMs and scan reports are evidence even when the gate fails.
+      archiveArtifacts artifacts: 'release/**', allowEmptyArchive: true, fingerprint: true
+    }
+    success { echo "Published ERIS ${env.ERIS_TAG}: release/release-images.env, release/sbom/, release/cosign.pub. Follow docs/operations/caltrans-podman.md to approve and deploy." }
+  }
+}
+
+// Sends release-images.env to the host's deploy-hook.sh (an SSH forced command:
+// the key can do nothing else). The host pulls under its signature policy, backs
+// up, migrates, verifies in production mode, and rolls back by itself on failure;
+// a nonzero exit here means the release did not go live.
+def deployRelease(String target, String host) {
+  if (!(host ==~ /[A-Za-z0-9.-]+/)) { error("Set a valid ${target} host") }
+  withCredentials([
+    sshUserPrivateKey(credentialsId: "eris-deploy-${target}", keyFileVariable: 'DEPLOY_KEY', usernameVariable: 'DEPLOY_USER'),
+    file(credentialsId: 'eris-known-hosts', variable: 'KNOWN_HOSTS')
+  ]) {
+    withEnv(["DEPLOY_HOST=${host}"]) {
+      sh '''
+        set -eu
+        ssh -i "$DEPLOY_KEY" -o IdentitiesOnly=yes -o BatchMode=yes           -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS"           "$DEPLOY_USER@$DEPLOY_HOST" < "$RELEASE_DIR/release-images.env"
+      '''
+    }
+  }
+}

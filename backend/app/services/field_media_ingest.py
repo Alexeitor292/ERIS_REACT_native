@@ -272,7 +272,7 @@ def backfill_missing_photo_metadata(db) -> dict:
         try:
             content, _ = get_object_bytes(
                 object_key=str(row["storage_key"]),
-                bucket=str(row["storage_bucket"] or settings.MINIO_BUCKET),
+                bucket=str(row["storage_bucket"] or settings.S3_BUCKET),
             )
         except Exception:
             continue

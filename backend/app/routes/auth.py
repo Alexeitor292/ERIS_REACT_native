@@ -1,20 +1,85 @@
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..auth import create_access_token, verify_password
+from ..auth import verify_password
 from ..config import settings
 from ..db import get_db
-from ..deps import get_current_user
+from ..rate_limit import limit_sign_in
+from ..deps import current_session, get_current_user
 from ..schemas.common import LoginRequest
 from ..services import org_directory
 from ..services import maintenance_workflows
+from ..sessions import (
+    CLIENT_BEARER,
+    CLIENT_WEB,
+    clear_session_cookies,
+    create_session,
+    hash_token,
+    is_browser,
+    revoke_all,
+    revoke_session,
+    session_cookie_name,
+    set_session_cookies,
+)
 
 router = APIRouter()
+# Sign-in, sign-out and revocation events for the host's log collector. Never
+# log passwords, tokens or authorization codes.
+audit = logging.getLogger("eris.auth")
 
 
-@router.post("/auth/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+@router.get("/auth/config")
+def auth_config():
+    """Which sign-in methods this deployment offers. Public, and secret-free.
+
+    The web reads this at run time, so the login page follows the API's
+    settings without a web rebuild.
+    """
+    return {
+        "local_login_enabled": bool(settings.LOCAL_LOGIN_ENABLED),
+        "entra_enabled": bool(settings.ENTRA_ENABLED),
+        "session_idle_minutes": int(settings.SESSION_IDLE_MINUTES),
+        "session_absolute_minutes": int(settings.SESSION_ABSOLUTE_MINUTES),
+        # Public client settings for the mobile app's own Entra sign-in, or null.
+        "entra_mobile": _entra_mobile_configuration(),
+    }
+
+
+def _entra_mobile_configuration():
+    from ..entra import mobile_configuration  # entra imports this module
+
+    return mobile_configuration()
+
+
+def start_session(db, request: Request, *, user_id: int, auth_method: str,
+                  client: str | None = None) -> tuple[str, str, object]:
+    """New session for a verified sign-in; ends this browser's previous one. Commits."""
+    browser = client == CLIENT_WEB if client else is_browser(request)
+    previous = request.cookies.get(session_cookie_name()) if browser else None
+    if previous:
+        db.execute(text("""UPDATE user_sessions SET revoked_at = UTC_TIMESTAMP(), revoked_reason = 'replaced'
+                           WHERE token_hash = :hash AND revoked_at IS NULL"""), {"hash": hash_token(previous)})
+    client = CLIENT_WEB if browser else CLIENT_BEARER
+    token, expires_at = create_session(db, user_id=user_id, client=client, auth_method=auth_method, request=request)
+    db.execute(text("UPDATE users SET last_login_at = NOW(), updated_at = updated_at WHERE id = :id"), {"id": int(user_id)})
+    db.commit()
+    return token, client, expires_at
+
+
+@router.post("/auth/login", dependencies=[Depends(limit_sign_in)])
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    """Password sign-in, for development and the Campos Labs rehearsal only.
+
+    Caltrans production signs in through Entra (LOCAL_LOGIN_ENABLED=false).
+    A browser gets HttpOnly cookies and never sees the session credential;
+    a native client gets it once in the body, for its Authorization header.
+    """
+    if not settings.LOCAL_LOGIN_ENABLED:
+        raise HTTPException(status_code=404, detail="Password sign-in is disabled")
     row = db.execute(text("""
         SELECT id, email, password_hash, is_active
         FROM users
@@ -23,24 +88,47 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     """), {"email": payload.email.strip().lower()}).mappings().first()
 
     if not row or int(row["is_active"]) != 1:
+        audit.warning("password_sign_in_failed reason=unknown_or_inactive")
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # An account without a password signs in through single sign-on only. It
     # gets the same answer as a wrong password, so this endpoint never tells a
     # caller which accounts exist or how they sign in.
     if not row["password_hash"] or not verify_password(payload.password, row["password_hash"]):
+        audit.warning("password_sign_in_failed reason=bad_password user_id=%s", int(row["id"]))
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    db.execute(text("UPDATE users SET last_login_at = NOW(), updated_at = updated_at WHERE id = :id"), {"id": int(row["id"])})
-    db.commit()
+    token, client, expires_at = start_session(db, request, user_id=int(row["id"]), auth_method="password")
+    audit.info("password_sign_in user_id=%s client=%s", int(row["id"]), client)
+    if client == CLIENT_WEB:
+        response = JSONResponse({"ok": True})
+        set_session_cookies(response, token)
+        return response
+    return {"access_token": token, "token_type": "bearer", "expires_at": expires_at.isoformat() + "Z"}
 
-    token = create_access_token(
-        subject=str(int(row["id"])),
-        secret=settings.JWT_SECRET,
-        alg=settings.JWT_ALG,
-        expires_minutes=settings.JWT_EXPIRES_MINUTES,
-    )
-    return {"access_token": token, "token_type": "bearer"}
+
+@router.post("/auth/logout")
+def logout(signed_in=Depends(current_session), db: Session = Depends(get_db)):
+    """End this session only; the account's other devices stay signed in."""
+    user, session = signed_in
+    revoke_session(db, session.id, reason="sign_out")
+    db.commit()
+    audit.info("sign_out user_id=%s client=%s", int(user["id"]), session.client)
+    response = JSONResponse({"ok": True})
+    clear_session_cookies(response)
+    return response
+
+
+@router.post("/auth/sessions/revoke-all")
+def revoke_my_sessions(signed_in=Depends(current_session), db: Session = Depends(get_db)):
+    """Sign out everywhere: every browser and device this account is signed in on."""
+    user, _session = signed_in
+    revoke_all(db, int(user["id"]), reason="sign_out_all")
+    db.commit()
+    audit.info("sign_out_everywhere user_id=%s", int(user["id"]))
+    response = JSONResponse({"ok": True})
+    clear_session_cookies(response)
+    return response
 
 
 @router.get("/auth/me")

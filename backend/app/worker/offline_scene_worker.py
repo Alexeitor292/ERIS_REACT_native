@@ -278,7 +278,7 @@ def verify_bucket_posture_or_fail() -> None:
     production (DEV_MODE off) a missing/unreachable bucket EXITS the worker nonzero
     so orchestration surfaces it; in dev it only warns so a laptop can iterate."""
     from ..storage import bucket_exists
-    bucket = settings.MINIO_OFFLINE_SCENES_BUCKET
+    bucket = settings.S3_OFFLINE_SCENES_BUCKET
     try:
         ok = bucket_exists(bucket)
         problem = None if ok else f"offline-scenes bucket '{bucket}' does not exist"
@@ -286,9 +286,9 @@ def verify_bucket_posture_or_fail() -> None:
         problem = f"offline-scenes storage unreachable: {e}"
     if problem:
         if settings.OFFLINE_SCENE_DEV_MODE:
-            logger.warning("DEV_MODE: %s (continuing; provision via the minio-init service)", problem)
+            logger.warning("DEV_MODE: %s (continuing; provision via the seaweedfs-init service)", problem)
         else:
-            logger.error("FAIL-CLOSED: %s — provision the private bucket (minio-init) first", problem)
+            logger.error("FAIL-CLOSED: %s — provision the private bucket (seaweedfs-init) first", problem)
             raise SystemExit(2)
 
 

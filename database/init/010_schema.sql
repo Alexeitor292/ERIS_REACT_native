@@ -24,6 +24,34 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- Server-side sign-in sessions (migration 20261028_user_sessions). Only the
+-- SHA-256 of each session credential is stored. Times are UTC.
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    client VARCHAR(16) NOT NULL,
+    auth_method VARCHAR(16) NOT NULL,
+    created_at DATETIME NOT NULL,
+    last_seen_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked_at DATETIME NULL,
+    revoked_reason VARCHAR(32) NULL,
+    user_agent VARCHAR(255) NULL,
+    created_ip VARCHAR(45) NULL,
+    CONSTRAINT uq_user_sessions_token UNIQUE (token_hash),
+    CONSTRAINT fk_user_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT chk_user_sessions_client CHECK (client IN ('web', 'bearer')),
+    INDEX ix_user_sessions_user (user_id, revoked_at),
+    INDEX ix_user_sessions_expiry (expires_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS deployment_bootstrap (
+    name VARCHAR(64) PRIMARY KEY,
+    completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    user_id BIGINT NULL
+) ENGINE=InnoDB;
+
 -- An account's Entra ID identity: authentication only. Roles and org placement
 -- are assigned in ERIS, never taken from Entra (migration 20260923_entra_identity).
 -- Keyed on the directory (tid) and object ID (oid); the email and UPN are kept
@@ -137,7 +165,7 @@ CREATE TABLE IF NOT EXISTS workflow_events (
 CREATE TABLE IF NOT EXISTS attachments (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     created_by_user_id BIGINT NOT NULL,
-    storage_provider VARCHAR(32) NOT NULL, -- minio | fileshare
+    storage_provider VARCHAR(32) NOT NULL, -- s3 | fileshare; minio retained for legacy rows
     storage_bucket VARCHAR(128) NOT NULL DEFAULT '',
     storage_key VARCHAR(512) NOT NULL,
     file_name VARCHAR(255) NOT NULL,
@@ -651,9 +679,9 @@ CREATE TABLE IF NOT EXISTS submission_gisa_actions (
 ) ENGINE=InnoDB;
 
 -- Offline 3D scene-package catalog.
--- Authoritative record of operator-authored, MinIO-stored .mspk packages for the
+-- Authoritative record of operator-authored, S3-stored .mspk packages for the
 -- mobile native 3D terrain viewer. A submission is offline-available ONLY when a
--- READY row here exists AND its MinIO object is present with matching size.
+-- READY row here exists AND its S3 object is present with matching size.
 -- Objects are immutable; a replacement is a NEW package_version and the prior
 -- READY row is RETIRED (kept for audit). See Alembic 0011_offline_scene_packages
 -- and docs/offline-scene-package-operator-runbook.md.
@@ -662,14 +690,14 @@ CREATE TABLE IF NOT EXISTS offline_scene_packages (
     submission_id BIGINT NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'READY',          -- READY | RETIRED | FAILED
     package_version VARCHAR(64) NOT NULL,
-    -- Immutable MinIO location (private bucket; no anonymous access).
+    -- Private S3 location (legacy column name retained for compatibility).
     minio_bucket VARCHAR(128) NOT NULL,
     object_key VARCHAR(512) NOT NULL,
     sha256 CHAR(64) NOT NULL,
     size_bytes BIGINT NOT NULL,
     -- Package format: 'eristerrain' (auto-generated USGS-3DEP bundle) or 'mspk'.
     package_format VARCHAR(32) NOT NULL DEFAULT 'mspk',
-    -- Durable object identity (immutable MinIO version id + etag) to detect any
+    -- Durable object identity (S3 version id + etag) to detect any
     -- replacement of the object behind a registered package.
     object_version_id VARCHAR(128) NULL,
     object_etag VARCHAR(128) NULL,
@@ -709,7 +737,7 @@ CREATE TABLE IF NOT EXISTS offline_scene_packages (
 -- Offline 3D scene-package GENERATION jobs.
 -- Durable queue for the automatic pipeline: an authorized user requests a
 -- bounded package; a separate worker fetches USGS 3DEP terrain, builds + verifies
--- a bounded offline package, uploads it to private MinIO, and registers it in
+-- a bounded offline package, uploads it to private S3 storage, and registers it in
 -- offline_scene_packages. No manual ArcGIS Pro authoring. See Alembic 0012.
 CREATE TABLE IF NOT EXISTS offline_scene_jobs (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -749,7 +777,7 @@ CREATE TABLE IF NOT EXISTS offline_scene_jobs (
     ))
 ) ENGINE=InnoDB;
 
--- Audit trail for immutable MinIO objects uploaded but intentionally NOT
+-- Audit trail for immutable S3 objects uploaded but intentionally NOT
 -- registered (e.g. the generation job was CANCELLED between upload and catalog
 -- registration). Never referenced by a READY catalog row, so never downloadable;
 -- operators reconcile these out-of-band. See Alembic 0013.

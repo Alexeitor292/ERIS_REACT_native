@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta, timezone
-from jose import jwt, JWTError
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
@@ -21,17 +19,3 @@ def verify_password(password: str, password_hash: str) -> bool:
     except Exception:
         return False
 
-def create_access_token(*, subject: str, secret: str, alg: str, expires_minutes: int) -> str:
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": subject,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=expires_minutes)).timestamp()),
-    }
-    return jwt.encode(payload, secret, algorithm=alg)
-
-def decode_token(token: str, secret: str, alg: str) -> dict:
-    try:
-        return jwt.decode(token, secret, algorithms=[alg])
-    except JWTError as e:
-        raise ValueError(str(e))

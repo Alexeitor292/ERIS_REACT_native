@@ -1,7 +1,7 @@
 """High-fidelity ERIS mobile package builder.
 
 Wraps the existing USGS/ERIS builder rather than replacing its analytical data.
-The resulting package remains an ERIS terrain bundle, so MinIO/catalog/download/
+The resulting package remains an ERIS terrain bundle, so S3 storage/catalog/download/
 integrity and all existing context layers keep their contract. Two immutable Esri
 sidecars are embedded for native ArcGIS Runtime visualization:
 `esri-terrain.tpkx` (Terrain 3D LERC elevation) and `esri-imagery.tpkx`
