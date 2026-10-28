@@ -1,0 +1,54 @@
+# XcodeGen definition of the ERIS iOS app. CI generates ios/ERIS.xcodeproj from
+# this file and commits it, so the Mac needs only Xcode: open ERIS.xcodeproj.
+# Change targets, settings or packages here, never in the .xcodeproj.
+name: ERIS
+options:
+  bundleIdPrefix: gov.ca.dot
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  ERISKit:
+    path: ERISKit
+  MSAL:
+    url: https://github.com/AzureAD/microsoft-authentication-library-for-objc
+    from: "1.2.0"
+targets:
+  ERIS:
+    type: application
+    platform: iOS
+    sources:
+      - path: ERIS
+        excludes:
+          - "*.entitlements"
+          - "Info.plist"
+    dependencies:
+      - package: ERISKit
+      - package: MSAL
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: gov.ca.dot.eris
+        INFOPLIST_FILE: ERIS/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        # The ERIS API this build talks to; set per environment before archiving.
+        ERIS_API_BASE_URL: https://eris-stage.example.gov/api
+        CODE_SIGN_STYLE: Automatic
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
+schemes:
+  ERIS:
+    build:
+      targets:
+        ERIS: all
+    run:
+      config: Debug
+    archive:
+      config: Release

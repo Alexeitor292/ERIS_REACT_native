@@ -1,0 +1,71 @@
+name: iOS
+
+# The native Swift ERIS iOS app (ios/). ERISKit's tests run on Linux (cheap);
+# only when they pass does the macOS job build the app with Xcode. The macOS
+# job also commits the Xcode project generated from ios/project.yml, so the
+# Caltrans Mac needs nothing but Xcode to open it.
+on:
+  push:
+    branches: [main, "claude/ios-swift-app"]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eriskit:
+    name: ERISKit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Test
+        working-directory: ios/ERISKit
+        run: swift test
+
+  app:
+    name: App build (Xcode)
+    needs: eriskit
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: ERISKit tests (macOS)
+        working-directory: ios/ERISKit
+        run: swift test
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec ios/project.yml
+      - name: Build for the iOS simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/ERIS.xcodeproj -scheme ERIS -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log | grep -E "error:|warning: .*ERIS|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build.log
+          if-no-files-found: ignore
+      - name: Commit the generated Xcode project
+        if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ios/ERIS.xcodeproj
+          if git diff --cached --quiet; then echo "Xcode project unchanged"; exit 0; fi
+          git commit -m "Regenerate ios/ERIS.xcodeproj from project.yml"
+          git push
