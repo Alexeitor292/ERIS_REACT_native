@@ -288,3 +288,50 @@ final class GisaMaterialTests: XCTestCase {
         XCTAssertEqual(editor.debrisShareTotal, 100)
     }
 }
+
+/// Step 2: Vegetation on Slope, Water / Drainage and Water Content.
+final class GisaWaterTests: XCTestCase {
+    private func editor(_ gisa: String = "null") throws -> GisaEditor {
+        GisaEditor(detail: try JSONDecoder().decode(SubmissionDetail.self, from: Data("""
+        {"submission": {"id": 1, "status": "DRAFT", "can_edit": true}, "gisa": \(gisa)}
+        """.utf8)))
+    }
+
+    func testDrainageIsOneConditionThatCanBeCleared() throws {
+        var editor = try editor()
+        editor.toggleDrainage("drainage_surface_runoff")
+        editor.toggleDrainage("drainage_clogged_inlet")
+        XCTAssertEqual(GisaEditor.drainageChoices.map { editor.form[$0.0] }, ["YES", "NO", "NO", "NO"])
+        editor.toggleDrainage("drainage_clogged_inlet")
+        XCTAssertEqual(GisaEditor.drainageChoices.map { editor.form[$0.0] }, ["NO", "NO", "NO", "NO"])
+    }
+
+    func testSeepAndSpringBelongToFlowingWater() throws {
+        var editor = try editor()
+        editor.toggleFlowing("water_seep")
+        XCTAssertEqual(editor.form["water_seep"], "NO", "not offered until the water is flowing")
+        editor.toggleWaterContent("water_flowing")
+        editor.toggleFlowing("water_seep")
+        editor.toggleFlowing("water_spring")
+        XCTAssertEqual(editor.form["water_seep"], "NO")
+        XCTAssertEqual(editor.form["water_spring"], "YES")
+        editor.toggleWaterContent("water_wet")
+        XCTAssertEqual(editor.form["water_flowing"], "NO")
+        XCTAssertEqual(editor.form["water_spring"], "NO")
+        XCTAssertEqual(editor.form["water_wet"], "YES")
+    }
+
+    func testImpactedAndMayBeImpactedExcludeEachOther() throws {
+        var editor = try editor(#"{"impact_maybe_adj_utilities": 1}"#)
+        XCTAssertEqual(editor.form["impact_maybe_adj_utilities"], "YES")
+        editor.toggleImpact(impactedKey: "impact_impacted_adj_utilities", maybeKey: "impact_maybe_adj_utilities", .impacted)
+        XCTAssertEqual(editor.form["impact_impacted_adj_utilities"], "YES")
+        XCTAssertEqual(editor.form["impact_maybe_adj_utilities"], "")
+        editor.toggleImpact(impactedKey: "impact_impacted_adj_utilities", maybeKey: "impact_maybe_adj_utilities", .impacted)
+        XCTAssertEqual(editor.form["impact_impacted_adj_utilities"], "")
+        guard case .success(let request) = { var e = editor; e.set("district", "04"); e.set("county", "ALA"); e.set("route", "880");
+            e.set("post_mile", "1"); e.set("latitude", "37.7"); e.set("longitude", "-122.2"); return e.prepareSave(lookups: .empty) }()
+        else { return XCTFail("should save") }
+        XCTAssertEqual(request.body["impact_impacted_adj_utilities"], .null, "a cleared answer is sent as no answer")
+    }
+}

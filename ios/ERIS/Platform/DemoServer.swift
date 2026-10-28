@@ -65,6 +65,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
 
     private func route(_ method: String, _ path: String, _ query: [URLQueryItem], _ body: [String: Any]) -> (Int, Any) {
         let parts = path.split(separator: "/").map(String.init)
+        // Split in two: as one switch it took the type checker too long for CI.
+        if let answer = formPhotoAndCrackRoute(method, parts, body) { return answer }
         switch (method, parts) {
         case ("GET", ["auth", "me"]):
             return (200, DemoData.me(roles: roles))
@@ -86,6 +88,38 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             return (200, ["items": DemoData.submissions])
         case ("GET", let p) where p.count == 2 && p[0] == "submissions":
             return p[1] == "501" ? (200, submissionDetail) : notFound
+        case ("GET", ["gisa", "lookups"]):
+            return (200, DemoData.lookups)
+        case ("PATCH", ["submissions", "501", "gisa"]):
+            gisa.merge(body) { _, new in new }
+            return (200, ["submission_id": 501, "gisa": gisa])
+        case ("PUT", ["submissions", "501", "gisa", "incident-types"]):
+            incidentTypes = body["items"] as? [String] ?? []
+            return (200, ["items": incidentTypes])
+        case ("PUT", ["submissions", "501", "gisa", "actions"]):
+            submissionActions = body
+            return (200, body)
+        case ("GET", ["assessments"]):
+            return (200, ["items": assessments.filter { matches($0, queue: query.first { $0.name == "queue" }?.value) }])
+        case ("GET", let p) where p.count == 2 && p[0] == "assessments":
+            guard let id = Int(p[1]), let item = assessments.first(where: { $0["id"] as? Int == id }) else { return notFound }
+            return (200, ["assessment": item, "assignments": [], "events": events[id] ?? DemoData.events(for: item)])
+        case ("GET", let p) where p.count == 3 && p[0] == "assessments" && p[2] == "branch-options":
+            return (200, DemoData.branchChiefOptions)
+        case ("GET", let p) where p.count == 3 && p[0] == "admin" && p[1] == "assessment-assignment-options":
+            return (200, DemoData.staffOptions)
+        case ("POST", let p) where p.count == 3 && p[0] == "assessments":
+            return step(Int(p[1]) ?? 0, p[2], body)
+        default:
+            return notFound
+        }
+    }
+
+    private var notFound: (Int, Any) { (404, ["detail": "Not in the demo data"]) }
+
+    /// The demo form's photo map, photo corrections, attachment links and cracks.
+    private func formPhotoAndCrackRoute(_ method: String, _ parts: [String], _ body: [String: Any]) -> (Int, Any)? {
+        switch (method, parts) {
         case ("GET", ["submissions", "501", "photo-map"]):
             return (200, photoMap)
         case ("PUT", let p) where p.count == 6 && p[2] == "photo-map" && p[5] == "correction":
@@ -117,34 +151,10 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("DELETE", let p) where p.count == 4 && p[2] == "cracks":
             cracks.removeAll { "\($0["id"]!)" == p[3] }
             return (200, ["deleted": Int(p[3]) ?? 0])
-        case ("GET", ["gisa", "lookups"]):
-            return (200, DemoData.lookups)
-        case ("PATCH", ["submissions", "501", "gisa"]):
-            gisa.merge(body) { _, new in new }
-            return (200, ["submission_id": 501, "gisa": gisa])
-        case ("PUT", ["submissions", "501", "gisa", "incident-types"]):
-            incidentTypes = body["items"] as? [String] ?? []
-            return (200, ["items": incidentTypes])
-        case ("PUT", ["submissions", "501", "gisa", "actions"]):
-            submissionActions = body
-            return (200, body)
-        case ("GET", ["assessments"]):
-            return (200, ["items": assessments.filter { matches($0, queue: query.first { $0.name == "queue" }?.value) }])
-        case ("GET", let p) where p.count == 2 && p[0] == "assessments":
-            guard let id = Int(p[1]), let item = assessments.first(where: { $0["id"] as? Int == id }) else { return notFound }
-            return (200, ["assessment": item, "assignments": [], "events": events[id] ?? DemoData.events(for: item)])
-        case ("GET", let p) where p.count == 3 && p[0] == "assessments" && p[2] == "branch-options":
-            return (200, DemoData.branchChiefOptions)
-        case ("GET", let p) where p.count == 3 && p[0] == "admin" && p[1] == "assessment-assignment-options":
-            return (200, DemoData.staffOptions)
-        case ("POST", let p) where p.count == 3 && p[0] == "assessments":
-            return step(Int(p[1]) ?? 0, p[2], body)
         default:
-            return notFound
+            return nil
         }
     }
-
-    private var notFound: (Int, Any) { (404, ["detail": "Not in the demo data"]) }
 
     /// A multipart upload: the file and, for a photo, its capture data.
     private func upload(_ request: URLRequest, sectionKey: String?) -> (Int, Any) {

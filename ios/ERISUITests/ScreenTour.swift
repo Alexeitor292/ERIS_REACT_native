@@ -281,6 +281,28 @@ final class ScreenTour: XCTestCase {
         snap("cracks-two")
     }
 
+    func testVegetationAndWater() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Body"])
+        replace(reveal(app.textFields["Groundcover Coverage %"]), with: "45")
+        tap(reveal(app.buttons["Surface Runoff"]))
+        // Each checked while on screen: the list unloads rows scrolled away.
+        tap(reveal(app.buttons["Adjacent Utilities impacted"]))
+        XCTAssertTrue(app.buttons["Adjacent Utilities impacted"].isSelected)
+        tap(reveal(app.buttons["Adjacent Properties may be impacted"]))
+        XCTAssertTrue(app.buttons["Adjacent Properties may be impacted"].isSelected)
+        tap(reveal(app.buttons["Flowing"]))
+        tap(reveal(app.buttons["Seep"]))
+        XCTAssertTrue(app.buttons["Seep"].isSelected)
+        snap("gisa-vegetation-water")
+        tap(app.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(reveal(app.buttons["Seep"]).isSelected, "still chosen after the reload")
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         tap(app.tabBars.buttons["Assessments"])

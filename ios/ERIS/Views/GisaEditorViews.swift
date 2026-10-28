@@ -177,6 +177,7 @@ struct SubmissionDetailView: View {
                     .disabled(saving)
             }
         }
+        .keyboardDoneButton()
     }
 
     private func load() async {
@@ -293,6 +294,9 @@ enum GisaStep: Int, CaseIterable, Identifiable {
         // The pavement diagram's marker layout is retired: each crack has its own photo and labels.
         .union(["pavement_ground_cracks", "indented_by_rocks", "settlement_in", "bulge_in",
                 "pavement_ground_annotation_layout_json"])
+        .union(GisaEditor.vegetationKeys.map(\.0)).union(GisaEditor.drainageChoices.map(\.0))
+        .union(GisaEditor.waterContentChoices.map(\.0)).union(GisaEditor.flowingChoices.map(\.0))
+        .union(GisaEditor.impactRows.flatMap { [$0.0, $0.1] })
     static let assessmentKeys: Set = ["record_of_event_notes", "maintenance_history_notes", "observations_notes",
                                       "geotechnical_assessment_notes", "sketchpad_notes"]
 
@@ -532,6 +536,84 @@ struct GisaBodySections: View {
 
         GisaMaterialSection(editor: $editor, canEdit: canEdit)
         GisaPavementSection(editor: $editor, canEdit: canEdit)
+        GisaVegetationWaterSections(editor: $editor, canEdit: canEdit)
+    }
+}
+
+/// Vegetation on Slope, Water / Drainage and Water Content.
+struct GisaVegetationWaterSections: View {
+    @Binding var editor: GisaEditor
+    let canEdit: Bool
+
+    private func binding(_ key: String) -> Binding<String> {
+        Binding(get: { editor.form[key] }, set: { editor.set(key, $0) })
+    }
+
+    var body: some View {
+        Section("Vegetation on Slope") {
+            ForEach(GisaEditor.vegetationKeys, id: \.0) { key, label in
+                GisaTextField(label: "\(label) Coverage %", value: binding(key), editable: canEdit,
+                              keyboard: .decimalPad, error: editor.errors[key])
+            }
+            GisaSectionPhotos(sectionKey: "vegetation_slope")
+        }
+
+        Section("Water / Drainage") {
+            ChipFlow {
+                ForEach(GisaEditor.drainageChoices, id: \.0) { key, label in
+                    GisaChip(label: label, on: editor.form[key] == "YES", enabled: canEdit) { editor.toggleDrainage(key) }
+                }
+            }
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow {
+                    Text("Impacted").font(.caption.weight(.semibold))
+                    Text("May be").font(.caption.weight(.semibold))
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                }
+                ForEach(GisaEditor.impactRows, id: \.2) { impacted, maybe, label in
+                    GridRow {
+                        impactBox(on: editor.form[impacted] == "YES", label: "\(label) impacted") {
+                            editor.toggleImpact(impactedKey: impacted, maybeKey: maybe, .impacted)
+                        }
+                        impactBox(on: editor.form[maybe] == "YES", label: "\(label) may be impacted") {
+                            editor.toggleImpact(impactedKey: impacted, maybeKey: maybe, .maybe)
+                        }
+                        Text(label)
+                    }
+                }
+            }
+            GisaSectionPhotos(sectionKey: "water_drainage")
+        }
+
+        Section("Water Content") {
+            ChipFlow {
+                ForEach(GisaEditor.waterContentChoices, id: \.0) { key, label in
+                    GisaChip(label: label, on: editor.form[key] == "YES", enabled: canEdit) { editor.toggleWaterContent(key) }
+                }
+            }
+            if editor.form["water_flowing"] == "YES" {
+                ChipFlow {
+                    ForEach(GisaEditor.flowingChoices, id: \.0) { key, label in
+                        GisaChip(label: label, on: editor.form[key] == "YES", enabled: canEdit) { editor.toggleFlowing(key) }
+                    }
+                }
+            }
+            GisaSectionPhotos(sectionKey: "water_content")
+        }
+    }
+
+    /// A tick box in the impact table, as on the paper form.
+    private func impactBox(on: Bool, label: String, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            Image(systemName: on ? "checkmark.square.fill" : "square")
+                .font(.title3)
+                .foregroundStyle(on ? Color.accentColor : Color.secondary)
+                .frame(minWidth: 44, minHeight: 32)
+        }
+        .buttonStyle(.borderless)
+        .disabled(!canEdit)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

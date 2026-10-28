@@ -152,3 +152,58 @@ extension GisaEditor {
         return total
     }
 }
+
+/// Step 2: Vegetation on Slope, Water / Drainage and Water Content, from the
+/// Expo GISA editor's selectSingleDrainage, selectBaseWaterContent,
+/// selectFlowingSubtype and setImpactSelection.
+extension GisaEditor {
+    public static let vegetationKeys = [("vegetation_trees", "Trees"), ("vegetation_bushes_shrubs", "Bushes/Shrubs"),
+                                        ("vegetation_groundcover", "Groundcover")]
+    public static let drainageChoices = [("drainage_clogged_inlet", "Clogged Inlet"),
+                                         ("drainage_compromised_drains", "Compromised Drains"),
+                                         ("drainage_surface_runoff", "Surface Runoff"),
+                                         ("drainage_torrent_surge_flood", "Torrent/Surge/Flood")]
+    public static let waterContentChoices = [("water_dry", "Dry"), ("water_moist", "Moist"), ("water_wet", "Wet"),
+                                             ("water_flowing", "Flowing")]
+    public static let flowingChoices = [("water_seep", "Seep"), ("water_spring", "Spring")]
+    /// (impacted key, may-be-impacted key, label)
+    public static let impactRows = [
+        ("impact_impacted_adj_utilities", "impact_maybe_adj_utilities", "Adjacent Utilities"),
+        ("impact_impacted_adj_properties", "impact_maybe_adj_properties", "Adjacent Properties"),
+        ("impact_impacted_adj_structure", "impact_maybe_adj_structure", "Adjacent Structures"),
+    ]
+
+    /// One drainage condition at a time; choosing it again clears it.
+    public mutating func toggleDrainage(_ key: String) {
+        let selecting = form[key] != "YES"
+        for (choice, _) in Self.drainageChoices { set(choice, choice == key && selecting ? "YES" : "NO") }
+    }
+
+    /// One base water content at a time. Seep and spring belong to flowing water.
+    public mutating func toggleWaterContent(_ key: String) {
+        let selecting = form[key] != "YES"
+        for (choice, _) in Self.waterContentChoices { set(choice, choice == key && selecting ? "YES" : "NO") }
+        if !selecting || key != "water_flowing" {
+            set("water_seep", "NO")
+            set("water_spring", "NO")
+        }
+    }
+
+    /// Seep or spring, only while the water is flowing.
+    public mutating func toggleFlowing(_ key: String) {
+        guard form["water_flowing"] == "YES" else { return }
+        let selecting = form[key] != "YES"
+        for (choice, _) in Self.flowingChoices { set(choice, choice == key && selecting ? "YES" : "NO") }
+    }
+
+    public enum Impact { case impacted, maybe }
+
+    /// Impacted and may-be-impacted exclude each other; clearing leaves the
+    /// answer blank, not "No", as the Expo editor does.
+    public mutating func toggleImpact(impactedKey: String, maybeKey: String, _ target: Impact) {
+        let (key, other) = target == .impacted ? (impactedKey, maybeKey) : (maybeKey, impactedKey)
+        let next = form[key] == "YES" ? "" : "YES"
+        set(key, next)
+        if next == "YES" { set(other, "") }
+    }
+}

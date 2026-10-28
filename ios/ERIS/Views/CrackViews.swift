@@ -221,6 +221,7 @@ struct CrackEditorView: View {
                     .disabled(saving || !dirty)
             }
         }
+        .keyboardDoneButton()
         .task { await loadImage() }
         .fullScreenCover(isPresented: $drawing) {
             if let image {
@@ -529,5 +530,19 @@ extension Color {
         guard let hex, hex.count == 7, hex.first == "#", let value = Int(hex.dropFirst(), radix: 16) else { return nil }
         self.init(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
                   blue: Double(value & 0xFF) / 255)
+    }
+}
+
+extension View {
+    /// A Done button above the keyboard: the number pads have no Return key.
+    func keyboardDoneButton() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+        }
     }
 }
