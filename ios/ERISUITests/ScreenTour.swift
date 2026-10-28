@@ -71,6 +71,50 @@ final class ScreenTour: XCTestCase {
         snap("assessment-approved-timeline")
     }
 
+    /// A row whose label starts with `text` (a menu, picker or field row).
+    private func row(_ text: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", text)).firstMatch
+    }
+
+    /// A switch turns on only when its knob end is tapped, not the row's label.
+    private func flip(_ toggle: XCUIElement) {
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "missing \(toggle)")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+    }
+
+    func testGisaHeaderSavesOnlyWithItsLocation() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        XCTAssertTrue(app.staticTexts["GISA Header"].waitForExistence(timeout: 10))
+        snap("gisa-header")
+
+        // A district without Alameda clears the county and route; saving is refused.
+        tap(row("District *"))
+        tap(app.buttons["District 07"])
+        tap(app.buttons["Save"])
+        XCTAssertTrue(app.alerts["Almost there"].waitForExistence(timeout: 10))
+        app.alerts.buttons["OK"].tap()
+        snap("gisa-header-missing")
+
+        tap(row("District *"))
+        tap(app.buttons["District 04"])
+        tap(row("County *"))
+        tap(app.buttons["Alameda (ALA)"])
+        tap(row("Route"))
+        tap(app.buttons["880"])
+        tap(app.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+        app.alerts.buttons["OK"].tap()
+
+        app.swipeUp()
+        app.swipeUp()
+        flip(app.switches["Show Northing/Easting"])
+        flip(app.switches["Show Lat/Lon"])
+        app.swipeUp()
+        snap("gisa-location")
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         tap(app.tabBars.buttons["Assessments"])

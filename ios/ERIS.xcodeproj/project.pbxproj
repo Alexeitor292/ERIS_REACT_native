@@ -17,6 +17,7 @@
 		7E0DE5A23DD0C9E77EE2F077 /* ScreenTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */; };
 		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
+		9D9354D09031B86DFA514DE0 /* GisaEditorViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */; };
 		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
 		FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */; };
@@ -43,6 +44,7 @@
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MSALTokenProvider.swift; sourceTree = "<group>"; };
 		A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ERISApp.swift; sourceTree = "<group>"; };
+		AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisaEditorViews.swift; sourceTree = "<group>"; };
 		B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmissionViews.swift; sourceTree = "<group>"; };
 		C467160FFD1AAD51AA080E35 /* LocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationProvider.swift; sourceTree = "<group>"; };
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
@@ -116,6 +118,7 @@
 			children = (
 				78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */,
 				165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */,
+				AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
 				B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */,
@@ -234,6 +237,7 @@
 				71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */,
 				5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */,
 				FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */,
+				9D9354D09031B86DFA514DE0 /* GisaEditorViews.swift in Sources */,
 				081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */,
 				903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */,
 				19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */,

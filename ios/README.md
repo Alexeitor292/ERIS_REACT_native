@@ -36,7 +36,7 @@ line-of-business app (see the spec for renewal dates).
 | Notifications feed | Ported |
 | Submissions: list, read-only detail (GISA fields, photos, latest PDF) | Ported; GISA editor not yet |
 | Assessments: worklists, detail, branch-chief and Staff pickers, submit, review, timeline | Ported; needs device test. Picker rules from the web's `personPickerModel.ts` (grouped, disabled branches, time-zone-safe return dates) |
-| GISA editor (`mobile/app/(tabs)/submissions/[id].tsx`, ~7,100 lines) | Next, in sections |
+| GISA editor (`mobile/app/(tabs)/submissions/[id].tsx`, ~7,100 lines) | In progress. Core (load, rules, validation, save) and step 1 (Header, district contacts, Location with northing/easting) ported. Steps 2–5 show saved values and keep them on save. Saving is online only until the offline queue is ported; the map editor and Site Photo Map come with the maps phase |
 | Drafts, offline queue and sync (`mobile/src/offline`) | Next |
 | Maintenance work, road inventory | Next |
 | Maps and offline terrain (ArcGIS Maps SDK for Swift) | Later; rewrite of `mobile/plugins/arcgis-ios` |
@@ -58,5 +58,8 @@ line-of-business app (see the spec for renewal dates).
   a screenshot of each:
   `TEST_RUNNER_ERIS_SCREENSHOT_DIR=/tmp/shots xcodebuild test -project ios/ERIS.xcodeproj -scheme ERIS -destination 'platform=iOS Simulator,name=iPhone 17'`.
   Add a step there for each new screen.
+- **Parity fixtures.** `node ios/scripts/make-parity-fixtures.mjs` (Node 22.18+) runs the Expo app's
+  TypeScript helpers and writes `ERISKit/Tests/ERISKitTests/Fixtures/gisa-helpers.json`; the Swift
+  tests check the ports against it. Rerun it when those TypeScript files change.
 - The server contract is `docs/ios-native-app.md`; never put a token in a URL, and
   decode GISA forms with `preservingKeys: true`.

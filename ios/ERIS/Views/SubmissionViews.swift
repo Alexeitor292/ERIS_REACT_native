@@ -2,8 +2,7 @@ import ERISKit
 import SafariServices
 import SwiftUI
 
-/// GISA submissions this person can see. Read-only in this phase: the GISA
-/// editor (mobile/app/(tabs)/submissions/[id].tsx) is ported next.
+/// GISA submissions this person can see; each opens in the GISA editor.
 struct SubmissionsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var items: [SubmissionSummary] = []
@@ -69,76 +68,6 @@ struct SubmissionsView: View {
 /// Distinct from incident ids in the navigation path.
 struct SubmissionRoute: Hashable {
     let id: Int
-}
-
-struct SubmissionDetailView: View {
-    @EnvironmentObject private var model: AppModel
-    let submissionId: Int
-    @State private var detail: SubmissionDetail?
-    @State private var error: String?
-    @State private var browserURL: IdentifiableURL?
-
-    var body: some View {
-        Group {
-            if let detail {
-                List {
-                    Section {
-                        LabeledContent("Status", value: SubmissionLabels.status(detail.submission.status))
-                        if let submitted = detail.submission.submittedAt { LabeledContent("Submitted", value: submitted) }
-                        if let reviewed = detail.submission.reviewedAt { LabeledContent("Reviewed", value: reviewed) }
-                        if let comment = detail.submission.reviewComment, !comment.isEmpty {
-                            LabeledContent("Review comment", value: comment)
-                        }
-                        Button("Open latest GISA PDF") { Task { await openPDF() } }
-                    }
-                    if let photos = detail.photos, !photos.isEmpty {
-                        Section("Photos") {
-                            ScrollView(.horizontal) {
-                                HStack { ForEach(photos) { AttachmentThumbnail(attachment: $0) } }
-                            }
-                        }
-                    }
-                    if let gisa = detail.gisa {
-                        Section("GISA form") {
-                            ForEach(gisa.keys.sorted(), id: \.self) { key in
-                                if let value = gisa[key].flatMap(SubmissionLabels.text) {
-                                    LabeledContent(SubmissionLabels.fieldName(key), value: value)
-                                }
-                            }
-                        }
-                    }
-                }
-                .navigationTitle(detail.submission.title ?? "Submission #\(submissionId)")
-            } else if let error {
-                Text(error).foregroundStyle(.red).padding()
-            } else {
-                ProgressView()
-            }
-        }
-        .task { await load() }
-        .refreshable { await load() }
-        .sheet(item: $browserURL) { SafariView(url: $0.url) }
-    }
-
-    private func load() async {
-        do {
-            detail = try await SubmissionsAPI(api: model.api).detail(submissionId)
-            error = nil
-        } catch {
-            self.error = model.handle(error)
-        }
-    }
-
-    private func openPDF() async {
-        do {
-            let link = try await SubmissionsAPI(api: model.api).gisaPDF(submissionId)
-            if let url = URL(string: link.downloadUrl) { browserURL = IdentifiableURL(url: url) }
-        } catch APIError.notFound {
-            error = "No GISA PDF has been generated yet."
-        } catch {
-            self.error = model.handle(error)
-        }
-    }
 }
 
 /// A photo from its presigned link. The link carries its own signature, so it

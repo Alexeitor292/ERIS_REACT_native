@@ -29,6 +29,9 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private var assessments: [[String: Any]]
     private var events: [Int: [[String: Any]]] = [:]
     private var nextEventId = 100
+    private var gisa: [String: Any] = DemoData.gisa
+    private var submissionActions: [String: Any] = ["immediate": [], "follow_up": []]
+    private var incidentTypes: [String] = ["HEAVING"]
 
     init(roles: [String]) {
         self.roles = roles
@@ -70,7 +73,20 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("GET", ["submissions"]):
             return (200, ["items": DemoData.submissions])
         case ("GET", let p) where p.count == 2 && p[0] == "submissions":
-            return p[1] == "501" ? (200, DemoData.submissionDetail) : notFound
+            return p[1] == "501" ? (200, submissionDetail) : notFound
+        case ("GET", ["gisa", "lookups"]):
+            return (200, DemoData.lookups)
+        case ("PATCH", ["submissions", "501", "gisa"]):
+            gisa.merge(body) { _, new in new }
+            return (200, ["submission_id": 501, "gisa": gisa])
+        case ("PUT", ["submissions", "501", "gisa", "incident-types"]):
+            incidentTypes = body["items"] as? [String] ?? []
+            return (200, ["items": incidentTypes])
+        case ("PUT", ["submissions", "501", "gisa", "actions"]):
+            submissionActions = body
+            return (200, body)
+        case ("GET", ["submissions", "501", "gisa", "pdf"]):
+            return notFound
         case ("GET", ["assessments"]):
             return (200, ["items": assessments.filter { matches($0, queue: query.first { $0.name == "queue" }?.value) }])
         case ("GET", let p) where p.count == 2 && p[0] == "assessments":
@@ -88,6 +104,14 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     }
 
     private var notFound: (Int, Any) { (404, ["detail": "Not in the demo data"]) }
+
+    private var submissionDetail: [String: Any] {
+        ["submission": ["id": 501, "created_by_user_id": DemoData.meId, "status": "DRAFT",
+                        "title": "I-880 slope failure GISA", "created_at": "2026-10-28T09:00:00",
+                        "updated_at": "2026-10-28T09:00:00", "can_edit": true, "can_review": false],
+         "gisa": gisa, "incident_types": incidentTypes, "actions": submissionActions,
+         "photos": [], "attachments": [], "workflow_events": []]
+    }
 
     private func matches(_ item: [String: Any], queue: String?) -> Bool {
         let state = item["state"] as? String
@@ -177,12 +201,23 @@ enum DemoData {
          "district": "04", "county": "ALA", "route": "880", "post_mile": "12.3", "created_at": "2026-10-28T09:00:00Z"],
     ]
 
-    static let submissionDetail: [String: Any] = [
-        "submission": ["id": 501, "status": "DRAFT", "title": "I-880 slope failure GISA",
-                       "created_at": "2026-10-28T09:00:00Z", "can_edit": true, "can_review": false],
-        "gisa": ["district": "04", "county": "ALA", "route": "880", "post_mile": "12.3",
-                 "date_incident_reported": "2026-10-27", "incident_description": "Cut slope failure onto the shoulder."],
-        "photos": [], "attachments": [],
+    /// A saved GISA row: DECIMAL columns as numbers and flags as 0/1, as the server sends them.
+    static let gisa: [String: Any] = [
+        "report_date": "2026-10-27", "district": "04", "county": "ALA", "route": "880", "post_mile": "12.3",
+        "date_incident_reported": "2026-10-27", "latitude": 37.7312, "longitude": -122.1975,
+        "district_contact": "[{\"first_name\":\"Ana\",\"last_name\":\"Ruiz\",\"s_number\":\"S1234\",\"phone\":\"510-555-0100\",\"cell_phone\":\"\"}]",
+        "failure_slide": 1, "material_soil": 1, "est_clay_pct": 40.0, "est_silt_pct": 60.0, "vegetation_trees": 30.0,
+        "pavement_ground_cracks": 1, "crack_length_ft": 12.5,
+        "geotechnical_assessment_notes": "Cut slope failure onto the shoulder.",
+    ]
+
+    static let lookups: [String: Any] = [
+        "distribution": [["code": "ADVANCING", "label": "Advancing"], ["code": "CONFINED", "label": "Confined"]],
+        "highway_status": [["code": "OPEN", "label": "Open"], ["code": "ONE_WAY", "label": "One-way traffic control"]],
+        "incident_types": [["code": "SLIDE", "label": "Slide"], ["code": "HEAVING", "label": "Heaving"]],
+        "actions": ["immediate": [["code": "CLOSE_LANE", "label": "Close lane"]],
+                    "follow_up": [["code": "MONITOR", "label": "Monitor"]]],
+        "requested_by_user_id": meId,
     ]
 
     static let assessments: [[String: Any]] = [

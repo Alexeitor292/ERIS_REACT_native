@@ -1,0 +1,485 @@
+import ERISKit
+import SwiftUI
+
+/// The GISA editor, as in mobile/app/(tabs)/submissions/[id].tsx: five steps,
+/// editable while the submission is a draft or returned and the server allows
+/// it. Steps are ported one at a time; a step not yet ported shows its saved
+/// values, and saving keeps them unchanged.
+struct SubmissionDetailView: View {
+    @EnvironmentObject private var model: AppModel
+    let submissionId: Int
+    @State private var detail: SubmissionDetail?
+    @State private var editor: GisaEditor?
+    @State private var lookups = GisaLookups.empty
+    @State private var step = GisaStep.header
+    @State private var error: String?
+    @State private var alert: GisaEditor.SaveProblem?
+    @State private var saving = false
+    @State private var browserURL: IdentifiableURL?
+
+    var body: some View {
+        Group {
+            if let detail, let editor = Binding($editor) {
+                content(detail, editor)
+            } else if let error {
+                Text(error).foregroundStyle(.red).padding()
+            } else {
+                ProgressView()
+            }
+        }
+        .navigationTitle(detail?.submission.status == "DRAFT" ? "Draft" : "Submission")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .sheet(item: $browserURL) { SafariView(url: $0.url) }
+        .alert(alert?.title ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
+            Button("OK", role: .cancel) { alert = nil }
+        } message: {
+            Text(alert?.message ?? "")
+        }
+    }
+
+    private func content(_ detail: SubmissionDetail, _ editor: Binding<GisaEditor>) -> some View {
+        let canEdit = detail.submission.isEditable
+        let form = editor.wrappedValue.form
+        return List {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(SubmissionDescriptor.text(district: form["district"], county: form["county"], route: form["route"],
+                                                   postMile: form["post_mile"], createdAt: detail.submission.createdAt))
+                        .font(.subheadline)
+                    Text("Status: \(SubmissionLabels.status(detail.submission.status))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Picker("Step", selection: $step) {
+                    ForEach(GisaStep.allCases) { Text($0.shortTitle).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            } footer: {
+                Text("Step \(step.rawValue + 1) of \(GisaStep.allCases.count): \(step.title)")
+            }
+
+            switch step {
+            case .header:
+                GisaHeaderSections(editor: editor, canEdit: canEdit)
+            case .gallery:
+                GisaGallerySection(detail: detail, openPDF: { Task { await openPDF() } })
+            default:
+                GisaSavedValuesSection(detail: detail, step: step)
+            }
+
+            if let next = GisaStep(rawValue: step.rawValue + 1) {
+                Section {
+                    Button("Continue to \(next.title)") { withAnimation { step = next } }
+                }
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            if canEdit {
+                Button(saving ? "Saving…" : "Save") { Task { await save() } }
+                    .disabled(saving)
+            }
+        }
+    }
+
+    private func load() async {
+        let submissions = SubmissionsAPI(api: model.api)
+        do {
+            let loaded = try await submissions.detail(submissionId)
+            // The lists are needed to check actions on save; an older cache is
+            // part of the offline work, so a failure leaves them empty for now.
+            if let fetched = try? await submissions.lookups() { lookups = fetched }
+            detail = loaded
+            editor = GisaEditor(detail: loaded)
+            error = nil
+        } catch {
+            self.error = model.handle(error)
+        }
+    }
+
+    /// Checks and sends the draft as the Expo editor's Save does, then reloads.
+    private func save() async {
+        guard var current = editor else { return }
+        let prepared = current.prepareSave(lookups: lookups)
+        editor = current
+        switch prepared {
+        case .failure(let problem):
+            if GisaStep.header.owns(current.errors.keys) { step = .header }
+            alert = problem
+        case .success(let request):
+            saving = true
+            defer { saving = false }
+            do {
+                try await SubmissionsAPI(api: model.api).saveGisa(submissionId, form: request.body,
+                                                                  incidentTypes: request.incidentTypes,
+                                                                  actions: request.actions)
+                await load()
+                alert = .init(title: "Saved", message: "Draft saved.")
+            } catch {
+                alert = .init(title: "Save failed", message: model.handle(error))
+            }
+        }
+    }
+
+    private func openPDF() async {
+        do {
+            let link = try await SubmissionsAPI(api: model.api).gisaPDF(submissionId)
+            if let url = URL(string: link.downloadUrl) { browserURL = IdentifiableURL(url: url) }
+        } catch APIError.notFound {
+            alert = .init(title: "No PDF yet", message: "No GISA PDF has been generated yet.")
+        } catch {
+            alert = .init(title: "PDF unavailable", message: model.handle(error))
+        }
+    }
+}
+
+/// The editor's five steps.
+enum GisaStep: Int, CaseIterable, Identifiable {
+    case header, body, assessment, actions, gallery
+
+    var id: Int { rawValue }
+
+    var title: String {
+        ["Header", "GISA Body", "Assessment", "Actions", "Gallery"][rawValue]
+    }
+
+    var shortTitle: String {
+        ["Header", "Body", "Assess", "Actions", "Gallery"][rawValue]
+    }
+
+    static let headerKeys: Set = ["report_date", "district", "county", "route", "post_mile", "ea", "project_id",
+                                  "date_incident_reported", "district_contact", "latitude", "longitude", "geometry_json"]
+    static let assessmentKeys: Set = ["record_of_event_notes", "maintenance_history_notes", "observations_notes",
+                                      "geotechnical_assessment_notes", "sketchpad_notes"]
+
+    /// Whether any of these field keys is on this step.
+    func owns<S: Sequence>(_ keys: S) -> Bool where S.Element == String {
+        guard self == .header else { return false }
+        return keys.contains { Self.headerKeys.contains($0) }
+    }
+
+    /// The saved GISA columns this step shows while it is not yet editable here.
+    func showsSavedValue(_ key: String) -> Bool {
+        switch self {
+        case .assessment: return Self.assessmentKeys.contains(key)
+        case .body: return !Self.headerKeys.contains(key) && !Self.assessmentKeys.contains(key) && !key.hasSuffix("_html")
+            && !["submission_id", "location_id", "updated_by_user_id", "revision", "created_at", "updated_at"].contains(key)
+        default: return false
+        }
+    }
+}
+
+// MARK: - Step 1: Header and Location
+
+struct GisaHeaderSections: View {
+    @Environment(\.openURL) private var openURL
+    @Binding var editor: GisaEditor
+    let canEdit: Bool
+    @State private var showCoordinates = false
+    @State private var showNorthingEasting = false
+    @State private var northing = ""
+    @State private var easting = ""
+    @State private var statePlaneError: String?
+    @State private var openContacts: Set<UUID> = []
+
+    private var form: GisaForm { editor.form }
+
+    private func binding(_ key: String) -> Binding<String> {
+        Binding(get: { editor.form[key] }, set: { editor.set(key, $0) })
+    }
+
+    var body: some View {
+        Section("GISA Header") {
+            GisaDateField(label: "Report Date", value: binding("report_date"), editable: canEdit,
+                          error: editor.errors["report_date"])
+            GisaChoiceField(label: "District *", value: form["district"], editable: canEdit,
+                            options: CaltransCounties.districts.map { ($0, "District \($0)") },
+                            placeholder: "Select district", error: editor.errors["district"]) { editor.chooseDistrict($0) }
+            GisaChoiceField(label: "County *", value: form["county"], editable: canEdit && !form["district"].isEmpty,
+                            options: CaltransCounties.counties(inDistrict: form["district"]).map { ($0.code, $0.displayLabel) },
+                            placeholder: form["district"].isEmpty ? "Select district first" : "Select county",
+                            error: editor.errors["county"]) { editor.chooseCounty($0) }
+            GisaChoiceField(label: "Route", value: form["route"], editable: canEdit && !form["county"].isEmpty,
+                            options: CaltransCounties.routes(forCounty: form["county"]).map { ($0, $0) },
+                            placeholder: form["county"].isEmpty ? "Select county first" : "Select route",
+                            error: editor.errors["route"]) { editor.set("route", $0) }
+            GisaTextField(label: "Post Mile", value: binding("post_mile"), editable: canEdit,
+                          keyboard: .decimalPad, error: editor.errors["post_mile"]) {
+                editor.set("post_mile", GisaPrecision.postMileInput(form["post_mile"]))
+            }
+            GisaTextField(label: "EA", value: binding("ea"), editable: canEdit, error: editor.errors["ea"])
+            GisaTextField(label: "Project ID", value: binding("project_id"), editable: canEdit, keyboard: .numberPad,
+                          error: editor.errors["project_id"])
+            GisaDateField(label: "Date Incident Reported", value: binding("date_incident_reported"),
+                          editable: canEdit, error: editor.errors["date_incident_reported"])
+        }
+
+        Section {
+            if editor.contacts.isEmpty {
+                Text("No district contacts added yet.").foregroundStyle(.secondary)
+            }
+            ForEach(Array(editor.contacts.enumerated()), id: \.element.id) { index, contact in
+                DisclosureGroup(isExpanded: Binding(get: { openContacts.contains(contact.id) },
+                                                    set: { if $0 { openContacts.insert(contact.id) } else { openContacts.remove(contact.id) } })) {
+                    contactField("First Name", \.firstName, index)
+                    contactField("Last Name", \.lastName, index)
+                    contactField("S Number", \.sNumber, index)
+                    contactField("Phone", \.phone, index, keyboard: .phonePad)
+                    contactField("Cell Phone", \.cellPhone, index, keyboard: .phonePad)
+                    if canEdit {
+                        Button("Remove Contact", role: .destructive) {
+                            editor.setContacts(editor.contacts.filter { $0.id != contact.id })
+                        }
+                    }
+                } label: {
+                    Text(contact.displayName(index: index))
+                }
+            }
+            if canEdit {
+                Button("Add District Contact") {
+                    let added = DistrictContact()
+                    editor.setContacts(editor.contacts + [added])
+                    openContacts.insert(added.id)
+                }
+            }
+        } header: {
+            Text("District Contacts")
+        } footer: {
+            if let message = editor.errors["district_contact"] { Text(message).foregroundStyle(.red) }
+        }
+
+        Section("Location") {
+            VStack(alignment: .leading, spacing: 6) {
+                if let preview = form.mapPreviewURL {
+                    AsyncImage(url: preview) { image in
+                        image.resizable().aspectRatio(2, contentMode: .fit)
+                    } placeholder: {
+                        Color.gray.opacity(0.15).aspectRatio(2, contentMode: .fit)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .accessibilityLabel("Satellite view of the location")
+                } else {
+                    Text("Awaiting location…").foregroundStyle(.secondary)
+                }
+                Text("Geometry: \(form["geometry_json"].trimmingCharacters(in: .whitespaces).isEmpty ? "None" : "Available")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Open in Google Maps") { if let url = form.googleMapsURL { openURL(url) } }
+                .disabled(form.googleMapsURL == nil)
+            Toggle("Show Lat/Lon", isOn: $showCoordinates)
+            if showCoordinates || editor.errors["latitude"] != nil || editor.errors["longitude"] != nil {
+                GisaTextField(label: "Latitude *", value: binding("latitude"), editable: canEdit,
+                              keyboard: .numbersAndPunctuation, error: editor.errors["latitude"]) {
+                    editor.set("latitude", GisaPrecision.formatCoordinate(form["latitude"]))
+                }
+                GisaTextField(label: "Longitude *", value: binding("longitude"), editable: canEdit,
+                              keyboard: .numbersAndPunctuation, error: editor.errors["longitude"]) {
+                    editor.set("longitude", GisaPrecision.formatCoordinate(form["longitude"]))
+                }
+            }
+            Toggle("Show Northing/Easting", isOn: $showNorthingEasting)
+                .disabled(form.statePlane == nil)
+            if showNorthingEasting, let plane = form.statePlane {
+                Text("CCS83 Zone \(plane.zone) · US survey ft").font(.caption).foregroundStyle(.secondary)
+                GisaTextField(label: "Northing", value: $northing, editable: canEdit, keyboard: .numbersAndPunctuation,
+                              error: statePlaneError) { applyStatePlane() }
+                GisaTextField(label: "Easting", value: $easting, editable: canEdit, keyboard: .numbersAndPunctuation,
+                              error: nil) { applyStatePlane() }
+            }
+        }
+        .onAppear(perform: refreshStatePlane)
+        .onChange(of: "\(form["latitude"])|\(form["longitude"])|\(form["county"])") { refreshStatePlane() }
+    }
+
+    private func contactField(_ label: String, _ path: WritableKeyPath<DistrictContact, String>, _ index: Int,
+                              keyboard: UIKeyboardType = .default) -> some View {
+        GisaTextField(label: label, value: Binding(get: { editor.contacts[index][keyPath: path] }, set: { value in
+            var next = editor.contacts
+            next[index][keyPath: path] = value
+            editor.setContacts(next)
+        }), editable: canEdit, keyboard: keyboard, error: nil)
+    }
+
+    private func refreshStatePlane() {
+        northing = form.statePlane?.northing ?? ""
+        easting = form.statePlane?.easting ?? ""
+        statePlaneError = nil
+    }
+
+    private func applyStatePlane() {
+        var next = editor.form
+        if let problem = next.applyStatePlane(northing: northing, easting: easting) {
+            statePlaneError = problem
+            return
+        }
+        editor.set("latitude", next["latitude"])
+        editor.set("longitude", next["longitude"])
+        refreshStatePlane()
+    }
+}
+
+// MARK: - Steps not yet ported, and the gallery
+
+/// The saved values of a step that is not editable on iPhone yet.
+struct GisaSavedValuesSection: View {
+    let detail: SubmissionDetail
+    let step: GisaStep
+
+    var body: some View {
+        Section {
+            Text("This step is being ported to iPhone. Its saved values are shown here, and saving keeps them as they are.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        if let gisa = detail.gisa, gisa.keys.contains(where: step.showsSavedValue) {
+            Section("Saved values") {
+                ForEach(gisa.keys.filter(step.showsSavedValue).sorted(), id: \.self) { key in
+                    if let value = gisa[key].flatMap(SubmissionLabels.text) {
+                        LabeledContent(SubmissionLabels.fieldName(key), value: value)
+                    }
+                }
+            }
+        }
+        if step == .actions, let actions = detail.actions {
+            Section("Saved actions") {
+                LabeledContent("Immediate", value: actions.immediate.isEmpty ? "None" : actions.immediate.joined(separator: ", "))
+                LabeledContent("Follow-up", value: actions.followUp.isEmpty ? "None" : actions.followUp.joined(separator: ", "))
+            }
+        }
+    }
+}
+
+struct GisaGallerySection: View {
+    let detail: SubmissionDetail
+    let openPDF: () -> Void
+
+    var body: some View {
+        Section("Photos") {
+            if let photos = detail.photos, !photos.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack { ForEach(photos) { AttachmentThumbnail(attachment: $0) } }
+                }
+            } else {
+                Text("No photos yet.").foregroundStyle(.secondary)
+            }
+        }
+        Section {
+            Button("Open latest GISA PDF", action: openPDF)
+        }
+    }
+}
+
+// MARK: - Fields
+
+/// A labelled text field with its error. `onEndEditing` runs when the field
+/// loses focus or Return is pressed, where the Expo editor normalised on blur.
+struct GisaTextField: View {
+    let label: String
+    @Binding var value: String
+    var editable = true
+    var keyboard: UIKeyboardType = .default
+    let error: String?
+    var onEndEditing: (() -> Void)?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            // The label sits above the field, so it is not repeated inside it.
+            TextField(label, text: $value, prompt: Text(""))
+                .keyboardType(keyboard)
+                .focused($focused)
+                .disabled(!editable)
+                .foregroundStyle(editable ? .primary : .secondary)
+                .onSubmit { onEndEditing?() }
+                .onChange(of: focused) { _, now in if !now { onEndEditing?() } }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+    }
+}
+
+/// A choice from a fixed list, shown as a menu. A saved value that is not in
+/// the list is kept and shown, not silently dropped.
+struct GisaChoiceField: View {
+    let label: String
+    let value: String
+    let editable: Bool
+    let options: [(value: String, title: String)]
+    let placeholder: String
+    let error: String?
+    let choose: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Menu {
+                ForEach(options, id: \.value) { option in
+                    Button { choose(option.value) } label: {
+                        if option.value == value { Label(option.title, systemImage: "checkmark") } else { Text(option.title) }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(label).foregroundStyle(.primary)
+                    Spacer()
+                    Text(options.first { $0.value == value }?.title ?? (value.isEmpty ? placeholder : value))
+                        .foregroundStyle(value.isEmpty ? .tertiary : .secondary)
+                    if editable { Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(.tertiary) }
+                }
+            }
+            .disabled(!editable)
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+    }
+}
+
+/// A YYYY-MM-DD date, chosen on a calendar; it can be left blank.
+struct GisaDateField: View {
+    let label: String
+    @Binding var value: String
+    let editable: Bool
+    let error: String?
+    @State private var choosing = false
+    @State private var draft = Date()
+
+    private static let format: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button {
+                draft = Self.format.date(from: value) ?? Date()
+                choosing = true
+            } label: {
+                HStack {
+                    Text(label).foregroundStyle(.primary)
+                    Spacer()
+                    Text(value.isEmpty ? "Select date" : value).foregroundStyle(value.isEmpty ? .tertiary : .secondary)
+                }
+            }
+            .disabled(!editable)
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+        .sheet(isPresented: $choosing) {
+            NavigationStack {
+                DatePicker(label, selection: $draft, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .padding()
+                    .navigationTitle(label)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Clear") { value = ""; choosing = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { value = Self.format.string(from: draft); choosing = false }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+}
