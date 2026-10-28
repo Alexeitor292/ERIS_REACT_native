@@ -17,6 +17,7 @@ const ENTRA_NOTICES: Record<string, string> = {
   failed: "Caltrans sign-in could not be verified. Try again; if it keeps failing, contact the ERIS administrator.",
   not_linked: "Your Caltrans account is not linked to an active ERIS account. Ask an ERIS administrator for access.",
   unavailable: "Caltrans sign-in is not available right now. Contact the ERIS administrator.",
+  busy: "Too many sign-in attempts from this network. Wait a minute, then sign in again.",
 };
 
 export default function LoginPage() {

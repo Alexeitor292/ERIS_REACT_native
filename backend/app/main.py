@@ -153,7 +153,12 @@ async def refuse_cross_site_writes(request: Request, call_next):
         check_origin(request)
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-    return await call_next(request)
+    response = await call_next(request)
+    # API responses carry records and personal data: no browser or proxy may
+    # cache them unless a route says otherwise, and none is a document to sniff.
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
 
 @app.exception_handler(HTTPException)
 async def eris_http_exception_handler(request: Request, exc: HTTPException):
@@ -169,7 +174,9 @@ async def eris_http_exception_handler(request: Request, exc: HTTPException):
         # clients know which upstream service failed.  500/502/504 mask the detail.
         detail = exc.detail if exc.status_code == 503 else GENERIC_SERVER_ERROR_DETAIL
         return JSONResponse(status_code=exc.status_code, content={"detail": detail})
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    # Keep the exception's headers (Retry-After on a 429, for one).
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail},
+                        headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(Exception)

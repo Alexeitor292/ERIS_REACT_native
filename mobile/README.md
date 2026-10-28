@@ -22,9 +22,9 @@ Tests: `npm test`. Type check: `npx tsc --noEmit`. Lint: `npx expo lint`.
 
 Full instructions:
 
-- [Development](../docs/development.md#4-mobile-app): running on a simulator or
+- [Development](../docs/development/getting-started.md#4-mobile-app): running on a simulator or
   device, and the API address.
-- [Configuration](../docs/configuration.md#mobile-app): every `EXPO_PUBLIC_*`
+- [Configuration](../docs/operations/configuration.md#mobile-app): every `EXPO_PUBLIC_*`
   variable.
-- [Deployment](../docs/deployment.md#mobile-app-releases): EAS builds and
+- [Deployment](../docs/operations/compose-deployment.md#mobile-app-releases): EAS builds and
   releases.

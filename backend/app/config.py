@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     # in total. With Entra single sign-on a reauthentication is usually silent.
     SESSION_IDLE_MINUTES: int = Field(default=30)
     SESSION_ABSOLUTE_MINUTES: int = Field(default=720)
+    # Sign-in requests one client address may make per minute (app/rate_limit.py);
+    # 0 turns the limit off. One Entra sign-in is two requests (start, callback).
+    AUTH_RATE_LIMIT_PER_MINUTE: int = Field(default=30, ge=0)
+    # Proxies in front of the API that append to X-Forwarded-For: 1 = the pod's
+    # nginx only (development, a gateway that does not forward the client
+    # address), 2 = the Caltrans TLS gateway + nginx. 0 ignores the header.
+    TRUSTED_PROXY_HOPS: int = Field(default=1, ge=0, le=5)
     LOCAL_LOGIN_ENABLED: bool = Field(default=True)
     ENTRA_ENABLED: bool = Field(default=False)
     ENTRA_AUTHORITY_HOST: str = Field(default="login.microsoftonline.com")

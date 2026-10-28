@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..auth import verify_password
 from ..config import settings
 from ..db import get_db
+from ..rate_limit import limit_sign_in
 from ..deps import current_session, get_current_user
 from ..schemas.common import LoginRequest
 from ..services import org_directory
@@ -69,7 +70,7 @@ def start_session(db, request: Request, *, user_id: int, auth_method: str,
     return token, client, expires_at
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", dependencies=[Depends(limit_sign_in)])
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Password sign-in, for development and the Campos Labs rehearsal only.
 

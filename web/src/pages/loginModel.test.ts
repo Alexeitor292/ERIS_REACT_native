@@ -22,7 +22,7 @@ test("an expired session goes straight back to Entra (usually silent)", () => {
 });
 
 test("a failed or refused Entra attempt shows the page instead of looping", () => {
-  for (const entraReason of ["failed", "not_linked", "cancelled", "unavailable"]) {
+  for (const entraReason of ["failed", "not_linked", "cancelled", "unavailable", "busy"]) {
     assert.equal(shouldStartSingleSignOn({ ...ssoOnly, entraReason }), false);
   }
 });

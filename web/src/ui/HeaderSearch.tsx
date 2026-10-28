@@ -273,7 +273,8 @@ export default function HeaderSearch({ pages, searchRecords }: { pages: SearchPa
   return (
     <div ref={rootRef} className="relative flex w-full justify-center">
       <SVGFilter />
-      <div className="flex items-center gap-2" style={open && !value ? { filter: "url(#eris-blob)" } : undefined}>
+      {/* Never wider than its header column: on a phone the column is narrower than 300 px. */}
+      <div className="flex min-w-0 max-w-full items-center gap-2" style={open && !value ? { filter: "url(#eris-blob)" } : undefined}>
         <motion.div
           layout
           initial={false}
@@ -284,7 +285,7 @@ export default function HeaderSearch({ pages, searchRecords }: { pages: SearchPa
             inputRef.current?.focus();
           }}
           className={cn(
-            "relative flex h-10 max-w-[56vw] cursor-text items-center gap-2 rounded-full border px-4 transition-[background-color,border-color,box-shadow]",
+            "relative flex h-10 max-w-full cursor-text items-center gap-2 rounded-full border px-4 transition-[background-color,border-color,box-shadow]",
             open
               ? "border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] bg-[var(--panel)] shadow-[0_6px_24px_rgba(15,23,42,0.12)]"
               : "border-[var(--line)] bg-[var(--panel-soft)] hover:border-[color:color-mix(in_oklab,var(--brand)_35%,var(--line))]"

@@ -5,7 +5,7 @@
 # handover steps to record. ERIS_VERIFY_PROFILE=production turns the
 # production gates (pinned digests, Entra-only sign-in, no bootstrap.env, HSTS)
 # from WARN into FAIL. Sign-in, upload/download, restart and restore tests
-# remain manual (docs/caltrans-podman.md).
+# remain manual (docs/operations/caltrans-podman.md).
 set -uo pipefail
 
 usage="Usage: verify-rehearsal.sh https://eris-stage.example.gov [https://eris-files-stage.example.gov]"
