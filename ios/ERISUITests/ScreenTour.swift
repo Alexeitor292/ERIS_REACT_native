@@ -76,6 +76,13 @@ final class ScreenTour: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", text)).firstMatch
     }
 
+    /// Scrolls down until the element is on screen (lists load rows lazily).
+    @discardableResult
+    private func reveal(_ element: XCUIElement) -> XCUIElement {
+        for _ in 0..<8 where !(element.exists && element.isHittable) { app.swipeUp() }
+        return element
+    }
+
     /// A switch turns on only when its knob end is tapped, not the row's label.
     private func flip(_ toggle: XCUIElement) {
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), "missing \(toggle)")
@@ -140,6 +147,36 @@ final class ScreenTour: XCTestCase {
         // After the reload the choices are still there.
         XCTAssertTrue(app.buttons["Washout"].isSelected)
         XCTAssertFalse(app.buttons["Slide"].isSelected)
+    }
+
+    func testGisaMaterial() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Body"])
+        let material = reveal(app.buttons["Landslide Debris"])
+
+        // The demo record has soil with clay 40 and silt 60: one shared slider at 100.
+        let sand = app.sliders["Sand Est %"]
+        XCTAssertTrue(sand.waitForExistence(timeout: 10))
+        reveal(app.sliders["Clay/Silt Est %"]).adjust(toNormalizedSliderPosition: 0.5)
+        reveal(sand).adjust(toNormalizedSliderPosition: 0.3)
+        reveal(app.sliders["Boulder Est %"]).adjust(toNormalizedSliderPosition: 0.2)
+        flip(reveal(app.switches["Rock Formation"]))
+        tap(reveal(app.buttons["Joint"]))
+        snap("gisa-material-slope")
+
+        app.swipeDown()
+        tap(reveal(app.buttons["Pavement"]))
+        tap(app.buttons["Asphalt"])
+        tap(material)
+        reveal(app.sliders["Sand Est %"]).adjust(toNormalizedSliderPosition: 0.6)
+        reveal(app.sliders["Boulder Est %"]).adjust(toNormalizedSliderPosition: 0.4)
+        snap("gisa-material-debris")
+
+        tap(app.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+        app.alerts.buttons["OK"].tap()
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

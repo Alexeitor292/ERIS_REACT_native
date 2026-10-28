@@ -156,6 +156,9 @@ enum GisaStep: Int, CaseIterable, Identifiable {
     static let portedBodyKeys = Set(["distribution_code", "highway_status_cause", "highway_status_code",
                                      "lanes_closed_count", "incident_type_description"])
         .union(GisaForm.incidentTypeCodes.map(\.key))
+        .union(["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures",
+                "material_pavement_type", "est_soil_pct", "est_rock_pct", "est_clay_pct", "est_silt_pct"])
+        .union(GisaEditor.soilShareKeys).union(GisaEditor.debrisShareKeys)
     static let assessmentKeys: Set = ["record_of_event_notes", "maintenance_history_notes", "observations_notes",
                                       "geotechnical_assessment_notes", "sketchpad_notes"]
 
@@ -389,6 +392,132 @@ struct GisaBodySections: View {
             GisaTextField(label: "Incident Type Description", value: binding("incident_type_description"),
                           editable: canEdit, error: editor.errors["incident_type_description"], axis: .vertical)
         }
+
+        GisaMaterialSection(editor: $editor, canEdit: canEdit)
+    }
+}
+
+/// Material: slope (soil and rock formation), pavement type and landslide debris.
+struct GisaMaterialSection: View {
+    @Binding var editor: GisaEditor
+    let canEdit: Bool
+    @State private var part = Part.slope
+
+    enum Part: String, CaseIterable, Identifiable {
+        case slope = "Slope", pavement = "Pavement", debris = "Landslide Debris"
+        var id: String { rawValue }
+    }
+
+    private func slider(_ label: String, _ key: String) -> some View {
+        GisaPercentSlider(label: label, value: GisaEditor.steppedPercent(editor.form[key]), enabled: canEdit) {
+            editor.setPercent(key, $0)
+        }
+    }
+
+    var body: some View {
+        Section {
+            Picker("Material", selection: $part) {
+                ForEach(Part.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+
+            switch part {
+            case .slope:
+                Toggle("Soil", isOn: Binding(get: { editor.form["material_soil"] == "YES" },
+                                             set: { _ in editor.toggleMaterial("material_soil") }))
+                    .disabled(!canEdit)
+                if editor.form["material_soil"] == "YES" {
+                    slider("Soil Est %", "est_soil_pct")
+                    GisaPercentSlider(label: "Clay/Silt Est %", value: GisaEditor.steppedPercent(editor.claySiltPercent),
+                                      enabled: canEdit) { editor.setClaySiltPercent($0) }
+                    slider("Sand Est %", "est_sand_pct")
+                    slider("Gravel/Cobbles Est %", "est_gravel_pct")
+                    slider("Boulder Est %", "est_boulder_pct")
+                    GisaShareTotal(what: "Clay/silt, sand, gravel/cobbles and boulder", total: editor.soilShareTotal)
+                }
+                Toggle("Rock Formation", isOn: Binding(get: { editor.form["material_rock"] == "YES" },
+                                                       set: { _ in editor.toggleMaterial("material_rock") }))
+                    .disabled(!canEdit)
+                if editor.form["material_rock"] == "YES" {
+                    slider("Rock Formation Est %", "est_rock_pct")
+                    ChipFlow {
+                        ForEach(GisaEditor.rockSubtypes, id: \.0) { key, label in
+                            GisaChip(label: label, on: editor.form[key] == "YES", enabled: canEdit) {
+                                editor.toggleRockSubtype(key)
+                            }
+                        }
+                    }
+                }
+            case .pavement:
+                ChipFlow {
+                    ForEach([("CONCRETE", "Concrete"), ("ASPHALT", "Asphalt")], id: \.0) { code, label in
+                        GisaChip(label: label, on: editor.form["material_pavement_type"] == code, enabled: canEdit) {
+                            editor.togglePavementType(code)
+                        }
+                    }
+                }
+            case .debris:
+                slider("Clay/Silt Est %", "est_debris_clay_silt_pct")
+                slider("Sand Est %", "est_debris_sand_pct")
+                slider("Gravel/Cobbles Est %", "est_debris_gravel_pct")
+                slider("Boulder Est %", "est_debris_boulder_pct")
+                GisaShareTotal(what: "Landslide debris", total: editor.debrisShareTotal)
+            }
+        } header: {
+            Text("Material")
+        }
+    }
+}
+
+/// A 0–100% share in steps of 5, as the Expo editor's SteppedPercentInput.
+struct GisaPercentSlider: View {
+    let label: String
+    let value: Int
+    let enabled: Bool
+    let change: (Double) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                Spacer()
+                Text("\(value)%").monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(get: { Double(value) }, set: change), in: 0...100, step: 5) {
+                Text(label)
+            } minimumValueLabel: {
+                Text("0%").font(.caption2).foregroundStyle(.secondary)
+            } maximumValueLabel: {
+                Text("100%").font(.caption2).foregroundStyle(.secondary)
+            }
+            .disabled(!enabled)
+            .sensoryFeedback(.selection, trigger: value)
+        }
+    }
+}
+
+/// The running total of a group of shares, which must reach 100% to submit.
+struct GisaShareTotal: View {
+    let what: String
+    let total: Double?
+
+    var body: some View {
+        if let total {
+            let done = total == 100
+            Label("\(what): \(JSNumberText.text(total))% of 100%", systemImage: done ? "checkmark.circle" : "exclamationmark.circle")
+                .font(.footnote)
+                .foregroundStyle(done ? Color.green : Color.secondary)
+        } else {
+            Label("\(what): a share is not a number", systemImage: "exclamationmark.triangle")
+                .font(.footnote).foregroundStyle(.red)
+        }
+    }
+}
+
+/// 80 -> "80", 72.5 -> "72.5".
+enum JSNumberText {
+    static func text(_ value: Double) -> String {
+        value.rounded() == value ? String(Int(value)) : String(format: "%.2f", value)
     }
 }
 

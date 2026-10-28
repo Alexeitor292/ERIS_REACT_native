@@ -36,7 +36,7 @@ line-of-business app (see the spec for renewal dates).
 | Notifications feed | Ported |
 | Submissions: list, read-only detail (GISA fields, photos, latest PDF) | Ported; GISA editor not yet |
 | Assessments: worklists, detail, branch-chief and Staff pickers, submit, review, timeline | Ported; needs device test. Picker rules from the web's `personPickerModel.ts` (grouped, disabled branches, time-zone-safe return dates) |
-| GISA editor (`mobile/app/(tabs)/submissions/[id].tsx`, ~7,100 lines) | In progress. Core (load, rules, validation, save) and step 1 (Header, district contacts, Location with northing/easting) ported. Step 2: Distribution, Highway Status and Incident Type ported; Material onward next. Unported blocks show saved values and keep them on save. Per-section photo uploads and figure citations come with the Gallery step. Saving is online only until the offline queue is ported; the map editor and Site Photo Map come with the maps phase |
+| GISA editor (`mobile/app/(tabs)/submissions/[id].tsx`, ~7,100 lines) | In progress. Core (load, rules, validation, save) and step 1 (Header, district contacts, Location with northing/easting) ported. Step 2: Distribution, Highway Status, Incident Type and Material ported; Pavement / Ground Status next. Unported blocks show saved values and keep them on save. Per-section photo uploads and figure citations come with the Gallery step. Saving is online only until the offline queue is ported; the map editor and Site Photo Map come with the maps phase |
 | Drafts, offline queue and sync (`mobile/src/offline`) | Next |
 | Maintenance work, road inventory | Next |
 | Maps and offline terrain (ArcGIS Maps SDK for Swift) | Later; rewrite of `mobile/plugins/arcgis-ios` |

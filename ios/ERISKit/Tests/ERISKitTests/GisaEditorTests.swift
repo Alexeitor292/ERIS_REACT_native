@@ -210,3 +210,81 @@ final class GisaBodyTests: XCTestCase {
         XCTAssertEqual(editor.form["highway_status_code"], "")
     }
 }
+
+/// Step 2: Material.
+final class GisaMaterialTests: XCTestCase {
+    private func editor(_ gisa: String = "null") throws -> GisaEditor {
+        GisaEditor(detail: try JSONDecoder().decode(SubmissionDetail.self, from: Data("""
+        {"submission": {"id": 1, "status": "DRAFT", "can_edit": true}, "gisa": \(gisa)}
+        """.utf8)))
+    }
+
+    func testSlidersShowFiveStepsAndBlankAsZero() {
+        XCTAssertEqual(GisaEditor.steppedPercent(""), 0)
+        XCTAssertEqual(GisaEditor.steppedPercent("33"), 35)
+        XCTAssertEqual(GisaEditor.steppedPercent("32.4"), 30)
+        XCTAssertEqual(GisaEditor.steppedPercent("2.5"), 5, "halves round up, as Math.round does")
+        XCTAssertEqual(GisaEditor.steppedPercent("140"), 100)
+        XCTAssertEqual(GisaEditor.steppedPercent("-3"), 0)
+        XCTAssertEqual(GisaEditor.steppedPercent("lots"), 0)
+    }
+
+    func testMovingASliderStoresTheStep() throws {
+        var editor = try editor()
+        editor.setPercent("est_sand_pct", 42.6)
+        XCTAssertEqual(editor.form["est_sand_pct"], "45")
+    }
+
+    func testClayAndSiltShareOneSlider() throws {
+        var editor = try editor(#"{"material_soil": 1, "est_clay_pct": 20, "est_silt_pct": 13}"#)
+        XCTAssertEqual(editor.claySiltPercent, "35")
+        editor.setClaySiltPercent(40)
+        XCTAssertEqual(editor.form["est_clay_pct"], "40")
+        XCTAssertEqual(editor.form["est_silt_pct"], "0")
+        XCTAssertEqual(try self.editor(#"{"material_soil": 1}"#).claySiltPercent, "")
+    }
+
+    func testTurningSoilOrRockOffClearsItsDetail() throws {
+        var editor = try editor(#"{"material_soil": 1, "material_rock": 1, "est_sand_pct": 30, "est_rock_pct": 60, "material_joints": 1}"#)
+        editor.toggleMaterial("material_soil")
+        XCTAssertEqual(editor.form["material_soil"], "NO")
+        XCTAssertEqual(editor.form["est_sand_pct"], "")
+        editor.toggleMaterial("material_rock")
+        XCTAssertEqual(editor.form["est_rock_pct"], "")
+        XCTAssertEqual(editor.form["material_joints"], "NO")
+        editor.toggleMaterial("material_rock")
+        XCTAssertEqual(editor.form["material_rock"], "YES")
+    }
+
+    func testRockSubtypesNeedRock() throws {
+        var editor = try editor()
+        editor.toggleRockSubtype("material_bedding")
+        XCTAssertEqual(editor.form["material_bedding"], "NO")
+        editor.toggleMaterial("material_rock")
+        editor.toggleRockSubtype("material_bedding")
+        editor.toggleRockSubtype("material_fractures")
+        XCTAssertEqual(editor.form["material_bedding"], "YES")
+        XCTAssertEqual(editor.form["material_fractures"], "YES")
+        editor.toggleRockSubtype("material_bedding")
+        XCTAssertEqual(editor.form["material_bedding"], "NO")
+    }
+
+    func testPavementTypeIsOneChoice() throws {
+        var editor = try editor()
+        editor.togglePavementType("ASPHALT")
+        editor.togglePavementType("CONCRETE")
+        XCTAssertEqual(editor.form["material_pavement_type"], "CONCRETE")
+        editor.togglePavementType("CONCRETE")
+        XCTAssertEqual(editor.form["material_pavement_type"], "")
+    }
+
+    func testTheSharesTotalAsSubmitChecksThem() throws {
+        var editor = try editor(#"{"material_soil": 1, "est_clay_pct": 40, "est_silt_pct": 10, "est_sand_pct": 30}"#)
+        XCTAssertEqual(editor.soilShareTotal, 80)
+        editor.set("est_boulder_pct", "x")
+        XCTAssertNil(editor.soilShareTotal)
+        editor.setPercent("est_debris_sand_pct", 60)
+        editor.setPercent("est_debris_boulder_pct", 40)
+        XCTAssertEqual(editor.debrisShareTotal, 100)
+    }
+}

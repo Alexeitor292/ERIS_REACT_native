@@ -64,3 +64,91 @@ extension GisaEditor {
     /// The lane counts offered for Lane(s) Closed.
     public static let lanesClosedCounts = ["1", "2", "3", "4"]
 }
+
+/// Step 2 Material rules: slope soil and rock, pavement type and landslide
+/// debris, from the Material block of the Expo GISA editor.
+extension GisaEditor {
+    public static let soilShareKeys = ["est_sand_pct", "est_gravel_pct", "est_boulder_pct"]
+    public static let debrisShareKeys = ["est_debris_clay_silt_pct", "est_debris_sand_pct", "est_debris_gravel_pct",
+                                         "est_debris_boulder_pct"]
+    public static let rockSubtypes = [("material_bedding", "Bedding"), ("material_joints", "Joint"),
+                                      ("material_fractures", "Fracture")]
+
+    /// A percentage as its slider shows it: 0–100 in steps of 5; blank or
+    /// unreadable text shows as 0 (`SteppedPercentInput`).
+    public static func steppedPercent(_ text: String) -> Int {
+        let value = JS.number(text) ?? 0
+        return Self.stepped(min(100, max(0, value)))
+    }
+
+    /// Nearest multiple of 5 within 0–100, rounding halves up as Math.round does.
+    static func stepped(_ value: Double) -> Int {
+        max(0, min(100, Int((value / 5 + 0.5).rounded(.down)) * 5))
+    }
+
+    /// Sets a share from its slider, stored in steps of 5.
+    public mutating func setPercent(_ key: String, _ value: Double) {
+        set(key, String(Self.stepped(value)))
+    }
+
+    /// Clay and silt share one slider: their sum, or "" when neither is set.
+    public var claySiltPercent: String {
+        let clay = form["est_clay_pct"].trimmingCharacters(in: .whitespacesAndNewlines)
+        let silt = form["est_silt_pct"].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clay.isEmpty || !silt.isEmpty else { return "" }
+        guard let clayValue = clay.isEmpty ? 0 : JS.number(clay), let siltValue = silt.isEmpty ? 0 : JS.number(silt),
+              clayValue.isFinite, siltValue.isFinite else { return "" }
+        return String(Self.stepped(clayValue + siltValue))
+    }
+
+    /// The shared slider stores its value as clay, with silt 0.
+    public mutating func setClaySiltPercent(_ value: Double) {
+        set("est_clay_pct", String(Self.stepped(value)))
+        set("est_silt_pct", "0")
+    }
+
+    /// Soil or rock on or off; turning one off clears its detail.
+    public mutating func toggleMaterial(_ key: String) {
+        let selecting = form[key] != "YES"
+        set(key, selecting ? "YES" : "NO")
+        guard !selecting else { return }
+        if key == "material_soil" {
+            for share in ["est_soil_pct", "est_clay_pct", "est_silt_pct"] + Self.soilShareKeys { set(share, "") }
+        } else if key == "material_rock" {
+            set("est_rock_pct", "")
+            for (subtype, _) in Self.rockSubtypes { set(subtype, "NO") }
+        }
+    }
+
+    /// Bedding, joints and fractures can be marked only while rock is present.
+    public mutating func toggleRockSubtype(_ key: String) {
+        guard form["material_rock"] == "YES" else { return }
+        set(key, form[key] == "YES" ? "NO" : "YES")
+    }
+
+    /// Concrete or asphalt; choosing it again clears it.
+    public mutating func togglePavementType(_ type: String) {
+        set("material_pavement_type", form["material_pavement_type"] == type ? "" : type)
+    }
+
+    /// The soil shares' total as submit checks it (clay, silt, sand, gravel,
+    /// boulder), or nil when a share is not a number.
+    public var soilShareTotal: Double? {
+        var total = 0.0
+        for key in ["est_clay_pct", "est_silt_pct"] + Self.soilShareKeys {
+            guard let value = GisaValidation.percent(form[key]) else { return nil }
+            total += value
+        }
+        return total
+    }
+
+    /// The landslide debris shares' total, or nil when one is not a number.
+    public var debrisShareTotal: Double? {
+        var total = 0.0
+        for key in Self.debrisShareKeys {
+            guard let value = GisaValidation.percent(form[key]) else { return nil }
+            total += value
+        }
+        return total
+    }
+}
