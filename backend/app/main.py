@@ -3687,11 +3687,10 @@ def attachment_content(
 @app.get("/photos/{photo_id}/content")
 def photo_content(
     photo_id: int = Path(..., ge=1),
-    request: Request = None,
-    access_token: str | None = None,
     db: Session = Depends(get_db),
+    user=Depends(get_current_user),
 ):
-    return attachment_content(photo_id, request, access_token, db)
+    return attachment_content(photo_id, db, user)
 
 
 # ----------------------------
