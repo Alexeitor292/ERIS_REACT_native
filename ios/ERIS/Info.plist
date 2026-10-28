@@ -42,6 +42,10 @@
 		<string>msauthv2</string>
 		<string>msauthv3</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ERIS uses your location to fill in the incident's district, county, route and post mile.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ERIS attaches the photos you choose to incident reports.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

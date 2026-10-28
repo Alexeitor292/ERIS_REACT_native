@@ -26,7 +26,7 @@ final class AppModel: ObservableObject {
     }
 
     /// `ERISAPIBaseURL` in Info.plist, from the `ERIS_API_BASE_URL` build setting.
-    static var configuredBaseURL: URL {
+    nonisolated static var configuredBaseURL: URL {
         let value = Bundle.main.object(forInfoDictionaryKey: "ERISAPIBaseURL") as? String ?? ""
         return URL(string: value) ?? URL(string: "https://eris.invalid/api")!
     }

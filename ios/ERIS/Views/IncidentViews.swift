@@ -8,6 +8,7 @@ struct IncidentsView: View {
     @State private var incidents: [Incident] = []
     @State private var error: String?
     @State private var loading = false
+    @State private var reporting = false
 
     var body: some View {
         List {
@@ -25,7 +26,21 @@ struct IncidentsView: View {
         }
         .overlay { if loading && incidents.isEmpty { ProgressView() } }
         .navigationTitle("Incidents")
-        .navigationDestination(for: Int.self) { IncidentDetailView(incidentId: $0) }
+        .navigationDestination(for: Int.self) { IncidentDetailView(incidentId: $0, roles: me.roles) }
+        .toolbar {
+            if RoleModel.canReportIncident(me.roles) {
+                Button {
+                    reporting = true
+                } label: {
+                    Label("Report incident", systemImage: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $reporting) {
+            NavigationStack {
+                CreateIncidentView { created in incidents.insert(created, at: 0) }
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
     }
@@ -34,8 +49,7 @@ struct IncidentsView: View {
         loading = true
         defer { loading = false }
         do {
-            incidents = try await model.api.get("/incidents", query: [URLQueryItem(name: "scope", value: "mobile")],
-                                                as: IncidentList.self).items
+            incidents = try await IncidentsAPI(api: model.api).list()
             error = nil
         } catch {
             self.error = model.handle(error)
@@ -76,8 +90,32 @@ struct StatusChip: View {
 struct IncidentDetailView: View {
     @EnvironmentObject private var model: AppModel
     let incidentId: Int
+    let roles: [String]
     @State private var incident: Incident?
     @State private var error: String?
+    @State private var working = false
+    @State private var prompt: Action?
+    @State private var comment = ""
+
+    /// Workflow steps offered by role; the server decides whether each is allowed now.
+    enum Action: String, Identifiable {
+        case claim = "Claim"
+        case forward = "Forward to GeoTech"
+        case revision = "Request revision"
+        case resolve = "Resolve"
+        var id: String { rawValue }
+    }
+
+    private func actions(for incident: Incident) -> [Action] {
+        guard incident.status != "RESOLVED" else { return [] }
+        var out: [Action] = []
+        if RoleModel.canTriage(roles) && incident.currentStage == "COORDINATOR_REVIEW" {
+            out += [.forward, .revision]
+        }
+        if RoleModel.isWorkforceUser(roles) && incident.assignment == nil { out.append(.claim) }
+        if RoleModel.isWorkforceUser(roles) { out.append(.resolve) }
+        return out
+    }
 
     var body: some View {
         Group {
@@ -97,8 +135,27 @@ struct IncidentDetailView: View {
                     if let resolution = incident.resolutionComment, !resolution.isEmpty {
                         Section("Resolution") { Text(resolution) }
                     }
+                    let available = actions(for: incident)
+                    if !available.isEmpty {
+                        Section("Actions") {
+                            ForEach(available) { action in
+                                Button(action.rawValue) {
+                                    if action == .claim { Task { await perform(action) } } else { comment = ""; prompt = action }
+                                }
+                                .disabled(working)
+                            }
+                        }
+                    }
                 }
                 .navigationTitle(incident.displayTitle)
+                .alert(prompt?.rawValue ?? "", isPresented: Binding(get: { prompt != nil }, set: { if !$0 { prompt = nil } })) {
+                    TextField("Comment (optional)", text: $comment)
+                    Button("Cancel", role: .cancel) { prompt = nil }
+                    Button(prompt?.rawValue ?? "OK") {
+                        if let action = prompt { Task { await perform(action) } }
+                        prompt = nil
+                    }
+                }
             } else if let error {
                 Text(error).foregroundStyle(.red).padding()
             } else {
@@ -111,8 +168,26 @@ struct IncidentDetailView: View {
 
     private func load() async {
         do {
-            incident = try await model.api.get("/incidents/\(incidentId)", as: Incident.self)
+            incident = try await IncidentsAPI(api: model.api).get(incidentId)
             error = nil
+        } catch {
+            self.error = model.handle(error)
+        }
+    }
+
+    private func perform(_ action: Action) async {
+        working = true
+        defer { working = false }
+        let incidents = IncidentsAPI(api: model.api)
+        let note = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            switch action {
+            case .claim: try await incidents.claim(incidentId)
+            case .forward: try await incidents.forwardByCoordinator(incidentId, comment: note.isEmpty ? nil : note)
+            case .revision: try await incidents.requestRevision(incidentId, comment: note.isEmpty ? nil : note)
+            case .resolve: try await incidents.resolve(incidentId, comment: note.isEmpty ? nil : note)
+            }
+            await load()
         } catch {
             self.error = model.handle(error)
         }
