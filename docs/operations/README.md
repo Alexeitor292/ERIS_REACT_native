@@ -172,7 +172,7 @@ sequenceDiagram
 ```
 
 1. Merge the reviewed pull request to `main`.
-2. In Jenkins, run the ERIS job (Script Path `deploy/ci/Jenkinsfile.podman`)
+2. In Jenkins, run the ERIS job ([creating it](caltrans-podman.md#creating-the-jenkins-job) the first time; Script Path `deploy/ci/Jenkinsfile.podman`)
    with `RELEASE_TAG` (for example `2026.11.0`) and `DEPLOY_TO=staging` or
    `staging-then-production`.
 3. Complete the staging acceptance checklist.
