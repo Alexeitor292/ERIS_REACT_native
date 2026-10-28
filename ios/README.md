@@ -35,7 +35,7 @@ line-of-business app (see the spec for renewal dates).
 | Incidents: list, detail, report (GPS + Caltrans postmile + photos), claim/forward/revision/resolve | Ported; needs device test |
 | Notifications feed | Ported |
 | Submissions: list, read-only detail (GISA fields, photos, latest PDF) | Ported; GISA editor not yet |
-| Assessments: model, worklist queues by role (ERISKit only) | Model ported; screen next |
+| Assessments: worklists, detail, branch-chief and Staff pickers, submit, review, timeline | Ported; needs device test. Picker rules from the web's `personPickerModel.ts` (grouped, disabled branches, time-zone-safe return dates) |
 | GISA editor (`mobile/app/(tabs)/submissions/[id].tsx`, ~7,100 lines) | Next, in sections |
 | Drafts, offline queue and sync (`mobile/src/offline`) | Next |
 | Maintenance work, road inventory | Next |

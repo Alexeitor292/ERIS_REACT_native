@@ -69,7 +69,7 @@ struct MainTabView: View {
     @State private var incidentPath: [Int] = []
 
     enum Tab: Hashable {
-        case incidents, submissions, notifications, account
+        case incidents, assessments, submissions, notifications, account
     }
 
     var body: some View {
@@ -77,6 +77,11 @@ struct MainTabView: View {
             NavigationStack(path: $incidentPath) { IncidentsView(me: me) }
                 .tabItem { Label("Incidents", systemImage: "exclamationmark.triangle") }
                 .tag(Tab.incidents)
+            if AssessmentTab.isVisible(to: me.roles) {
+                NavigationStack { AssessmentsView(me: me) }
+                    .tabItem { Label("Assessments", systemImage: "checkmark.seal") }
+                    .tag(Tab.assessments)
+            }
             NavigationStack { SubmissionsView() }
                 .tabItem { Label("Submissions", systemImage: "doc.text") }
                 .tag(Tab.submissions)
@@ -99,6 +104,9 @@ struct MainTabView: View {
             case .submission:
                 model.pendingRoute = nil
                 tab = .submissions
+            case .assessments where AssessmentTab.isVisible(to: me.roles):
+                model.pendingRoute = nil
+                tab = .assessments
             default:
                 return
             }

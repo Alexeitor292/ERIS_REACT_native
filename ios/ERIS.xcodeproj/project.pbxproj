@@ -13,6 +13,7 @@
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
 		71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */; };
+		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
 		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
@@ -25,6 +26,7 @@
 		2E8560894A4728D677214030 /* RootViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootViews.swift; sourceTree = "<group>"; };
 		4096957882DF657855E7DBEA /* IncidentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentViews.swift; sourceTree = "<group>"; };
 		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
+		78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentViews.swift; sourceTree = "<group>"; };
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MSALTokenProvider.swift; sourceTree = "<group>"; };
 		A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ERISApp.swift; sourceTree = "<group>"; };
@@ -86,6 +88,7 @@
 		B8D9D5B27A55884192FCCD07 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */,
 				165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
@@ -178,6 +181,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */,
+				893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */,
 				71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */,
 				FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */,
 				081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */,
