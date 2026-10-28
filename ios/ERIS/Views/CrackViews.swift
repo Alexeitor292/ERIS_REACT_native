@@ -163,43 +163,13 @@ struct CrackEditorView: View {
         return true
     }
 
+    // The form is built in parts: as one body it took Xcode 16's type checker too long in CI.
     var body: some View {
         Form {
-            if crack.photoAttachmentId != nil {
-                Section {
-                    CrackPhotoView(image: image, shapes: draft.annotations?.shapes ?? [], crack: crack)
-                        .listRowInsets(EdgeInsets())
-                    if canEdit && image != nil {
-                        Button { drawing = true } label: { Label("Draw on Photo", systemImage: "pencil.tip.crop.circle") }
-                    }
-                }
-            }
-            Section("Crack") {
-                LabeledTextField(label: "Name", text: $draft.label, prompt: "Crack \(index + 1)")
-                ForEach(CrackMeasure.allCases) { measure in
-                    LabeledTextField(label: "\(measure.shortLabel) (\(measure.unit))", text: $draft[measure], keyboard: .decimalPad)
-                }
-            }
-            Section {
-                LabeledTextField(label: "Direction (°)", text: $draft.trendDeg, keyboard: .decimalPad)
-                if let runs = Crack.trendText(typedNumber(draft.trendDeg)) { Text("Runs \(runs)").foregroundStyle(.secondary) }
-                Picker("Orientation to the roadway", selection: $draft.orientation) {
-                    Text("Not set").tag(CrackOrientation?.none)
-                    ForEach(CrackOrientation.allCases) { Text($0.label).tag(CrackOrientation?.some($0)) }
-                }
-            } header: {
-                Text("Direction")
-            } footer: {
-                Text("Degrees from north that the crack runs; a line runs both ways, so 200° is the same as 20°.")
-            }
-            Section {
-                LabeledTextField(label: "Latitude", text: $draft.latitude, keyboard: .numbersAndPunctuation)
-                LabeledTextField(label: "Longitude", text: $draft.longitude, keyboard: .numbersAndPunctuation)
-            } header: {
-                Text("Location")
-            } footer: {
-                if let saved = crack.locationText { Text("Saved: \(saved)") }
-            }
+            photoSection
+            measuresSection
+            directionSection
+            locationSection
             Section("Notes") {
                 TextField("Notes", text: $draft.notes, axis: .vertical).lineLimit(3...8)
             }
@@ -235,6 +205,53 @@ struct CrackEditorView: View {
             Button("Delete Crack", role: .destructive) { Task { await delete() } }
         } message: {
             Text("Its photo stays on the form.")
+        }
+    }
+
+    @ViewBuilder private var photoSection: some View {
+        if crack.photoAttachmentId != nil {
+            Section {
+                CrackPhotoView(image: image, shapes: draft.annotations?.shapes ?? [], crack: crack)
+                    .listRowInsets(EdgeInsets())
+                if canEdit && image != nil {
+                    Button { drawing = true } label: { Label("Draw on Photo", systemImage: "pencil.tip.crop.circle") }
+                }
+            }
+        }
+    }
+
+    private var measuresSection: some View {
+        Section("Crack") {
+            LabeledTextField(label: "Name", text: $draft.label, prompt: "Crack \(index + 1)")
+            ForEach(CrackMeasure.allCases) { measure in
+                LabeledTextField(label: "\(measure.shortLabel) (\(measure.unit))", text: $draft[measure], keyboard: .decimalPad)
+            }
+        }
+    }
+
+    private var directionSection: some View {
+        Section {
+            LabeledTextField(label: "Direction (°)", text: $draft.trendDeg, keyboard: .decimalPad)
+            if let runs = Crack.trendText(typedNumber(draft.trendDeg)) { Text("Runs \(runs)").foregroundStyle(.secondary) }
+            Picker("Orientation to the roadway", selection: $draft.orientation) {
+                Text("Not set").tag(CrackOrientation?.none)
+                ForEach(CrackOrientation.allCases) { Text($0.label).tag(CrackOrientation?.some($0)) }
+            }
+        } header: {
+            Text("Direction")
+        } footer: {
+            Text("Degrees from north that the crack runs; a line runs both ways, so 200° is the same as 20°.")
+        }
+    }
+
+    private var locationSection: some View {
+        Section {
+            LabeledTextField(label: "Latitude", text: $draft.latitude, keyboard: .numbersAndPunctuation)
+            LabeledTextField(label: "Longitude", text: $draft.longitude, keyboard: .numbersAndPunctuation)
+        } header: {
+            Text("Location")
+        } footer: {
+            if let saved = crack.locationText { Text("Saved: \(saved)") }
         }
     }
 

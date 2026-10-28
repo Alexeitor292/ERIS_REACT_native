@@ -365,24 +365,42 @@ enum DemoData {
         "pavement_ground_cracks": 1, "settlement_in": 2.0,
         "geotechnical_assessment_notes": "Cut slope failure onto the shoulder.",
         "measure_slope_height_ft": 32.0, "measure_original_slope_deg": 34.0,
-        "road_inventory_context": ["dataset_version_id": 3, "segment_id": 812, "match_method": "nearest_segment",
-                                   "checked_at": "2026-10-27 15:05:00",
-                                   "snapshot": ["county_code": "ALA", "route_name": "880", "begin_pm": 11.2, "end_pm": 13.0,
-                                                "terrain_code": "R", "left_lanes": 4, "right_lanes": 4]],
+        "road_inventory_context": roadInventoryContext,
         "elevation_profile": elevationProfile(bearing: 47.6, source: "arcgis_postmile_geometry"),
+    ]
+
+    // Literals are typed and kept small: mixed-type ones are slow for Xcode 16's type checker in CI.
+    static let roadInventorySnapshot: [String: Any] = [
+        "county_code": "ALA", "route_name": "880", "begin_pm": 11.2, "end_pm": 13.0,
+        "terrain_code": "R", "left_lanes": 4, "right_lanes": 4,
+    ]
+    static let roadInventoryContext: [String: Any] = [
+        "dataset_version_id": 3, "segment_id": 812, "match_method": "nearest_segment",
+        "checked_at": "2026-10-27 15:05:00", "snapshot": roadInventorySnapshot,
     ]
 
     /// Ground across the road: a cut slope rising on the right.
     static func elevationProfile(bearing: Double, source: String) -> [String: Any] {
-        let points: [[String: Any]] = stride(from: -30.0, through: 30.0, by: 5.0).map { offset in
-            ["offset_m": offset, "lat": 37.7312, "lon": -122.1975, "source": "usgs_3dep",
-             "elevation_ft": 40 + (offset > 0 ? offset * 0.9 : offset * 0.1)]
+        var points: [[String: Any]] = []
+        for offset in stride(from: -30.0, through: 30.0, by: 5.0) {
+            let rise: Double = offset > 0 ? offset * 0.9 : offset * 0.1
+            let elevation: Double = 40 + rise
+            var point: [String: Any] = ["offset_m": offset, "lat": 37.7312, "lon": -122.1975]
+            point["source"] = "usgs_3dep"
+            point["elevation_ft"] = elevation
+            points.append(point)
         }
-        return ["source": "usgs_3dep", "checked_at": "2026-10-27 15:05:00", "classification": "CUT",
-                "classification_reason": NSNull(), "confidence": 0.82, "error": NSNull(),
-                "profile": ["points": points, "metadata": ["road_bearing_deg_used": bearing, "road_bearing_source": source,
-                                                           "half_width_m": 30, "spacing_m": 5,
-                                                           "classification_requires_bearing": true]]]
+        var metadata: [String: Any] = ["road_bearing_deg_used": bearing, "road_bearing_source": source]
+        metadata["half_width_m"] = 30
+        metadata["spacing_m"] = 5
+        metadata["classification_requires_bearing"] = true
+        let profile: [String: Any] = ["points": points, "metadata": metadata]
+        var out: [String: Any] = ["source": "usgs_3dep", "checked_at": "2026-10-27 15:05:00", "classification": "CUT"]
+        out["classification_reason"] = NSNull()
+        out["confidence"] = 0.82
+        out["error"] = NSNull()
+        out["profile"] = profile
+        return out
     }
 
     static let lookups: [String: Any] = [

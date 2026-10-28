@@ -560,7 +560,14 @@ struct GisaVegetationWaterSections: View {
         Binding(get: { editor.form[key] }, set: { editor.set(key, $0) })
     }
 
+    // Three parts rather than one body: kept small for Xcode 16's type checker in CI.
     var body: some View {
+        vegetation
+        drainage
+        waterContent
+    }
+
+    private var vegetation: some View {
         Section("Vegetation on Slope") {
             ForEach(GisaEditor.vegetationKeys, id: \.0) { key, label in
                 GisaTextField(label: "\(label) Coverage %", value: binding(key), editable: canEdit,
@@ -568,7 +575,9 @@ struct GisaVegetationWaterSections: View {
             }
             GisaSectionPhotos(sectionKey: "vegetation_slope")
         }
+    }
 
+    private var drainage: some View {
         Section("Water / Drainage") {
             ChipFlow {
                 ForEach(GisaEditor.drainageChoices, id: \.0) { key, label in
@@ -595,7 +604,9 @@ struct GisaVegetationWaterSections: View {
             }
             GisaSectionPhotos(sectionKey: "water_drainage")
         }
+    }
 
+    private var waterContent: some View {
         Section("Water Content") {
             ChipFlow {
                 ForEach(GisaEditor.waterContentChoices, id: \.0) { key, label in
