@@ -71,11 +71,26 @@ sign_in_limiter = SlidingWindowLimiter(settings.AUTH_RATE_LIMIT_PER_MINUTE)
 
 
 def limit_sign_in(request: Request) -> None:
-    """Dependency for the anonymous sign-in routes: 429 with Retry-After when exceeded."""
+    """Dependency for the anonymous sign-in API routes: 429 with Retry-After when exceeded."""
     retry_after = sign_in_limiter.hit(client_address(request))
     if retry_after is not None:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "Too many sign-in attempts. Wait a minute and try again.",
             headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
+        )
+
+
+def limit_sign_in_navigation(request: Request) -> None:
+    """The same limit for /auth/entra/start and /callback, which the browser opens
+    as pages: back to the sign-in page with reason "busy", never a raw JSON error."""
+    retry_after = sign_in_limiter.hit(client_address(request))
+    if retry_after is not None:
+        raise HTTPException(
+            status.HTTP_303_SEE_OTHER,
+            "Too many sign-in attempts",
+            headers={
+                "Location": f"{settings.WEB_BASE_URL.rstrip('/')}/login?entra=busy",
+                "Retry-After": str(max(1, math.ceil(retry_after))),
+            },
         )

@@ -30,7 +30,7 @@ from sqlalchemy import text
 from . import entra_credential
 from .config import settings
 from .db import SessionLocal
-from .rate_limit import limit_sign_in
+from .rate_limit import limit_sign_in, limit_sign_in_navigation
 from .routes.auth import start_session
 from .sessions import CLIENT_BEARER, CLIENT_WEB, is_browser, set_session_cookies
 
@@ -202,7 +202,7 @@ def _linked_active_user(db, tenant: str, identity: dict) -> dict | None:
     return user
 
 
-@router.get("/start", dependencies=[Depends(limit_sign_in)])
+@router.get("/start", dependencies=[Depends(limit_sign_in_navigation)])
 def start():
     try:
         tenant, client, redirect = _configuration()
@@ -225,7 +225,7 @@ def start():
     return response
 
 
-@router.get("/callback", dependencies=[Depends(limit_sign_in)])
+@router.get("/callback", dependencies=[Depends(limit_sign_in_navigation)])
 def callback(request: Request, code: str | None = Query(default=None), state: str | None = Query(default=None),
              error: str | None = Query(default=None), eris_entra_state: str | None = Cookie(default=None)):
     try:

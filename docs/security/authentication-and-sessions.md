@@ -155,7 +155,8 @@ it could read.
 Every anonymous sign-in route (`/auth/login`, `/auth/entra/start`,
 `/auth/entra/callback`, `/auth/entra/native`) shares a per-client sliding
 window of `AUTH_RATE_LIMIT_PER_MINUTE` requests (30). Beyond it the API answers
-429 with `Retry-After`. The client is the address the outermost trusted proxy
+429 with `Retry-After`; `/start` and `/callback`, which the browser opens as
+pages, send the person back to `/login?entra=busy` instead of a JSON error. The client is the address the outermost trusted proxy
 recorded in `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`: 2 behind the Caltrans
 gateway and nginx), so a client cannot dodge the limit by sending its own
 header. The window lives in the API process (`app/rate_limit.py`); the image

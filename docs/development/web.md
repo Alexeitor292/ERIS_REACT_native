@@ -69,6 +69,23 @@ role cannot use, and components hide buttons the person cannot press. **This
 is convenience, not security**: the API enforces every rule again. When you
 change a role rule, change the backend first, then mirror it here.
 
+## The app frame
+
+`ui/AppShell.tsx` wraps every signed-in page:
+
+- The browser tab reads "*Page* · ERIS" (`ui/shellModel.ts`, `documentTitle`).
+- A **Skip to main content** link is the first keyboard stop; `<main>` is its
+  target.
+- Below the desktop breakpoint the navigation folds into one **Menu** button
+  naming the current page; it closes after a choice or with Escape.
+- Page transitions are skipped when the system asks for reduced motion.
+- Every focusable element shows a focus ring (`index.css`, `:focus-visible`).
+
+Inside a page, give wide content (tables, tab rows, toolbars) a box that
+scrolls on its own (`overflow-x-auto`, `max-w-full`) and grids a
+`minmax(0, 1fr)` column, so a phone never scrolls the whole page sideways.
+Check new screens at 375 px wide.
+
 ## Styling and themes
 
 - Tailwind 4 utility classes, with colors from CSS variables in `index.css`

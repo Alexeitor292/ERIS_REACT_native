@@ -20,6 +20,7 @@ sequenceDiagram
   other Caltrans web apps.
 - **"Your account is not linked"** (`not_linked`): Caltrans knows you, but no
   ERIS account is linked to you yet. Ask an ERIS administrator.
+- **"Too many sign-in attempts"**: wait a minute and sign in again.
 - **iPhone:** install ERIS from Company Portal; it signs in through Microsoft
   Authenticator with the account already on the phone.
 - ERIS signs you out after **30 minutes** without activity and after

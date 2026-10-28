@@ -36,6 +36,7 @@ The web returns to `/login?entra=<reason>` after a failed Entra sign-in:
 | `cancelled` | The person closed Entra, or Entra refused (Conditional Access, MFA not completed) | Entra sign-in logs show why. |
 | `failed` | ERIS could not verify the Entra token: wrong tenant or client ID, clock skew on the host, network to `login.microsoftonline.com` blocked | Check `ENTRA_TENANT_ID`/`ENTRA_CLIENT_ID`, host time (NTP), egress. API log line `entra_sign_in_failed`. |
 | `not_linked` | Entra signed the person in, but no **active** ERIS account is linked to that object ID | An ERIS administrator creates or enables the account with the person's Entra **user object ID** ([administration](../user-guides/administration.md)). Log line `entra_sign_in_refused` shows tenant and object ID. |
+| `busy` | More than `AUTH_RATE_LIMIT_PER_MINUTE` sign-in requests from one address in a minute | Wait a minute. If a whole office hits it, the gateway is probably not forwarding `X-Forwarded-For` ([configuration](../operations/configuration.md#authentication)). |
 | `unavailable` | ERIS's Entra configuration is unusable: certificate missing, expired or not matching its key, or a bad callback URL | `bash deploy/podman/eris-pod.sh cert-check`; [rotate the certificate](../security/secrets-and-keys.md#rotation-procedures). |
 
 | Symptom | Cause | Fix |

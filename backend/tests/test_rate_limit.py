@@ -70,17 +70,27 @@ def test_every_sign_in_route_is_limited(method, path):
     from tests.route_table import api_routes
 
     route = next(r for r in api_routes(app) if getattr(r, "path", None) == path and method in getattr(r, "methods", ()))
-    assert any(d.call is rate_limit.limit_sign_in for d in route.dependant.dependencies), path
+    limits = {rate_limit.limit_sign_in, rate_limit.limit_sign_in_navigation}
+    assert any(d.call in limits for d in route.dependant.dependencies), path
 
 
 def test_the_api_answers_429_with_retry_after(client, sign_in_rate_limit_off, monkeypatch):
     monkeypatch.setattr(sign_in_rate_limit_off, "limit", 2)
-    statuses = [client.get("/auth/entra/start", follow_redirects=False).status_code for _ in range(2)]
+    statuses = [client.post("/auth/entra/native", json={}).status_code for _ in range(2)]
     assert 429 not in statuses
-    refused = client.get("/auth/entra/start", follow_redirects=False)
+    refused = client.post("/auth/entra/native", json={})
     assert refused.status_code == 429
     assert 1 <= int(refused.headers["retry-after"]) <= 60
     assert "Too many sign-in attempts" in refused.json()["detail"]
+
+
+def test_a_limited_browser_navigation_returns_to_the_sign_in_page(client, sign_in_rate_limit_off, monkeypatch):
+    monkeypatch.setattr(sign_in_rate_limit_off, "limit", 1)
+    client.get("/auth/entra/start", follow_redirects=False)
+    refused = client.get("/auth/entra/start", follow_redirects=False)
+    assert refused.status_code == 303
+    assert refused.headers["location"].endswith("/login?entra=busy")
+    assert int(refused.headers["retry-after"]) >= 1
 
 
 def test_api_responses_are_not_cached_or_sniffed(client):
