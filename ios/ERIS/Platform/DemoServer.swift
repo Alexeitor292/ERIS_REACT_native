@@ -1,0 +1,263 @@
+#if DEBUG
+import ERISKit
+import Foundation
+
+/// Debug builds only: run the app against built-in sample data, with no
+/// sign-in and no network, to check screens in the simulator. Start it with the
+/// launch argument `-ERISDemo YES` (add `-ERISDemoRoles OFFICE_CHIEF,STAFF` to
+/// try other roles; the default is ADMIN). This file is compiled out of Release
+/// builds, so the Intune build cannot enter demo mode.
+enum DemoServer {
+    static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "ERISDemo") }
+
+    static var roles: [String] {
+        let value = UserDefaults.standard.string(forKey: "ERISDemoRoles") ?? "ADMIN"
+        return value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    static func makeClient() -> APIClient {
+        APIClient(baseURL: URL(string: "https://demo.eris.invalid/api")!, store: MemorySessionStore(token: "demo"),
+                  transport: DemoTransport(roles: roles))
+    }
+}
+
+/// Answers API requests from sample data. Workflow steps change the sample
+/// assessments so a whole hand-off can be clicked through.
+final class DemoTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private let roles: [String]
+    private var assessments: [[String: Any]]
+    private var events: [Int: [[String: Any]]] = [:]
+    private var nextEventId = 100
+
+    init(roles: [String]) {
+        self.roles = roles
+        assessments = DemoData.assessments
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let url = request.url!
+        let path = url.path.hasPrefix("/api") ? String(url.path.dropFirst(4)) : url.path
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let (status, object) = lock.locked { route(request.httpMethod ?? "GET", path, query, body) }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": "application/json"])!
+        return (data, response)
+    }
+
+    private func route(_ method: String, _ path: String, _ query: [URLQueryItem], _ body: [String: Any]) -> (Int, Any) {
+        let parts = path.split(separator: "/").map(String.init)
+        switch (method, parts) {
+        case ("GET", ["auth", "me"]):
+            return (200, DemoData.me(roles: roles))
+        case ("GET", ["auth", "config"]):
+            return (200, ["local_login_enabled": false, "entra_enabled": true, "entra_mobile": NSNull()])
+        case ("POST", ["auth", "logout"]), ("POST", ["notifications", "devices", "unregister"]):
+            return (200, [:])
+        case ("GET", ["notifications", "unread"]):
+            return (200, ["unread": 2])
+        case ("GET", ["notifications"]):
+            return (200, DemoData.feed)
+        case ("POST", ["notifications", "read"]):
+            return (200, ["unread": 0])
+        case ("GET", ["incidents"]):
+            return (200, ["items": DemoData.incidents])
+        case ("GET", let p) where p.count == 2 && p[0] == "incidents":
+            return DemoData.incidents.first { "\($0["id"]!)" == p[1] }.map { (200, $0) } ?? notFound
+        case ("GET", ["submissions"]):
+            return (200, ["items": DemoData.submissions])
+        case ("GET", let p) where p.count == 2 && p[0] == "submissions":
+            return p[1] == "501" ? (200, DemoData.submissionDetail) : notFound
+        case ("GET", ["assessments"]):
+            return (200, ["items": assessments.filter { matches($0, queue: query.first { $0.name == "queue" }?.value) }])
+        case ("GET", let p) where p.count == 2 && p[0] == "assessments":
+            guard let id = Int(p[1]), let item = assessments.first(where: { $0["id"] as? Int == id }) else { return notFound }
+            return (200, ["assessment": item, "assignments": [], "events": events[id] ?? DemoData.events(for: item)])
+        case ("GET", let p) where p.count == 3 && p[0] == "assessments" && p[2] == "branch-options":
+            return (200, DemoData.branchChiefOptions)
+        case ("GET", let p) where p.count == 3 && p[0] == "admin" && p[1] == "assessment-assignment-options":
+            return (200, DemoData.staffOptions)
+        case ("POST", let p) where p.count == 3 && p[0] == "assessments":
+            return step(Int(p[1]) ?? 0, p[2], body)
+        default:
+            return notFound
+        }
+    }
+
+    private var notFound: (Int, Any) { (404, ["detail": "Not in the demo data"]) }
+
+    private func matches(_ item: [String: Any], queue: String?) -> Bool {
+        let state = item["state"] as? String
+        switch queue {
+        case "office_chief": return state == "PENDING_OFFICE_DELEGATION"
+        case "branch_chief": return state == "PENDING_ENGINEER_ASSIGNMENT" && item["routing_path"] as? String == "BRANCH"
+        case "engineer", "assignee": return item["assigned_engineer_user_id"] as? Int == DemoData.meId
+        case "reviewer": return state == "SUBMITTED"
+        default: return true
+        }
+    }
+
+    /// A workflow step, applied to the sample assessment with a timeline entry.
+    private func step(_ id: Int, _ action: String, _ body: [String: Any]) -> (Int, Any) {
+        guard let index = assessments.firstIndex(where: { $0["id"] as? Int == id }) else { return notFound }
+        var item = assessments[index]
+        let from = item["state"] as? String ?? ""
+        switch action {
+        case "delegate-branch":
+            item["state"] = "PENDING_ENGINEER_ASSIGNMENT"
+            item["routing_path"] = "BRANCH"
+            item["branch_chief_user_id"] = body["branch_chief_user_id"]
+            item["routed_branch_id"] = 3
+            item["routed_branch_name"] = "Branch C"
+        case "assign-engineer":
+            item["state"] = "DRAFT"
+            item["assigned_engineer_user_id"] = body["engineer_user_id"]
+        case "submit":
+            item["state"] = "SUBMITTED"
+            item["can_review"] = true
+        case "review":
+            item["state"] = body["action"] as? String == "APPROVE" ? "APPROVED" : "REVISION_REQUESTED"
+        default:
+            return notFound
+        }
+        assessments[index] = item
+        var history = events[id] ?? DemoData.events(for: assessments[index])
+        nextEventId += 1
+        history.append(["id": nextEventId, "incident_id": item["incident_id"]!, "actor_user_id": DemoData.meId,
+                        "actor_name": "Demo User", "event_type": action.uppercased().replacingOccurrences(of: "-", with: "_"),
+                        "from_state": from, "to_state": item["state"]!, "notes": body["notes"] ?? NSNull(),
+                        "created_at": "2026-10-28T12:00:00Z"])
+        events[id] = history
+        return (200, ["assessment": item])
+    }
+}
+
+/// Sample records, in the shapes the server returns.
+enum DemoData {
+    static let meId = 41
+
+    static func me(roles: [String]) -> [String: Any] {
+        ["id": meId, "email": "demo.user@dot.ca.gov", "full_name": "Demo User", "roles": roles,
+         "maintenance_districts": [],
+         "org": ["office_name": "Office of Geotechnical Design West", "office_short_name": "OGD West",
+                 "branch_name": "Branch C", "home_district": "04", "job_title": "Transportation Engineer"]]
+    }
+
+    static let feed: [String: Any] = [
+        "unread": 2,
+        "items": [
+            ["id": 1, "kind": "ASSESSMENT_ASSIGNED", "title": "Assessment #3 is waiting for a Staff member",
+             "body": "Incident #12, Branch C", "link": "/assessments/3", "actor": "Office Chief",
+             "created_at": "2026-10-28T08:15:00Z", "read": false],
+            ["id": 2, "kind": "INCIDENT_CREATED", "title": "New incident reported on I-880",
+             "body": "Slope failure near PM 12.3", "link": "/incidents/12", "actor": "Maintenance Crew",
+             "created_at": "2026-10-27T16:40:00Z", "read": false],
+        ],
+    ]
+
+    static let incidents: [[String: Any]] = [
+        ["id": 12, "incident_key": "INC-2026-0012", "title": "Slope failure above I-880", "incident_type": "LANDSLIDE",
+         "description": "Cut slope failed onto the right shoulder after overnight rain.",
+         "first_observed_at": "2026-10-27T14:05:00Z", "latitude": 37.7312, "longitude": -122.1975,
+         "district": "04", "county": "ALA", "route": "880", "post_mile": "12.3", "office_code": "WEST",
+         "current_stage": "BRANCH_CHIEF_REVIEW", "status": "IN_PROGRESS", "reporter_user_id": 7,
+         "created_at": "2026-10-27T14:20:00Z", "updated_at": "2026-10-28T08:15:00Z"],
+        ["id": 14, "incident_key": "INC-2026-0014", "title": "Rockfall on SR-1", "incident_type": "ROCKFALL",
+         "description": "Rocks up to 0.5 m in the northbound lane.", "first_observed_at": "2026-10-28T06:30:00Z",
+         "latitude": 37.5900, "longitude": -122.5100, "district": "04", "county": "SM", "route": "1",
+         "post_mile": "38.2", "current_stage": "COORDINATOR_REVIEW", "status": "NEW", "reporter_user_id": 7,
+         "created_at": "2026-10-28T06:45:00Z"],
+    ]
+
+    static let submissions: [[String: Any]] = [
+        ["id": 501, "created_by_user_id": meId, "status": "DRAFT", "title": "I-880 slope failure GISA",
+         "district": "04", "county": "ALA", "route": "880", "post_mile": "12.3", "created_at": "2026-10-28T09:00:00Z"],
+    ]
+
+    static let submissionDetail: [String: Any] = [
+        "submission": ["id": 501, "status": "DRAFT", "title": "I-880 slope failure GISA",
+                       "created_at": "2026-10-28T09:00:00Z", "can_edit": true, "can_review": false],
+        "gisa": ["district": "04", "county": "ALA", "route": "880", "post_mile": "12.3",
+                 "date_incident_reported": "2026-10-27", "incident_description": "Cut slope failure onto the shoulder."],
+        "photos": [], "attachments": [],
+    ]
+
+    static let assessments: [[String: Any]] = [
+        assessment(3, incident: 12, state: "PENDING_OFFICE_DELEGATION", path: nil),
+        assessment(4, incident: 14, state: "PENDING_ENGINEER_ASSIGNMENT", path: "BRANCH", branch: "Branch C"),
+        assessment(5, incident: 9, state: "DRAFT", path: "BRANCH", branch: "Branch C", assignee: meId, submission: 501),
+        assessment(6, incident: 8, state: "SUBMITTED", path: "SENIOR_ENGINEER", assignee: 52, canReview: true),
+        assessment(7, incident: 5, state: "APPROVED", path: "BRANCH", branch: "Branch A", assignee: 44),
+    ]
+
+    private static func assessment(_ id: Int, incident: Int, state: String, path: String?, branch: String? = nil,
+                                   assignee: Int? = nil, submission: Int? = nil, canReview: Bool = false) -> [String: Any] {
+        ["id": id, "assessment_uuid": "demo-\(id)", "incident_id": incident, "submission_id": submission ?? NSNull(),
+         "district": "04", "office_code": "WEST", "routed_office_name": "Office of Geotechnical Design West",
+         "routed_branch_id": branch == nil ? NSNull() : 3, "routed_branch_name": branch ?? NSNull(),
+         "routing_path": path ?? NSNull(), "assigned_engineer_user_id": assignee ?? NSNull(),
+         "can_review": canReview, "state": state, "created_by_user_id": 2,
+         "created_at": "2026-10-27T15:00:00Z", "updated_at": "2026-10-28T08:15:00Z"]
+    }
+
+    static func events(for item: [String: Any]) -> [[String: Any]] {
+        [["id": (item["id"] as? Int ?? 0) * 10, "incident_id": item["incident_id"]!, "actor_user_id": 2,
+          "actor_name": "Coordinator", "event_type": "TRIAGED", "disposition": "ASSESSMENT_REQUIRED",
+          "from_state": NSNull(), "to_state": "PENDING_OFFICE_DELEGATION", "notes": "Needs a geotechnical look.",
+          "created_at": "2026-10-27T15:00:00Z"]]
+    }
+
+    static let branchChiefOptions: [String: Any] = [
+        "assessment_id": 3, "office_code": "WEST",
+        "groups": [
+            group("b:1", "Branch A", id: 1, letter: "A", city: "Oakland"),
+            group("b:3", "Branch C", id: 3, letter: "C", city: "San Jose"),
+            group("b:5", "Branch E", id: 5, letter: "E", city: "Sacramento", accepts: false),
+        ],
+        "items": [
+            person(21, "M. Okafor", branch: 1, letter: "A", city: "Oakland", open: 6, waiting: 1),
+            person(23, "L. Chen", branch: 3, letter: "C", city: "San Jose", open: 3, waiting: 0,
+                   availability: "ROTATION_OUT", until: "2027-02-05"),
+            person(25, "R. Duarte", branch: 5, letter: "E", city: "Sacramento", open: 0, waiting: 0),
+        ],
+    ]
+
+    static let staffOptions: [String: Any] = [
+        "assessment_id": 4, "office_code": "WEST", "kind": "ENGINEER",
+        "groups": [group("b:3", "Branch C", id: 3, letter: "C", city: "San Jose"),
+                   group("b:1", "Branch A", id: 1, letter: "A", city: "Oakland")],
+        "items": [
+            person(meId, "Demo User", branch: 3, letter: "C", city: "San Jose", open: 2, waiting: 1),
+            person(44, "A. Rivera", branch: 3, letter: "C", city: "San Jose", open: 4, waiting: 0),
+            person(46, "B. Nakamura", branch: 1, letter: "A", city: "Oakland", open: 1, waiting: 0),
+        ],
+    ]
+
+    private static func group(_ key: String, _ label: String, id: Int, letter: String, city: String,
+                              accepts: Bool = true) -> [String: Any] {
+        ["group_key": key, "label": label, "branch_id": id, "branch_letter": letter, "branch_name": label,
+         "home_city": city, "home_district": "04", "accepts_assignments": accepts, "is_active": true]
+    }
+
+    private static func person(_ id: Int, _ name: String, branch: Int, letter: String, city: String, open: Int,
+                               waiting: Int, availability: String = "AVAILABLE", until: String? = nil) -> [String: Any] {
+        ["id": id, "email": name.lowercased().replacingOccurrences(of: ". ", with: ".").replacingOccurrences(of: " ", with: ".")
+            + "@dot.ca.gov",
+         "full_name": name, "office_code": "WEST", "office_name": "Office of Geotechnical Design West",
+         "branch_id": branch, "branch_letter": letter, "branch_name": "Branch \(letter)", "home_city": city,
+         "home_district": "04", "open_assessment_count": open, "awaiting_action_count": waiting,
+         "availability": availability, "available_until": until ?? NSNull(), "group_key": "b:\(branch)"]
+    }
+}
+
+private extension NSLock {
+    func locked<T>(_ body: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try body()
+    }
+}
+#endif

@@ -17,7 +17,7 @@ packages:
     path: ERISKit
   MSAL:
     url: https://github.com/AzureAD/microsoft-authentication-library-for-objc
-    from: "1.2.0"
+    exactVersion: "1.9.0"
 targets:
   ERIS:
     type: application
@@ -43,6 +43,21 @@ targets:
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Debug.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
+  # Drives Debug builds in demo mode (sample data, no sign-in) and saves
+  # screenshots; see ERISUITests/ScreenTour.swift.
+  ERISUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ERISUITests
+    dependencies:
+      - target: ERIS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: gov.ca.dot.eris.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
 schemes:
   ERIS:
     build:
@@ -50,5 +65,9 @@ schemes:
         ERIS: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - ERISUITests
     archive:
       config: Release

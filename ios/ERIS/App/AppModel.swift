@@ -21,8 +21,20 @@ final class AppModel: ObservableObject {
     private var device: DeviceRegistration?
 
     init(baseURL: URL = AppModel.configuredBaseURL) {
-        let api = APIClient(baseURL: baseURL, store: KeychainSessionStore())
+        var api = APIClient(baseURL: baseURL, store: KeychainSessionStore())
+        #if DEBUG
+        if DemoServer.isEnabled { api = DemoServer.makeClient() }
+        #endif
         auth = AuthService(api: api, provider: MSALTokenProvider())
+    }
+
+    /// Debug builds started with `-ERISDemo YES` show sample data.
+    var isDemo: Bool {
+        #if DEBUG
+        return DemoServer.isEnabled
+        #else
+        return false
+        #endif
     }
 
     /// `ERISAPIBaseURL` in Info.plist, from the `ERIS_API_BASE_URL` build setting.
@@ -88,6 +100,7 @@ final class AppModel: ObservableObject {
 
     private func afterSignIn() async {
         await refreshUnread()
+        if isDemo { return }
         let center = UNUserNotificationCenter.current()
         if (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true {
             UIApplication.shared.registerForRemoteNotifications()

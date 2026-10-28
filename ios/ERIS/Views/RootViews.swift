@@ -11,7 +11,19 @@ struct RootView: View {
         case .signedOut(let message):
             SignInView(message: message)
         case .signedIn(let me):
-            MainTabView(me: me)
+            // A stack, not a safe-area inset: pushed navigation bars then lay
+            // out below the demo banner instead of under it.
+            VStack(spacing: 0) {
+                if model.isDemo {
+                    Text("Demo data: not connected to ERIS")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 2)
+                        .background(.orange)
+                        .foregroundStyle(.black)
+                }
+                MainTabView(me: me)
+            }
         }
     }
 }

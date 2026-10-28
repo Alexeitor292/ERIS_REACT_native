@@ -12,7 +12,9 @@
 		19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C467160FFD1AAD51AA080E35 /* LocationProvider.swift */; };
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
+		5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BD4538642D56D52AACFE19 /* DemoServer.swift */; };
 		71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */; };
+		7E0DE5A23DD0C9E77EE2F077 /* ScreenTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */; };
 		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
 		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
@@ -21,8 +23,19 @@
 		FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		9BB15C1A8F83CA34BBB562FB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 30A056B4BD208D7D30B0C943 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 634440038F12669308F06EEF;
+			remoteInfo = ERIS;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateIncidentView.swift; sourceTree = "<group>"; };
+		16BD4538642D56D52AACFE19 /* DemoServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoServer.swift; sourceTree = "<group>"; };
 		2E8560894A4728D677214030 /* RootViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootViews.swift; sourceTree = "<group>"; };
 		4096957882DF657855E7DBEA /* IncidentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentViews.swift; sourceTree = "<group>"; };
 		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
@@ -33,6 +46,8 @@
 		B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmissionViews.swift; sourceTree = "<group>"; };
 		C467160FFD1AAD51AA080E35 /* LocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationProvider.swift; sourceTree = "<group>"; };
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
+		E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
+		EFF8C7FF82BD8D82D61D7DE0 /* ERISUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ERISUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FDA966222712234613820962 /* ERIS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ERIS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -52,6 +67,7 @@
 		1D1C589ED65070065F2FAC80 /* Platform */ = {
 			isa = PBXGroup;
 			children = (
+				16BD4538642D56D52AACFE19 /* DemoServer.swift */,
 				6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */,
 				C467160FFD1AAD51AA080E35 /* LocationProvider.swift */,
 				947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */,
@@ -63,6 +79,7 @@
 			isa = PBXGroup;
 			children = (
 				F9DEBD70583A81B14BE4150A /* ERIS */,
+				A648B890DE3D459D295D5926 /* ERISUITests */,
 				F14F713A7C0041A970AC8DA9 /* Packages */,
 				699684895EF07E22E9F48C30 /* Products */,
 			);
@@ -72,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				FDA966222712234613820962 /* ERIS.app */,
+				EFF8C7FF82BD8D82D61D7DE0 /* ERISUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,6 +101,14 @@
 				A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A648B890DE3D459D295D5926 /* ERISUITests */ = {
+			isa = PBXGroup;
+			children = (
+				E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */,
+			);
+			path = ERISUITests;
 			sourceTree = "<group>";
 		};
 		B8D9D5B27A55884192FCCD07 /* Views */ = {
@@ -118,6 +144,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		41DA67236B4014A1D73DF1E9 /* ERISUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5AAD5AB950104ADBA9F3878E /* Build configuration list for PBXNativeTarget "ERISUITests" */;
+			buildPhases = (
+				102B663BA8903014A7486C21 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4768E2780D7DC0ABC0078B74 /* PBXTargetDependency */,
+			);
+			name = ERISUITests;
+			packageProductDependencies = (
+			);
+			productName = ERISUITests;
+			productReference = EFF8C7FF82BD8D82D61D7DE0 /* ERISUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		634440038F12669308F06EEF /* ERIS */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 54A58D3B059BECCE9E284AFD /* Build configuration list for PBXNativeTarget "ERIS" */;
@@ -147,6 +191,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					41DA67236B4014A1D73DF1E9 = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = 634440038F12669308F06EEF;
+					};
 					634440038F12669308F06EEF = {
 						ProvisioningStyle = Automatic;
 					};
@@ -171,6 +219,7 @@
 			projectRoot = "";
 			targets = (
 				634440038F12669308F06EEF /* ERIS */,
+				41DA67236B4014A1D73DF1E9 /* ERISUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -183,6 +232,7 @@
 				0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */,
 				893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */,
 				71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */,
+				5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */,
 				FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */,
 				081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */,
 				903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */,
@@ -193,7 +243,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		102B663BA8903014A7486C21 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7E0DE5A23DD0C9E77EE2F077 /* ScreenTour.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4768E2780D7DC0ABC0078B74 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 634440038F12669308F06EEF /* ERIS */;
+			targetProxy = 9BB15C1A8F83CA34BBB562FB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4AE485FE3FD8D750DFE6D58B /* Release */ = {
@@ -338,6 +404,42 @@
 			};
 			name = Release;
 		};
+		C73F0E6BF55433301063856D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = ERIS;
+			};
+			name = Debug;
+		};
+		CF8E2EE5ED133879D31212EE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = ERIS;
+			};
+			name = Release;
+		};
 		F18665EE9157B6822FDBF299 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -369,6 +471,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		5AAD5AB950104ADBA9F3878E /* Build configuration list for PBXNativeTarget "ERISUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C73F0E6BF55433301063856D /* Debug */,
+				CF8E2EE5ED133879D31212EE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		6B56A714CA9218E0F2586F07 /* Build configuration list for PBXProject "ERIS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -392,8 +503,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/AzureAD/microsoft-authentication-library-for-objc";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.2.0;
+				kind = exactVersion;
+				version = 1.9.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

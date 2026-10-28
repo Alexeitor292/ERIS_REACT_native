@@ -49,5 +49,14 @@ line-of-business app (see the spec for renewal dates).
   binary into `~/bin`, which needs no admin rights).
 - Port one screen at a time. Put logic and API calls in `ERISKit` with tests ported
   from the matching `*.test.ts`; keep SwiftUI views thin.
+- **Demo mode (Debug builds only).** Launch with the arguments `-ERISDemo YES` (Xcode:
+  scheme → Run → Arguments) to use built-in sample data with no sign-in and no network;
+  `-ERISDemoRoles OFFICE_CHIEF,STAFF` tries other roles (default `ADMIN`). An orange
+  banner shows it is on. `ERIS/Platform/DemoServer.swift` is wrapped in `#if DEBUG`, so
+  Release and Intune builds do not contain it.
+- **Screen tour.** `ERISUITests/ScreenTour.swift` walks the screens in demo mode and saves
+  a screenshot of each:
+  `TEST_RUNNER_ERIS_SCREENSHOT_DIR=/tmp/shots xcodebuild test -project ios/ERIS.xcodeproj -scheme ERIS -destination 'platform=iOS Simulator,name=iPhone 17'`.
+  Add a step there for each new screen.
 - The server contract is `docs/ios-native-app.md`; never put a token in a URL, and
   decode GISA forms with `preservingKeys: true`.

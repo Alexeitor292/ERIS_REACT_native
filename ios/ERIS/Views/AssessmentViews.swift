@@ -112,6 +112,8 @@ struct AssessmentDetailView: View {
     @State private var error: String?
     @State private var actionError: String?
     @State private var working = false
+    /// Changed after each step, to bring the new state into view.
+    @State private var stepsDone = 0
 
     var body: some View {
         Group {
@@ -141,9 +143,11 @@ struct AssessmentDetailView: View {
         let chosenStaff = PersonPicker.selectedPerson(staff, staffId)
         let outOfBranch = PersonPicker.isOutOfBranchChoice(chosenStaff, assessmentBranchId: assessment.routedBranchId)
         let hasNotes = !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        ScrollViewReader { scroller in
         List {
             Section {
                 AssessmentStateBadge(state: assessment.state)
+                    .id("state")
                 // Office and branch by name from the routing snapshot: what they
                 // read when this assessment was routed, not what they are called today.
                 LabeledContent("Incident", value: "#\(assessment.incidentId)")
@@ -169,14 +173,6 @@ struct AssessmentDetailView: View {
             if actions.delegate {
                 PersonPickerSections(title: "Delegate to a branch chief", sections: branchChiefs,
                                      empty: "No branch chiefs configured for this office.", selection: $branchChiefId)
-                Section {
-                    Button(PersonPicker.selectedPerson(branchChiefs, branchChiefId).map { "Delegate to \($0.fullName)" }
-                           ?? "Delegate to branch chief") {
-                        guard let chosen = branchChiefId else { return }
-                        run { try await $0.delegateBranch(assessment.id, branchChiefUserId: chosen, notes: notes) }
-                    }
-                    .disabled(working || branchChiefId == nil)
-                }
             }
 
             if actions.assignNotOnThisRoute {
@@ -188,20 +184,6 @@ struct AssessmentDetailView: View {
             if actions.assign {
                 PersonPickerSections(title: "Assign a Staff member", sections: staff,
                                      empty: "No Staff members are recorded for this office.", selection: $staffId)
-                Section {
-                    Button("Assign Staff member") {
-                        guard let chosen = staffId else { return }
-                        run { try await $0.assignEngineer(assessment.id, engineerUserId: chosen, notes: notes) }
-                    }
-                    .disabled(working || staffId == nil || (outOfBranch && !hasNotes))
-                } footer: {
-                    if outOfBranch, let chosenStaff {
-                        Text("\(chosenStaff.fullName) is in \(chosenStaff.placeNote ?? "another branch"), not \(assessment.branchLabel ?? "this branch"). Record why in the notes to assign them anyway.")
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("Assigning outside this branch is allowed; record why in the notes.")
-                    }
-                }
             }
 
             if actions.submit {
@@ -245,11 +227,35 @@ struct AssessmentDetailView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         if let note = event.notes, !note.isEmpty { Text(note).font(.caption) }
-                        Text("by \(event.actorLabel)\(event.createdAt.map { " · \($0)" } ?? "")")
+                        Text("by \(event.actorLabel)\(ServerDate.display(event.createdAt).map { " · \($0)" } ?? "")")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             }
+        }
+        // Back to the top after a step, as the Expo sheet reopened there.
+        .onChange(of: stepsDone) { withAnimation { scroller.scrollTo("state", anchor: .top) } }
+        .safeAreaInset(edge: .bottom) {
+            if actions.delegate {
+                let chosen = PersonPicker.selectedPerson(branchChiefs, branchChiefId)
+                HandOffBar(hint: chosen == nil ? "Choose a branch chief above." : nil, warning: nil,
+                           title: chosen.map { "Delegate to \($0.fullName)" } ?? "Delegate to branch chief",
+                           enabled: !working && chosen != nil) {
+                    guard let chosen else { return }
+                    run { try await $0.delegateBranch(assessment.id, branchChiefUserId: chosen.id, notes: notes) }
+                }
+            } else if actions.assign {
+                HandOffBar(hint: chosenStaff == nil ? "Choose a Staff member above." : nil,
+                           warning: outOfBranch ? chosenStaff.map {
+                               "\($0.fullName) is in \($0.placeNote ?? "another branch"), not \(assessment.branchLabel ?? "this branch"). Record why in the notes to assign them anyway."
+                           } : nil,
+                           title: chosenStaff.map { "Assign \($0.fullName)" } ?? "Assign Staff member",
+                           enabled: !working && chosenStaff != nil && (!outOfBranch || hasNotes)) {
+                    guard let chosenStaff else { return }
+                    run { try await $0.assignEngineer(assessment.id, engineerUserId: chosenStaff.id, notes: notes) }
+                }
+            }
+        }
         }
     }
 
@@ -279,10 +285,40 @@ struct AssessmentDetailView: View {
                 branchChiefId = PersonPicker.initialValue()
                 staffId = PersonPicker.initialValue()
                 await load()
+                stepsDone += 1
             } catch {
                 actionError = model.handle(error)
             }
         }
+    }
+}
+
+/// The confirm step of a hand-off, kept in reach below the picker: choosing a
+/// person and handing the work to them are separate acts.
+struct HandOffBar: View {
+    let hint: String?
+    let warning: String?
+    let title: String
+    let enabled: Bool
+    let confirm: () -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            if let warning {
+                Text(warning).font(.footnote).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+            } else if let hint {
+                Text(hint).font(.footnote).foregroundStyle(.secondary)
+            }
+            Button(action: confirm) {
+                Text(title).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!enabled)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 }
 
