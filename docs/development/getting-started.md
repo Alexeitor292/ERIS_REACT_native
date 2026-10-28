@@ -1,6 +1,8 @@
-# Development
+# Getting started
 
-How to run ERIS on your own machine, test it, and change the database schema.
+How to run ERIS on your own machine (the **development** environment), test
+it, and change the database schema. The test and production environments are
+in [operations](../operations/README.md).
 Commands are shown for PowerShell and bash where they differ. Every setting
 mentioned here is described in [configuration.md](../operations/configuration.md).
 
@@ -8,8 +10,9 @@ mentioned here is described in [configuration.md](../operations/configuration.md
 
 - Docker Desktop (MariaDB and SeaweedFS run in containers).
 - Python 3.12 for the backend.
-- Node.js 20 for the web and mobile apps.
-- For the iOS app: macOS with Xcode and CocoaPods.
+- Node.js 22 (the CI version) for the web and Expo apps.
+- For the iPhone app: macOS with Xcode ([iOS](ios.md)); for the Expo reference
+  app also CocoaPods.
 
 ## 1. Start MariaDB and SeaweedFS
 
@@ -45,7 +48,7 @@ the mock accounts in their places (roles come only from where people sit):
 docker exec -i eris_mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' < database/dev/040_mock_placements.sql
 ```
  The accounts, all with password
-`password`, are listed in [roles-and-identity.md](../security/roles-and-permissions.md#mock-accounts-development-and-test-only).
+`password`, are listed in [roles and permissions](../security/roles-and-permissions.md#mock-accounts-development-and-test-only).
 
 A database seeded before the `mock.*` addresses can be renamed in place with
 `database/dev/rename_local_accounts.sql`.
@@ -89,7 +92,7 @@ Interactive API documentation is at http://127.0.0.1:8000/docs while
 Optional helpers:
 
 - `python -m app.tools.create_admin --email ... --name ...` creates or promotes
-  an administrator (see [deployment.md](../operations/compose-deployment.md#fresh-installation)).
+  an administrator (see [Compose deployment](../operations/compose-deployment.md#fresh-installation)).
 - `python scripts/seed_demo_org_roster.py --i-understand-this-is-demo-data`
   fills the organization with 27 invented people (`mock.demo.*@dot.ca.gov`), so
   the office, branch and person pickers have something to show. `--remove`
@@ -112,6 +115,9 @@ Sign in with a mock account. `VITE_*` values are read when Vite starts, so
 restart `npm run dev` after changing `web/.env`.
 
 ## 4. Mobile app
+
+The native Swift app is described in [iOS](ios.md). The steps below run the
+Expo reference app ([status](mobile-expo.md)).
 
 The app uses the native ArcGIS Runtime SDK for iOS, so it runs as a development
 build, not in Expo Go.

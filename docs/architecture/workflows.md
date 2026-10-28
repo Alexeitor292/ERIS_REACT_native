@@ -6,6 +6,117 @@ Group and an assessment, to approval. Role names are those in
 branches, district coverage) is maintained as described in
 [organization.md](../user-guides/administration.md).
 
+## At a glance
+
+### End to end, by role
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Crew as Maintenance Crew
+    actor Coord as Maintenance Coordinator
+    actor OC as Office Chief
+    actor BC as Branch Chief
+    actor Author as Staff / Senior Specialist
+    participant ERIS
+
+    Crew->>ERIS: Report an incident (location, photos)
+    ERIS-->>Coord: My Work + notification: triage
+    Coord->>ERIS: Assessment required, Incident Group, ERIS number
+    ERIS-->>OC: Assessment to route
+    alt Branch route
+        OC->>ERIS: Hand to a Branch Chief
+        ERIS-->>BC: Assessment to assign
+        BC->>ERIS: Assign a Staff member
+    else Senior Specialist route
+        OC->>ERIS: Assign a Senior Specialist
+    end
+    ERIS-->>Author: Form to fill
+    Author->>ERIS: GISA technical form, submit
+    ERIS-->>BC: Review (branch route) or Office Chief (direct route)
+    alt Approve
+        BC->>ERIS: Approve (final)
+        ERIS-->>Coord: Approved notice, record readable by Guests
+    else Request revision
+        BC->>ERIS: Request revision
+        ERIS-->>Author: Revise and resubmit
+    end
+    Author->>ERIS: Resolve the incident
+```
+
+### Incident stages
+
+```mermaid
+stateDiagram-v2
+    [*] --> COORDINATOR_REVIEW: reported (provisional, no ERIS number)
+    COORDINATOR_REVIEW --> COORDINATOR_REVIEW: needs reporter information
+    COORDINATOR_REVIEW --> RESOLVED: no assessment, or duplicate (closed at triage)
+    COORDINATOR_REVIEW --> OFFICE_CHIEF_REVIEW: assessment required (ERIS number, Incident Group)
+    OFFICE_CHIEF_REVIEW --> BRANCH_CHIEF_REVIEW: branch route
+    OFFICE_CHIEF_REVIEW --> ENGINEER_ASSIGNED: Senior Specialist route
+    BRANCH_CHIEF_REVIEW --> ENGINEER_ASSIGNED: Staff assigned
+    ENGINEER_ASSIGNED --> RESOLVED: resolved by assignee or admin
+    RESOLVED --> [*]
+```
+
+Incident `status` follows the stage: `NEW` before work starts, `IN_PROGRESS`,
+then `RESOLVED`.
+
+### Triage decisions
+
+```mermaid
+flowchart TD
+    report["New report<br/>COORDINATOR_REVIEW"] --> decide{"Coordinator decides"}
+    decide -->|Assessment required| group{"Open Incident Group nearby?"}
+    group -->|yes| attach["Attach to it"]
+    group -->|no| start["Start a new group"]
+    attach --> number["Permanent ERIS number,<br/>assessment for the district's office"]
+    start --> number
+    decide -->|No assessment required| closed["Closed at triage<br/>RESOLVED, no ERIS number"]
+    decide -->|Duplicate or linked| dup["Closed at triage,<br/>linked to the original"]
+    decide -->|Needs reporter information| back["Back to the reporter,<br/>returns on reply"]
+```
+
+### Assessment states
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING_OFFICE_DELEGATION: created at triage
+    PENDING_OFFICE_DELEGATION --> PENDING_ENGINEER_ASSIGNMENT: branch route (to a Branch Chief)
+    PENDING_OFFICE_DELEGATION --> DRAFT: Senior Specialist route
+    PENDING_ENGINEER_ASSIGNMENT --> DRAFT: Branch Chief assigns Staff
+    DRAFT --> SUBMITTED: author submits
+    SUBMITTED --> APPROVED: reviewer approves (final)
+    SUBMITTED --> REVISION_REQUESTED: reviewer requests revision
+    REVISION_REQUESTED --> SUBMITTED: author resubmits
+    APPROVED --> [*]
+```
+
+`FINALIZED` exists only on records approved before routing v2.
+
+### Technical forms outside an assessment
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT
+    DRAFT --> SUBMITTED: submit
+    SUBMITTED --> APPROVED: administrator approves
+    SUBMITTED --> REJECTED: administrator returns it
+    REJECTED --> SUBMITTED: resubmit after changes
+    APPROVED --> [*]
+```
+
+### Incident Groups
+
+```mermaid
+stateDiagram-v2
+    [*] --> OPEN: started from a report at triage
+    OPEN --> CLOSED: every report resolved (coordinator or admin)
+    CLOSED --> OPEN: reopened
+    OPEN --> ARCHIVED: left with no reports (automatic)
+    CLOSED --> ARCHIVED: left with no reports (automatic)
+```
+
 ## 1. Field report
 
 A **Maintenance Crew** member, a **Staff** member or an administrator reports an
@@ -64,14 +175,7 @@ district (set on the **Organization** page). The office and branch names are fro
 on the assessment when it is routed, so renaming or restructuring the
 organization never rewrites history.
 
-```
-PENDING_OFFICE_DELEGATION ──(branch route)──► PENDING_ENGINEER_ASSIGNMENT ──► DRAFT
-          │                                                                     ▲
-          └──────────(Senior Specialist route)──────────────────────────────────┘
-DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
-                      │
-                      └──request revision──► REVISION_REQUESTED ──resubmit──► SUBMITTED
-```
+The states are drawn in [assessment states](#assessment-states) above.
 
 1. **The Office Chief routes it**, choosing one of two routes by hand. Nothing is
    pre-selected:

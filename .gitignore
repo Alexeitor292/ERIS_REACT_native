@@ -13,6 +13,11 @@ deploy/podman/bootstrap.env
 # Entra certificate/key and any other runtime secret files; never commit.
 deploy/podman/secrets/
 *.key
+*.pem
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
 cosign.key
 **/.env
 **/.env.local
