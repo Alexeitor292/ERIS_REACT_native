@@ -76,6 +76,11 @@ final class ScreenTour: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", text)).firstMatch
     }
 
+    /// Any element whose label contains `text` (a LabeledContent reads as "Label, value").
+    private func text(containing text: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    }
+
     /// Scrolls down until the element is on screen (lists load rows lazily).
     @discardableResult
     private func reveal(_ element: XCUIElement) -> XCUIElement {
@@ -157,8 +162,8 @@ final class ScreenTour: XCTestCase {
         let material = reveal(app.buttons["Landslide Debris"])
 
         // The demo record has soil with clay 40 and silt 60: one shared slider at 100.
-        let sand = app.sliders["Sand Est %"]
-        XCTAssertTrue(sand.waitForExistence(timeout: 10))
+        let sand = reveal(app.sliders["Sand Est %"])
+        XCTAssertTrue(sand.exists)
         reveal(app.sliders["Clay/Silt Est %"]).adjust(toNormalizedSliderPosition: 0.5)
         reveal(sand).adjust(toNormalizedSliderPosition: 0.3)
         reveal(app.sliders["Boulder Est %"]).adjust(toNormalizedSliderPosition: 0.2)
@@ -177,6 +182,49 @@ final class ScreenTour: XCTestCase {
         tap(app.buttons["Save"])
         XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
         app.alerts.buttons["OK"].tap()
+    }
+
+    func testSectionPhotos() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Body"])
+
+        // The demo form has one photo filed under Material.
+        let sample = reveal(app.buttons["Photo field-photo-sample.jpg"])
+        snap("photos-material-section")
+        tap(sample)
+        let facing = text(containing: "Facing 135° (SE)")
+        if !facing.waitForExistence(timeout: 10) { snap("photo-detail-missing") }
+        XCTAssertTrue(facing.exists)
+        snap("photo-detail")
+
+        tap(app.buttons["Correct Location or Direction"])
+        flip(app.switches["Correct the direction"])
+        reveal(app.sliders["Direction"]).adjust(toNormalizedSliderPosition: 0.25)
+        snap("photo-correction")
+        tap(app.navigationBars["Correct Photo"].buttons["Save"])
+        XCTAssertTrue(text(containing: "direction corrected by hand").waitForExistence(timeout: 10))
+        snap("photo-detail-corrected")
+        tap(app.buttons["Done"])
+
+        // The simulator has no camera: the camera says so instead of failing.
+        tap(reveal(app.buttons["Add Photo"]))
+        tap(app.buttons["Take Photo"])
+        XCTAssertTrue(text(containing: "This device has no rear camera").waitForExistence(timeout: 10))
+        tap(app.buttons["Close"])
+
+        // A library photo is filed under the section.
+        tap(reveal(app.buttons["Add Photo"]))
+        tap(app.buttons["Choose from Library"])
+        // The system picker's grid is not exposed element by element: wait for
+        // the picker, then tap its first photo by position.
+        XCTAssertTrue(text(containing: "Private Access to Photos").waitForExistence(timeout: 15))
+        snap("photos-library-picker")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.43)).tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo library-photo-'")).firstMatch
+            .waitForExistence(timeout: 20))
+        snap("photos-material-added")
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

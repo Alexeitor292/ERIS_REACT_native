@@ -1,6 +1,7 @@
 #if DEBUG
 import ERISKit
 import Foundation
+import UIKit
 
 /// Debug builds only: run the app against built-in sample data, with no
 /// sign-in and no network, to check screens in the simulator. Start it with the
@@ -32,6 +33,10 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private var gisa: [String: Any] = DemoData.gisa
     private var submissionActions: [String: Any] = ["immediate": [], "follow_up": []]
     private var incidentTypes: [String] = ["HEAVING"]
+    /// Photos filed on the demo form: attachment record, image bytes, capture data.
+    private var photos: [(record: [String: Any], data: Data, capture: [String: Any])] = [DemoData.samplePhoto]
+    private var corrections: [Int: [String: Any]] = [:]
+    private var nextAttachmentId = 900
 
     init(roles: [String]) {
         self.roles = roles
@@ -44,7 +49,12 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         let path = url.path.hasPrefix("/api") ? String(url.path.dropFirst(4)) : url.path
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-        let (status, object) = lock.locked { route(request.httpMethod ?? "GET", path, query, body) }
+        let (status, object) = lock.locked {
+            if request.httpMethod == "POST", path == "/submissions/501/attachments" {
+                return upload(request, sectionKey: query.first { $0.name == "section_key" }?.value)
+            }
+            return route(request.httpMethod ?? "GET", path, query, body)
+        }
         let data = try JSONSerialization.data(withJSONObject: object)
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "application/json"])!
@@ -74,6 +84,15 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             return (200, ["items": DemoData.submissions])
         case ("GET", let p) where p.count == 2 && p[0] == "submissions":
             return p[1] == "501" ? (200, submissionDetail) : notFound
+        case ("GET", ["submissions", "501", "photo-map"]):
+            return (200, photoMap)
+        case ("PUT", let p) where p.count == 6 && p[2] == "photo-map" && p[5] == "correction":
+            guard let id = Int(p[4]) else { return notFound }
+            corrections[id] = body
+            return (200, ["attachment_id": id, "idempotent_replay": false])
+        case ("GET", let p) where p.count == 3 && p[0] == "attachments" && p[2] == "download-url":
+            guard let photo = photos.first(where: { "\($0.record["id"]!)" == p[1] }) else { return notFound }
+            return (200, ["download_url": "data:image/jpeg;base64,\(photo.data.base64EncodedString())"])
         case ("GET", ["gisa", "lookups"]):
             return (200, DemoData.lookups)
         case ("PATCH", ["submissions", "501", "gisa"]):
@@ -105,12 +124,74 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
 
     private var notFound: (Int, Any) { (404, ["detail": "Not in the demo data"]) }
 
+    /// A multipart upload: the file and, for a photo, its capture data.
+    private func upload(_ request: URLRequest, sectionKey: String?) -> (Int, Any) {
+        let contentType = request.value(forHTTPHeaderField: "Content-Type") ?? ""
+        guard let boundary = contentType.components(separatedBy: "boundary=").last, let body = request.httpBody else {
+            return (400, ["detail": "Expected a multipart upload"])
+        }
+        var file = Data(), fileName = "upload.jpg", capture: [String: Any] = [:]
+        for part in body.split(separator: Data("--\(boundary)".utf8)) {
+            guard let headerEnd = part.range(of: Data("\r\n\r\n".utf8)) else { continue }
+            let header = String(decoding: part[part.startIndex..<headerEnd.lowerBound], as: UTF8.self)
+            var content = Data(part[headerEnd.upperBound...])
+            if content.suffix(2) == Data("\r\n".utf8) { content.removeLast(2) }
+            if header.contains("name=\"capture_metadata_json\"") {
+                capture = (try? JSONSerialization.jsonObject(with: content) as? [String: Any]) ?? [:]
+            } else if header.contains("name=\"file\"") {
+                file = content
+                if let range = header.range(of: "filename=\"") {
+                    fileName = String(header[range.upperBound...].prefix { $0 != "\"" })
+                }
+            }
+        }
+        nextAttachmentId += 1
+        let record: [String: Any] = ["id": nextAttachmentId, "file_name": fileName, "mime_type": "image/jpeg",
+                                     "kind": "PHOTO", "section_key": sectionKey as Any? ?? NSNull()]
+        photos.append((record, file, capture))
+        return (200, ["attachment_id": nextAttachmentId, "section_key": sectionKey as Any? ?? NSNull(), "kind": "PHOTO"])
+    }
+
+    /// The photo map: each photo's capture data with the latest correction applied.
+    private var photoMap: [String: Any] {
+        let items: [[String: Any]] = photos.map { photo in
+            let id = photo.record["id"] as? Int ?? 0
+            var item: [String: Any] = ["attachment_id": id, "file_name": photo.record["file_name"]!,
+                                       "mime_type": "image/jpeg", "section_key": photo.record["section_key"]!,
+                                       "source_scope": "SUBMISSION", "can_edit_correction": true,
+                                       "download_url": "data:image/jpeg;base64,\(photo.data.base64EncodedString())"]
+            for key in ["captured_at", "latitude", "longitude", "horizontal_accuracy_m", "camera_heading_deg",
+                        "camera_heading_accuracy_code", "location_source", "heading_source"] {
+                item[key] = photo.capture[key] ?? NSNull()
+            }
+            if let correction = corrections[id] {
+                let location = correction["location_override"] as? [String: Any]
+                let heading = correction["heading_override_deg"] as? Double
+                if let location {
+                    item["latitude"] = location["latitude"]
+                    item["longitude"] = location["longitude"]
+                    item["horizontal_accuracy_m"] = NSNull()
+                    item["location_source"] = "MANUAL"
+                }
+                if let heading {
+                    item["camera_heading_deg"] = heading
+                    item["heading_source"] = "MANUAL"
+                }
+                item["correction"] = ["has_history": true, "location_overridden": location != nil,
+                                      "heading_overridden": heading != nil, "location_override": location as Any? ?? NSNull(),
+                                      "heading_override_deg": heading as Any? ?? NSNull()]
+            }
+            return item
+        }
+        return ["submission_id": 501, "can_edit_corrections": true, "photos": items]
+    }
+
     private var submissionDetail: [String: Any] {
         ["submission": ["id": 501, "created_by_user_id": DemoData.meId, "status": "DRAFT",
                         "title": "I-880 slope failure GISA", "created_at": "2026-10-28T09:00:00",
                         "updated_at": "2026-10-28T09:00:00", "can_edit": true, "can_review": false],
          "gisa": gisa, "incident_types": incidentTypes, "actions": submissionActions,
-         "photos": [], "attachments": [], "workflow_events": []]
+         "photos": photos.map(\.record), "attachments": photos.map(\.record), "workflow_events": []]
     }
 
     private func matches(_ item: [String: Any], queue: String?) -> Bool {
@@ -200,6 +281,30 @@ enum DemoData {
         ["id": 501, "created_by_user_id": meId, "status": "DRAFT", "title": "I-880 slope failure GISA",
          "district": "04", "county": "ALA", "route": "880", "post_mile": "12.3", "created_at": "2026-10-28T09:00:00Z"],
     ]
+
+    /// A field photo filed under Material, facing south-east.
+    static var samplePhoto: (record: [String: Any], data: Data, capture: [String: Any]) {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 800, height: 600)).image { context in
+            UIColor(red: 0.55, green: 0.47, blue: 0.36, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 800, height: 600))
+            UIColor(red: 0.42, green: 0.62, blue: 0.85, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 800, height: 220))
+            UIColor.darkGray.setStroke()
+            let crack = UIBezierPath()
+            crack.move(to: CGPoint(x: 120, y: 420))
+            for point in [(260, 380), (330, 450), (470, 400), (560, 470), (700, 430)] {
+                crack.addLine(to: CGPoint(x: point.0, y: point.1))
+            }
+            crack.lineWidth = 6
+            crack.stroke()
+        }
+        return (["id": 801, "file_name": "field-photo-sample.jpg", "mime_type": "image/jpeg", "kind": "PHOTO",
+                 "section_key": "material"],
+                image.jpegData(compressionQuality: 0.8) ?? Data(),
+                ["captured_at": "2026-10-28T09:20:00", "latitude": 37.73135, "longitude": -122.19731,
+                 "horizontal_accuracy_m": 4.0, "camera_heading_deg": 135.0, "camera_heading_accuracy_code": 3,
+                 "location_source": "DEVICE_AT_CAPTURE", "heading_source": "DEVICE_TRUE_HEADING"])
+    }
 
     /// A saved GISA row: DECIMAL columns as numbers and flags as 0/1, as the server sends them.
     static let gisa: [String: Any] = [

@@ -42,10 +42,12 @@
 		<string>msauthv2</string>
 		<string>msauthv3</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>ERIS takes field photos for incident reports and assessment forms, recording where and which way each was taken.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>ERIS uses your location to fill in the incident's district, county, route and post mile.</string>
+	<string>ERIS uses your location to fill in an incident's district, county, route and post mile, and to map where each field photo was taken.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>ERIS attaches the photos you choose to incident reports.</string>
+	<string>ERIS attaches the photos you choose to incident reports and assessment forms.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

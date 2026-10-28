@@ -1,4 +1,5 @@
 import ERISKit
+import PhotosUI
 import SwiftUI
 
 /// The GISA editor, as in mobile/app/(tabs)/submissions/[id].tsx: five steps,
@@ -16,6 +17,17 @@ struct SubmissionDetailView: View {
     @State private var alert: GisaEditor.SaveProblem?
     @State private var saving = false
     @State private var browserURL: IdentifiableURL?
+    @State private var cameraSection: PhotoTarget?
+    @State private var librarySection: String?
+    @State private var libraryItem: PhotosPickerItem?
+    @State private var uploadingSection: String?
+    @State private var openPhoto: AttachmentRef?
+
+    /// The section a new photo will be filed under.
+    struct PhotoTarget: Identifiable {
+        let sectionKey: String
+        var id: String { sectionKey }
+    }
 
     var body: some View {
         Group {
@@ -31,6 +43,31 @@ struct SubmissionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .sheet(item: $browserURL) { SafariView(url: $0.url) }
+        .sheet(item: $openPhoto) { PhotoDetailView(submissionId: submissionId, attachment: $0) }
+        .fullScreenCover(item: $cameraSection) { target in
+            MappedCameraScreen(onCaptured: { capture in
+                cameraSection = nil
+                Task { await upload(capture, to: target.sectionKey) }
+            }, onCancel: { cameraSection = nil })
+        }
+        .photosPicker(isPresented: Binding(get: { librarySection != nil }, set: { if !$0 && libraryItem == nil { librarySection = nil } }),
+                      selection: $libraryItem, matching: .images)
+        .onChange(of: libraryItem) { _, item in
+            guard let item, let section = librarySection else { return }
+            libraryItem = nil
+            librarySection = nil
+            Task {
+                do {
+                    guard let photo = try await LibraryPhoto.load(item) else {
+                        alert = .init(title: "Photo unavailable", message: "That photo could not be read.")
+                        return
+                    }
+                    await upload(photo, to: section)
+                } catch {
+                    alert = .init(title: "Photo unavailable", message: error.localizedDescription)
+                }
+            }
+        }
         .alert(alert?.title ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
             Button("OK", role: .cancel) { alert = nil }
         } message: {
@@ -77,6 +114,15 @@ struct SubmissionDetailView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .environment(\.gisaPhotos, GisaPhotoContext(
+            detail: detail, canEdit: canEdit, busySection: uploadingSection,
+            add: { section, source in
+                switch source {
+                case .camera: cameraSection = PhotoTarget(sectionKey: section)
+                case .library: librarySection = section
+                }
+            },
+            open: { openPhoto = $0 }))
         .toolbar {
             if canEdit {
                 Button(saving ? "Saving…" : "Save") { Task { await save() } }
@@ -121,6 +167,22 @@ struct SubmissionDetailView: View {
             } catch {
                 alert = .init(title: "Save failed", message: model.handle(error))
             }
+        }
+    }
+
+    /// Files a photo under its form section. Only the attachment list is
+    /// refreshed afterwards, so unsaved form changes are kept.
+    private func upload(_ photo: MappedPhotoCapture, to section: String) async {
+        uploadingSection = section
+        defer { uploadingSection = nil }
+        let submissions = SubmissionsAPI(api: model.api)
+        do {
+            _ = try await submissions.uploadAttachment(submissionId, file: photo.jpeg, fileName: photo.fileName,
+                                                       mimeType: "image/jpeg", sectionKey: section, kind: "PHOTO",
+                                                       capture: photo.metadata)
+            if let fresh = try? await submissions.detail(submissionId) { detail = fresh }
+        } catch {
+            alert = .init(title: "Photo upload failed", message: model.handle(error))
         }
     }
 
@@ -354,6 +416,7 @@ struct GisaBodySections: View {
                     }
                 }
             }
+            GisaSectionPhotos(sectionKey: "distribution")
         }
 
         Section {
@@ -377,6 +440,7 @@ struct GisaBodySections: View {
                 Text("Enter the cause above to reveal the highway status options.")
                     .font(.callout).foregroundStyle(.secondary)
             }
+            GisaSectionPhotos(sectionKey: "highway_status")
         } header: {
             Text("Highway Status")
         }
@@ -391,6 +455,7 @@ struct GisaBodySections: View {
             }
             GisaTextField(label: "Incident Type Description", value: binding("incident_type_description"),
                           editable: canEdit, error: editor.errors["incident_type_description"], axis: .vertical)
+            GisaSectionPhotos(sectionKey: "incident_type")
         }
 
         GisaMaterialSection(editor: $editor, canEdit: canEdit)
@@ -463,6 +528,7 @@ struct GisaMaterialSection: View {
                 slider("Boulder Est %", "est_debris_boulder_pct")
                 GisaShareTotal(what: "Landslide debris", total: editor.debrisShareTotal)
             }
+            GisaSectionPhotos(sectionKey: "material")
         } header: {
             Text("Material")
         }

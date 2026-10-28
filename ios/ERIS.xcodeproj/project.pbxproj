@@ -10,6 +10,7 @@
 		081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4096957882DF657855E7DBEA /* IncidentViews.swift */; };
 		0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8179064C0312B2FDA75A3216 /* AppModel.swift */; };
 		19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C467160FFD1AAD51AA080E35 /* LocationProvider.swift */; };
+		2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */; };
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
 		5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BD4538642D56D52AACFE19 /* DemoServer.swift */; };
@@ -19,6 +20,7 @@
 		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
 		9D9354D09031B86DFA514DE0 /* GisaEditorViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */; };
+		9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B0406C2726AB58967A07E70 /* PhotoViews.swift */; };
 		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
 		FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */; };
@@ -40,10 +42,12 @@
 		16BD4538642D56D52AACFE19 /* DemoServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoServer.swift; sourceTree = "<group>"; };
 		2E8560894A4728D677214030 /* RootViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootViews.swift; sourceTree = "<group>"; };
 		4096957882DF657855E7DBEA /* IncidentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentViews.swift; sourceTree = "<group>"; };
+		4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MappedCamera.swift; sourceTree = "<group>"; };
 		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
 		78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentViews.swift; sourceTree = "<group>"; };
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MSALTokenProvider.swift; sourceTree = "<group>"; };
+		9B0406C2726AB58967A07E70 /* PhotoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoViews.swift; sourceTree = "<group>"; };
 		A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ERISApp.swift; sourceTree = "<group>"; };
 		AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisaEditorViews.swift; sourceTree = "<group>"; };
 		B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmissionViews.swift; sourceTree = "<group>"; };
@@ -74,6 +78,7 @@
 				16BD4538642D56D52AACFE19 /* DemoServer.swift */,
 				6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */,
 				C467160FFD1AAD51AA080E35 /* LocationProvider.swift */,
+				4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */,
 				947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */,
 			);
 			path = Platform;
@@ -122,6 +127,7 @@
 				165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */,
 				AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
+				9B0406C2726AB58967A07E70 /* PhotoViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
 				B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */,
 			);
@@ -257,6 +263,8 @@
 				903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */,
 				19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */,
 				FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */,
+				2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */,
+				9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */,
 				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,
 				E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */,
 			);
