@@ -13,7 +13,7 @@ final class GisaFormTests: XCTestCase {
         "report_date": .string("2026-10-27"), "district": .string("4"), "county": .string("Alameda"),
         "route": .string("880"), "post_mile": .string("12.3"), "ea": .string("04-1A234"),
         "latitude": .number(37.7312), "longitude": .number(-122.1975),
-        "lanes_closed_count": .number(2), "crack_length_ft": .number(12.5), "settlement_in": .number(3),
+        "lanes_closed_count": .number(2), "bulge_in": .number(12.5), "settlement_in": .number(3),
         "pavement_ground_cracks": .number(1), "indented_by_rocks": .number(0),
         "failure_slide": .number(1), "failure_flow": .number(0), "material_soil": .number(1),
         "material_pavement_type": .string("GRAVEL"), "est_clay_pct": .number(40), "est_silt_pct": .number(60),
@@ -33,7 +33,7 @@ final class GisaFormTests: XCTestCase {
         XCTAssertEqual(form["latitude"], "37.731200")
         XCTAssertEqual(form["longitude"], "-122.197500")
         XCTAssertEqual(form["lanes_closed_count"], "2")
-        XCTAssertEqual(form["crack_length_ft"], "12.5")
+        XCTAssertEqual(form["bulge_in"], "12.5")
         XCTAssertEqual(form["vegetation_trees"], "30")
         XCTAssertEqual(form["pavement_ground_cracks"], "YES")
         XCTAssertEqual(form["indented_by_rocks"], "NO")
@@ -103,7 +103,8 @@ final class GisaFormTests: XCTestCase {
         XCTAssertEqual(body["post_mile"], .string("12.30"))
         XCTAssertEqual(body["latitude"], .number(37.7312))
         XCTAssertEqual(body["lanes_closed_count"], .number(2))
-        XCTAssertEqual(body["crack_length_ft"], .number(12.5))
+        XCTAssertEqual(body["bulge_in"], .number(12.5))
+        XCTAssertNil(body["crack_length_ft"], "cracks are their own records")
         XCTAssertEqual(body["vegetation_trees"], .number(30))
         XCTAssertEqual(body["pavement_ground_cracks"], .bool(true))
         XCTAssertEqual(body["indented_by_rocks"], .bool(false))
@@ -141,7 +142,7 @@ final class GisaFormTests: XCTestCase {
             do { _ = try form.patchBody() } catch let error as GisaFieldError { return error } catch {}
             return nil
         }
-        XCTAssertEqual(error("crack_length_ft", "12 ft"), GisaFieldError(key: "crack_length_ft", message: "Crack length must be numeric"))
+        XCTAssertEqual(error("bulge_in", "12 in"), GisaFieldError(key: "bulge_in", message: "Bulge must be numeric"))
         XCTAssertEqual(error("lanes_closed_count", "1.5"),
                        GisaFieldError(key: "lanes_closed_count", message: "Lanes closed count must be a whole number"))
         XCTAssertEqual(error("vegetation_trees", "120"),
@@ -149,7 +150,7 @@ final class GisaFormTests: XCTestCase {
         XCTAssertEqual(error("latitude", "north"), GisaFieldError(key: "latitude", message: "Latitude must be numeric"))
         XCTAssertEqual(error("geometry_json", "{oops"), GisaFieldError(key: "geometry_json", message: "Geometry JSON is invalid."))
         XCTAssertNil(error("lanes_closed_count", "2.0"))
-        XCTAssertNil(error("crack_length_ft", " 1e1 "))
+        XCTAssertNil(error("bulge_in", " 1e1 "))
     }
 
     func testAnUnreadablePavementLayoutIsReplacedByTheDefault() throws {

@@ -21,11 +21,17 @@ struct SubmissionDetailView: View {
     @State private var libraryItem: PhotosPickerItem?
     @State private var uploadingSection: String?
     @State private var openPhoto: AttachmentRef?
+    @State private var libraryForCrack = false
+    /// The form's cracks: saved on their own, so kept apart from the form draft.
+    @State private var cracks: [Crack] = []
+    @State private var addingCrack = false
+    @State private var openCrack: CrackRoute?
 
-    /// The section a new photo will be filed under.
+    /// The section a new photo will be filed under, and whether it starts a crack.
     struct PhotoTarget: Identifiable {
         let sectionKey: String
-        var id: String { sectionKey }
+        var forCrack = false
+        var id: String { "\(sectionKey)-\(forCrack)" }
     }
 
     var body: some View {
@@ -62,15 +68,19 @@ struct SubmissionDetailView: View {
             .fullScreenCover(item: $cameraSection) { target in
                 MappedCameraScreen(onCaptured: { capture in
                     cameraSection = nil
-                    Task { await upload(capture, to: target.sectionKey) }
+                    Task {
+                        if target.forCrack { await addCrack(photo: capture) } else { await upload(capture, to: target.sectionKey) }
+                    }
                 }, onCancel: { cameraSection = nil })
             }
             .photosPicker(isPresented: libraryOpen, selection: $libraryItem, matching: .images)
             .onChange(of: libraryItem) { _, item in
                 guard let item, let section = librarySection else { return }
+                let forCrack = libraryForCrack
                 libraryItem = nil
                 librarySection = nil
-                Task { await uploadLibraryPhoto(item, to: section) }
+                libraryForCrack = false
+                Task { await uploadLibraryPhoto(item, to: section, forCrack: forCrack) }
             }
     }
 
@@ -78,13 +88,13 @@ struct SubmissionDetailView: View {
         Binding(get: { librarySection != nil }, set: { if !$0 && libraryItem == nil { librarySection = nil } })
     }
 
-    private func uploadLibraryPhoto(_ item: PhotosPickerItem, to section: String) async {
+    private func uploadLibraryPhoto(_ item: PhotosPickerItem, to section: String, forCrack: Bool) async {
         do {
             guard let photo = try await LibraryPhoto.load(item) else {
                 alert = .init(title: "Photo unavailable", message: "That photo could not be read.")
                 return
             }
-            await upload(photo, to: section)
+            if forCrack { await addCrack(photo: photo) } else { await upload(photo, to: section) }
         } catch {
             alert = .init(title: "Photo unavailable", message: error.localizedDescription)
         }
@@ -138,6 +148,29 @@ struct SubmissionDetailView: View {
                 }
             },
             open: { openPhoto = $0 }))
+        .environment(\.gisaCracks, GisaCrackContext(
+            submissionId: submissionId, cracks: cracks, canEdit: canEdit, adding: addingCrack,
+            add: { source in
+                switch source {
+                case .camera: cameraSection = PhotoTarget(sectionKey: "pavement_ground_status", forCrack: true)
+                case .library:
+                    libraryForCrack = true
+                    librarySection = "pavement_ground_status"
+                case .noPhoto: Task { await addCrack(photo: nil) }
+                }
+            },
+            open: { openCrack = CrackRoute(id: $0.id) }))
+        .navigationDestination(item: $openCrack) { route in
+            if let index = cracks.firstIndex(where: { $0.id == route.id }) {
+                CrackEditorView(submissionId: submissionId, crack: cracks[index], index: index, canEdit: canEdit,
+                                onSaved: { saved in
+                                    if let at = cracks.firstIndex(where: { $0.id == saved.id }) { cracks[at] = saved }
+                                },
+                                onDeleted: { cracks.removeAll { $0.id == route.id } })
+            } else {
+                Text("This crack is no longer on the form.").foregroundStyle(.secondary)
+            }
+        }
         .toolbar {
             if canEdit {
                 Button(saving ? "Saving…" : "Save") { Task { await save() } }
@@ -155,6 +188,7 @@ struct SubmissionDetailView: View {
             if let fetched = try? await submissions.lookups() { lookups = fetched }
             detail = loaded
             editor = GisaEditor(detail: loaded)
+            cracks = loaded.cracks ?? []
             error = nil
         } catch {
             self.error = model.handle(error)
@@ -187,17 +221,47 @@ struct SubmissionDetailView: View {
 
     /// Files a photo under its form section. Only the attachment list is
     /// refreshed afterwards, so unsaved form changes are kept.
-    private func upload(_ photo: MappedPhotoCapture, to section: String) async {
+    @discardableResult
+    private func upload(_ photo: MappedPhotoCapture, to section: String) async -> UploadedAttachment? {
         uploadingSection = section
         defer { uploadingSection = nil }
         let submissions = SubmissionsAPI(api: model.api)
         do {
-            _ = try await submissions.uploadAttachment(submissionId, file: photo.jpeg, fileName: photo.fileName,
-                                                       mimeType: "image/jpeg", sectionKey: section, kind: "PHOTO",
-                                                       capture: photo.metadata)
+            let uploaded = try await submissions.uploadAttachment(submissionId, file: photo.jpeg, fileName: photo.fileName,
+                                                                  mimeType: "image/jpeg", sectionKey: section, kind: "PHOTO",
+                                                                  capture: photo.metadata)
             if let fresh = try? await submissions.detail(submissionId) { detail = fresh }
+            return uploaded
         } catch {
             alert = .init(title: "Photo upload failed", message: model.handle(error))
+            return nil
+        }
+    }
+
+    /// Starts a crack, from a photo or without one, and opens it. A photo is
+    /// filed under Pavement / Ground Status and its GPS is the crack's
+    /// approximate location.
+    private func addCrack(photo: MappedPhotoCapture?) async {
+        addingCrack = true
+        defer { addingCrack = false }
+        var fields: [String: JSONValue] = [:]
+        if let photo {
+            guard let uploaded = await upload(photo, to: "pavement_ground_status") else { return }
+            fields["photo_attachment_id"] = .number(Double(uploaded.attachmentId))
+            if let latitude = photo.metadata?.latitude, let longitude = photo.metadata?.longitude {
+                fields["latitude"] = .number(latitude)
+                fields["longitude"] = .number(longitude)
+                fields["location_source"] = .string("PHOTO")
+            }
+        }
+        do {
+            let crack = try await SubmissionsAPI(api: model.api).createCrack(submissionId, fields: fields)
+            cracks.append(crack)
+            // Answering "Pavement/Ground Cracks" is the server's; show it.
+            editor?.form["pavement_ground_cracks"] = "YES"
+            openCrack = CrackRoute(id: crack.id)
+        } catch {
+            alert = .init(title: "Crack not added", message: model.handle(error))
         }
     }
 
@@ -226,6 +290,9 @@ enum GisaStep: Int, CaseIterable, Identifiable {
         .union(["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures",
                 "material_pavement_type", "est_soil_pct", "est_rock_pct", "est_clay_pct", "est_silt_pct"])
         .union(GisaEditor.soilShareKeys).union(GisaEditor.debrisShareKeys)
+        // The pavement diagram's marker layout is retired: each crack has its own photo and labels.
+        .union(["pavement_ground_cracks", "indented_by_rocks", "settlement_in", "bulge_in",
+                "pavement_ground_annotation_layout_json"])
     static let assessmentKeys: Set = ["record_of_event_notes", "maintenance_history_notes", "observations_notes",
                                       "geotechnical_assessment_notes", "sketchpad_notes"]
 
@@ -464,6 +531,7 @@ struct GisaBodySections: View {
         }
 
         GisaMaterialSection(editor: $editor, canEdit: canEdit)
+        GisaPavementSection(editor: $editor, canEdit: canEdit)
     }
 }
 

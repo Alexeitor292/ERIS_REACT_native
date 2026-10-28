@@ -37,6 +37,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private var photos: [(record: [String: Any], data: Data, capture: [String: Any])] = [DemoData.samplePhoto]
     private var corrections: [Int: [String: Any]] = [:]
     private var nextAttachmentId = 900
+    private var cracks: [[String: Any]] = [DemoData.sampleCrack]
+    private var nextCrackId = 60
 
     init(roles: [String]) {
         self.roles = roles
@@ -93,6 +95,28 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("GET", let p) where p.count == 3 && p[0] == "attachments" && p[2] == "download-url":
             guard let photo = photos.first(where: { "\($0.record["id"]!)" == p[1] }) else { return notFound }
             return (200, ["download_url": "data:image/jpeg;base64,\(photo.data.base64EncodedString())"])
+        case ("GET", ["submissions", "501", "cracks"]):
+            return (200, ["items": cracks])
+        case ("POST", ["submissions", "501", "cracks"]):
+            nextCrackId += 1
+            var crack: [String: Any] = ["id": nextCrackId, "submission_id": 501, "client_uuid": body["client_uuid"] ?? "",
+                                        "sort_order": cracks.count + 1, "revision": 1, "created_by_user_id": DemoData.meId,
+                                        "created_by_name": "Demo User"]
+            for (key, value) in body where key != "client_uuid" { crack[key] = value }
+            cracks.append(crack)
+            gisa["pavement_ground_cracks"] = 1
+            return (201, ["crack": crack, "idempotent_replay": false])
+        case ("PATCH", let p) where p.count == 4 && p[2] == "cracks":
+            guard let index = cracks.firstIndex(where: { "\($0["id"]!)" == p[3] }) else { return notFound }
+            guard body["revision"] as? Int == cracks[index]["revision"] as? Int else {
+                return (409, ["detail": ["message": "Someone else saved this crack after you opened it.", "crack": cracks[index]]])
+            }
+            for (key, value) in body where key != "revision" { cracks[index][key] = value }
+            cracks[index]["revision"] = (cracks[index]["revision"] as? Int ?? 1) + 1
+            return (200, ["crack": cracks[index]])
+        case ("DELETE", let p) where p.count == 4 && p[2] == "cracks":
+            cracks.removeAll { "\($0["id"]!)" == p[3] }
+            return (200, ["deleted": Int(p[3]) ?? 0])
         case ("GET", ["gisa", "lookups"]):
             return (200, DemoData.lookups)
         case ("PATCH", ["submissions", "501", "gisa"]):
@@ -188,7 +212,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         ["submission": ["id": 501, "created_by_user_id": DemoData.meId, "status": "DRAFT",
                         "title": "I-880 slope failure GISA", "created_at": "2026-10-28T09:00:00",
                         "updated_at": "2026-10-28T09:00:00", "can_edit": true, "can_review": false],
-         "gisa": gisa, "incident_types": incidentTypes, "actions": submissionActions,
+         "gisa": gisa, "incident_types": incidentTypes, "actions": submissionActions, "cracks": cracks,
          "photos": photos.map(\.record), "attachments": photos.map(\.record), "workflow_events": []]
     }
 
@@ -280,6 +304,19 @@ enum DemoData {
          "district": "04", "county": "ALA", "route": "880", "post_mile": "12.3", "created_at": "2026-10-28T09:00:00Z"],
     ]
 
+    /// A crack on the sample photo, traced and labelled.
+    static let sampleCrack: [String: Any] = [
+        "id": 51, "submission_id": 501, "client_uuid": "6f1c2a3e-0000-4000-8000-000000000051", "sort_order": 1,
+        "label": "NB shoulder", "latitude": 37.73135, "longitude": -122.19731, "location_source": "PHOTO",
+        "trend_deg": 75.0, "orientation": "TRANSVERSE", "length_ft": 12.5, "width_in": 0.75,
+        "horizontal_disp_in": NSNull(), "vertical_disp_in": 1.5, "depth_in": 6.0, "notes": "Opened since last week.",
+        "photo_attachment_id": 801, "revision": 1, "created_by_user_id": meId, "created_by_name": "Demo User",
+        "annotations_json": ["version": 1, "shapes": [
+            ["type": "path", "points": [[0.15, 0.70], [0.325, 0.633], [0.4125, 0.75], [0.5875, 0.667], [0.7, 0.783], [0.875, 0.717]]],
+            ["type": "label", "at": [0.5, 0.55], "measure": "length_ft"],
+        ]],
+    ]
+
     /// A field photo filed under Material, facing south-east.
     static var samplePhoto: (record: [String: Any], data: Data, capture: [String: Any]) {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 800, height: 600)).image { context in
@@ -310,7 +347,7 @@ enum DemoData {
         "date_incident_reported": "2026-10-27", "latitude": 37.7312, "longitude": -122.1975,
         "district_contact": "[{\"first_name\":\"Ana\",\"last_name\":\"Ruiz\",\"s_number\":\"S1234\",\"phone\":\"510-555-0100\",\"cell_phone\":\"\"}]",
         "failure_slide": 1, "material_soil": 1, "est_clay_pct": 40.0, "est_silt_pct": 60.0, "vegetation_trees": 30.0,
-        "pavement_ground_cracks": 1, "crack_length_ft": 12.5,
+        "pavement_ground_cracks": 1, "settlement_in": 2.0,
         "geotechnical_assessment_notes": "Cut slope failure onto the shoulder.",
     ]
 

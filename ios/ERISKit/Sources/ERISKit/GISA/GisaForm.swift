@@ -81,11 +81,8 @@ public struct GisaForm: Equatable, Sendable {
             GisaField("highway_status_code", .text),
             GisaField("lanes_closed_count", .integer, "Lanes closed count"),
             GisaField("open_highway_traffic_lanes_count", .integer, "Open highway traffic lanes count"),
+            // Each crack is its own record (Cracks.swift); this is the yes/no answer.
             GisaField("pavement_ground_cracks", .tri),
-            GisaField("crack_length_ft", .decimal, "Crack length"),
-            GisaField("crack_horizontal_in", .decimal, "Crack horizontal"),
-            GisaField("crack_vertical_in", .decimal, "Crack vertical"),
-            GisaField("crack_depth_in", .decimal, "Crack depth"),
             GisaField("settlement_in", .decimal, "Settlement"), GisaField("bulge_in", .decimal, "Bulge"),
             GisaField("indented_by_rocks", .tri),
         ]

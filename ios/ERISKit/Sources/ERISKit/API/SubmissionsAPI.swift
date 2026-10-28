@@ -47,6 +47,14 @@ public struct AttachmentRef: Decodable, Equatable, Identifiable, Sendable {
         case id, kind
         case fileName = "file_name", mimeType = "mime_type", sectionKey = "section_key"
     }
+
+    public init(id: Int, kind: String? = nil, fileName: String? = nil, mimeType: String? = nil, sectionKey: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.fileName = fileName
+        self.mimeType = mimeType
+        self.sectionKey = sectionKey
+    }
 }
 
 /// `GET /submissions/{id}`. The GISA form stays a JSON object: the app shows
@@ -113,12 +121,14 @@ public struct SubmissionDetail: Decodable, Equatable, Sendable {
     public let gisa: [String: JSONValue]?
     public let incidentTypes: [String]?
     public let actions: Actions?
+    /// Each crack is its own record (backend routes/cracks.py).
+    public let cracks: [Crack]?
     public let photos: [AttachmentRef]?
     public let attachments: [AttachmentRef]?
     public let workflowEvents: [WorkflowEvent]?
 
     enum CodingKeys: String, CodingKey {
-        case submission, gisa, photos, attachments, actions
+        case submission, gisa, photos, attachments, actions, cracks
         case incidentTypes = "incident_types", workflowEvents = "workflow_events"
     }
 

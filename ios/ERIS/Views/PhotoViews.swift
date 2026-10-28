@@ -61,7 +61,10 @@ struct GisaSectionPhotos: View {
                             Label("Choose from Library", systemImage: "photo.on.rectangle")
                         }
                     } label: {
+                        // The whole row opens the menu, not just its words.
                         Label("Add Photo", systemImage: "camera.badge.ellipsis")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
                     .disabled(photos.busySection != nil)

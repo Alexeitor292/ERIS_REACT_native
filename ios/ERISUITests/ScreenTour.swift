@@ -88,6 +88,13 @@ final class ScreenTour: XCTestCase {
         return element
     }
 
+    /// Replaces a text field's contents with `text`.
+    private func replace(_ field: XCUIElement, with text: String) {
+        tap(field)
+        let current = (field.value as? String) ?? ""
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + text)
+    }
+
     /// A switch turns on only when its knob end is tapped, not the row's label.
     private func flip(_ toggle: XCUIElement) {
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), "missing \(toggle)")
@@ -225,6 +232,53 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo library-photo-'")).firstMatch
             .waitForExistence(timeout: 20))
         snap("photos-material-added")
+    }
+
+    func testCracksAreSeparateRecordsWithTheirOwnLabels() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Body"])
+
+        // The demo form has one crack, traced and labelled on its photo.
+        let first = reveal(row("NB shoulder"))
+        snap("cracks-list")
+        tap(first)
+        XCTAssertTrue(text(containing: "Length 12.5 ft").waitForExistence(timeout: 15))
+        snap("crack-editor")
+
+        replace(reveal(app.textFields["Depth (in)"]), with: "8")
+        app.swipeDown()
+        app.swipeDown()
+
+        // Mark the opening with an arrow and a label that shows the width.
+        tap(app.buttons["Draw on Photo"])
+        let photo = text(containing: "Photo to draw on")
+        XCTAssertTrue(photo.waitForExistence(timeout: 10))
+        tap(app.buttons["Arrow"])
+        photo.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.62))
+            .press(forDuration: 0.1, thenDragTo: photo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)))
+        tap(app.buttons["Label"])
+        photo.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.45)).tap()
+        tap(row("Width (0.75 in)"))
+        snap("crack-drawing")
+        tap(app.navigationBars["Draw on Photo"].buttons["Done"])
+        XCTAssertTrue(text(containing: "Width 0.75 in").waitForExistence(timeout: 10))
+        tap(app.navigationBars["NB shoulder"].buttons["Save"])
+        XCTAssertTrue(app.navigationBars["NB shoulder"].buttons["Save"].waitForNonExistence(timeout: 1) ||
+                      !app.navigationBars["NB shoulder"].buttons["Save"].isEnabled)
+        snap("crack-saved")
+        app.navigationBars["NB shoulder"].buttons.element(boundBy: 0).tap()
+
+        // A second crack is its own record with the same fields.
+        tap(reveal(app.buttons["Add Crack"]))
+        tap(app.buttons["Without a Photo"])
+        replace(app.textFields["Length (ft)"], with: "4")
+        tap(app.navigationBars["Crack 2"].buttons["Save"])
+        app.navigationBars["Crack 2"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(text(containing: "4 ft long").waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "8 in deep").exists)
+        snap("cracks-two")
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

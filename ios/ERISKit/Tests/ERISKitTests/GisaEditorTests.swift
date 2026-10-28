@@ -104,10 +104,10 @@ final class GisaEditorTests: XCTestCase {
 
     func testSavingNamesAFieldTheServerWouldRefuse() throws {
         var editor = GisaEditor(detail: try detail(located))
-        editor.set("crack_length_ft", "about 3")
+        editor.set("settlement_in", "about 3")
         guard case .failure(let problem) = editor.prepareSave(lookups: .empty) else { return XCTFail("should not save") }
-        XCTAssertEqual(problem.message, "Crack length must be numeric")
-        XCTAssertEqual(editor.errors["crack_length_ft"], "Crack length must be numeric")
+        XCTAssertEqual(problem.message, "Settlement must be numeric")
+        XCTAssertEqual(editor.errors["settlement_in"], "Settlement must be numeric")
     }
 
     func testAReadyDraftBuildsItsRequestWithTheRulesApplied() throws {
