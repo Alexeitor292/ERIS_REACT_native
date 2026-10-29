@@ -1,5 +1,8 @@
 import XCTest
 @testable import ERISKit
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Ported from web/src/components/siteAreasModel.test.ts.
 final class SiteAreasTests: XCTestCase {

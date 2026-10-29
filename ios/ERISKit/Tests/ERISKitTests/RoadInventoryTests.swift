@@ -1,5 +1,8 @@
 import XCTest
 @testable import ERISKit
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 final class RoadInventoryTests: XCTestCase {
     /// `{"schema_version":2,"segments":[],"postmile_points":[]}`, gzipped by Python with mtime 0.
