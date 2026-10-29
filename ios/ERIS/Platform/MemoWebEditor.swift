@@ -1,4 +1,5 @@
 import ERISKit
+import ObjectiveC
 import SwiftUI
 import WebKit
 
@@ -58,6 +59,28 @@ final class MemoEditorController: NSObject, ObservableObject {
         if let page = Bundle.main.url(forResource: "MemoEditor", withExtension: "html") {
             webView.loadFileURL(page, allowingReadAccessTo: page)
         }
+        Self.hideKeyboardBar(of: webView)
+    }
+
+    /// The memo has its own toolbar (with a Done key), so WebKit's bar of
+    /// arrows and a checkmark above the keyboard is left off. Done by giving
+    /// the page's content view a subclass whose keyboard bar is empty; if
+    /// WebKit changes and that view is not found, its bar simply stays.
+    private static func hideKeyboardBar(of webView: WKWebView) {
+        guard let content = webView.scrollView.subviews.first(where: { String(describing: type(of: $0)).hasPrefix("WKContent") }),
+              let base = object_getClass(content) else { return }
+        let name = "\(NSStringFromClass(base))_ERISMemo"
+        var subclass: AnyClass? = NSClassFromString(name)
+        if subclass == nil, let made = objc_allocateClassPair(base, name, 0) {
+            let none: @convention(block) (AnyObject) -> UIView? = { _ in nil }
+            let selector = #selector(getter: UIResponder.inputAccessoryView)
+            if let method = class_getInstanceMethod(UIView.self, selector) {
+                class_addMethod(made, selector, imp_implementationWithBlock(none), method_getTypeEncoding(method))
+            }
+            objc_registerClassPair(made)
+            subclass = made
+        }
+        if let subclass { object_setClass(content, subclass) }
     }
 
     /// Shows a memo; sent once the page is ready.

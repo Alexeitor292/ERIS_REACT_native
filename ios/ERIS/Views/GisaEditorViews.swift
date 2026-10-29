@@ -29,6 +29,7 @@ struct SubmissionDetailView: View {
     /// Who else is in the form, the memos they hold, and their saves.
     @State private var presence: FormPresenceSession?
     @State private var openMemo: MemoRoute?
+    @State private var sketching = false
     /// "Maria Garcia saved Project ID. Their changes are shown here."
     @State private var mergedNotice: String?
     @State private var choosingConflicts = false
@@ -90,6 +91,12 @@ struct SubmissionDetailView: View {
                         if target.forCrack { await addCrack(photo: capture) } else { await upload(capture, to: target.sectionKey) }
                     }
                 }, onCancel: { cameraSection = nil })
+            }
+            .fullScreenCover(isPresented: $sketching) {
+                SketchpadScreen(onSave: { png in
+                    sketching = false
+                    Task { await uploadSketch(png) }
+                }, onCancel: { sketching = false })
             }
             .photosPicker(isPresented: libraryOpen, selection: $libraryItem, matching: .images)
             .onChange(of: libraryItem) { _, item in
@@ -169,6 +176,7 @@ struct SubmissionDetailView: View {
                 switch source {
                 case .camera: cameraSection = PhotoTarget(sectionKey: section)
                 case .library: librarySection = section
+                case .sketch: sketching = true
                 }
             },
             open: { openPhoto = $0 })), canEdit: canEdit), detail: detail, canEdit: canEdit)
@@ -331,6 +339,23 @@ struct SubmissionDetailView: View {
         } catch {
             alert = .init(title: "Photo upload failed", message: model.handle(error))
             return nil
+        }
+    }
+
+    /// Files a sketch under the Sketchpad, as the Expo editor did (kind SKETCH).
+    private func uploadSketch(_ png: Data) async {
+        uploadingSection = "sketchpad"
+        defer { uploadingSection = nil }
+        let submissions = SubmissionsAPI(api: model.api)
+        do {
+            let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false))
+                .replacingOccurrences(of: ":", with: "")
+            _ = try await submissions.uploadAttachment(submissionId, file: png, fileName: "gisa-sketch-\(stamp).png",
+                                                       mimeType: "image/png", sectionKey: "sketchpad", kind: "SKETCH",
+                                                       capture: nil)
+            if let fresh = try? await submissions.detail(submissionId) { detail = fresh }
+        } catch {
+            alert = .init(title: "Sketch not saved", message: model.handle(error))
         }
     }
 

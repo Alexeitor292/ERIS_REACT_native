@@ -116,6 +116,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             submissionActions = ["immediate": body["immediate"] ?? [], "follow_up": body["follow_up"] ?? []]
             saved(by: nil)
             return (200, submissionActions)
+        case ("GET", ["submissions", "501", "site-history"]):
+            return (200, DemoData.siteHistory)
         case ("POST", ["submissions", "501", "presence"]):
             let others: [[String: Any]] = colleague
                 ? [["session_id": "maria-session", "user_id": 77, "name": "Maria Garcia", "area": NSNull(), "field": NSNull(),
@@ -155,7 +157,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             return (200, ["attachment_id": id, "idempotent_replay": false])
         case ("GET", let p) where p.count == 3 && p[0] == "attachments" && p[2] == "download-url":
             guard let photo = photos.first(where: { "\($0.record["id"]!)" == p[1] }) else { return notFound }
-            return (200, ["download_url": "data:image/jpeg;base64,\(photo.data.base64EncodedString())"])
+            return (200, ["download_url": "data:\(photo.record["mime_type"] ?? "image/jpeg");base64,\(photo.data.base64EncodedString())"])
         case ("GET", ["submissions", "501", "cracks"]):
             return (200, ["items": cracks])
         case ("POST", ["submissions", "501", "cracks"]):
@@ -205,10 +207,12 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             }
         }
         nextAttachmentId += 1
-        let record: [String: Any] = ["id": nextAttachmentId, "file_name": fileName, "mime_type": "image/jpeg",
-                                     "kind": "PHOTO", "section_key": sectionKey as Any? ?? NSNull()]
+        let png = fileName.lowercased().hasSuffix(".png")
+        let kind = png && fileName.contains("sketch") ? "SKETCH" : "PHOTO"
+        let record: [String: Any] = ["id": nextAttachmentId, "file_name": fileName, "mime_type": png ? "image/png" : "image/jpeg",
+                                     "kind": kind, "section_key": sectionKey as Any? ?? NSNull()]
         photos.append((record, file, capture))
-        return (200, ["attachment_id": nextAttachmentId, "section_key": sectionKey as Any? ?? NSNull(), "kind": "PHOTO"])
+        return (200, ["attachment_id": nextAttachmentId, "section_key": sectionKey as Any? ?? NSNull(), "kind": kind])
     }
 
     /// The photo map: each photo's capture data with the latest correction applied.
@@ -573,5 +577,38 @@ private extension NSLock {
         defer { unlock() }
         return try body()
     }
+}
+extension DemoData {
+    /// Two earlier incidents near the demo form: a recurrence still in review
+    /// with its maintenance, and a report closed at triage.
+    static let siteHistory: [String: Any] = [
+        "anchor": ["latitude": 37.7312, "longitude": -122.1975, "location_id": 3, "radius_m": 150, "source": "FORM"],
+        "current_types": [["code": "SLIDE", "label": "Slide"]],
+        "incidents": [
+            ["incident_id": 412, "title": "Slip onto the shoulder", "observed_at": "2025-02-14T07:40:00", "distance_m": 38,
+             "same_location": false, "in_record": true, "types": [["code": "SLIDE", "label": "Slide"]], "relation": "SAME_TYPE",
+             "stage": "ASSESSMENT", "status": "OPEN", "outcome": NSNull(), "duplicate_of_incident_id": NSNull(),
+             "event_group": NSNull(), "assessment": ["id": 9, "state": "SUBMITTED"],
+             "maintenance": [
+                "report": ["description": "Soil and rocks across the right shoulder after the storm.", "reported_by": "Crew 4 (Hayward)",
+                           "reported_at": "2025-02-14T07:55:00"],
+                "triage": ["disposition": "ASSESSMENT_REQUIRED", "notes": "Same cut as 2023. Needs geotech.",
+                           "decided_by": "R. Okafor", "decided_at": "2025-02-14T10:12:00"],
+                "immediate_actions": [["code": "CLOSE_SHOULDER", "label": "Close shoulder"]],
+                "follow_up_actions": [["code": "ROUTINE_VISUAL_MONITOR", "label": "Routine visual monitoring"]],
+                "notes": [["text": "Cleared debris; drain inlet half blocked.", "by": "Crew 4", "at": "2025-02-15T14:00:00"]],
+                "also_reported": [] as [Any],
+             ] as [String: Any]],
+            ["incident_id": 377, "title": NSNull(), "observed_at": "2024-11-02T16:20:00", "distance_m": 120,
+             "same_location": false, "in_record": false, "types": [] as [Any], "relation": "UNCLASSIFIED",
+             "stage": NSNull(), "status": "CLOSED", "outcome": "NO_ASSESSMENT_REQUIRED", "duplicate_of_incident_id": NSNull(),
+             "event_group": NSNull(), "assessment": NSNull(),
+             "maintenance": [
+                "report": ["description": "Small rocks in the ditch.", "reported_by": "Crew 4 (Hayward)", "reported_at": NSNull()],
+                "triage": NSNull(), "immediate_actions": [] as [Any], "follow_up_actions": [] as [Any], "notes": [] as [Any],
+                "also_reported": [] as [Any],
+             ] as [String: Any]],
+        ] as [Any],
+    ]
 }
 #endif

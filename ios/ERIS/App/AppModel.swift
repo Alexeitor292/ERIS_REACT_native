@@ -77,6 +77,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Any screen that sees `.unauthorized` sends the person back to sign-in.
+    /// The signed-in person's roles; none before sign-in.
+    var roles: [String] {
+        if case .signedIn(let me) = phase { return me.roles }
+        return []
+    }
+
     func handle(_ error: Error) -> String {
         if let error = error as? APIError {
             switch error {

@@ -444,6 +444,38 @@ final class ScreenTour: XCTestCase {
         snap("memo-saved")
     }
 
+    func testASketchIsDrawnSavedAndPlacedInSketchNotes() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Assess"])
+        tap(reveal(app.buttons["add-photo-sketchpad"]))
+        tap(app.buttons["Draw a Sketch"])
+        let canvas = app.descendants(matching: .any)["sketch-canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.3))
+            .press(forDuration: 0.1, thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)))
+        snap("sketch-drawn")
+        tap(app.navigationBars["Sketch"].buttons["Save"])
+        let sketch = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo gisa-sketch'")).firstMatch
+        XCTAssertTrue(sketch.waitForExistence(timeout: 15))
+
+        // The sketch as a figure in Sketch notes.
+        tap(reveal(app.buttons["memo-sketchpad_notes"]))
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 15))
+        tap(app.buttons["Figures"])
+        tap(app.buttons["Insert a photo as a figure"])
+        tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'gisa-sketch'")).firstMatch)
+        let caption = app.textFields["What the photo shows"]
+        tap(caption)
+        caption.typeText("Site sketch")
+        tap(app.navigationBars["Insert figure"].buttons["Insert"])
+        XCTAssertTrue(app.webViews.firstMatch.images["Site sketch"].waitForExistence(timeout: 10))
+        snap("sketch-figure")
+        let number = app.webViews.firstMatch.staticTexts.matching(NSPredicate(format: "label CONTAINS '4.1'")).firstMatch
+        XCTAssertTrue(number.exists, "Sketch notes number their figures 4.x")
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         tap(app.tabBars.buttons["Assessments"])

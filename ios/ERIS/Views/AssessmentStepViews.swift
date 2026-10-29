@@ -33,8 +33,12 @@ struct GisaAssessmentSections: View {
             }
         }
         Section {
+            RecordOfIncidents()
             NotesField(label: "Notes on earlier incidents", text: binding("record_of_event_notes"), editable: canEdit)
-            NotesField(label: "Notes on maintenance", text: binding("maintenance_history_notes"), editable: canEdit)
+            // Written while maintenance history had its own place: kept in view until cleared.
+            if !editor.base.form["maintenance_history_notes"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                NotesField(label: "Notes on maintenance", text: binding("maintenance_history_notes"), editable: canEdit)
+            }
             GisaSectionPhotos(sectionKey: "record_of_event")
         } header: {
             Text("Record of incidents")
@@ -209,6 +213,8 @@ private struct MemoToolbar: View {
                 tool("arrow.uturn.backward", "Undo", "undo", on: false).disabled(!controller.canUndo)
                 tool("arrow.uturn.forward", "Redo", "redo", on: false).disabled(!controller.canRedo)
                 Divider().frame(height: 24)
+                // Figures first: placing photos and citing them is most of what a memo needs.
+                figureMenu
                 tool("bold", "Bold", "bold")
                 tool("italic", "Italic", "italic")
                 tool("underline", "Underline", "underline")
@@ -223,7 +229,6 @@ private struct MemoToolbar: View {
                 tool("increase.indent", "Increase indent", "indent", on: false)
                 tool("text.quote", "Quote", "blockquote", command: "quote")
                 Divider().frame(height: 24)
-                figureMenu
                 tableMenu
                 symbolMenu
                 tool("textformat", "Clear formatting", "clear", on: false)
@@ -351,5 +356,134 @@ private struct FigurePicker: View {
                 }
             }
         }
+    }
+}
+
+/// Earlier incidents at this site, newest first, each with its maintenance:
+/// what the crew reported, what the coordinator decided, the actions taken and
+/// the notes left. Operational roles only, as on the web form.
+private struct RecordOfIncidents: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.gisaPhotos) private var photos
+    @State private var history: SiteHistory?
+    @State private var problem: String?
+
+    var body: some View {
+        if RoleModel.isOperationalUser(model.roles), let id = photos.detail?.submission.id {
+            Group {
+                if let history {
+                    summary(history)
+                    ForEach(history.incidents) { SiteIncidentRow(item: $0) }
+                } else if let problem {
+                    Text(problem).foregroundStyle(.red)
+                } else {
+                    Label("Looking up this location…", systemImage: "magnifyingglass").foregroundStyle(.secondary)
+                }
+            }
+            .task(id: id) {
+                do {
+                    history = try await SubmissionsAPI(api: model.api).siteHistory(id)
+                } catch {
+                    problem = model.handle(error)
+                }
+            }
+        }
+    }
+
+    private func summary(_ history: SiteHistory) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(history.headline).font(.headline)
+            if let counts = history.counts { Text(counts).font(.subheadline) }
+            Label(history.scope, systemImage: "mappin").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// One earlier incident, with its maintenance underneath.
+private struct SiteIncidentRow: View {
+    let item: SiteHistory.Incident
+
+    private static func day(_ text: String?) -> String {
+        guard let text, let date = ServerDate.parse(text) else { return "Date unknown" }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    var body: some View {
+        DisclosureGroup {
+            maintenance(item.maintenance)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(item.heading).font(.subheadline.bold())
+                    Spacer()
+                    Text(item.inRecord ? item.relation.label : SiteHistory.outcome(item.outcome) ?? "")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(tone.opacity(0.15), in: Capsule())
+                        .foregroundStyle(tone)
+                }
+                Text("\(Self.day(item.observedAt)) · \(SiteHistory.distance(item.distanceM, sameLocation: item.sameLocation)) · \(item.standing)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if item.inRecord, !item.types.isEmpty {
+                    Text(item.types.map(\.label).joined(separator: ", ")).font(.caption)
+                }
+            }
+        }
+    }
+
+    private var tone: Color {
+        guard item.inRecord else { return .secondary }
+        switch item.relation {
+        case .sameType: return .orange
+        case .differentType: return .blue
+        case .unclassified: return .secondary
+        }
+    }
+
+    @ViewBuilder private func maintenance(_ side: SiteHistory.Maintenance) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            row("Reported") {
+                Text([side.report.reportedBy ?? "Reporter unknown", side.report.reportedAt.map { Self.day($0) }].compactMap { $0 }
+                    .joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                if let text = side.report.description { Text(text) }
+            }
+            if let triage = side.triage {
+                row("Coordinator") {
+                    Text(SiteHistory.outcome(triage.disposition) ?? "Decided").bold()
+                    if let notes = triage.notes { quote(notes, by: triage.decidedBy, at: triage.decidedAt) }
+                }
+            }
+            if !side.immediateActions.isEmpty { row("Immediate actions") { Text(side.immediateActions.map(\.label).joined(separator: ", ")) } }
+            if !side.followUpActions.isEmpty { row("Follow-up actions") { Text(side.followUpActions.map(\.label).joined(separator: ", ")) } }
+            if !side.notes.isEmpty {
+                row("Maintenance notes") { ForEach(side.notes.indices, id: \.self) { quote(side.notes[$0].text ?? "", by: side.notes[$0].by, at: side.notes[$0].at) } }
+            }
+            if !side.alsoReported.isEmpty {
+                row("Also reported") {
+                    ForEach(side.alsoReported, id: \.incidentId) { dup in
+                        Text("Report #\(dup.incidentId) · \(Self.day(dup.observedAt))\(dup.reportedBy.map { " · \($0)" } ?? "")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let text = dup.description { Text(text) }
+                        if let notes = dup.coordinatorNotes { quote(notes, by: dup.decidedBy, at: dup.decidedAt) }
+                    }
+                }
+            }
+            if !side.hasRecord {
+                Text("No actions or notes from maintenance yet.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+    }
+
+    private func row<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption.bold()).foregroundStyle(.secondary)
+            content()
+        }
+    }
+
+    private func quote(_ text: String, by: String?, at: String?) -> some View {
+        Text("“\(text)”\(by.map { " — \($0)\(at.map { ", \(Self.day($0))" } ?? "")" } ?? "")")
+            .font(.callout).italic()
     }
 }

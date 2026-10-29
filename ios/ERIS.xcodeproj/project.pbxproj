@@ -31,6 +31,7 @@
 		A9F95ECE84F3EC9F938EDAD8 /* FormPresenceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576704982A623A2F1D8DFF28 /* FormPresenceSession.swift */; };
 		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
+		E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C79A78C23480075CFA148688 /* SketchpadViews.swift */; };
 		FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */; };
 		FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */; };
 /* End PBXBuildFile section */
@@ -67,6 +68,7 @@
 		B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmissionViews.swift; sourceTree = "<group>"; };
 		C467160FFD1AAD51AA080E35 /* LocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationProvider.swift; sourceTree = "<group>"; };
 		C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C79A78C23480075CFA148688 /* SketchpadViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchpadViews.swift; sourceTree = "<group>"; };
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
 		E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
 		EB0938B6DC180DAC888EBEA9 /* AssessmentStepViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentStepViews.swift; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@
 				FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */,
 				9B0406C2726AB58967A07E70 /* PhotoViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
+				C79A78C23480075CFA148688 /* SketchpadViews.swift */,
 				B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */,
 			);
 			path = Views;
@@ -306,6 +309,7 @@
 				18F9A10935B792C843FFF9CF /* MemoWebEditor.swift in Sources */,
 				9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */,
 				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,
+				E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */,
 				E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

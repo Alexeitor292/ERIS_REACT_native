@@ -17,6 +17,8 @@ struct GisaPhotoContext {
 
 enum GisaPhotoSource {
     case camera, library
+    /// A drawing on the Sketchpad (Apple Pencil or a finger).
+    case sketch
 }
 
 private struct GisaPhotoContextKey: EnvironmentKey {
@@ -59,6 +61,9 @@ struct GisaSectionPhotos: View {
                         Button { photos.add(sectionKey, .camera) } label: { Label("Take Photo", systemImage: "camera") }
                         Button { photos.add(sectionKey, .library) } label: {
                             Label("Choose from Library", systemImage: "photo.on.rectangle")
+                        }
+                        if sectionKey == "sketchpad" {
+                            Button { photos.add(sectionKey, .sketch) } label: { Label("Draw a Sketch", systemImage: "pencil.and.scribble") }
                         }
                     } label: {
                         // The whole row opens the menu, not just its words.
