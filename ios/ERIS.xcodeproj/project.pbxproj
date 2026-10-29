@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4096957882DF657855E7DBEA /* IncidentViews.swift */; };
 		0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8179064C0312B2FDA75A3216 /* AppModel.swift */; };
+		1289FEB61399B9FC12257709 /* MeasurementDiagramViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */; };
 		19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C467160FFD1AAD51AA080E35 /* LocationProvider.swift */; };
 		1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */; };
 		2B6167462B0624A10A806B75 /* CrackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEEB54A5C523456E696A8B6E /* CrackViews.swift */; };
@@ -45,6 +46,7 @@
 		2E8560894A4728D677214030 /* RootViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootViews.swift; sourceTree = "<group>"; };
 		4096957882DF657855E7DBEA /* IncidentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentViews.swift; sourceTree = "<group>"; };
 		4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MappedCamera.swift; sourceTree = "<group>"; };
+		6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementDiagramViews.swift; sourceTree = "<group>"; };
 		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
 		78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentViews.swift; sourceTree = "<group>"; };
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -132,6 +134,7 @@
 				165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */,
 				AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
+				6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */,
 				FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */,
 				9B0406C2726AB58967A07E70 /* PhotoViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
@@ -271,6 +274,7 @@
 				19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */,
 				FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */,
 				2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */,
+				1289FEB61399B9FC12257709 /* MeasurementDiagramViews.swift in Sources */,
 				1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */,
 				9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */,
 				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,

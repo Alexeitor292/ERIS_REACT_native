@@ -330,7 +330,10 @@ final class ScreenTour: XCTestCase {
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
         XCTAssertTrue(reveal(text(containing: "Road inventory context active")).exists)
-        XCTAssertTrue(reveal(text(containing: "48° · auto-detected from map")).exists)
+        // The diagram below makes the list long enough to scroll past it; come back up if so.
+        let orientation = text(containing: "48° · auto-detected from map")
+        if !reveal(orientation).isHittable { _ = revealAbove(orientation) }
+        XCTAssertTrue(orientation.exists)
         snap("gisa-measurements-profile")
 
         // A manual bearing overrides detection.
@@ -345,6 +348,33 @@ final class ScreenTour: XCTestCase {
         snap("gisa-measurements-fields")
         tap(app.buttons["Save"])
         XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+    }
+
+    func testCrossSectionDiagram() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Body"])
+        let diagram = app.descendants(matching: .any)["measurement-diagram"]
+        XCTAssertTrue(reveal(diagram).exists)
+        XCTAssertTrue(diagram.label.contains("Landslide Through Road"))
+        snap("gisa-diagram-through")
+
+        // A slide above the road, on both sides, with the ground rising on each.
+        tap(reveal(app.segmentedControls.buttons["Above"]))
+        tap(reveal(app.segmentedControls.buttons["Both"]))
+        tap(reveal(app.segmentedControls.buttons["Crown"]))
+        XCTAssertTrue(diagram.label.contains("Landslide Above Road"))
+        _ = reveal(diagram)
+        snap("gisa-diagram-above")
+
+        tap(reveal(app.buttons["diagram-full-screen"]))
+        let done = app.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        Thread.sleep(forTimeInterval: 2)
+        snap("gisa-diagram-full-screen")
+        tap(done)
+        XCTAssertTrue(diagram.waitForExistence(timeout: 10))
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

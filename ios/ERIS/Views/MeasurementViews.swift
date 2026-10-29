@@ -2,10 +2,9 @@ import Charts
 import ERISKit
 import SwiftUI
 
-/// Measurements: the road inventory segment, the ground across the road, and
-/// the eight GISA-001 measurements. The cross-section diagram and the 3D
-/// terrain come later (the diagram with its parity tests, the terrain with the
-/// ArcGIS Maps SDK).
+/// Measurements: the road inventory segment, the ground across the road, the
+/// cross-section diagram and the eight GISA-001 measurements. The 3D terrain
+/// comes later, with the ArcGIS Maps SDK.
 struct GisaMeasurementsSection: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.gisaPhotos) private var photos
@@ -65,6 +64,8 @@ struct GisaMeasurementsSection: View {
             Text("Ground elevation across the road at this location, from USGS.")
         }
 
+        MeasurementDiagramSection(form: editor.form, snapshot: RoadInventoryContext(gisa: gisa)?.snapshot, profile: profile)
+
         Section {
             ForEach(GisaEditor.measurementFields, id: \.0) { key, label in
                 GisaTextField(label: label, value: binding(key), editable: canEdit, keyboard: .decimalPad,
@@ -72,7 +73,7 @@ struct GisaMeasurementsSection: View {
             }
             GisaSectionPhotos(sectionKey: "measurements")
         } footer: {
-            Text("The cross-section diagram and 3D terrain are not on iPhone yet.")
+            Text("The 3D terrain is not on iPhone yet.")
         }
         .onAppear(perform: loadProfile)
         .onChange(of: photos.detail?.submission.id) { loadProfile() }
