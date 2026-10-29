@@ -98,6 +98,43 @@ try {
   const headings = [0, 359.999, 360, 725, -10, -370, "abc", null].map((input) => ({ input, output: M.normalizePhotoHeading(input) }));
   writeFileSync(join(fixtures, "photo-capture.json"), JSON.stringify({ devices, exifs, merges, headings }, null, 2) + "\n");
   console.log("wrote", join(fixtures, "photo-capture.json"));
+
+  stage(["buildRoadSectionFromInventory", "buildTerrainAppearance", "buildMeasurementDiagramData"], "measurements");
+  const D = await import(pathToFileURL(join(work, "buildMeasurementDiagramData.ts")).href);
+  const T = await import(pathToFileURL(join(work, "buildTerrainAppearance.ts")).href);
+  // The road cross-section cases are shared with the backend; copied as they are.
+  const roadSections = JSON.parse(readFileSync(
+    join(repo, "mobile", "src", "measurements", "__fixtures__", "roadCrossSectionParity.json"), "utf8"));
+  const forms = [
+    {},
+    { material_soil: "YES" },
+    { material_rock: "YES", material_joints: "YES", material_fractures: "yes", est_gravel_pct: "30", est_boulder_pct: "12" },
+    { material_soil: "YES", material_rock: "YES", est_soil_pct: "60", est_rock_pct: "40", est_clay_pct: "35",
+      est_sand_pct: "20", water_wet: "YES", water_seep: "YES", vegetation_trees: "40", vegetation_groundcover: "80",
+      material_pavement_type: "asphalt" },
+    { water_flowing: "YES", water_moist: "YES", vegetation_bushes_shrubs: "150", est_rock_pct: "-5",
+      material_bedding: "YES", material_pavement_type: "CONCRETE" },
+    { water_moist: " yes ", est_soil_pct: "abc", est_sand_pct: " 45 ", material_pavement_type: "GRAVEL" },
+  ];
+  const terrain = forms.map((form) => {
+    const appearance = T.buildTerrainAppearance(form);
+    return { form, appearance, palette: T.buildTerrainPalette(appearance) };
+  });
+  const diagrams = [
+    { form: { measure_slope_height_ft: "40", measure_original_slope_deg: "35.5", measure_roadway_width_ft: "24 ft",
+              measure_landslide_width_ft: "abc", measure_main_scarp_height_ft: " 6 ", measure_landslide_slope_deg: "1e1",
+              measure_roadway_length_ft: ".5", measure_landslide_length_ft: "" },
+      snapshot: null, template: "AUTO", failureSide: "LT", terrain: "AUTO", profile: { classification: "BOWL" } },
+    { form: {}, snapshot: { left_lanes: 2, right_lanes: 2 }, template: "LANDSLIDE_ABOVE_ROAD", failureSide: "BOTH",
+      terrain: "CROWN", profile: { classification: "LEFT_HIGH" } },
+    { form: { measure_roadway_width_ft: "Infinity" }, snapshot: null, template: "LANDSLIDE_BELOW_ROAD_SLIPOUT",
+      failureSide: "RT", terrain: "AUTO", profile: { classification: "UNKNOWN" } },
+    { form: {}, snapshot: {}, template: "AUTO", failureSide: "LT", terrain: "AUTO", profile: null },
+  ].map((input) => ({ input, output: D.buildMeasurementDiagramData(
+    input.form, input.snapshot, input.template, input.failureSide, input.terrain, input.profile) }));
+  writeFileSync(join(fixtures, "measurement-diagram.json"),
+    JSON.stringify({ roadSections, terrain, diagrams }, null, 2) + "\n");
+  console.log("wrote", join(fixtures, "measurement-diagram.json"));
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
