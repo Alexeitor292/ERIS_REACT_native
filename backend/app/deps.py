@@ -68,6 +68,26 @@ def deny_public_only(user=Depends(get_current_user)):
     return user
 
 
+def deny_public_only_unless_maintenance_reporter(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """``deny_public_only``, except for someone who reports for a district
+    maintenance workflow.
+
+    Reporting duties come from a district's workflow, not from a role, so an
+    account can be Viewer-only by role and still file maintenance reports. The
+    road data its app needs to find a highway post mile without a connection
+    (road inventory manifest and mobile package) is opened to it; nothing else.
+    """
+    if is_public_only(user):
+        from .services import maintenance_workflows  # imports the app's routes; deferred to avoid a cycle
+
+        if not any(item["report"] for item in maintenance_workflows.summary(db, int(user["id"]))):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions for this operation",
+            )
+    return user
+
+
 def require_roles(required: list[str]):
     def _guard(user=Depends(get_current_user)):
         have = set(user["roles"])
