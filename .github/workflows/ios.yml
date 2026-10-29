@@ -7,9 +7,11 @@ name: iOS
 on:
   push:
     branches: [main, "claude/ios-swift-app"]
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths: ["ios/**", ".github/workflows/ios.yml", "web/src/memoIos/**", "web/src/features/submissions/memo*",
+            "web/src/index.css", "web/scripts/build-memo-ios.mjs", "web/package-lock.json"]
   pull_request:
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths: ["ios/**", ".github/workflows/ios.yml", "web/src/memoIos/**", "web/src/features/submissions/memo*",
+            "web/src/index.css", "web/scripts/build-memo-ios.mjs", "web/package-lock.json"]
   workflow_dispatch:
 
 permissions:
@@ -30,6 +32,27 @@ jobs:
       - name: Test
         working-directory: ios/ERISKit
         run: swift test
+
+  # The memo editor in the app is the web form's own editor, built into one
+  # page (web/scripts/build-memo-ios.mjs). The committed page must be what its
+  # sources build, so a change to the web memo editor reaches the app.
+  memo-editor:
+    name: Memo editor page is up to date
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build:memo-ios
+      - name: Compare with the committed page
+        run: git diff --exit-code -- ../ios/ERIS/Resources/MemoEditor.html || (echo "Run 'npm run build:memo-ios' in web/ and commit ios/ERIS/Resources/MemoEditor.html." && exit 1)
 
   app:
     name: App build (Xcode)
