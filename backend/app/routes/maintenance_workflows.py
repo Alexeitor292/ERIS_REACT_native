@@ -134,6 +134,8 @@ def work(db: Session = Depends(get_db), user=Depends(authenticated)):
             step = workflow["definition"]["steps"][workflow["state"]["step_index"]]
             result.append({"id": row["id"], "title": row["title"], "district": row["district"], "outcome": row["outcome"],
                            "step_name": step["name"], "waiting_reporter": workflow["state"]["waiting_reporter"],
+                           # So a reporter's app can list the reports they filed apart from those they review.
+                           "reported_by_me": row["reporter_user_id"] == int(user["id"]),
                            "my_turn": not row["outcome"] and ((workflow["state"]["waiting_reporter"] and row["reporter_user_id"] == int(user["id"])) or
                            (not workflow["state"]["waiting_reporter"] and int(user["id"]) in mw.users_for(workflow["definition"], step["duty_ids"]) and int(user["id"]) not in workflow["state"]["approved_user_ids"]))})
     return {"items": result}

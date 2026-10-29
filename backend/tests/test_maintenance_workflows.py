@@ -276,6 +276,8 @@ def test_only_assigned_records_appear_in_queue(db, plan):
     assert routes.work(db, user(9, ["MAINTENANCE_COORDINATOR"]))["items"] == []
     assert routes.work(db, user(4))["items"][0]["my_turn"]
     assert not routes.work(db, user(8))["items"][0]["my_turn"]
+    assert routes.work(db, user(2))["items"][0]["reported_by_me"]
+    assert not routes.work(db, user(4))["items"][0]["reported_by_me"]
 
 
 def test_notification_only_workflow_members_have_their_own_feed(db, plan):
