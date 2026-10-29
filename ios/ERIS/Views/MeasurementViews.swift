@@ -3,8 +3,7 @@ import ERISKit
 import SwiftUI
 
 /// Measurements: the road inventory segment, the ground across the road, the
-/// cross-section diagram and the eight GISA-001 measurements. The 3D terrain
-/// comes later, with the ArcGIS Maps SDK.
+/// cross-section diagram, the site in 3D and the eight GISA-001 measurements.
 struct GisaMeasurementsSection: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.gisaPhotos) private var photos
@@ -67,13 +66,18 @@ struct GisaMeasurementsSection: View {
         MeasurementDiagramSection(form: editor.form, snapshot: RoadInventoryContext(gisa: gisa)?.snapshot, profile: profile)
 
         Section {
+            SiteTerrainSection(latitude: Double(editor.form["latitude"]), longitude: Double(editor.form["longitude"]),
+                               geometry: editor.form["geometry_json"])
+        } header: {
+            Text("Terrain")
+        }
+
+        Section {
             ForEach(GisaEditor.measurementFields, id: \.0) { key, label in
                 GisaTextField(label: label, value: binding(key), editable: canEdit, keyboard: .decimalPad,
                               error: editor.errors[key])
             }
             GisaSectionPhotos(sectionKey: "measurements")
-        } footer: {
-            Text("The 3D terrain is not on iPhone yet.")
         }
         .onAppear(perform: loadProfile)
         .onChange(of: photos.detail?.submission.id) { loadProfile() }

@@ -139,6 +139,9 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         // Split in two: as one switch it took the type checker too long for CI.
         if let answer = formPhotoAndCrackRoute(method, parts, body) { return answer }
         if let answer = formWorkflowRoute(method, parts, body) { return answer }
+        if method == "GET", parts.count >= 4, parts[0] == "submissions", parts[1] == "501", parts[3] == "offline-scene-package" {
+            return parts.count == 4 ? (200, DemoTerrain.descriptor(501)) : (200, DemoTerrain.grant(501))
+        }
         if let answer = work.route(method, parts, query, body, incidents: &incidents, assessments: &assessments) { return answer }
         switch (method, parts) {
         case ("GET", ["auth", "me"]):

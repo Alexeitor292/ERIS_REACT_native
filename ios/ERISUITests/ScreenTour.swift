@@ -858,6 +858,25 @@ final class ScreenTour: XCTestCase {
         tap(app.navigationBars["Site Photo Map"].buttons["Done"])
     }
 
+    func testTheSiteIsShownIn3DFromItsKeptTerrain() {
+        launch()
+        openDemoForm(step: "Body")
+        let open = app.buttons["site-terrain-open"], get = app.buttons["site-terrain-get"]
+        // The terrain comes with assigned work; for a form that isn't, it is asked for here.
+        if !reveal(open).exists, reveal(get).exists { tap(get) }
+        XCTAssertTrue(open.waitForExistence(timeout: 20))
+        tap(reveal(open))
+        let status = app.staticTexts["site-terrain-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 20))
+        XCTAssertTrue(status.label.hasPrefix("81 × 81 elevation grid"), status.label)
+        snap("site-terrain")
+        app.sliders["Vertical exaggeration"].adjust(toNormalizedSliderPosition: 1)
+        XCTAssertTrue(app.staticTexts["site-terrain-exaggeration"].label.contains("3"),
+                      app.staticTexts["site-terrain-exaggeration"].label)
+        snap("site-terrain-exaggerated")
+        tap(app.navigationBars["Site in 3D"].buttons["Done"])
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         XCTAssertEqual(tabNames(), ["My Work", "Forms", "Notifications", "Account"])
