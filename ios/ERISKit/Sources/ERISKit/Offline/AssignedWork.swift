@@ -34,6 +34,8 @@ public struct AssignedWork: Sendable {
         public var assessments = 0
         public var forms = 0
         public var photos = 0
+        /// Site terrain packages downloaded this round.
+        public var terrain = 0
         /// ERIS could not be reached; what was kept before stays.
         public var unreachable = false
     }
@@ -88,6 +90,12 @@ public struct AssignedWork: Sendable {
                 summary.forms += 1
                 _ = try? await api.kept("/submissions/\(formId)/site-history", preservingKeys: true, store: store,
                                         name: "forms/\(formId)-site-history", as: SiteHistory.self)
+                // The site in 3D, for the measurements and cross-sections offline.
+                switch await AssignedTerrain(api: api, store: store, download: download).keep(formId) {
+                case .downloaded: summary.terrain += 1
+                case .unreachable: summary.unreachable = true
+                default: break
+                }
                 for photo in GisaPhotoSections.allPhotos(of: form.value) {
                     wanted.insert(photo.id)
                     if store.file(photo.id) != nil { continue }
