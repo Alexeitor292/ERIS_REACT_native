@@ -1,60 +1,129 @@
 import ERISKit
 import SwiftUI
 
-/// The incidents this person can see on the phone (`GET /incidents?scope=mobile`).
-struct IncidentsView: View {
+/// Report: a maintenance reporter's tool. Report an incident, and follow the
+/// reports they filed (one sent back for more information also waits in My Work).
+struct ReportsView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
     let me: Me
-    @State private var incidents: [Incident] = []
+    @State private var items: [MyReports.Item] = []
     @State private var error: String?
     @State private var loading = false
     @State private var reporting = false
+    @State private var notice: String?
 
     var body: some View {
         List {
-            if let error {
-                Text(error).foregroundStyle(.red)
+            if let notice {
+                Section { Label(notice, systemImage: "checkmark.circle").foregroundStyle(.green).font(.subheadline) }
             }
-            ForEach(incidents) { incident in
-                NavigationLink(value: incident.id) {
-                    IncidentRow(incident: incident)
-                }
-            }
-            if !loading && incidents.isEmpty && error == nil {
-                Text("No incidents to show.").foregroundStyle(.secondary)
-            }
-        }
-        .overlay { if loading && incidents.isEmpty { ProgressView() } }
-        .navigationTitle("Incidents")
-        .navigationDestination(for: Int.self) { IncidentDetailView(incidentId: $0, roles: me.roles) }
-        .toolbar {
-            if RoleModel.canReportIncident(me.roles) {
+            Section {
                 Button {
                     reporting = true
                 } label: {
-                    Label("Report incident", systemImage: "plus")
+                    Label("Report an Incident", systemImage: "plus.circle.fill").font(.headline)
                 }
+            }
+            OfflineStatusSection(keptAt: nil)
+            if !offline.waiting.incidents.isEmpty {
+                Section("Waiting to send") {
+                    ForEach(offline.waiting.incidents) { report in
+                        HStack(alignment: .top) {
+                            Image(systemName: report.problem == nil ? "clock.arrow.circlepath" : "exclamationmark.circle")
+                                .foregroundStyle(report.problem == nil ? Color.secondary : Color.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(report.title).font(.headline)
+                                Text(report.problem ?? "Kept on this iPhone\(report.files.isEmpty ? "" : " with \(report.files.count) photo\(report.files.count == 1 ? "" : "s")")")
+                                    .font(.caption).foregroundStyle(report.problem == nil ? Color.secondary : Color.orange)
+                            }
+                            Spacer()
+                            if report.problem != nil {
+                                Button("Discard", role: .destructive) {
+                                    offline.store.removeIncident(report)
+                                    offline.refresh()
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+            if let error { Text(error).foregroundStyle(.red) }
+            Section("My reports") {
+                ForEach(items) { item in
+                    switch item {
+                    case .incident(let incident):
+                        NavigationLink(value: ReportRoute(id: incident.id, inWorkflow: false)) { IncidentRow(incident: incident) }
+                    case .maintenance(let report):
+                        NavigationLink(value: ReportRoute(id: report.id, inWorkflow: true)) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(report.title ?? "Report #\(report.id)").font(.headline)
+                                HStack {
+                                    StatusChip(text: report.status)
+                                    if report.myTurn { Text("Your action needed").font(.caption.weight(.semibold)).foregroundStyle(.orange) }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !loading && items.isEmpty && error == nil {
+                    Text("Reports you file appear here.").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .overlay { if loading && items.isEmpty { ProgressView() } }
+        .navigationTitle("Report")
+        .navigationDestination(for: ReportRoute.self) { route in
+            if route.inWorkflow {
+                MaintenanceReportView(incidentId: route.id) { message in
+                    notice = message
+                    Task { await load() }
+                }
+            } else {
+                ReportDetailView(incidentId: route.id)
             }
         }
         .sheet(isPresented: $reporting) {
             NavigationStack {
-                CreateIncidentView { created in incidents.insert(created, at: 0) }
+                CreateIncidentView { message in
+                    notice = message
+                    Task { await load() }
+                }
             }
         }
-        .refreshable { await load() }
+        .refreshable {
+            offline.kick()
+            await load()
+        }
         .task { await load() }
+        // A kept report filed: it joins the list.
+        .onChange(of: offline.rounds) { Task { await load() } }
     }
 
     private func load() async {
         loading = true
         defer { loading = false }
+        let incidents = IncidentsAPI(api: model.api)
         do {
-            incidents = try await IncidentsAPI(api: model.api).list()
+            async let filed = incidents.list(limit: 500)
+            async let workflow = incidents.maintenanceReports()
+            let reports = (try? await workflow) ?? []
+            items = MyReports.items(incidents: try await filed, maintenance: reports, me: me.id)
             error = nil
+        } catch let failure as APIError where failure.isUnreachable {
+            error = items.isEmpty ? "Your reports can't be listed without a connection. New reports are kept on this iPhone." : nil
         } catch {
             self.error = model.handle(error)
         }
     }
+}
+
+/// A report this person filed, opened from the Report tab.
+struct ReportRoute: Hashable {
+    let id: Int
+    let inWorkflow: Bool
 }
 
 struct IncidentRow: View {
@@ -87,35 +156,14 @@ struct StatusChip: View {
     }
 }
 
-struct IncidentDetailView: View {
+/// A report, read only: where it stands, what was reported, its evidence.
+/// Decisions on it are made in My Work.
+struct ReportDetailView: View {
     @EnvironmentObject private var model: AppModel
     let incidentId: Int
-    let roles: [String]
     @State private var incident: Incident?
+    @State private var evidence: [IncidentEvidence]?
     @State private var error: String?
-    @State private var working = false
-    @State private var prompt: Action?
-    @State private var comment = ""
-
-    /// Workflow steps offered by role; the server decides whether each is allowed now.
-    enum Action: String, Identifiable {
-        case claim = "Claim"
-        case forward = "Forward to GeoTech"
-        case revision = "Request revision"
-        case resolve = "Resolve"
-        var id: String { rawValue }
-    }
-
-    private func actions(for incident: Incident) -> [Action] {
-        guard incident.status != "RESOLVED" else { return [] }
-        var out: [Action] = []
-        if RoleModel.canTriage(roles) && incident.currentStage == "COORDINATOR_REVIEW" {
-            out += [.forward, .revision]
-        }
-        if RoleModel.isWorkforceUser(roles) && incident.assignment == nil { out.append(.claim) }
-        if RoleModel.isWorkforceUser(roles) { out.append(.resolve) }
-        return out
-    }
 
     var body: some View {
         Group {
@@ -124,38 +172,15 @@ struct IncidentDetailView: View {
                     Section {
                         LabeledContent("Status", value: IncidentLabels.status(incident.status))
                         LabeledContent("Stage", value: IncidentLabels.stage(incident.currentStage))
-                        if let type = incident.incidentType { LabeledContent("Type", value: type) }
-                        if !incident.locationLine.isEmpty { LabeledContent("Location", value: incident.locationLine) }
-                        if let observed = incident.firstObservedAt { LabeledContent("Observed", value: observed) }
-                        if let name = incident.assignment?.assigneeName { LabeledContent("Assigned to", value: name) }
-                    }
-                    if let description = incident.description, !description.isEmpty {
-                        Section("Description") { Text(description) }
-                    }
-                    if let resolution = incident.resolutionComment, !resolution.isEmpty {
-                        Section("Resolution") { Text(resolution) }
-                    }
-                    let available = actions(for: incident)
-                    if !available.isEmpty {
-                        Section("Actions") {
-                            ForEach(available) { action in
-                                Button(action.rawValue) {
-                                    if action == .claim { Task { await perform(action) } } else { comment = ""; prompt = action }
-                                }
-                                .disabled(working)
-                            }
+                        if let resolution = incident.resolutionComment, !resolution.isEmpty {
+                            Text(resolution).font(.callout)
                         }
                     }
+                    ReportFactsSection(incident: incident)
+                    EvidenceSection(items: evidence)
                 }
-                .navigationTitle(incident.displayTitle)
-                .alert(prompt?.rawValue ?? "", isPresented: Binding(get: { prompt != nil }, set: { if !$0 { prompt = nil } })) {
-                    TextField("Comment (optional)", text: $comment)
-                    Button("Cancel", role: .cancel) { prompt = nil }
-                    Button(prompt?.rawValue ?? "OK") {
-                        if let action = prompt { Task { await perform(action) } }
-                        prompt = nil
-                    }
-                }
+                .navigationTitle("Report #\(incident.id)")
+                .navigationBarTitleDisplayMode(.inline)
             } else if let error {
                 Text(error).foregroundStyle(.red).padding()
             } else {
@@ -167,27 +192,11 @@ struct IncidentDetailView: View {
     }
 
     private func load() async {
-        do {
-            incident = try await IncidentsAPI(api: model.api).get(incidentId)
-            error = nil
-        } catch {
-            self.error = model.handle(error)
-        }
-    }
-
-    private func perform(_ action: Action) async {
-        working = true
-        defer { working = false }
         let incidents = IncidentsAPI(api: model.api)
-        let note = comment.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            switch action {
-            case .claim: try await incidents.claim(incidentId)
-            case .forward: try await incidents.forwardByCoordinator(incidentId, comment: note.isEmpty ? nil : note)
-            case .revision: try await incidents.requestRevision(incidentId, comment: note.isEmpty ? nil : note)
-            case .resolve: try await incidents.resolve(incidentId, comment: note.isEmpty ? nil : note)
-            }
-            await load()
+            incident = try await incidents.get(incidentId)
+            evidence = (try? await incidents.evidence(incidentId)) ?? []
+            error = nil
         } catch {
             self.error = model.handle(error)
         }
@@ -197,6 +206,7 @@ struct IncidentDetailView: View {
 /// The same feed as the web portal's bell.
 struct NotificationsView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
     @State private var feed: [FeedItem] = []
     @State private var error: String?
 
@@ -231,6 +241,8 @@ struct NotificationsView: View {
         }
         .refreshable { await load() }
         .task { await load() }
+        // New notices appear without pulling to refresh.
+        .onChange(of: offline.rounds) { Task { await load() } }
     }
 
     private func load() async {

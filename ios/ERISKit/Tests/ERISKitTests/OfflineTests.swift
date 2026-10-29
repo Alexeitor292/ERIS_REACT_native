@@ -127,6 +127,8 @@ final class OfflineTests: XCTestCase {
         var editor = try await open()
         editor.set("ea", "04-1A")
         store.keepEdits(editor.edits(501, state: .editing))
+        XCTAssertTrue(store.waiting.isEmpty, "kept, but not waiting to be sent")
+        XCTAssertNil(store.waiting.summary)
         let outcome = await FormSync(api: api, store: store).send(501)
         XCTAssertEqual(outcome, .nothing)
         XCTAssertFalse(server.requests().contains("PATCH /api/submissions/501/gisa"))

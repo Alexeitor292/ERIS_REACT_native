@@ -155,6 +155,22 @@ public final class APIClient: @unchecked Sendable {
         preservingKeys: Bool = false,
         as type: T.Type = T.self
     ) async throws -> T {
+        let data = try await bytes(method, path, query: query, body: body, contentType: contentType,
+                                   authenticated: authenticated, allowRenewal: allowRenewal)
+        return try decode(type, from: data, preservingKeys: preservingKeys)
+    }
+
+    /// The answer's bytes as sent (a file, a package), with the same sign-in,
+    /// renewal and errors as every other call.
+    public func bytes(
+        _ method: String = "GET",
+        _ path: String,
+        query: [URLQueryItem] = [],
+        body: Data? = nil,
+        contentType: String = "application/json",
+        authenticated: Bool = true,
+        allowRenewal: Bool = true
+    ) async throws -> Data {
         var renewed = false
         while true {
             let request = try makeRequest(method, path, query: query, body: body, contentType: contentType,
@@ -162,7 +178,7 @@ public final class APIClient: @unchecked Sendable {
             let (data, response) = try await transport.send(request)
             switch response.statusCode {
             case 200..<300:
-                return try decode(type, from: data, preservingKeys: preservingKeys)
+                return data
             case 401:
                 if authenticated, allowRenewal, !renewed, let renew = reauthenticate {
                     renewed = true

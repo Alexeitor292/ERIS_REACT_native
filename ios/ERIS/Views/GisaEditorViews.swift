@@ -8,6 +8,12 @@ import SwiftUI
 /// values, and saving keeps them unchanged.
 struct SubmissionDetailView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
+    /// When the form shown was kept on this iPhone, because ERIS could not be reached.
+    @State private var keptAt: Date?
+    /// Changes kept on this iPhone that can no longer be sent, and why.
+    @State private var strandedNote: String?
+    @State private var autosave: Task<Void, Never>?
     let submissionId: Int
     @State private var detail: SubmissionDetail?
     @State private var editor: GisaEditor?
@@ -91,6 +97,21 @@ struct SubmissionDetailView: View {
         .navigationTitle(detail?.submission.status == "DRAFT" ? "Draft" : "Submission")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .onAppear { offline.openForm = submissionId }
+        .onDisappear {
+            keepNow()
+            if offline.openForm == submissionId { offline.openForm = nil }
+        }
+        // Every change is kept on this iPhone at once, so nothing typed is lost.
+        .onChange(of: editor) {
+            autosave?.cancel()
+            autosave = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if !Task.isCancelled { keepNow() }
+            }
+        }
+        // Back in reach: show the form as saved now and send what was kept.
+        .onChange(of: offline.rounds) { Task { await reconnect() } }
         .onChange(of: presence?.reply?.revision) { _, revision in
             // Someone else saved: bring their changes in.
             guard let revision, let editor, revision > editor.base.revision, !saving else { return }
@@ -136,6 +157,7 @@ struct SubmissionDetailView: View {
 
     /// Photos and videos from the library, one after another.
     private func uploadToGallery(_ items: [PhotosPickerItem]) async {
+        let keptBefore = offline.store.uploads(for: submissionId).count
         var problems: [String] = []
         for (index, item) in items.enumerated() {
             galleryUploading = items.count > 1 ? "Uploading \(index + 1) of \(items.count)…" : "Uploading…"
@@ -144,9 +166,12 @@ struct SubmissionDetailView: View {
                     guard let video = try await FileTransfer.upload(fromVideo: item) else { problems.append("A video could not be read."); continue }
                     if let problem = await send(video) { problems.append(problem) }
                 } else if let photo = try await LibraryPhoto.load(item) {
-                    let kept = galleryUploading
-                    if await upload(photo, to: nil) == nil { problems.append("A photo was not uploaded.") }
-                    galleryUploading = kept
+                    let progress = galleryUploading, keptSoFar = offline.store.uploads(for: submissionId).count
+                    // Kept on this iPhone to upload later is not a problem.
+                    if await upload(photo, to: nil) == nil, offline.store.uploads(for: submissionId).count == keptSoFar {
+                        problems.append("A photo was not uploaded.")
+                    }
+                    galleryUploading = progress
                 } else {
                     problems.append("A photo could not be read.")
                 }
@@ -155,11 +180,12 @@ struct SubmissionDetailView: View {
             }
         }
         galleryUploading = nil
-        if !problems.isEmpty { alert = .init(title: "Not everything was added", message: problems.joined(separator: "\n")) }
+        reportGallery(problems, keptBefore: keptBefore)
     }
 
     /// Documents and other files from Files.
     private func uploadFiles(_ urls: [URL]) async {
+        let keptBefore = offline.store.uploads(for: submissionId).count
         var problems: [String] = []
         for (index, url) in urls.enumerated() {
             galleryUploading = urls.count > 1 ? "Uploading \(index + 1) of \(urls.count)…" : "Uploading \(url.lastPathComponent)…"
@@ -170,7 +196,18 @@ struct SubmissionDetailView: View {
             }
         }
         galleryUploading = nil
-        if !problems.isEmpty { alert = .init(title: "Not everything was added", message: problems.joined(separator: "\n")) }
+        reportGallery(problems, keptBefore: keptBefore)
+    }
+
+    /// What became of files added to the Gallery: problems, or files kept to upload later.
+    private func reportGallery(_ problems: [String], keptBefore: Int) {
+        let kept = offline.store.uploads(for: submissionId).count - keptBefore
+        if !problems.isEmpty {
+            alert = .init(title: "Not everything was added", message: problems.joined(separator: "\n"))
+        } else if kept > 0 {
+            alert = .init(title: "Kept on This iPhone",
+                          message: "ERIS can't be reached. \(kept == 1 ? "The file" : "\(kept) files") will be uploaded when the connection returns.")
+        }
     }
 
     /// Sends one Gallery file with the kind its type gives it; the problem, if any.
@@ -183,6 +220,10 @@ struct SubmissionDetailView: View {
                                                        kind: SubmissionLibrary.uploadKind(fileName: file.fileName, mimeType: file.mimeType),
                                                        capture: nil)
             if let fresh = try? await submissions.detail(submissionId) { detail = fresh }
+            return nil
+        } catch let failure as APIError where failure.isUnreachable {
+            keepFile(file.data, fileName: file.fileName, mimeType: file.mimeType, section: nil,
+                     kind: SubmissionLibrary.uploadKind(fileName: file.fileName, mimeType: file.mimeType), capture: nil)
             return nil
         } catch {
             return "\(file.fileName): \(model.handle(error))"
@@ -238,7 +279,18 @@ struct SubmissionDetailView: View {
         let canEdit = detail.submission.isEditable
         let form = editor.wrappedValue.form
         // Built in parts: as one expression it took the type checker too long for CI.
-        return assessmentWiring(memoWiring(crackWiring(List {
+        return assessmentWiring(memoWiring(crackWiring(ScrollViewReader { scroller in List {
+            OfflineStatusSection(keptAt: keptAt)
+            if let strandedNote {
+                Section {
+                    Label(strandedNote, systemImage: "exclamationmark.circle").font(.subheadline).foregroundStyle(.orange)
+                    Button("Discard the Kept Changes", role: .destructive) {
+                        offline.store.removeEdits(submissionId)
+                        offline.refresh()
+                        self.strandedNote = nil
+                    }
+                }
+            }
             FormPresenceSection(others: presence?.others ?? [], notice: mergedNotice, pending: editor.wrappedValue.pending,
                                 choose: { choosingConflicts = true })
             GisaReviewStatusSections(detail: detail, comment: $drafts.reviewComment, working: working,
@@ -259,6 +311,7 @@ struct SubmissionDetailView: View {
             } footer: {
                 Text("Step \(step.rawValue + 1) of \(GisaStep.allCases.count): \(step.title)")
             }
+            .id("steps")
 
             switch step {
             case .header:
@@ -275,6 +328,7 @@ struct SubmissionDetailView: View {
                                     notifying: working, notify: { Task { await notifyCoordinator() } })
             case .gallery:
                 GisaLibrarySection(detail: detail, canEdit: canEdit, uploading: galleryUploading, opening: openingFile,
+                                   waiting: waitingFiles,
                                    add: { source in
                                        switch source {
                                        case .camera: cameraSection = PhotoTarget(sectionKey: nil)
@@ -282,7 +336,11 @@ struct SubmissionDetailView: View {
                                        case .files: importingFiles = true
                                        }
                                    },
-                                   open: { item in Task { await openFile(item) } })
+                                   open: { item in Task { await openFile(item) } },
+                                   discard: { upload in
+                                       offline.store.removeUpload(upload)
+                                       offline.refresh()
+                                   })
                 GisaSubmitSections(detail: detail,
                                    requirements: GisaWorkflow.requirements(form: form, photoCount: detail.photos?.count ?? 0),
                                    canEdit: canEdit, comment: $drafts.submitComment, working: working || saving,
@@ -297,9 +355,12 @@ struct SubmissionDetailView: View {
                 }
             }
         }
+        // A new step starts at its top, wherever the last one was scrolled to.
+        .onChange(of: step) { withAnimation { scroller.scrollTo("steps", anchor: .top) } }
+        }
         .scrollDismissesKeyboard(.interactively)
         .environment(\.gisaPhotos, GisaPhotoContext(
-            detail: detail, canEdit: canEdit, busySection: uploadingSection,
+            detail: detail, canEdit: canEdit, busySection: uploadingSection, waiting: waitingFiles,
             add: { section, source in
                 switch source {
                 case .camera: cameraSection = PhotoTarget(sectionKey: section)
@@ -319,12 +380,12 @@ struct SubmissionDetailView: View {
 
     /// The memo screen the Assessment step opens.
     private func memoWiring<Content: View>(_ content: Content, detail: SubmissionDetail, canEdit: Bool) -> some View {
-        let api = model.api
+        let api = model.api, store = offline.store
         return content.navigationDestination(item: $openMemo) { route in
             if let editor = Binding($editor) {
                 MemoEditorScreen(editor: editor, key: route.key, canEdit: canEdit, writer: presence?.writers[route.key],
                                  photos: GisaPhotoSections.allPhotos(of: detail),
-                                 figure: { id in try await Self.figure(id, api: api) },
+                                 figure: { id in try await Self.figure(id, api: api, store: store) },
                                  typed: { presence?.typed() }, save: { await save() })
                     .modifier(prompts)
             }
@@ -332,7 +393,8 @@ struct SubmissionDetailView: View {
     }
 
     /// A photo's bytes for a memo figure, fetched with the app's sign-in.
-    private static func figure(_ id: Int, api: APIClient) async throws -> (Data, String) {
+    private static func figure(_ id: Int, api: APIClient, store: OfflineStore) async throws -> (Data, String) {
+        if let kept = store.file(id) { return (kept, "image/jpeg") }
         let link = try await SubmissionsAPI(api: api).attachmentLink(id)
         guard let url = URL(string: link.downloadUrl) else { throw URLError(.badURL) }
         let (data, response) = try await URLSession.shared.data(from: url)
@@ -368,20 +430,75 @@ struct SubmissionDetailView: View {
             }
     }
 
+    /// The form from ERIS, or the copy kept on this iPhone when ERIS cannot be
+    /// reached, with any changes kept here put back on it (caught up with what
+    /// others saved since, when online).
     private func load() async {
         let submissions = SubmissionsAPI(api: model.api)
         do {
-            let loaded = try await submissions.detail(submissionId)
-            // The lists are needed to check actions on save; an older cache is
-            // part of the offline work, so a failure leaves them empty for now.
-            if let fetched = try? await submissions.lookups() { lookups = fetched }
+            let answer = try await submissions.detail(submissionId, keepingIn: offline.store)
+            // The lists check actions on save; the kept copy serves offline.
+            if let fetched = try? await submissions.lookups(keepingIn: offline.store) { lookups = fetched.value }
+            let loaded = answer.value
             detail = loaded
-            editor = GisaEditor(detail: loaded)
+            keptAt = answer.keptAt
+            editor = restored(loaded, online: answer.keptAt == nil)
             if presence == nil { presence = FormPresenceSession(api: model.api, submissionId: submissionId) }
             cracks = loaded.cracks ?? []
             error = nil
+        } catch let failure as APIError where failure.isUnreachable {
+            error = "ERIS can't be reached, and this form has not been opened on this iPhone before, so there is no copy of it here. Open it once while connected to have it offline."
         } catch {
             self.error = model.handle(error)
+        }
+    }
+
+    /// The editor for the loaded form, with the changes kept on this iPhone, if any.
+    private func restored(_ loaded: SubmissionDetail, online: Bool) -> GisaEditor {
+        let fresh = GisaEditor(detail: loaded)
+        strandedNote = nil
+        guard let kept = offline.store.edits(submissionId) else { return fresh }
+        guard loaded.submission.isEditable else {
+            strandedNote = kept.note ?? "Changes kept on this iPhone could not be sent: this form can no longer be edited."
+            return fresh
+        }
+        var editor = GisaEditor(edits: kept)
+        if online { editor.catchUp(with: loaded, savedBy: nil) }
+        guard editor.hasChanges || editor.pending != nil else {
+            offline.store.removeEdits(submissionId)
+            offline.refresh()
+            return fresh
+        }
+        mergedNotice = kept.state == .refused ? kept.note : "Changes kept on this iPhone are shown\(kept.state == .waiting ? " and will be sent" : "")."
+        if editor.pending != nil { choosingConflicts = true }
+        return editor
+    }
+
+    /// Keeps the form's changes on this iPhone, or forgets them once there are none.
+    private func keepNow() {
+        autosave?.cancel()
+        guard let editor, let detail, detail.submission.isEditable else { return }
+        let kept = offline.store.edits(submissionId)
+        if editor.hasChanges || editor.pending != nil {
+            let state: FormEdits.State = kept.map { $0.state == .refused ? .editing : $0.state } ?? .editing
+            offline.store.keepEdits(editor.edits(submissionId, state: state, note: state == kept?.state ? kept?.note : nil))
+        } else if kept != nil {
+            offline.store.removeEdits(submissionId)
+        }
+        offline.refresh()
+    }
+
+    /// After a sending round: if this form was a kept copy, or has changes
+    /// saved to send, try ERIS again.
+    private func reconnect() async {
+        guard !saving, !working else { return }
+        let waiting = offline.store.edits(submissionId)?.state == .waiting
+        guard keptAt != nil || waiting else { return }
+        keepNow()
+        guard (try? await SubmissionsAPI(api: model.api).detail(submissionId, keepingIn: offline.store))?.keptAt == nil else { return }
+        await load()
+        if waiting, editor?.pending == nil, await save(quietly: true) {
+            mergedNotice = "Changes kept on this iPhone were sent."
         }
     }
 
@@ -414,6 +531,8 @@ struct SubmissionDetailView: View {
             do {
                 try await SubmissionsAPI(api: model.api).saveGisa(submissionId, request)
                 resaves = 0
+                offline.store.removeEdits(submissionId)
+                offline.refresh()
                 await load()
                 if !quietly { alert = .init(title: "Saved", message: "Draft saved.") }
                 return true
@@ -422,6 +541,15 @@ struct SubmissionDetailView: View {
                 return await catchUp(savedBy: savedBy, refused: true, quietly: quietly)
             } catch FormRefusal.locked(let message) {
                 alert = .init(title: "Not saved", message: message)
+            } catch let failure as APIError where failure.isUnreachable {
+                // Kept here, and sent when ERIS can be reached.
+                offline.store.keepEdits((editor ?? current).edits(submissionId, state: .waiting))
+                offline.refresh()
+                alert = quietly
+                    ? .init(title: "Needs a Connection",
+                            message: "ERIS can't be reached, so this can't be done now. Your changes are saved on this iPhone and will be sent when the connection returns.")
+                    : .init(title: "Saved on This iPhone",
+                            message: "ERIS can't be reached. Your changes are kept on this iPhone and sent automatically when the connection returns.")
             } catch {
                 alert = .init(title: "Save failed", message: model.handle(error))
             }
@@ -527,6 +655,11 @@ struct SubmissionDetailView: View {
         openAssessment = AssessmentRoute(id: id)
     }
 
+    /// This form's files kept on this iPhone to upload.
+    private var waitingFiles: [PendingUpload] {
+        offline.waiting.uploads.filter { $0.submissionId == submissionId }
+    }
+
     /// The memos this person is writing (changed since opening or catching up): locked for everyone else.
     private var writingMemos: [String] {
         guard let editor else { return [] }
@@ -536,7 +669,7 @@ struct SubmissionDetailView: View {
     /// Files a photo under its form section, or under none from the Gallery.
     /// Only the attachment list is refreshed afterwards, so unsaved form changes are kept.
     @discardableResult
-    private func upload(_ photo: MappedPhotoCapture, to section: String?) async -> UploadedAttachment? {
+    private func upload(_ photo: MappedPhotoCapture, to section: String?, keepingOffline: Bool = true) async -> UploadedAttachment? {
         uploadingSection = section
         if section == nil { galleryUploading = "Uploading photo…" }
         defer {
@@ -550,10 +683,24 @@ struct SubmissionDetailView: View {
                                                                   capture: photo.metadata)
             if let fresh = try? await submissions.detail(submissionId) { detail = fresh }
             return uploaded
+        } catch let failure as APIError where failure.isUnreachable && keepingOffline {
+            keepFile(photo.jpeg, fileName: photo.fileName, mimeType: "image/jpeg", section: section, kind: "PHOTO",
+                     capture: photo.metadata)
+            alert = .init(title: "Photo Kept on This iPhone",
+                          message: "ERIS can't be reached. The photo will be uploaded when the connection returns.")
+            return nil
         } catch {
             alert = .init(title: "Photo upload failed", message: model.handle(error))
             return nil
         }
+    }
+
+    /// A file to upload once ERIS can be reached.
+    private func keepFile(_ data: Data, fileName: String, mimeType: String, section: String?, kind: String,
+                          capture: PhotoCaptureMetadata?) {
+        offline.store.addUpload(PendingUpload(submissionId: submissionId, fileName: fileName, mimeType: mimeType,
+                                              sectionKey: section, kind: kind, capture: capture, size: data.count), file: data)
+        offline.refresh()
     }
 
     /// Files a sketch under the Sketchpad, as the Expo editor did (kind SKETCH).
@@ -561,13 +708,18 @@ struct SubmissionDetailView: View {
         uploadingSection = "sketchpad"
         defer { uploadingSection = nil }
         let submissions = SubmissionsAPI(api: model.api)
+        let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false))
+            .replacingOccurrences(of: ":", with: "")
         do {
-            let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false))
-                .replacingOccurrences(of: ":", with: "")
             _ = try await submissions.uploadAttachment(submissionId, file: png, fileName: "gisa-sketch-\(stamp).png",
                                                        mimeType: "image/png", sectionKey: "sketchpad", kind: "SKETCH",
                                                        capture: nil)
             if let fresh = try? await submissions.detail(submissionId) { detail = fresh }
+        } catch let failure as APIError where failure.isUnreachable {
+            keepFile(png, fileName: "gisa-sketch-\(stamp).png", mimeType: "image/png", section: "sketchpad", kind: "SKETCH",
+                     capture: nil)
+            alert = .init(title: "Sketch Kept on This iPhone",
+                          message: "ERIS can't be reached. The sketch will be uploaded when the connection returns.")
         } catch {
             alert = .init(title: "Sketch not saved", message: model.handle(error))
         }
@@ -581,7 +733,8 @@ struct SubmissionDetailView: View {
         defer { addingCrack = false }
         var fields: [String: JSONValue] = [:]
         if let photo {
-            guard let uploaded = await upload(photo, to: "pavement_ground_status") else { return }
+            // A crack points at its uploaded photo, so it waits for a connection.
+            guard let uploaded = await upload(photo, to: "pavement_ground_status", keepingOffline: false) else { return }
             fields["photo_attachment_id"] = .number(Double(uploaded.attachmentId))
             if let latitude = photo.metadata?.latitude, let longitude = photo.metadata?.longitude {
                 fields["latitude"] = .number(latitude)
@@ -639,6 +792,10 @@ enum GisaStep: Int, CaseIterable, Identifiable {
 
 struct GisaHeaderSections: View {
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var roads: RoadData
+    @State private var locating = false
+    @State private var locationNote: String?
+    private let location = LocationProvider()
     @Binding var editor: GisaEditor
     let canEdit: Bool
     @State private var showCoordinates = false
@@ -734,6 +891,11 @@ struct GisaHeaderSections: View {
                 Text("The map editor (pin and polygon) is not on iPhone yet. Set the location with Lat/Lon or Northing/Easting below.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if canEdit {
+                Button(locating ? "Locating…" : "Use My Location") { Task { await useMyLocation() } }
+                    .disabled(locating)
+                if let locationNote { Text(locationNote).font(.caption).foregroundStyle(.secondary) }
+            }
             Button("Open in Google Maps") { if let url = form.googleMapsURL { openURL(url) } }
                 .disabled(form.googleMapsURL == nil)
             Toggle("Show Lat/Lon", isOn: $showCoordinates)
@@ -768,6 +930,32 @@ struct GisaHeaderSections: View {
             next[index][keyPath: path] = value
             editor.setContacts(next)
         }), editable: canEdit, keyboard: keyboard, error: nil)
+    }
+
+    /// GPS for the coordinates, and the highway post mile there (road data on
+    /// this iPhone first, then online) for District, County, Route and Post Mile.
+    private func useMyLocation() async {
+        locating = true
+        defer { locating = false }
+        do {
+            let fix = try await location.currentLocation()
+            editor.set("latitude", GisaPrecision.formatCoordinate(String(fix.coordinate.latitude)))
+            editor.set("longitude", GisaPrecision.formatCoordinate(String(fix.coordinate.longitude)))
+            showCoordinates = true
+            guard let road = await roads.locate(latitude: fix.coordinate.latitude, longitude: fix.coordinate.longitude) else {
+                locationNote = "Coordinates set. No highway post mile was found for them; enter District, County, Route and Post Mile."
+                return
+            }
+            if !road.district.isEmpty { editor.chooseDistrict(road.district) }
+            editor.chooseCounty(road.county)
+            editor.set("route", GisaPrecision.routeInput(road.route))
+            editor.set("post_mile", GisaPrecision.postMileInput(road.postMile))
+            locationNote = "Coordinates and post mile set. \(road.note)"
+        } catch LocationProvider.Failure.denied {
+            locationNote = "Location access is off. Allow it in Settings, or enter the location by hand."
+        } catch {
+            locationNote = "The location could not be determined. Enter it by hand."
+        }
     }
 
     private func refreshStatePlane() {

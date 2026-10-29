@@ -13,8 +13,10 @@
 		18F9A10935B792C843FFF9CF /* MemoWebEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304C10E2CBA732244FA1B0EA /* MemoWebEditor.swift */; };
 		19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C467160FFD1AAD51AA080E35 /* LocationProvider.swift */; };
 		1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */; };
+		252B6D4585C6891A71D36DA6 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = A292A7CF2D2C5976DE180BA9 /* OfflineSync.swift */; };
 		2B6167462B0624A10A806B75 /* CrackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEEB54A5C523456E696A8B6E /* CrackViews.swift */; };
 		2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */; };
+		44CA30771FCCFC9A1F46441F /* DemoWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C1617C9169B704B9433F21 /* DemoWork.swift */; };
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
 		586D79AA03DC3DE543D242B4 /* GalleryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
@@ -32,6 +34,8 @@
 		9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B0406C2726AB58967A07E70 /* PhotoViews.swift */; };
 		A9F95ECE84F3EC9F938EDAD8 /* FormPresenceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576704982A623A2F1D8DFF28 /* FormPresenceSession.swift */; };
 		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
+		AD7DD33F31277AFCC3D2C491 /* RoadData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92AA8EDC99BC32A3CF3C4C80 /* RoadData.swift */; };
+		D0DE8754749DC291E96E08CE /* MyWorkViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
 		E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C79A78C23480075CFA148688 /* SketchpadViews.swift */; };
 		FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */; };
@@ -64,8 +68,11 @@
 		78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentViews.swift; sourceTree = "<group>"; };
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		8FB17402AE2FC47CD9018576 /* FormCollabViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormCollabViews.swift; sourceTree = "<group>"; };
+		90C1617C9169B704B9433F21 /* DemoWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWork.swift; sourceTree = "<group>"; };
+		92AA8EDC99BC32A3CF3C4C80 /* RoadData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadData.swift; sourceTree = "<group>"; };
 		947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MSALTokenProvider.swift; sourceTree = "<group>"; };
 		9B0406C2726AB58967A07E70 /* PhotoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoViews.swift; sourceTree = "<group>"; };
+		A292A7CF2D2C5976DE180BA9 /* OfflineSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineSync.swift; sourceTree = "<group>"; };
 		A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ERISApp.swift; sourceTree = "<group>"; };
 		AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisaEditorViews.swift; sourceTree = "<group>"; };
 		AEEB54A5C523456E696A8B6E /* CrackViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrackViews.swift; sourceTree = "<group>"; };
@@ -76,6 +83,7 @@
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
 		E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
 		EB0938B6DC180DAC888EBEA9 /* AssessmentStepViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentStepViews.swift; sourceTree = "<group>"; };
+		EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyWorkViews.swift; sourceTree = "<group>"; };
 		EFF8C7FF82BD8D82D61D7DE0 /* ERISUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ERISUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementViews.swift; sourceTree = "<group>"; };
 		FDA966222712234613820962 /* ERIS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ERIS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -98,12 +106,15 @@
 			isa = PBXGroup;
 			children = (
 				16BD4538642D56D52AACFE19 /* DemoServer.swift */,
+				90C1617C9169B704B9433F21 /* DemoWork.swift */,
 				576704982A623A2F1D8DFF28 /* FormPresenceSession.swift */,
 				6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */,
 				C467160FFD1AAD51AA080E35 /* LocationProvider.swift */,
 				4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */,
 				304C10E2CBA732244FA1B0EA /* MemoWebEditor.swift */,
 				947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */,
+				A292A7CF2D2C5976DE180BA9 /* OfflineSync.swift */,
+				92AA8EDC99BC32A3CF3C4C80 /* RoadData.swift */,
 			);
 			path = Platform;
 			sourceTree = "<group>";
@@ -166,6 +177,7 @@
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
 				6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */,
 				FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */,
+				EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */,
 				9B0406C2726AB58967A07E70 /* PhotoViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
 				C79A78C23480075CFA148688 /* SketchpadViews.swift */,
@@ -302,6 +314,7 @@
 				2B6167462B0624A10A806B75 /* CrackViews.swift in Sources */,
 				71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */,
 				5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */,
+				44CA30771FCCFC9A1F46441F /* DemoWork.swift in Sources */,
 				FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */,
 				9C5C2795DCC69423E29F8D80 /* FormCollabViews.swift in Sources */,
 				A9F95ECE84F3EC9F938EDAD8 /* FormPresenceSession.swift in Sources */,
@@ -315,7 +328,10 @@
 				1289FEB61399B9FC12257709 /* MeasurementDiagramViews.swift in Sources */,
 				1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */,
 				18F9A10935B792C843FFF9CF /* MemoWebEditor.swift in Sources */,
+				D0DE8754749DC291E96E08CE /* MyWorkViews.swift in Sources */,
+				252B6D4585C6891A71D36DA6 /* OfflineSync.swift in Sources */,
 				9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */,
+				AD7DD33F31277AFCC3D2C491 /* RoadData.swift in Sources */,
 				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,
 				E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */,
 				E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */,

@@ -86,22 +86,31 @@ public final class OfflineStore: @unchecked Sendable {
 
     /// What is waiting to be sent, for the whole iPhone.
     public var waiting: Waiting {
-        Waiting(edits: allEdits(), uploads: uploads())
+        Waiting(edits: allEdits(), uploads: uploads(), incidents: queuedIncidents())
     }
 
     public struct Waiting: Equatable, Sendable {
         public let edits: [FormEdits]
         public let uploads: [PendingUpload]
+        public var incidents: [QueuedIncident] = []
 
-        public var isEmpty: Bool { edits.isEmpty && uploads.isEmpty }
+        /// Changes saved to send (or waiting on this person); changes still being
+        /// typed are kept on the iPhone but are not waiting to be sent.
+        public var toSend: [FormEdits] { edits.filter { $0.state != .editing } }
+
+        public var isEmpty: Bool { toSend.isEmpty && uploads.isEmpty && incidents.isEmpty }
         public var forms: Set<Int> { Set(edits.map(\.submissionId)).union(uploads.map(\.submissionId)) }
 
-        /// "2 forms with changes and 3 files waiting to send".
+        /// "1 report, 2 forms with changes and 3 files waiting to send".
         public var summary: String? {
             var parts: [String] = []
+            if !incidents.isEmpty { parts.append("\(incidents.count) \(incidents.count == 1 ? "report" : "reports")") }
+            let edits = toSend
             if !edits.isEmpty { parts.append("\(edits.count) \(edits.count == 1 ? "form" : "forms") with changes") }
             if !uploads.isEmpty { parts.append("\(uploads.count) \(uploads.count == 1 ? "file" : "files")") }
-            return parts.isEmpty ? nil : parts.joined(separator: " and ") + " waiting to send"
+            guard !parts.isEmpty else { return nil }
+            let joined = parts.count == 1 ? parts[0] : parts.dropLast().joined(separator: ", ") + " and " + parts.last!
+            return joined + " waiting to send"
         }
 
         /// Forms where someone else changed the same fields: they wait for this person.
@@ -157,6 +166,24 @@ public final class OfflineStore: @unchecked Sendable {
     private func names(in folder: String) -> [String] {
         lock.locked { (try? files.contentsOfDirectory(atPath: url(folder).path)) ?? [] }
     }
+
+    // MARK: Copies of other answers, and files
+
+    /// A server answer kept under a name ("assessments/5", "work/assignee").
+    public func keep(_ data: Data, as name: String) { write(data, to: "copies/\(name).json") }
+    public func copy(named name: String) -> Copy? { copy("copies/\(name).json") }
+
+    /// A form's photo, kept so it shows without a connection.
+    public func keepFile(_ attachmentId: Int, _ data: Data) { write(data, to: "files/\(attachmentId)") }
+    public func file(_ attachmentId: Int) -> Data? { copy("files/\(attachmentId)")?.data }
+    public func keptFileIds() -> Set<Int> { Set(names(in: "files").compactMap(Int.init)) }
+    public func removeFile(_ attachmentId: Int) { remove("files/\(attachmentId)") }
+
+    // For the other kinds of kept work (IncidentQueue.swift).
+    func writeFile(_ data: Data, to path: String) { write(data, to: path) }
+    func readFile(_ path: String) -> Data? { copy(path)?.data }
+    func removeFile(_ path: String) { remove(path) }
+    func folders(in path: String) -> [String] { names(in: path) }
 }
 
 /// A form's changes not yet sent: the saved form they started from, and the

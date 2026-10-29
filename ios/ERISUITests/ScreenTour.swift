@@ -46,7 +46,7 @@ final class ScreenTour: XCTestCase {
 
     func testAssessmentHandOff() {
         launch()
-        tap(app.tabBars.buttons["Assessments"])
+        tap(app.tabBars.buttons["My Work"])
         XCTAssertTrue(app.staticTexts["Assessment #3"].waitForExistence(timeout: 10))
         snap("assessments-list")
 
@@ -126,7 +126,7 @@ final class ScreenTour: XCTestCase {
 
     func testGisaHeaderSavesOnlyWithItsLocation() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         XCTAssertTrue(app.staticTexts["GISA Header"].waitForExistence(timeout: 10))
         snap("gisa-header")
@@ -159,7 +159,7 @@ final class ScreenTour: XCTestCase {
 
     func testGisaBodyDistributionHighwayAndIncidentType() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
         tap(app.buttons["Widening"])
@@ -180,13 +180,13 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
         app.alerts.buttons["OK"].tap()
         // After the reload the choices are still there.
-        XCTAssertTrue(app.buttons["Washout"].isSelected)
+        XCTAssertTrue(revealAbove(app.buttons["Washout"]).isSelected)
         XCTAssertFalse(app.buttons["Slide"].isSelected)
     }
 
     func testGisaMaterial() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
         let material = reveal(app.buttons["Landslide Debris"])
@@ -216,7 +216,7 @@ final class ScreenTour: XCTestCase {
 
     func testSectionPhotos() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
 
@@ -259,7 +259,7 @@ final class ScreenTour: XCTestCase {
 
     func testCracksAreSeparateRecordsWithTheirOwnLabels() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
 
@@ -306,7 +306,7 @@ final class ScreenTour: XCTestCase {
 
     func testVegetationAndWater() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
         replace(reveal(app.textFields["Groundcover Coverage %"]), with: "45")
@@ -328,7 +328,7 @@ final class ScreenTour: XCTestCase {
 
     func testMeasurements() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
         XCTAssertTrue(reveal(text(containing: "Road inventory context active")).exists)
@@ -354,7 +354,7 @@ final class ScreenTour: XCTestCase {
 
     func testCrossSectionDiagram() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Body"])
         let diagram = app.descendants(matching: .any)["measurement-diagram"]
@@ -381,7 +381,7 @@ final class ScreenTour: XCTestCase {
 
     func testAFieldAColleagueAlsoChangedIsChosenNotOverwritten() {
         launch(colleague: true)
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         XCTAssertTrue(text(containing: "Maria Garcia is also in this form").waitForExistence(timeout: 15))
         replace(reveal(app.textFields["Project ID"]), with: "555")
@@ -400,7 +400,7 @@ final class ScreenTour: XCTestCase {
 
     func testAColleaguesSaveElsewhereIsKept() {
         launch(colleague: true)
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         replace(reveal(app.textFields["EA"]), with: "04-1A234")
         tap(app.navigationBars.buttons["Save"])
@@ -413,7 +413,7 @@ final class ScreenTour: XCTestCase {
 
     func testAWebMemoIsEditedWithNothingLost() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Assess"])
         let row = app.buttons["memo-observations_notes"]
@@ -447,7 +447,7 @@ final class ScreenTour: XCTestCase {
 
     func testASketchIsDrawnSavedAndPlacedInSketchNotes() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.buttons["Assess"])
         tap(reveal(app.buttons["add-photo-sketchpad"]))
@@ -485,13 +485,15 @@ final class ScreenTour: XCTestCase {
     }
 
     private func openDemoForm(step: String) {
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(app.segmentedControls.buttons[step])
     }
 
     private func dismissAlert(_ title: String, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(app.alerts[title].waitForExistence(timeout: 10), "no \(title) alert", file: file, line: line)
+        if !app.alerts[title].waitForExistence(timeout: 10) { snap("missing-alert-\(title)") }
+        XCTAssertTrue(app.alerts[title].exists, "no \(title) alert; alerts: \(app.alerts.allElementsBoundByIndex.map(\.label))",
+                      file: file, line: line)
         app.alerts[title].buttons["OK"].tap()
     }
 
@@ -526,7 +528,7 @@ final class ScreenTour: XCTestCase {
 
     func testTheReviewChecklistLeadsToWhatIsMissing() {
         launch()
-        tap(app.tabBars.buttons["Submissions"])
+        tap(app.tabBars.buttons["Forms"])
         tap(app.staticTexts["I-880 slope failure GISA"])
         tap(row("District *"))
         tap(app.buttons["District 07"])
@@ -614,10 +616,211 @@ final class ScreenTour: XCTestCase {
         snap("gallery-added")
     }
 
+    private func tabNames() -> [String] {
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
+        return app.tabBars.buttons.allElementsBoundByIndex.map(\.label)
+    }
+
+    func testAnAdministratorWorksTheWholeQueueAndChoosesASide() {
+        launch()
+        XCTAssertEqual(tabNames(), ["My Work", "Report", "Forms", "Notifications", "Account"])
+        XCTAssertTrue(app.staticTexts["Triage · Report #14"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Assessment #3"].exists)
+        snap("mywork-admin")
+        tap(app.segmentedControls.buttons["Geotechnical"])
+        XCTAssertFalse(app.staticTexts["Triage · Report #14"].exists)
+        XCTAssertFalse(app.staticTexts["Maintenance · Report #20"].exists)
+        XCTAssertTrue(app.staticTexts["Assessment #3"].exists)
+        tap(app.segmentedControls.buttons["Maintenance"])
+        XCTAssertTrue(app.staticTexts["Maintenance · Report #20"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Assessment #3"].exists)
+        snap("mywork-maintenance-only")
+        tap(app.segmentedControls.buttons["Both"])
+    }
+
+    func testACoordinatorTriagesAReportIntoAnIncidentGroup() {
+        launch()
+        tap(app.staticTexts["Triage · Report #14"])
+        XCTAssertTrue(text(containing: "Rocks up to 0.5 m").waitForExistence(timeout: 10))
+        tap(reveal(row("Assessment required")))
+        tap(reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'I-880 slides, October storm'")).firstMatch))
+        snap("triage-decision")
+        tap(reveal(app.buttons["Accept and open assessment"]))
+        XCTAssertTrue(text(containing: "Report #14 accepted. Assessment #9 is open").waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Triage · Report #14"].exists, "it left the queue")
+        XCTAssertTrue(reveal(app.staticTexts["Assessment #9"]).exists, "and its assessment waits to be routed")
+    }
+
+    func testAMaintenanceReviewerCompletesTheirStep() {
+        launch()
+        tap(reveal(app.staticTexts["Maintenance · Report #20"]))
+        XCTAssertTrue(text(containing: "Current step: Supervisor review").waitForExistence(timeout: 10))
+        tap(reveal(row("Complete review and continue")))
+        let notes = reveal(app.descendants(matching: .any)["review-notes"])
+        tap(notes)
+        notes.typeText("Inlet cleared, water still ponding.")
+        snap("maintenance-review")
+        tap(reveal(app.buttons["Record Action"]))
+        XCTAssertTrue(text(containing: "Your action was recorded.").waitForExistence(timeout: 10))
+        tap(reveal(app.staticTexts["Maintenance · Report #20"]))
+        XCTAssertTrue(text(containing: "Current step: District decision").waitForExistence(timeout: 10))
+    }
+
+    func testABranchChiefApprovesAShare() {
+        launch()
+        tap(reveal(app.staticTexts["Sharing · Form #501"]))
+        XCTAssertTrue(text(containing: "Demo User is sharing").waitForExistence(timeout: 10))
+        snap("share-review")
+        tap(reveal(app.buttons["Approve"]))
+        XCTAssertTrue(text(containing: "takes effect once the other branch chief approves").waitForExistence(timeout: 10))
+    }
+
+    func testAReporterHasReportingAndNothingElse() {
+        launch(roles: "MAINTENANCE_CREW")
+        XCTAssertEqual(tabNames(), ["Report", "Notifications", "Account"])
+        XCTAssertTrue(app.buttons["Report an Incident"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Settlement at the bridge approach"].waitForExistence(timeout: 10), "their own report")
+        XCTAssertFalse(app.staticTexts["Rockfall on SR-1"].exists, "not anyone else's")
+        snap("report-tab")
+    }
+
+    func testADistrictReporterAnswersTheReviewer() {
+        app.launchArguments += ["-ERISDemoDuties", "YES"]
+        launch(roles: "GUEST")
+        XCTAssertEqual(tabNames(), ["My Work", "Report", "Notifications", "Account"])
+        tap(app.staticTexts["Maintenance · Report #22"])
+        tap(reveal(row("Supply information and return for review")))
+        let notes = reveal(app.descendants(matching: .any)["review-notes"])
+        tap(notes)
+        notes.typeText("Photo of the inlet added.")
+        tap(reveal(app.buttons["Record Action"]))
+        XCTAssertTrue(text(containing: "Your action was recorded.").waitForExistence(timeout: 10))
+    }
+
+    func testChiefsHaveTheirQueueOnly() {
+        launch(roles: "OFFICE_CHIEF")
+        XCTAssertEqual(tabNames(), ["My Work", "Notifications", "Account"])
+        XCTAssertTrue(app.staticTexts["Assessment #3"].waitForExistence(timeout: 10))
+    }
+
+    private func setConnection(_ connected: Bool) {
+        tap(app.tabBars.buttons["Account"])
+        let toggle = reveal(app.switches["demo-offline"])
+        let wanted = connected ? "0" : "1"
+        for _ in 0..<3 where (toggle.value as? String) != wanted {
+            flip(toggle)
+            if (toggle.value as? String) != wanted, toggle.switches.firstMatch.exists { toggle.switches.firstMatch.tap() }
+        }
+        XCTAssertEqual(toggle.value as? String, wanted, "the demo connection switch")
+        tap(app.tabBars.buttons["Forms"])
+    }
+
+    func testAFormWorksOfflineAndIsSentWhenTheConnectionReturns() {
+        launch()
+        openDemoForm(step: "Header")
+        setConnection(false)
+
+        // Saved with no connection: kept on this iPhone.
+        replace(reveal(app.textFields["EA"]), with: "04-OFF1")
+        tap(app.navigationBars.buttons["Save"])
+        dismissAlert("Saved on This iPhone")
+
+        // A photo taken offline waits on the iPhone too.
+        tap(revealAbove(app.segmentedControls.buttons["Gallery"]))
+        tap(reveal(app.buttons["add-file"]))
+        tap(app.buttons["Photo or Video Library"])
+        XCTAssertTrue(text(containing: "Private Access to Photos").waitForExistence(timeout: 15))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.43)).tap()
+        let add = app.buttons["Add"]
+        if add.waitForExistence(timeout: 5) { add.tap() }
+        dismissAlert("Kept on This iPhone")
+        XCTAssertTrue(reveal(text(containing: "kept on this iPhone")).exists)
+        snap("offline-gallery-waiting")
+
+        // The list says what is waiting; the form reopens from the kept copy, with the change.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(text(containing: "ERIS can't be reached").waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "1 form with changes and 1 file waiting to send").exists)
+        snap("offline-list")
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        XCTAssertTrue(text(containing: "Changes kept on this iPhone are shown").waitForExistence(timeout: 10))
+        XCTAssertEqual(reveal(app.textFields["EA"]).value as? String, "04-OFF1")
+        snap("offline-form")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // Back online: everything is sent, and the form shows it saved.
+        setConnection(true)
+        let waiting = text(containing: "waiting to send")
+        let sent = NSPredicate(format: "exists == false")
+        expectation(for: sent, evaluatedWith: waiting)
+        waitForExpectations(timeout: 30)
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        XCTAssertEqual(reveal(app.textFields["EA"]).value as? String, "04-OFF1")
+        XCTAssertFalse(text(containing: "Changes kept on this iPhone").exists)
+        tap(revealAbove(app.segmentedControls.buttons["Gallery"]))
+        XCTAssertTrue(reveal(text(containing: "3 items · 2 photos · 1 document")).waitForExistence(timeout: 10))
+        snap("offline-sent")
+    }
+
+    func testAReportMadeOfflineIsFiledWhenTheConnectionReturns() {
+        launch(roles: "MAINTENANCE_CREW")
+        tap(app.tabBars.buttons["Account"])
+        let toggle = reveal(app.switches["demo-offline"])
+        flip(toggle)
+        XCTAssertEqual(toggle.value as? String, "1")
+        tap(app.tabBars.buttons["Report"])
+        tap(app.buttons["Report an Incident"])
+        for (label, value) in [("Title (optional)", "Rocks on SR-84"), ("Latitude", "37.6"), ("Longitude", "-121.9"),
+                               ("District", "04"), ("County", "ALA"), ("Route", "84"), ("Post mile", "5.2")] {
+            let field = reveal(app.textFields[label])
+            tap(field)
+            field.typeText(value)
+        }
+        tap(app.navigationBars.buttons["Submit"])
+        XCTAssertTrue(text(containing: "The report is kept on this iPhone").waitForExistence(timeout: 15))
+        XCTAssertTrue(text(containing: "Rocks on SR-84").exists)
+        XCTAssertTrue(text(containing: "1 report waiting to send").exists)
+        snap("report-kept-offline")
+
+        tap(app.tabBars.buttons["Account"])
+        flip(reveal(app.switches["demo-offline"]))
+        tap(app.tabBars.buttons["Report"])
+        let waiting = text(containing: "1 report waiting to send")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: waiting)
+        waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.staticTexts["Rocks on SR-84"].waitForExistence(timeout: 10), "filed, and in my reports")
+        snap("report-filed")
+    }
+
+    func testWorkAssignedWhileOfflineArrivesOnItsOwnReadyToWorkOffline() {
+        app.launchArguments += ["-ERISDemoLateAssignment", "YES"]
+        launch(roles: "STAFF")
+        XCTAssertTrue(app.staticTexts["Assessment #5"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Assessment #8"].exists)
+
+        // Offline, the office assigns Assessment #8. Back online, it arrives with nobody pulling to refresh.
+        setConnection(false)
+        setConnection(true)
+        tap(app.tabBars.buttons["My Work"])
+        XCTAssertTrue(app.staticTexts["Assessment #8"].waitForExistence(timeout: 20))
+        snap("assigned-arrived")
+
+        // Its form was kept: it opens, photos and all, with no connection.
+        setConnection(false)
+        tap(app.tabBars.buttons["My Work"])
+        tap(app.staticTexts["Assessment #8"])
+        XCTAssertTrue(text(containing: "ERIS can't be reached").waitForExistence(timeout: 10))
+        tap(reveal(app.buttons["Open technical form #501"]))
+        XCTAssertTrue(app.segmentedControls.buttons["Body"].waitForExistence(timeout: 10))
+        tap(app.segmentedControls.buttons["Body"])
+        XCTAssertTrue(reveal(app.buttons["Photo field-photo-sample.jpg"]).exists)
+        snap("assigned-form-offline")
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
-        tap(app.tabBars.buttons["Assessments"])
-        tap(app.buttons["Staff"])
+        XCTAssertEqual(tabNames(), ["My Work", "Forms", "Notifications", "Account"])
+        tap(app.tabBars.buttons["My Work"])
         tap(app.staticTexts["Assessment #5"])
         XCTAssertTrue(app.buttons["Submit for review"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Approve"].exists)

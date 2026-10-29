@@ -1,56 +1,6 @@
 import ERISKit
 import SwiftUI
 
-/// The assessment worklists (`GET /assessments?queue=`), as in
-/// mobile/app/(tabs)/assessments/index.tsx.
-struct AssessmentsView: View {
-    @EnvironmentObject private var model: AppModel
-    let me: Me
-    @State private var tab = AssessmentTab.all
-    @State private var items: [Assessment] = []
-    @State private var error: String?
-    @State private var loading = false
-
-    var body: some View {
-        List {
-            Picker("Worklist", selection: $tab) {
-                ForEach(AssessmentTab.allCases) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-            if let error {
-                Text(error).foregroundStyle(.red)
-            }
-            ForEach(items) { item in
-                NavigationLink(value: AssessmentRoute(id: item.id)) {
-                    AssessmentRow(assessment: item)
-                }
-            }
-            if !loading && items.isEmpty && error == nil {
-                Text("No assessments in this queue.").foregroundStyle(.secondary)
-            }
-        }
-        .overlay { if loading && items.isEmpty { ProgressView() } }
-        .navigationTitle("Assessments")
-        .navigationDestination(for: AssessmentRoute.self) { AssessmentDetailView(assessmentId: $0.id, me: me) }
-        .navigationDestination(for: SubmissionRoute.self) { SubmissionDetailView(submissionId: $0.id) }
-        .refreshable { await load() }
-        .task(id: tab) { await load() }
-    }
-
-    private func load() async {
-        loading = true
-        defer { loading = false }
-        do {
-            items = try await AssessmentsAPI(api: model.api).list(queue: tab.queue)
-            error = nil
-        } catch {
-            self.error = model.handle(error)
-        }
-    }
-}
-
 /// Distinct from incident and submission ids in a navigation path.
 struct AssessmentRoute: Hashable {
     let id: Int
@@ -99,6 +49,9 @@ struct AssessmentStateBadge: View {
 
 struct AssessmentDetailView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
+    /// When the assessment shown was kept on this iPhone, because ERIS could not be reached.
+    @State private var keptAt: Date?
     let assessmentId: Int
     let me: Me
     @State private var detail: AssessmentDetail?
@@ -129,6 +82,8 @@ struct AssessmentDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
+        // Kept current: a step taken elsewhere (on the web) shows here.
+        .onChange(of: offline.rounds) { if !working { Task { await load() } } }
         .alert("Action failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
             Button("OK", role: .cancel) { actionError = nil }
         } message: {
@@ -145,6 +100,7 @@ struct AssessmentDetailView: View {
         let hasNotes = !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ScrollViewReader { scroller in
         List {
+            OfflineStatusSection(keptAt: keptAt)
             Section {
                 AssessmentStateBadge(state: assessment.state)
                     .id("state")
@@ -214,24 +170,7 @@ struct AssessmentDetailView: View {
                 }
             }
 
-            Section("Timeline") {
-                if detail.events.isEmpty {
-                    Text("Nothing recorded yet.").foregroundStyle(.secondary)
-                }
-                ForEach(detail.events) { event in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(event.eventType + (event.disposition.map { " · \($0)" } ?? ""))
-                            .font(.subheadline.weight(.semibold))
-                        if event.fromState != nil || event.toState != nil {
-                            Text("\(event.fromState ?? "—") → \(event.toState ?? "—")")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        if let note = event.notes, !note.isEmpty { Text(note).font(.caption) }
-                        Text("by \(event.actorLabel)\(ServerDate.display(event.createdAt).map { " · \($0)" } ?? "")")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
+            AssessmentTimelineSection(events: detail.events)
         }
         // Back to the top after a step, as the Expo sheet reopened there.
         .onChange(of: stepsDone) { withAnimation { scroller.scrollTo("state", anchor: .top) } }
@@ -262,7 +201,9 @@ struct AssessmentDetailView: View {
     private func load() async {
         let assessments = AssessmentsAPI(api: model.api)
         do {
-            let loaded = try await assessments.detail(assessmentId)
+            let answer = try await assessments.detail(assessmentId, keepingIn: offline.store)
+            let loaded = answer.value
+            keptAt = answer.keptAt
             let actions = AssessmentActions(assessment: loaded.assessment, roles: me.roles, meId: me.id)
             // A picker that fails to load shows as empty, as in the Expo app.
             branchChiefs = actions.delegate ? ((try? await assessments.branchOptions(assessmentId))?.sections ?? []) : []
@@ -382,5 +323,31 @@ struct PersonPickerRow: View {
         .foregroundStyle(.primary)
         .disabled(disabled)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// What has happened to an assessment, oldest first.
+struct AssessmentTimelineSection: View {
+    let events: [AssessmentEvent]
+
+    var body: some View {
+        Section("Timeline") {
+            if events.isEmpty {
+                Text("Nothing recorded yet.").foregroundStyle(.secondary)
+            }
+            ForEach(events) { event in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.eventType + (event.disposition.map { " · \($0)" } ?? ""))
+                        .font(.subheadline.weight(.semibold))
+                    if event.fromState != nil || event.toState != nil {
+                        Text("\(event.fromState ?? "—") → \(event.toState ?? "—")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let note = event.notes, !note.isEmpty { Text(note).font(.caption) }
+                    Text("by \(event.actorLabel)\(ServerDate.display(event.createdAt).map { " · \($0)" } ?? "")")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }

@@ -11,6 +11,8 @@ struct GisaPhotoContext {
     var detail: SubmissionDetail?
     var canEdit = false
     var busySection: String?
+    /// Files kept on this iPhone to upload when ERIS can be reached.
+    var waiting: [PendingUpload] = []
     var add: (String, GisaPhotoSource) -> Void = { _, _ in }
     var open: (AttachmentRef) -> Void = { _ in }
 }
@@ -52,6 +54,11 @@ struct GisaSectionPhotos: View {
                         }
                     }
                 }
+            }
+            let waiting = photos.waiting.filter { $0.sectionKey == sectionKey }.count
+            if waiting > 0 {
+                Label("\(waiting) \(waiting == 1 ? "photo" : "photos") on this iPhone, waiting to upload", systemImage: "clock.arrow.circlepath")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if photos.canEdit {
                 if photos.busySection == sectionKey {

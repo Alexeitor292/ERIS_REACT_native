@@ -20,8 +20,11 @@ struct GisaLibrarySection: View {
     let uploading: String?
     /// The file being fetched to open.
     let opening: Int?
+    /// Files kept on this iPhone to upload when ERIS can be reached.
+    let waiting: [PendingUpload]
     let add: (GalleryAddSource) -> Void
     let open: (SubmissionLibrary.Item) -> Void
+    let discard: (PendingUpload) -> Void
     @State private var filter = SubmissionLibrary.Filter.all
 
     var body: some View {
@@ -73,10 +76,35 @@ struct GisaLibrarySection: View {
         } header: {
             Text("Submission Library")
         } footer: {
-            Text(canEdit
-                 ? "\(SubmissionLibrary.countLabel(counts)). Files added here belong to the whole submission; photos for a section are added in that section. Up to \(SubmissionLibrary.maxUploadMB) MB each."
-                 : SubmissionLibrary.countLabel(counts))
+            Text(footer(counts))
         }
+        if !waiting.isEmpty {
+            Section("Waiting to Upload") {
+                ForEach(waiting) { upload in
+                    HStack(alignment: .top) {
+                        Image(systemName: upload.problem == nil ? "clock.arrow.circlepath" : "exclamationmark.circle")
+                            .foregroundStyle(upload.problem == nil ? Color.secondary : Color.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(upload.fileName).font(.subheadline).lineLimit(1)
+                            Text(upload.problem ?? "\(SubmissionLibrary.sectionLabel(upload.sectionKey)) · \(SubmissionLibrary.sizeText(upload.size) ?? "") · kept on this iPhone")
+                                .font(.caption).foregroundStyle(upload.problem == nil ? Color.secondary : Color.orange)
+                        }
+                        Spacer()
+                        if upload.problem != nil {
+                            Button("Discard", role: .destructive) { discard(upload) }.buttonStyle(.borderless)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("waiting-\(upload.fileName)")
+                }
+            }
+        }
+    }
+
+    private func footer(_ counts: SubmissionLibrary.Counts) -> String {
+        canEdit
+            ? "\(SubmissionLibrary.countLabel(counts)). Files added here belong to the whole submission; photos for a section are added in that section. Up to \(SubmissionLibrary.maxUploadMB) MB each."
+            : SubmissionLibrary.countLabel(counts)
     }
 }
 

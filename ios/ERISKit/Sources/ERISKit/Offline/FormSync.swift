@@ -106,11 +106,12 @@ public struct FormSync: Sendable {
         self.store = store
     }
 
-    /// Every form with something waiting, until ERIS cannot be reached.
-    public func sendAll() async -> [Int: Outcome] {
+    /// Every form with something waiting, until ERIS cannot be reached. The
+    /// changes of the form open on screen (`open`) are left to it; its files go.
+    public func sendAll(except open: Int? = nil) async -> [Int: Outcome] {
         var outcomes: [Int: Outcome] = [:]
         for id in store.waiting.forms.sorted() {
-            let outcome = await send(id)
+            let outcome = await send(id, includingEdits: id != open)
             outcomes[id] = outcome
             if outcome == .unreachable { break }
         }
@@ -118,8 +119,8 @@ public struct FormSync: Sendable {
     }
 
     /// One form's changes, then its files.
-    public func send(_ id: Int) async -> Outcome {
-        let changes = await sendEdits(id)
+    public func send(_ id: Int, includingEdits: Bool = true) async -> Outcome {
+        let changes = includingEdits ? await sendEdits(id) : .nothing
         if changes == .unreachable { return changes }
         let files = await sendUploads(id)
         if files == .unreachable { return files }

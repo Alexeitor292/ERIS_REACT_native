@@ -24,28 +24,11 @@ final class AssessmentsAPITests: XCTestCase {
               "state": "PENDING_ENGINEER_ASSIGNMENT", "created_by_user_id": 1}]}
             """)
         }
-        let item = try await client(transport).list(queue: AssessmentTab.branch.queue)[0]
+        let item = try await client(transport).list(queue: .branchChief)[0]
         XCTAssertEqual(transport.requests.first?.url?.query, "queue=branch_chief")
         XCTAssertEqual(item.officeLabel, "Office of Geotechnical Design North")
         XCTAssertEqual(item.branchLabel, "Branch C")
         XCTAssertEqual(RoleModel.assessmentStateLabel(item.state), "Pending Staff assignment")
-    }
-
-    func testTheTabsAreTheExpoWorklists() async throws {
-        XCTAssertEqual(AssessmentTab.allCases.map(\.label), ["All", "Office", "Branch", "Staff", "Reviews"])
-        XCTAssertEqual(AssessmentTab.allCases.map { $0.queue?.rawValue }, [nil, "office_chief", "branch_chief", "engineer", "reviewer"])
-        let transport = FakeTransport { _ in .init(status: 200, body: #"{"items": []}"#) }
-        _ = try await client(transport).list(queue: AssessmentTab.all.queue)
-        XCTAssertNil(transport.requests.first?.url?.query)
-    }
-
-    func testOnlyOperationalRolesSeeTheTab() {
-        for role in ["OFFICE_CHIEF", "BRANCH_CHIEF", "STAFF", "SENIOR_SPECIALIST", "MAINTENANCE_COORDINATOR", "ADMIN"] {
-            XCTAssertTrue(AssessmentTab.isVisible(to: [role]), role)
-        }
-        XCTAssertFalse(AssessmentTab.isVisible(to: ["MAINTENANCE_CREW"]))
-        XCTAssertFalse(AssessmentTab.isVisible(to: ["GUEST"]))
-        XCTAssertFalse(AssessmentTab.isVisible(to: []))
     }
 
     func testOfficeAndBranchFallBackOnePartAtATime() throws {

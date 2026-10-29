@@ -48,8 +48,13 @@
 	<string>ERIS uses your location to fill in an incident's district, county, route and post mile, and to map where each field photo was taken.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ERIS attaches the photos you choose to incident reports and assessment forms.</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>gov.ca.dot.eris.refresh</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>fetch</string>
 		<string>remote-notification</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>

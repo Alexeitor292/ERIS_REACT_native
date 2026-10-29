@@ -90,8 +90,16 @@ public struct Me: Decodable, Equatable, Sendable {
         public let jobTitle: String?
     }
 
-    /// Someone on a district maintenance list lands on Maintenance work.
+    /// Someone holding a duty in a district maintenance workflow; its reports wait in My Work.
     public var hasMaintenanceDistricts: Bool { !(maintenanceDistricts ?? []).isEmpty }
+
+    /// A district duty that includes reporting incidents.
+    public var reportsForMaintenance: Bool {
+        (maintenanceDistricts ?? []).contains { district in
+            if case .object(let fields) = district, case .bool(true)? = fields["report"] { return true }
+            return false
+        }
+    }
 }
 
 // MARK: - Notifications

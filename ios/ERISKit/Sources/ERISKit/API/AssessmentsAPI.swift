@@ -9,6 +9,8 @@ public struct Assessment: Decodable, Equatable, Identifiable, Sendable {
     public let id: Int
     public let incidentId: Int
     public let submissionId: Int?
+    /// Every technical form attached (the newest is `submissionId`).
+    public let submissionIds: [Int]?
     public let district: String?
     public let officeCode: String?
     /// The routing snapshot: the office and branch as they read when this

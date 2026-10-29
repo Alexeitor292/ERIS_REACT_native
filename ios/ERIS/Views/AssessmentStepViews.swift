@@ -364,6 +364,7 @@ private struct FigurePicker: View {
 /// the notes left. Operational roles only, as on the web form.
 private struct RecordOfIncidents: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
     @Environment(\.gisaPhotos) private var photos
     @State private var history: SiteHistory?
     @State private var problem: String?
@@ -382,7 +383,7 @@ private struct RecordOfIncidents: View {
             }
             .task(id: id) {
                 do {
-                    history = try await SubmissionsAPI(api: model.api).siteHistory(id)
+                    history = try await SubmissionsAPI(api: model.api).siteHistory(id, keepingIn: offline.store)
                 } catch {
                     problem = model.handle(error)
                 }

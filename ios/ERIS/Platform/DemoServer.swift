@@ -1,12 +1,14 @@
 #if DEBUG
 import ERISKit
 import Foundation
+import SwiftUI
 import UIKit
 
 /// Debug builds only: run the app against built-in sample data, with no
 /// sign-in and no network, to check screens in the simulator. Start it with the
 /// launch argument `-ERISDemo YES` (add `-ERISDemoRoles OFFICE_CHIEF,STAFF` to
-/// try other roles; the default is ADMIN). The demo form belongs to Assessment
+/// try other roles; the default is ADMIN; `-ERISDemoDuties YES` adds a
+/// district maintenance duty). The demo form belongs to Assessment
 /// #5; `-ERISDemoLegacyForm YES` makes it a form of its own, sent for review
 /// and decided on itself. This file is compiled out of Release
 /// builds, so the Intune build cannot enter demo mode.
@@ -21,6 +23,54 @@ enum DemoServer {
     static func makeClient() -> APIClient {
         APIClient(baseURL: URL(string: "https://demo.eris.invalid/api")!, store: MemorySessionStore(token: "demo"),
                   transport: DemoTransport(roles: roles))
+    }
+}
+
+/// The demo's stand-in for losing the connection: while on, every request
+/// fails as it does with no network. Switched in Account (demo only), or
+/// from the start with `-ERISDemoOffline YES`.
+enum DemoNetwork {
+    /// In memory, so each launch starts connected unless asked otherwise.
+    private final class Flag: @unchecked Sendable {
+        let lock = NSLock()
+        var value = UserDefaults.standard.bool(forKey: "ERISDemoOffline")
+        var assignedWhileOffline = false
+    }
+
+    private static let flag = Flag()
+
+    static var offline: Bool {
+        get { flag.lock.locked { flag.value } }
+        set {
+            flag.lock.locked {
+                flag.value = newValue
+                // `-ERISDemoLateAssignment YES`: the office assigns more work while this iPhone is offline.
+                if newValue, UserDefaults.standard.bool(forKey: "ERISDemoLateAssignment") { flag.assignedWhileOffline = true }
+            }
+        }
+    }
+
+    static var assignedWhileOffline: Bool { flag.lock.locked { flag.assignedWhileOffline } }
+}
+
+/// The Account screen's switch for it.
+struct DemoNetworkSection: View {
+    @EnvironmentObject private var offline: OfflineSync
+    @State private var on = DemoNetwork.offline
+
+    var body: some View {
+        Section {
+            Toggle("Simulate no connection", isOn: $on)
+                .accessibilityIdentifier("demo-offline")
+                .onChange(of: on) { _, now in
+                    DemoNetwork.offline = now
+                    if !now { offline.kick() }
+                }
+        } header: {
+            Text("Demo")
+        } footer: {
+            Text("Every request fails as it does without a network, to try working offline.")
+        }
     }
 }
 
@@ -52,6 +102,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private var status = "DRAFT"
     private var reviewComment: String?
     private var formEvents: [[String: Any]] = []
+    private var incidents = DemoData.incidents
+    private var work = DemoWork()
 
     init(roles: [String]) {
         self.roles = roles
@@ -64,6 +116,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try await Task.sleep(nanoseconds: 150_000_000)
+        if DemoNetwork.offline { throw APIError.transport("The Internet connection appears to be offline.") }
         let url = request.url!
         let path = url.path.hasPrefix("/api") ? String(url.path.dropFirst(4)) : url.path
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -86,6 +139,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         // Split in two: as one switch it took the type checker too long for CI.
         if let answer = formPhotoAndCrackRoute(method, parts, body) { return answer }
         if let answer = formWorkflowRoute(method, parts, body) { return answer }
+        if let answer = work.route(method, parts, query, body, incidents: &incidents, assessments: &assessments) { return answer }
         switch (method, parts) {
         case ("GET", ["auth", "me"]):
             return (200, DemoData.me(roles: roles))
@@ -100,9 +154,9 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("POST", ["notifications", "read"]):
             return (200, ["unread": 0])
         case ("GET", ["incidents"]):
-            return (200, ["items": DemoData.incidents])
+            return (200, ["items": incidents])
         case ("GET", let p) where p.count == 2 && p[0] == "incidents":
-            return DemoData.incidents.first { "\($0["id"]!)" == p[1] }.map { (200, $0) } ?? notFound
+            return incidents.first { "\($0["id"]!)" == p[1] }.map { (200, ["incident": $0]) } ?? notFound
         case ("GET", ["submissions"]):
             return (200, ["items": DemoData.submissions])
         case ("GET", let p) where p.count == 2 && p[0] == "submissions":
@@ -145,7 +199,21 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("DELETE", let p) where p.count == 4 && p[2] == "presence":
             return (200, ["ok": true])
         case ("GET", ["assessments"]):
-            return (200, ["items": assessments.filter { matches($0, queue: query.first { $0.name == "queue" }?.value) }])
+            if DemoNetwork.assignedWhileOffline, !assessments.contains(where: { $0["id"] as? Int == 8 }) {
+                var late = assessments[0]
+                late["id"] = 8
+                late["incident_id"] = 14
+                late["state"] = "DRAFT"
+                late["routing_path"] = "BRANCH"
+                late["assigned_engineer_user_id"] = DemoData.meId
+                late["submission_id"] = 501
+                late["submission_ids"] = [501]
+                assessments.append(late)
+            }
+            let state = query.first { $0.name == "state" }?.value
+            return (200, ["items": assessments.filter {
+                matches($0, queue: query.first { $0.name == "queue" }?.value) && (state == nil || $0["state"] as? String == state)
+            }])
         case ("GET", let p) where p.count == 2 && p[0] == "assessments":
             guard let id = Int(p[1]), let item = assessments.first(where: { $0["id"] as? Int == id }) else { return notFound }
             return (200, ["assessment": item, "assignments": [], "events": events[id] ?? DemoData.events(for: item)])
@@ -396,6 +464,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case "branch_chief": return state == "PENDING_ENGINEER_ASSIGNMENT" && item["routing_path"] as? String == "BRANCH"
         case "engineer", "assignee": return item["assigned_engineer_user_id"] as? Int == DemoData.meId
         case "reviewer": return state == "SUBMITTED"
+        case "office_chief_review": return state == "SUBMITTED" && item["routing_path"] as? String == "SENIOR_ENGINEER"
+        case "branch_chief_review": return state == "SUBMITTED" && item["routing_path"] as? String == "BRANCH"
         default: return true
         }
     }
@@ -450,7 +520,9 @@ enum DemoData {
 
     static func me(roles: [String]) -> [String: Any] {
         ["id": meId, "email": "demo.user@dot.ca.gov", "full_name": "Demo User", "roles": roles,
-         "maintenance_districts": [],
+         // `-ERISDemoDuties YES`: a district maintenance duty that reports and reviews.
+         "maintenance_districts": UserDefaults.standard.bool(forKey: "ERISDemoDuties")
+            ? [["district": "04", "report": true, "manage": false]] : [],
          "org": ["office_name": "Office of Geotechnical Design West", "office_short_name": "OGD West",
                  "branch_name": "Branch C", "home_district": "04", "job_title": "Transportation Engineer"]]
     }
@@ -479,6 +551,10 @@ enum DemoData {
          "latitude": 37.5900, "longitude": -122.5100, "district": "04", "county": "SM", "route": "1",
          "post_mile": "38.2", "current_stage": "COORDINATOR_REVIEW", "status": "NEW", "reporter_user_id": 7,
          "created_at": "2026-10-28T06:45:00Z"],
+        ["id": 16, "title": "Settlement at the bridge approach", "description": "A 2-inch dip across both lanes.",
+         "first_observed_at": "2026-10-26T16:00:00Z", "latitude": 37.6000, "longitude": -122.0500, "district": "04",
+         "county": "ALA", "route": "238", "post_mile": "15.0", "current_stage": "OFFICE_CHIEF_REVIEW",
+         "status": "IN_PROGRESS", "reporter_user_id": meId, "created_at": "2026-10-26T16:10:00Z"],
     ]
 
     static let submissions: [[String: Any]] = [

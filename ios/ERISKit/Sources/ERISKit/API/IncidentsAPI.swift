@@ -5,7 +5,7 @@ import FoundationNetworking
 
 /// `POST /incidents` and `PATCH /incidents/{id}` body. Ported from
 /// `IncidentCreatePayload` in mobile/src/api/incidents.ts.
-public struct IncidentDraft: Encodable, Equatable, Sendable {
+public struct IncidentDraft: Codable, Equatable, Sendable {
     public var title: String?
     public var incidentType: String?
     public var description: String?
@@ -53,7 +53,7 @@ public struct IncidentEnvelope: Decodable, Equatable, Sendable {
     public let incident: Incident
 }
 
-public enum IncidentAttachmentKind: String, Sendable {
+public enum IncidentAttachmentKind: String, Codable, Sendable {
     case photo = "PHOTO", video = "VIDEO", doc = "DOC", sketch = "SKETCH"
 }
 
@@ -74,8 +74,9 @@ public struct IncidentsAPI: Sendable {
         return try await api.get("/incidents", query: query, as: IncidentList.self).items
     }
 
+    /// The server answers `{"incident": {...}}`, as it does for create and update.
     public func get(_ id: Int) async throws -> Incident {
-        try await api.get("/incidents/\(id)", as: Incident.self)
+        try await api.get("/incidents/\(id)", as: IncidentEnvelope.self).incident
     }
 
     public func create(_ draft: IncidentDraft) async throws -> Incident {

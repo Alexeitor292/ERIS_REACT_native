@@ -1,36 +1,5 @@
 import Foundation
 
-/// The worklist tabs of the Assessments screen, as in
-/// mobile/app/(tabs)/assessments/index.tsx.
-public enum AssessmentTab: String, CaseIterable, Identifiable, Sendable {
-    case all, office, branch, staff, reviews
-
-    public var id: String { rawValue }
-
-    public var label: String {
-        switch self {
-        case .all: return "All"
-        case .office: return "Office"
-        case .branch: return "Branch"
-        case .staff: return "Staff"
-        case .reviews: return "Reviews"
-        }
-    }
-
-    public var queue: AssessmentQueue? {
-        switch self {
-        case .all: return nil
-        case .office: return .officeChief
-        case .branch: return .branchChief
-        case .staff: return .engineer
-        case .reviews: return .reviewer
-        }
-    }
-
-    /// The Assessments tab is for operational roles only, as in the Expo tab bar.
-    public static func isVisible(to roles: [String]) -> Bool { RoleModel.isOperationalUser(roles) }
-}
-
 /// The colour family of an assessment state's badge.
 public enum AssessmentTone: Sendable {
     case done, attention, inReview, waiting, neutral

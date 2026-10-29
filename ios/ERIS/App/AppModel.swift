@@ -15,6 +15,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var phase: Phase = .starting
     @Published var unread = 0
     @Published var pendingRoute: AppRoute?
+    /// The signed-in person's forms and unsent work kept on this iPhone.
+    private(set) var offline: OfflineSync?
+    /// Highway reference data for finding post miles without a connection.
+    let roads = RoadData()
+    private var foreground: NSObjectProtocol?
 
     let auth: AuthService
     var api: APIClient { auth.api }
@@ -45,7 +50,7 @@ final class AppModel: ObservableObject {
 
     func start() async {
         if let me = await auth.restore() {
-            phase = .signedIn(me)
+            enter(me)
             await afterSignIn()
         } else {
             phase = .signedOut(message: nil)
@@ -54,7 +59,7 @@ final class AppModel: ObservableObject {
 
     func signIn() async {
         do {
-            phase = .signedIn(try await auth.signIn())
+            enter(try await auth.signIn())
             await afterSignIn()
         } catch AuthError.cancelled {
             phase = .signedOut(message: nil)
@@ -69,7 +74,33 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Signed in: this person's offline store first, so every screen has it.
+    private func enter(_ me: Me) {
+        if offline == nil {
+            // The demo's sample data starts afresh each launch, so does what it kept.
+            if isDemo { OfflineStore(directory: OfflineSync.folder(for: me.id)).wipe() }
+            offline = OfflineSync(api: api, me: me)
+        }
+        phase = .signedIn(me)
+        // Reporters (by role or district duty) and form authors find post miles with it; viewers are refused by the server.
+        if !isDemo && (!RoleModel.isPublicOnly(me.roles) || me.reportsForMaintenance) {
+            roads.refresh(api: api)
+            if foreground == nil {
+                foreground = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
+                                                                    object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor in
+                        guard let self, case .signedIn = self.phase else { return }
+                        self.roads.refresh(api: self.api)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Signing out deletes what this person kept on the iPhone, sent or not.
     func signOut() async {
+        offline?.stop(wiping: true)
+        offline = nil
         await auth.signOut(device: device)
         device = nil
         unread = 0
@@ -101,6 +132,15 @@ final class AppModel: ObservableObject {
             }
         }
         return "Something went wrong. Try again."
+    }
+
+    /// A notice or background time: catch up, so new work is ready before it is opened.
+    func catchUpInBackground() async -> Bool {
+        guard let offline else { return false }
+        let reached = await offline.catchUpInBackground()
+        await refreshUnread()
+        if !isDemo { roads.refresh(api: api) }
+        return reached
     }
 
     func refreshUnread() async {
