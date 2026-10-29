@@ -97,7 +97,8 @@ final class GisaFormTests: XCTestCase {
 
     func testTheSavedBodyHasEveryFieldTypedAsTheServerExpects() throws {
         let body = try GisaForm(server: saved, incidentTypes: [], createdAt: nil).patchBody()
-        XCTAssertEqual(body.count, GisaForm.fields.count)
+        // Every field but the memos' plain copies, which the server derives.
+        XCTAssertEqual(body.count, GisaForm.fields.count - MemoContent.keys.count)
         XCTAssertEqual(body["district"], .string("04"))
         XCTAssertEqual(body["route"], .string("880"))
         XCTAssertEqual(body["post_mile"], .string("12.30"))
@@ -121,8 +122,10 @@ final class GisaFormTests: XCTestCase {
         let transport = FakeTransport { _ in .init(status: 200, body: "{}") }
         let api = SubmissionsAPI(api: APIClient(baseURL: base, store: MemorySessionStore(token: "t"), transport: transport))
         let form = GisaForm(server: saved, incidentTypes: [], createdAt: nil)
-        try await api.saveGisa(501, form: try form.patchBody(), incidentTypes: form.incidentTypeItems(listed: ["SINK_HOLE"]),
-                               actions: .init(immediate: ["CLOSE_LANE"], followUp: []))
+        func list(_ items: [String]) -> JSONValue { .array(items.map(JSONValue.string)) }
+        try await api.saveGisa(501, .init(form: form, body: try form.patchBody(),
+                                          incidentTypes: ["items": list(form.incidentTypeItems(listed: ["SINK_HOLE"]))],
+                                          actions: ["immediate": list(["CLOSE_LANE"]), "follow_up": list([])]))
         XCTAssertEqual(transport.requests.map { "\($0.httpMethod!) \($0.url!.path)" },
                        ["PATCH /api/submissions/501/gisa", "PUT /api/submissions/501/gisa/incident-types",
                         "PUT /api/submissions/501/gisa/actions"])

@@ -13,8 +13,9 @@ final class ScreenTour: XCTestCase {
         app.launchArguments = ["-ERISDemo", "YES"]
     }
 
-    private func launch(roles: String = "ADMIN") {
+    private func launch(roles: String = "ADMIN", colleague: Bool = false) {
         app.launchArguments += ["-ERISDemoRoles", roles]
+        if colleague { app.launchArguments += ["-ERISDemoColleague", "YES"] }
         app.launch()
         XCTAssertTrue(app.staticTexts["Demo data: not connected to ERIS"].waitForExistence(timeout: 10))
     }
@@ -375,6 +376,72 @@ final class ScreenTour: XCTestCase {
         snap("gisa-diagram-full-screen")
         tap(done)
         XCTAssertTrue(diagram.waitForExistence(timeout: 10))
+    }
+
+    func testAFieldAColleagueAlsoChangedIsChosenNotOverwritten() {
+        launch(colleague: true)
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        XCTAssertTrue(text(containing: "Maria Garcia is also in this form").waitForExistence(timeout: 15))
+        replace(reveal(app.textFields["Project ID"]), with: "555")
+        tap(app.navigationBars.buttons["Save"])
+        // Maria saved Project ID first: nothing is overwritten until this person chooses.
+        let sheet = app.navigationBars["Changed by both"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "EA 04-0B2 (from Maria)").exists)
+        snap("collab-conflict")
+        tap(app.buttons["project_id-mine"])
+        tap(sheet.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+        app.alerts["Saved"].buttons["OK"].tap()
+        XCTAssertEqual(reveal(app.textFields["Project ID"]).value as? String, "555")
+    }
+
+    func testAColleaguesSaveElsewhereIsKept() {
+        launch(colleague: true)
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        replace(reveal(app.textFields["EA"]), with: "04-1A234")
+        tap(app.navigationBars.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+        app.alerts["Saved"].buttons["OK"].tap()
+        // Only EA was sent, so Maria's Project ID stands.
+        XCTAssertEqual(reveal(app.textFields["Project ID"]).value as? String, "EA 04-0B2 (from Maria)")
+        snap("collab-merged")
+    }
+
+    func testAWebMemoIsEditedWithNothingLost() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.buttons["Assess"])
+        let row = app.buttons["memo-observations_notes"]
+        XCTAssertTrue(reveal(row).label.contains("Toe of the slope"))
+        tap(row)
+        // Written on the web: heading, list, table, figure with its photo, and a citation.
+        let page = app.webViews.firstMatch
+        XCTAssertTrue(page.staticTexts["Toe of the slope"].waitForExistence(timeout: 15))
+        XCTAssertTrue(page.staticTexts["Scarp"].exists, "the table")
+        XCTAssertTrue(page.images["Scarp above the shoulder"].waitForExistence(timeout: 10), "the figure's photo")
+        snap("memo-opened")
+
+        page.staticTexts["Debris on the right lane"].tap()
+        app.typeText(" and shoulder")
+        tap(app.buttons["Bold"])
+        snap("memo-edited")
+        tap(app.navigationBars.buttons["Save"])
+        XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
+        app.alerts["Saved"].buttons["OK"].tap()
+
+        // Saved and reloaded: the formatting is all still there.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(reveal(row).label.contains("and shoulder"))
+        tap(row)
+        XCTAssertTrue(page.staticTexts["Toe of the slope"].waitForExistence(timeout: 15))
+        XCTAssertTrue(page.staticTexts["Scarp"].exists, "the table survived")
+        XCTAssertTrue(page.images["Scarp above the shoulder"].exists, "the figure survived")
+        XCTAssertTrue(page.staticTexts["Figure 1.1"].exists, "the citation survived")
+        snap("memo-saved")
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

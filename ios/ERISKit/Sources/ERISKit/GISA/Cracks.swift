@@ -288,7 +288,7 @@ extension SubmissionsAPI {
         do {
             return try await api.request("PATCH", "/submissions/\(id)/cracks/\(crackId)", body: try JSONEncoder().encode(body),
                                          preservingKeys: true, as: CrackEnvelope.self).crack
-        } catch APIError.http(409, _) {
+        } catch APIError.http(409, _), APIError.refused(409, _, _) {
             throw CrackConflict(theirs: try? await cracks(id).first { $0.id == crackId })
         }
     }

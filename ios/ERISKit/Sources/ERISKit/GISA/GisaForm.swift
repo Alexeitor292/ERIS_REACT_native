@@ -22,6 +22,10 @@ public enum GisaFieldKind: Equatable, Sendable {
     case incidentType(code: String)
     /// One of a fixed set of values, else blank.
     case choice([String])
+    /// A formatted memo (`<memo>_html`), opened as MemoContent.choose decides.
+    case memo(plainKey: String)
+    /// A memo's plain-text copy: the server derives it from the document, so it is never sent.
+    case mirror
     /// JSON kept as text in the form; `serverKey` is the column it comes from and goes to.
     case json(serverKey: String, pretty: Bool)
 }
@@ -127,8 +131,9 @@ public struct GisaForm: Equatable, Sendable {
             GisaField("measure_roadway_length_ft", .decimal, "Roadway length"),
             GisaField("measure_roadway_width_ft", .decimal, "Roadway width"),
         ]
-        out += ["record_of_event", "maintenance_history", "geotechnical_assessment", "recommendations", "sketchpad",
-                "observations"].map { GisaField("\($0)_notes", .text) }
+        out += ["record_of_event", "maintenance_history"].map { GisaField("\($0)_notes", .text) }
+        out += MemoContent.keys.map { GisaField($0, .mirror) }
+        out += MemoContent.keys.map { GisaField("\($0)_html", .memo(plainKey: $0)) }
         out += [
             GisaField("geometry_json", .json(serverKey: "geometry_json", pretty: true)),
             GisaField("pavement_ground_annotation_layout",
@@ -149,8 +154,11 @@ public struct GisaForm: Equatable, Sendable {
         for field in Self.fields {
             let value = g[field.key]
             switch field.kind {
-            case .text:
+            case .text, .mirror:
                 self[field.key] = JS.string(value)
+            case .memo(let plainKey):
+                let html = JS.string(value)
+                self[field.key] = MemoContent.choose(html: html.isEmpty ? nil : html, plain: JS.string(g[plainKey]))
             case .route:
                 self[field.key] = GisaPrecision.routeInput(JS.string(value))
             case .postMile:
@@ -294,6 +302,10 @@ public struct GisaForm: Equatable, Sendable {
             switch field.kind {
             case .text, .choice:
                 body[field.key] = blank ? .null : .string(text.trimmingCharacters(in: .whitespacesAndNewlines))
+            case .memo:
+                body[field.key] = blank ? .null : .string(text)
+            case .mirror:
+                continue
             case .route:
                 body[field.key] = GisaPrecision.routeValue(text).map(JSONValue.string) ?? .null
             case .postMile:

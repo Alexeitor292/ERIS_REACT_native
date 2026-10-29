@@ -86,6 +86,8 @@ final class AppModel: ObservableObject {
             case .forbidden(let detail): return detail ?? "You do not have access to this."
             case .notFound: return "Not found."
             case .transport: return "ERIS could not be reached. Check the connection."
+            // The server's own words when it gives a reason ("Only DRAFT or REJECTED…").
+            case .http(_, let detail?), .refused(_, let detail?, _): return detail
             default: return "Something went wrong. Try again."
             }
         }

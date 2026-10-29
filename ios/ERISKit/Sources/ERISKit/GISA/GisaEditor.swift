@@ -12,6 +12,10 @@ public struct GisaEditor: Equatable, Sendable {
     public var actions: SubmissionDetail.Actions
     /// Field key -> message.
     public var errors: [String: String] = [:]
+    /// What a save is checked against (FormCollab.swift).
+    public internal(set) var base: Base
+    /// Fields someone else also changed, waiting for this person's choice.
+    public internal(set) var pending: Pending?
 
     public init(detail: SubmissionDetail) {
         form = detail.form
@@ -20,6 +24,12 @@ public struct GisaEditor: Equatable, Sendable {
         var seen = Set<String>()
         listedIncidentTypes = ((detail.incidentTypes ?? []) + form.tickedIncidentTypes).filter { seen.insert($0).inserted }
         actions = detail.actions ?? .init()
+        base = Base(detail: detail, form: form, listed: listedIncidentTypes)
+    }
+
+    /// The contacts as the form now stores them.
+    mutating func resetContacts() {
+        contacts = DistrictContact.parse(form["district_contact"])
     }
 
     /// Changes a field and clears its error.
@@ -44,12 +54,17 @@ public struct GisaEditor: Equatable, Sendable {
         set("district_contact", DistrictContact.serialize(next))
     }
 
-    /// Everything one save sends.
+    /// What one save sends: only what this person changed, each part with the
+    /// saved value it started from, so the server can refuse a field someone
+    /// else changed meanwhile. A part left nil is not sent.
     public struct SaveRequest: Equatable, Sendable {
         public let form: GisaForm
-        public let body: [String: JSONValue]
-        public let incidentTypes: [String]
-        public let actions: SubmissionDetail.Actions
+        /// The changed columns, and `base`: each one's saved value when this person started.
+        public let body: [String: JSONValue]?
+        public let incidentTypes: [String: JSONValue]?
+        public let actions: [String: JSONValue]?
+
+        public var isEmpty: Bool { body == nil && incidentTypes == nil && actions == nil }
     }
 
     /// Why a save cannot be sent yet, with the alert the Expo editor shows.
@@ -78,15 +93,36 @@ public struct GisaEditor: Equatable, Sendable {
         }
         form = form.enforcingBusinessRules()
         do {
-            let body = try form.patchBody()
-            return .success(SaveRequest(form: form, body: body,
-                                        incidentTypes: form.incidentTypeItems(listed: listedIncidentTypes),
-                                        actions: actions))
+            return .success(try changes())
         } catch let error as GisaFieldError {
             errors[error.key] = error.message
             return .failure(SaveProblem(title: "Almost there", message: error.message))
         } catch {
             return .failure(SaveProblem(title: "Save failed", message: String(describing: error)))
         }
+    }
+
+    /// The request for what changed since `base`.
+    func changes() throws -> SaveRequest {
+        let now = try form.patchBody()
+        let was = (try? base.form.patchBody()) ?? [:]
+        let keys = now.keys.filter { !FormMerge.savedSame(now[$0], was[$0]) }.sorted()
+        var body: [String: JSONValue]?
+        if !keys.isEmpty {
+            var changed = Dictionary(uniqueKeysWithValues: keys.map { ($0, now[$0] ?? .null) })
+            changed["base"] = .object(Dictionary(uniqueKeysWithValues: keys.map { ($0, base.gisa[$0] ?? .null) }))
+            body = changed
+        }
+        func list(_ items: [String]) -> JSONValue { .array(items.map(JSONValue.string)) }
+        let items = form.incidentTypeItems(listed: listedIncidentTypes)
+        let incidentTypes: [String: JSONValue]? = Set(items) == Set(base.incidentTypes) ? nil
+            : ["items": list(items), "base": list(base.incidentTypes)]
+        let sameActions = Set(actions.immediate) == Set(base.actions.immediate)
+            && Set(actions.followUp) == Set(base.actions.followUp)
+        let actionsBody: [String: JSONValue]? = sameActions ? nil : [
+            "immediate": list(actions.immediate), "follow_up": list(actions.followUp),
+            "base_immediate": list(base.actions.immediate), "base_follow_up": list(base.actions.followUp),
+        ]
+        return SaveRequest(form: form, body: body, incidentTypes: incidentTypes, actions: actionsBody)
     }
 }

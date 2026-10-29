@@ -1,5 +1,15 @@
 import { Extension, type CommandProps } from "@tiptap/core";
-import { TableCell, TableHeader } from "@tiptap/extension-table";
+import StarterKit from "@tiptap/starter-kit";
+import TextAlign from "@tiptap/extension-text-align";
+import Highlight from "@tiptap/extension-highlight";
+import Subscript from "@tiptap/extension-subscript";
+import Superscript from "@tiptap/extension-superscript";
+import { TaskItem, TaskList } from "@tiptap/extension-list";
+import { TextStyleKit } from "@tiptap/extension-text-style";
+import { TableCell, TableHeader, TableKit } from "@tiptap/extension-table";
+import { CharacterCount, Placeholder } from "@tiptap/extensions";
+
+import { MemoFigure, MemoFigureRef } from "./memoFigures";
 
 const BLOCK_TYPES = ["paragraph", "heading"];
 const INDENT_STEP_EM = 2;
@@ -90,3 +100,32 @@ export const ShadedTableHeader = TableHeader.extend({
     return { ...this.parent?.(), ...cellBackground };
   },
 });
+
+/**
+ * Everything a memo document can hold. The web editor and the iPhone app's
+ * memo editor (src/memoIos, bundled into the app) both use this list, so a
+ * memo written in one opens in the other without losing anything.
+ */
+export function memoExtensions(placeholder: string) {
+  return [
+    StarterKit.configure({
+      heading: { levels: [1, 2, 3, 4] },
+      link: { openOnClick: false, autolink: true, protocols: ["http", "https", "mailto"] },
+    }),
+    TextAlign.configure({ types: ["heading", "paragraph"] }),
+    Highlight.configure({ multicolor: true }),
+    Subscript,
+    Superscript,
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    TextStyleKit,
+    BlockFormatting,
+    TableKit.configure({ table: { resizable: true }, tableCell: false, tableHeader: false }),
+    ShadedTableCell,
+    ShadedTableHeader,
+    Placeholder.configure({ placeholder }),
+    CharacterCount,
+    MemoFigure,
+    MemoFigureRef,
+  ];
+}

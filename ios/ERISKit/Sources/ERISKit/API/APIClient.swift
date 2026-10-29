@@ -11,6 +11,9 @@ public enum APIError: Error, Equatable, Sendable {
     case notFound
     case server(Int)
     case http(Int, String?)
+    /// A refusal whose detail is an object (a save conflict, a locked memo):
+    /// status, its message, and the detail itself.
+    case refused(Int, String?, [String: JSONValue])
     case invalidResponse
     case decoding(String)
     case transport(String)
@@ -180,6 +183,9 @@ public final class APIClient: @unchecked Sendable {
             case 500...:
                 throw APIError.server(response.statusCode)
             default:
+                if case .object(let structured)? = (try? rawDecoder.decode([String: JSONValue].self, from: data))?["detail"] {
+                    throw APIError.refused(response.statusCode, detail(in: data), structured)
+                }
                 throw APIError.http(response.statusCode, detail(in: data))
             }
         }

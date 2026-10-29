@@ -39,10 +39,18 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private var nextAttachmentId = 900
     private var cracks: [[String: Any]] = [DemoData.sampleCrack]
     private var nextCrackId = 60
+    /// Each save raises it, as on the server.
+    private var revision = 1
+    private var savedBy: String?
+    /// `-ERISDemoColleague YES`: Maria Garcia has the form open too, and saves
+    /// Project ID just before this person's first save arrives.
+    private var colleague = UserDefaults.standard.bool(forKey: "ERISDemoColleague")
+    private var colleagueSaved = false
 
     init(roles: [String]) {
         self.roles = roles
         assessments = DemoData.assessments
+        gisa["revision"] = revision
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -96,14 +104,28 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("GET", ["gisa", "lookups"]):
             return (200, DemoData.lookups)
         case ("PATCH", ["submissions", "501", "gisa"]):
-            gisa.merge(body) { _, new in new }
-            return (200, ["submission_id": 501, "gisa": gisa])
+            return saveGisa(body)
         case ("PUT", ["submissions", "501", "gisa", "incident-types"]):
+            if let base = body["base"] as? [String], Set(base) != Set(incidentTypes) {
+                return refused([["field": "incident_types", "theirs": incidentTypes.sorted()]])
+            }
             incidentTypes = body["items"] as? [String] ?? []
+            saved(by: nil)
             return (200, ["items": incidentTypes])
         case ("PUT", ["submissions", "501", "gisa", "actions"]):
-            submissionActions = body
-            return (200, body)
+            submissionActions = ["immediate": body["immediate"] ?? [], "follow_up": body["follow_up"] ?? []]
+            saved(by: nil)
+            return (200, submissionActions)
+        case ("POST", ["submissions", "501", "presence"]):
+            let others: [[String: Any]] = colleague
+                ? [["session_id": "maria-session", "user_id": 77, "name": "Maria Garcia", "area": NSNull(), "field": NSNull(),
+                    "memos": []]]
+                : []
+            return (200, ["others": others, "granted": body["memos"] ?? [], "denied": [String: Any](), "revision": revision,
+                          "saved_by": savedBy.map { ["user_id": 77, "name": $0] as [String: Any] } ?? NSNull(),
+                          "saved_at": NSNull()])
+        case ("DELETE", let p) where p.count == 4 && p[2] == "presence":
+            return (200, ["ok": true])
         case ("GET", ["assessments"]):
             return (200, ["items": assessments.filter { matches($0, queue: query.first { $0.name == "queue" }?.value) }])
         case ("GET", let p) where p.count == 2 && p[0] == "assessments":
@@ -221,6 +243,47 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             return item
         }
         return ["submission_id": 501, "can_edit_corrections": true, "photos": items]
+    }
+
+    /// A save as the server judges it (services/form_saves.py): a field whose
+    /// saved value moved since the person's `base` is refused with both values.
+    private func saveGisa(_ body: [String: Any]) -> (Int, Any) {
+        if colleague, !colleagueSaved {
+            colleagueSaved = true
+            gisa["project_id"] = "EA 04-0B2 (from Maria)"
+            saved(by: "Maria Garcia")
+        }
+        var changes = body
+        let base = changes.removeValue(forKey: "base") as? [String: Any]
+        // As the server does: a memo's plain copy is derived from its document.
+        for key in MemoContent.keys {
+            guard let html = changes["\(key)_html"] else { continue }
+            changes[key] = (html as? String).map { MemoContent.preview($0, limit: .max) } ?? NSNull()
+        }
+        let conflicts: [[String: Any]] = (base ?? [:]).keys.sorted().compactMap { key in
+            FormMerge.savedSame(Self.json(base?[key]), Self.json(gisa[key])) ? nil : ["field": key, "theirs": gisa[key] ?? NSNull()]
+        }
+        if !conflicts.isEmpty { return refused(conflicts) }
+        gisa.merge(changes) { _, new in new }
+        saved(by: nil)
+        return (200, ["submission_id": 501, "gisa": gisa])
+    }
+
+    private func saved(by name: String?) {
+        revision += 1
+        gisa["revision"] = revision
+        savedBy = name
+    }
+
+    private func refused(_ conflicts: [[String: Any]]) -> (Int, Any) {
+        (409, ["detail": ["message": "Someone else saved changes to the same fields after you opened this form.",
+                          "conflicts": conflicts, "saved_by": savedBy ?? NSNull(), "revision": revision] as [String: Any]])
+    }
+
+    private static func json(_ value: Any?) -> JSONValue? {
+        guard let value, !(value is NSNull),
+              let data = try? JSONSerialization.data(withJSONObject: ["v": value]) else { return nil }
+        return (try? JSONDecoder().decode([String: JSONValue].self, from: data))?["v"]
     }
 
     private var submissionDetail: [String: Any] {
@@ -364,6 +427,24 @@ enum DemoData {
         "failure_slide": 1, "material_soil": 1, "est_clay_pct": 40.0, "est_silt_pct": 60.0, "vegetation_trees": 30.0,
         "pavement_ground_cracks": 1, "settlement_in": 2.0,
         "geotechnical_assessment_notes": "Cut slope failure onto the shoulder.",
+        // Written on the web: a document with a heading, list, table, figure and citation.
+        "observations_notes_html": """
+            <h2>Toe of the slope</h2><p>Seepage at the <strong>toe</strong>, about 40 ft long.</p>\
+            <ul><li><p>Fresh tension crack along the shoulder</p></li><li><p>Debris on the right lane</p></li></ul>\
+            <table><tbody><tr><th><p>Feature</p></th><th><p>Size</p></th></tr><tr><td><p>Scarp</p></td><td><p>6 ft</p></td></tr></tbody></table>\
+            <figure data-figure="801" data-caption="Scarp above the shoulder" data-width="100" data-label="1.1">\
+            <figcaption>Figure 1.1. Scarp above the shoulder</figcaption></figure>\
+            <p>See <span data-figure-ref="801" data-label="1.1">Figure 1.1</span>.</p>
+            """,
+        "observations_notes": """
+            Toe of the slope
+            Seepage at the toe, about 40 ft long.
+            • Fresh tension crack along the shoulder
+            • Debris on the right lane
+            Feature Size Scarp 6 ft
+            Figure 1.1. Scarp above the shoulder
+            See Figure 1.1.
+            """,
         "measure_slope_height_ft": 32.0, "measure_original_slope_deg": 34.0,
         "road_inventory_context": roadInventoryContext,
         "elevation_profile": elevationProfile(bearing: 47.6, source: "arcgis_postmile_geometry"),

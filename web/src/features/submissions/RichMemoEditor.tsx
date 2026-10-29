@@ -1,14 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import TextAlign from "@tiptap/extension-text-align";
-import Highlight from "@tiptap/extension-highlight";
-import Subscript from "@tiptap/extension-subscript";
-import Superscript from "@tiptap/extension-superscript";
-import { TaskItem, TaskList } from "@tiptap/extension-list";
-import { TextStyleKit } from "@tiptap/extension-text-style";
-import { TableKit } from "@tiptap/extension-table";
-import { CharacterCount, Placeholder } from "@tiptap/extensions";
 import DOMPurify from "dompurify";
 import {
   AlignCenter,
@@ -62,10 +53,10 @@ import {
   WrapText,
 } from "lucide-react";
 
-import { BlockFormatting, ShadedTableCell, ShadedTableHeader } from "./memoEditorExtensions";
+import { memoExtensions } from "./memoEditorExtensions";
 import { downloadBlob, exportMemoDocx, importMemoDocx } from "./memoDocx";
 import { figureText, memoNumber } from "./memoFigureModel";
-import { MemoFigure, MemoFigureRef, setFigureContext, type MemoFigureTools } from "./memoFigures";
+import { setFigureContext, type MemoFigureTools } from "./memoFigures";
 
 type Props = {
   value: string;
@@ -120,27 +111,7 @@ export default function RichMemoEditor({ value, onChange, editable, placeholder,
   onChangeRef.current = onChange;
 
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3, 4] },
-        link: { openOnClick: false, autolink: true, protocols: ["http", "https", "mailto"] },
-      }),
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Highlight.configure({ multicolor: true }),
-      Subscript,
-      Superscript,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      TextStyleKit,
-      BlockFormatting,
-      TableKit.configure({ table: { resizable: true }, tableCell: false, tableHeader: false }),
-      ShadedTableCell,
-      ShadedTableHeader,
-      Placeholder.configure({ placeholder }),
-      CharacterCount,
-      MemoFigure,
-      MemoFigureRef,
-    ],
+    extensions: memoExtensions(placeholder),
     content: clean(value),
     editable,
     onUpdate: ({ editor: current }) => onChangeRef.current(current.isEmpty ? "" : current.getHTML()),

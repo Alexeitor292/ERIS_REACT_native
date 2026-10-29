@@ -205,15 +205,28 @@ public struct SubmissionsAPI: Sendable {
     /// Saves a draft as the Expo editor does: the form, then its incident types,
     /// then its actions. The form is sent with its own keys untouched, since
     /// its JSON fields hold data keys (`rangeEnd`) that must not be renamed.
-    public func saveGisa(_ id: Int, form body: [String: JSONValue], incidentTypes: [String],
-                         actions: SubmissionDetail.Actions) async throws {
+    /// Sends what one save changed. Throws `FormRefusal` when the server refuses
+    /// it because someone else changed the same fields or is writing a memo.
+    public func saveGisa(_ id: Int, _ save: GisaEditor.SaveRequest) async throws {
         let raw = JSONEncoder()
         raw.outputFormatting = .withoutEscapingSlashes
-        _ = try await api.request("PATCH", "/submissions/\(id)/gisa", body: try raw.encode(body), as: EmptyResponse.self)
-        _ = try await api.request("PUT", "/submissions/\(id)/gisa/incident-types",
-                                  body: try raw.encode(["items": incidentTypes]), as: EmptyResponse.self)
-        _ = try await api.request("PUT", "/submissions/\(id)/gisa/actions", body: try raw.encode(actions),
-                                  as: EmptyResponse.self)
+        do {
+            if let body = save.body {
+                _ = try await api.request("PATCH", "/submissions/\(id)/gisa", body: try raw.encode(body), as: EmptyResponse.self)
+            }
+            if let items = save.incidentTypes {
+                _ = try await api.request("PUT", "/submissions/\(id)/gisa/incident-types", body: try raw.encode(items),
+                                          as: EmptyResponse.self)
+            }
+            if let actions = save.actions {
+                _ = try await api.request("PUT", "/submissions/\(id)/gisa/actions", body: try raw.encode(actions),
+                                          as: EmptyResponse.self)
+            }
+        } catch APIError.refused(409, let message, let detail) {
+            if detail["locked"] != nil { throw FormRefusal.locked(message ?? "Someone else is writing that memo.") }
+            if detail["conflicts"] != nil { throw FormRefusal.conflicts(savedBy: detail["saved_by"].flatMap { JS.string($0).nilIfEmpty }) }
+            throw APIError.http(409, message)
+        }
     }
 
     public func submit(_ id: Int, comment: String?) async throws {

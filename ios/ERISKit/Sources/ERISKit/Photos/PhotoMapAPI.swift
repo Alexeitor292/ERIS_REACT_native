@@ -141,6 +141,14 @@ public enum GisaPhotoSections {
     ]
 
     /// A section's attachments that can be shown as pictures.
+    /// Every photo on the form, newest first (to place as a memo figure).
+    public static func allPhotos(of detail: SubmissionDetail) -> [AttachmentRef] {
+        let photoIds = Set((detail.photos ?? []).map(\.id))
+        return (detail.attachments ?? detail.photos ?? [])
+            .filter { photoIds.contains($0.id) || ($0.mimeType ?? "").lowercased().hasPrefix("image/") }
+            .sorted { $0.id > $1.id }
+    }
+
     public static func photos(in sectionKey: String, of detail: SubmissionDetail) -> [AttachmentRef] {
         let photoIds = Set((detail.photos ?? []).map(\.id))
         return (detail.attachments ?? detail.photos ?? []).filter { attachment in

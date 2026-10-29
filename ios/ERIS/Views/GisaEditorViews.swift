@@ -26,6 +26,13 @@ struct SubmissionDetailView: View {
     @State private var cracks: [Crack] = []
     @State private var addingCrack = false
     @State private var openCrack: CrackRoute?
+    /// Who else is in the form, the memos they hold, and their saves.
+    @State private var presence: FormPresenceSession?
+    @State private var openMemo: MemoRoute?
+    /// "Maria Garcia saved Project ID. Their changes are shown here."
+    @State private var mergedNotice: String?
+    @State private var choosingConflicts = false
+    @State private var resaves = 0
 
     /// The section a new photo will be filed under, and whether it starts a crack.
     struct PhotoTarget: Identifiable {
@@ -35,12 +42,17 @@ struct SubmissionDetailView: View {
     }
 
     var body: some View {
-        photoFlows(screen)
-            .alert(alert?.title ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
-                Button("OK", role: .cancel) { alert = nil }
-            } message: {
-                Text(alert?.message ?? "")
-            }
+        photoFlows(screen).modifier(prompts)
+    }
+
+    /// Alerts and the choice between versions, shown on the form or on an open memo.
+    private var prompts: FormPrompts {
+        FormPrompts(alert: $alert, choosing: $choosingConflicts, pending: editor?.pending) { theirs in
+            editor?.resolve(takingTheirs: theirs)
+            choosingConflicts = false
+            resaves = 0
+            Task { await save() }
+        }
     }
 
     // The body is split into parts: as one expression it took the type
@@ -59,6 +71,12 @@ struct SubmissionDetailView: View {
         .navigationTitle(detail?.submission.status == "DRAFT" ? "Draft" : "Submission")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .onChange(of: presence?.reply?.revision) { _, revision in
+            // Someone else saved: bring their changes in.
+            guard let revision, let editor, revision > editor.base.revision, !saving else { return }
+            Task { await catchUp(savedBy: presence?.reply?.savedBy?.name, refused: false) }
+        }
+        .onChange(of: writingMemos) { _, memos in presence?.writing = memos }
     }
 
     /// Taking, choosing and opening section photos.
@@ -104,7 +122,9 @@ struct SubmissionDetailView: View {
         let canEdit = detail.submission.isEditable
         let form = editor.wrappedValue.form
         // Built in parts: as one expression it took the type checker too long for CI.
-        return crackWiring(List {
+        return memoWiring(crackWiring(List {
+            FormPresenceSection(others: presence?.others ?? [], notice: mergedNotice, pending: editor.wrappedValue.pending,
+                                choose: { choosingConflicts = true })
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(SubmissionDescriptor.text(district: form["district"], county: form["county"], route: form["route"],
@@ -127,6 +147,9 @@ struct SubmissionDetailView: View {
             case .body:
                 // Every Body field is editable here; saving keeps any the screen does not show.
                 GisaBodySections(editor: editor, canEdit: canEdit, lookups: lookups)
+            case .assessment:
+                GisaAssessmentSections(editor: editor, canEdit: canEdit, writers: presence?.writers ?? [:],
+                                       open: { openMemo = MemoRoute(key: $0) })
             case .gallery:
                 GisaGallerySection(detail: detail)
             default:
@@ -148,7 +171,7 @@ struct SubmissionDetailView: View {
                 case .library: librarySection = section
                 }
             },
-            open: { openPhoto = $0 })), canEdit: canEdit)
+            open: { openPhoto = $0 })), canEdit: canEdit), detail: detail, canEdit: canEdit)
         .toolbar {
             if canEdit {
                 Button(saving ? "Saving…" : "Save") { Task { await save() } }
@@ -156,6 +179,28 @@ struct SubmissionDetailView: View {
             }
         }
         .keyboardDoneButton()
+    }
+
+    /// The memo screen the Assessment step opens.
+    private func memoWiring<Content: View>(_ content: Content, detail: SubmissionDetail, canEdit: Bool) -> some View {
+        let api = model.api
+        return content.navigationDestination(item: $openMemo) { route in
+            if let editor = Binding($editor) {
+                MemoEditorScreen(editor: editor, key: route.key, canEdit: canEdit, writer: presence?.writers[route.key],
+                                 photos: GisaPhotoSections.allPhotos(of: detail),
+                                 figure: { id in try await Self.figure(id, api: api) },
+                                 typed: { presence?.typed() }, save: { await save() })
+                    .modifier(prompts)
+            }
+        }
+    }
+
+    /// A photo's bytes for a memo figure, fetched with the app's sign-in.
+    private static func figure(_ id: Int, api: APIClient) async throws -> (Data, String) {
+        let link = try await SubmissionsAPI(api: api).attachmentLink(id)
+        guard let url = URL(string: link.downloadUrl) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        return (data, response.mimeType ?? "image/jpeg")
     }
 
     /// The cracks' context for the Pavement / Ground Status section, and the
@@ -196,6 +241,7 @@ struct SubmissionDetailView: View {
             if let fetched = try? await submissions.lookups() { lookups = fetched }
             detail = loaded
             editor = GisaEditor(detail: loaded)
+            if presence == nil { presence = FormPresenceSession(api: model.api, submissionId: submissionId) }
             cracks = loaded.cracks ?? []
             error = nil
         } catch {
@@ -203,7 +249,9 @@ struct SubmissionDetailView: View {
         }
     }
 
-    /// Checks and sends the draft as the Expo editor's Save does, then reloads.
+    /// Checks the draft as the Expo editor's Save does and sends what changed,
+    /// then reloads. A save refused because someone else changed the same
+    /// fields catches up with theirs and lets this person choose.
     private func save() async {
         guard var current = editor else { return }
         let prepared = current.prepareSave(lookups: lookups)
@@ -213,18 +261,58 @@ struct SubmissionDetailView: View {
             if GisaStep.header.owns(current.errors.keys) { step = .header }
             alert = problem
         case .success(let request):
+            if current.pending != nil {
+                choosingConflicts = true
+                return
+            }
+            guard !request.isEmpty else {
+                alert = .init(title: "Saved", message: "There are no changes to save.")
+                return
+            }
             saving = true
             defer { saving = false }
             do {
-                try await SubmissionsAPI(api: model.api).saveGisa(submissionId, form: request.body,
-                                                                  incidentTypes: request.incidentTypes,
-                                                                  actions: request.actions)
+                try await SubmissionsAPI(api: model.api).saveGisa(submissionId, request)
+                resaves = 0
                 await load()
                 alert = .init(title: "Saved", message: "Draft saved.")
+            } catch FormRefusal.conflicts(let savedBy) {
+                saving = false
+                await catchUp(savedBy: savedBy, refused: true)
+            } catch FormRefusal.locked(let message) {
+                alert = .init(title: "Not saved", message: message)
             } catch {
                 alert = .init(title: "Save failed", message: model.handle(error))
             }
         }
+    }
+
+    /// Brings in what others saved where this person has not typed. Fields both
+    /// changed wait for a choice; after a refused save with none left, it saves again.
+    private func catchUp(savedBy: String?, refused: Bool) async {
+        guard let fresh = try? await SubmissionsAPI(api: model.api).detail(submissionId), var current = editor else {
+            if refused { alert = .init(title: "Save failed", message: "The form changed and could not be reloaded. Try again.") }
+            return
+        }
+        let taken = current.catchUp(with: fresh, savedBy: savedBy)
+        editor = current
+        detail = fresh
+        if !taken.isEmpty {
+            let names = taken.prefix(4).joined(separator: ", ") + (taken.count > 4 ? " and \(taken.count - 4) more" : "")
+            mergedNotice = "\(savedBy ?? "Someone") saved \(names). Their changes are shown here."
+        }
+        if current.pending != nil {
+            if refused { choosingConflicts = true }
+        } else if refused, resaves < 2 {
+            resaves += 1
+            await save()
+        }
+    }
+
+    /// The memos this person is writing (changed since opening or catching up): locked for everyone else.
+    private var writingMemos: [String] {
+        guard let editor else { return [] }
+        return MemoContent.keys.filter { editor.form["\($0)_html"] != editor.base.form["\($0)_html"] }
     }
 
     /// Files a photo under its form section. Only the attachment list is

@@ -1,0 +1,21 @@
+/* The web form's styles (theme colours, the memo surface, figures), set for a phone screen. */
+@import "../index.css";
+
+body {
+  background: var(--panel);
+  -webkit-text-size-adjust: 100%;
+}
+
+.eris-memo-ios {
+  padding: 14px 16px 120px;
+}
+
+.eris-memo-ios .ProseMirror {
+  min-height: 60vh;
+  font-size: 17px;
+}
+
+/* Wide tables scroll sideways instead of squeezing their columns. */
+.eris-memo-ios .tableWrapper {
+  overflow-x: auto;
+}

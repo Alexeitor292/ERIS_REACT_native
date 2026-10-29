@@ -115,11 +115,15 @@ final class GisaEditorTests: XCTestCase {
         editor.set("material_rock", "NO")
         editor.set("est_rock_pct", "25")
         editor.set("failure_washout", "YES")
+        editor.set("settlement_in", "3")
         guard case .success(let request) = editor.prepareSave(lookups: .empty) else { return XCTFail("should save") }
-        XCTAssertEqual(request.body["est_rock_pct"], .null)
-        XCTAssertEqual(request.body["post_mile"], .string("12.30"))
-        XCTAssertEqual(request.incidentTypes, ["WASHOUT", "HEAVING"])
-        XCTAssertEqual(editor.form["est_rock_pct"], "")
+        // Only what changed is sent, each with the saved value it started from.
+        XCTAssertEqual(request.body, ["failure_washout": .bool(true), "settlement_in": .number(3),
+                                      "base": .object(["failure_washout": .null, "settlement_in": .null])])
+        XCTAssertEqual(request.incidentTypes, ["items": .array([.string("WASHOUT"), .string("HEAVING")]),
+                                               "base": .array([.string("HEAVING")])])
+        XCTAssertNil(request.actions, "actions were not touched")
+        XCTAssertEqual(editor.form["est_rock_pct"], "", "the rock share goes with the rock")
     }
 
     func testAnActionInTheWrongGroupStopsTheSave() throws {
@@ -332,7 +336,8 @@ final class GisaWaterTests: XCTestCase {
         guard case .success(let request) = { var e = editor; e.set("district", "04"); e.set("county", "ALA"); e.set("route", "880");
             e.set("post_mile", "1"); e.set("latitude", "37.7"); e.set("longitude", "-122.2"); return e.prepareSave(lookups: .empty) }()
         else { return XCTFail("should save") }
-        XCTAssertEqual(request.body["impact_impacted_adj_utilities"], .null, "a cleared answer is sent as no answer")
+        XCTAssertEqual(request.body?["impact_maybe_adj_utilities"], .null, "a cleared answer is sent as no answer")
+        XCTAssertNil(request.body?["impact_impacted_adj_utilities"], "ticked and unticked again: unchanged")
     }
 }
 
