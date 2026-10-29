@@ -212,7 +212,7 @@ public enum FormRefusal: Error, Equatable, Sendable {
 extension GisaEditor {
     /// The form as this person opened it (or last caught up with), and the saved
     /// values a save is checked against.
-    public struct Base: Equatable, Sendable {
+    public struct Base: Codable, Equatable, Sendable {
         public var form: GisaForm
         public var listed: [String]
         public var gisa: [String: JSONValue]

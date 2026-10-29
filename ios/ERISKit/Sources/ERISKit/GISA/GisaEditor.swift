@@ -7,7 +7,7 @@ public struct GisaEditor: Equatable, Sendable {
     public var form: GisaForm
     /// Kept apart from the form, as in the Expo editor, so a contact just added
     /// (still empty, so not yet stored) keeps its place and identity.
-    public private(set) var contacts: [DistrictContact]
+    public internal(set) var contacts: [DistrictContact]
     public var listedIncidentTypes: [String]
     public var actions: SubmissionDetail.Actions
     /// Field key -> message.

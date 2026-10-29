@@ -52,7 +52,7 @@ public struct GisaFieldError: Error, Equatable, Sendable {
 /// The GISA form as the editor holds it: every field as text, exactly as in
 /// mobile/app/(tabs)/submissions/[id].tsx (`FormState`). Values are converted
 /// only when loading from and saving to the server, by the field table below.
-public struct GisaForm: Equatable, Sendable {
+public struct GisaForm: Codable, Equatable, Sendable {
     public private(set) var values: [String: String]
 
     public subscript(key: String) -> String {
