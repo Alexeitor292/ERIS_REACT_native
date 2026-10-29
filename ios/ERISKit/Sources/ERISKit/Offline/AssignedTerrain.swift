@@ -31,7 +31,9 @@ public struct AssignedTerrain: Sendable {
     /// The kept terrain of a form: its folder of unpacked files, if any.
     public static func folder(_ submissionId: Int) -> String { "terrain/\(submissionId)" }
 
-    public func keep(_ submissionId: Int) async -> Outcome {
+    /// Keeps the form's terrain. `byHand` marks one asked for on a form not
+    /// assigned, which `prune` leaves until sign-out.
+    public func keep(_ submissionId: Int, byHand: Bool = false) async -> Outcome {
         let path = "/submissions/\(submissionId)/gisa/offline-scene-package"
         let descriptor: OfflineScene.SceneAreaDescriptor
         do {
@@ -72,6 +74,7 @@ public struct AssignedTerrain: Sendable {
             let folder = Self.folder(submissionId)
             store.removeFile(folder)
             for (name, bytes) in extracted.files { store.writeFile(Data(bytes), to: "\(folder)/\(name)") }
+            if byHand { store.writeFile(Data("1".utf8), to: "\(folder)/.by-hand") }
             store.writeFile(Data(grant.sha256.lowercased().utf8), to: "\(folder)/.sha256")
             return .downloaded
         } catch let error as APIError where error.isUnreachable {
@@ -80,6 +83,16 @@ public struct AssignedTerrain: Sendable {
             return .unavailable("The terrain package could not be opened: \(error.message)")
         } catch {
             return .unreachable
+        }
+    }
+
+    /// Removes the terrain that came with work no longer assigned; `forms` are
+    /// those still needed (assigned, or with changes waiting).
+    public func prune(keeping forms: Set<Int>) {
+        for name in store.folders(in: "terrain") {
+            guard let id = Int(name), !forms.contains(id) else { continue }
+            if store.readFile("\(Self.folder(id))/.by-hand") != nil { continue }
+            store.removeFile(Self.folder(id))
         }
     }
 

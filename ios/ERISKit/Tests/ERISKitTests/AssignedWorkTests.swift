@@ -97,6 +97,17 @@ final class AssignedWorkTests: XCTestCase {
         XCTAssertNil(store.file(70))
     }
 
+    func testTheFormsPhotosStayWhileItsChangesWaitAfterTheWorkIsReassigned() async throws {
+        _ = await work.prepare(await queue().assessments)
+        var editor = GisaEditor(detail: try await SubmissionsAPI(api: api).detail(501, keepingIn: store).value)
+        editor.set("ea", "04-1A234")
+        store.keepEdits(editor.edits(501, state: .waiting))
+        server.assigned = false
+        _ = await work.prepare(await queue().assessments)
+        XCTAssertNotNil(store.file(801), "the form's photo, still needed to finish and send it")
+        XCTAssertNil(store.file(70), "the incident's photo goes")
+    }
+
     func testOfflineNothingKeptIsLost() async {
         _ = await work.prepare(await queue().assessments)
         server.reachable = false

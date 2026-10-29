@@ -386,7 +386,7 @@ struct SiteTerrainSection: View {
     private func get(_ id: Int) async {
         asking = true
         defer { asking = false }
-        switch await AssignedTerrain(api: model.api, store: offline.store).keep(id) {
+        switch await AssignedTerrain(api: model.api, store: offline.store).keep(id, byHand: true) {
         case .downloaded, .kept: note = nil
         case .preparing: note = "ERIS is preparing it; it arrives on its own when ready."
         case .unavailable(let why): note = why

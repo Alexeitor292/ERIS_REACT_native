@@ -80,4 +80,17 @@ final class AssignedTerrainTests: XCTestCase {
         XCTAssertEqual(outcome, .preparing)
         XCTAssertEqual(server.generated, 1)
     }
+
+    func testTerrainOfWorkNoLongerNeededGoesButOneAskedForByHandStays() async {
+        let bytes = Data(server.package)
+        _ = await terrain { _ in bytes }.keep(501)
+        terrain { _ in bytes }.prune(keeping: [501])
+        XCTAssertNotNil(store.terrainFolder(501), "still assigned")
+        terrain { _ in bytes }.prune(keeping: [])
+        XCTAssertNil(store.terrainFolder(501), "no longer assigned")
+
+        _ = await terrain { _ in bytes }.keep(501, byHand: true)
+        terrain { _ in bytes }.prune(keeping: [])
+        XCTAssertNotNil(store.terrainFolder(501), "asked for on a form not assigned")
+    }
 }

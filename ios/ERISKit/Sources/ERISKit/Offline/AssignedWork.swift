@@ -66,7 +66,7 @@ public struct AssignedWork: Sendable {
         var summary = Summary()
         let submissions = SubmissionsAPI(api: api), incidents = IncidentsAPI(api: api)
         _ = try? await submissions.lookups(keepingIn: store)
-        var wanted = Set<Int>()
+        var wanted = Set<Int>(), assignedForms = Set<Int>()
         for assessment in Self.assigned(assessments, to: me) {
             summary.assessments += 1
             _ = try? await api.kept("/assessments/\(assessment.id)", store: store, name: "assessments/\(assessment.id)",
@@ -88,6 +88,7 @@ public struct AssignedWork: Sendable {
                 guard let form = try? await submissions.detail(formId, keepingIn: store) else { continue }
                 if form.keptAt != nil { summary.unreachable = true; continue }
                 summary.forms += 1
+                assignedForms.insert(formId)
                 _ = try? await api.kept("/submissions/\(formId)/site-history", preservingKeys: true, store: store,
                                         name: "forms/\(formId)-site-history", as: SiteHistory.self)
                 // The site in 3D, for the measurements and cross-sections offline.
@@ -104,9 +105,16 @@ public struct AssignedWork: Sendable {
                 }
             }
         }
-        // Photos of work no longer assigned go; those of forms with changes waiting stay.
+        // Photos and terrain of work no longer assigned go; those of forms with changes waiting stay.
         if !summary.unreachable {
+            let waiting = store.waiting.forms
+            for formId in waiting {
+                guard let data = store.form(formId)?.data,
+                      let form = try? api.decode(SubmissionDetail.self, from: data, preservingKeys: true) else { continue }
+                wanted.formUnion(GisaPhotoSections.allPhotos(of: form).map(\.id))
+            }
             for id in store.keptFileIds().subtracting(wanted) { store.removeFile(id) }
+            AssignedTerrain(api: api, store: store, download: download).prune(keeping: assignedForms.union(waiting))
         }
         return summary
     }
