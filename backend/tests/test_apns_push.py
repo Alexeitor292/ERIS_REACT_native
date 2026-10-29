@@ -76,7 +76,9 @@ def test_a_push_is_an_alert_to_the_app_topic(apns_on, monkeypatch):
     assert sandbox.url.startswith("https://api.sandbox.push.apple.com/")
     assert production.headers["apns-topic"] == TOPIC and production.headers["apns-push-type"] == "alert"
     assert production.headers["authorization"].startswith("bearer ")
-    assert production.body == {"aps": {"alert": {"title": "Assigned", "body": "Incident 12"}, "sound": "default"},
+    # content-available also wakes the app in the background to fetch the new work.
+    assert production.body == {"aps": {"alert": {"title": "Assigned", "body": "Incident 12"}, "sound": "default",
+                                       "content-available": 1},
                                "link": "/incidents/12", "id": 99}
 
 
