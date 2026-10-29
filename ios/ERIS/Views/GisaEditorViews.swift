@@ -796,6 +796,9 @@ struct GisaHeaderSections: View {
     @State private var locating = false
     @State private var locationNote: String?
     @State private var editingAreas = false
+    @State private var viewingPhotos = false
+    /// The form's photos (and its number), as every section reads them.
+    @Environment(\.gisaPhotos) private var sitePhotos
     private let location = LocationProvider()
     @Binding var editor: GisaEditor
     let canEdit: Bool
@@ -888,6 +891,13 @@ struct GisaHeaderSections: View {
                 Text("Site areas: \(SiteAreas.summary(SiteAreas.areas(fromText: form["geometry_json"])))")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Button("Site Photo Map") { viewingPhotos = true }
+                .accessibilityIdentifier("site-photo-map")
+                .disabled(sitePhotos.detail == nil)
+                .fullScreenCover(isPresented: $viewingPhotos) {
+                    SitePhotoMap(submissionId: sitePhotos.detail?.submission.id ?? 0, latitude: Double(form["latitude"]),
+                                 longitude: Double(form["longitude"]), areas: SiteAreas.areas(fromText: form["geometry_json"]))
+                }
             Button(canEdit ? "Draw Site Areas on Map" : "View Site Areas on Map") { editingAreas = true }
                 .accessibilityIdentifier("site-areas-map")
                 // Presented from the button: from a List section it does not open.

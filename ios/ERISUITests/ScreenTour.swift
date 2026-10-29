@@ -845,6 +845,19 @@ final class ScreenTour: XCTestCase {
         dismissAlert("Saved")
     }
 
+    func testTheSitePhotoMapShowsWhereEachPhotoWasTaken() {
+        launch()
+        openDemoForm(step: "Header")
+        tap(reveal(app.buttons["site-photo-map"]))
+        let status = app.staticTexts["photo-map-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 20))
+        let placed = NSPredicate(format: "label BEGINSWITH '1 photo on the map'")
+        expectation(for: placed, evaluatedWith: status)
+        waitForExpectations(timeout: 20)
+        snap("site-photo-map")
+        tap(app.navigationBars["Site Photo Map"].buttons["Done"])
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         XCTAssertEqual(tabNames(), ["My Work", "Forms", "Notifications", "Account"])

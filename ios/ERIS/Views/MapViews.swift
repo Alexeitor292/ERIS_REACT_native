@@ -305,3 +305,253 @@ final class SiteAreaEditorModel: ObservableObject {
         return rings.isEmpty ? nil : rings
     }
 }
+
+// MARK: - Site Photo Map
+
+/// Where each photo of the form was taken and which way the camera faced,
+/// around the site and its areas: tap one to see it, move it on the map to
+/// correct where it was taken, or correct its direction. Corrections are kept
+/// on record beside the original values, as on the web.
+struct SitePhotoMap: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var maps: MapSetup
+    @Environment(\.dismiss) private var dismiss
+    let submissionId: Int
+    let latitude: Double?
+    let longitude: Double?
+    let areas: [SiteAreas.Area]
+    @StateObject private var photos = SitePhotoMapModel()
+    @State private var correcting: MappedPhoto?
+    @State private var problem: String?
+
+    var body: some View {
+        NavigationStack {
+            MapViewReader { proxy in
+                MapView(map: photos.map, graphicsOverlays: [photos.contextOverlay, photos.photosOverlay])
+                    .geometryEditor(photos.editor)
+                    .onSingleTapGesture { screenPoint, _ in
+                        Task { await photos.select(at: screenPoint, proxy: proxy) }
+                    }
+                    .task {
+                        await photos.start(submissionId: submissionId, api: model.api, latitude: latitude, longitude: longitude,
+                                           areas: areas, offline: { await maps.offlineMap() })
+                    }
+                    .overlay(alignment: .top) {
+                        Text(photos.status)
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(.thinMaterial, in: Capsule())
+                            .padding(.top, 8)
+                            .accessibilityIdentifier("photo-map-status")
+                    }
+                    .overlay(alignment: .bottom) { card.padding() }
+            }
+            .ignoresSafeArea(edges: .bottom)
+            .navigationTitle("Site Photo Map")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .sheet(item: $correcting) { photo in
+                PhotoCorrectionForm(submissionId: submissionId, photo: photo) {
+                    Task { await photos.reload(api: model.api) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var card: some View {
+        if let photo = photos.selected {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    AttachmentThumbnail(attachment: AttachmentRef(id: photo.attachmentId, fileName: photo.fileName,
+                                                                  mimeType: photo.mimeType, sectionKey: photo.sectionKey),
+                                        size: CGSize(width: 96, height: 72))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(photo.fileName ?? "Photo").font(.subheadline.bold()).lineLimit(1)
+                        if let taken = ServerDate.display(photo.capturedAt) { Text(taken).font(.caption) }
+                        Text(photo.directionText ?? "Direction not recorded").font(.caption)
+                        if !photo.sourceText.isEmpty { Text(photo.sourceText).font(.caption2).foregroundStyle(.secondary) }
+                    }
+                    Spacer()
+                    Button { photos.deselect() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .accessibilityLabel("Close")
+                }
+                if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
+                if photo.canEditCorrection == true {
+                    HStack {
+                        if photos.moving {
+                            Button("Cancel") { photos.cancelMove() }
+                            Spacer()
+                            Button("Place Here") { Task { await place(photo) } }.bold()
+                        } else {
+                            Button("Move on Map") { photos.startMove(photo) }
+                            Spacer()
+                            Button("Correct…") { correcting = photo }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(12)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    /// Saves the moved location, keeping any direction correction already made.
+    private func place(_ photo: MappedPhoto) async {
+        guard let point = photos.finishMove() else { return }
+        do {
+            try await SubmissionsAPI(api: model.api).correctPhoto(
+                submissionId, attachmentId: photo.attachmentId,
+                PhotoCorrection(locationOverride: .init(latitude: point.y, longitude: point.x),
+                                headingOverrideDeg: photo.correction?.headingOverridden == true ? photo.correction?.headingOverrideDeg : nil))
+            problem = nil
+            await photos.reload(api: model.api)
+        } catch {
+            problem = model.handle(error)
+        }
+    }
+}
+
+@MainActor
+final class SitePhotoMapModel: ObservableObject {
+    @Published private(set) var map = Map(basemapStyle: .arcGISImagery)
+    let editor = GeometryEditor()
+    let contextOverlay = GraphicsOverlay()
+    let photosOverlay = GraphicsOverlay()
+    @Published private(set) var photoMap: PhotoMap?
+    @Published private(set) var selected: MappedPhoto?
+    @Published private(set) var moving = false
+    @Published private(set) var problem: String?
+    private var submissionId = 0
+
+    var status: String {
+        if let problem { return problem }
+        guard let photoMap else { return "Loading photos…" }
+        let placed = photoMap.photos.filter { $0.latitude != nil && $0.longitude != nil }.count
+        let unplaced = photoMap.photos.count - placed
+        return "\(placed) \(placed == 1 ? "photo" : "photos") on the map\(unplaced > 0 ? " · \(unplaced) without a location" : "")"
+    }
+
+    func start(submissionId: Int, api: APIClient, latitude: Double?, longitude: Double?, areas: [SiteAreas.Area],
+               offline: () async -> Map?) async {
+        self.submissionId = submissionId
+        let red = UIColor(red: 0.84, green: 0.15, blue: 0.16, alpha: 1)
+        contextOverlay.addGraphics(areas.compactMap(SiteAreaEditorModel.polygon).map {
+            Graphic(geometry: $0, symbol: SimpleFillSymbol(style: .solid, color: red.withAlphaComponent(0.1),
+                                                           outline: SimpleLineSymbol(style: .dash, color: red, width: 2)))
+        })
+        var site: Point?
+        if let latitude, let longitude {
+            let point = Point(x: longitude, y: latitude, spatialReference: .wgs84)
+            let marker = SimpleMarkerSymbol(style: .diamond, color: red, size: 16)
+            marker.outline = SimpleLineSymbol(style: .solid, color: .white, width: 2)
+            contextOverlay.addGraphic(Graphic(geometry: point, symbol: marker))
+            site = point
+        }
+        await reload(api: api)
+        let placed = (photoMap?.photos ?? []).compactMap(Self.point)
+        let everything: [Geometry] = placed + (site.map { [$0] } ?? [])
+        let start: Viewpoint? = everything.count > 1
+            ? GeometryEngine.combineExtents(of: everything).map { Viewpoint(boundingGeometry: GeometryEngine.buffer(around: $0, distance: 0.0004) ?? $0) }
+            : everything.first.map { Viewpoint(center: $0 as! Point, scale: 3_000) }
+        map.initialViewpoint = start
+        do {
+            try await map.load()
+        } catch {
+            let fallback = await offline() ?? Map(spatialReference: .webMercator)
+            fallback.initialViewpoint = start
+            map = fallback
+        }
+    }
+
+    func reload(api: APIClient) async {
+        do {
+            photoMap = try await SubmissionsAPI(api: api).photoMap(submissionId)
+            problem = nil
+        } catch let error as APIError where error.isUnreachable {
+            problem = "ERIS can't be reached; the photo map needs a connection."
+        } catch {
+            problem = "The photo map could not be loaded."
+        }
+        if let id = selected?.attachmentId { selected = photoMap?.photos.first { $0.attachmentId == id } }
+        redraw()
+    }
+
+    func select(at screenPoint: CGPoint, proxy: MapViewProxy) async {
+        guard !moving, let result = try? await proxy.identify(on: photosOverlay, screenPoint: screenPoint, tolerance: 14),
+              let id = result.graphics.first?.attributes["attachment_id"] as? Int else { return }
+        selected = photoMap?.photos.first { $0.attachmentId == id }
+        redraw()
+    }
+
+    func deselect() {
+        cancelMove()
+        selected = nil
+        redraw()
+    }
+
+    func startMove(_ photo: MappedPhoto) {
+        guard let point = Self.point(photo) else { return }
+        moving = true
+        editor.start(withInitial: point)
+    }
+
+    func cancelMove() {
+        guard moving else { return }
+        _ = editor.stop()
+        moving = false
+    }
+
+    /// Where the photo was moved to, in WGS84.
+    func finishMove() -> Point? {
+        let geometry = editor.stop()
+        moving = false
+        return geometry.flatMap { GeometryEngine.project($0, into: .wgs84) as? Point }
+    }
+
+    private func redraw() {
+        photosOverlay.removeAllGraphics()
+        for photo in photoMap?.photos ?? [] {
+            guard let point = Self.point(photo) else { continue }
+            let chosen = photo.attachmentId == selected?.attachmentId
+            let symbol: Symbol
+            if let heading = photo.cameraHeadingDeg {
+                let cone = PictureMarkerSymbol(image: Self.cone(chosen: chosen))
+                cone.width = chosen ? 46 : 38
+                cone.height = chosen ? 46 : 38
+                cone.angle = Float(heading)
+                cone.angleAlignment = .map
+                symbol = cone
+            } else {
+                symbol = SimpleMarkerSymbol(style: .circle, color: chosen ? .systemOrange : .systemBlue, size: chosen ? 16 : 12)
+            }
+            photosOverlay.addGraphic(Graphic(geometry: point, attributes: ["attachment_id": photo.attachmentId], symbol: symbol))
+        }
+    }
+
+    static func point(_ photo: MappedPhoto) -> Point? {
+        guard let latitude = photo.latitude, let longitude = photo.longitude else { return nil }
+        return Point(x: longitude, y: latitude, spatialReference: .wgs84)
+    }
+
+    /// A camera's field of view, pointing up (north), drawn once per state.
+    static func cone(chosen: Bool) -> UIImage {
+        let size = CGSize(width: 64, height: 64)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            let center = CGPoint(x: 32, y: 32)
+            let wedge = UIBezierPath()
+            wedge.move(to: center)
+            wedge.addArc(withCenter: center, radius: 30, startAngle: -.pi / 2 - 0.45, endAngle: -.pi / 2 + 0.45, clockwise: true)
+            wedge.close()
+            (chosen ? UIColor.systemOrange : UIColor.systemBlue).withAlphaComponent(0.45).setFill()
+            wedge.fill()
+            let dot = UIBezierPath(ovalIn: CGRect(x: 26, y: 26, width: 12, height: 12))
+            (chosen ? UIColor.systemOrange : UIColor.systemBlue).setFill()
+            dot.fill()
+            UIColor.white.setStroke()
+            dot.lineWidth = 2
+            dot.stroke()
+        }
+    }
+}
