@@ -8,6 +8,8 @@ pymysql
 python-dotenv
 minio
 pydantic-settings
+# Time zone data for zoneinfo: the slim image may have none (app/timezones.py).
+tzdata
 python-jose[cryptography]
 # Entra certificate credential: PS256 assertions, not_valid_after_utc.
 cryptography>=42

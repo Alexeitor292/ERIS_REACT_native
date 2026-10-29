@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..timezones import server_naive
+
 
 class LoginRequest(BaseModel):
     email: str
@@ -192,6 +194,12 @@ class IncidentCreate(BaseModel):
     route: str = Field(..., min_length=1, max_length=64)
     post_mile: str = Field(..., min_length=1, max_length=64)
     road_inventory_context: RoadInventoryIncidentContext | None = None
+
+    @field_validator("first_observed_at", "first_occurred_at")
+    @classmethod
+    def _server_clock(cls, value: datetime | None) -> datetime | None:
+        # Stored without a zone, so a zoned time becomes the server's (Pacific) clock.
+        return server_naive(value)
 
 
 class IncidentAssignRequest(BaseModel):
