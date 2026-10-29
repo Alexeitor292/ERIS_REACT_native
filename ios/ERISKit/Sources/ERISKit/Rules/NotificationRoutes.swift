@@ -17,6 +17,8 @@ public enum NotificationRoutes {
         if kind == "INCIDENT_COORDINATOR_REVIEW" { return .trackIncidents }
         guard let link, !link.isEmpty else { return nil }
         let path = String(link.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+        // Maintenance reports wait in My Work; earlier notices still carry the former page's link.
+        if path == "/my-work", let report = queryNumber(in: link, named: "maintenance") { return .maintenance(incident: report) }
         if path == "/maintenance-work" { return .maintenance(incident: queryNumber(in: link, named: "incident")) }
         if let id = numberAfter("/incidents/", in: path) { return .incident(id) }
         if let id = numberAfter("/submissions/", in: path) { return .submission(id) }

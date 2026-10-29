@@ -170,7 +170,7 @@ def notify(db, workflow, message, *, entered=False):
             recipients |= users_for(definition, step["duty_ids"])
     add(db, user_ids=recipients, kind="MAINTENANCE_WORKFLOW", title=message,
          body=f"District {int(workflow['district'])} · Incident #{workflow['incident_id']}",
-         link=f"/maintenance-work?incident={workflow['incident_id']}", incident_id=workflow["incident_id"])
+         link=f"/my-work?maintenance={workflow['incident_id']}", incident_id=workflow["incident_id"])
 
 
 def start(db, incident_id, district, actor, workflow):

@@ -196,6 +196,8 @@ def test_request_information_and_resubmission_restart_reviews(db, plan):
     assert not result["state"]["waiting_reporter"]
     assert db.execute(text("SELECT description FROM incidents WHERE id = 10")).scalar() == "Added road condition"
     assert any(2 in recipients for recipients, _ in db.info["notices"])
+    # Every notice opens the report in My Work, where maintenance reports wait.
+    assert {notice["link"] for _, notice in db.info["notices"]} == {"/my-work?maintenance=10"}
 
 
 def test_stale_action_and_completed_run_refuse_writes(db, plan, monkeypatch):

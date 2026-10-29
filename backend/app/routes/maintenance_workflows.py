@@ -224,7 +224,7 @@ def act(incident_id: int, payload: Action, db: Session = Depends(get_db), user=D
         if payload.action == "REQUEST_INFORMATION":
             from ..services.notification_feed import add
             add(db, [incident["reporter_user_id"]], kind="MAINTENANCE_WORKFLOW", title="More report information needed",
-                body=notes, link=f"/maintenance-work?incident={incident_id}", incident_id=incident_id)
+                body=notes, link=f"/my-work?maintenance={incident_id}", incident_id=incident_id)
         db.commit()
         return detail(incident_id, db, user)
     except Exception:

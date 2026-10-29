@@ -78,8 +78,10 @@ final class NotificationRoutesTests: XCTestCase {
         XCTAssertEqual(NotificationRoutes.route(link: "/submissions/7", kind: "SHARE_RECEIVED"), .submission(7))
         XCTAssertEqual(NotificationRoutes.route(link: "/my-work?assessment=9", kind: "ASSESSMENT_STAFF_ASSIGNMENT"), .assessments)
         XCTAssertEqual(NotificationRoutes.route(link: "/assessments/9", kind: "ASSESSMENT_APPROVED_AUTHOR"), .assessments)
-        XCTAssertEqual(NotificationRoutes.route(link: "/maintenance-work?incident=42", kind: "MAINTENANCE_WORKFLOW"),
+        XCTAssertEqual(NotificationRoutes.route(link: "/my-work?maintenance=42", kind: "MAINTENANCE_WORKFLOW"),
                        .maintenance(incident: 42))
+        XCTAssertEqual(NotificationRoutes.route(link: "/maintenance-work?incident=42", kind: "MAINTENANCE_WORKFLOW"),
+                       .maintenance(incident: 42), "an earlier notice")
     }
 
     func testStepsDoneOnTheWebStayInTheList() {
