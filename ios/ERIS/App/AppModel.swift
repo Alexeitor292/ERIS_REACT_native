@@ -76,13 +76,16 @@ final class AppModel: ObservableObject {
         phase = .signedOut(message: "You have signed out of ERIS.")
     }
 
-    /// Any screen that sees `.unauthorized` sends the person back to sign-in.
     /// The signed-in person's roles; none before sign-in.
-    var roles: [String] {
-        if case .signedIn(let me) = phase { return me.roles }
-        return []
+    var roles: [String] { me?.roles ?? [] }
+
+    /// The signed-in person, if any.
+    var me: Me? {
+        if case .signedIn(let me) = phase { return me }
+        return nil
     }
 
+    /// Any screen that sees `.unauthorized` sends the person back to sign-in.
     func handle(_ error: Error) -> String {
         if let error = error as? APIError {
             switch error {

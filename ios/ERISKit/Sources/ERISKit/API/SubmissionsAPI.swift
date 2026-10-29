@@ -42,18 +42,24 @@ public struct AttachmentRef: Decodable, Equatable, Identifiable, Sendable {
     public let fileName: String?
     public let mimeType: String?
     public let sectionKey: String?
+    public let fileSizeBytes: Int?
+    public let uploadedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind
         case fileName = "file_name", mimeType = "mime_type", sectionKey = "section_key"
+        case fileSizeBytes = "file_size_bytes", uploadedAt = "uploaded_at"
     }
 
-    public init(id: Int, kind: String? = nil, fileName: String? = nil, mimeType: String? = nil, sectionKey: String? = nil) {
+    public init(id: Int, kind: String? = nil, fileName: String? = nil, mimeType: String? = nil, sectionKey: String? = nil,
+                fileSizeBytes: Int? = nil, uploadedAt: String? = nil) {
         self.id = id
         self.kind = kind
         self.fileName = fileName
         self.mimeType = mimeType
         self.sectionKey = sectionKey
+        self.fileSizeBytes = fileSizeBytes
+        self.uploadedAt = uploadedAt
     }
 }
 
@@ -117,6 +123,32 @@ public struct SubmissionDetail: Decodable, Equatable, Sendable {
         }
     }
 
+    /// The incident and assessment this form belongs to, if any.
+    public struct Context: Decodable, Equatable, Sendable {
+        public let incidentId: Int
+        public let incidentTitle: String?
+        public let assessmentId: Int?
+        public let assessmentState: String?
+        public let assessmentRoutingPath: String?
+        public let canReview: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case incidentId = "incident_id", incidentTitle = "incident_title", assessmentId = "assessment_id"
+            case assessmentState = "assessment_state", assessmentRoutingPath = "assessment_routing_path"
+            case canReview = "can_review"
+        }
+
+        public init(incidentId: Int, incidentTitle: String? = nil, assessmentId: Int? = nil, assessmentState: String? = nil,
+                    assessmentRoutingPath: String? = nil, canReview: Bool? = nil) {
+            self.incidentId = incidentId
+            self.incidentTitle = incidentTitle
+            self.assessmentId = assessmentId
+            self.assessmentState = assessmentState
+            self.assessmentRoutingPath = assessmentRoutingPath
+            self.canReview = canReview
+        }
+    }
+
     public let submission: Header
     public let gisa: [String: JSONValue]?
     public let incidentTypes: [String]?
@@ -126,9 +158,10 @@ public struct SubmissionDetail: Decodable, Equatable, Sendable {
     public let photos: [AttachmentRef]?
     public let attachments: [AttachmentRef]?
     public let workflowEvents: [WorkflowEvent]?
+    public let context: Context?
 
     enum CodingKeys: String, CodingKey {
-        case submission, gisa, photos, attachments, actions, cracks
+        case submission, gisa, photos, attachments, actions, cracks, context
         case incidentTypes = "incident_types", workflowEvents = "workflow_events"
     }
 

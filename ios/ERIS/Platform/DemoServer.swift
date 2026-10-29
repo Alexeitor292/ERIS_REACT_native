@@ -6,7 +6,9 @@ import UIKit
 /// Debug builds only: run the app against built-in sample data, with no
 /// sign-in and no network, to check screens in the simulator. Start it with the
 /// launch argument `-ERISDemo YES` (add `-ERISDemoRoles OFFICE_CHIEF,STAFF` to
-/// try other roles; the default is ADMIN). This file is compiled out of Release
+/// try other roles; the default is ADMIN). The demo form belongs to Assessment
+/// #5; `-ERISDemoLegacyForm YES` makes it a form of its own, sent for review
+/// and decided on itself. This file is compiled out of Release
 /// builds, so the Intune build cannot enter demo mode.
 enum DemoServer {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "ERISDemo") }
@@ -34,7 +36,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private var submissionActions: [String: Any] = ["immediate": [], "follow_up": []]
     private var incidentTypes: [String] = ["HEAVING"]
     /// Photos filed on the demo form: attachment record, image bytes, capture data.
-    private var photos: [(record: [String: Any], data: Data, capture: [String: Any])] = [DemoData.samplePhoto]
+    private var photos: [(record: [String: Any], data: Data, capture: [String: Any])] = [DemoData.samplePhoto, DemoData.sampleDocument]
     private var corrections: [Int: [String: Any]] = [:]
     private var nextAttachmentId = 900
     private var cracks: [[String: Any]] = [DemoData.sampleCrack]
@@ -46,10 +48,17 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     /// Project ID just before this person's first save arrives.
     private var colleague = UserDefaults.standard.bool(forKey: "ERISDemoColleague")
     private var colleagueSaved = false
+    /// The demo form's place in review, and its timeline.
+    private var status = "DRAFT"
+    private var reviewComment: String?
+    private var formEvents: [[String: Any]] = []
 
     init(roles: [String]) {
         self.roles = roles
         assessments = DemoData.assessments
+        if UserDefaults.standard.bool(forKey: "ERISDemoLegacyForm"), let five = assessments.firstIndex(where: { $0["id"] as? Int == 5 }) {
+            assessments[five]["submission_id"] = NSNull()
+        }
         gisa["revision"] = revision
     }
 
@@ -61,7 +70,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         let (status, object) = lock.locked {
             if request.httpMethod == "POST", path == "/submissions/501/attachments" {
-                return upload(request, sectionKey: query.first { $0.name == "section_key" }?.value)
+                return upload(request, sectionKey: query.first { $0.name == "section_key" }?.value,
+                              kind: query.first { $0.name == "kind" }?.value)
             }
             return route(request.httpMethod ?? "GET", path, query, body)
         }
@@ -75,6 +85,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         let parts = path.split(separator: "/").map(String.init)
         // Split in two: as one switch it took the type checker too long for CI.
         if let answer = formPhotoAndCrackRoute(method, parts, body) { return answer }
+        if let answer = formWorkflowRoute(method, parts, body) { return answer }
         switch (method, parts) {
         case ("GET", ["auth", "me"]):
             return (200, DemoData.me(roles: roles))
@@ -113,6 +124,11 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             saved(by: nil)
             return (200, ["items": incidentTypes])
         case ("PUT", ["submissions", "501", "gisa", "actions"]):
+            let was = submissionActions
+            if let baseImmediate = body["base_immediate"] as? [String], let baseFollowUp = body["base_follow_up"] as? [String],
+               Set(baseImmediate) != Set(was["immediate"] as? [String] ?? []) || Set(baseFollowUp) != Set(was["follow_up"] as? [String] ?? []) {
+                return refused([["field": "actions", "theirs": was]])
+            }
             submissionActions = ["immediate": body["immediate"] ?? [], "follow_up": body["follow_up"] ?? []]
             saved(by: nil)
             return (200, submissionActions)
@@ -145,6 +161,68 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     }
 
     private var notFound: (Int, Any) { (404, ["detail": "Not in the demo data"]) }
+
+    /// The assessment the demo form belongs to, if any.
+    private var linkedAssessment: [String: Any]? {
+        assessments.first { $0["submission_id"] as? Int == 501 }
+    }
+
+    /// Sending the demo form for review, deciding it, and notifying the
+    /// coordinator, with the server's checks (backend main.py).
+    private func formWorkflowRoute(_ method: String, _ parts: [String], _ body: [String: Any]) -> (Int, Any)? {
+        switch (method, parts) {
+        case ("POST", ["submissions", "501", "submit"]):
+            if let linked = linkedAssessment {
+                return (409, ["detail": "Send this for review on the assessment: POST /assessments/\(linked["id"]!)/submit"])
+            }
+            var missing: [String] = []
+            if (gisa["geotechnical_assessment_notes"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                missing.append("geotechnical_assessment")
+            }
+            if !photos.contains(where: { $0.record["kind"] as? String == "PHOTO" }) { missing.append("photo") }
+            if !missing.isEmpty {
+                return (409, ["detail": "Cannot submit: missing required fields [\(missing.joined(separator: ", "))]"])
+            }
+            guard status == "DRAFT" || status == "REJECTED" else {
+                return (409, ["detail": "Only DRAFT or REJECTED submissions can be submitted"])
+            }
+            formEvent(status == "REJECTED" ? "RESUBMIT" : "SUBMIT", to: "SUBMITTED", comment: body["comment"])
+            return (200, ["submission_id": 501, "status": status])
+        case ("POST", ["submissions", "501", "review"]):
+            if let linked = linkedAssessment {
+                return (409, ["detail": "Decide this on the assessment: POST /assessments/\(linked["id"]!)/review"])
+            }
+            guard roles.contains("ADMIN") else { return (403, ["detail": "You are not the reviewer for this assessment"]) }
+            guard status == "SUBMITTED" else { return (409, ["detail": "Only SUBMITTED submissions can be decided"]) }
+            let approve = body["decision"] as? String == "APPROVE"
+            formEvent(approve ? "APPROVE" : "REJECT", to: approve ? "APPROVED" : "REJECTED", comment: body["comment"])
+            reviewComment = body["comment"] as? String
+            return (200, ["submission_id": 501, "status": status])
+        case ("POST", ["submissions", "501", "notify-coordinator"]):
+            guard status == "DRAFT" || status == "REJECTED" else {
+                return (409, ["detail": "Only DRAFT or REJECTED submissions can notify coordinator"])
+            }
+            let immediate = submissionActions["immediate"] as? [String] ?? []
+            guard !immediate.isEmpty else {
+                return (409, ["detail": "Select at least one Immediate Action before notifying coordinator."])
+            }
+            let message = (body["message"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !message.isEmpty else { return (422, ["detail": "Notification message is required."]) }
+            formEvent("COORDINATOR_NOTIFIED", to: status,
+                      comment: "Immediate actions: \(immediate.joined(separator: ", ")) | Message: \(message)")
+            return (200, ["submission_id": 501, "notified": true, "status": status, "immediate_actions": immediate,
+                          "message": message])
+        default:
+            return nil
+        }
+    }
+
+    private func formEvent(_ type: String, to: String, comment: Any?) {
+        nextEventId += 1
+        formEvents.append(["id": nextEventId, "actor_user_id": DemoData.meId, "event_type": type, "from_status": status,
+                           "to_status": to, "comment": comment ?? NSNull(), "created_at": "2026-10-28T12:\(10 + formEvents.count):00"])
+        status = to
+    }
 
     /// The demo form's photo map, photo corrections, attachment links and cracks.
     private func formPhotoAndCrackRoute(_ method: String, _ parts: [String], _ body: [String: Any]) -> (Int, Any)? {
@@ -186,12 +264,12 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     }
 
     /// A multipart upload: the file and, for a photo, its capture data.
-    private func upload(_ request: URLRequest, sectionKey: String?) -> (Int, Any) {
+    private func upload(_ request: URLRequest, sectionKey: String?, kind requestedKind: String?) -> (Int, Any) {
         let contentType = request.value(forHTTPHeaderField: "Content-Type") ?? ""
         guard let boundary = contentType.components(separatedBy: "boundary=").last, let body = request.httpBody else {
             return (400, ["detail": "Expected a multipart upload"])
         }
-        var file = Data(), fileName = "upload.jpg", capture: [String: Any] = [:]
+        var file = Data(), fileName = "upload.jpg", mimeType = "image/jpeg", capture: [String: Any] = [:]
         for part in body.split(separator: Data("--\(boundary)".utf8)) {
             guard let headerEnd = part.range(of: Data("\r\n\r\n".utf8)) else { continue }
             let header = String(decoding: part[part.startIndex..<headerEnd.lowerBound], as: UTF8.self)
@@ -204,20 +282,23 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
                 if let range = header.range(of: "filename=\"") {
                     fileName = String(header[range.upperBound...].prefix { $0 != "\"" })
                 }
+                if let range = header.range(of: "Content-Type: ", options: .caseInsensitive) {
+                    mimeType = String(header[range.upperBound...].prefix { !$0.isNewline }).trimmingCharacters(in: .whitespaces)
+                }
             }
         }
         nextAttachmentId += 1
-        let png = fileName.lowercased().hasSuffix(".png")
-        let kind = png && fileName.contains("sketch") ? "SKETCH" : "PHOTO"
-        let record: [String: Any] = ["id": nextAttachmentId, "file_name": fileName, "mime_type": png ? "image/png" : "image/jpeg",
-                                     "kind": kind, "section_key": sectionKey as Any? ?? NSNull()]
+        let kind = requestedKind ?? "PHOTO"
+        let record: [String: Any] = ["id": nextAttachmentId, "file_name": fileName, "mime_type": mimeType,
+                                     "kind": kind, "section_key": sectionKey as Any? ?? NSNull(),
+                                     "file_size_bytes": file.count, "uploaded_at": "2026-10-28T12:30:00"]
         photos.append((record, file, capture))
         return (200, ["attachment_id": nextAttachmentId, "section_key": sectionKey as Any? ?? NSNull(), "kind": kind])
     }
 
     /// The photo map: each photo's capture data with the latest correction applied.
     private var photoMap: [String: Any] {
-        let items: [[String: Any]] = photos.map { photo in
+        let items: [[String: Any]] = photos.filter { $0.record["kind"] as? String == "PHOTO" }.map { photo in
             let id = photo.record["id"] as? Int ?? 0
             var item: [String: Any] = ["attachment_id": id, "file_name": photo.record["file_name"]!,
                                        "mime_type": "image/jpeg", "section_key": photo.record["section_key"]!,
@@ -291,11 +372,21 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     }
 
     private var submissionDetail: [String: Any] {
-        ["submission": ["id": 501, "created_by_user_id": DemoData.meId, "status": "DRAFT",
-                        "title": "I-880 slope failure GISA", "created_at": "2026-10-28T09:00:00",
-                        "updated_at": "2026-10-28T09:00:00", "can_edit": true, "can_review": false],
-         "gisa": gisa, "incident_types": incidentTypes, "actions": submissionActions, "cracks": cracks,
-         "photos": photos.map(\.record), "attachments": photos.map(\.record), "workflow_events": []]
+        let linked = linkedAssessment
+        // As the server decides it: on the assessment's route when linked, else admins.
+        let canReview = status == "SUBMITTED" && (linked.map { $0["can_review"] as? Bool == true } ?? roles.contains("ADMIN"))
+        let context: Any = linked.map { item -> [String: Any] in
+            ["incident_id": item["incident_id"]!, "incident_title": "I-880 slope failure", "event_group_id": NSNull(),
+             "assessment_id": item["id"]!, "assessment_state": item["state"]!, "assessment_routing_path": item["routing_path"]!,
+             "can_review": canReview]
+        } ?? NSNull()
+        return ["submission": ["id": 501, "created_by_user_id": DemoData.meId, "status": status,
+                               "title": "I-880 slope failure GISA", "created_at": "2026-10-28T09:00:00",
+                               "updated_at": "2026-10-28T09:00:00", "can_edit": status == "DRAFT" || status == "REJECTED",
+                               "can_review": canReview, "review_comment": reviewComment ?? NSNull()],
+                "gisa": gisa, "incident_types": incidentTypes, "actions": submissionActions, "cracks": cracks,
+                "photos": photos.filter { $0.record["kind"] as? String == "PHOTO" }.map(\.record),
+                "attachments": photos.map(\.record), "workflow_events": formEvents, "context": context]
     }
 
     private func matches(_ item: [String: Any], queue: String?) -> Bool {
@@ -327,8 +418,17 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case "submit":
             item["state"] = "SUBMITTED"
             item["can_review"] = true
+            // As the server does, the form goes with its assessment.
+            if item["submission_id"] as? Int == 501, status == "DRAFT" || status == "REJECTED" {
+                formEvent(status == "REJECTED" ? "RESUBMIT" : "SUBMIT", to: "SUBMITTED", comment: body["notes"])
+            }
         case "review":
-            item["state"] = body["action"] as? String == "APPROVE" ? "APPROVED" : "REVISION_REQUESTED"
+            let approve = body["action"] as? String == "APPROVE"
+            item["state"] = approve ? "APPROVED" : "REVISION_REQUESTED"
+            if item["submission_id"] as? Int == 501, status == "SUBMITTED" {
+                formEvent(approve ? "APPROVE" : "REJECT", to: approve ? "APPROVED" : "REJECTED", comment: body["notes"])
+                reviewComment = approve ? nil : body["notes"] as? String
+            }
         default:
             return notFound
         }
@@ -423,6 +523,26 @@ enum DemoData {
                  "location_source": "DEVICE_AT_CAPTURE", "heading_source": "DEVICE_TRUE_HEADING"])
     }
 
+    /// A one-page PDF filed under Measurements, to open in Quick Look.
+    static var sampleDocument: (record: [String: Any], data: Data, capture: [String: Any]) {
+        let page = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let pdf = UIGraphicsPDFRenderer(bounds: page).pdfData { context in
+            context.beginPage()
+            ("Survey plan, I-880 PM 12.3" as NSString).draw(at: CGPoint(x: 72, y: 72),
+                                                            withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20)])
+            UIColor.darkGray.setStroke()
+            let ground = UIBezierPath()
+            ground.move(to: CGPoint(x: 72, y: 400))
+            ground.addLine(to: CGPoint(x: 300, y: 380))
+            ground.addLine(to: CGPoint(x: 540, y: 250))
+            ground.lineWidth = 3
+            ground.stroke()
+        }
+        return (["id": 802, "file_name": "survey-plan.pdf", "mime_type": "application/pdf", "kind": "DOC",
+                 "section_key": "measurements", "file_size_bytes": pdf.count, "uploaded_at": "2026-10-28T09:40:00"],
+                pdf, [:])
+    }
+
     /// A saved GISA row: DECIMAL columns as numbers and flags as 0/1, as the server sends them.
     static let gisa: [String: Any] = [
         "report_date": "2026-10-27", "district": "04", "county": "ALA", "route": "880", "post_mile": "12.3",
@@ -498,8 +618,19 @@ enum DemoData {
                            ["code": "ONE_WAY_CLOSED", "label": "One-way Closed"],
                            ["code": "TWO_WAY_CLOSED", "label": "Two-way Closed"]],
         "incident_types": [["code": "SLIDE", "label": "Slide"], ["code": "HEAVING", "label": "Heaving"]],
-        "actions": ["immediate": [["code": "CLOSE_LANE", "label": "Close lane"]],
-                    "follow_up": [["code": "MONITOR", "label": "Monitor"]]],
+        "actions": [
+            "immediate": [["code": "OPEN_HIGHWAY_TRAFFIC", "label": "Open highway traffic"],
+                          ["code": "CLOSE_HIGHWAY_SHOULDER", "label": "Close highway shoulder"],
+                          ["code": "CLOSE_ONE_DIRECTION", "label": "Close highway one direction"],
+                          ["code": "REMOVE_DEBRIS", "label": "Remove landslide debris"],
+                          ["code": "PLACE_K_RAIL", "label": "Place K-rail or fence"],
+                          ["code": "COVER_SLOPE_PLASTIC", "label": "Cover slope with plastic"],
+                          ["code": "DIVERT_SURFACE_WATER", "label": "Divert surface water"]],
+            "follow_up": [["code": "ROUTINE_VISUAL_MONITOR", "label": "Routine visual monitor"],
+                          ["code": "RECONSTRUCT_SLOPE", "label": "Reconstruct slope"],
+                          ["code": "EROSION_CONTROL", "label": "Install erosion control"],
+                          ["code": "SUBSURFACE_EXPLORATION", "label": "Perform subsurface exploration"]],
+        ],
         "requested_by_user_id": meId,
     ]
 

@@ -127,10 +127,19 @@ final class GisaEditorTests: XCTestCase {
     }
 
     func testAnActionInTheWrongGroupStopsTheSave() throws {
-        var editor = GisaEditor(detail: try detail(located, actions: #"{"immediate": ["X"], "follow_up": []}"#))
-        guard case .failure(let problem) = editor.prepareSave(lookups: .empty) else { return XCTFail("should not save") }
+        var editor = GisaEditor(detail: try detail(located, actions: #"{"immediate": ["X", "MONITOR"], "follow_up": []}"#))
+        let lookups = GisaLookups(distribution: [], highwayStatus: [], incidentTypes: [],
+                                  actions: .init(immediate: [GisaOption(code: "CLOSE_LANE", label: "Close lane")],
+                                                 followUp: [GisaOption(code: "MONITOR", label: "Monitor")]))
+        guard case .failure(let problem) = editor.prepareSave(lookups: lookups) else { return XCTFail("should not save") }
         XCTAssertEqual(problem.title, "Cannot Save Yet")
         XCTAssertTrue(problem.message.contains("Immediate has unknown code(s): X"))
+        XCTAssertTrue(problem.message.contains("Immediate has FOLLOW_UP code(s): MONITOR"))
+    }
+
+    func testListsThatDidNotLoadDoNotStopTheSave() throws {
+        var editor = GisaEditor(detail: try detail(located, actions: #"{"immediate": ["X"], "follow_up": []}"#))
+        guard case .success = editor.prepareSave(lookups: .empty) else { return XCTFail("the server checks the codes") }
     }
 }
 

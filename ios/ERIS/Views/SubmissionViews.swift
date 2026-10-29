@@ -74,6 +74,7 @@ struct SubmissionRoute: Hashable {
 struct AttachmentThumbnail: View {
     @EnvironmentObject private var model: AppModel
     let attachment: AttachmentRef
+    var size = CGSize(width: 120, height: 90)
     @State private var url: URL?
 
     var body: some View {
@@ -82,7 +83,7 @@ struct AttachmentThumbnail: View {
         } placeholder: {
             Color.gray.opacity(0.15)
         }
-        .frame(width: 120, height: 90)
+        .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task {
             if let link = try? await SubmissionsAPI(api: model.api).attachmentLink(attachment.id) {

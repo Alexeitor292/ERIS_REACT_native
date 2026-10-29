@@ -13,9 +13,10 @@ final class ScreenTour: XCTestCase {
         app.launchArguments = ["-ERISDemo", "YES"]
     }
 
-    private func launch(roles: String = "ADMIN", colleague: Bool = false) {
+    private func launch(roles: String = "ADMIN", colleague: Bool = false, legacyForm: Bool = false) {
         app.launchArguments += ["-ERISDemoRoles", roles]
         if colleague { app.launchArguments += ["-ERISDemoColleague", "YES"] }
+        if legacyForm { app.launchArguments += ["-ERISDemoLegacyForm", "YES"] }
         app.launch()
         XCTAssertTrue(app.staticTexts["Demo data: not connected to ERIS"].waitForExistence(timeout: 10))
     }
@@ -474,6 +475,143 @@ final class ScreenTour: XCTestCase {
         snap("sketch-figure")
         let number = app.webViews.firstMatch.staticTexts.matching(NSPredicate(format: "label CONTAINS '4.1'")).firstMatch
         XCTAssertTrue(number.exists, "Sketch notes number their figures 4.x")
+    }
+
+    /// A text field or, for one that grows with its text, a text view.
+    private func field(_ label: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND (elementType == %d OR elementType == %d)",
+                                                             label, XCUIElement.ElementType.textField.rawValue,
+                                                             XCUIElement.ElementType.textView.rawValue)).firstMatch
+    }
+
+    private func openDemoForm(step: String) {
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(app.segmentedControls.buttons[step])
+    }
+
+    private func dismissAlert(_ title: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(app.alerts[title].waitForExistence(timeout: 10), "no \(title) alert", file: file, line: line)
+        app.alerts[title].buttons["OK"].tap()
+    }
+
+    func testActionsAreChosenAndTheCoordinatorNotified() {
+        launch()
+        openDemoForm(step: "Actions")
+        tap(app.buttons["actions-immediate"])
+        tap(app.buttons["Open highway traffic"])
+        tap(app.buttons["Remove landslide debris"])
+        snap("actions-immediate-picker")
+        tap(app.navigationBars["Immediate Actions"].buttons["Done"])
+        XCTAssertTrue(text(containing: "Open highway traffic, Remove landslide debris").waitForExistence(timeout: 5))
+        replace(reveal(field("Open Highway Traffic Lanes")), with: "1")
+
+        let message = reveal(field("Emergency Justification Message"))
+        tap(message)
+        message.typeText("Rocks on the northbound lane.")
+        tap(reveal(app.buttons["Notify Coordinator"]))
+        dismissAlert("Coordinator Notified")
+        // The notice stays on the form, so it is not sent twice by mistake.
+        XCTAssertTrue(reveal(text(containing: "Rocks on the northbound lane.")).exists)
+        XCTAssertEqual(field("Emergency Justification Message").value as? String ?? "", "")
+        snap("actions-coordinator-notified")
+
+        tap(reveal(app.buttons["actions-follow-up"]))
+        tap(app.buttons["Routine visual monitor"])
+        tap(app.navigationBars["Follow-up Actions"].buttons["Done"])
+        tap(app.navigationBars.buttons["Save"])
+        dismissAlert("Saved")
+        XCTAssertTrue(reveal(text(containing: "Routine visual monitor")).exists)
+    }
+
+    func testTheReviewChecklistLeadsToWhatIsMissing() {
+        launch()
+        tap(app.tabBars.buttons["Submissions"])
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(row("District *"))
+        tap(app.buttons["District 07"])
+        tap(app.segmentedControls.buttons["Gallery"])
+        let location = reveal(app.buttons["requirement-location"])
+        XCTAssertTrue(location.label.contains("Missing: County, Route."), location.label)
+        XCTAssertTrue(app.buttons["requirement-photo"].label.contains("At least one photo"))
+        snap("review-checklist")
+        tap(location)
+        XCTAssertTrue(app.staticTexts["GISA Header"].waitForExistence(timeout: 5))
+    }
+
+    func testAFormOfAnAssessmentIsSentForReviewWithIt() {
+        launch()
+        openDemoForm(step: "Gallery")
+        XCTAssertFalse(app.buttons["Submit for Review"].exists, "the server sends it with its assessment")
+        tap(reveal(app.buttons["Save and Open Assessment #5"]))
+        XCTAssertTrue(app.navigationBars["Assessment #5"].waitForExistence(timeout: 10))
+        tap(app.buttons["Submit for review"])
+        XCTAssertTrue(app.buttons["Approve"].waitForExistence(timeout: 10), "now in review")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // The form went with it: no longer editable, and reviewed on the assessment.
+        XCTAssertTrue(revealAbove(app.buttons["Review it on Assessment #5"]).waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "Awaiting branch chief review").exists)
+        XCTAssertFalse(app.navigationBars.buttons["Save"].exists)
+        snap("review-on-the-assessment")
+    }
+
+    func testALegacyFormIsSubmittedReturnedAndResubmitted() {
+        launch(legacyForm: true)
+        openDemoForm(step: "Gallery")
+        let comment = reveal(field("Comment (optional)"))
+        tap(comment)
+        comment.typeText("Ready.")
+        tap(reveal(app.buttons["Submit for Review"]))
+        tap(app.sheets.buttons["Submit"].exists ? app.sheets.buttons["Submit"] : app.buttons["Submit"])
+        dismissAlert("Submitted")
+
+        // An administrator decides a form with no assessment on the form itself.
+        let review = revealAbove(field("Review Comment"))
+        tap(review)
+        review.typeText("Check the post mile.")
+        snap("review-decision")
+        tap(app.buttons["Return for Correction"])
+        tap(app.sheets.buttons["Return for Correction"].exists ? app.sheets.buttons["Return for Correction"]
+            : app.buttons.matching(identifier: "Return for Correction").element(boundBy: 1))
+        dismissAlert("Updated")
+        XCTAssertTrue(revealAbove(text(containing: "Returned for correction: Check the post mile.")).exists)
+        XCTAssertTrue(app.navigationBars.buttons["Save"].exists, "a returned form can be edited again")
+        XCTAssertTrue(reveal(app.buttons["Resubmit for Review"]).exists)
+        snap("review-returned")
+    }
+
+    func testTheGalleryHoldsEveryFileAndAddsNewOnes() {
+        launch()
+        openDemoForm(step: "Gallery")
+        XCTAssertTrue(reveal(text(containing: "2 items · 1 photo · 1 document")).waitForExistence(timeout: 10))
+        snap("gallery-library")
+
+        // A document opens in Quick Look.
+        tap(reveal(app.buttons["file-802"]))
+        XCTAssertTrue(text(containing: "survey-plan").waitForExistence(timeout: 15))
+        // Quick Look's PDF view (it has a search button) and its close button.
+        XCTAssertTrue(app.buttons["QLPDFItemViewControllerBarSearchRightButtonAccessibilityIdentifier"].waitForExistence(timeout: 10))
+        let close = app.buttons["QLOverlayDoneButtonAccessibilityIdentifier"]
+        XCTAssertTrue(close.exists)
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "the page draws")], timeout: 3)
+        snap("gallery-document-preview")
+        close.tap()
+
+        tap(app.segmentedControls.buttons["Docs 1"])
+        XCTAssertFalse(app.buttons["file-801"].exists, "the photo is filtered out")
+        XCTAssertTrue(text(containing: "survey-plan.pdf").exists)
+        tap(app.segmentedControls.buttons["All 2"])
+
+        // Photos and videos come from the library, several at a time.
+        tap(reveal(app.buttons["add-file"]))
+        tap(app.buttons["Photo or Video Library"])
+        XCTAssertTrue(text(containing: "Private Access to Photos").waitForExistence(timeout: 15))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.43)).tap()
+        snap("gallery-library-picker")
+        let add = app.buttons["Add"]
+        if add.waitForExistence(timeout: 5) { add.tap() }
+        XCTAssertTrue(reveal(text(containing: "3 items · 2 photos · 1 document")).waitForExistence(timeout: 20))
+        snap("gallery-added")
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

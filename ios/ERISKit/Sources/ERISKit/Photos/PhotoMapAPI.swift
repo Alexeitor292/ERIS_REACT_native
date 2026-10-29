@@ -140,7 +140,6 @@ public enum GisaPhotoSections {
         ("geotechnical_assessment", "Geotechnical Assessment", 14), ("sketchpad", "Sketchpad", 15),
     ]
 
-    /// A section's attachments that can be shown as pictures.
     /// Every photo on the form, newest first (to place as a memo figure).
     public static func allPhotos(of detail: SubmissionDetail) -> [AttachmentRef] {
         let photoIds = Set((detail.photos ?? []).map(\.id))
@@ -149,6 +148,7 @@ public enum GisaPhotoSections {
             .sorted { $0.id > $1.id }
     }
 
+    /// A section's attachments that can be shown as pictures.
     public static func photos(in sectionKey: String, of detail: SubmissionDetail) -> [AttachmentRef] {
         let photoIds = Set((detail.photos ?? []).map(\.id))
         return (detail.attachments ?? detail.photos ?? []).filter { attachment in

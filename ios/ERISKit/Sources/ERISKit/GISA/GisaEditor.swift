@@ -87,7 +87,9 @@ public struct GisaEditor: Equatable, Sendable {
             return .failure(SaveProblem(title: "Almost there",
                                         message: "Please fill the highlighted required fields before continuing."))
         }
-        if let problem = GisaValidation.actionGroupProblem(immediate: actions.immediate, followUp: actions.followUp,
+        // Lists that did not load (offline) cannot judge the codes; the server still checks them.
+        let listsLoaded = !lookups.actions.immediate.isEmpty || !lookups.actions.followUp.isEmpty
+        if listsLoaded, let problem = GisaValidation.actionGroupProblem(immediate: actions.immediate, followUp: actions.followUp,
                                                            lookups: lookups) {
             return .failure(SaveProblem(title: "Cannot Save Yet", message: problem))
         }

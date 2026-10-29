@@ -34,16 +34,28 @@ struct SubmissionDetailView: View {
     @State private var mergedNotice: String?
     @State private var choosingConflicts = false
     @State private var resaves = 0
+    /// Notifying, submitting or deciding.
+    @State private var working = false
+    @State private var drafts = WorkflowDrafts()
+    @State private var openAssessment: AssessmentRoute?
+    /// The Gallery's own adding and opening of files.
+    @State private var galleryPicking = false
+    @State private var galleryItems: [PhotosPickerItem] = []
+    @State private var importingFiles = false
+    @State private var galleryUploading: String?
+    @State private var openingFile: Int?
+    @State private var previewURL: URL?
 
     /// The section a new photo will be filed under, and whether it starts a crack.
+    /// The section a new photo will be filed under (none from the Gallery), and whether it starts a crack.
     struct PhotoTarget: Identifiable {
-        let sectionKey: String
+        let sectionKey: String?
         var forCrack = false
-        var id: String { "\(sectionKey)-\(forCrack)" }
+        var id: String { "\(sectionKey ?? "")-\(forCrack)" }
     }
 
     var body: some View {
-        photoFlows(screen).modifier(prompts)
+        galleryFlows(photoFlows(screen)).modifier(prompts)
     }
 
     /// Alerts and the choice between versions, shown on the form or on an open memo.
@@ -53,6 +65,13 @@ struct SubmissionDetailView: View {
             choosingConflicts = false
             resaves = 0
             Task { await save() }
+        }
+    }
+
+    /// The assessment this form belongs to, opened from it.
+    private func assessmentWiring<Content: View>(_ content: Content) -> some View {
+        content.navigationDestination(item: $openAssessment) { route in
+            if let me = model.me { AssessmentDetailView(assessmentId: route.id, me: me) }
         }
     }
 
@@ -78,6 +97,96 @@ struct SubmissionDetailView: View {
             Task { await catchUp(savedBy: presence?.reply?.savedBy?.name, refused: false) }
         }
         .onChange(of: writingMemos) { _, memos in presence?.writing = memos }
+    }
+
+    /// The Gallery's library picker (photos and videos), Files, and Quick Look.
+    private func galleryFlows<Screen: View>(_ screen: Screen) -> some View {
+        screen
+            .photosPicker(isPresented: $galleryPicking, selection: $galleryItems, maxSelectionCount: 10,
+                          matching: .any(of: [.images, .videos]))
+            .onChange(of: galleryItems) { _, items in
+                guard !items.isEmpty else { return }
+                galleryItems = []
+                Task { await uploadToGallery(items) }
+            }
+            .fileImporter(isPresented: $importingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls): Task { await uploadFiles(urls) }
+                case .failure(let error): alert = .init(title: "Files unavailable", message: error.localizedDescription)
+                }
+            }
+            .quickLookPreview($previewURL)
+    }
+
+    /// Opens a file: a photo with where and which way it was taken; anything
+    /// else (sketches, videos, PDFs, CAD and Office files) in Quick Look.
+    private func openFile(_ item: SubmissionLibrary.Item) async {
+        if item.media == .photo, (item.attachment.kind ?? "PHOTO").uppercased() == "PHOTO" {
+            openPhoto = item.attachment
+            return
+        }
+        openingFile = item.id
+        defer { openingFile = nil }
+        do {
+            previewURL = try await FileTransfer.localCopy(of: item.attachment, api: model.api)
+        } catch {
+            alert = .init(title: "File unavailable", message: model.handle(error))
+        }
+    }
+
+    /// Photos and videos from the library, one after another.
+    private func uploadToGallery(_ items: [PhotosPickerItem]) async {
+        var problems: [String] = []
+        for (index, item) in items.enumerated() {
+            galleryUploading = items.count > 1 ? "Uploading \(index + 1) of \(items.count)…" : "Uploading…"
+            do {
+                if item.isVideo {
+                    guard let video = try await FileTransfer.upload(fromVideo: item) else { problems.append("A video could not be read."); continue }
+                    if let problem = await send(video) { problems.append(problem) }
+                } else if let photo = try await LibraryPhoto.load(item) {
+                    let kept = galleryUploading
+                    if await upload(photo, to: nil) == nil { problems.append("A photo was not uploaded.") }
+                    galleryUploading = kept
+                } else {
+                    problems.append("A photo could not be read.")
+                }
+            } catch {
+                problems.append(error.localizedDescription)
+            }
+        }
+        galleryUploading = nil
+        if !problems.isEmpty { alert = .init(title: "Not everything was added", message: problems.joined(separator: "\n")) }
+    }
+
+    /// Documents and other files from Files.
+    private func uploadFiles(_ urls: [URL]) async {
+        var problems: [String] = []
+        for (index, url) in urls.enumerated() {
+            galleryUploading = urls.count > 1 ? "Uploading \(index + 1) of \(urls.count)…" : "Uploading \(url.lastPathComponent)…"
+            do {
+                if let problem = await send(try FileTransfer.upload(fromFile: url)) { problems.append(problem) }
+            } catch {
+                problems.append(error.localizedDescription)
+            }
+        }
+        galleryUploading = nil
+        if !problems.isEmpty { alert = .init(title: "Not everything was added", message: problems.joined(separator: "\n")) }
+    }
+
+    /// Sends one Gallery file with the kind its type gives it; the problem, if any.
+    private func send(_ file: FileTransfer.Upload) async -> String? {
+        if let problem = SubmissionLibrary.sizeProblem(fileName: file.fileName, bytes: file.data.count) { return problem }
+        let submissions = SubmissionsAPI(api: model.api)
+        do {
+            _ = try await submissions.uploadAttachment(submissionId, file: file.data, fileName: file.fileName, mimeType: file.mimeType,
+                                                       sectionKey: nil,
+                                                       kind: SubmissionLibrary.uploadKind(fileName: file.fileName, mimeType: file.mimeType),
+                                                       capture: nil)
+            if let fresh = try? await submissions.detail(submissionId) { detail = fresh }
+            return nil
+        } catch {
+            return "\(file.fileName): \(model.handle(error))"
+        }
     }
 
     /// Taking, choosing and opening section photos.
@@ -129,9 +238,12 @@ struct SubmissionDetailView: View {
         let canEdit = detail.submission.isEditable
         let form = editor.wrappedValue.form
         // Built in parts: as one expression it took the type checker too long for CI.
-        return memoWiring(crackWiring(List {
+        return assessmentWiring(memoWiring(crackWiring(List {
             FormPresenceSection(others: presence?.others ?? [], notice: mergedNotice, pending: editor.wrappedValue.pending,
                                 choose: { choosingConflicts = true })
+            GisaReviewStatusSections(detail: detail, comment: $drafts.reviewComment, working: working,
+                                     decide: { decision in Task { await review(decision) } },
+                                     openAssessment: { id in Task { await open(assessment: id, saving: false) } })
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(SubmissionDescriptor.text(district: form["district"], county: form["county"], route: form["route"],
@@ -157,10 +269,26 @@ struct SubmissionDetailView: View {
             case .assessment:
                 GisaAssessmentSections(editor: editor, canEdit: canEdit, writers: presence?.writers ?? [:],
                                        open: { openMemo = MemoRoute(key: $0) })
+            case .actions:
+                GisaActionsSections(editor: editor, message: $drafts.notifyMessage, canEdit: canEdit, lookups: lookups,
+                                    notices: GisaWorkflow.coordinatorNotices(detail.workflowEvents ?? []),
+                                    notifying: working, notify: { Task { await notifyCoordinator() } })
             case .gallery:
-                GisaGallerySection(detail: detail)
-            default:
-                GisaSavedValuesSection(detail: detail, step: step)
+                GisaLibrarySection(detail: detail, canEdit: canEdit, uploading: galleryUploading, opening: openingFile,
+                                   add: { source in
+                                       switch source {
+                                       case .camera: cameraSection = PhotoTarget(sectionKey: nil)
+                                       case .library: galleryPicking = true
+                                       case .files: importingFiles = true
+                                       }
+                                   },
+                                   open: { item in Task { await openFile(item) } })
+                GisaSubmitSections(detail: detail,
+                                   requirements: GisaWorkflow.requirements(form: form, photoCount: detail.photos?.count ?? 0),
+                                   canEdit: canEdit, comment: $drafts.submitComment, working: working || saving,
+                                   fix: { kind in withAnimation { step = GisaStep.fixing(kind) } },
+                                   submit: { Task { await submit() } },
+                                   openAssessment: { id in Task { await open(assessment: id, saving: canEdit) } })
             }
 
             if let next = GisaStep(rawValue: step.rawValue + 1) {
@@ -179,7 +307,7 @@ struct SubmissionDetailView: View {
                 case .sketch: sketching = true
                 }
             },
-            open: { openPhoto = $0 })), canEdit: canEdit), detail: detail, canEdit: canEdit)
+            open: { openPhoto = $0 })), canEdit: canEdit), detail: detail, canEdit: canEdit))
         .toolbar {
             if canEdit {
                 Button(saving ? "Saving…" : "Save") { Task { await save() } }
@@ -259,23 +387,27 @@ struct SubmissionDetailView: View {
 
     /// Checks the draft as the Expo editor's Save does and sends what changed,
     /// then reloads. A save refused because someone else changed the same
-    /// fields catches up with theirs and lets this person choose.
-    private func save() async {
-        guard var current = editor else { return }
+    /// fields catches up with theirs and lets this person choose. `quietly`,
+    /// as a step before notifying or submitting, it says nothing when it
+    /// works. True when everything is saved.
+    @discardableResult
+    private func save(quietly: Bool = false) async -> Bool {
+        guard var current = editor else { return false }
         let prepared = current.prepareSave(lookups: lookups)
         editor = current
         switch prepared {
         case .failure(let problem):
             if GisaStep.header.owns(current.errors.keys) { step = .header }
             alert = problem
+            return false
         case .success(let request):
             if current.pending != nil {
                 choosingConflicts = true
-                return
+                return false
             }
             guard !request.isEmpty else {
-                alert = .init(title: "Saved", message: "There are no changes to save.")
-                return
+                if !quietly { alert = .init(title: "Saved", message: "There are no changes to save.") }
+                return true
             }
             saving = true
             defer { saving = false }
@@ -283,24 +415,28 @@ struct SubmissionDetailView: View {
                 try await SubmissionsAPI(api: model.api).saveGisa(submissionId, request)
                 resaves = 0
                 await load()
-                alert = .init(title: "Saved", message: "Draft saved.")
+                if !quietly { alert = .init(title: "Saved", message: "Draft saved.") }
+                return true
             } catch FormRefusal.conflicts(let savedBy) {
                 saving = false
-                await catchUp(savedBy: savedBy, refused: true)
+                return await catchUp(savedBy: savedBy, refused: true, quietly: quietly)
             } catch FormRefusal.locked(let message) {
                 alert = .init(title: "Not saved", message: message)
             } catch {
                 alert = .init(title: "Save failed", message: model.handle(error))
             }
+            return false
         }
     }
 
     /// Brings in what others saved where this person has not typed. Fields both
-    /// changed wait for a choice; after a refused save with none left, it saves again.
-    private func catchUp(savedBy: String?, refused: Bool) async {
+    /// changed wait for a choice; after a refused save with none left, it saves
+    /// again, and says whether that worked.
+    @discardableResult
+    private func catchUp(savedBy: String?, refused: Bool, quietly: Bool = false) async -> Bool {
         guard let fresh = try? await SubmissionsAPI(api: model.api).detail(submissionId), var current = editor else {
             if refused { alert = .init(title: "Save failed", message: "The form changed and could not be reloaded. Try again.") }
-            return
+            return false
         }
         let taken = current.catchUp(with: fresh, savedBy: savedBy)
         editor = current
@@ -313,8 +449,82 @@ struct SubmissionDetailView: View {
             if refused { choosingConflicts = true }
         } else if refused, resaves < 2 {
             resaves += 1
-            await save()
+            return await save(quietly: quietly)
         }
+        return false
+    }
+
+    // MARK: Notifying, sending for review and deciding
+
+    /// Saves, then sends the immediate actions and the message to the
+    /// maintenance coordinator, as the Expo editor's Notify Coordinator does.
+    private func notifyCoordinator() async {
+        guard let current = editor else { return }
+        if let problem = GisaWorkflow.notifyProblem(immediate: current.actions.immediate, message: drafts.notifyMessage) {
+            alert = problem
+            return
+        }
+        guard await save(quietly: true) else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await SubmissionsAPI(api: model.api).notifyCoordinator(
+                submissionId, message: drafts.notifyMessage.trimmingCharacters(in: .whitespacesAndNewlines))
+            drafts.notifyMessage = ""
+            await load()
+            alert = .init(title: "Coordinator Notified", message: "Immediate actions were sent to the maintenance coordinator.")
+        } catch {
+            alert = .init(title: "Notify failed", message: model.handle(error))
+        }
+    }
+
+    /// Checks what review needs, saves, and sends the form for review.
+    private func submit() async {
+        guard var current = editor, let detail else { return }
+        let requirements = GisaWorkflow.requirements(form: current.form, photoCount: detail.photos?.count ?? 0)
+        if let problem = GisaWorkflow.submitProblem(requirements) {
+            current.errors.merge(GisaValidation.submitErrors(current.form)) { _, new in new }
+            editor = current
+            if let first = requirements.first(where: { !$0.met }), first.kind != .photo {
+                withAnimation { step = GisaStep.fixing(first.kind) }
+            }
+            alert = problem
+            return
+        }
+        guard await save(quietly: true) else { return }
+        working = true
+        defer { working = false }
+        do {
+            let comment = drafts.submitComment.trimmingCharacters(in: .whitespacesAndNewlines)
+            try await SubmissionsAPI(api: model.api).submit(submissionId, comment: comment.isEmpty ? nil : comment)
+            drafts.submitComment = ""
+            await load()
+            alert = .init(title: "Submitted", message: "Sent for review.")
+        } catch APIError.http(409, let detail?) {
+            alert = .init(title: "Cannot Submit Yet", message: GisaWorkflow.submitRefusal(detail) ?? detail)
+        } catch {
+            alert = .init(title: "Submit failed", message: model.handle(error))
+        }
+    }
+
+    private func review(_ decision: SubmissionsAPI.ReviewDecision) async {
+        working = true
+        defer { working = false }
+        do {
+            let comment = drafts.reviewComment.trimmingCharacters(in: .whitespacesAndNewlines)
+            try await SubmissionsAPI(api: model.api).review(submissionId, decision: decision, comment: comment.isEmpty ? nil : comment)
+            drafts.reviewComment = ""
+            await load()
+            alert = .init(title: "Updated", message: GisaWorkflow.reviewDone(decision))
+        } catch {
+            alert = .init(title: "Review failed", message: model.handle(error))
+        }
+    }
+
+    /// Opens the assessment this form belongs to, saving first so it is sent with what is on screen.
+    private func open(assessment id: Int, saving: Bool) async {
+        if saving { guard await save(quietly: true) else { return } }
+        openAssessment = AssessmentRoute(id: id)
     }
 
     /// The memos this person is writing (changed since opening or catching up): locked for everyone else.
@@ -323,12 +533,16 @@ struct SubmissionDetailView: View {
         return MemoContent.keys.filter { editor.form["\($0)_html"] != editor.base.form["\($0)_html"] }
     }
 
-    /// Files a photo under its form section. Only the attachment list is
-    /// refreshed afterwards, so unsaved form changes are kept.
+    /// Files a photo under its form section, or under none from the Gallery.
+    /// Only the attachment list is refreshed afterwards, so unsaved form changes are kept.
     @discardableResult
-    private func upload(_ photo: MappedPhotoCapture, to section: String) async -> UploadedAttachment? {
+    private func upload(_ photo: MappedPhotoCapture, to section: String?) async -> UploadedAttachment? {
         uploadingSection = section
-        defer { uploadingSection = nil }
+        if section == nil { galleryUploading = "Uploading photo…" }
+        defer {
+            uploadingSection = nil
+            if section == nil { galleryUploading = nil }
+        }
         let submissions = SubmissionsAPI(api: model.api)
         do {
             let uploaded = try await submissions.uploadAttachment(submissionId, file: photo.jpeg, fileName: photo.fileName,
@@ -404,40 +618,20 @@ enum GisaStep: Int, CaseIterable, Identifiable {
 
     static let headerKeys: Set = ["report_date", "district", "county", "route", "post_mile", "ea", "project_id",
                                   "date_incident_reported", "district_contact", "latitude", "longitude", "geometry_json"]
-    /// Body fields already editable here, so not repeated as saved values.
-    static let portedBodyKeys = Set(["distribution_code", "highway_status_cause", "highway_status_code",
-                                     "lanes_closed_count", "incident_type_description"])
-        .union(GisaForm.incidentTypeCodes.map(\.key))
-        .union(["material_rock", "material_soil", "material_bedding", "material_joints", "material_fractures",
-                "material_pavement_type", "est_soil_pct", "est_rock_pct", "est_clay_pct", "est_silt_pct"])
-        .union(GisaEditor.soilShareKeys).union(GisaEditor.debrisShareKeys)
-        // The pavement diagram's marker layout is retired: each crack has its own photo and labels.
-        .union(["pavement_ground_cracks", "indented_by_rocks", "settlement_in", "bulge_in",
-                "pavement_ground_annotation_layout_json"])
-        .union(GisaEditor.vegetationKeys.map(\.0)).union(GisaEditor.drainageChoices.map(\.0))
-        .union(GisaEditor.waterContentChoices.map(\.0)).union(GisaEditor.flowingChoices.map(\.0))
-        .union(GisaEditor.impactRows.flatMap { [$0.0, $0.1] })
-        .union(GisaEditor.measurementFields.map(\.0))
-        // Shown in Measurements as the road inventory card and the elevation profile.
-        .union(["road_inventory_context", "elevation_profile"])
-    static let assessmentKeys: Set = ["record_of_event_notes", "maintenance_history_notes", "observations_notes",
-                                      "geotechnical_assessment_notes", "sketchpad_notes"]
+    /// The step where a requirement for review is met.
+    static func fixing(_ kind: GisaWorkflow.Requirement.Kind) -> GisaStep {
+        switch kind {
+        case .location: return .header
+        case .geotechnical: return .assessment
+        case .soil, .debris: return .body
+        case .photo: return .gallery
+        }
+    }
 
     /// Whether any of these field keys is on this step.
     func owns<S: Sequence>(_ keys: S) -> Bool where S.Element == String {
         guard self == .header else { return false }
         return keys.contains { Self.headerKeys.contains($0) }
-    }
-
-    /// The saved GISA columns this step shows while it is not yet editable here.
-    func showsSavedValue(_ key: String) -> Bool {
-        switch self {
-        case .assessment: return Self.assessmentKeys.contains(key)
-        case .body: return !Self.headerKeys.contains(key) && !Self.assessmentKeys.contains(key) && !key.hasSuffix("_html")
-            && !Self.portedBodyKeys.contains(key)
-            && !["submission_id", "location_id", "updated_by_user_id", "revision", "created_at", "updated_at"].contains(key)
-        default: return false
-        }
     }
 }
 
@@ -947,54 +1141,6 @@ struct ChipFlow: Layout {
             }
         }
         return rows
-    }
-}
-
-// MARK: - Steps not yet ported, and the gallery
-
-/// The saved values of a step that is not editable on iPhone yet.
-struct GisaSavedValuesSection: View {
-    let detail: SubmissionDetail
-    let step: GisaStep
-
-    var body: some View {
-        Section {
-            Text(step == .body
-                 ? "The rest of this step is being ported to iPhone. Its saved values are shown below, and saving keeps them as they are."
-                 : "This step is being ported to iPhone. Its saved values are shown here, and saving keeps them as they are.")
-                .font(.callout).foregroundStyle(.secondary)
-        }
-        if let gisa = detail.gisa, gisa.keys.contains(where: step.showsSavedValue) {
-            Section("Saved values") {
-                ForEach(gisa.keys.filter(step.showsSavedValue).sorted(), id: \.self) { key in
-                    if let value = gisa[key].flatMap(SubmissionLabels.text) {
-                        LabeledContent(SubmissionLabels.fieldName(key), value: value)
-                    }
-                }
-            }
-        }
-        if step == .actions, let actions = detail.actions {
-            Section("Saved actions") {
-                LabeledContent("Immediate", value: actions.immediate.isEmpty ? "None" : actions.immediate.joined(separator: ", "))
-                LabeledContent("Follow-up", value: actions.followUp.isEmpty ? "None" : actions.followUp.joined(separator: ", "))
-            }
-        }
-    }
-}
-
-struct GisaGallerySection: View {
-    let detail: SubmissionDetail
-
-    var body: some View {
-        Section("Photos") {
-            if let photos = detail.photos, !photos.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack { ForEach(photos) { AttachmentThumbnail(attachment: $0) } }
-                }
-            } else {
-                Text("No photos yet.").foregroundStyle(.secondary)
-            }
-        }
     }
 }
 

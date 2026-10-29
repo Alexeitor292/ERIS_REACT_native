@@ -16,6 +16,7 @@
 		2B6167462B0624A10A806B75 /* CrackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEEB54A5C523456E696A8B6E /* CrackViews.swift */; };
 		2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */; };
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
+		586D79AA03DC3DE543D242B4 /* GalleryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
 		5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BD4538642D56D52AACFE19 /* DemoServer.swift */; };
 		71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */; };
@@ -24,6 +25,7 @@
 		7E0DE5A23DD0C9E77EE2F077 /* ScreenTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */; };
 		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
+		959ABA9F639D72957F0414B6 /* ActionsStepViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B2E66F767C917B799CEE40A /* ActionsStepViews.swift */; };
 		9BBB420495B6246D9E770B91 /* AssessmentStepViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0938B6DC180DAC888EBEA9 /* AssessmentStepViews.swift */; };
 		9C5C2795DCC69423E29F8D80 /* FormCollabViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FB17402AE2FC47CD9018576 /* FormCollabViews.swift */; };
 		9D9354D09031B86DFA514DE0 /* GisaEditorViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */; };
@@ -56,6 +58,8 @@
 		4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MappedCamera.swift; sourceTree = "<group>"; };
 		576704982A623A2F1D8DFF28 /* FormPresenceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormPresenceSession.swift; sourceTree = "<group>"; };
 		6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementDiagramViews.swift; sourceTree = "<group>"; };
+		6B2E66F767C917B799CEE40A /* ActionsStepViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionsStepViews.swift; sourceTree = "<group>"; };
+		6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryViews.swift; sourceTree = "<group>"; };
 		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
 		78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentViews.swift; sourceTree = "<group>"; };
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -151,11 +155,13 @@
 		B8D9D5B27A55884192FCCD07 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				6B2E66F767C917B799CEE40A /* ActionsStepViews.swift */,
 				EB0938B6DC180DAC888EBEA9 /* AssessmentStepViews.swift */,
 				78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */,
 				AEEB54A5C523456E696A8B6E /* CrackViews.swift */,
 				165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */,
 				8FB17402AE2FC47CD9018576 /* FormCollabViews.swift */,
+				6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */,
 				AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
 				6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */,
@@ -289,6 +295,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				959ABA9F639D72957F0414B6 /* ActionsStepViews.swift in Sources */,
 				0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */,
 				9BBB420495B6246D9E770B91 /* AssessmentStepViews.swift in Sources */,
 				893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */,
@@ -298,6 +305,7 @@
 				FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */,
 				9C5C2795DCC69423E29F8D80 /* FormCollabViews.swift in Sources */,
 				A9F95ECE84F3EC9F938EDAD8 /* FormPresenceSession.swift in Sources */,
+				586D79AA03DC3DE543D242B4 /* GalleryViews.swift in Sources */,
 				9D9354D09031B86DFA514DE0 /* GisaEditorViews.swift in Sources */,
 				081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */,
 				903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */,

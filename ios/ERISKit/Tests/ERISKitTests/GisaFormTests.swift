@@ -204,7 +204,9 @@ final class GisaFormTests: XCTestCase {
         XCTAssertEqual(GisaValidation.draftErrors(form), [:])
         XCTAssertEqual(GisaValidation.submitErrors(form),
                        ["geotechnical_assessment_notes": "Geotechnical Assessment is required."])
-        form["geotechnical_assessment_notes"] = "Stable."
+        form["geotechnical_assessment_notes_html"] = "<p></p>"
+        XCTAssertFalse(GisaValidation.hasGeotechnicalAssessment(form))
+        form["geotechnical_assessment_notes_html"] = "<p>Stable.</p>"
         XCTAssertEqual(GisaValidation.submitErrors(form), [:])
     }
 

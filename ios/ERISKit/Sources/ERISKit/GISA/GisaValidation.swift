@@ -21,10 +21,17 @@ public enum GisaValidation {
     /// Submitting also needs the geotechnical assessment.
     public static func submitErrors(_ form: GisaForm) -> [String: String] {
         var errors = draftErrors(form)
-        if errors.isEmpty && form["geotechnical_assessment_notes"].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if errors.isEmpty && !hasGeotechnicalAssessment(form) {
             errors["geotechnical_assessment_notes"] = "Geotechnical Assessment is required."
         }
         return errors
+    }
+
+    /// Whether the Geotechnical Assessment memo has any words. The memo's
+    /// document is what is edited; its plain copy is the server's, made on save.
+    public static func hasGeotechnicalAssessment(_ form: GisaForm) -> Bool {
+        !MemoContent.text(ofHTML: form["geotechnical_assessment_notes_html"])
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// When soil is present, clay, silt, sand, gravel and boulder must total 100%.

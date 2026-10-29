@@ -83,7 +83,7 @@ private struct MemoRow: View {
 }
 
 /// A plain multi-line note.
-private struct NotesField: View {
+struct NotesField: View {
     let label: String
     @Binding var text: String
     let editable: Bool
