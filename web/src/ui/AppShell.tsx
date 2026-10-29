@@ -22,7 +22,7 @@ import { useUiSettings } from "./UiSettingsContext";
 import HeaderSearch from "./HeaderSearch";
 import ProfileMenu from "./ProfileMenu";
 import { navigateWithTransition, pageRendered } from "./pageTransition";
-import { hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
+import { hasMaintenanceDuties, hasWorkQueue, isAdmin, isOperationalUser, isPublicOnly, roleLabel } from "../utils/roleModel";
 import { placeLabel } from "../utils/orgDistricts";
 import type { UserOrg } from "../api/types";
 
@@ -102,7 +102,7 @@ function useNavSections(): NavSection[] {
   const roles = me?.roles;
   const operational = isOperationalUser(roles);
   const admin = isAdmin(roles);
-  const maintenance = !!me?.maintenance_districts?.length;
+  const maintenance = hasMaintenanceDuties(me);
   const viewerOnly = isPublicOnly(roles) && !maintenance;
 
   if (viewerOnly) {
@@ -118,10 +118,8 @@ function useNavSections(): NavSection[] {
   }
 
   const sections: NavSection[] = [];
-  if (maintenance || admin) {
-    sections.push({ label: "Maintenance", items: [{ to: "/maintenance-work", label: "Maintenance Work", icon: Inbox }] });
-  }
-  if (hasWorkQueue(roles)) {
+  // One queue for everyone: maintenance reports wait in My Work with the rest.
+  if (hasWorkQueue(roles, maintenance)) {
     sections.push({ label: "Workspace", items: [{ to: "/my-work", label: "My Work", icon: Inbox }] });
   }
 
@@ -223,7 +221,7 @@ export default function AppShell({ title, children, workspace = false }: { title
             <HeaderSearch pages={pages} searchRecords={!!me && isOperationalUser(me.roles)} />
           </div>
           <div className="flex items-center justify-end gap-1.5">
-            {me && (!isPublicOnly(me.roles) || !!me.maintenance_districts?.length) ? <NotificationBell /> : null}
+            {me && (!isPublicOnly(me.roles) || hasMaintenanceDuties(me)) ? <NotificationBell /> : null}
             <span aria-hidden className="mx-1 hidden h-6 w-px bg-[var(--line)] sm:block" />
             <ProfileMenu orgLine={orgLine} />
           </div>

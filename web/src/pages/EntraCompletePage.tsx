@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { landingPathFor } from "../utils/roleModel";
+import { hasMaintenanceDuties, landingPathFor } from "../utils/roleModel";
 
 export default function EntraCompletePage() {
   const { finishEntra } = useAuth();
@@ -11,7 +11,7 @@ export default function EntraCompletePage() {
   useEffect(() => {
     let live = true;
     finishEntra().then((me) => {
-      if (live) navigate(me.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(me.roles), { replace: true });
+      if (live) navigate(landingPathFor(me.roles, hasMaintenanceDuties(me)), { replace: true });
     }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : "Entra sign-in failed"); });
     return () => { live = false; };
     // Handoff is consumed once on arrival.

@@ -15,6 +15,7 @@ import {
   canReportIncident,
   canTriage,
   hasRole,
+  hasMaintenanceDuties,
   hasWorkQueue,
   isAdmin,
   isAssessmentAuthor,
@@ -172,4 +173,14 @@ test("the Maintenance Crew stays out of the operational surface", () => {
   assert.equal(isMaintenanceOnly([...CREW, ...SENIOR_SPECIALIST]), false);
   assert.equal(isAdmin(SENIOR_SPECIALIST), false);
   assert.equal(isAdmin(["ADMIN"]), true);
+});
+
+test("district maintenance duties open My Work, whatever the role", () => {
+  const duties = { maintenance_districts: [{ district: "04", report: true, manage: false }] };
+  assert.equal(hasMaintenanceDuties(duties), true);
+  assert.equal(hasMaintenanceDuties({ maintenance_districts: [] }), false);
+  assert.equal(hasMaintenanceDuties(null), false);
+  assert.equal(hasWorkQueue(GUEST, true), true);
+  assert.equal(landingPathFor(GUEST, true), "/my-work");
+  assert.equal(landingPathFor(GUEST, false), "/incidents");
 });

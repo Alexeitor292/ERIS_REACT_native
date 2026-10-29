@@ -3,19 +3,31 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { getAssessment, listAssessments, type Assessment, type AssessmentDetail } from "../../api/assessments";
 import { api } from "../../api/client";
+import { maintenanceWork, type WorkItem as MaintenanceReport } from "../../api/maintenanceWorkflows";
 import { listShareReviews, type ShareReviewItem } from "../../api/sharing";
 import type { Incident } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import AppShell from "../../ui/AppShell";
-import { canAssignEngineer, canDelegateBranch, canTriage, hasWorkQueue, isAdmin, isAssessmentAuthor } from "../../utils/roleModel";
+import { canAssignEngineer, canDelegateBranch, canTriage, hasMaintenanceDuties, hasWorkQueue, isAdmin, isAssessmentAuthor } from "../../utils/roleModel";
 import AssessmentDetailPanel, { AssessmentRailCard, formatTimestamp } from "../assessments/AssessmentDetailPanel";
 import { useSubmissionIndex } from "../assessments/AssessmentWorkspacePage";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
+import MaintenanceReportForm from "../incidents/MaintenanceReportForm";
+import MaintenanceWorkItem from "./MaintenanceWorkItem";
+import { filterWork, maintenanceInView, maintenanceStatus, parseWorkFilter, WORK_FILTERS, type WorkFilter } from "./myWorkModel";
 import ShareWorkItem from "./ShareWorkItem";
 import TriageWorkItem from "./TriageWorkItem";
 
+const FILTER_KEY = "eris.myWork.show";
+
+function storedFilter(): WorkFilter {
+  try { return parseWorkFilter(window.localStorage.getItem(FILTER_KEY)); } catch { return "both"; }
+}
+
 type WorkItem =
   | { kind: "triage"; id: string; incident: Incident; sortKey: number }
+  /** A report moving through its district's maintenance workflow. */
+  | { kind: "maintenance"; id: string; report: MaintenanceReport; sortKey: number }
   /** A share of a technical form waiting on this branch or office chief. */
   | { kind: "share"; id: string; share: ShareReviewItem; sortKey: number }
   /** `outsideQueue`: opened by a link although no queue of the caller's holds it. */
@@ -33,13 +45,17 @@ function timestamp(value: string | null | undefined) {
  * reviewer, so the queues follow the route rather than an assignment:
  *
  *  - Maintenance Coordinator: field reports awaiting intake triage.
+ *  - Anyone with district maintenance duties: reports at their step of the
+ *    district's maintenance workflow (and, on request, the others they can read).
  *  - Office Chief: assessments to route (`office_chief`), and senior-engineer-route
  *    assessments of their own office to review (`office_chief_review`).
  *  - Branch Chief: assessments handed to them that still need an assignee (`branch_chief`), and the
  *    same ones to approve or return once submitted (`branch_chief_review`).
  *  - Staff or Senior Specialist: their own assessments in Draft / Revision
  *    requested (`assignee` — both routes store the assignee in the same column).
- *  - Admin: every submitted assessment, matching the server's review bypass.
+ *  - Admin: every submitted assessment, matching the server's review bypass,
+ *    and every maintenance report; an administrator can show geotechnical or
+ *    maintenance work alone.
  *  - Branch and Office Chiefs: shares of technical forms to approve, or that
  *    they were told about and may stop (`/shares/reviews`).
  *
@@ -56,6 +72,12 @@ function timestamp(value: string | null | undefined) {
 export default function MyWorkPage() {
   const { me } = useAuth();
   const roles = me?.roles;
+  const maintenanceDuties = hasMaintenanceDuties(me);
+  const admin = isAdmin(roles);
+  const [filter, setFilter] = useState<WorkFilter>(storedFilter);
+  const [maintenanceReports, setMaintenanceReports] = useState<MaintenanceReport[]>([]);
+  const [otherReports, setOtherReports] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<WorkItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -69,7 +91,7 @@ export default function MyWorkPage() {
   const { submissionsById, reloadSubmissions } = useSubmissionIndex();
 
   const load = useCallback(async () => {
-    if (!hasWorkQueue(roles)) { setItems([]); return; }
+    if (!hasWorkQueue(roles, maintenanceDuties)) { setItems([]); return; }
     setLoading(true);
     setError(null);
     try {
@@ -110,16 +132,23 @@ export default function MyWorkPage() {
         ? listShareReviews().then((r) => r.items ?? []).catch(() => [])
         : Promise.resolve([]);
 
-      const [triage, shares, ...assessmentLists] = await Promise.all([triagePromise, sharesPromise, ...requests]);
+      const maintenancePromise: Promise<MaintenanceReport[]> = maintenanceDuties || isAdmin(roles)
+        ? maintenanceWork().then((r) => r.items ?? []).catch(() => [])
+        : Promise.resolve([]);
+
+      const [triage, shares, reports, ...assessmentLists] = await Promise.all([triagePromise, sharesPromise, maintenancePromise, ...requests]);
+      setMaintenanceReports(reports);
       const byId = new Map<number, Assessment>();
       for (const list of assessmentLists) for (const assessment of list) byId.set(assessment.id, assessment);
 
       const next: WorkItem[] = [
         ...triage.map((incident) => ({ kind: "triage" as const, id: `t${incident.id}`, incident, sortKey: timestamp(incident.first_observed_at) })),
+        // The server lists them in order; the sort keeps it.
+        ...reports.map((report, index) => ({ kind: "maintenance" as const, id: `m${report.id}`, report, sortKey: reports.length - index })),
         ...shares.map((share) => ({ kind: "share" as const, id: `s${share.review_id}`, share, sortKey: timestamp(share.created_at) })),
         ...[...byId.values()].map((assessment) => ({ kind: "assessment" as const, id: `a${assessment.id}`, assessment, sortKey: timestamp(assessment.updated_at) })),
       ];
-      const rank = { triage: 0, share: 1, assessment: 2 } as const;
+      const rank = { triage: 0, maintenance: 1, share: 2, assessment: 3 } as const;
       next.sort((a, b) => (a.kind === b.kind ? b.sortKey - a.sortKey : rank[a.kind] - rank[b.kind]));
       setItems(next);
     } catch (e) {
@@ -128,9 +157,22 @@ export default function MyWorkPage() {
       setLoading(false);
       setLoaded(true);
     }
-  }, [roles]);
+  }, [roles, maintenanceDuties]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // A maintenance report by link (a notification): ?maintenance=<incident id>.
+  const requestedReport = Number(searchParams.get("maintenance")) || null;
+  useEffect(() => {
+    if (!requestedReport || !loaded) return;
+    if (maintenanceReports.some((report) => report.id === requestedReport)) setSelectedId(`m${requestedReport}`);
+    else setError(`Maintenance report #${requestedReport} is not one you can open.`);
+  }, [loaded, maintenanceReports, requestedReport]);
+
+  const chooseFilter = (next: WorkFilter) => {
+    setFilter(next);
+    try { window.localStorage.setItem(FILTER_KEY, next); } catch { /* the choice lasts this visit */ }
+  };
 
   // Deep link from an assessment record or its technical form: ?assessment=<id>.
   // The assessment opens even when none of the caller's queues holds it — an
@@ -155,12 +197,17 @@ export default function MyWorkPage() {
     return () => { cancelled = true; };
   }, [items, loaded, requested]);
 
-  const allItems = useMemo<WorkItem[]>(
-    () => (linked && !items.some((item) => item.id === `a${linked.id}`)
-      ? [{ kind: "assessment", id: `a${linked.id}`, assessment: linked, sortKey: Number.POSITIVE_INFINITY, outsideQueue: true }, ...items]
-      : items),
-    [items, linked],
-  );
+  const allItems = useMemo<WorkItem[]>(() => {
+    const opened = selectedId?.startsWith("m") ? Number(selectedId.slice(1)) : requestedReport;
+    const shownReports = new Set(maintenanceInView(maintenanceReports, otherReports, opened).map((report) => `m${report.id}`));
+    const inQueue = items.filter((item) => item.kind !== "maintenance" || shownReports.has(item.id));
+    const withLinked = linked && !inQueue.some((item) => item.id === `a${linked.id}`)
+      ? [{ kind: "assessment" as const, id: `a${linked.id}`, assessment: linked, sortKey: Number.POSITIVE_INFINITY, outsideQueue: true }, ...inQueue]
+      : inQueue;
+    return filterWork(withLinked, filter, admin);
+  }, [items, linked, maintenanceReports, otherReports, selectedId, requestedReport, filter, admin]);
+  const othersReadable = maintenanceReports.filter((report) => !report.my_turn).length;
+  const canReport = admin || !!me?.maintenance_districts?.some((district) => district.report);
 
   const selected = useMemo(() => allItems.find((item) => item.id === selectedId) ?? allItems[0] ?? null, [allItems, selectedId]);
 
@@ -191,7 +238,7 @@ export default function MyWorkPage() {
     }
   }, [load, reloadSubmissions, selected]);
 
-  if (!hasWorkQueue(roles)) {
+  if (!hasWorkQueue(roles, maintenanceDuties)) {
     return (
       <AppShell title="My Work">
         <div className="p-6">
@@ -208,9 +255,48 @@ export default function MyWorkPage() {
     <AppShell title="My Work">
       <div className="grid gap-3.5 p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm"><b>{items.length}</b><span className="text-muted"> item{items.length === 1 ? "" : "s"} waiting on your role</span></span>
-          <button type="button" onClick={refresh} disabled={loading} className="ml-auto rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{loading ? "Refreshing…" : "Refresh"}</button>
+          <span className="text-sm"><b>{allItems.length}</b><span className="text-muted"> item{allItems.length === 1 ? "" : "s"} waiting on your role</span></span>
+          {admin ? (
+            <div role="radiogroup" aria-label="Show" className="inline-flex rounded-md border border-[var(--line)] bg-[var(--panel)] p-0.5">
+              {WORK_FILTERS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={filter === option.id}
+                  onClick={() => chooseFilter(option.id)}
+                  className={`rounded px-2.5 py-1 text-xs font-semibold ${filter === option.id ? "bg-[var(--brand)] text-white" : "text-[var(--ink)] hover:bg-[var(--panel-soft)]"}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {othersReadable > 0 && (!admin || filter !== "geotech") ? (
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input type="checkbox" checked={otherReports} onChange={(e) => setOtherReports(e.target.checked)} />
+              Also show maintenance reports not waiting on me ({othersReadable})
+            </label>
+          ) : null}
+          <div className="ml-auto flex flex-wrap gap-2">
+            {canReport ? (
+              <button type="button" onClick={() => setReporting(true)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)]">Report an incident</button>
+            ) : null}
+            <button type="button" onClick={refresh} disabled={loading} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{loading ? "Refreshing…" : "Refresh"}</button>
+          </div>
         </div>
+        {reporting ? (
+          <MaintenanceReportForm
+            onCancel={() => setReporting(false)}
+            onCreated={(incidentId, message) => {
+              setNotice(message);
+              setReporting(false);
+              setOtherReports(true);
+              setSelectedId(`m${incidentId}`);
+              void load();
+            }}
+          />
+        ) : null}
 
         {error ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
         {notice ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--good)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--good)_10%,transparent)] px-3 py-2 text-sm text-[var(--good)]">{notice}</div> : null}
@@ -218,12 +304,16 @@ export default function MyWorkPage() {
         {allItems.length === 0 ? (
           <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-soft)] px-6 py-10 text-center">
             <div className="text-base font-semibold">{loading ? "Loading your queue…" : "Nothing needs your attention"}</div>
-            <p className="mt-1.5 text-sm text-muted">No steps are waiting on you. Browse the records under <Link to="/assessments" className="font-medium text-[var(--brand)] hover:underline">Operations › Assessments</Link>.</p>
+            {hasWorkQueue(roles) ? (
+              <p className="mt-1.5 text-sm text-muted">No steps are waiting on you. Browse the records under <Link to="/assessments" className="font-medium text-[var(--brand)] hover:underline">Operations › Assessments</Link>.</p>
+            ) : (
+              <p className="mt-1.5 text-sm text-muted">No maintenance reports are waiting on you. Reports you file are under <Link to="/incidents" className="font-medium text-[var(--brand)] hover:underline">Incidents</Link>.</p>
+            )}
           </div>
         ) : (
           <div className="grid items-start gap-4 xl:grid-cols-[minmax(320px,0.7fr)_minmax(0,1.8fr)]">
             <section className="flex max-h-[860px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
-              <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5 text-[13px] text-muted">{items.length} item{items.length === 1 ? "" : "s"} waiting on you</div>
+              <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5 text-[13px] text-muted">{allItems.length} item{allItems.length === 1 ? "" : "s"} waiting on you</div>
               <div className="grid flex-1 content-start gap-2 overflow-auto p-2">
                 {allItems.map((item) => {
                   const active = selected?.id === item.id;
@@ -241,6 +331,23 @@ export default function MyWorkPage() {
                           <span className="inline-flex whitespace-nowrap rounded-full border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--bad)]">New report</span>
                         </div>
                         <div className="mt-2 text-xs text-muted">{eventGroupLocationLabel(incident)} · Reported {formatTimestamp(incident.first_observed_at)}</div>
+                      </button>
+                    );
+                  }
+                  if (item.kind === "maintenance") {
+                    const report = item.report;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => { setSelectedId(item.id); setSearchParams({}, { replace: true }); }}
+                        className={`block w-full rounded-lg border p-3 text-left ${active ? "border-[var(--brand)] bg-[color:color-mix(in_oklab,var(--brand)_7%,var(--panel))]" : "border-[var(--line)] bg-[var(--panel)] hover:border-[color:color-mix(in_oklab,var(--brand)_45%,var(--line))] hover:bg-[var(--panel-soft)]"}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div><div className="font-semibold">Maintenance · Incident #{report.id}</div><div className="mt-0.5 text-xs text-muted">{report.title || "Field report"}</div></div>
+                          <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${report.my_turn ? "border-[color:color-mix(in_oklab,var(--brand)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--brand)_10%,transparent)] text-[var(--brand)]" : "border-[var(--line)] bg-[var(--panel-soft)]"}`}>{report.my_turn ? "Your action needed" : "For reading"}</span>
+                        </div>
+                        <div className="mt-2 text-xs text-muted">District {Number(report.district)} · {maintenanceStatus(report)}</div>
                       </button>
                     );
                   }
@@ -289,6 +396,8 @@ export default function MyWorkPage() {
                   item={selected.share}
                   onDecided={async (message) => { setNotice(message); setSelectedId(null); await refresh(); }}
                 />
+              ) : selected.kind === "maintenance" ? (
+                <MaintenanceWorkItem key={selected.id} id={selected.report.id} onChanged={() => void refresh()} />
               ) : selected.kind === "triage" ? (
                 <TriageWorkItem
                   incident={selected.incident}

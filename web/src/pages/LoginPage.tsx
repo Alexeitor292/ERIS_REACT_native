@@ -3,7 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 
 import AuthGateLoading from "../auth/AuthGateLoading";
 import { useAuth } from "../auth/AuthContext";
-import { landingPathFor } from "../utils/roleModel";
+import { hasMaintenanceDuties, landingPathFor } from "../utils/roleModel";
 import { useSignInSplash } from "../ui/SignInSplash";
 import { appConfig } from "../config";
 import { api } from "../api/client";
@@ -99,7 +99,7 @@ export default function LoginPage() {
 
   if (isInitializing || redirecting) return <AuthGateLoading />;
   // Signed in already: on to this person's own landing.
-  if (signedIn && me) return <Navigate to={me.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(me.roles)} replace />;
+  if (signedIn && me) return <Navigate to={landingPathFor(me.roles, hasMaintenanceDuties(me))} replace />;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -115,7 +115,7 @@ export default function LoginPage() {
       const account = await login(normalizedEmail, password);
       // The mobile app's opening animation, over the landing page as it loads.
       playSplash();
-      navigate(account.maintenance_districts?.length ? "/maintenance-work" : landingPathFor(account.roles), { replace: true });
+      navigate(landingPathFor(account.roles, hasMaintenanceDuties(account)), { replace: true });
     } catch (e: any) {
       setError(e?.message ?? "Sign in failed. Verify your credentials and try again.");
     } finally {

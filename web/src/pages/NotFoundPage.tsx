@@ -1,13 +1,13 @@
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
-import { landingPathFor } from "../utils/roleModel";
+import { hasMaintenanceDuties, landingPathFor } from "../utils/roleModel";
 
 export default function NotFoundPage() {
   const { me, signedIn } = useAuth();
   // Role-aware, for the same reason the refusal surface is: offering a read-only
   // viewer "Open submissions" points them at a page they may not have.
-  const landing = landingPathFor(me?.roles);
+  const landing = landingPathFor(me?.roles, hasMaintenanceDuties(me));
   const landingLabel = landing === "/my-work" ? "Go to My Work" : "Go to Incidents";
 
   return (

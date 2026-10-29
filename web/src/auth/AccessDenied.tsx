@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Lock } from "lucide-react";
 
 import { useAuth } from "./AuthContext";
-import { landingPathFor } from "../utils/roleModel";
+import { hasMaintenanceDuties, landingPathFor } from "../utils/roleModel";
 
 /**
  * The explicit refusal surface.
@@ -29,7 +29,7 @@ export function AccessDeniedNotice({
   landingTo?: string;
 }) {
   const { me } = useAuth();
-  const to = landingTo ?? landingPathFor(me?.roles);
+  const to = landingTo ?? landingPathFor(me?.roles, hasMaintenanceDuties(me));
   const label = landingLabel ?? (to === "/my-work" ? "Go to My Work" : "Go to Incidents");
   return (
     <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6 text-center">

@@ -32,8 +32,11 @@ and managers. On smaller screens it opens as a drawer so the chart stays readabl
   with maintenance handling; only the final step can refer to GeoTech.
 - Optionally let reviewers ask the reporter for more information.
 
-The **Maintenance Work** page and the mobile **Maintenance** tab show readable
-reports and a **Waiting on me** filter. Review notes are required. Unanimous
+Reports wait in **My Work**, the one queue every user has: each person sees
+the reports at their step, and can also show the other reports they may read.
+Administrators can show geotechnical work, maintenance work or both. Links to
+the former Maintenance Work page (`/maintenance-work?incident=N`, as in earlier
+notifications) open the report in My Work. Review notes are required. Unanimous
 decision makers must agree on the same outcome and Incident Group. A GeoTech
 referral uses the existing assessment creation, office routing and notification
 logic. Maintenance handling ends maintenance review without creating an

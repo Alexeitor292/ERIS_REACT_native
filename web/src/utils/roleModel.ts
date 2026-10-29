@@ -175,9 +175,21 @@ export function isAssessmentAuthor(roles: string[] | undefined): boolean {
   return isAdmin(roles) || hasRole(roles, ROLES.STAFF) || hasRole(roles, ROLES.SENIOR_SPECIALIST);
 }
 
-/** Roles that can have workflow steps waiting on them (My Work). */
-export function hasWorkQueue(roles: string[] | undefined): boolean {
-  return (roles ?? []).some((r) => WORK_QUEUE.has(r));
+/**
+ * Whether this account holds a duty in a district maintenance workflow. Those
+ * duties come from the district's workflow, not from a role, and their reports
+ * wait in My Work like everything else.
+ */
+export function hasMaintenanceDuties(account: { maintenance_districts?: unknown[] | null } | null | undefined): boolean {
+  return (account?.maintenance_districts?.length ?? 0) > 0;
+}
+
+/**
+ * Who can have workflow steps waiting on them (My Work): the roles below, and
+ * anyone with district maintenance duties.
+ */
+export function hasWorkQueue(roles: string[] | undefined, maintenanceDuties = false): boolean {
+  return maintenanceDuties || (roles ?? []).some((r) => WORK_QUEUE.has(r));
 }
 
 /**
@@ -185,8 +197,8 @@ export function hasWorkQueue(roles: string[] | undefined): boolean {
  * sends it. A guest has no queue and no Home, so their landing is the record
  * they came for (org model design §8).
  */
-export function landingPathFor(roles: string[] | undefined): string {
-  return hasWorkQueue(roles) ? "/my-work" : "/incidents";
+export function landingPathFor(roles: string[] | undefined, maintenanceDuties = false): string {
+  return hasWorkQueue(roles, maintenanceDuties) ? "/my-work" : "/incidents";
 }
 
 /**
