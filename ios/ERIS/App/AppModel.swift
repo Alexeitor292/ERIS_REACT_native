@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
     private(set) var offline: OfflineSync?
     /// Highway reference data for finding post miles without a connection.
     let roads = RoadData()
+    /// ArcGIS key and license, from ERIS.
+    let maps = MapSetup()
     private var foreground: NSObjectProtocol?
 
     let auth: AuthService
@@ -81,6 +83,7 @@ final class AppModel: ObservableObject {
             if isDemo { OfflineStore(directory: OfflineSync.folder(for: me.id)).wipe() }
             offline = OfflineSync(api: api, me: me)
         }
+        if let store = offline?.store { Task { await maps.prepare(api: api, store: store) } }
         phase = .signedIn(me)
         // Reporters (by role or district duty) and form authors find post miles with it; viewers are refused by the server.
         if !isDemo && (!RoleModel.isPublicOnly(me.roles) || me.reportsForMaintenance) {

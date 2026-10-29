@@ -25,6 +25,7 @@
 		74DFDD6D0707CC1ED7EE68AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */; };
 		75EAC41924E978AFD6FA8540 /* MemoEditor.html in Resources */ = {isa = PBXBuildFile; fileRef = 3A0581E3CF08485CC2E52F5B /* MemoEditor.html */; };
 		7E0DE5A23DD0C9E77EE2F077 /* ScreenTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */; };
+		88DC3B60EE23973EF8C9457A /* MapViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 827616E660C0B94B84C77CCF /* MapViews.swift */; };
 		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
 		959ABA9F639D72957F0414B6 /* ActionsStepViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B2E66F767C917B799CEE40A /* ActionsStepViews.swift */; };
@@ -35,6 +36,7 @@
 		A9F95ECE84F3EC9F938EDAD8 /* FormPresenceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576704982A623A2F1D8DFF28 /* FormPresenceSession.swift */; };
 		AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */ = {isa = PBXBuildFile; productRef = C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */; };
 		AD7DD33F31277AFCC3D2C491 /* RoadData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92AA8EDC99BC32A3CF3C4C80 /* RoadData.swift */; };
+		BEB3ED316DFDC07182189AFD /* ArcGIS in Frameworks */ = {isa = PBXBuildFile; productRef = 8DBC821D9E6241913D8CF616 /* ArcGIS */; };
 		D0DE8754749DC291E96E08CE /* MyWorkViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
 		E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C79A78C23480075CFA148688 /* SketchpadViews.swift */; };
@@ -67,6 +69,7 @@
 		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
 		78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentViews.swift; sourceTree = "<group>"; };
 		8179064C0312B2FDA75A3216 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		827616E660C0B94B84C77CCF /* MapViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapViews.swift; sourceTree = "<group>"; };
 		8FB17402AE2FC47CD9018576 /* FormCollabViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormCollabViews.swift; sourceTree = "<group>"; };
 		90C1617C9169B704B9433F21 /* DemoWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWork.swift; sourceTree = "<group>"; };
 		92AA8EDC99BC32A3CF3C4C80 /* RoadData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadData.swift; sourceTree = "<group>"; };
@@ -96,6 +99,7 @@
 			files = (
 				AAF5000252B34910BD5FC154 /* ERISKit in Frameworks */,
 				59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */,
+				BEB3ED316DFDC07182189AFD /* ArcGIS in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -175,6 +179,7 @@
 				6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */,
 				AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
+				827616E660C0B94B84C77CCF /* MapViews.swift */,
 				6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */,
 				FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */,
 				EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */,
@@ -243,6 +248,7 @@
 			packageProductDependencies = (
 				C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */,
 				64D9E0837A5828840AA493A6 /* MSAL */,
+				8DBC821D9E6241913D8CF616 /* ArcGIS */,
 			);
 			productName = ERIS;
 			productReference = FDA966222712234613820962 /* ERIS.app */;
@@ -276,6 +282,7 @@
 			mainGroup = 5EF800605951421C4C5EE35C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				6B45AEBE0EE480C1959B5318 /* XCRemoteSwiftPackageReference "arcgis-maps-sdk-swift" */,
 				D1BEB79AFB31B42D07585D5F /* XCRemoteSwiftPackageReference "microsoft-authentication-library-for-objc" */,
 				4F417B9CD78D4EF9D4D546D8 /* XCLocalSwiftPackageReference "ERISKit" */,
 			);
@@ -324,6 +331,7 @@
 				903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */,
 				19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */,
 				FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */,
+				88DC3B60EE23973EF8C9457A /* MapViews.swift in Sources */,
 				2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */,
 				1289FEB61399B9FC12257709 /* MeasurementDiagramViews.swift in Sources */,
 				1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */,
@@ -594,6 +602,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		6B45AEBE0EE480C1959B5318 /* XCRemoteSwiftPackageReference "arcgis-maps-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Esri/arcgis-maps-sdk-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 200.8.3;
+			};
+		};
 		D1BEB79AFB31B42D07585D5F /* XCRemoteSwiftPackageReference "microsoft-authentication-library-for-objc" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/AzureAD/microsoft-authentication-library-for-objc";
@@ -609,6 +625,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D1BEB79AFB31B42D07585D5F /* XCRemoteSwiftPackageReference "microsoft-authentication-library-for-objc" */;
 			productName = MSAL;
+		};
+		8DBC821D9E6241913D8CF616 /* ArcGIS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6B45AEBE0EE480C1959B5318 /* XCRemoteSwiftPackageReference "arcgis-maps-sdk-swift" */;
+			productName = ArcGIS;
 		};
 		C4AF9C9D663BD5B8CA52C5F4 /* ERISKit */ = {
 			isa = XCSwiftPackageProductDependency;

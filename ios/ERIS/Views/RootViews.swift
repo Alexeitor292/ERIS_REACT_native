@@ -23,7 +23,7 @@ struct RootView: View {
                         .foregroundStyle(.black)
                 }
                 if let offline = model.offline {
-                    MainTabView(me: me).environmentObject(offline).environmentObject(model.roads)
+                    MainTabView(me: me).environmentObject(offline).environmentObject(model.roads).environmentObject(model.maps)
                 }
             }
         }

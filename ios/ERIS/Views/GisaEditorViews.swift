@@ -795,6 +795,7 @@ struct GisaHeaderSections: View {
     @EnvironmentObject private var roads: RoadData
     @State private var locating = false
     @State private var locationNote: String?
+    @State private var editingAreas = false
     private let location = LocationProvider()
     @Binding var editor: GisaEditor
     let canEdit: Bool
@@ -884,13 +885,18 @@ struct GisaHeaderSections: View {
                 } else {
                     Text("Awaiting location…").foregroundStyle(.secondary)
                 }
-                Text("Geometry: \(form["geometry_json"].trimmingCharacters(in: .whitespaces).isEmpty ? "None" : "Available")")
-                    .font(.caption).foregroundStyle(.secondary)
-                // The Expo app opens its ArcGIS map editor from this preview; that
-                // and the Site Photo Map come with the ArcGIS Maps SDK port.
-                Text("The map editor (pin and polygon) is not on iPhone yet. Set the location with Lat/Lon or Northing/Easting below.")
+                Text("Site areas: \(SiteAreas.summary(SiteAreas.areas(fromText: form["geometry_json"])))")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Button(canEdit ? "Draw Site Areas on Map" : "View Site Areas on Map") { editingAreas = true }
+                .accessibilityIdentifier("site-areas-map")
+                // Presented from the button: from a List section it does not open.
+                .fullScreenCover(isPresented: $editingAreas) {
+                    SiteAreaEditor(latitude: Double(form["latitude"]), longitude: Double(form["longitude"]),
+                                   initial: SiteAreas.areas(fromText: form["geometry_json"]), editable: canEdit) { areas in
+                        editor.set("geometry_json", SiteAreas.text(areas))
+                    }
+                }
             if canEdit {
                 Button(locating ? "Locating…" : "Use My Location") { Task { await useMyLocation() } }
                     .disabled(locating)

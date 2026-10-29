@@ -817,6 +817,34 @@ final class ScreenTour: XCTestCase {
         snap("assigned-form-offline")
     }
 
+    func testSiteAreasAreDrawnOnTheMap() {
+        launch()
+        openDemoForm(step: "Header")
+        tap(reveal(app.buttons["site-areas-map"]))
+        let status = app.staticTexts["site-area-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 20))
+        XCTAssertEqual(status.label, "No areas drawn")
+        tap(app.buttons["Add Area"])
+        let map = app.otherElements.firstMatch
+        for (x, y) in [(0.35, 0.40), (0.65, 0.40), (0.65, 0.60), (0.35, 0.60)] {
+            app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y)).tap()
+            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "corner")], timeout: 0.6)
+        }
+        _ = map
+        snap("site-area-drawing")
+        tap(app.buttons["Done"])
+        XCTAssertTrue(status.label.hasPrefix("1 area · "), status.label)
+        // An area the size of a site, not a continent.
+        let squareMetres = status.label.components(separatedBy: " · ")[1].replacingOccurrences(of: " m²", with: "")
+            .replacingOccurrences(of: ",", with: "")
+        XCTAssertLessThan(Double(squareMetres) ?? .infinity, 1_000_000, status.label)
+        snap("site-area-drawn")
+        tap(app.navigationBars["Site Areas"].buttons["Save"])
+        XCTAssertTrue(text(containing: "Site areas: 1 area").waitForExistence(timeout: 10))
+        tap(app.navigationBars.buttons["Save"])
+        dismissAlert("Saved")
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         XCTAssertEqual(tabNames(), ["My Work", "Forms", "Notifications", "Account"])
