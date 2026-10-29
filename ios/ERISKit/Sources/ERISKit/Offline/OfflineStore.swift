@@ -86,20 +86,24 @@ public final class OfflineStore: @unchecked Sendable {
 
     /// What is waiting to be sent, for the whole iPhone.
     public var waiting: Waiting {
-        Waiting(edits: allEdits(), uploads: uploads(), incidents: queuedIncidents())
+        Waiting(edits: allEdits(), uploads: uploads(), incidents: queuedIncidents(), corrections: corrections())
     }
 
     public struct Waiting: Equatable, Sendable {
         public let edits: [FormEdits]
         public let uploads: [PendingUpload]
         public var incidents: [QueuedIncident] = []
+        /// Photo corrections made on this iPhone.
+        public var corrections: [QueuedCorrection] = []
 
         /// Changes saved to send (or waiting on this person); changes still being
         /// typed are kept on the iPhone but are not waiting to be sent.
         public var toSend: [FormEdits] { edits.filter { $0.state != .editing } }
 
-        public var isEmpty: Bool { toSend.isEmpty && uploads.isEmpty && incidents.isEmpty }
-        public var forms: Set<Int> { Set(edits.map(\.submissionId)).union(uploads.map(\.submissionId)) }
+        public var isEmpty: Bool { toSend.isEmpty && uploads.isEmpty && incidents.isEmpty && corrections.isEmpty }
+        public var forms: Set<Int> {
+            Set(edits.map(\.submissionId)).union(uploads.map(\.submissionId)).union(corrections.map(\.submissionId))
+        }
 
         /// "1 report, 2 forms with changes and 3 files waiting to send".
         public var summary: String? {
@@ -108,6 +112,9 @@ public final class OfflineStore: @unchecked Sendable {
             let edits = toSend
             if !edits.isEmpty { parts.append("\(edits.count) \(edits.count == 1 ? "form" : "forms") with changes") }
             if !uploads.isEmpty { parts.append("\(uploads.count) \(uploads.count == 1 ? "file" : "files")") }
+            if !corrections.isEmpty {
+                parts.append("\(corrections.count) photo \(corrections.count == 1 ? "correction" : "corrections")")
+            }
             guard !parts.isEmpty else { return nil }
             let joined = parts.count == 1 ? parts[0] : parts.dropLast().joined(separator: ", ") + " and " + parts.last!
             return joined + " waiting to send"

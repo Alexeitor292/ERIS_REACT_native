@@ -91,6 +91,7 @@ public struct AssignedWork: Sendable {
                 assignedForms.insert(formId)
                 _ = try? await api.kept("/submissions/\(formId)/site-history", preservingKeys: true, store: store,
                                         name: "forms/\(formId)-site-history", as: SiteHistory.self)
+                _ = try? await submissions.photoMap(formId, keepingIn: store)
                 // The site in 3D, for the measurements and cross-sections offline.
                 switch await AssignedTerrain(api: api, store: store, download: download).keep(formId) {
                 case .downloaded: summary.terrain += 1

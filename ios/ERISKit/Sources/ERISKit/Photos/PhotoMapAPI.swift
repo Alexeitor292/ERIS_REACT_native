@@ -18,6 +18,20 @@ public struct MappedPhoto: Decodable, Equatable, Identifiable, Sendable {
         public let locationOverride: Location?
         public let headingOverrideDeg: Double?
         public let correctedAt: String?
+        /// Made on this iPhone and not yet sent (never set by ERIS).
+        public var waitingToSend: Bool?
+    }
+
+    /// What the camera recorded, before any correction.
+    public struct Captured: Decodable, Equatable, Sendable {
+        public let latitude: Double?
+        public let longitude: Double?
+        public let horizontalAccuracyM: Double?
+        public let cameraHeadingDeg: Double?
+        public let cameraHeadingAccuracyCode: Int?
+        public let headingReference: String?
+        public let locationSource: String?
+        public let headingSource: String?
     }
 
     public let attachmentId: Int
@@ -36,6 +50,7 @@ public struct MappedPhoto: Decodable, Equatable, Identifiable, Sendable {
     public let locationSource: String?
     public let headingSource: String?
     public let correction: Correction?
+    public let capturedMetadata: Captured?
     /// A presigned link, valid about 15 minutes; fetched without the ERIS token.
     public let downloadUrl: String?
 
@@ -87,8 +102,8 @@ public struct PhotoMap: Decodable, Equatable, Sendable {
 
 /// A correction is the whole corrected state: a location, a direction, or
 /// both; nil for either keeps (or restores) what the camera recorded.
-public struct PhotoCorrection: Encodable, Equatable, Sendable {
-    public struct Location: Encodable, Equatable, Sendable {
+public struct PhotoCorrection: Codable, Equatable, Sendable {
+    public struct Location: Codable, Equatable, Sendable {
         public let latitude: Double
         public let longitude: Double
 
@@ -112,6 +127,13 @@ public struct PhotoCorrection: Encodable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case clientCorrectionUuid = "client_correction_uuid", locationOverride = "location_override"
         case headingOverrideDeg = "heading_override_deg"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        clientCorrectionUuid = try container.decode(String.self, forKey: .clientCorrectionUuid)
+        locationOverride = try container.decodeIfPresent(Location.self, forKey: .locationOverride)
+        headingOverrideDeg = try container.decodeIfPresent(Double.self, forKey: .headingOverrideDeg)
     }
 
     /// Both keys are always sent: null is the instruction to use the camera's value.

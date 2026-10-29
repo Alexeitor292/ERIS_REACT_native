@@ -183,10 +183,11 @@ enum LibraryPhoto {
 // MARK: - One photo
 
 /// A photo with where and which way it was taken, and, for those allowed,
-/// a correction of either. Dragging the photo on a map comes with the ArcGIS
-/// Site Photo Map; here the values are typed.
+/// a correction of either (typed here; the Site Photo Map moves it on a map).
+/// Opens from what the iPhone kept when ERIS can't be reached.
 struct PhotoDetailView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
     @Environment(\.dismiss) private var dismiss
     let submissionId: Int
     let attachment: AttachmentRef
@@ -198,12 +199,16 @@ struct PhotoDetailView: View {
         NavigationStack {
             List {
                 Section {
-                    AsyncImage(url: photo?.downloadUrl.flatMap(URL.init(string:))) { image in
-                        image.resizable().scaledToFit()
-                    } placeholder: {
-                        Color.gray.opacity(0.15).aspectRatio(4 / 3, contentMode: .fit).overlay(ProgressView())
+                    if let kept = offline.store.file(attachment.id).flatMap(UIImage.init(data:)) {
+                        Image(uiImage: kept).resizable().scaledToFit().listRowInsets(EdgeInsets())
+                    } else {
+                        AsyncImage(url: photo?.downloadUrl.flatMap(URL.init(string:))) { image in
+                            image.resizable().scaledToFit()
+                        } placeholder: {
+                            Color.gray.opacity(0.15).aspectRatio(4 / 3, contentMode: .fit).overlay(ProgressView())
+                        }
+                        .listRowInsets(EdgeInsets())
                     }
-                    .listRowInsets(EdgeInsets())
                 }
                 if let photo {
                     Section("Where it was taken") {
@@ -225,6 +230,7 @@ struct PhotoDetailView: View {
                         if !photo.sourceText.isEmpty {
                             Text(photo.sourceText).font(.caption).foregroundStyle(.secondary)
                         }
+                        CorrectionWaitingNote(submissionId: submissionId, photo: photo) { Task { await load() } }
                     }
                     if photo.canEditCorrection == true {
                         Section {
@@ -241,6 +247,8 @@ struct PhotoDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Done") { dismiss() } }
             .task { await load() }
+            // A correction sent (or refused) meanwhile shows as ERIS now has it.
+            .onChange(of: offline.waiting.corrections) { Task { await load() } }
             .sheet(isPresented: $correcting) {
                 if let photo {
                     PhotoCorrectionForm(submissionId: submissionId, photo: photo) { Task { await load() } }
@@ -251,7 +259,7 @@ struct PhotoDetailView: View {
 
     private func load() async {
         do {
-            let map = try await SubmissionsAPI(api: model.api).photoMap(submissionId)
+            let map = try await SubmissionsAPI(api: model.api).photoMap(submissionId, keepingIn: offline.store).value
             photo = map.photos.first { $0.attachmentId == attachment.id }
             error = photo == nil ? "This photo is not on the form's photo map." : nil
         } catch {
@@ -260,9 +268,42 @@ struct PhotoDetailView: View {
     }
 }
 
+/// A correction of this photo made on the iPhone and not yet on ERIS: waiting
+/// to send, or refused (with why, and a way to drop it).
+struct CorrectionWaitingNote: View {
+    @EnvironmentObject private var offline: OfflineSync
+    let submissionId: Int
+    let photo: MappedPhoto
+    let changed: () -> Void
+
+    var body: some View {
+        let refused = offline.waiting.corrections.first {
+            $0.submissionId == submissionId && $0.attachmentId == photo.attachmentId && $0.problem != nil
+        }
+        if let refused, let problem = refused.problem {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Correction not saved: \(problem)", systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.red)
+                Button("Discard the Correction") {
+                    offline.store.removeCorrection(refused)
+                    offline.refresh()
+                    changed()
+                }
+                .font(.caption.bold())
+                .buttonStyle(.borderless)
+            }
+        } else if photo.correction?.waitingToSend == true {
+            Label("Correction kept on this iPhone; sent when ERIS can be reached", systemImage: "arrow.up.circle")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("correction-waiting")
+        }
+    }
+}
+
 /// Typed corrections of a photo's location and direction.
 struct PhotoCorrectionForm: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
     @Environment(\.dismiss) private var dismiss
     let submissionId: Int
     let photo: MappedPhoto
@@ -333,11 +374,13 @@ struct PhotoCorrectionForm: View {
         saving = true
         defer { saving = false }
         do {
-            try await SubmissionsAPI(api: model.api).correctPhoto(
+            // Without a connection it is kept and sent with the rest of the waiting work.
+            _ = try await PhotoCorrections(api: model.api, store: offline.store).save(
                 submissionId, attachmentId: photo.attachmentId,
                 // Whole degrees, as shown; 360 is north again.
                 PhotoCorrection(locationOverride: location,
                                 headingOverrideDeg: correctDirection ? heading.rounded().truncatingRemainder(dividingBy: 360) : nil))
+            offline.refresh()
             saved()
             dismiss()
         } catch {

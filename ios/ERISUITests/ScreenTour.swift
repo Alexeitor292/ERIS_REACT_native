@@ -877,6 +877,35 @@ final class ScreenTour: XCTestCase {
         tap(app.navigationBars["Site in 3D"].buttons["Done"])
     }
 
+    func testAPhotoCorrectedOfflineIsKeptAndSentWhenTheConnectionReturns() {
+        launch()
+        openDemoForm(step: "Body")
+        // Opened once online, the photo is kept with its place on the photo map.
+        tap(reveal(app.buttons["Photo field-photo-sample.jpg"]))
+        XCTAssertTrue(text(containing: "Facing 135° (SE)").waitForExistence(timeout: 10))
+        tap(app.buttons["Done"])
+
+        setConnection(false)
+        tap(reveal(app.buttons["Photo field-photo-sample.jpg"]))
+        XCTAssertTrue(text(containing: "Facing 135° (SE)").waitForExistence(timeout: 10), "opens from what the iPhone kept")
+        tap(app.buttons["Correct Location or Direction"])
+        flip(app.switches["Correct the direction"])
+        reveal(app.sliders["Direction"]).adjust(toNormalizedSliderPosition: 0.25)
+        tap(app.navigationBars["Correct Photo"].buttons["Save"])
+        XCTAssertTrue(app.staticTexts["correction-waiting"].waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "direction corrected by hand").exists, "shown as made while it waits")
+        snap("photo-correction-waiting")
+        tap(app.buttons["Done"])
+
+        setConnection(true)
+        tap(reveal(app.buttons["Photo field-photo-sample.jpg"]))
+        XCTAssertTrue(text(containing: "direction corrected by hand").waitForExistence(timeout: 10))
+        let sent = NSPredicate(format: "exists == false")
+        expectation(for: sent, evaluatedWith: app.staticTexts["correction-waiting"])
+        waitForExpectations(timeout: 90)
+        tap(app.buttons["Done"])
+    }
+
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
         XCTAssertEqual(tabNames(), ["My Work", "Forms", "Notifications", "Account"])

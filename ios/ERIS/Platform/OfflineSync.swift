@@ -124,7 +124,10 @@ final class OfflineSync: ObservableObject {
         defer { sending = false }
         let sync = FormSync(api: api, store: store), reports = IncidentSync(api: api, store: store, me: userId)
         // Reports first: they are the newest news from the field.
-        if await reports.sendAll() != .unreachable { _ = await sync.sendAll(except: openForm) }
+        if await reports.sendAll() != .unreachable {
+            let forms = await sync.sendAll(except: openForm)
+            if !forms.values.contains(.unreachable) { _ = await PhotoCorrections(api: api, store: store).sendAll() }
+        }
         refresh()
     }
 

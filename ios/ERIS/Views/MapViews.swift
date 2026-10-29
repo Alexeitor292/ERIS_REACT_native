@@ -314,6 +314,7 @@ final class SiteAreaEditorModel: ObservableObject {
 /// on record beside the original values, as on the web.
 struct SitePhotoMap: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var offline: OfflineSync
     @EnvironmentObject private var maps: MapSetup
     @Environment(\.dismiss) private var dismiss
     let submissionId: Int
@@ -333,7 +334,8 @@ struct SitePhotoMap: View {
                         Task { await photos.select(at: screenPoint, proxy: proxy) }
                     }
                     .task {
-                        await photos.start(submissionId: submissionId, api: model.api, latitude: latitude, longitude: longitude,
+                        await photos.start(submissionId: submissionId, api: model.api, store: offline.store,
+                                           latitude: latitude, longitude: longitude,
                                            areas: areas, offline: { await maps.offlineMap() })
                     }
                     .overlay(alignment: .top) {
@@ -347,6 +349,7 @@ struct SitePhotoMap: View {
                     .overlay(alignment: .bottom) { card.padding() }
             }
             .ignoresSafeArea(edges: .bottom)
+            .onChange(of: offline.waiting.corrections) { Task { await photos.reload(api: model.api) } }
             .navigationTitle("Site Photo Map")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -377,6 +380,7 @@ struct SitePhotoMap: View {
                         .accessibilityLabel("Close")
                 }
                 if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
+                CorrectionWaitingNote(submissionId: submissionId, photo: photo) { Task { await photos.reload(api: model.api) } }
                 if photo.canEditCorrection == true {
                     HStack {
                         if photos.moving {
@@ -401,10 +405,12 @@ struct SitePhotoMap: View {
     private func place(_ photo: MappedPhoto) async {
         guard let point = photos.finishMove() else { return }
         do {
-            try await SubmissionsAPI(api: model.api).correctPhoto(
+            // Without a connection it is kept and sent with the rest of the waiting work.
+            _ = try await PhotoCorrections(api: model.api, store: offline.store).save(
                 submissionId, attachmentId: photo.attachmentId,
                 PhotoCorrection(locationOverride: .init(latitude: point.y, longitude: point.x),
                                 headingOverrideDeg: photo.correction?.headingOverridden == true ? photo.correction?.headingOverrideDeg : nil))
+            offline.refresh()
             problem = nil
             await photos.reload(api: model.api)
         } catch {
@@ -423,7 +429,10 @@ final class SitePhotoMapModel: ObservableObject {
     @Published private(set) var selected: MappedPhoto?
     @Published private(set) var moving = false
     @Published private(set) var problem: String?
+    /// When the photo map shown was kept, when ERIS can't be reached.
+    @Published private(set) var keptAt: Date?
     private var submissionId = 0
+    private var store: OfflineStore?
 
     var status: String {
         if let problem { return problem }
@@ -431,11 +440,13 @@ final class SitePhotoMapModel: ObservableObject {
         let placed = photoMap.photos.filter { $0.latitude != nil && $0.longitude != nil }.count
         let unplaced = photoMap.photos.count - placed
         return "\(placed) \(placed == 1 ? "photo" : "photos") on the map\(unplaced > 0 ? " · \(unplaced) without a location" : "")"
+            + (keptAt != nil ? " · kept on this iPhone" : "")
     }
 
-    func start(submissionId: Int, api: APIClient, latitude: Double?, longitude: Double?, areas: [SiteAreas.Area],
-               offline: () async -> Map?) async {
+    func start(submissionId: Int, api: APIClient, store: OfflineStore, latitude: Double?, longitude: Double?,
+               areas: [SiteAreas.Area], offline: () async -> Map?) async {
         self.submissionId = submissionId
+        self.store = store
         let red = UIColor(red: 0.84, green: 0.15, blue: 0.16, alpha: 1)
         contextOverlay.addGraphics(areas.compactMap(SiteAreaEditorModel.polygon).map {
             Graphic(geometry: $0, symbol: SimpleFillSymbol(style: .solid, color: red.withAlphaComponent(0.1),
@@ -467,10 +478,17 @@ final class SitePhotoMapModel: ObservableObject {
 
     func reload(api: APIClient) async {
         do {
-            photoMap = try await SubmissionsAPI(api: api).photoMap(submissionId)
+            let submissions = SubmissionsAPI(api: api)
+            if let store {
+                let kept = try await submissions.photoMap(submissionId, keepingIn: store)
+                photoMap = kept.value
+                keptAt = kept.keptAt
+            } else {
+                photoMap = try await submissions.photoMap(submissionId)
+            }
             problem = nil
         } catch let error as APIError where error.isUnreachable {
-            problem = "ERIS can't be reached; the photo map needs a connection."
+            problem = "ERIS can't be reached, and this iPhone has no copy of the photo map yet."
         } catch {
             problem = "The photo map could not be loaded."
         }
