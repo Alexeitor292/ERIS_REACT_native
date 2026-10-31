@@ -136,9 +136,17 @@ server-side values; never reuse them as the web's `VITE_ARCGIS_API_KEY`.
 | --- | --- | --- |
 | `ARCGIS_RUNTIME_ENABLED` | `false` | Turns the runtime configuration on. The Esri offline-scene builder also requires it. |
 | `ARCGIS_API_KEY` | unset | ArcGIS API key for the native runtime. |
-| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. |
+| `ARCGIS_LICENSE_KEY` / `ARCGIS_LICENSE_EXPIRES_AT` | unset | Runtime license string and its expiry. Production: the ArcGIS Maps SDK 200.x license string (a 100.x Runtime license does not license the iOS app's SDK). Staging: leave unset. |
 | `ARCGIS_MMPK_URL` | unset | URL of an offline mobile map package, if one is published. |
 | `ARCGIS_CONFIG_OFFLINE_TTL_HOURS` | `168` | How long the phone may use a cached configuration while offline. |
+
+The iOS app is built per deployment (`ios/project.yml`): the **ERIS Staging**
+scheme talks to the staging server and runs the maps under ArcGIS developer
+licensing, ignoring any license the server sends; the **ERIS** scheme's archive
+(Release) is the production build, which applies the license from
+`ARCGIS_LICENSE_KEY`. If the production server sends none, or the SDK refuses
+or finds it expired, the production app says so on its maps and on the Account
+screen (which also shows the build and the maps' license level).
 
 ### Postmile lookup (server side)
 

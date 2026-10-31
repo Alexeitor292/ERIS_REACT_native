@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>ERIS</string>
+	<string>$(ERIS_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,6 +27,9 @@
 	<!-- The ERIS API, from the ERIS_API_BASE_URL build setting. -->
 	<key>ERISAPIBaseURL</key>
 	<string>$(ERIS_API_BASE_URL)</string>
+	<!-- staging or production, from the ERIS_DEPLOYMENT build setting: how the maps are licensed. -->
+	<key>ERISDeployment</key>
+	<string>$(ERIS_DEPLOYMENT)</string>
 	<!-- MSAL: Microsoft Authenticator returns to msauth.<bundle id>://auth. -->
 	<key>CFBundleURLTypes</key>
 	<array>

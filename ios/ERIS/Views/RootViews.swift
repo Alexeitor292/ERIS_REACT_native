@@ -153,6 +153,7 @@ struct MainTabView: View {
 struct AccountView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var offline: OfflineSync
+    @EnvironmentObject private var maps: MapSetup
     let me: Me
     @State private var confirmingSignOut = false
 
@@ -172,6 +173,10 @@ struct AccountView: View {
                 Text(model.api.baseURL.absoluteString)
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
+                LabeledContent("Build", value: MapSetup.deployment == .staging ? "Staging" : "Production")
+                if let licensing = maps.licenseSummary {
+                    LabeledContent("Maps", value: licensing).accessibilityIdentifier("maps-licensing")
+                }
             }
             if !RoleModel.isPublicOnly(me.roles) || me.reportsForMaintenance { RoadDataSection() }
             #if DEBUG

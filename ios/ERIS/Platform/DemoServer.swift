@@ -146,6 +146,11 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         switch (method, parts) {
         case ("GET", ["auth", "me"]):
             return (200, DemoData.me(roles: roles))
+        case ("GET", ["arcgis", "runtime-config"]):
+            // A license the demo (a staging build) leaves unused: its maps run under developer licensing.
+            return (200, ["runtime_enabled": false, "api_key": NSNull(), "license_key": "runtimelite,1000,demo-only",
+                          "license_expires_at": NSNull(), "mmpk_url": NSNull(), "offline_ttl_hours": 168,
+                          "issued_at": ISO8601DateFormatter().string(from: Date()), "requested_by_user_id": 1])
         case ("GET", ["auth", "config"]):
             return (200, ["local_login_enabled": false, "entra_enabled": true, "entra_mobile": NSNull()])
         case ("POST", ["auth", "logout"]), ("POST", ["notifications", "devices", "unregister"]):

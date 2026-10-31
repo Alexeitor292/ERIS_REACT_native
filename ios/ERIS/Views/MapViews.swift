@@ -4,26 +4,47 @@ import Network
 import SwiftUI
 
 /// ArcGIS for the app: the API key and license from ERIS (never built in),
-/// applied once, kept for maps offline within the server's window.
+/// applied once, kept for maps offline within the server's window. Staging
+/// builds use developer licensing; production builds use the license ERIS
+/// serves and say so on the maps when it is missing or refused.
 @MainActor
 final class MapSetup: ObservableObject {
     @Published private(set) var ready = false
     /// A published offline basemap (.mmpk) on this iPhone, if any.
     @Published private(set) var offlineBasemap: URL?
+    /// Why the maps are not licensed as this build needs, if they are not.
+    @Published private(set) var licenseProblem: String?
+    /// The maps' licensing, for the Account screen; nil until ERIS has answered once.
+    @Published private(set) var licenseSummary: String?
     private var applied = false
+
+    /// `ERISDeployment` in Info.plist, from the `ERIS_DEPLOYMENT` build setting.
+    nonisolated static var deployment: Deployment {
+        Deployment(Bundle.main.object(forInfoDictionaryKey: "ERISDeployment") as? String)
+    }
 
     func prepare(api: APIClient, store: OfflineStore) async {
         guard !applied else { return }
-        guard let config = try? await api.arcGISConfig(keepingIn: store), config.runtimeEnabled else {
+        guard let config = try? await api.arcGISConfig(keepingIn: store) else {
             ready = true  // Maps still open; Esri basemaps need the key, so they may stay blank.
             return
         }
-        if let key = config.apiKey, !key.isEmpty, let apiKey = APIKey(key) { ArcGISEnvironment.apiKey = apiKey }
-        if let license = config.licenseKey, !license.isEmpty, let licenseKey = LicenseKey(license) {
-            _ = try? ArcGISEnvironment.setLicense(with: licenseKey)
-        }
         applied = true
+        let licensing = MapsLicensing(Self.deployment, config: config)
+        var outcome: MapsLicensing.Outcome?
+        if case .license(let string) = licensing, let key = LicenseKey(string),
+           let result = try? ArcGISEnvironment.setLicense(with: key) {
+            switch result.licenseStatus {
+            case .valid: outcome = .valid
+            case .expired: outcome = .expired
+            default: outcome = .invalid
+            }
+        }
+        licenseProblem = licensing.problem(outcome)
+        licenseSummary = licensing.summary(outcome, level: outcome == .valid ? "\(ArcGISEnvironment.license.level)".capitalized : nil)
         ready = true
+        guard config.runtimeEnabled else { return }
+        if let key = config.apiKey, !key.isEmpty, let apiKey = APIKey(key) { ArcGISEnvironment.apiKey = apiKey }
         offlineBasemap = Self.keptPackage()
         if let address = config.mmpkUrl, let url = URL(string: address) { await keepPackage(from: url) }
     }
@@ -83,6 +104,20 @@ final class MapSetup: ObservableObject {
     }
 }
 
+/// On a map, when this build's maps are not licensed as they must be.
+struct MapsLicenseNote: View {
+    @EnvironmentObject private var maps: MapSetup
+
+    var body: some View {
+        if let problem = maps.licenseProblem {
+            Label(problem, systemImage: "exclamationmark.triangle")
+                .font(.caption).padding(8)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityIdentifier("maps-license-problem")
+        }
+    }
+}
+
 /// The technical form's site areas on a map: draw, reshape or remove them
 /// around the site's location, stored in `geometry_json` exactly as the web
 /// stores them (one Polygon, or a MultiPolygon for several).
@@ -119,6 +154,7 @@ struct SiteAreaEditor: View {
                                     .font(.caption).padding(8)
                                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
                             }
+                            MapsLicenseNote()
                         }
                         .padding(.top, 8).padding(.horizontal)
                     }
@@ -339,12 +375,15 @@ struct SitePhotoMap: View {
                                            areas: areas, offline: { await maps.offlineMap() })
                     }
                     .overlay(alignment: .top) {
-                        Text(photos.status)
-                            .font(.footnote.weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(.thinMaterial, in: Capsule())
-                            .padding(.top, 8)
-                            .accessibilityIdentifier("photo-map-status")
+                        VStack(spacing: 6) {
+                            Text(photos.status)
+                                .font(.footnote.weight(.semibold))
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(.thinMaterial, in: Capsule())
+                                .accessibilityIdentifier("photo-map-status")
+                            MapsLicenseNote()
+                        }
+                        .padding(.top, 8).padding(.horizontal)
                     }
                     .overlay(alignment: .bottom) { card.padding() }
             }

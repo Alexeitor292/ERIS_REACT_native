@@ -762,6 +762,16 @@ final class ScreenTour: XCTestCase {
         snap("offline-sent")
     }
 
+    func testAStagingBuildRunsTheMapsUnderDeveloperLicensing() {
+        launch(roles: "STAFF")
+        tap(app.tabBars.buttons["Account"])
+        XCTAssertTrue(text(containing: "Staging").waitForExistence(timeout: 10))
+        let licensing = app.descendants(matching: .any)["maps-licensing"]
+        XCTAssertTrue(licensing.waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "Developer licensing (staging build)").exists, "the server's license is not used")
+        snap("account-maps-licensing")
+    }
+
     func testAReportMadeOfflineIsFiledWhenTheConnectionReturns() {
         launch(roles: "MAINTENANCE_CREW")
         tap(app.tabBars.buttons["Account"])

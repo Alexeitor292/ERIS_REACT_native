@@ -7,6 +7,15 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+# One build per deployment. Debug and Staging talk to the staging ERIS and run
+# the maps under ArcGIS developer licensing; Release is the Caltrans production
+# build, licensed with the ArcGIS Maps SDK 200.x license the production ERIS
+# serves (ARCGIS_LICENSE_KEY). Archive the "ERIS Staging" scheme for testers and
+# the "ERIS" scheme for production.
+configs:
+  Debug: debug
+  Staging: release
+  Release: release
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -42,14 +51,24 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: gov.ca.dot.eris
         INFOPLIST_FILE: ERIS/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
-        # The ERIS API this build talks to; set per environment before archiving.
-        ERIS_API_BASE_URL: https://eris-stage.example.gov/api
         CODE_SIGN_STYLE: Automatic
+        ERIS_DISPLAY_NAME: ERIS
+      # ERIS_API_BASE_URL: the ERIS API each build talks to (set the real hosts).
+      # ERIS_DEPLOYMENT: staging or production, which decides the maps' licensing.
       configs:
         Debug:
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Debug.entitlements
+          ERIS_API_BASE_URL: https://eris-stage.example.gov/api
+          ERIS_DEPLOYMENT: staging
+        Staging:
+          CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
+          ERIS_API_BASE_URL: https://eris-stage.example.gov/api
+          ERIS_DEPLOYMENT: staging
+          ERIS_DISPLAY_NAME: ERIS Staging
         Release:
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
+          ERIS_API_BASE_URL: https://eris.example.gov/api
+          ERIS_DEPLOYMENT: production
   # Drives Debug builds in demo mode (sample data, no sign-in) and saves
   # screenshots; see ERISUITests/ScreenTour.swift.
   ERISUITests:
@@ -78,3 +97,15 @@ schemes:
         - ERISUITests
     archive:
       config: Release
+  ERIS Staging:
+    build:
+      targets:
+        ERIS: all
+    run:
+      config: Staging
+    profile:
+      config: Staging
+    analyze:
+      config: Staging
+    archive:
+      config: Staging
