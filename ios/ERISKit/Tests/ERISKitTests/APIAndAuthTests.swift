@@ -205,6 +205,62 @@ final class AuthServiceTests: XCTestCase {
         XCTAssertEqual(provider.silentCalls, 0)
     }
 
+    private func passwordService(status: Int = 200) -> (AuthService, FakeTransport) {
+        let transport = FakeTransport { request in
+            switch request.url!.path {
+            case "/api/auth/login":
+                switch status {
+                case 200: return .init(status: 200, body: #"{"access_token": "eris-session", "token_type": "bearer", "expires_at": "2026-11-01T20:00:00Z"}"#)
+                case 404: return .init(status: 404, body: #"{"detail": "Password sign-in is disabled"}"#)
+                default: return .init(status: status, body: #"{"detail": "Invalid credentials"}"#)
+                }
+            case "/api/auth/me":
+                return request.value(forHTTPHeaderField: "Authorization") == "Bearer eris-session"
+                    ? .init(status: 200, body: meJSON) : .init(status: 401, body: "{}")
+            default: return .init(status: 200, body: "{}")
+            }
+        }
+        let api = APIClient(baseURL: base, store: MemorySessionStore(), transport: transport)
+        return (AuthService(api: api, provider: FakeProvider()), transport)
+    }
+
+    func testAPasswordSignInKeepsOnlyTheErisSessionAndNeverSendsTheTokenAnywhereElse() async throws {
+        let (auth, transport) = passwordService()
+        let me = try await auth.signIn(email: "  A@Dot.CA.gov ", password: " pass word ")
+        XCTAssertEqual(me.id, 7)
+        XCTAssertEqual(auth.api.store.load(), "eris-session")
+        let login = try XCTUnwrap(transport.requests.first { $0.url!.path == "/api/auth/login" })
+        XCTAssertNil(login.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertNil(login.url?.query, "nothing in the URL")
+        let body = try JSONSerialization.jsonObject(with: login.httpBody ?? Data()) as? [String: String]
+        XCTAssertEqual(body, ["email": "a@dot.ca.gov", "password": " pass word "], "the password is sent exactly as typed")
+    }
+
+    func testAWrongPasswordOrADisabledPasswordSignInIsReportedAndNothingIsKept() async {
+        for (status, expected) in [(401, AuthError.wrongPassword), (404, .passwordSignInDisabled)] {
+            let (auth, _) = passwordService(status: status)
+            do {
+                _ = try await auth.signIn(email: "a@dot.ca.gov", password: "x")
+                XCTFail("expected \(expected)")
+            } catch {
+                XCTAssertEqual(error as? AuthError, expected)
+            }
+            XCTAssertNil(auth.api.store.load())
+        }
+    }
+
+    func testOnlyAStagingBuildOffersAPasswordAndOnlyWhenTheServerAllowsIt() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let entraOnly = try decoder.decode(AuthConfig.self, from: Data(configJSON.utf8))
+        let rehearsal = try decoder.decode(AuthConfig.self, from: Data(#"{"local_login_enabled": true, "entra_enabled": false, "entra_mobile": null}"#.utf8))
+        XCTAssertTrue(SignInMethods(rehearsal, deployment: .staging).password)
+        XCTAssertFalse(SignInMethods(rehearsal, deployment: .staging).entra)
+        XCTAssertFalse(SignInMethods(rehearsal, deployment: .production).password, "production is Entra only")
+        XCTAssertFalse(SignInMethods(entraOnly, deployment: .staging).password)
+        XCTAssertTrue(SignInMethods(entraOnly, deployment: .production).entra)
+    }
+
     func testRestoreWithoutASessionDoesNotTouchTheNetwork() async {
         let (auth, transport, _) = makeService()
         let restored = await auth.restore()

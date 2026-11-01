@@ -12,6 +12,24 @@ public enum AuthError: Error, Equatable, Sendable {
     /// Silent sign-in is impossible; the person must sign in interactively.
     case interactionRequired
     case cancelled
+    /// The ERIS email or password was wrong (or the account has no password).
+    case wrongPassword
+    /// The server does not allow password sign-in.
+    case passwordSignInDisabled
+}
+
+/// The ways a build may sign in to a server. Entra when the server has the
+/// ERIS Mobile client; the ERIS email and password only in a staging build
+/// and only when the server allows it (the Campos Labs rehearsal, until
+/// Caltrans Entra is ready). A production build never offers a password.
+public struct SignInMethods: Equatable, Sendable {
+    public let entra: Bool
+    public let password: Bool
+
+    public init(_ config: AuthConfig, deployment: Deployment) {
+        entra = config.entraMobile != nil
+        password = deployment == .staging && config.localLoginEnabled
+    }
 }
 
 /// Gets an Entra access token for the ERIS API scope. The app implements it
@@ -80,6 +98,24 @@ public final class AuthService: @unchecked Sendable {
     public func signIn() async throws -> Me {
         let config = try await mobileConfiguration()
         try await exchange(try await provider.acquireTokenInteractively(config))
+        return try await me()
+    }
+
+    /// Sign-in with the ERIS email and password (staging builds only; see
+    /// `SignInMethods`). The password is sent once and never kept; the ERIS
+    /// session that comes back is stored like an Entra one.
+    public func signIn(email: String, password: String) async throws -> Me {
+        let body = try api.encoder.encode(["email": email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                                           "password": password])
+        do {
+            let session = try await api.request("POST", "/auth/login", body: body, authenticated: false,
+                                                as: SessionResponse.self)
+            api.store.save(session.accessToken)
+        } catch APIError.unauthorized {
+            throw AuthError.wrongPassword
+        } catch APIError.notFound {
+            throw AuthError.passwordSignInDisabled
+        }
         return try await me()
     }
 
