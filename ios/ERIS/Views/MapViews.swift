@@ -18,11 +18,6 @@ final class MapSetup: ObservableObject {
     @Published private(set) var licenseSummary: String?
     private var applied = false
 
-    /// `ERISDeployment` in Info.plist, from the `ERIS_DEPLOYMENT` build setting.
-    nonisolated static var deployment: Deployment {
-        Deployment(Bundle.main.object(forInfoDictionaryKey: "ERISDeployment") as? String)
-    }
-
     func prepare(api: APIClient, store: OfflineStore) async {
         guard !applied else { return }
         guard let config = try? await api.arcGISConfig(keepingIn: store) else {
@@ -30,7 +25,7 @@ final class MapSetup: ObservableObject {
             return
         }
         applied = true
-        let licensing = MapsLicensing(Self.deployment, config: config)
+        let licensing = MapsLicensing(AppModel.deployment, config: config)
         var outcome: MapsLicensing.Outcome?
         if case .license(let string) = licensing, let key = LicenseKey(string),
            let result = try? ArcGISEnvironment.setLicense(with: key) {

@@ -44,6 +44,17 @@ final class AppModel: ObservableObject {
         #endif
     }
 
+    /// `ERISDeployment` in Info.plist, from the `ERIS_DEPLOYMENT` build setting.
+    nonisolated static var deployment: Deployment {
+        Deployment(Bundle.main.object(forInfoDictionaryKey: "ERISDeployment") as? String)
+    }
+
+    /// How this build may sign in to the server; nil when it cannot be reached.
+    func signInMethods() async -> SignInMethods? {
+        guard let config = try? await auth.configuration() else { return nil }
+        return SignInMethods(config, deployment: Self.deployment)
+    }
+
     /// `ERISAPIBaseURL` in Info.plist, from the `ERIS_API_BASE_URL` build setting.
     nonisolated static var configuredBaseURL: URL {
         let value = Bundle.main.object(forInfoDictionaryKey: "ERISAPIBaseURL") as? String ?? ""
@@ -76,8 +87,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Staging builds only: the ERIS email and password (see `SignInMethods`).
+    func signIn(email: String, password: String) async {
+        guard Self.deployment == .staging else { return }
+        do {
+            enter(try await auth.signIn(email: email, password: password))
+            await afterSignIn()
+        } catch AuthError.wrongPassword {
+            phase = .signedOut(message: "That email and password did not sign in. Check them and try again.")
+        } catch AuthError.passwordSignInDisabled {
+            phase = .signedOut(message: "This ERIS server does not allow password sign-in.")
+        } catch {
+            phase = .signedOut(message: "ERIS could not be reached. Check the connection and try again.")
+        }
+    }
+
     /// Signed in: this person's offline store first, so every screen has it.
     private func enter(_ me: Me) {
+        // After a session ended, someone else may sign in: the last person's
+        // kept work stays in their own folder for when they come back.
+        if let offline, offline.personId != me.id {
+            offline.stop(wiping: false)
+            self.offline = nil
+        }
         if offline == nil {
             // The demo's sample data starts afresh each launch, so does what it kept.
             if isDemo { OfflineStore(directory: OfflineSync.folder(for: me.id)).wipe() }

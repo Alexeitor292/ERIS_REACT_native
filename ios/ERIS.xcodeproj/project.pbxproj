@@ -273,9 +273,6 @@
 						ProvisioningStyle = Automatic;
 						TestTargetID = 634440038F12669308F06EEF;
 					};
-					634440038F12669308F06EEF = {
-						ProvisioningStyle = Automatic;
-					};
 				};
 			};
 			buildConfigurationList = 6B56A714CA9218E0F2586F07 /* Build configuration list for PBXProject "ERIS" */;
@@ -379,7 +376,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Release.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				ERIS_API_BASE_URL = "https://eris.example.gov/api";
 				ERIS_DEPLOYMENT = production;
 				ERIS_DISPLAY_NAME = ERIS;
@@ -600,7 +597,7 @@
 				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Release.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				ERIS_API_BASE_URL = "https://eris-stage.example.gov/api";
+				ERIS_API_BASE_URL = "https://eris.camposlabs.org/api";
 				ERIS_DEPLOYMENT = staging;
 				ERIS_DISPLAY_NAME = "ERIS Staging";
 				INFOPLIST_FILE = ERIS/Info.plist;
@@ -608,7 +605,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris;
+				PRODUCT_BUNDLE_IDENTIFIER = org.camposlabs.eris;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -657,7 +654,7 @@
 				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Debug.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				ERIS_API_BASE_URL = "https://eris-stage.example.gov/api";
+				ERIS_API_BASE_URL = "https://eris.camposlabs.org/api";
 				ERIS_DEPLOYMENT = staging;
 				ERIS_DISPLAY_NAME = ERIS;
 				INFOPLIST_FILE = ERIS/Info.plist;
@@ -665,7 +662,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris;
+				PRODUCT_BUNDLE_IDENTIFIER = org.camposlabs.eris;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};

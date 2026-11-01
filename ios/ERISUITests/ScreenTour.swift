@@ -762,6 +762,27 @@ final class ScreenTour: XCTestCase {
         snap("offline-sent")
     }
 
+    func testAStagingBuildSignsInWithTheERISPasswordWhenTheServerAllowsIt() {
+        app.launchArguments += ["-ERISDemoSignedOut", "YES", "-ERISDemoRoles", "STAFF"]
+        app.launch()
+        let email = app.textFields["ERIS email"], password = app.secureTextFields["Password"]
+        XCTAssertTrue(email.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["sign-in-build"].exists, "a staging build says so")
+        tap(email)
+        email.typeText("Demo@dot.ca.gov")
+        tap(password)
+        password.typeText("wrong")
+        tap(app.buttons["sign-in-password"])
+        XCTAssertTrue(text(containing: "did not sign in").waitForExistence(timeout: 10))
+        snap("sign-in-password-wrong")
+        tap(password)
+        password.typeText("demo-password")
+        tap(app.buttons["sign-in-password"])
+        XCTAssertTrue(app.staticTexts["Demo data: not connected to ERIS"].waitForExistence(timeout: 10))
+        XCTAssertTrue(tabNames().contains("My Work"))
+        snap("sign-in-password-signed-in")
+    }
+
     func testAStagingBuildRunsTheMapsUnderDeveloperLicensing() {
         launch(roles: "STAFF")
         tap(app.tabBars.buttons["Account"])

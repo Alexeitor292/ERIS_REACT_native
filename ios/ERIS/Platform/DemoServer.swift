@@ -20,8 +20,14 @@ enum DemoServer {
         return value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
+    /// `-ERISDemoSignedOut YES`: start at sign-in, against a server that
+    /// allows the ERIS password (demo@dot.ca.gov / demo-password), as the
+    /// Campos Labs rehearsal does.
+    static var startsSignedOut: Bool { UserDefaults.standard.bool(forKey: "ERISDemoSignedOut") }
+
     static func makeClient() -> APIClient {
-        APIClient(baseURL: URL(string: "https://demo.eris.invalid/api")!, store: MemorySessionStore(token: "demo"),
+        APIClient(baseURL: URL(string: "https://demo.eris.invalid/api")!,
+                  store: startsSignedOut ? MemorySessionStore() : MemorySessionStore(token: "demo"),
                   transport: DemoTransport(roles: roles))
     }
 }
@@ -152,7 +158,12 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
                           "license_expires_at": NSNull(), "mmpk_url": NSNull(), "offline_ttl_hours": 168,
                           "issued_at": ISO8601DateFormatter().string(from: Date()), "requested_by_user_id": 1])
         case ("GET", ["auth", "config"]):
-            return (200, ["local_login_enabled": false, "entra_enabled": true, "entra_mobile": NSNull()])
+            return (200, ["local_login_enabled": DemoServer.startsSignedOut, "entra_enabled": true, "entra_mobile": NSNull()])
+        case ("POST", ["auth", "login"]):
+            guard body["email"] as? String == "demo@dot.ca.gov", body["password"] as? String == "demo-password" else {
+                return (401, ["detail": "Invalid credentials"])
+            }
+            return (200, ["access_token": "demo", "token_type": "bearer", "expires_at": "2099-01-01T00:00:00Z"])
         case ("POST", ["auth", "logout"]), ("POST", ["notifications", "devices", "unregister"]):
             return (200, [:])
         case ("GET", ["notifications", "unread"]):

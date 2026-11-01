@@ -35,6 +35,17 @@ struct SignInView: View {
     @EnvironmentObject private var model: AppModel
     let message: String?
     @State private var busy = false
+    /// What the server offers this build; nil until it answers, or when it cannot be reached.
+    @State private var methods: SignInMethods?
+    @State private var email = ""
+    @State private var password = ""
+
+    private var staging: Bool { AppModel.deployment == .staging }
+    /// Entra unless the server says it has no mobile client.
+    private var offersEntra: Bool { methods?.entra ?? true }
+    /// A password only in a staging build, and only when the server allows it
+    /// (or cannot say: it refuses a password itself when switched off).
+    private var offersPassword: Bool { methods?.password ?? staging }
 
     var body: some View {
         VStack(spacing: 24) {
@@ -49,30 +60,82 @@ struct SignInView: View {
                 Text(message)
                     .font(.callout)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(.yellow.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
             }
-            Button {
-                busy = true
-                Task {
-                    await model.signIn()
-                    busy = false
-                }
-            } label: {
-                Text(busy ? "Signing in…" : "Sign in with Caltrans Microsoft Entra")
-                    .frame(maxWidth: .infinity)
+            if offersPassword { passwordForm }
+            if offersEntra {
+                // The password form leads where it is offered.
+                if offersPassword { entraButton.buttonStyle(.bordered) } else { entraButton.buttonStyle(.borderedProminent) }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(busy)
+            if let methods, !methods.entra, !methods.password {
+                Text("This ERIS server has not enabled the mobile app yet. Contact the ERIS administrator.")
+                    .font(.callout).multilineTextAlignment(.center)
+            }
             Spacer()
             Text("Internal Caltrans system. Access is limited to authorized ERIS users.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if staging {
+                Text("Staging build · \(model.api.baseURL.host ?? "")")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("sign-in-build")
+            }
         }
         .padding(24)
+        .task { methods = await model.signInMethods() }
+    }
+
+    private var entraButton: some View {
+        Button {
+            busy = true
+            Task {
+                await model.signIn()
+                busy = false
+            }
+        } label: {
+            Text(busy ? "Signing in…" : "Sign in with Caltrans Microsoft Entra")
+                .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .disabled(busy)
+    }
+
+    private var passwordForm: some View {
+        VStack(spacing: 12) {
+            TextField("ERIS email", text: $email)
+                .textContentType(.username)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            SecureField("Password", text: $password)
+                .textContentType(.password)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(signInWithPassword)
+            Button(action: signInWithPassword) {
+                Text(busy ? "Signing in…" : "Sign In").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
+            .accessibilityIdentifier("sign-in-password")
+        }
+    }
+
+    private func signInWithPassword() {
+        guard !busy, !email.isEmpty, !password.isEmpty else { return }
+        busy = true
+        Task {
+            await model.signIn(email: email, password: password)
+            password = ""
+            busy = false
+        }
     }
 }
 
@@ -173,7 +236,7 @@ struct AccountView: View {
                 Text(model.api.baseURL.absoluteString)
                     .font(.footnote.monospaced())
                     .foregroundStyle(.secondary)
-                LabeledContent("Build", value: MapSetup.deployment == .staging ? "Staging" : "Production")
+                LabeledContent("Build", value: AppModel.deployment == .staging ? "Staging" : "Production")
                 if let licensing = maps.licenseSummary {
                     LabeledContent("Maps", value: licensing).accessibilityIdentifier("maps-licensing")
                 }

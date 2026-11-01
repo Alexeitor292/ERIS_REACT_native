@@ -7,11 +7,17 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
-# One build per deployment. Debug and Staging talk to the staging ERIS and run
-# the maps under ArcGIS developer licensing; Release is the Caltrans production
-# build, licensed with the ArcGIS Maps SDK 200.x license the production ERIS
-# serves (ARCGIS_LICENSE_KEY). Archive the "ERIS Staging" scheme for testers and
-# the "ERIS" scheme for production.
+# One build per deployment.
+# - Debug and Staging: the Campos Labs staging ERIS (eris.camposlabs.org) until
+#   Caltrans hosts one; ArcGIS developer licensing; the ERIS password allowed
+#   when the server allows it. Their own bundle ID (org.camposlabs.eris), signed
+#   with the Campos Labs Apple team and sent to testers through TestFlight
+#   ("ERIS Staging" scheme → Archive → TestFlight).
+# - Release: the Caltrans production build, gov.ca.dot.eris, signed by Caltrans
+#   (enterprise, manual signing) and delivered through Intune Company Portal;
+#   Entra only, licensed with the 200.x license the production ERIS serves.
+#   Never archived with the Campos Labs team, so Caltrans's bundle ID is never
+#   registered under another account.
 configs:
   Debug: debug
   Staging: release
@@ -58,15 +64,19 @@ targets:
       configs:
         Debug:
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Debug.entitlements
-          ERIS_API_BASE_URL: https://eris-stage.example.gov/api
+          PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris
+          ERIS_API_BASE_URL: https://eris.camposlabs.org/api
           ERIS_DEPLOYMENT: staging
         Staging:
+          # TestFlight builds use the production APNs gateway, as Release does.
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
-          ERIS_API_BASE_URL: https://eris-stage.example.gov/api
+          PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris
+          ERIS_API_BASE_URL: https://eris.camposlabs.org/api
           ERIS_DEPLOYMENT: staging
           ERIS_DISPLAY_NAME: ERIS Staging
         Release:
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
+          CODE_SIGN_STYLE: Manual
           ERIS_API_BASE_URL: https://eris.example.gov/api
           ERIS_DEPLOYMENT: production
   # Drives Debug builds in demo mode (sample data, no sign-in) and saves

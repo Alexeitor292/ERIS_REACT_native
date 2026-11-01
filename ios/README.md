@@ -14,27 +14,52 @@ Microsoft Authenticator, APNs push. The build contract is
 ## On the Caltrans Mac (Xcode only, no other tools)
 
 1. `git pull` the `claude/ios-swift-app` branch and open `ios/ERIS.xcodeproj`.
-2. Target **ERIS → Signing & Capabilities**: choose the Caltrans team. Use the bundle
-   identifier registered for ERIS (default `gov.ca.dot.eris`; change it in
-   `project.yml` if Caltrans uses another).
-3. Set `ERIS_API_BASE_URL` for each configuration in `project.yml`: Debug and Staging
-   to the ERIS staging API (e.g. `https://eris-stage.<domain>/api`), Release to the
-   production API. Each server must have `ENTRA_MOBILE_CLIENT_ID` set.
-4. Run on your Caltrans iPhone. Sign in goes through Microsoft Authenticator.
+2. Signing is set in `project.yml`, not in Xcode's signing pane (the project is
+   regenerated from it): Debug and Staging use the Campos Labs team
+   (`DEVELOPMENT_TEAM`) and `org.camposlabs.eris`; Release is signed by Caltrans as
+   `gov.ca.dot.eris`.
+3. Each configuration's server is in `project.yml` (`ERIS_API_BASE_URL`): Debug and
+   Staging use the Campos Labs staging ERIS, Release the Caltrans production API.
+4. Run on your iPhone.
 
-Each build is for one deployment (`ERIS_DEPLOYMENT`), which also decides how the maps
-are licensed:
+Each build is for one deployment (`ERIS_DEPLOYMENT`), which decides its server,
+sign-in, maps licensing and how it reaches phones:
 
-| Scheme → Archive | Configuration | Server | Maps licensing |
-| --- | --- | --- | --- |
-| **ERIS Staging** | Staging (named "ERIS Staging" on the iPhone) | staging | ArcGIS developer licensing |
-| **ERIS** | Release | production | the ArcGIS Maps SDK 200.x license from the production ERIS (`ARCGIS_LICENSE_KEY`) |
+| Scheme → Archive | Bundle ID | Server | Sign-in | Maps licensing | Delivered by |
+| --- | --- | --- | --- | --- | --- |
+| **ERIS Staging** (Staging; "ERIS Staging" on the iPhone) | `org.camposlabs.eris` | `eris.camposlabs.org` | ERIS email and password when the server allows it; Entra when it has the mobile client | ArcGIS developer licensing | TestFlight, Campos Labs Apple team |
+| **ERIS** (Release) | `gov.ca.dot.eris` | Caltrans production | Entra only | the ArcGIS Maps SDK 200.x license from the production ERIS (`ARCGIS_LICENSE_KEY`) | Intune Company Portal, Caltrans enterprise signing (manual) |
 
-Archive for Intune: **Product → Archive** with the scheme for the deployment, export
-with the Enterprise (in-house) distribution profile, and upload the `.ipa` to Intune
-as an iOS line-of-business app (see the spec for renewal dates). Both builds share the
-bundle identifier, so an iPhone holds one or the other. The Account screen shows the
-build and the maps' licensing.
+The two builds have different bundle IDs, so an iPhone can hold both. The Account
+screen shows the build and the maps' licensing; the sign-in screen of a staging build
+shows its server.
+
+### Staging on a Caltrans iPhone, through TestFlight
+
+Until Caltrans IT hosts ERIS and registers the Entra apps, staging runs on
+`eris.camposlabs.org`:
+
+1. **Server**: deploy this branch's backend (with its migrations), and set
+   `LOCAL_LOGIN_ENABLED=true` so the app offers the ERIS password. For push, set
+   `APNS_ENABLED=true`, `APNS_TOPIC=org.camposlabs.eris` and the `.p8` key, key ID and
+   team ID from the Campos Labs Apple account. Leave `ARCGIS_LICENSE_KEY` unset; set
+   `ARCGIS_RUNTIME_ENABLED=true` and `ARCGIS_API_KEY` for Esri basemaps. Password
+   sessions end after `SESSION_IDLE_MINUTES` without use; work kept on the iPhone
+   stays and is sent after the next sign-in.
+2. **App Store Connect** (Campos Labs account): create the app with the bundle ID
+   `org.camposlabs.eris`, and add each tester's Apple ID as an internal tester.
+3. **Xcode**: put the Campos Labs team ID in `DEVELOPMENT_TEAM` for Debug and Staging
+   in `project.yml` (not in the Xcode signing pane: the project is regenerated from
+   `project.yml`), choose the **ERIS Staging** scheme and **Any iOS Device**, then
+   **Product → Archive → Distribute App → TestFlight & App Store**.
+4. **iPhone**: install TestFlight, accept the invitation, and install ERIS Staging.
+   Each build lasts 90 days.
+
+### Production
+
+Archive the **ERIS** scheme with the Caltrans enterprise certificate and profile, export
+for Enterprise (in-house) distribution, and upload the `.ipa` to Intune as an iOS
+line-of-business app (see the spec for renewal dates).
 
 ## Port status
 

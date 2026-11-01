@@ -15,6 +15,8 @@ final class OfflineSync: ObservableObject {
     private let api: APIClient
     private let userId: Int
     private let me: Me
+    /// Whose work this is.
+    var personId: Int { userId }
     /// My Work, as last loaded (from the kept copy when offline).
     @Published private(set) var work = MyWork.Loaded()
     @Published private(set) var workLoaded = false
