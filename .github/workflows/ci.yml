@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - main
+      - claude/ios-swift-app  # Temporary: this branch has no pull request yet. Remove after the run.
   pull_request:
 
 jobs:
