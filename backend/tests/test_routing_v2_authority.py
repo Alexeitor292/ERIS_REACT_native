@@ -595,15 +595,17 @@ class TestRedelegationFromSubmitted:
         # Hand off to the first chief, run it to SUBMITTED under them.
         case = _branch_routed(client_db, tokens, ids, chief_user_id=first["id"])
         aid = case["assessment_id"]
+        # A chief assigns only Staff of their own branch.
+        placed = extra_users["_placed"]
+        staff = placed.make("STAFF", "first-chiefs-staff", branch_id=first["branch_id"])
         assigned = client_db.post(
             f"/assessments/{aid}/assign-engineer",
-            # The engineer sits in Branch A, not this chief's branch: say why.
-            json={"engineer_user_id": ids["engineer"], "notes": "Branch A has the site history"},
+            json={"engineer_user_id": staff["id"]},
             headers=_auth(first["token"]),
         )
         assert assigned.status_code == 200, assigned.text
         linked_submission_id = int(assigned.json()["assessment"]["submission_id"])
-        submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=_auth(tokens["engineer"]))
+        submitted = client_db.post(f"/assessments/{aid}/submit", json={}, headers=placed.login(staff))
         assert submitted.status_code == 200, submitted.text
         before = _assessment_row(aid)
         assert before["state"] == "SUBMITTED"

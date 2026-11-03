@@ -143,7 +143,7 @@ class TestAssigneeEligibility:
             headers=_auth(tokens["branchchief"]),
         )
         assert resp.status_code == 400, resp.text
-        assert _ENGINEER_MESSAGE in str(resp.json().get("detail", ""))
+        assert "Only Staff of this branch" in str(resp.json().get("detail", ""))
         assert _SENIOR_ENGINEER_MESSAGE not in str(resp.json().get("detail", ""))
         # The refusal rolled the whole assignment back.
         assert _scalar(

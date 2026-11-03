@@ -81,7 +81,11 @@ def test_candidates_are_from_the_same_office(client_db, people):
     assert people["guest"]["id"] not in ids
 
 
-def test_someone_placed_nowhere_is_refused_by_the_app_only(client_db, people):
+def test_someone_placed_nowhere_is_refused_by_the_app_only(client_db, people, monkeypatch):
+    from app import deps
+    from app.services import app_access
+
+    monkeypatch.setattr(deps, "may_use_app", app_access.may_use_app)  # conftest turns it off for the others
     refused = client_db.get("/auth/me", headers=people["guest"]["headers"])
     assert refused.status_code == 403
     assert "ERIS Mobile" in refused.json()["detail"]

@@ -45,6 +45,7 @@ def sign_in(monkeypatch, *roles, client, path):
     user = person(*roles)
     monkeypatch.setattr(deps, "authenticate", lambda request, db, token: (user, SimpleNamespace(client=client)))
     monkeypatch.setattr(deps, "user_with_roles", lambda db, u: u)
+    monkeypatch.setattr(deps, "may_use_app", app_access.may_use_app)
     request = SimpleNamespace(url=SimpleNamespace(path=path), method="GET", headers={})
     return deps.current_session(request, None, None)[0]
 
