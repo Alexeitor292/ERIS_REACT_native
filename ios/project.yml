@@ -65,12 +65,14 @@ targets:
         Debug:
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Debug.entitlements
           PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris
+          DEVELOPMENT_TEAM: 7Q2NXVP8KR  # Campos Labs
           ERIS_API_BASE_URL: https://eris.camposlabs.org/api
           ERIS_DEPLOYMENT: staging
         Staging:
           # TestFlight builds use the production APNs gateway, as Release does.
           CODE_SIGN_ENTITLEMENTS: ERIS/ERIS-Release.entitlements
           PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris
+          DEVELOPMENT_TEAM: 7Q2NXVP8KR  # Campos Labs
           ERIS_API_BASE_URL: https://eris.camposlabs.org/api
           ERIS_DEPLOYMENT: staging
           ERIS_DISPLAY_NAME: ERIS Staging
@@ -90,7 +92,9 @@ targets:
       - target: ERIS
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: gov.ca.dot.eris.uitests
+        # Run only against Debug builds, so they belong to the Campos Labs team.
+        PRODUCT_BUNDLE_IDENTIFIER: org.camposlabs.eris.uitests
+        DEVELOPMENT_TEAM: 7Q2NXVP8KR
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic

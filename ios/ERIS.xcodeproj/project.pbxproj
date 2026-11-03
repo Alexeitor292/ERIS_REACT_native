@@ -270,6 +270,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					41DA67236B4014A1D73DF1E9 = {
+						DevelopmentTeam = 7Q2NXVP8KR;
 						ProvisioningStyle = Automatic;
 						TestTargetID = 634440038F12669308F06EEF;
 					};
@@ -454,13 +455,14 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 7Q2NXVP8KR;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = org.camposlabs.eris.uitests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = ERIS;
@@ -597,6 +599,7 @@
 				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Release.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 7Q2NXVP8KR;
 				ERIS_API_BASE_URL = "https://eris.camposlabs.org/api";
 				ERIS_DEPLOYMENT = staging;
 				ERIS_DISPLAY_NAME = "ERIS Staging";
@@ -616,13 +619,14 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 7Q2NXVP8KR;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = org.camposlabs.eris.uitests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = ERIS;
@@ -634,13 +638,14 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 7Q2NXVP8KR;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = gov.ca.dot.eris.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = org.camposlabs.eris.uitests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = ERIS;
@@ -654,6 +659,7 @@
 				CODE_SIGN_ENTITLEMENTS = "ERIS/ERIS-Debug.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 7Q2NXVP8KR;
 				ERIS_API_BASE_URL = "https://eris.camposlabs.org/api";
 				ERIS_DEPLOYMENT = staging;
 				ERIS_DISPLAY_NAME = ERIS;
