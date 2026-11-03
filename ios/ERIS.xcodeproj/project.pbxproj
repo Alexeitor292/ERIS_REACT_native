@@ -21,11 +21,13 @@
 		586D79AA03DC3DE543D242B4 /* GalleryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
 		5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BD4538642D56D52AACFE19 /* DemoServer.swift */; };
+		670EEA3BF70DF8B073C25EB3 /* MoveWorkViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02D4FB49496AC27AC7FA5B7 /* MoveWorkViews.swift */; };
 		71299A8126510E3C32F97B7B /* CreateIncidentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */; };
 		74DFDD6D0707CC1ED7EE68AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */; };
 		75EAC41924E978AFD6FA8540 /* MemoEditor.html in Resources */ = {isa = PBXBuildFile; fileRef = 3A0581E3CF08485CC2E52F5B /* MemoEditor.html */; };
 		7D70D5CB6B9DB1974652994F /* TerrainViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F044BEA9FCDD6168ABC415 /* TerrainViews.swift */; };
 		7E0DE5A23DD0C9E77EE2F077 /* ScreenTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */; };
+		86AE64320D15B735CB93B754 /* OutOfOfficeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A93BD80FD29F4D09DC775E07 /* OutOfOfficeViews.swift */; };
 		88DC3B60EE23973EF8C9457A /* MapViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 827616E660C0B94B84C77CCF /* MapViews.swift */; };
 		893A2E6F5A04125CD45636BD /* AssessmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A78EA181A9E18B45A8EC80 /* AssessmentViews.swift */; };
 		903E1ACF9CBF233D548BF1EA /* KeychainSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */; };
@@ -81,6 +83,7 @@
 		9B0406C2726AB58967A07E70 /* PhotoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoViews.swift; sourceTree = "<group>"; };
 		A292A7CF2D2C5976DE180BA9 /* OfflineSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineSync.swift; sourceTree = "<group>"; };
 		A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ERISApp.swift; sourceTree = "<group>"; };
+		A93BD80FD29F4D09DC775E07 /* OutOfOfficeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutOfOfficeViews.swift; sourceTree = "<group>"; };
 		AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisaEditorViews.swift; sourceTree = "<group>"; };
 		AEEB54A5C523456E696A8B6E /* CrackViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrackViews.swift; sourceTree = "<group>"; };
 		B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmissionViews.swift; sourceTree = "<group>"; };
@@ -88,6 +91,7 @@
 		C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C79A78C23480075CFA148688 /* SketchpadViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchpadViews.swift; sourceTree = "<group>"; };
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
+		E02D4FB49496AC27AC7FA5B7 /* MoveWorkViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveWorkViews.swift; sourceTree = "<group>"; };
 		E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
 		EB0938B6DC180DAC888EBEA9 /* AssessmentStepViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentStepViews.swift; sourceTree = "<group>"; };
 		EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyWorkViews.swift; sourceTree = "<group>"; };
@@ -187,7 +191,9 @@
 				827616E660C0B94B84C77CCF /* MapViews.swift */,
 				6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */,
 				FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */,
+				E02D4FB49496AC27AC7FA5B7 /* MoveWorkViews.swift */,
 				EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */,
+				A93BD80FD29F4D09DC775E07 /* OutOfOfficeViews.swift */,
 				9B0406C2726AB58967A07E70 /* PhotoViews.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
 				C79A78C23480075CFA148688 /* SketchpadViews.swift */,
@@ -341,8 +347,10 @@
 				1289FEB61399B9FC12257709 /* MeasurementDiagramViews.swift in Sources */,
 				1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */,
 				18F9A10935B792C843FFF9CF /* MemoWebEditor.swift in Sources */,
+				670EEA3BF70DF8B073C25EB3 /* MoveWorkViews.swift in Sources */,
 				D0DE8754749DC291E96E08CE /* MyWorkViews.swift in Sources */,
 				252B6D4585C6891A71D36DA6 /* OfflineSync.swift in Sources */,
+				86AE64320D15B735CB93B754 /* OutOfOfficeViews.swift in Sources */,
 				9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */,
 				AD7DD33F31277AFCC3D2C491 /* RoadData.swift in Sources */,
 				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,
@@ -426,7 +434,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -503,7 +511,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -568,7 +576,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

@@ -98,6 +98,14 @@ actor RenewalGate {
 public final class APIClient: @unchecked Sendable {
     public let baseURL: URL
     public let store: SessionStore
+    private let actingLock = NSLock()
+    private var acting: Int?
+    /// Standing in for someone away (`Delegations.swift`): every request is then
+    /// judged as them. Only in memory: a restart is back to the person's own work.
+    public var actingFor: Int? {
+        get { actingLock.locked { acting } }
+        set { actingLock.locked { acting = newValue } }
+    }
     private let transport: HTTPTransport
     private let gate = RenewalGate()
     private let lock = NSLock()
@@ -224,6 +232,9 @@ public final class APIClient: @unchecked Sendable {
         }
         if authenticated, let token = store.load() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if authenticated, let person = actingFor {
+            request.setValue(String(person), forHTTPHeaderField: "X-ERIS-Acting-For")
         }
         return request
     }

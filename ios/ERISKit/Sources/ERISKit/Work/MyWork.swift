@@ -11,7 +11,9 @@ import Foundation
 ///  - Staff or Senior Specialist: their own assessments in Draft or Revision requested.
 ///  - Admin: every submitted assessment and every maintenance report; an
 ///    administrator can show geotechnical or maintenance work alone.
-///  - Branch and Office Chiefs: shares of technical forms to approve or that they were told about.
+///  - Branch and Office Chiefs: shares of technical forms they must approve. What they are
+///    only told about comes as a notification that opens it, and asks nothing of them here.
+///  - Anyone: forms in progress shared with them, and their own that are on no assessment.
 public enum MyWork {
     /// Which side of the work an item is on.
     public enum Filter: String, CaseIterable, Identifiable, Sendable {
@@ -31,6 +33,8 @@ public enum MyWork {
         case maintenance(MaintenanceReport)
         case share(ShareReview)
         case assessment(Assessment)
+        case sharedForm(SharedForm)
+        case ownForm(SubmissionSummary)
 
         public var id: String {
             switch self {
@@ -38,6 +42,8 @@ public enum MyWork {
             case .maintenance(let report): return "m\(report.id)"
             case .share(let review): return "s\(review.reviewId)"
             case .assessment(let assessment): return "a\(assessment.id)"
+            case .sharedForm(let shared): return "f\(shared.submission.id)"
+            case .ownForm(let form): return "f\(form.id)"
             }
         }
 
@@ -45,7 +51,7 @@ public enum MyWork {
         public var isMaintenance: Bool {
             switch self {
             case .triage, .maintenance: return true
-            case .share, .assessment: return false
+            case .share, .assessment, .sharedForm, .ownForm: return false
             }
         }
     }
@@ -56,6 +62,9 @@ public enum MyWork {
         public var reports: [MaintenanceReport] = []
         public var shares: [ShareReview] = []
         public var assessments: [Assessment] = []
+        public var forms = MyForms()
+        /// For a chief: who holds what, to move it around.
+        public var workload = Workload()
         /// When the oldest list shown was kept on this iPhone, if any was.
         public var keptAt: Date?
 
@@ -69,6 +78,36 @@ public enum MyWork {
 
         /// Maintenance reports this person can read that are not waiting on them.
         public var otherReports: Int { reports.filter { !$0.myTurn }.count }
+
+        /// Forms that open from an assessment in this queue.
+        public var assessmentForms: Set<Int> {
+            Set(assessments.flatMap { $0.submissionIds ?? [] } + assessments.compactMap(\.submissionId))
+        }
+    }
+
+    /// `GET /my-forms`: forms in progress that reach this person outside an assessment.
+    public struct MyForms: Decodable, Equatable, Sendable {
+        public var shared: [SharedForm] = []
+        public var own: [SubmissionSummary] = []
+
+        public init(shared: [SharedForm] = [], own: [SubmissionSummary] = []) {
+            self.shared = shared
+            self.own = own
+        }
+
+        public var isEmpty: Bool { shared.isEmpty && own.isEmpty }
+    }
+
+    public struct SharedForm: Decodable, Equatable, Sendable {
+        public let submission: SubmissionSummary
+        public let sharedBy: String?
+        public let sharedAt: String?
+
+        public init(submission: SubmissionSummary, sharedBy: String?, sharedAt: String?) {
+            self.submission = submission
+            self.sharedBy = sharedBy
+            self.sharedAt = sharedAt
+        }
     }
 
     /// Whether this person has a queue at all.
@@ -90,8 +129,8 @@ public enum MyWork {
         return out
     }
 
-    /// The queue: triage first, then maintenance reports, shares and assessments,
-    /// each newest first (maintenance reports in the server's order). Maintenance
+    /// The queue: triage first, then maintenance reports, shares, assessments and
+    /// forms, each newest first (maintenance reports in the server's order). Maintenance
     /// reports not waiting on this person show only when asked for, or when
     /// opened by a link. An administrator's filter applies last.
     public static func items(_ loaded: Loaded, includeOtherReports: Bool = false, opened: Int? = nil,
@@ -101,8 +140,10 @@ public enum MyWork {
         let items: [Item] =
             loaded.triage.sorted { ($0.firstObservedAt ?? "") > ($1.firstObservedAt ?? "") }.map(Item.triage)
             + loaded.reports.filter { $0.myTurn || includeOtherReports || $0.id == opened }.map(Item.maintenance)
-            + loaded.shares.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }.map(Item.share)
+            + loaded.shares.filter(\.isApproval).sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }.map(Item.share)
             + assessments.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }.map(Item.assessment)
+            + loaded.forms.shared.filter { !loaded.assessmentForms.contains($0.submission.id) }.map(Item.sharedForm)
+            + loaded.forms.own.map(Item.ownForm)
         guard admin, filter != .both else { return items }
         return items.filter { $0.isMaintenance == (filter == .maintenance) }
     }
@@ -144,6 +185,15 @@ public enum MyWork {
                 loaded.assessments += answer.items.filter(list.keep)
                 note(at)
             }
+        }
+        if RoleModel.canDelegateBranch(roles) || RoleModel.canAssignEngineer(roles),
+           let (workload, at) = try? await api.kept("/assessments/workload", store: store, name: "work/workload", as: Workload.self) {
+            loaded.workload = workload
+            note(at)
+        }
+        if let (forms, at) = try? await api.kept("/my-forms", store: store, name: "work/forms", as: MyForms.self) {
+            loaded.forms = forms
+            note(at)
         }
         loaded.keptAt = keptAt
         return loaded

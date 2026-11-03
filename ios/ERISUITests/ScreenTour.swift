@@ -6,6 +6,8 @@ import XCTest
 /// write them as PNG files to that folder.
 final class ScreenTour: XCTestCase {
     private var app: XCUIApplication!
+    /// The demo form sits outside any assessment (`-ERISDemoLegacyForm`).
+    private var formIsOnItsOwn = false
 
     override func setUp() {
         continueAfterFailure = false
@@ -14,6 +16,7 @@ final class ScreenTour: XCTestCase {
     }
 
     private func launch(roles: String = "ADMIN", colleague: Bool = false, legacyForm: Bool = false) {
+        formIsOnItsOwn = legacyForm
         app.launchArguments += ["-ERISDemoRoles", roles]
         if colleague { app.launchArguments += ["-ERISDemoColleague", "YES"] }
         if legacyForm { app.launchArguments += ["-ERISDemoLegacyForm", "YES"] }
@@ -31,6 +34,22 @@ final class ScreenTour: XCTestCase {
             let url = URL(fileURLWithPath: dir).appendingPathComponent("\(name).png")
             try? shot.pngRepresentation.write(to: url)
         }
+    }
+
+    /// There is no list of forms: the demo form opens from its assessment in My
+    /// Work, or from My Work itself when it is on no assessment.
+    private func openForm(file: StaticString = #filePath, line: UInt = #line) {
+        tap(app.tabBars.buttons["My Work"], file: file, line: line)
+        if formIsOnItsOwn {
+            tap(reveal(app.staticTexts["I-880 slope failure GISA"]), file: file, line: line)
+        } else {
+            tap(reveal(app.staticTexts["Assessment #5"]), file: file, line: line)
+            tap(reveal(formLink), file: file, line: line)
+        }
+    }
+
+    private var formLink: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Open technical form")).firstMatch
     }
 
     private func tap(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
@@ -57,10 +76,10 @@ final class ScreenTour: XCTestCase {
         tap(app.buttons["Delegate to M. Okafor"])
         XCTAssertTrue(app.staticTexts["Pending Staff assignment"].waitForExistence(timeout: 10))
 
-        // Branch chief: someone from another branch needs a reason first.
-        tap(person("B. Nakamura"))
-        snap("assessment-assign-out-of-branch")
-        XCTAssertFalse(app.buttons["Assign B. Nakamura"].isEnabled)
+        // Branch chief: the Staff of their branch, and nobody else.
+        XCTAssertTrue(person("A. Rivera").waitForExistence(timeout: 10))
+        XCTAssertFalse(person("B. Nakamura").exists, "another branch")
+        snap("assessment-assign-staff")
         tap(person("Demo User"))
         tap(app.buttons["Assign Demo User"])
         XCTAssertTrue(app.staticTexts["Draft"].waitForExistence(timeout: 10))
@@ -71,6 +90,17 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(app.staticTexts["Approved"].waitForExistence(timeout: 10))
         app.swipeUp()
         snap("assessment-approved-timeline")
+    }
+
+    func testAnOfficeChiefRoutesToABranchChiefOrASeniorSpecialist() {
+        launch(roles: "OFFICE_CHIEF")
+        tap(app.staticTexts["Assessment #3"])
+        XCTAssertTrue(person("M. Okafor").waitForExistence(timeout: 10), "a branch chief")
+        tap(reveal(person("S. Morales")))
+        snap("assessment-assign-senior-specialist")
+        XCTAssertTrue(app.buttons["Assign S. Morales"].isEnabled)
+        tap(app.buttons["Assign S. Morales"])
+        XCTAssertTrue(app.staticTexts["Draft"].waitForExistence(timeout: 10))
     }
 
     /// A row whose label starts with `text` (a menu, picker or field row).
@@ -126,8 +156,7 @@ final class ScreenTour: XCTestCase {
 
     func testGisaHeaderSavesOnlyWithItsLocation() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         XCTAssertTrue(app.staticTexts["GISA Header"].waitForExistence(timeout: 10))
         snap("gisa-header")
 
@@ -159,8 +188,7 @@ final class ScreenTour: XCTestCase {
 
     func testGisaBodyDistributionHighwayAndIncidentType() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Body"])
         tap(app.buttons["Widening"])
         // The status choices wait for a cause.
@@ -186,8 +214,7 @@ final class ScreenTour: XCTestCase {
 
     func testGisaMaterial() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Body"])
         let material = reveal(app.buttons["Landslide Debris"])
 
@@ -216,8 +243,7 @@ final class ScreenTour: XCTestCase {
 
     func testSectionPhotos() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Body"])
 
         // The demo form has one photo filed under Material.
@@ -259,8 +285,7 @@ final class ScreenTour: XCTestCase {
 
     func testCracksAreSeparateRecordsWithTheirOwnLabels() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Body"])
 
         // The demo form has one crack, traced and labelled on its photo.
@@ -306,8 +331,7 @@ final class ScreenTour: XCTestCase {
 
     func testVegetationAndWater() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Body"])
         replace(reveal(app.textFields["Groundcover Coverage %"]), with: "45")
         tap(reveal(app.buttons["Surface Runoff"]))
@@ -328,8 +352,7 @@ final class ScreenTour: XCTestCase {
 
     func testMeasurements() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Body"])
         XCTAssertTrue(reveal(text(containing: "Road inventory context active")).exists)
         // The diagram below makes the list long enough to scroll past it; come back up if so.
@@ -354,8 +377,7 @@ final class ScreenTour: XCTestCase {
 
     func testCrossSectionDiagram() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Body"])
         let diagram = app.descendants(matching: .any)["measurement-diagram"]
         XCTAssertTrue(reveal(diagram).exists)
@@ -381,8 +403,7 @@ final class ScreenTour: XCTestCase {
 
     func testAFieldAColleagueAlsoChangedIsChosenNotOverwritten() {
         launch(colleague: true)
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         XCTAssertTrue(text(containing: "Maria Garcia is also in this form").waitForExistence(timeout: 15))
         replace(reveal(app.textFields["Project ID"]), with: "555")
         tap(app.navigationBars.buttons["Save"])
@@ -400,8 +421,7 @@ final class ScreenTour: XCTestCase {
 
     func testAColleaguesSaveElsewhereIsKept() {
         launch(colleague: true)
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         replace(reveal(app.textFields["EA"]), with: "04-1A234")
         tap(app.navigationBars.buttons["Save"])
         XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
@@ -413,8 +433,7 @@ final class ScreenTour: XCTestCase {
 
     func testAWebMemoIsEditedWithNothingLost() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Assess"])
         let row = app.buttons["memo-observations_notes"]
         XCTAssertTrue(reveal(row).label.contains("Toe of the slope"))
@@ -447,8 +466,7 @@ final class ScreenTour: XCTestCase {
 
     func testASketchIsDrawnSavedAndPlacedInSketchNotes() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.buttons["Assess"])
         tap(reveal(app.buttons["add-photo-sketchpad"]))
         tap(app.buttons["Draw a Sketch"])
@@ -485,8 +503,7 @@ final class ScreenTour: XCTestCase {
     }
 
     private func openDemoForm(step: String) {
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(app.segmentedControls.buttons[step])
     }
 
@@ -528,8 +545,7 @@ final class ScreenTour: XCTestCase {
 
     func testTheReviewChecklistLeadsToWhatIsMissing() {
         launch()
-        tap(app.tabBars.buttons["Forms"])
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        openForm()
         tap(row("District *"))
         tap(app.buttons["District 07"])
         tap(app.segmentedControls.buttons["Gallery"])
@@ -647,6 +663,93 @@ final class ScreenTour: XCTestCase {
         snap("notifications-all-read")
     }
 
+    func testThereIsNoFormsTabAndASharedFormWaitsInMyWork() {
+        app.launchArguments += ["-ERISDemoSharedForm", "YES"]
+        launch(roles: "MAINTENANCE_CREW")
+        XCTAssertTrue(app.tabBars.buttons["My Work"].waitForExistence(timeout: 20), "crew have My Work once a form is shared")
+        XCTAssertEqual(tabNames(), ["My Work", "Report", "Notifications", "Account"])
+        tap(app.tabBars.buttons["My Work"])
+        XCTAssertTrue(app.staticTexts["Shared with you"].waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "Shared by Maria Garcia").exists)
+        snap("mywork-shared-form")
+        tap(app.staticTexts["I-880 slope failure GISA"])
+        XCTAssertTrue(app.staticTexts["GISA Header"].waitForExistence(timeout: 10))
+    }
+
+    func testAPromotionShowsUpWithoutRestarting() {
+        app.launchArguments += ["-ERISDemoRolesLater", "BRANCH_CHIEF"]
+        launch(roles: "STAFF")
+        tap(app.tabBars.buttons["My Work"])
+        XCTAssertTrue(text(containing: "Sharing · Form #501").waitForExistence(timeout: 30), "a chief's queue, without restarting")
+        snap("mywork-after-promotion")
+    }
+
+    func testSomeoneNoLongerPlacedLeavesTheApp() {
+        app.launchArguments += ["-ERISDemoRoles", "STAFF", "-ERISDemoRolesLater", "GUEST"]
+        app.launch()
+        XCTAssertTrue(text(containing: "ERIS Mobile is for people placed").waitForExistence(timeout: 30))
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
+        snap("signed-out-no-place")
+    }
+
+    func testAGuestIsToldTheAppIsNotForThem() {
+        app.launchArguments += ["-ERISDemoRoles", "GUEST"]
+        app.launch()
+        XCTAssertTrue(text(containing: "ERIS Mobile is for people placed").waitForExistence(timeout: 20))
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
+    }
+
+    func testSomeoneActsForAColleagueAwayAndGoesBack() {
+        app.launchArguments += ["-ERISDemoActing", "YES"]
+        launch(roles: "STAFF")
+        XCTAssertFalse(app.staticTexts["acting-banner"].exists)
+        tap(app.tabBars.buttons["Account"])
+        tap(reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Act for Jordan Chen")).firstMatch))
+        XCTAssertTrue(app.staticTexts["acting-banner"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["acting-banner"].label, "Acting for Jordan Chen")
+        tap(app.tabBars.buttons["My Work"])
+        XCTAssertTrue(text(containing: "Sharing · Form #501").waitForExistence(timeout: 30), "the chief's queue")
+        snap("acting-for-someone")
+        tap(app.buttons["Back to my work"])
+        let gone = NSPredicate(format: "exists == false")
+        expectation(for: gone, evaluatedWith: app.staticTexts["acting-banner"])
+        waitForExpectations(timeout: 15)
+    }
+
+    func testSettingWhoActsWhileAway() {
+        launch(roles: "BRANCH_CHIEF")
+        tap(app.tabBars.buttons["Account"])
+        tap(reveal(app.buttons["Set who acts for me"]))
+        XCTAssertFalse(app.buttons["set-out-of-office"].isEnabled, "nobody chosen yet")
+        tap(app.buttons["delegate-picker"])
+        tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "M. Okafor")).firstMatch)
+        XCTAssertTrue(app.buttons["set-out-of-office"].isEnabled)
+        snap("out-of-office")
+        tap(app.buttons["set-out-of-office"])
+        XCTAssertTrue(text(containing: "They have been told").waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(app.buttons["End Now"]).exists)
+        snap("out-of-office-set")
+        tap(app.buttons["End Now"])
+        XCTAssertTrue(reveal(app.staticTexts["Cancelled"]).waitForExistence(timeout: 10))
+    }
+
+    func testAChiefMovesWorkLeftBySomeoneWhoMovedOn() {
+        app.launchArguments += ["-ERISDemoWorkLeft", "YES"]
+        launch(roles: "OFFICE_CHIEF")
+        tap(app.tabBars.buttons["My Work"])
+        XCTAssertTrue(text(containing: "left by someone who moved on").waitForExistence(timeout: 30))
+        snap("move-work-row")
+        tap(app.buttons["move-work"])
+        tap(reveal(text(containing: "Lee Former · Branch chief · has moved on")))
+        XCTAssertTrue(person("M. Okafor").waitForExistence(timeout: 10))
+        XCTAssertFalse(reveal(app.buttons["move-confirm"]).isEnabled, "nobody chosen yet")
+        tap(revealAbove(person("M. Okafor")))
+        XCTAssertTrue(reveal(app.buttons["move-confirm"]).isEnabled)
+        snap("move-work-chosen")
+        tap(app.buttons["move-confirm"])
+        XCTAssertTrue(text(containing: "Their work stayed with them").waitForExistence(timeout: 15))
+    }
+
     func testTheThemeIsChosenOnAccountAndKept() {
         launch()
         tap(app.tabBars.buttons["Account"])
@@ -674,7 +777,7 @@ final class ScreenTour: XCTestCase {
 
     func testAnAdministratorWorksTheWholeQueueAndChoosesASide() {
         launch()
-        XCTAssertEqual(tabNames(), ["My Work", "Report", "Forms", "Notifications", "Account"])
+        XCTAssertEqual(tabNames(), ["My Work", "Report", "Notifications", "Account"])
         XCTAssertTrue(app.staticTexts["Triage · Report #14"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Assessment #3"].exists)
         snap("mywork-admin")
@@ -698,7 +801,9 @@ final class ScreenTour: XCTestCase {
         snap("triage-decision")
         tap(reveal(app.buttons["Accept and open assessment"]))
         XCTAssertTrue(text(containing: "Report #14 accepted. Assessment #9 is open").waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Triage · Report #14"].exists, "it left the queue")
+        // The queue reloads just after the notice appears.
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["Triage · Report #14"])
+        waitForExpectations(timeout: 15)
         XCTAssertTrue(reveal(app.staticTexts["Assessment #9"]).exists, "and its assessment waits to be routed")
     }
 
@@ -723,7 +828,7 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(text(containing: "Demo User is sharing").waitForExistence(timeout: 10))
         snap("share-review")
         tap(reveal(app.buttons["Approve"]))
-        XCTAssertTrue(text(containing: "takes effect once the other branch chief approves").waitForExistence(timeout: 10))
+        XCTAssertTrue(text(containing: "takes effect once everyone else with a say approves").waitForExistence(timeout: 10))
     }
 
     func testAReporterHasReportingAndNothingElse() {
@@ -763,7 +868,7 @@ final class ScreenTour: XCTestCase {
             if (toggle.value as? String) != wanted, toggle.switches.firstMatch.exists { toggle.switches.firstMatch.tap() }
         }
         XCTAssertEqual(toggle.value as? String, wanted, "the demo connection switch")
-        tap(app.tabBars.buttons["Forms"])
+        tap(app.tabBars.buttons["My Work"])
     }
 
     func testAFormWorksOfflineAndIsSentWhenTheConnectionReturns() {
@@ -788,12 +893,12 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(reveal(text(containing: "kept on this iPhone")).exists)
         snap("offline-gallery-waiting")
 
-        // The list says what is waiting; the form reopens from the kept copy, with the change.
+        // Its assessment says what is waiting; the form reopens from the kept copy, with the change.
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(text(containing: "ERIS can't be reached").waitForExistence(timeout: 10))
         XCTAssertTrue(text(containing: "1 form with changes and 1 file waiting to send").exists)
         snap("offline-list")
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(reveal(formLink))
         XCTAssertTrue(text(containing: "Changes kept on this iPhone are shown").waitForExistence(timeout: 10))
         XCTAssertEqual(reveal(app.textFields["EA"]).value as? String, "04-OFF1")
         snap("offline-form")
@@ -805,7 +910,7 @@ final class ScreenTour: XCTestCase {
         let sent = NSPredicate(format: "exists == false")
         expectation(for: sent, evaluatedWith: waiting)
         waitForExpectations(timeout: 30)
-        tap(app.staticTexts["I-880 slope failure GISA"])
+        tap(reveal(formLink))
         XCTAssertEqual(reveal(app.textFields["EA"]).value as? String, "04-OFF1")
         XCTAssertFalse(text(containing: "Changes kept on this iPhone").exists)
         tap(revealAbove(app.segmentedControls.buttons["Gallery"]))
@@ -839,7 +944,7 @@ final class ScreenTour: XCTestCase {
         tap(app.tabBars.buttons["Account"])
         XCTAssertTrue(text(containing: "Staging").waitForExistence(timeout: 10))
         let licensing = app.descendants(matching: .any)["maps-licensing"]
-        XCTAssertTrue(licensing.waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(licensing).exists)
         XCTAssertTrue(text(containing: "Developer licensing (staging build)").exists, "the server's license is not used")
         snap("account-maps-licensing")
     }
@@ -990,7 +1095,7 @@ final class ScreenTour: XCTestCase {
 
     func testStaffSeeOnlyTheirOwnStep() {
         launch(roles: "STAFF")
-        XCTAssertEqual(tabNames(), ["My Work", "Forms", "Notifications", "Account"])
+        XCTAssertEqual(tabNames(), ["My Work", "Notifications", "Account"])
         tap(app.tabBars.buttons["My Work"])
         tap(app.staticTexts["Assessment #5"])
         XCTAssertTrue(app.buttons["Submit for review"].waitForExistence(timeout: 10))

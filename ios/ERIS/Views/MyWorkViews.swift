@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A step in My Work, or a record opened from a notification.
 struct WorkRoute: Hashable {
-    enum Kind: Hashable { case triage, maintenance, share, assessment, incident }
+    enum Kind: Hashable { case triage, maintenance, share, assessment, incident, form, moveWork }
     let kind: Kind
     let id: Int
 
@@ -18,6 +18,8 @@ struct WorkRoute: Hashable {
         case .maintenance(let report): self.init(.maintenance, report.id)
         case .share(let review): self.init(.share, review.reviewId)
         case .assessment(let assessment): self.init(.assessment, assessment.id)
+        case .sharedForm(let shared): self.init(.form, shared.submission.id)
+        case .ownForm(let form): self.init(.form, form.id)
         }
     }
 }
@@ -58,6 +60,19 @@ struct MyWorkView: View {
                 Toggle("Also show maintenance reports not waiting on me (\(loaded.otherReports))", isOn: $includeOthers)
                     .font(.subheadline)
             }
+            if !loaded.workload.groups.isEmpty {
+                NavigationLink(value: WorkRoute(.moveWork, 0)) {
+                    HStack {
+                        Text("Move work")
+                        Spacer()
+                        if loaded.workload.left > 0 {
+                            Text("\(loaded.workload.left) left by someone who moved on")
+                                .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("move-work")
+            }
             if items.isEmpty && didLoad {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Nothing needs your attention").font(.headline)
@@ -70,6 +85,23 @@ struct MyWorkView: View {
                 }
             } footer: {
                 if !items.isEmpty { Text("\(items.count) \(items.count == 1 ? "item" : "items") waiting on you") }
+            }
+            // Work kept on this iPhone that nothing above opens any more, such as
+            // a form moved to someone else: still here to be sent or looked at.
+            let listed = loaded.assessmentForms.union(loaded.forms.shared.map(\.submission.id)).union(loaded.forms.own.map(\.id))
+            let unsent = offline.waiting.forms.subtracting(listed).sorted()
+            if !unsent.isEmpty {
+                Section("Waiting to send") {
+                    ForEach(unsent, id: \.self) { id in
+                        NavigationLink(value: SubmissionRoute(id: id)) {
+                            HStack {
+                                Text("Form #\(id)")
+                                Spacer()
+                                WaitingBadgeLabel(id: id)
+                            }
+                        }
+                    }
+                }
             }
         }
         .overlay { if !didLoad { ProgressView() } }
@@ -97,6 +129,10 @@ struct MyWorkView: View {
             AssessmentDetailView(assessmentId: route.id, me: me)
         case .incident:
             ReportDetailView(incidentId: route.id)
+        case .form:
+            SubmissionDetailView(submissionId: route.id)
+        case .moveWork:
+            MoveWorkView(done: finished)
         }
     }
 
@@ -126,6 +162,11 @@ private struct WorkRow: View {
                 [review.unitLabel], badge: review.isApproval ? "Needs approval" : "For your information", urgent: review.isApproval)
         case .assessment(let assessment):
             AssessmentRow(assessment: assessment)
+        case .sharedForm(let shared):
+            row("Form #\(shared.submission.id)", shared.submission.displayTitle,
+                [shared.sharedBy.map { "Shared by \($0)" }, shared.submission.locationLine], badge: "Shared with you", urgent: false)
+        case .ownForm(let form):
+            row("Form #\(form.id)", form.displayTitle, [form.locationLine], badge: SubmissionLabels.status(form.status), urgent: false)
         }
     }
 

@@ -76,16 +76,18 @@ final class NotificationRoutesTests: XCTestCase {
         XCTAssertEqual(NotificationRoutes.route(link: "/my-work", kind: "INCIDENT_COORDINATOR_REVIEW"), .trackIncidents)
         XCTAssertEqual(NotificationRoutes.route(link: "/incidents/42", kind: "ASSESSMENT_APPROVED_COORDINATOR"), .incident(42))
         XCTAssertEqual(NotificationRoutes.route(link: "/submissions/7", kind: "SHARE_RECEIVED"), .submission(7))
-        XCTAssertEqual(NotificationRoutes.route(link: "/my-work?assessment=9", kind: "ASSESSMENT_STAFF_ASSIGNMENT"), .assessments)
-        XCTAssertEqual(NotificationRoutes.route(link: "/assessments/9", kind: "ASSESSMENT_APPROVED_AUTHOR"), .assessments)
+        XCTAssertEqual(NotificationRoutes.route(link: "/my-work?assessment=9", kind: "ASSESSMENT_STAFF_ASSIGNMENT"), .assessment(9))
+        XCTAssertEqual(NotificationRoutes.route(link: "/assessments/9", kind: "ASSESSMENT_APPROVED_AUTHOR"), .assessment(9))
+        XCTAssertEqual(NotificationRoutes.route(link: "/assessments", kind: "X"), .assessments)
+        XCTAssertEqual(NotificationRoutes.route(link: "/my-work", kind: "SHARE_APPROVAL"), .assessments, "an approval waits in My Work")
+        XCTAssertEqual(NotificationRoutes.route(link: "/my-work?share=8", kind: "SHARE_NOTICE"), .share(review: 8), "a notice opens by itself")
         XCTAssertEqual(NotificationRoutes.route(link: "/my-work?maintenance=42", kind: "MAINTENANCE_WORKFLOW"),
                        .maintenance(incident: 42))
         XCTAssertEqual(NotificationRoutes.route(link: "/maintenance-work?incident=42", kind: "MAINTENANCE_WORKFLOW"),
                        .maintenance(incident: 42), "an earlier notice")
     }
 
-    func testStepsDoneOnTheWebStayInTheList() {
-        XCTAssertNil(NotificationRoutes.route(link: "/my-work", kind: "SHARE_APPROVAL"))
+    func testALinkWithNoScreenStaysInTheList() {
         XCTAssertNil(NotificationRoutes.route(link: nil, kind: "SHARE_ENDED"))
         XCTAssertNil(NotificationRoutes.route(link: "/incidents/abc", kind: "X"))
     }

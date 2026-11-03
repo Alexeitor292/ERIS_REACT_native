@@ -1,86 +1,6 @@
 import ERISKit
 import SwiftUI
 
-/// Forms: the technical forms this person is completing (drafts, and those
-/// returned for correction), each opening in the GISA editor. A form with
-/// changes still to send stays listed. Submitted records are read on the web.
-struct SubmissionsView: View {
-    @EnvironmentObject private var model: AppModel
-    /// Not observed here: this list sits under an open form, and redrawing it
-    /// whenever the form keeps a change moved the form's scroll position. The
-    /// rows' badges observe it themselves; the list reloads after each sending round.
-    let offline: OfflineSync
-    @State private var items: [SubmissionSummary] = []
-    /// When the list shown was kept on this iPhone, because ERIS could not be reached.
-    @State private var keptAt: Date?
-    @State private var error: String?
-    @State private var loading = false
-    @State private var search = ""
-
-    private var filtered: [SubmissionSummary] {
-        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return items }
-        return items.filter {
-            "\($0.id) \($0.status) \($0.displayTitle) \($0.locationLine)".lowercased().contains(query)
-        }
-    }
-
-    var body: some View {
-        List {
-            if let error { Text(error).foregroundStyle(.red) }
-            OfflineStatusSection(keptAt: keptAt)
-            let unsent = offline.store.waiting.forms
-            let working = filtered.filter { $0.isWorkInProgress || unsent.contains($0.id) }
-            if !working.isEmpty {
-                Section("In progress") { ForEach(working) { row($0) } }
-            }
-            if !loading && working.isEmpty && error == nil {
-                Text("Forms you are completing appear here. Each starts from an assessment assigned to you in My Work.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .searchable(text: $search, prompt: "ID, status, route, county")
-        .overlay { if loading && items.isEmpty { ProgressView() } }
-        .navigationTitle("Forms")
-        .navigationDestination(for: SubmissionRoute.self) { SubmissionDetailView(submissionId: $0.id) }
-        .refreshable {
-            offline.kick()
-            await load()
-        }
-        .task { await load() }
-        // After work is sent, the list shows where each form now stands.
-        .onReceive(offline.$rounds.dropFirst()) { _ in Task { await load() } }
-    }
-
-    private func row(_ item: SubmissionSummary) -> some View {
-        NavigationLink(value: SubmissionRoute(id: item.id)) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.displayTitle).font(.headline)
-                if !item.locationLine.isEmpty {
-                    Text(item.locationLine).font(.subheadline).foregroundStyle(.secondary)
-                }
-                HStack {
-                    StatusChip(text: SubmissionLabels.status(item.status))
-                    WaitingBadgeLabel(id: item.id)
-                }
-            }
-        }
-    }
-
-    private func load() async {
-        loading = true
-        defer { loading = false }
-        do {
-            let answer = try await SubmissionsAPI(api: model.api).list(keepingIn: offline.store)
-            items = answer.value
-            keptAt = answer.keptAt
-            error = nil
-        } catch {
-            self.error = model.handle(error)
-        }
-    }
-}
-
 /// Distinct from incident ids in the navigation path.
 struct SubmissionRoute: Hashable {
     let id: Int
@@ -176,7 +96,7 @@ enum WaitingBadge {
 }
 
 /// A form's unsent work, observing what is waiting on its own.
-private struct WaitingBadgeLabel: View {
+struct WaitingBadgeLabel: View {
     @EnvironmentObject private var offline: OfflineSync
     let id: Int
 

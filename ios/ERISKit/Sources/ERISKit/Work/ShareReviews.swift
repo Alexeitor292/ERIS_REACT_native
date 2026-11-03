@@ -1,8 +1,9 @@
 import Foundation
 
 /// A share of a technical form waiting on a branch or office chief
-/// (`GET /shares/reviews`). APPROVAL: it takes effect only once every branch
-/// chief with a say approves. NOTICE: the chief is told and may stop it.
+/// (`GET /shares/reviews`). APPROVAL: it takes effect only once everyone with a
+/// say approves, and waits in My Work. NOTICE: the chief is told by a notification
+/// that opens this, and may stop it; it asks nothing, so it is not in My Work.
 /// Ported from the web's ShareWorkItem.
 public struct ShareReview: Decodable, Equatable, Identifiable, Sendable {
     public struct Person: Decodable, Equatable, Sendable {
@@ -72,9 +73,9 @@ public struct ShareReview: Decodable, Equatable, Identifiable, Sendable {
 
     /// What the chief needs to know before deciding.
     public var explanation: String {
-        if isApproval { return "It takes effect only once every branch chief below approves. Rejecting it stops it." }
+        if isApproval { return "It takes effect only once everyone below with a say approves. Rejecting it stops it." }
         return status == "ACTIVE" ? "It is in effect. You need not do anything; you may stop it."
-            : "It is waiting on the branch chiefs. You need not do anything; you may stop it."
+            : "It is waiting on someone else's approval. You need not do anything; you may stop it."
     }
 
     public enum Decision: String, Sendable {
@@ -90,7 +91,7 @@ public struct ShareReview: Decodable, Equatable, Identifiable, Sendable {
     public func outcome(_ decision: Decision, status: String) -> String {
         switch decision {
         case .approve:
-            return status == "PENDING" ? "Approved. It takes effect once the other branch chief approves too." : "Approved. The form is now shared."
+            return status == "PENDING" ? "Approved. It takes effect once everyone else with a say approves too." : "Approved. The form is now shared."
         case .reject: return isApproval ? "Rejected. The form was not shared." : "Stopped. The form is no longer shared."
         case .acknowledge: return "Noted. The share stands."
         }

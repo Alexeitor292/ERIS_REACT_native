@@ -1,3 +1,4 @@
+import Combine
 import ERISKit
 import Foundation
 import UserNotifications
@@ -15,6 +16,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var phase: Phase = .starting
     @Published var unread = 0
     @Published var pendingRoute: AppRoute?
+    /// Forms wait in My Work for someone who otherwise has no queue there.
+    @Published private(set) var hasForms = false
     /// The signed-in person's forms and unsent work kept on this iPhone.
     private(set) var offline: OfflineSync?
     /// Highway reference data for finding post miles without a connection.
@@ -22,6 +25,7 @@ final class AppModel: ObservableObject {
     /// ArcGIS key and license, from ERIS.
     let maps = MapSetup()
     private var foreground: NSObjectProtocol?
+    private var rounds: AnyCancellable?
 
     let auth: AuthService
     var api: APIClient { auth.api }
@@ -62,18 +66,22 @@ final class AppModel: ObservableObject {
     }
 
     func start() async {
-        if let me = await auth.restore() {
-            enter(me)
-            await afterSignIn()
-        } else {
-            phase = .signedOut(message: nil)
+        do {
+            if let me = try await auth.restoreChecked() {
+                await arrive(me)
+            } else {
+                phase = .signedOut(message: nil)
+            }
+        } catch {
+            await refuse(error)
         }
     }
 
     func signIn() async {
         do {
-            enter(try await auth.signIn())
-            await afterSignIn()
+            await arrive(try await auth.signIn())
+        } catch APIError.forbidden(let detail) {
+            await refuse(APIError.forbidden(detail))
         } catch AuthError.cancelled {
             phase = .signedOut(message: nil)
         } catch AuthError.notLinked {
@@ -91,14 +99,73 @@ final class AppModel: ObservableObject {
     func signIn(email: String, password: String) async {
         guard Self.deployment == .staging else { return }
         do {
-            enter(try await auth.signIn(email: email, password: password))
-            await afterSignIn()
+            await arrive(try await auth.signIn(email: email, password: password))
+        } catch APIError.forbidden(let detail) {
+            await refuse(APIError.forbidden(detail))
         } catch AuthError.wrongPassword {
             phase = .signedOut(message: "That email and password did not sign in. Check them and try again.")
         } catch AuthError.passwordSignInDisabled {
             phase = .signedOut(message: "This ERIS server does not allow password sign-in.")
         } catch {
             phase = .signedOut(message: "ERIS could not be reached. Check the connection and try again.")
+        }
+    }
+
+    /// Standing in for someone away, or (nil) back to one's own work. Their queue and
+    /// what is kept for them sit apart from this person's own.
+    func actFor(_ person: Int?) async {
+        let before = api.actingFor
+        api.actingFor = person
+        do {
+            enter(try await auth.me())
+            await offline?.catchUp()
+            await refreshUnread()
+        } catch {
+            api.actingFor = before
+        }
+    }
+
+    private func arrive(_ me: Me) async {
+        guard AppAccess.allowed(me) else { return await refuse(nil) }
+        enter(me)
+        await afterSignIn()
+    }
+
+    /// ERIS does not admit this account to the app. The session ends, but what it
+    /// kept on this iPhone stays, for if the person is placed again.
+    private func refuse(_ error: Error?) async {
+        api.actingFor = nil
+        var message = AppAccess.refusal
+        if let error = error as? APIError, case .forbidden(let detail?) = error { message = detail }
+        offline?.stop(wiping: false)
+        offline = nil
+        rounds = nil
+        await auth.signOut(device: device)
+        device = nil
+        unread = 0
+        hasForms = false
+        phase = .signedOut(message: message)
+    }
+
+    /// Picks up a change of place: the server applies it at the next request, and
+    /// the tabs, queue and steps follow it here. Called when the app comes back
+    /// and after each round of catching up.
+    func refreshMe() async {
+        guard case .signedIn(let current) = phase else { return }
+        do {
+            let fresh = try await auth.me()
+            guard case .signedIn = phase else { return }
+            guard AppAccess.allowed(fresh) else { return await refuse(nil) }
+            guard fresh != current else { return }
+            enter(fresh)
+            if fresh.roles != current.roles || fresh.maintenanceDistricts != current.maintenanceDistricts {
+                await offline?.catchUp()
+            }
+        } catch APIError.forbidden(let detail) {
+            // The delegation ended: back to this person's own work, not out of the app.
+            if api.actingFor != nil { await actFor(nil) } else { await refuse(APIError.forbidden(detail)) }
+        } catch {
+            // Not reached, or the session ended: the next request says so.
         }
     }
 
@@ -114,19 +181,27 @@ final class AppModel: ObservableObject {
             // The demo's sample data starts afresh each launch, so does what it kept.
             if isDemo { OfflineStore(directory: OfflineSync.folder(for: me.id)).wipe() }
             offline = OfflineSync(api: api, me: me)
+            rounds = offline?.$rounds.dropFirst().sink { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.hasForms = !(self.offline?.work.forms.isEmpty ?? true)
+                    await self.refreshMe()
+                }
+            }
+        } else {
+            offline?.update(me: me)
         }
         if let store = offline?.store { Task { await maps.prepare(api: api, store: store) } }
         phase = .signedIn(me)
         // Reporters (by role or district duty) and form authors find post miles with it; viewers are refused by the server.
-        if !isDemo && (!RoleModel.isPublicOnly(me.roles) || me.reportsForMaintenance) {
-            roads.refresh(api: api)
-            if foreground == nil {
-                foreground = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
-                                                                    object: nil, queue: .main) { [weak self] _ in
-                    Task { @MainActor in
-                        guard let self, case .signedIn = self.phase else { return }
-                        self.roads.refresh(api: self.api)
-                    }
+        if !isDemo && (!RoleModel.isPublicOnly(me.roles) || me.reportsForMaintenance) { roads.refresh(api: api) }
+        if foreground == nil {
+            foreground = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
+                                                                object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, case .signedIn = self.phase else { return }
+                    if !self.isDemo { self.roads.refresh(api: self.api) }
+                    await self.refreshMe()
                 }
             }
         }
@@ -134,11 +209,14 @@ final class AppModel: ObservableObject {
 
     /// Signing out deletes what this person kept on the iPhone, sent or not.
     func signOut() async {
+        if api.actingFor != nil { await actFor(nil) }
         offline?.stop(wiping: true)
         offline = nil
+        rounds = nil
         await auth.signOut(device: device)
         device = nil
         unread = 0
+        hasForms = false
         phase = .signedOut(message: "You have signed out of ERIS.")
     }
 

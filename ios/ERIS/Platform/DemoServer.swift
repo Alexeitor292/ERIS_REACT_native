@@ -84,7 +84,11 @@ struct DemoNetworkSection: View {
 /// assessments so a whole hand-off can be clicked through.
 final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
-    private let roles: [String]
+    private var roles: [String]
+    private var askedWhoAmI = 0
+    private var actingFor: Int?
+    private var delegations: [[String: Any]] = []
+    private var workMoved = false
     private var assessments: [[String: Any]]
     private var events: [Int: [[String: Any]]] = [:]
     private var nextEventId = 100
@@ -133,6 +137,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
                 return upload(request, sectionKey: query.first { $0.name == "section_key" }?.value,
                               kind: query.first { $0.name == "kind" }?.value)
             }
+            actingFor = request.value(forHTTPHeaderField: "X-ERIS-Acting-For").flatMap(Int.init)
             return route(request.httpMethod ?? "GET", path, query, body)
         }
         let data = try JSONSerialization.data(withJSONObject: object)
@@ -144,6 +149,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private func route(_ method: String, _ path: String, _ query: [URLQueryItem], _ body: [String: Any]) -> (Int, Any) {
         let parts = path.split(separator: "/").map(String.init)
         // Split in two: as one switch it took the type checker too long for CI.
+        if let answer = delegationRoute(method, parts, body) { return answer }
         if let answer = formPhotoAndCrackRoute(method, parts, body) { return answer }
         if let answer = formWorkflowRoute(method, parts, body) { return answer }
         if method == "GET", parts.count >= 4, parts[0] == "submissions", parts[1] == "501", parts[3] == "offline-scene-package" {
@@ -152,7 +158,19 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         if let answer = work.route(method, parts, query, body, incidents: &incidents, assessments: &assessments) { return answer }
         switch (method, parts) {
         case ("GET", ["auth", "me"]):
+            // `-ERISDemoRolesLater BRANCH_CHIEF`: moved to another place while the app is open.
+            askedWhoAmI += 1
+            if askedWhoAmI > 1, let later = UserDefaults.standard.string(forKey: "ERISDemoRolesLater") {
+                roles = later.split(separator: ",").map(String.init)
+            }
             return (200, DemoData.me(roles: roles))
+        case ("GET", ["my-forms"]):
+            // `-ERISDemoSharedForm YES`: a form in progress someone shared with this person.
+            let form = DemoData.submissions.first ?? [:]
+            let shared: [[String: Any]] = UserDefaults.standard.bool(forKey: "ERISDemoSharedForm")
+                ? [["submission": form, "shared_by": "Maria Garcia", "shared_at": "2026-10-28T09:00:00Z"]] : []
+            let legacy = UserDefaults.standard.bool(forKey: "ERISDemoLegacyForm")
+            return (200, ["shared": shared, "own": legacy ? [form] : []])
         case ("GET", ["arcgis", "runtime-config"]):
             // A license the demo (a staging build) leaves unused: its maps run under developer licensing.
             return (200, ["runtime_enabled": false, "api_key": NSNull(), "license_key": "runtimelite,1000,demo-only",
@@ -241,6 +259,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             return (200, ["assessment": item, "assignments": [], "events": events[id] ?? DemoData.events(for: item)])
         case ("GET", let p) where p.count == 3 && p[0] == "assessments" && p[2] == "branch-options":
             return (200, DemoData.branchChiefOptions)
+        case ("GET", let p) where p.count == 3 && p[0] == "assessments" && p[2] == "senior-engineer-options":
+            return (200, DemoData.seniorOptions)
         case ("GET", let p) where p.count == 3 && p[0] == "admin" && p[1] == "assessment-assignment-options":
             return (200, DemoData.staffOptions)
         case ("POST", let p) where p.count == 3 && p[0] == "assessments":
@@ -251,6 +271,54 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     }
 
     private var notFound: (Int, Any) { (404, ["detail": "Not in the demo data"]) }
+
+    /// Out of office and moving work. `-ERISDemoActing YES`: Jordan Chen, a branch chief, is
+    /// away and this person may act for them. `-ERISDemoWorkLeft YES`: someone moved on.
+    private func delegationRoute(_ method: String, _ parts: [String], _ body: [String: Any]) -> (Int, Any)? {
+        let actingOptions: [[String: Any]] = UserDefaults.standard.bool(forKey: "ERISDemoActing")
+            ? [["delegation_id": 1, "user_id": DemoData.awayId, "full_name": "Jordan Chen", "ends_on": "2099-01-31"]] : []
+        switch (method, parts) {
+        case ("GET", ["auth", "me"]) where actingFor != nil:
+            var me = DemoData.me(roles: ["BRANCH_CHIEF"])
+            me["id"] = actingFor
+            me["full_name"] = "Jordan Chen"
+            me["acting"] = ["delegation_id": 1, "user_id": DemoData.meId, "full_name": "Demo User"]
+            me["acting_options"] = actingOptions
+            return (200, me)
+        case ("GET", ["delegations"]):
+            return (200, ["given": delegations, "received": [], "acting_options": actingOptions])
+        case ("GET", ["delegations", "people"]):
+            return (200, ["items": []])
+        case ("GET", ["delegations", "candidates"]):
+            return (200, ["items": [["id": 50, "full_name": "M. Okafor", "email": "m@dot.ca.gov", "placement": "Branch Chief · OGD West › Branch C"]]])
+        case ("POST", ["delegations"]):
+            delegations.append(["id": delegations.count + 1,
+                                "delegator": ["id": DemoData.meId, "full_name": "Demo User"],
+                                "delegate": ["id": body["delegate_user_id"] ?? 50, "full_name": "M. Okafor"],
+                                "starts_on": body["starts_on"] ?? "", "ends_on": body["ends_on"] ?? "",
+                                "note": body["note"] ?? NSNull(), "status": "ACTIVE", "action_count": 0])
+            return (200, ["id": delegations.count])
+        case ("POST", let p) where p.count == 3 && p[0] == "delegations" && p[2] == "cancel":
+            delegations = delegations.map { item in
+                var item = item
+                if "\(item["id"] ?? "")" == p[1] { item["status"] = "CANCELLED" }
+                return item
+            }
+            return (200, [:])
+        case ("GET", ["assessments", "workload"]):
+            guard UserDefaults.standard.bool(forKey: "ERISDemoWorkLeft"), !workMoved else { return (200, ["groups": [], "left": 0]) }
+            let item: [String: Any] = ["id": 3, "incident_id": 12, "state": "PENDING_ENGINEER_ASSIGNMENT", "title": "Slope failure near PM 12.3",
+                                       "office_code": "WEST", "branch_label": "Branch C", "updated_at": "2026-10-28T08:15:00Z"]
+            return (200, ["left": 1, "groups": [["kind": "BRANCH_CHIEF",
+                                                 "holder": ["id": 77, "full_name": "Lee Former", "placement": NSNull()],
+                                                 "left": true, "items": [item]]]])
+        case ("POST", ["assessments", "move"]):
+            workMoved = true
+            return (200, ["moved": body["assessment_ids"] ?? [], "failed": []])
+        default:
+            return nil
+        }
+    }
 
     /// The assessment the demo form belongs to, if any.
     private var linkedAssessment: [String: Any]? {
@@ -507,6 +575,10 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case "assign-engineer":
             item["state"] = "DRAFT"
             item["assigned_engineer_user_id"] = body["engineer_user_id"]
+        case "assign-senior-engineer":
+            item["state"] = "DRAFT"
+            item["routing_path"] = "SENIOR_ENGINEER"
+            item["assigned_engineer_user_id"] = body["senior_engineer_user_id"]
         case "submit":
             item["state"] = "SUBMITTED"
             item["can_review"] = true
@@ -539,10 +611,13 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
 /// Sample records, in the shapes the server returns.
 enum DemoData {
     static let meId = 41
+    static let awayId = 77
 
     static func me(roles: [String]) -> [String: Any] {
         ["id": meId, "email": "demo.user@dot.ca.gov", "full_name": "Demo User", "roles": roles,
          // `-ERISDemoDuties YES`: a district maintenance duty that reports and reviews.
+         "acting_options": UserDefaults.standard.bool(forKey: "ERISDemoActing")
+            ? [["delegation_id": 1, "user_id": awayId, "full_name": "Jordan Chen", "ends_on": "2099-01-31"]] : [],
          "maintenance_districts": UserDefaults.standard.bool(forKey: "ERISDemoDuties")
             ? [["district": "04", "report": true, "manage": false]] : [],
          "org": ["office_name": "Office of Geotechnical Design West", "office_short_name": "OGD West",
@@ -780,6 +855,12 @@ enum DemoData {
           "created_at": "2026-10-27T15:00:00Z"]]
     }
 
+    static let seniorOptions: [String: Any] = [
+        "assessment_id": 3, "office_code": "WEST",
+        "groups": [group("b:9", "Oakland D4", id: 9, letter: "", city: "Oakland")],
+        "items": [person(61, "S. Morales", branch: 9, letter: "", city: "Oakland", open: 1, waiting: 0)],
+    ]
+
     static let branchChiefOptions: [String: Any] = [
         "assessment_id": 3, "office_code": "WEST",
         "groups": [
@@ -797,12 +878,10 @@ enum DemoData {
 
     static let staffOptions: [String: Any] = [
         "assessment_id": 4, "office_code": "WEST", "kind": "ENGINEER",
-        "groups": [group("b:3", "Branch C", id: 3, letter: "C", city: "San Jose"),
-                   group("b:1", "Branch A", id: 1, letter: "A", city: "Oakland")],
+        "groups": [group("b:3", "Branch C", id: 3, letter: "C", city: "San Jose")],
         "items": [
             person(meId, "Demo User", branch: 3, letter: "C", city: "San Jose", open: 2, waiting: 1),
             person(44, "A. Rivera", branch: 3, letter: "C", city: "San Jose", open: 4, waiting: 0),
-            person(46, "B. Nakamura", branch: 1, letter: "A", city: "Oakland", open: 1, waiting: 0),
         ],
     ]
 

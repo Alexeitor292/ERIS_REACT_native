@@ -61,6 +61,8 @@ struct AssessmentDetailView: View {
     // deliberate human choice (owner decision 7).
     @State private var branchChiefId = PersonPicker.initialValue()
     @State private var staffId = PersonPicker.initialValue()
+    @State private var seniorId = PersonPicker.initialValue()
+    @State private var seniors: [PickerSection] = []
     @State private var notes = ""
     @State private var error: String?
     @State private var actionError: String?
@@ -96,8 +98,6 @@ struct AssessmentDetailView: View {
         let assessment = detail.assessment
         let actions = AssessmentActions(assessment: assessment, roles: me.roles, meId: me.id)
         let chosenStaff = PersonPicker.selectedPerson(staff, staffId)
-        let outOfBranch = PersonPicker.isOutOfBranchChoice(chosenStaff, assessmentBranchId: assessment.routedBranchId)
-        let hasNotes = !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ScrollViewReader { scroller in
         List {
             OfflineStatusSection(keptAt: keptAt)
@@ -118,8 +118,7 @@ struct AssessmentDetailView: View {
 
             if actions.delegate || actions.assign || actions.submit || actions.review {
                 Section {
-                    TextField(outOfBranch ? "Required: why this Staff member, from another branch" : "Notes (optional)",
-                              text: $notes, axis: .vertical)
+                    TextField("Notes (optional)", text: $notes, axis: .vertical)
                         .lineLimit(2...6)
                 } header: {
                     Text("Notes")
@@ -129,6 +128,8 @@ struct AssessmentDetailView: View {
             if actions.delegate {
                 PersonPickerSections(title: "Delegate to a branch chief", sections: branchChiefs,
                                      empty: "No branch chiefs configured for this office.", selection: $branchChiefId)
+                PersonPickerSections(title: "Or assign a Senior Specialist", sections: seniors,
+                                     empty: "No Senior Specialists are recorded for this office.", selection: $seniorId)
             }
 
             if actions.assignNotOnThisRoute {
@@ -139,7 +140,7 @@ struct AssessmentDetailView: View {
 
             if actions.assign {
                 PersonPickerSections(title: "Assign a Staff member", sections: staff,
-                                     empty: "No Staff members are recorded for this office.", selection: $staffId)
+                                     empty: "No Staff members are recorded for this branch.", selection: $staffId)
             }
 
             if actions.submit {
@@ -172,24 +173,31 @@ struct AssessmentDetailView: View {
 
             AssessmentTimelineSection(events: detail.events)
         }
+        // One choice of two: a branch chief, or a Senior Specialist.
+        .onChange(of: branchChiefId) { _, chosen in if chosen != nil { seniorId = nil } }
+        .onChange(of: seniorId) { _, chosen in if chosen != nil { branchChiefId = nil } }
         // Back to the top after a step, as the Expo sheet reopened there.
         .onChange(of: stepsDone) { withAnimation { scroller.scrollTo("state", anchor: .top) } }
         .safeAreaInset(edge: .bottom) {
             if actions.delegate {
                 let chosen = PersonPicker.selectedPerson(branchChiefs, branchChiefId)
-                HandOffBar(hint: chosen == nil ? "Choose a branch chief above." : nil, warning: nil,
-                           title: chosen.map { "Delegate to \($0.fullName)" } ?? "Delegate to branch chief",
-                           enabled: !working && chosen != nil) {
-                    guard let chosen else { return }
-                    run { try await $0.delegateBranch(assessment.id, branchChiefUserId: chosen.id, notes: notes) }
+                let chosenSenior = PersonPicker.selectedPerson(seniors, seniorId)
+                if let chosenSenior {
+                    HandOffBar(hint: nil, warning: nil, title: "Assign \(chosenSenior.fullName)", enabled: !working) {
+                        run { try await $0.assignSenior(assessment.id, seniorEngineerUserId: chosenSenior.id, notes: notes) }
+                    }
+                } else {
+                    HandOffBar(hint: chosen == nil ? "Choose a branch chief or a Senior Specialist above." : nil, warning: nil,
+                               title: chosen.map { "Delegate to \($0.fullName)" } ?? "Delegate to branch chief",
+                               enabled: !working && chosen != nil) {
+                        guard let chosen else { return }
+                        run { try await $0.delegateBranch(assessment.id, branchChiefUserId: chosen.id, notes: notes) }
+                    }
                 }
             } else if actions.assign {
-                HandOffBar(hint: chosenStaff == nil ? "Choose a Staff member above." : nil,
-                           warning: outOfBranch ? chosenStaff.map {
-                               "\($0.fullName) is in \($0.placeNote ?? "another branch"), not \(assessment.branchLabel ?? "this branch"). Record why in the notes to assign them anyway."
-                           } : nil,
+                HandOffBar(hint: chosenStaff == nil ? "Choose a Staff member above." : nil, warning: nil,
                            title: chosenStaff.map { "Assign \($0.fullName)" } ?? "Assign Staff member",
-                           enabled: !working && chosenStaff != nil && (!outOfBranch || hasNotes)) {
+                           enabled: !working && chosenStaff != nil) {
                     guard let chosenStaff else { return }
                     run { try await $0.assignEngineer(assessment.id, engineerUserId: chosenStaff.id, notes: notes) }
                 }
@@ -207,6 +215,7 @@ struct AssessmentDetailView: View {
             let actions = AssessmentActions(assessment: loaded.assessment, roles: me.roles, meId: me.id)
             // A picker that fails to load shows as empty, as in the Expo app.
             branchChiefs = actions.delegate ? ((try? await assessments.branchOptions(assessmentId))?.sections ?? []) : []
+            seniors = actions.delegate ? ((try? await assessments.seniorOptions(assessmentId))?.sections ?? []) : []
             staff = actions.assign ? ((try? await assessments.engineerOptions(assessmentId))?.sections ?? []) : []
             detail = loaded
             error = nil
@@ -225,6 +234,7 @@ struct AssessmentDetailView: View {
                 notes = ""
                 branchChiefId = PersonPicker.initialValue()
                 staffId = PersonPicker.initialValue()
+                seniorId = PersonPicker.initialValue()
                 await load()
                 stepsDone += 1
             } catch {

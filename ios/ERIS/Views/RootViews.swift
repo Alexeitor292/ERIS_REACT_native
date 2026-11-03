@@ -22,11 +22,39 @@ struct RootView: View {
                         .background(.orange)
                         .foregroundStyle(.black)
                 }
+                if let acting = me.acting {
+                    ActingBanner(person: me.fullName, realName: acting.fullName)
+                }
                 if let offline = model.offline {
-                    MainTabView(me: me).environmentObject(offline).environmentObject(model.roads).environmentObject(model.maps)
+                    MainTabView(me: me).id(me.id).environmentObject(offline).environmentObject(model.roads).environmentObject(model.maps)
                 }
             }
         }
+    }
+}
+
+/// Never out of sight while someone is acting for another.
+private struct ActingBanner: View {
+    @EnvironmentObject private var model: AppModel
+    let person: String
+    let realName: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Acting for \(person)")
+                .font(.footnote.weight(.semibold))
+                .accessibilityIdentifier("acting-banner")
+            Spacer()
+            Button("Back to my work") { Task { await model.actFor(nil) } }
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(.white)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color.accentColor)
+        .foregroundStyle(.white)
     }
 }
 
@@ -146,10 +174,9 @@ struct MainTabView: View {
     @State private var tab = AppTab.myWork
     @State private var workPath = NavigationPath()
     @State private var reportPath = NavigationPath()
-    @State private var formsPath = NavigationPath()
 
     var body: some View {
-        let tabs = AppTab.visible(for: me)
+        let tabs = AppTab.visible(for: me, hasForms: model.hasForms)
         TabView(selection: $tab) {
             if tabs.contains(.myWork) {
                 NavigationStack(path: $workPath) { MyWorkView(me: me, path: $workPath) }
@@ -161,11 +188,6 @@ struct MainTabView: View {
                     .tabItem { Label("Report", systemImage: "exclamationmark.bubble") }
                     .tag(AppTab.report)
             }
-            if tabs.contains(.forms) {
-                NavigationStack(path: $formsPath) { if let offline = model.offline { SubmissionsView(offline: offline) } }
-                    .tabItem { Label("Forms", systemImage: "doc.text") }
-                    .tag(AppTab.forms)
-            }
             NavigationStack { NotificationsView() }
                 .tabItem { Label("Notifications", systemImage: "bell") }
                 // nil, not "": iOS draws an empty string as a red dot.
@@ -176,6 +198,8 @@ struct MainTabView: View {
                 .tag(AppTab.account)
         }
         .onAppear { if !tabs.contains(tab) { tab = tabs.first ?? .notifications } }
+        // A change of place can take away the tab this person is on.
+        .onChange(of: tabs) { _, now in if !now.contains(tab) { tab = now.first ?? .notifications } }
         .onChange(of: model.pendingRoute) { _, route in
             guard let route else { return }
             model.pendingRoute = nil
@@ -188,6 +212,14 @@ struct MainTabView: View {
         switch route {
         case .assessments, .trackIncidents:
             if tabs.contains(.myWork) { tab = .myWork }
+        case .assessment(let id):
+            guard tabs.contains(.myWork) else { return }
+            tab = .myWork
+            workPath = NavigationPath([AssessmentRoute(id: id)])
+        case .share(let review):
+            guard tabs.contains(.myWork) else { return }
+            tab = .myWork
+            workPath = NavigationPath([WorkRoute(.share, review)])
         case .maintenance(let incident):
             guard tabs.contains(.myWork) else { return }
             tab = .myWork
@@ -201,14 +233,9 @@ struct MainTabView: View {
                 workPath = NavigationPath([WorkRoute(.incident, id)])
             }
         case .submission(let id):
-            if tabs.contains(.forms) {
-                tab = .forms
-                formsPath = NavigationPath([SubmissionRoute(id: id)])
-            } else if tabs.contains(.myWork) {
+            if tabs.contains(.myWork) {
                 tab = .myWork
-                var path = NavigationPath()
-                path.append(SubmissionRoute(id: id))
-                workPath = path
+                workPath = NavigationPath([SubmissionRoute(id: id)])
             }
         }
     }
@@ -266,6 +293,16 @@ struct AccountView: View {
                     ForEach(AppTheme.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
+            }
+            if me.acting == nil, AppAccess.allowed(me), !RoleModel.isPublicOnly(me.roles) || me.hasMaintenanceDistricts {
+                Section("Out of office") {
+                    ForEach(me.actingOptions ?? []) { option in
+                        Button("Act for \(option.fullName), until \(DelegationDates.label(option.endsOn))") {
+                            Task { await model.actFor(option.userId) }
+                        }
+                    }
+                    NavigationLink("Set who acts for me") { OutOfOfficeView(me: me) }
+                }
             }
             Section("Server") {
                 Text(model.api.baseURL.absoluteString)

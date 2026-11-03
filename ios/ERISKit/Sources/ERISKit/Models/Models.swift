@@ -81,6 +81,23 @@ public struct Me: Decodable, Equatable, Sendable {
     public let roles: [String]
     public let maintenanceDistricts: [JSONValue]?
     public let org: Org?
+    /// Present while someone else is acting for this person: who it really is.
+    public let acting: Acting?
+    /// Whom the person signed in may switch to acting for today.
+    public let actingOptions: [ActingOption]?
+
+    public struct Acting: Decodable, Equatable, Sendable {
+        public let userId: Int
+        public let fullName: String
+    }
+
+    public struct ActingOption: Decodable, Equatable, Identifiable, Sendable {
+        public let userId: Int
+        public let fullName: String
+        public let endsOn: String
+
+        public var id: Int { userId }
+    }
 
     public struct Org: Decodable, Equatable, Sendable {
         public let officeName: String?

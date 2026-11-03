@@ -6,13 +6,15 @@ public enum AppRoute: Equatable, Hashable, Sendable {
     case incident(Int)
     case submission(Int)
     case assessments
+    case assessment(Int)
+    /// A share the person was told about: it opens here to stop it, and is not in My Work.
+    case share(review: Int)
     case maintenance(incident: Int?)
 }
 
 public enum NotificationRoutes {
-    /// Where a notification leads. The feed stores web paths; steps done on
-    /// the web (sharing approvals, office routing) return nil and the list
-    /// simply marks them read.
+    /// Where a notification leads. The feed stores web paths; a link the app
+    /// has no screen for returns nil and the list simply marks it read.
     public static func route(link: String?, kind: String) -> AppRoute? {
         if kind == "INCIDENT_COORDINATOR_REVIEW" { return .trackIncidents }
         guard let link, !link.isEmpty else { return nil }
@@ -22,8 +24,12 @@ public enum NotificationRoutes {
         if path == "/maintenance-work" { return .maintenance(incident: queryNumber(in: link, named: "incident")) }
         if let id = numberAfter("/incidents/", in: path) { return .incident(id) }
         if let id = numberAfter("/submissions/", in: path) { return .submission(id) }
-        if path == "/assessments" || numberAfter("/assessments/", in: path) != nil { return .assessments }
-        if path == "/my-work" && link.contains("assessment=") { return .assessments }
+        if let id = numberAfter("/assessments/", in: path) { return .assessment(id) }
+        if path == "/assessments" { return .assessments }
+        if path == "/my-work", let id = queryNumber(in: link, named: "assessment") { return .assessment(id) }
+        if path == "/my-work", let id = queryNumber(in: link, named: "share") { return .share(review: id) }
+        // What waits in My Work with no step of its own, such as a share to approve.
+        if path == "/my-work" { return .assessments }
         return nil
     }
 

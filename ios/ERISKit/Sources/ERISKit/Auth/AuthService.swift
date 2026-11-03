@@ -144,8 +144,21 @@ public final class AuthService: @unchecked Sendable {
 
     /// The signed-in account if a stored session (or a silent renewal) works.
     public func restore() async -> Me? {
+        (try? await restoreChecked()) ?? nil
+    }
+
+    /// `restore`, except that ERIS refusing this account is reported (403 and
+    /// why), not treated as having no session.
+    public func restoreChecked() async throws -> Me? {
         guard api.store.load() != nil else { return nil }
-        return try? await me()
+        do {
+            return try await me()
+        } catch let error as APIError {
+            if case .forbidden = error { throw error }
+            return nil
+        } catch {
+            return nil
+        }
     }
 
     /// Ends this device's ERIS session; other devices stay signed in.

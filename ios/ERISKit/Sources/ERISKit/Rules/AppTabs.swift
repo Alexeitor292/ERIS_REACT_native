@@ -5,24 +5,38 @@ import Foundation
 ///
 ///  - My Work, for anyone with steps waiting on them: coordinators triaging,
 ///    maintenance reviewers and approvers, office and branch chiefs routing and
-///    reviewing, Staff and Senior Specialists on their assigned assessments.
+///    reviewing, Staff and Senior Specialists on their assigned assessments, and
+///    anyone a form in progress has been shared with. Forms open from here.
 ///  - Report, for maintenance reporters: report an incident and follow their own reports.
-///  - Forms, for Staff and Senior Specialists: the technical forms they are completing.
 ///  - Notifications and Account, for everyone.
 public enum AppTab: String, CaseIterable, Identifiable, Sendable {
-    case myWork, report, forms, notifications, account
+    case myWork, report, notifications, account
     public var id: String { rawValue }
 
-    public static func visible(roles: [String], maintenanceDuties: Bool, reportsForMaintenance: Bool) -> [AppTab] {
+    public static func visible(roles: [String], maintenanceDuties: Bool, reportsForMaintenance: Bool,
+                               hasForms: Bool = false) -> [AppTab] {
         var tabs: [AppTab] = []
-        if MyWork.hasQueue(roles: roles, maintenanceDuties: maintenanceDuties) { tabs.append(.myWork) }
+        if hasForms || MyWork.hasQueue(roles: roles, maintenanceDuties: maintenanceDuties) { tabs.append(.myWork) }
         if RoleModel.isAdmin(roles) || RoleModel.has(roles, .maintenanceCrew) || reportsForMaintenance { tabs.append(.report) }
-        if RoleModel.isAssessmentAuthor(roles) { tabs.append(.forms) }
         return tabs + [.notifications, .account]
     }
 
-    public static func visible(for me: Me) -> [AppTab] {
-        visible(roles: me.roles, maintenanceDuties: me.hasMaintenanceDistricts, reportsForMaintenance: me.reportsForMaintenance)
+    public static func visible(for me: Me, hasForms: Bool = false) -> [AppTab] {
+        visible(roles: me.roles, maintenanceDuties: me.hasMaintenanceDistricts, reportsForMaintenance: me.reportsForMaintenance,
+                hasForms: hasForms)
+    }
+}
+
+/// Who may use the app: anyone placed in an office or on a district list, anyone
+/// with a step in a district's maintenance workflow, and administrators. The
+/// server decides (`services/app_access.py`, every request); this says the same
+/// to a server that has not been updated yet.
+public enum AppAccess {
+    public static let refusal = "ERIS Mobile is for people placed in an office or on a district's maintenance list. "
+        + "Ask your chief or an ERIS administrator to place you, or use ERIS on the web."
+
+    public static func allowed(_ me: Me) -> Bool {
+        RoleModel.isWorkforceUser(me.roles) || me.hasMaintenanceDistricts
     }
 }
 

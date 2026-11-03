@@ -14,7 +14,7 @@ final class OfflineSync: ObservableObject {
     let store: OfflineStore
     private let api: APIClient
     private let userId: Int
-    private let me: Me
+    private var me: Me
     /// Whose work this is.
     var personId: Int { userId }
     /// My Work, as last loaded (from the kept copy when offline).
@@ -87,6 +87,9 @@ final class OfflineSync: ObservableObject {
         lastCatchUp = Date()
         rounds += 1
     }
+
+    /// This person's place changed: the next round loads the queue it gives them.
+    func update(me: Me) { self.me = me }
 
     /// For a notice or background time, where iOS waits for the answer.
     func catchUpInBackground() async -> Bool {

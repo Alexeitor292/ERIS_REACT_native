@@ -170,13 +170,22 @@ final class ShareReviewTests: XCTestCase {
         """.utf8))
     }
 
+    func testOnlyAnApprovalWaitsInMyWorkAndANoticeIsNotOnTheList() throws {
+        var loaded = MyWork.Loaded()
+        loaded.shares = [try review(kind: "APPROVAL"), try review(kind: "NOTICE", status: "ACTIVE")]
+        XCTAssertEqual(MyWork.items(loaded).count, 1)
+        guard case .share(let listed)? = MyWork.items(loaded).first else { return XCTFail("the approval") }
+        XCTAssertTrue(listed.isApproval)
+        XCTAssertEqual(loaded.shares.count, 2, "the notice stays loaded, for its notification to open")
+    }
+
     func testAShareSaysWhoSharesWhatAndWhereEachReviewStands() throws {
         let approval = try review(kind: "APPROVAL")
         XCTAssertEqual(approval.headline, "A. Lee is sharing “Slip at PM 4” with b.cho@dot.ca.gov")
         XCTAssertEqual(approval.reviews.map(\.line), ["Branch C — waiting for approval", "Branch D — approved by M. Okafor",
                                                       "Office West — stopped by P. Shah"])
         XCTAssertEqual(approval.decisions.map(\.1), ["Approve", "Reject"])
-        XCTAssertEqual(approval.outcome(.approve, status: "PENDING"), "Approved. It takes effect once the other branch chief approves too.")
+        XCTAssertEqual(approval.outcome(.approve, status: "PENDING"), "Approved. It takes effect once everyone else with a say approves too.")
         XCTAssertEqual(approval.outcome(.approve, status: "ACTIVE"), "Approved. The form is now shared.")
 
         let notice = try review(kind: "NOTICE", status: "ACTIVE")
@@ -235,10 +244,45 @@ final class AppTabTests: XCTestCase {
         XCTAssertEqual(tabs(["MAINTENANCE_COORDINATOR"]), [.myWork, .notifications, .account])
         XCTAssertEqual(tabs(["OFFICE_CHIEF"]), [.myWork, .notifications, .account])
         XCTAssertEqual(tabs(["BRANCH_CHIEF"]), [.myWork, .notifications, .account])
-        XCTAssertEqual(tabs(["STAFF"]), [.myWork, .forms, .notifications, .account])
-        XCTAssertEqual(tabs(["SENIOR_SPECIALIST"]), [.myWork, .forms, .notifications, .account])
+        XCTAssertEqual(tabs(["STAFF"]), [.myWork, .notifications, .account])
+        XCTAssertEqual(tabs(["SENIOR_SPECIALIST"]), [.myWork, .notifications, .account])
         XCTAssertEqual(tabs(["GUEST"]), [.notifications, .account], "a read-only viewer uses the web")
         XCTAssertEqual(tabs(["ADMIN"]), AppTab.allCases)
+    }
+
+    func testAFormSharedWithSomeoneWithNoQueueBringsMyWork() {
+        XCTAssertEqual(AppTab.visible(roles: ["MAINTENANCE_CREW"], maintenanceDuties: false, reportsForMaintenance: false),
+                       [.report, .notifications, .account])
+        XCTAssertEqual(AppTab.visible(roles: ["MAINTENANCE_CREW"], maintenanceDuties: false, reportsForMaintenance: false, hasForms: true),
+                       [.myWork, .report, .notifications, .account])
+    }
+
+    private func person(_ roles: [String], duties: Bool = false) throws -> Me {
+        let districts = duties ? #"[{"district": "04", "report": false, "manage": false}]"# : "[]"
+        return try snake.decode(Me.self, from: Data("""
+        {"id": 1, "email": "a@x", "full_name": "A", "roles": \(String(data: try JSONEncoder().encode(roles), encoding: .utf8)!),
+         "maintenance_districts": \(districts)}
+        """.utf8))
+    }
+
+    func testTheAppIsForPeoplePlacedInTheOrganizationAndAdministrators() throws {
+        for role in ["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF", "SENIOR_SPECIALIST", "STAFF", "MAINTENANCE_COORDINATOR", "MAINTENANCE_CREW"] {
+            XCTAssertTrue(AppAccess.allowed(try person([role])), role)
+        }
+        XCTAssertFalse(AppAccess.allowed(try person(["GUEST"])))
+        XCTAssertFalse(AppAccess.allowed(try person([])))
+        XCTAssertTrue(AppAccess.allowed(try person(["GUEST"], duties: true)), "a step in a district's workflow")
+    }
+
+    func testAFormFromAnAssessmentInTheQueueIsNotListedTwice() throws {
+        let form = try snake.decode(SubmissionSummary.self, from: Data(#"{"id": 501, "status": "DRAFT"}"#.utf8))
+        let other = try snake.decode(SubmissionSummary.self, from: Data(#"{"id": 502, "status": "DRAFT", "title": "Mine"}"#.utf8))
+        let assessment = try snake.decode(Assessment.self, from: Data(#"{"id": 5, "incident_id": 1, "state": "DRAFT", "submission_id": 501}"#.utf8))
+        var loaded = MyWork.Loaded(assessments: [assessment])
+        loaded.forms = MyWork.MyForms(shared: [MyWork.SharedForm(submission: form, sharedBy: "M", sharedAt: nil),
+                                               MyWork.SharedForm(submission: other, sharedBy: "M", sharedAt: nil)],
+                                      own: [])
+        XCTAssertEqual(MyWork.items(loaded).map(\.id), ["a5", "f502"])
     }
 
     func testAMaintenanceDutyThatReportsIsReadFromTheAccount() throws {

@@ -152,6 +152,11 @@ public struct RoutingOptions: Decodable, Equatable, Sendable {
     public let groups: [PickerGroup]?
     public let items: [RoutingUserOption]
 
+    public init(groups: [PickerGroup]?, items: [RoutingUserOption]) {
+        self.groups = groups
+        self.items = items
+    }
+
     public var sections: [PickerSection] { PersonPicker.sections(groups: groups ?? [], items: items) }
 }
 
@@ -209,8 +214,21 @@ public struct AssessmentsAPI: Sendable {
                                as: EmptyResponse.self)
     }
 
+    /// The Senior Specialists of this assessment's office.
+    public func seniorOptions(_ id: Int) async throws -> RoutingOptions {
+        try await api.get("/assessments/\(id)/senior-engineer-options", as: RoutingOptions.self)
+    }
+
+    /// An office chief's other choice: assign a Senior Specialist directly.
+    public func assignSenior(_ id: Int, seniorEngineerUserId: Int, notes: String?) async throws {
+        struct Body: Encodable { let seniorEngineerUserId: Int; let notes: String? }
+        _ = try await api.post("/assessments/\(id)/assign-senior-engineer",
+                               json: Body(seniorEngineerUserId: seniorEngineerUserId, notes: notes.blankAsNil),
+                               as: EmptyResponse.self)
+    }
+
     /// Assign a Staff member (`assign-engineer` is the deployed name). The server
-    /// accepts someone from another branch only with a reason in `notes`.
+    /// accepts only Staff of the branch the assessment was handed to.
     public func assignEngineer(_ id: Int, engineerUserId: Int, notes: String?) async throws {
         struct Body: Encodable { let engineerUserId: Int; let notes: String? }
         _ = try await api.post("/assessments/\(id)/assign-engineer",
