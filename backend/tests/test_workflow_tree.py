@@ -500,12 +500,12 @@ class TestLegacyFinalization:
 
 class TestHistoricalActor:
     def test_completed_node_keeps_original_actor_after_reassignment(self, client_db, tokens, ids):
-        # Engineer E1 (mock.staff@dot.ca.gov) submits; then reassign engineer to E2 (admin).
+        # Engineer E1 (mock.staff@dot.ca.gov) submits; then reassign to E2, also of Branch A.
         incident_id, aid = _drive_to_submitted(client_db, tokens, ids)
         # Reassign the engineer while SUBMITTED (assign-engineer is allowed pre-approval).
         resp = client_db.post(
             f"/assessments/{aid}/assign-engineer",
-            json={"engineer_user_id": ids["admin"]},
+            json={"engineer_user_id": ids["other_staff"]},
             headers=_auth(tokens["branchchief"]),
         )
         assert resp.status_code == 200, resp.text
@@ -515,7 +515,7 @@ class TestHistoricalActor:
         assert eng_node["status"] == "COMPLETED"
         assert eng_node["user"]["user_id"] == ids["engineer"]
         # But the assessment's current engineer is now E2.
-        assert tree["assessment"]["assigned_engineer_user_id"] == ids["admin"]
+        assert tree["assessment"]["assigned_engineer_user_id"] == ids["other_staff"]
 
 
 # ---------------------------------------------------------------------------

@@ -646,6 +646,8 @@ class TestRedelegationFromSubmitted:
             f"/admin/users/{first['id']}", headers=admin_headers, json={"is_active": True}
         )
         assert reactivated.status_code == 200, reactivated.text
+        # Disabling ended their sessions: they sign in again.
+        first["token"] = placed.login(first)["Authorization"].split(" ", 1)[1]
         old = client_db.post(
             f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(first["token"])
         )
