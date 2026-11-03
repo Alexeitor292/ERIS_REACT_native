@@ -528,19 +528,9 @@ def _routing_users_for(
         if not normalized_office:
             return []
         params["office_code"] = normalized_office
-        office_sql = org_directory.USER_OFFICE_CODE_SQL
-        if assignment_key in {"BRANCH_CHIEF", "SENIOR_ENGINEER"}:
-            # Accounts created before office scoping have no office at all.
-            # Excluding those otherwise-valid users leaves the office chief's
-            # routing pickers empty and strands the assessment, so a named
-            # branch chief or senior specialist with NO office is admitted as a
-            # compatibility fallback (PR #125); one scoped to another office is
-            # not. Their authority stays limited to the assessment that names them.
-            where_parts.append(f"({office_sql} = :office_code OR {office_sql} = '')")
-        else:
-            # Office chiefs own every assessment in their office, so unlike a
-            # named branch/senior assignee they must always be explicitly scoped.
-            where_parts.append(f"{office_sql} = :office_code")
+        # Only people of this office: a role follows from a place in its tree, so
+        # nobody who should be offered here has no office (owner, 2026-11-03).
+        where_parts.append(f"{org_directory.USER_OFFICE_CODE_SQL} = :office_code")
 
     rows = db.execute(
         text(

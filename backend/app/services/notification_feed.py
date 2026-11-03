@@ -73,6 +73,42 @@ def add(
         )
         if result.lastrowid:
             ids.append(int(result.lastrowid))
+    ids += _tell_who_stands_in(db, recipients, kind=kind, title=title, actor_id=actor_id)
+    return ids
+
+
+def _tell_who_stands_in(db: Session, recipients: list[int], *, kind: str, title: str, actor_id: int | None) -> list[int]:
+    """While someone is away, the person acting for them hears what they would.
+
+    A copy, with no link and no step of its own: the work is done after switching
+    to acting for them, where the original waits in their queue.
+    """
+    from . import delegations  # imports this module; deferred to avoid a cycle
+
+    if kind.startswith("DELEGATION") or not recipients:
+        return []
+    ids: list[int] = []
+    told = set(recipients) | ({int(actor_id)} if actor_id else set())
+    for person, stand_ins in delegations.delegates_of(db, recipients).items():
+        for delegate, name in stand_ins:
+            if delegate in told:
+                continue
+            result = db.execute(
+                text(
+                    """
+                    INSERT INTO user_notifications (user_id, kind, title, body, actor_user_id)
+                    VALUES (:uid, 'DELEGATED', :title, :body, :actor)
+                    """
+                ),
+                {
+                    "uid": delegate,
+                    "title": f"For {name}: {title}"[:255],
+                    "body": f"You are acting for {name}. Switch to acting for them to handle this.",
+                    "actor": actor_id,
+                },
+            )
+            if result.lastrowid:
+                ids.append(int(result.lastrowid))
     return ids
 
 

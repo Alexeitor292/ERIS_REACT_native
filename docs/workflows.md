@@ -212,8 +212,11 @@ approved before routing v2; the finalize endpoint now answers 410.
 **My Work** lists every step waiting on the signed-in person: triage for
 coordinators, routing for Office Chiefs, assignment for Branch Chiefs, forms for
 Staff and Senior Specialists, reviews for whoever holds review authority, and
-shares of technical forms for the branch and office chiefs who approve them or
-are told about them.
+shares of technical forms for whoever must approve them. What a chief is only told
+about comes as a notification, with the option to stop it, and does not wait here.
+Branch chiefs also find **Move work** here, to see who holds what; an office chief
+finds it when someone who moved on left work that needs them
+([organization.md](organization.md#when-someone-takes-over-a-role)).
 "Act on it" opens the exact step. An assessment's page also shows whose turn it
 is.
 
@@ -249,7 +252,8 @@ can still see that the assessment exists and where it stands.
 
 A form's owner can **share** it with named people, who can then view and edit
 it. Branch chiefs approve shares into or out of their branch, and office chiefs
-are told when one leaves their office or involves a Senior Specialist (see
+are told when one leaves their office or involves a Senior Specialist; they approve
+only a Senior Specialist sharing with one in another office (see
 [roles-and-identity.md](roles-and-identity.md#special-permits)). The **Sharing**
 card shows, before sharing, what it would take, and afterwards where each share
 stands.

@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from .db import get_db
-from .roles import is_public_only
-from .sessions import authenticate
+from .roles import ADMIN, is_public_only
+from .services import delegations
+from .services.app_access import APP_ACCESS_DETAIL, OPEN_PATHS, may_use_app
+from .sessions import CLIENT_BEARER, authenticate
 from .user_metadata import parse_user_metadata
 
 bearer = HTTPBearer(auto_error=False)
@@ -27,6 +29,35 @@ def user_with_roles(db, user: dict) -> dict:
     }
 
 
+def _acting_for(request: Request, db, real: dict, requested: str) -> dict:
+    """Judges this request as the person ``real`` stands in for (services/delegations.py)."""
+    try:
+        person_id = int(requested)
+    except ValueError:
+        person_id = 0
+    delegation_id = delegations.running(db, delegate_id=int(real["id"]), delegator_id=person_id)
+    if delegation_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=delegations.ACTING_ENDED_DETAIL)
+    if delegations.blocked_while_acting(request.method, request.url.path):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=delegations.ACTING_BLOCKED_DETAIL)
+    row = db.execute(
+        text("SELECT id, email, full_name, metadata_json FROM users WHERE id = :uid AND is_active = 1"), {"uid": person_id}
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=delegations.ACTING_ENDED_DETAIL)
+    who = {"delegation_id": delegation_id, "user_id": int(real["id"]), "full_name": real["full_name"] or real["email"]}
+    db.info["acting"] = who
+    if request.method.upper() in delegations.UNSAFE_METHODS:
+        delegations.record_action(
+            db, delegation_id=delegation_id, actor_id=int(real["id"]), acting_for=person_id,
+            method=request.method.upper(), path=request.url.path,
+        )
+    person = user_with_roles(db, row)
+    person["roles"] = [role for role in person["roles"] if role != ADMIN]  # the work, not the keys
+    person["acting"] = who
+    return person
+
+
 def current_session(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
@@ -35,10 +66,21 @@ def current_session(
     """(user, session) from the session cookie or a native client's bearer token.
 
     Roles and the active flag are read from the database on every request, so
-    a role change or a disabled account takes effect at once.
+    a role change or a disabled account takes effect at once. A native client
+    also has to belong to the organization (``services/app_access.py``).
     """
     user, session = authenticate(request, db, creds.credentials if creds else None)
-    return user_with_roles(db, user), session
+    with_roles = user_with_roles(db, user)
+    if (
+        session.client == CLIENT_BEARER
+        and not request.url.path.endswith(OPEN_PATHS)
+        and not may_use_app(db, with_roles)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=APP_ACCESS_DETAIL)
+    requested = request.headers.get(delegations.ACTING_HEADER)
+    if requested:
+        with_roles = _acting_for(request, db, with_roles, requested)
+    return with_roles, session
 
 
 def get_current_user(signed_in=Depends(current_session)):

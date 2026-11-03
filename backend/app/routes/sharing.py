@@ -10,6 +10,8 @@
   chief: approvals to give and notices to read.
 * ``POST /shares/{share_id}/reviews/{review_id}`` — approve, reject (stop) or
   acknowledge.
+* ``GET /my-forms`` — forms in progress that reach the caller outside an
+  assessment: shared with them, or their own and on no assessment.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import require_roles
+from ..deps import deny_public_only, require_roles
 from ..roles import ADMIN, BRANCH_CHIEF, GISA_AUTHOR_ROLES, OFFICE_CHIEF
 from ..schemas.common import ShareRequest
 from ..services import sharing
@@ -117,6 +119,11 @@ def submission_shares(
         "grants": grants,
         "candidates": sharing.candidates(db, submission_id=submission_id, owner_id=owner_id),
     }
+
+
+@router.get("/my-forms")
+def my_forms(db: Session = Depends(get_db), user=Depends(deny_public_only)) -> dict[str, Any]:
+    return sharing.my_forms(db, int(user["id"]))
 
 
 @router.get("/shares/reviews")

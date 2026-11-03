@@ -43,8 +43,12 @@ def test_specialist_to_specialist_in_one_office_goes_through_and_the_office_chie
     assert reviews_for(specialist(WEST), specialist(WEST)) == [Review(OFFICE, WEST, NOTICE)]
 
 
-def test_specialists_in_two_offices_go_through_and_both_office_chiefs_are_told():
-    assert reviews_for(specialist(WEST), specialist(NORTH)) == [Review(OFFICE, WEST, NOTICE), Review(OFFICE, NORTH, NOTICE)]
+def test_specialists_in_two_offices_need_both_office_chiefs_to_approve():
+    assert reviews_for(specialist(WEST), specialist(NORTH)) == [Review(OFFICE, WEST, APPROVAL), Review(OFFICE, NORTH, APPROVAL)]
+
+
+def test_a_specialist_sharing_with_staff_of_their_office_needs_that_branch_chief_and_tells_the_office_chief():
+    assert reviews_for(specialist(WEST), staff(WEST, WEST_B)) == [Review(BRANCH, WEST_B, APPROVAL), Review(OFFICE, WEST, NOTICE)]
 
 
 def test_staff_to_a_specialist_of_their_office_needs_the_branch_chief_and_tells_the_office_chief():

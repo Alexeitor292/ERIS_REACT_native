@@ -148,6 +148,29 @@ is a Guest: find them with the + on the tree and place them.
 
 ---
 
+## When someone takes over a role
+
+Open work does not follow a person's replacement by itself, except where it needs
+nothing to move:
+
+| Who changed | What happens to their open work |
+|---|---|
+| **Office chief** | Nothing to move: routing and Senior Specialist review go by office, so the new chief has it all at once. Their share reviews follow the place too. |
+| **Branch chief** | Share reviews follow the place. Assessments stay named to the former chief until moved, because review authority is that one name: they appear under **Move work** in the office chief's My Work, flagged as left by someone who moved on. |
+| **Senior Specialist** | Flagged the same way for the office chief. Only Draft and Revision requested work moves, since what is submitted is the office's to review. |
+| **Staff** | Flagged for the branch chief the work was handed to, who can also look at anyone's load and spread it around. |
+
+**Move work** is in My Work. An office chief sees it only when someone who moved on
+left work that needs them; a branch chief can always see the Staff on what was
+handed to them. A chief ticks some or all of one person's work and chooses who takes it: spreading it
+around is several of these, giving it all to the new person is one. Each move is an
+ordinary hand-off with its own checks, timeline row and notice, so the technical
+form, its photos and its history stay with the assessment and the new person can
+edit them. One refused move (someone in another branch with no reason recorded, for
+instance) does not undo the others, and the answer says which and why.
+
+---
+
 ## A restructuring never breaks history
 
 This is the guarantee the model is built around, and it is worth understanding
@@ -187,7 +210,12 @@ an account that sits in no office tree and on no district list is a guest.
   Incidents. No My Work, no Mission Center, no Incident Groups, no Terrain, no
   administration, and no "Report an incident".
 - There is no mobile guest surface. A guest who signs in to ERIS Mobile is told
-  the app is for field and office staff and to use ERIS on the web.
+  the app is for people placed in the organization and to use ERIS on the web. The
+  server refuses a native client for anyone placed nowhere, with no maintenance duty
+  and not an administrator, on every request (`services/app_access.py`), so a move
+  out of the organization takes effect at once. The app reads the person's place
+  again when it comes back and after each round of catching up, so its tabs and
+  queue follow a change of role without restarting.
 - A guest is in **no** picker and **no** notification list, and holds no
   authority anywhere.
 - Placing a guest anywhere ends their guest status: the place gives its role instead.
@@ -214,11 +242,14 @@ has to re-derive why ERIS behaves this way.
    cannot be inferred at all.
 2. **Policy and Support** are seeded as non-routing units. Confirm, and say
    whether Support should appear in the admin UI before its chart exists.
-3. **Assigning out of branch** is allowed with a recorded reason; assigning out
-   of **office** is refused outright. A hard refusal on branch would be the first
-   place the org model tells a chief covering a short-staffed branch "no".
-4. **Dual membership and acting assignments with dates** are not modelled. The
-   availability marking covers "temporarily elsewhere"; genuinely belonging to
+3. **Assigning out of branch** is not allowed. An office chief is offered only the
+   branch chiefs and Senior Specialists of the assessment's office, and a branch
+   chief only the Staff of the branch it was handed to; the server refuses anyone
+   else. For someone elsewhere, the office chief hands the assessment to their
+   branch chief, or moves the person.
+4. **Dual membership** is not modelled. Someone covering for a colleague for a
+   run of dates uses Out of office ([roles-and-identity.md](roles-and-identity.md#special-permits));
+   the availability marking covers "temporarily elsewhere"; genuinely belonging to
    two branches would need membership rows with validity periods.
 5. **Who supervises Maintenance Crew members, and whether that supervisor
    sees their crew's reports.** The model records a supervisor; no visibility
