@@ -1,3 +1,4 @@
+import { actingFor, setActingFor } from "../auth/acting";
 import { csrfHeaders } from "../auth/token";
 import { appConfig } from "../config";
 
@@ -23,6 +24,9 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   if (!headers.has("Content-Type") && init.body && !isFormData) headers.set("Content-Type", "application/json");
   // The session travels in its HttpOnly cookie; writes also carry its CSRF token.
   for (const [name, value] of Object.entries(csrfHeaders(init.method))) headers.set(name, value);
+  // Standing in for someone away: the server judges this request as them, and records who it really was.
+  const standingInFor = actingFor();
+  if (standingInFor != null) headers.set("X-ERIS-Acting-For", String(standingInFor));
 
   const res = await fetch(url, { ...init, headers, credentials: "same-origin" });
 
@@ -51,6 +55,11 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
         // A structured refusal (a save conflict, say) carries its message inside.
         const structured = detail && typeof detail === "object" ? (detail as { message?: string }).message : undefined;
         const validation = Array.isArray(detail) ? detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join("; ") : "";
+        // The delegation ended while this page was open: back to the person's own work.
+        if (res.status === 403 && standingInFor != null && typeof detail === "string" && detail.startsWith("You are no longer acting")) {
+          setActingFor(null);
+          window.location.href = "/";
+        }
         msg = structured || validation || (typeof detail === "string" ? detail : "") || j?.message || msg;
       } catch {
         // ignore

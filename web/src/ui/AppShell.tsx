@@ -192,7 +192,7 @@ function SidebarNavigation({ collapsed = false }: { collapsed?: boolean }) {
 
 
 export default function AppShell({ title, children, workspace = false }: { title: string; children: ReactNode; workspace?: boolean }) {
-  const { me, logout } = useAuth();
+  const { me, logout, actFor } = useAuth();
   const { navCollapsed, setNavCollapsed } = useUiSettings();
   const navExpanded = !navCollapsed;
   const setNavExpanded = (update: (expanded: boolean) => boolean) => setNavCollapsed(!update(navExpanded));
@@ -227,6 +227,13 @@ export default function AppShell({ title, children, workspace = false }: { title
           </div>
         </div>
       </header>
+
+      {me?.acting ? (
+        <div role="status" className="flex flex-wrap items-center justify-center gap-3 bg-[var(--brand)] px-4 py-1.5 text-sm font-semibold text-white">
+          <span>You are acting for {me.full_name || me.email}. What you do is recorded under both names.</span>
+          <button type="button" onClick={() => actFor(null)} className="rounded-md border border-white/60 px-2 py-0.5 text-xs font-semibold hover:bg-white/10">Back to my own work</button>
+        </div>
+      ) : null}
 
       <div className={cn("mx-auto flex w-full max-w-[1900px] flex-1 flex-col px-4 md:px-6 lg:flex-row", workspace ? "gap-3 py-3 lg:min-h-0 lg:gap-4" : "gap-4 py-6 lg:gap-6")}>
         <aside className="lg:hidden"><div className="product-card p-3"><div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Navigation</div><SidebarNavigation /></div></aside>

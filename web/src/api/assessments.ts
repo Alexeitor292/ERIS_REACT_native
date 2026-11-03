@@ -382,3 +382,35 @@ export function reviewAssessment(
     body: JSON.stringify({ action, notes }),
   });
 }
+
+/** Who holds which open work, for a chief moving it around. */
+export type WorkKind = "BRANCH_CHIEF" | "STAFF" | "SENIOR_SPECIALIST";
+
+export type WorkGroup = {
+  kind: WorkKind;
+  holder: { id: number | null; full_name: string | null; placement: string | null };
+  /** They have moved on from the place that gave them this work. */
+  left: boolean;
+  items: Array<{
+    id: number;
+    incident_id: number;
+    state: string;
+    title: string | null;
+    office_code: string | null;
+    branch_label: string | null;
+    updated_at: string | null;
+  }>;
+};
+
+export function assessmentWorkload(): Promise<{ groups: WorkGroup[]; left: number }> {
+  return api("/assessments/workload");
+}
+
+export function moveAssessments(body: {
+  assessment_ids: number[];
+  to_user_id: number;
+  kind: WorkKind;
+  notes?: string;
+}): Promise<{ moved: number[]; failed: Array<{ id: number; detail: string }> }> {
+  return api("/assessments/move", { method: "POST", body: JSON.stringify(body) });
+}

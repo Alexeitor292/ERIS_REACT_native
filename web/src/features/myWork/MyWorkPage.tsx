@@ -14,7 +14,8 @@ import { useSubmissionIndex } from "../assessments/AssessmentWorkspacePage";
 import { eventGroupLocationLabel } from "../eventGroups/eventGroupTypes";
 import MaintenanceReportForm from "../incidents/MaintenanceReportForm";
 import MaintenanceWorkItem from "./MaintenanceWorkItem";
-import { filterWork, maintenanceInView, maintenanceStatus, parseWorkFilter, WORK_FILTERS, type WorkFilter } from "./myWorkModel";
+import MoveWorkPanel from "./MoveWorkPanel";
+import { filterWork, maintenanceInView, sharesInView, maintenanceStatus, parseWorkFilter, WORK_FILTERS, type WorkFilter } from "./myWorkModel";
 import ShareWorkItem from "./ShareWorkItem";
 import TriageWorkItem from "./TriageWorkItem";
 
@@ -56,8 +57,8 @@ function timestamp(value: string | null | undefined) {
  *  - Admin: every submitted assessment, matching the server's review bypass,
  *    and every maintenance report; an administrator can show geotechnical or
  *    maintenance work alone.
- *  - Branch and Office Chiefs: shares of technical forms to approve, or that
- *    they were told about and may stop (`/shares/reviews`).
+ *  - Branch and Office Chiefs: shares of technical forms they must approve. What
+ *    they are only told about comes as a notification that opens it (`?share=`).
  *
  * Every request carries its own `.catch(() => [])`: one failing queue — or a
  * failing /incidents call — must never blank the whole page.
@@ -174,6 +175,14 @@ export default function MyWorkPage() {
     try { window.localStorage.setItem(FILTER_KEY, next); } catch { /* the choice lasts this visit */ }
   };
 
+  // A share the person was only told about, from its notification: ?share=<review id>.
+  const requestedShare = Number(searchParams.get("share")) || null;
+  useEffect(() => {
+    if (!requestedShare || !loaded) return;
+    if (items.some((item) => item.id === `s${requestedShare}`)) setSelectedId(`s${requestedShare}`);
+    else setError("That share has already ended, or no longer needs you.");
+  }, [items, loaded, requestedShare]);
+
   // Deep link from an assessment record or its technical form: ?assessment=<id>.
   // The assessment opens even when none of the caller's queues holds it — an
   // administrator stepping in, an office chief reassigning a Senior Specialist —
@@ -200,12 +209,13 @@ export default function MyWorkPage() {
   const allItems = useMemo<WorkItem[]>(() => {
     const opened = selectedId?.startsWith("m") ? Number(selectedId.slice(1)) : requestedReport;
     const shownReports = new Set(maintenanceInView(maintenanceReports, otherReports, opened).map((report) => `m${report.id}`));
-    const inQueue = items.filter((item) => item.kind !== "maintenance" || shownReports.has(item.id));
+    const shownShares = new Set(sharesInView(items.flatMap((item) => (item.kind === "share" ? [item.share] : [])), requestedShare).map((share) => `s${share.review_id}`));
+    const inQueue = items.filter((item) => (item.kind === "maintenance" ? shownReports.has(item.id) : item.kind !== "share" || shownShares.has(item.id)));
     const withLinked = linked && !inQueue.some((item) => item.id === `a${linked.id}`)
       ? [{ kind: "assessment" as const, id: `a${linked.id}`, assessment: linked, sortKey: Number.POSITIVE_INFINITY, outsideQueue: true }, ...inQueue]
       : inQueue;
     return filterWork(withLinked, filter, admin);
-  }, [items, linked, maintenanceReports, otherReports, selectedId, requestedReport, filter, admin]);
+  }, [items, linked, maintenanceReports, otherReports, selectedId, requestedReport, requestedShare, filter, admin]);
   const othersReadable = maintenanceReports.filter((report) => !report.my_turn).length;
   const canReport = admin || !!me?.maintenance_districts?.some((district) => district.report);
 
@@ -285,6 +295,7 @@ export default function MyWorkPage() {
             <button type="button" onClick={refresh} disabled={loading} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{loading ? "Refreshing…" : "Refresh"}</button>
           </div>
         </div>
+        {me && (canDelegateBranch(me.roles) || canAssignEngineer(me.roles)) ? <MoveWorkPanel onMoved={() => void load()} /> : null}
         {reporting ? (
           <MaintenanceReportForm
             onCancel={() => setReporting(false)}

@@ -58,7 +58,13 @@ export type Me = {
   /** Legacy mirror; read `org` for anything organizational. */
   metadata?: UserMetadata;
   org?: UserOrg | null;
+  /** Present while someone else is acting for this person: who it really is. */
+  acting?: { delegation_id: number; user_id: number; full_name: string } | null;
+  /** Whom the person signed in may switch to acting for today. */
+  acting_options?: ActingOption[];
 };
+
+export type ActingOption = { delegation_id: number; user_id: number; full_name: string; ends_on: string };
 
 export type AdminUser = {
   id: number;

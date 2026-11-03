@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filterWork, maintenanceInView, maintenanceStatus, parseWorkFilter, workArea } from "./myWorkModel.ts";
+import { filterWork, maintenanceInView, maintenanceStatus, parseWorkFilter, workArea, sharesInView } from "./myWorkModel.ts";
 
 const items = [
   { kind: "triage" as const, id: "t1" },
@@ -36,4 +36,11 @@ test("reports waiting on this person are listed; the rest when asked, and one op
   assert.deepEqual(maintenanceInView(reports, false, null).map((r) => r.id), [1]);
   assert.deepEqual(maintenanceInView(reports, false, 3).map((r) => r.id), [1, 3]);
   assert.deepEqual(maintenanceInView(reports, true, null).map((r) => r.id), [1, 2, 3]);
+});
+
+test("only an approval waits in My Work; a notice shows when its notification opens it", () => {
+  const approval = { kind: "APPROVAL", review_id: 1 };
+  const notice = { kind: "NOTICE", review_id: 2 };
+  assert.deepEqual(sharesInView([approval, notice], null), [approval]);
+  assert.deepEqual(sharesInView([approval, notice], 2), [approval, notice]);
 });

@@ -44,3 +44,12 @@ export function maintenanceStatus(item: Pick<MaintenanceItem, "outcome" | "waiti
 export function maintenanceInView<T extends Pick<MaintenanceItem, "id" | "my_turn">>(items: T[], includeOthers: boolean, opened: number | null): T[] {
   return items.filter((item) => item.my_turn || includeOthers || item.id === opened);
 }
+
+/**
+ * The shares My Work lists: those the person must approve. One they are only told
+ * about asks nothing of them, so it comes as a notification that opens it here
+ * (`?share=<review id>`), and it shows only while opened.
+ */
+export function sharesInView<T extends { kind: string; review_id: number }>(shares: T[], opened: number | null): T[] {
+  return shares.filter((share) => share.kind === "APPROVAL" || share.review_id === opened);
+}

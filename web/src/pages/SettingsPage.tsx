@@ -1,5 +1,8 @@
 import AppShell from "../ui/AppShell";
 import { useUiSettings } from "../ui/UiSettingsContext";
+import { useAuth } from "../auth/AuthContext";
+import OutOfOfficeSection from "../features/delegations/OutOfOfficeSection";
+import { isPublicOnly } from "../utils/roleModel";
 
 const THEMES = [
   {
@@ -21,6 +24,7 @@ const THEMES = [
 
 export default function SettingsPage() {
   const { theme, setTheme, pageTransitions, setPageTransitions } = useUiSettings();
+  const { me } = useAuth();
 
   return (
     <AppShell title="Settings">
@@ -61,6 +65,8 @@ export default function SettingsPage() {
             })}
           </div>
         </section>
+
+        {me && !isPublicOnly(me.roles) ? <OutOfOfficeSection /> : null}
 
         <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 md:p-5">
           <h2 className="text-base font-semibold">Motion</h2>

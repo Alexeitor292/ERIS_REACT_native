@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api, ApiError, apiUrl } from "../api/client";
+import { setActingFor } from "./acting";
 import { csrfHeaders } from "./token";
 
 import type { Me } from "../api/types";
@@ -16,6 +17,8 @@ type AuthState = {
   finishEntra: () => Promise<Me>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
+  /** Stand in for someone away, or (null) go back to one's own work. Reloads, so nothing of the other stays on screen. */
+  actFor: (userId: number | null) => void;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -55,7 +58,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return establish();
   }
 
+  function actFor(userId: number | null) {
+    setActingFor(userId);
+    window.location.href = "/";
+  }
+
   async function logout() {
+    setActingFor(null);
     // End the session on the server (it clears the cookies), then locally.
     // Not through api(): a session that already expired is not an error here.
     try {
@@ -97,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ me, signedIn: me != null, isInitializing, login, finishEntra, logout, refreshMe }),
+    () => ({ me, signedIn: me != null, isInitializing, login, finishEntra, logout, refreshMe, actFor }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [me, isInitializing]
   );

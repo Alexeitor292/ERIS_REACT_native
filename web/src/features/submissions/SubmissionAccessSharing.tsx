@@ -18,7 +18,8 @@ const STATUS_TONES: Record<string, string> = {
  * chiefs. Branch chiefs approve anything going into or out of their branch; a
  * share inside one branch goes through at once and its chief is told. Office
  * chiefs are told when it leaves their office or involves one of their Senior
- * Specialists, and may stop it.
+ * Specialists, and may stop it; they approve only a Senior Specialist sharing with
+ * one in another office.
  */
 export default function SubmissionAccessSharing({
   query,
@@ -51,7 +52,7 @@ export default function SubmissionAccessSharing({
   return (
     <SubmissionDetailCard
       title="Sharing"
-      subtitle="Sharing gives viewing and editing. Branch chiefs approve anything going into or out of their branch; inside one branch it goes through and the chief is told. Office chiefs are told when it leaves their office or involves a Senior Specialist, and may stop it."
+      subtitle="Sharing gives viewing and editing. Branch chiefs approve anything going into or out of their branch; inside one branch it goes through and the chief is told. Office chiefs are told when it leaves their office or involves a Senior Specialist, and may stop it; they approve only a Senior Specialist sharing with one in another office."
     >
       <label className="block">
         <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Share with</span>
