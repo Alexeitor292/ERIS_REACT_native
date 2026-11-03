@@ -97,6 +97,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
     private var nextAttachmentId = 900
     private var cracks: [[String: Any]] = [DemoData.sampleCrack]
     private var nextCrackId = 60
+    private var readNotices: Set<Int> = []
     /// Each save raises it, as on the server.
     private var revision = 1
     private var savedBy: String?
@@ -167,11 +168,13 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         case ("POST", ["auth", "logout"]), ("POST", ["notifications", "devices", "unregister"]):
             return (200, [:])
         case ("GET", ["notifications", "unread"]):
-            return (200, ["unread": 2])
+            return (200, ["unread": DemoData.unread(readNotices: readNotices)])
         case ("GET", ["notifications"]):
-            return (200, DemoData.feed)
+            return (200, DemoData.feed(readNotices: readNotices))
         case ("POST", ["notifications", "read"]):
-            return (200, ["unread": 0])
+            // With no ids, all of them, as the server does.
+            readNotices.formUnion(body["ids"] as? [Int] ?? DemoData.notices.compactMap { $0["id"] as? Int })
+            return (200, ["unread": DemoData.unread(readNotices: readNotices)])
         case ("GET", ["incidents"]):
             return (200, ["items": incidents])
         case ("GET", let p) where p.count == 2 && p[0] == "incidents":
@@ -546,17 +549,40 @@ enum DemoData {
                  "branch_name": "Branch C", "home_district": "04", "job_title": "Transportation Engineer"]]
     }
 
-    static let feed: [String: Any] = [
-        "unread": 2,
-        "items": [
-            ["id": 1, "kind": "ASSESSMENT_ASSIGNED", "title": "Assessment #3 is waiting for a Staff member",
-             "body": "Incident #12, Branch C", "link": "/assessments/3", "actor": "Office Chief",
-             "created_at": "2026-10-28T08:15:00Z", "read": false],
-            ["id": 2, "kind": "INCIDENT_CREATED", "title": "New incident reported on I-880",
-             "body": "Slope failure near PM 12.3", "link": "/incidents/12", "actor": "Maintenance Crew",
-             "created_at": "2026-10-27T16:40:00Z", "read": false],
-        ],
+    /// Unread, unread, already read, and unread but with its step already taken
+    /// by somebody, which the server does not count as unread.
+    static let notices: [[String: Any]] = [
+        ["id": 1, "kind": "ASSESSMENT_ASSIGNED", "title": "Assessment #3 is waiting for a Staff member",
+         "body": "Incident #12, Branch C", "link": "/assessments/3", "actor": "Office Chief",
+         "created_at": "2026-10-28T08:15:00Z", "read": false],
+        ["id": 2, "kind": "INCIDENT_CREATED", "title": "New incident reported on I-880",
+         "body": "Slope failure near PM 12.3", "link": "/incidents/12", "actor": "Maintenance Crew",
+         "created_at": "2026-10-27T16:40:00Z", "read": false],
+        ["id": 3, "kind": "INCIDENT_CREATED", "title": "New incident reported on SR-17",
+         "body": "Rockfall near PM 4.1", "link": "/incidents/12", "actor": "Maintenance Crew",
+         "created_at": "2026-10-26T10:05:00Z", "read": true],
+        ["id": 4, "kind": "ASSESSMENT_ASSIGNED", "title": "Assessment #2 was waiting for a Staff member",
+         "body": "Incident #9, Branch C", "link": "/assessments/3", "actor": "Office Chief",
+         "created_at": "2026-10-25T09:30:00Z", "read": false,
+         "done": ["at": "2026-10-25T11:00:00Z", "by": "M. Okafor", "by_you": false, "action": "ASSIGN", "state": "DRAFT"]],
     ]
+
+    private static func isRead(_ notice: [String: Any], _ readNotices: Set<Int>) -> Bool {
+        notice["read"] as? Bool == true || readNotices.contains(notice["id"] as? Int ?? 0)
+    }
+
+    static func unread(readNotices: Set<Int>) -> Int {
+        notices.filter { !isRead($0, readNotices) && $0["done"] == nil }.count
+    }
+
+    static func feed(readNotices: Set<Int>) -> [String: Any] {
+        ["unread": unread(readNotices: readNotices),
+         "items": notices.map { notice in
+             var item = notice
+             item["read"] = isRead(notice, readNotices)
+             return item
+         }]
+    }
 
     static let incidents: [[String: Any]] = [
         ["id": 12, "incident_key": "INC-2026-0012", "title": "Slope failure above I-880", "incident_type": "LANDSLIDE",

@@ -8,11 +8,13 @@ import UserNotifications
 struct ERISApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
+    @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                .preferredColorScheme(theme.colorScheme)
                 .task {
                     delegate.model = model
                     await model.start()

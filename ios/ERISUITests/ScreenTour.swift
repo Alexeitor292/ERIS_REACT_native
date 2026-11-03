@@ -621,6 +621,57 @@ final class ScreenTour: XCTestCase {
         return app.tabBars.buttons.allElementsBoundByIndex.map(\.label)
     }
 
+    private func notice(_ title: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+    }
+
+    /// The badge itself is not visible to UI tests: see the two screenshots.
+    func testUnreadNoticesAreHighlightedAndTheBadgeGoesAtZero() {
+        launch()
+        let tab = app.tabBars.buttons["Notifications"]
+        tap(tab)
+        XCTAssertTrue(notice("New incident reported on I-880").waitForExistence(timeout: 10))
+        snap("notifications-unread")
+        XCTAssertFalse(notice("New incident reported on I-880").label.contains("T16:40"), "a readable date, not the server's text")
+        XCTAssertEqual(notice("New incident reported on I-880").value as? String, "Unread")
+        XCTAssertEqual(notice("Assessment #3 is waiting").value as? String, "Unread")
+        XCTAssertNotEqual(notice("New incident reported on SR-17").value as? String, "Unread")
+        // Never opened, but somebody took the step: the server does not count it.
+        XCTAssertNotEqual(notice("Assessment #2 was waiting").value as? String, "Unread")
+
+        tap(app.buttons["Mark all read"])
+        let noneUnread = NSPredicate(format: "value != %@", "Unread")
+        expectation(for: noneUnread, evaluatedWith: notice("New incident reported on I-880"))
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons["Mark all read"].exists)
+        snap("notifications-all-read")
+    }
+
+    func testTheThemeIsChosenOnAccountAndKept() {
+        launch()
+        tap(app.tabBars.buttons["Account"])
+        let system = app.segmentedControls.buttons["System"]
+        let dark = app.segmentedControls.buttons["Dark"]
+        tap(dark)
+        XCTAssertTrue(dark.isSelected)
+        snap("theme-dark-account")
+        tap(app.tabBars.buttons["Notifications"])
+        XCTAssertTrue(notice("New incident reported on I-880").waitForExistence(timeout: 10))
+        snap("theme-dark-notifications")
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Demo data: not connected to ERIS"].waitForExistence(timeout: 10))
+        snap("theme-dark-after-relaunch")
+        tap(app.tabBars.buttons["Account"])
+        XCTAssertTrue(dark.waitForExistence(timeout: 10))
+        XCTAssertTrue(dark.isSelected, "kept across launches")
+
+        tap(system)
+        XCTAssertTrue(system.isSelected)
+        snap("theme-back-to-system")
+    }
+
     func testAnAdministratorWorksTheWholeQueueAndChoosesASide() {
         launch()
         XCTAssertEqual(tabNames(), ["My Work", "Report", "Forms", "Notifications", "Account"])

@@ -115,6 +115,15 @@ public struct FeedItem: Decodable, Equatable, Identifiable, Sendable {
     public let actor: String?
     public let createdAt: String?
     public let read: Bool
+    /// Set once somebody has taken the step this notice asks for.
+    public let done: Done?
+
+    /// The server sends who and when; here it only matters that it happened.
+    public struct Done: Decodable, Equatable, Sendable {}
+
+    /// As the server counts it: a step already taken no longer needs this
+    /// reader, even if the notice was never opened.
+    public var isUnread: Bool { !read && done == nil }
 }
 
 public struct Feed: Decodable, Equatable, Sendable {

@@ -168,7 +168,8 @@ struct MainTabView: View {
             }
             NavigationStack { NotificationsView() }
                 .tabItem { Label("Notifications", systemImage: "bell") }
-                .badge(NotificationRoutes.badgeText(model.unread) ?? "")
+                // nil, not "": iOS draws an empty string as a red dot.
+                .badge(NotificationRoutes.badgeText(model.unread))
                 .tag(AppTab.notifications)
             NavigationStack { AccountView(me: me) }
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
@@ -213,12 +214,40 @@ struct MainTabView: View {
     }
 }
 
+/// The look of the app on this iPhone. It stays through sign-out, since it
+/// belongs to the device and not to the account.
+enum AppTheme: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    static let storageKey = "appTheme"
+
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    /// nil follows the iPhone's own setting.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
 struct AccountView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var offline: OfflineSync
     @EnvironmentObject private var maps: MapSetup
     let me: Me
     @State private var confirmingSignOut = false
+    @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
 
     var body: some View {
         List {
@@ -231,6 +260,12 @@ struct AccountView: View {
             }
             Section("Roles") {
                 ForEach(me.roles, id: \.self) { Text(RoleModel.label($0)) }
+            }
+            Section("Appearance") {
+                Picker("Theme", selection: $theme) {
+                    ForEach(AppTheme.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
             }
             Section("Server") {
                 Text(model.api.baseURL.absoluteString)

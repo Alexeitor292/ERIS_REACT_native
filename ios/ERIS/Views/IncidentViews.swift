@@ -205,6 +205,7 @@ struct ReportDetailView: View {
 
 /// The same feed as the web portal's bell.
 struct NotificationsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var offline: OfflineSync
     @State private var feed: [FeedItem] = []
@@ -217,17 +218,26 @@ struct NotificationsView: View {
                 Button {
                     Task { await open(item) }
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title).font(item.read ? .body : .body.weight(.semibold))
-                        if let body = item.body, !body.isEmpty {
-                            Text(body).font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        if let created = item.createdAt {
-                            Text(created).font(.caption).foregroundStyle(.tertiary)
+                    HStack(alignment: .top, spacing: 10) {
+                        Circle()
+                            .fill(item.isUnread ? Color.accentColor : .clear)
+                            .frame(width: 9, height: 9)
+                            .padding(.top, 6)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title).font(item.isUnread ? .body.weight(.semibold) : .body)
+                            if let body = item.body, !body.isEmpty {
+                                Text(body).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            if let created = ServerDate.display(item.createdAt) {
+                                Text(created).font(.caption).foregroundStyle(.tertiary)
+                            }
                         }
                     }
                 }
                 .foregroundStyle(.primary)
+                .listRowBackground(item.isUnread ? Color.accentColor.opacity(colorScheme == .dark ? 0.3 : 0.12) : nil)
+                .accessibilityValue(item.isUnread ? "Unread" : "")
             }
             if feed.isEmpty && error == nil {
                 Text("Nothing new.").foregroundStyle(.secondary)

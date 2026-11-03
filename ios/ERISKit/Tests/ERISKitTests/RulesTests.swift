@@ -96,6 +96,21 @@ final class NotificationRoutesTests: XCTestCase {
         XCTAssertEqual(NotificationRoutes.badgeText(40), "9+")
     }
 
+    func testAStepAlreadyTakenIsNotUnreadThoughNeverOpened() throws {
+        func item(_ extra: String) throws -> FeedItem {
+            let json = #"{"id":1,"kind":"K","title":"T",\#(extra)}"#
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode(FeedItem.self, from: Data(json.utf8))
+        }
+        XCTAssertTrue(try item(#""read":false"#).isUnread)
+        XCTAssertTrue(try item(#""read":false,"done":null"#).isUnread)
+        XCTAssertFalse(try item(#""read":true,"done":null"#).isUnread)
+        XCTAssertFalse(try item(#""read":false,"done":{"at":"2026-10-25T11:00:00","by":"M. Okafor","by_you":false,"action":"ASSIGN","state":"DRAFT"}"#).isUnread)
+        // Its step can be done with no one recorded as having taken it.
+        XCTAssertFalse(try item(#""read":false,"done":{"at":null,"by":null,"by_you":false,"action":null,"state":"APPROVED"}"#).isUnread)
+    }
+
     func testDeviceTokensAreLowercaseHexForTheRightGateway() {
         let token = Data([0x00, 0xAB, 0x10, 0xFF])
         XCTAssertEqual(PushRegistration.hex(token), "00ab10ff")
