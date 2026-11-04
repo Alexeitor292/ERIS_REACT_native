@@ -82,8 +82,8 @@ Each role sees only what it can use:
 
 | Role | Navigation |
 | --- | --- |
-| Maintenance Crew | Incidents (their own reports, and "Report an incident"), Settings |
-| Maintenance Coordinator, Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Incident Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. Office chiefs also get My office, and branch chiefs My branch (their part of the organization tree). |
+| Maintenance | Incidents (their own reports, and "Report an incident" with a reporting part in a workflow), My Work with any part, Settings |
+| Office Chief, Branch Chief, Senior Specialist, Staff | My Work, Mission Center, Incident Groups, Incidents, Assessments, Terrain Cross Sections, Settings. Staff can also report incidents. Office chiefs also get My office, and branch chiefs My branch (their part of the organization tree). |
 | Guest | Incidents and Assessments (approved records only), Settings |
 | Administrator | Everything above, plus Users, Organization (every office tree and the maintenance lists) and Road Inventory |
 
@@ -96,13 +96,13 @@ cannot use, and the server enforces it.
 
 Tabs by role (`mobile/app/(tabs)/_layout.tsx`):
 
-- **Incidents** for every work role: Maintenance Crew and Staff file reports with
-  the phone's GPS, route and postmile, or a map; coordinators and chiefs follow
+- **Incidents** for every work role: Maintenance reporters and Staff file reports with
+  the phone's GPS, route and postmile, or a map; chiefs follow
   their cases.
 - **Drafts** and **Submissions** for Staff, Senior Specialists and
   administrators, who fill technical forms, with offline drafts that sync when
   the phone is back online.
-- **Assessments** for work roles other than the Maintenance Crew.
+- **Assessments** for work roles other than Maintenance.
 - A Guest who signs in is told to use the web app.
 
 Maps, the site photo map and offline 3D terrain use native iOS screens

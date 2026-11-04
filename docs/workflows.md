@@ -8,7 +8,7 @@ branches, district coverage) is maintained as described in
 
 ## 1. Field report
 
-A **Maintenance Crew** member, a **Staff** member or an administrator reports an
+Someone with a reporting part in their district's workflow, a **Staff** member or an administrator reports an
 incident, on the phone or with **Report an incident** on the web. The location
 can be given three ways: GPS (phone) or a point on a map (web), route and
 postmile with county, or latitude and longitude. Each is converted to the others
@@ -16,13 +16,13 @@ through the public Caltrans postmile layer.
 
 A new report is **provisional**: stage `COORDINATOR_REVIEW`, no ERIS number, not
 in any Incident Group, and not part of the incident record, the Incident Groups page or
-the Mission Center. Until triage, its reporter (or the coordinator, or an
+the Mission Center. Until triage, its reporter (or an
 administrator) may discard it.
 
 ## 2. Triage
 
-The **Maintenance Coordinator** covering the report's district (or an
-administrator) reviews it and makes one decision (`POST /incidents/{id}/triage`):
+In a district with a workflow, its steps decide who reviews it and who makes the
+final decision. Otherwise an administrator reviews it and makes one decision (`POST /incidents/{id}/triage`):
 
 | Decision | Result |
 | --- | --- |

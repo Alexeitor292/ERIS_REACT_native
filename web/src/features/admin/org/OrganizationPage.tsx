@@ -136,7 +136,7 @@ export default function OrganizationPage() {
     <AppShell title="Organization">
       <div className="flex h-full flex-col gap-4 p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-3">
-          <p className="min-w-0 flex-1 text-sm text-muted">
+          <p className="min-w-0 flex-[1_1_20rem] text-sm text-muted">
             GeoTech offices define their organization trees. Maintenance districts assign their own ERIS duties and workflows.
           </p>
           {tree ? (

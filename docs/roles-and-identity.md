@@ -12,8 +12,7 @@ Seven work roles and the Administrator. One code each, with no aliases.
 
 | Code | Name | What it is for |
 | --- | --- | --- |
-| `MAINTENANCE_CREW` | Maintenance Crew | Files field reports from the road. Sees only their own reports. No assessments. |
-| `MAINTENANCE_COORDINATOR` | Maintenance Coordinator | Triages field reports in the districts they cover and runs Incident Groups. Only "Assessment required" puts a report on the record. |
+| `MAINTENANCE` | Maintenance | Their own reports. Everything more comes from their part in a district's workflow: reporting, reviewing, the final decision, reading the district, changing the workflow. No assessments. |
 | `OFFICE_CHIEF` | Office Chief | Routes their GeoTech office's assessments: hands one to a branch chief of that office, or assigns a Senior Specialist of that office directly. Reviews the Senior Specialist route. |
 | `BRANCH_CHIEF` | Branch Chief | Assigns the Staff of their own branch to the assessments handed to it, and reviews the branch route. |
 | `SENIOR_SPECIALIST` | Senior Specialist | Fills the assessments an office chief assigns directly. |
@@ -23,8 +22,8 @@ Seven work roles and the Administrator. One code each, with no aliases.
 
 **Where a person sits decides their work role** (`services/org_tree.py`): the top of an
 office tree is Office Chief, leading a branch Branch Chief, a leaf under the office chief
-Senior Specialist, under a branch Staff, a district's coordinator list Maintenance
-Coordinator and its crew list Maintenance Crew; placed nowhere, Guest. Every change of
+Senior Specialist, under a branch Staff; anyone named in a district's maintenance workflow
+Maintenance; placed nowhere, Guest. Every change of
 place rewrites the person's `user_roles` at once, so the guards below keep reading
 `user_roles` unchanged. Administrator is the only role granted directly (Administration ›
 Users). The page, who may edit which part, and the migration that placed existing
@@ -55,7 +54,7 @@ Rules that hold across the system:
   open to every operational user; a form outside any assessment opens once it
   is approved itself. Anyone else is told the form is in progress and can ask
   its owner to share it (`backend/app/services/form_access.py`).
-- **Scope narrows the reach.** A coordinator reads the districts they cover;
+- **Scope narrows the reach.** Maintenance reads what their workflow part allows;
   office and branch chiefs read their office; Staff and Senior Specialists read
   what they are assigned. A missing district or office reads nothing (fail
   closed).
@@ -171,9 +170,9 @@ production:
 | Account | Role |
 | --- | --- |
 | `mock.admin@dot.ca.gov` | Administrator only |
-| `mock.maintenance.crew@dot.ca.gov` | Maintenance Crew |
-| `mock.coordinator.d01@dot.ca.gov` | Maintenance Coordinator, district 01 |
-| `mock.coordinator.d04@dot.ca.gov` | Maintenance Coordinator, district 04 |
+| `mock.maintenance.crew@dot.ca.gov` | Maintenance |
+| `mock.coordinator.d01@dot.ca.gov` | Maintenance, district 01 |
+| `mock.coordinator.d04@dot.ca.gov` | Maintenance, district 04 |
 | `mock.office.chief@dot.ca.gov` | Office Chief, WEST |
 | `mock.branch.chief@dot.ca.gov` | Branch Chief, WEST Branch A |
 | `mock.senior.specialist@dot.ca.gov` | Senior Specialist, WEST |
@@ -196,8 +195,7 @@ read them with this table:
 
 | Retired code | Now |
 | --- | --- |
-| `MAINTENANCE`, `MAINTENANCE_FIELD_WORKER` | `MAINTENANCE_CREW` |
-| `MAINT_COORDINATOR` | `MAINTENANCE_COORDINATOR` |
+| `MAINTENANCE_CREW`, `MAINTENANCE_FIELD_WORKER`, `MAINTENANCE_COORDINATOR`, `MAINT_COORDINATOR` | `MAINTENANCE` |
 | `GEOTECH_OFFICE_CHIEF` | `OFFICE_CHIEF` |
 | `GEOTECH_BRANCH_CHIEF` | `BRANCH_CHIEF` |
 | `GEOTECH_SENIOR_ENGINEER` ("Senior Engineer") | `SENIOR_SPECIALIST` |

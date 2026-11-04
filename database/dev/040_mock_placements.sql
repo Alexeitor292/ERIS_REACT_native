@@ -65,3 +65,8 @@ SELECT DISTINCT c.user_id, r.id FROM org_district_crew c
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u JOIN roles r ON r.name = 'GUEST'
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id);
+
+-- The upgrade gives every district with mock people on the old lists a starter
+-- workflow. Local work and the tests start from none: each sets up what it needs.
+DELETE FROM maintenance_workflow_events;
+DELETE FROM maintenance_workflows;
