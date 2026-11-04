@@ -1737,10 +1737,16 @@ def create_incident(
                 assignment_mode="ASSIGN",
                 assignment_stage="COORDINATOR",
             )
+        # With no workflow in the district, an administrator decides the report: tell them.
+        reviewers = coordinator_ids or ([] if workflow else [int(uid) for uid in db.execute(text(
+            "SELECT DISTINCT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id "
+            "JOIN roles r ON r.id = ur.role_id WHERE r.name = 'ADMIN' AND u.is_active = 1"
+        )).scalars()])
+        if reviewers:
             _queue_incident_notifications(
                 db=db,
                 incident_id=new_id,
-                recipient_user_ids=coordinator_ids,
+                recipient_user_ids=reviewers,
                 template_code="INCIDENT_COORDINATOR_REVIEW",
                 payload={"incident_id": new_id, "district": district_code, "office_code": office_code},
             )

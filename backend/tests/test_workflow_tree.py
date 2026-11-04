@@ -47,6 +47,7 @@ def tokens(client_db):
     return {
         "admin": _login(client_db, "mock.admin@dot.ca.gov"),
         "maintenance": _login(client_db, "mock.staff@dot.ca.gov"),
+        "field": _login(client_db, "mock.maintenance.crew@dot.ca.gov"),
         "coordinator": _login(client_db, "mock.admin@dot.ca.gov"),
         "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
         "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
@@ -526,7 +527,7 @@ class TestHistoricalActor:
 class TestAccess:
     def test_field_worker_cannot_read_others_tree(self, client_db, tokens):
         others = _create_incident(client_db, tokens["admin"], district="07", county="Los Angeles", route="5")
-        resp = client_db.get(f"/incidents/{others}/workflow-tree", headers=_auth(tokens["maintenance"]))
+        resp = client_db.get(f"/incidents/{others}/workflow-tree", headers=_auth(tokens["field"]))
         assert resp.status_code == 403
 
     def test_field_worker_can_read_own_tree(self, client_db, tokens):

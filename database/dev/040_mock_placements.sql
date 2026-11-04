@@ -70,3 +70,5 @@ SELECT u.id, r.id FROM users u JOIN roles r ON r.name = 'GUEST'
 -- workflow. Local work and the tests start from none: each sets up what it needs.
 DELETE FROM maintenance_workflow_events;
 DELETE FROM maintenance_workflows;
+UPDATE org_coordinator_coverage SET is_active = 0;
+UPDATE org_district_crew SET is_active = 0;

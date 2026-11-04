@@ -75,7 +75,7 @@ def test_real_district_workflow_to_maintenance_and_geotech():
                 iid = response.json()["incident"]["id"]; incident_ids.append(iid)
                 assert call("GET", f"/incidents/{iid}", 5).status_code == 200  # Notify-only may read.
                 assert call("GET", f"/incidents/{iid}", 6).status_code == 403  # Unassigned Staff may not.
-                assert call("POST", f"/incidents/{iid}/triage", 7, {"disposition": "NO_ASSESSMENT_REQUIRED"}).status_code == 409
+                assert call("POST", f"/incidents/{iid}/triage", 7, {"disposition": "NO_ASSESSMENT_REQUIRED"}).status_code == 403
                 initial = call("GET", f"/maintenance-work/incidents/{iid}", 2).json()
                 version = initial["version"]
                 response = call("POST", f"/maintenance-work/incidents/{iid}/actions", 2,

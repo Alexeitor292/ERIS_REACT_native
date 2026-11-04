@@ -123,7 +123,7 @@ class TestSiteHistory:
         other = client_db.post("/submissions", json={"title": "Earlier form"}, headers=staff)
         other_id = int(other.json()["submission_id"])
         staff_id = client_db.get("/auth/me", headers=staff).json()["id"]
-        coordinator_id = client_db.get("/auth/me", headers=coordinator).json()["id"]
+        coordinator_id = client_db.get("/auth/me", headers=_login(client_db, "mock.maintenance.crew@dot.ca.gov")).json()["id"]
         with engine.begin() as conn:
             conn.execute(
                 text("INSERT INTO incident_submission_links (incident_id, submission_id, linked_by_user_id) VALUES (:i, :s, :u)"),
@@ -176,7 +176,7 @@ class TestSiteHistory:
         assert relation() == "DIFFERENT_TYPE"
 
     def test_only_operational_roles_may_read_it(self, client_db, form, viewer_token):
-        crew = _login(client_db, "mock.staff@dot.ca.gov")
+        crew = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
         assert client_db.get(f"/submissions/{form}/site-history", headers=crew).status_code == 403
         guest = {"Authorization": f"Bearer {viewer_token}"}
         assert client_db.get(f"/submissions/{form}/site-history", headers=guest).status_code == 403
