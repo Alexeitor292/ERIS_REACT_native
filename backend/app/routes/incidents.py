@@ -1723,25 +1723,11 @@ def create_incident(
             },
         )
         new_id = int(db.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-        coordinator_ids = [] if workflow else _routing_users_for(
-            db=db,
-            assignment_type="DISTRICT_COORDINATOR",
-            district=district_code,
-        )
-        if coordinator_ids:
-            _set_stage_assignment(
-                db=db,
-                incident_id=new_id,
-                assignee_user_id=coordinator_ids[0],
-                assigned_by_user_id=int(user["id"]),
-                assignment_mode="ASSIGN",
-                assignment_stage="COORDINATOR",
-            )
         # With no workflow in the district, an administrator decides the report: tell them.
-        reviewers = coordinator_ids or ([] if workflow else [int(uid) for uid in db.execute(text(
+        reviewers = [] if workflow else [int(uid) for uid in db.execute(text(
             "SELECT DISTINCT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id "
             "JOIN roles r ON r.id = ur.role_id WHERE r.name = 'ADMIN' AND u.is_active = 1"
-        )).scalars()])
+        )).scalars()]
         if reviewers:
             _queue_incident_notifications(
                 db=db,

@@ -48,6 +48,18 @@ def _feed(client_db, token):
     return client_db.get("/notifications?limit=50", headers=_auth(token)).json()["items"]
 
 
+@pytest.fixture(autouse=True)
+def _a_district_with_people(who):
+    """District 04 has someone who can be its contact, and no workflow for these legacy hand-offs."""
+    from app.db import engine
+
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE org_coordinator_coverage SET is_active = 1 WHERE district = '04' AND user_id = :u"), {"u": who["ids"]["coordinator"]})
+    yield
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE org_coordinator_coverage SET is_active = 0 WHERE district = '04' AND user_id = :u"), {"u": who["ids"]["coordinator"]})
+
+
 def test_the_default_is_set_by_an_administrator_and_read_by_the_hand_off(client_db, who):
     coordinator = who["ids"]["coordinator"]
     answer = client_db.put("/district-contacts/04", json={"user_id": coordinator}, headers=_auth(who["tokens"]["admin"]))

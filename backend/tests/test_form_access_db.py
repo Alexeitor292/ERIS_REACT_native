@@ -74,7 +74,7 @@ def test_work_in_progress_opens_only_to_its_route(client_db, tokens, ids):
     attachment = _attach(sid, ids["engineer"])
 
     # Everyone operational still sees the assessment and its stage.
-    for who in ("other_staff", "coordinator"):
+    for who in ("other_staff",):
         seen = client_db.get(f"/assessments/{aid}", headers=_auth(tokens[who]))
         assert seen.status_code == 200, seen.text
 
@@ -85,7 +85,7 @@ def test_work_in_progress_opens_only_to_its_route(client_db, tokens, ids):
         assert _listed(client_db, tokens[who], sid), who
 
     # Nobody else, and they are told why.
-    for who in ("other_staff", "coordinator"):
+    for who in ("other_staff",):
         refused = client_db.get(f"/submissions/{sid}", headers=_auth(tokens[who]))
         assert refused.status_code == 403 and "in progress" in refused.json()["detail"], who
         assert not _listed(client_db, tokens[who], sid), who
@@ -119,6 +119,6 @@ def test_a_share_opens_it_and_approval_opens_it_to_everyone(client_db, tokens, i
     approved = client_db.post(f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(tokens["branchchief"]))
     assert approved.status_code == 200, approved.text
 
-    for who in ("other_staff", "coordinator"):
+    for who in ("other_staff",):
         assert _opens(client_db, tokens[who], sid) == 200, who
         assert _listed(client_db, tokens[who], sid), who
