@@ -268,6 +268,45 @@ enum AppTheme: String, CaseIterable, Identifiable {
     }
 }
 
+/// How large text is on this iPhone, for reading in rain or at a glance. It stays
+/// through sign-out, like the theme. nil follows the iPhone's own Text Size.
+enum AppTextSize {
+    static let storageKey = "appTextSize"
+    static let boldKey = "appTextBold"
+    /// The app's steps, smallest to largest, from the iPhone's own scale.
+    static let steps: [DynamicTypeSize] = [.large, .xLarge, .xxLarge, .xxxLarge, .accessibility1, .accessibility2, .accessibility3]
+    static let system = -1
+
+    static func size(_ step: Int) -> DynamicTypeSize? { steps.indices.contains(step) ? steps[step] : nil }
+}
+
+/// Account › Text: the app's own text size, as iOS offers it in Settings.
+private struct TextSizeSection: View {
+    @AppStorage(AppTextSize.storageKey) private var step = AppTextSize.system
+    @AppStorage(AppTextSize.boldKey) private var bold = false
+
+    private var usesSystem: Binding<Bool> {
+        Binding(get: { step == AppTextSize.system }, set: { step = $0 ? AppTextSize.system : 3 })
+    }
+
+    var body: some View {
+        Section("Text") {
+            Toggle("Same as iPhone", isOn: usesSystem).accessibilityIdentifier("text-same-as-iphone")
+            if step != AppTextSize.system {
+                HStack(spacing: 12) {
+                    Image(systemName: "textformat.size.smaller").accessibilityHidden(true)
+                    Slider(value: Binding(get: { Double(step) }, set: { step = Int($0.rounded()) }),
+                           in: 0...Double(AppTextSize.steps.count - 1), step: 1)
+                        .accessibilityLabel("Text size")
+                        .accessibilityIdentifier("text-size")
+                    Image(systemName: "textformat.size.larger").accessibilityHidden(true)
+                }
+            }
+            Toggle("Bold Text", isOn: $bold).accessibilityIdentifier("text-bold")
+        }
+    }
+}
+
 struct AccountView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var offline: OfflineSync
@@ -278,6 +317,8 @@ struct AccountView: View {
 
     var body: some View {
         List {
+            // First: at a large size, nobody should have to scroll to reach it.
+            TextSizeSection()
             Section("Signed in") {
                 LabeledContent("Name", value: me.fullName)
                 LabeledContent("Email", value: me.email)

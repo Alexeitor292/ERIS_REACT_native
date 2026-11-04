@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import DistrictWorkflowChart from "./DistrictWorkflowChart";
 import SimpleMaintenanceWorkflowEditor from "./SimpleMaintenanceWorkflowEditor";
+import { DistrictContactDefault } from "../../fieldNotices/DistrictContactPicker";
 import WorkflowPeoplePicker from "./WorkflowPeoplePicker";
 import { createInitialDefinition, fromSimpleWorkflow, isSimpleDefinition, toSimpleWorkflow, validateSimpleWorkflow } from "./simpleMaintenanceWorkflow";
 import { getWorkflows, publishWorkflow, type Definition, type DistrictWorkflow, type Person } from "../../../api/maintenanceWorkflows";
@@ -66,6 +67,7 @@ export default function DistrictWorkflows({ maintenance, onPublished }: { mainte
       <div><h2 className="text-lg font-semibold">District maintenance workflows</h2><p className="mt-1 text-sm text-muted">Choose who reports, who reviews, and who makes the final decision.</p></div>
       {current?.can_manage && !guided && <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50" disabled={cannotPublish} onClick={() => void save()}><Check size={15} />{busy ? "Publishing…" : "Publish workflow"}</button>}
     </div>
+    {district ? <DistrictContactDefault key={district} district={district} /> : null}
     <div className="flex flex-wrap items-end justify-between gap-3">
       <label className="grid w-full max-w-sm gap-1.5 text-xs font-medium text-muted">District<select aria-label="Maintenance district" className={input} value={district} disabled={busy || !districts.length} onChange={e => {
         if (dirty && !window.confirm("Discard your unsaved workflow changes?")) return;

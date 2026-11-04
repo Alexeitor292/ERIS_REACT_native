@@ -31,6 +31,7 @@ from ..roles import (
     is_maintenance_only,
     is_public_only,
 )
+from ..services import district_contact
 from ..services import org_directory
 from ..services import maintenance_workflows as mw
 from ..services.incident_name import incident_name
@@ -1428,6 +1429,7 @@ def _ensure_linked_submission(
             ),
             {"sid": int(existing), "uid": assignee_user_id, "granted_by": actor_user_id},
         )
+        district_contact.prefill_form(db, submission_id=int(existing), incident_id=int(incident_row["id"]))
         return int(existing)
 
     return _create_linked_submission(
@@ -1574,6 +1576,7 @@ def _create_linked_submission(
             ),
             {"sid": submission_id, "uid": reporter_uid, "granted_by": actor_user_id},
         )
+    district_contact.prefill_form(db, submission_id=submission_id, incident_id=int(incident_row["id"]))
     return submission_id
 
 

@@ -286,6 +286,8 @@ CREATE TABLE IF NOT EXISTS incidents (
     resolved_at DATETIME NULL,
     resolved_by_user_id BIGINT NULL,
     resolution_comment TEXT NULL,
+    district_contact_user_id BIGINT NULL,
+    CONSTRAINT fk_incident_district_contact FOREIGN KEY (district_contact_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT fk_incident_reporter FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_incident_location FOREIGN KEY (location_id) REFERENCES incident_locations(id) ON DELETE SET NULL,
     CONSTRAINT fk_incident_location_reviewed_by FOREIGN KEY (location_reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
@@ -900,4 +902,29 @@ CREATE TABLE IF NOT EXISTS delegated_actions (
     CONSTRAINT fk_delegated_action_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_delegated_action_for FOREIGN KEY (acting_for_user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX ix_delegated_action_delegation (delegation_id, created_at)
+) ENGINE=InnoDB;
+
+-- District contacts and immediate action deliveries (services/district_contact.py).
+CREATE TABLE IF NOT EXISTS org_district_settings (
+    district VARCHAR(8) PRIMARY KEY,
+    contact_user_id BIGINT NULL,
+    updated_by_user_id BIGINT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_district_setting_contact FOREIGN KEY (contact_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_district_setting_editor FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS immediate_action_deliveries (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    submission_id BIGINT NOT NULL,
+    actor_user_id BIGINT NOT NULL,
+    client_uuid CHAR(36) NOT NULL,
+    actions_json JSON NOT NULL,
+    description TEXT NOT NULL,
+    written_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_immediate_delivery_client UNIQUE (client_uuid),
+    CONSTRAINT fk_immediate_delivery_submission FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_immediate_delivery_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX ix_immediate_delivery_submission (submission_id, created_at)
 ) ENGINE=InnoDB;

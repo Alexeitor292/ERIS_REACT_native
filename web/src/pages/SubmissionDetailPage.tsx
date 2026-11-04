@@ -9,6 +9,7 @@ import { useFormPresence } from "../features/submissions/collab/useFormPresence"
 import type { GisaLookups, SubmissionDetail } from "../api/types";
 import { getFormShares, type FormShares } from "../api/sharing";
 import AppShell from "../ui/AppShell";
+import ImmediateActionsDelivery from "../features/fieldNotices/ImmediateActionsDelivery";
 import { useAuth } from "../auth/AuthContext";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
@@ -1780,6 +1781,7 @@ export default function SubmissionDetailPage() {
                   editable={canEdit}
                 />
               </div>
+              {canEdit ? <ImmediateActionsDelivery submissionId={data.submission.id} actions={imm} /> : null}
             </PresenceArea>
 
             <PresenceArea area="section:memos" others={presence.others} className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4">

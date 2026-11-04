@@ -172,10 +172,17 @@ private struct WorkRow: View {
 
     private func row(_ title: String, _ subtitle: String, _ details: [String?], badge: String, urgent: Bool) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).font(.headline)
-                Spacer()
-                Text(badge).font(.caption.weight(.semibold)).foregroundStyle(urgent ? Color.orange : .secondary)
+            // Side by side only while both fit: at a large text size, one above the other.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title).font(.headline).fixedSize()
+                    Spacer()
+                    Text(badge).font(.caption.weight(.semibold)).foregroundStyle(urgent ? Color.orange : .secondary).fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline)
+                    Text(badge).font(.caption.weight(.semibold)).foregroundStyle(urgent ? Color.orange : .secondary)
+                }
             }
             Text(subtitle).font(.subheadline)
             let line = details.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -273,6 +280,7 @@ struct TriageView: View {
     @EnvironmentObject private var model: AppModel
     let incidentId: Int
     let done: (String) -> Void
+    @State private var contacts: DistrictContacts?
     @State private var incident: Incident?
     @State private var evidence: [IncidentEvidence]?
     @State private var draft: Triage.Draft
@@ -304,7 +312,10 @@ struct TriageView: View {
                 Text("Decision")
             }
             switch draft.disposition {
-            case .assessmentRequired?: groupSection
+            case .assessmentRequired?:
+                groupSection
+                DistrictContactSection(contacts: contacts, selection: $draft.districtContact)
+                    .task { await loadContacts() }
             case .needsReporterInformation?: correctionsSection
             case .duplicateOrLinked?: duplicateSection
             default: EmptyView()
@@ -438,6 +449,15 @@ struct TriageView: View {
         candidates = Triage.duplicateCandidates(of: incident, among: reports)
     }
 
+    /// The district's people to name, starting on its default.
+    private func loadContacts() async {
+        guard contacts == nil, let district = incident?.district else { return }
+        guard let loaded = try? await IncidentsAPI(api: model.api).districtContacts(district) else { return }
+        contacts = loaded
+        draft.contactRequired = !loaded.candidates.isEmpty
+        if draft.districtContact == nil { draft.districtContact = loaded.defaultUserId }
+    }
+
     private func confirm() async {
         working = true
         defer { working = false }
@@ -446,6 +466,34 @@ struct TriageView: View {
             done(draft.outcome(assessmentId: assessment))
         } catch {
             self.error = model.handle(error)
+        }
+    }
+}
+
+/// On a hand-off to GeoTech: who is kept informed, starting on the district's default.
+struct DistrictContactSection: View {
+    let contacts: DistrictContacts?
+    @Binding var selection: Int?
+
+    var body: some View {
+        Section {
+            if let contacts {
+                if contacts.candidates.isEmpty {
+                    Text("No one is listed in this district to name.").foregroundStyle(.secondary)
+                } else {
+                    Picker("District Contact", selection: $selection) {
+                        Text("Select a person").tag(Int?.none)
+                        ForEach(contacts.candidates) { Text($0.fullName).tag(Int?.some($0.id)) }
+                    }
+                    .accessibilityIdentifier("district-contact")
+                }
+            } else {
+                ProgressView()
+            }
+        } header: {
+            Text("District Contact")
+        } footer: {
+            Text("Kept informed about this assessment and any Immediate Actions.")
         }
     }
 }
@@ -459,6 +507,8 @@ struct MaintenanceReportView: View {
     @EnvironmentObject private var model: AppModel
     let incidentId: Int
     let done: (String) -> Void
+    @State private var contacts: DistrictContacts?
+    @State private var districtContact: Int?
     @State private var incident: Incident?
     @State private var evidence: [IncidentEvidence]?
     @State private var workflow: MaintenanceWorkflow?
@@ -557,6 +607,10 @@ struct MaintenanceReportView: View {
                     Text("The referral goes to the district's GeoTech office. When every decision maker must agree, all choose the same outcome and Incident Group.")
                 }
             }
+            if action == .geotech {
+                DistrictContactSection(contacts: contacts, selection: $districtContact)
+                    .task { await loadContacts(district: workflow.district) }
+            }
             Section {
                 TextField("Review notes / reason (required)", text: $notes, axis: .vertical).lineLimit(2...6)
                     .accessibilityLabel("Review notes")
@@ -565,9 +619,21 @@ struct MaintenanceReportView: View {
                     if action == .restart { confirmingRestart = true } else { Task { await record() } }
                 }
                 .bold()
-                .disabled(working || notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(working || notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || contactMissing)
             }
         }
+    }
+
+    /// A hand-off names someone, unless the district has nobody to name.
+    private var contactMissing: Bool {
+        action == .geotech && !(contacts?.candidates.isEmpty ?? true) && districtContact == nil
+    }
+
+    private func loadContacts(district: String) async {
+        guard contacts == nil,
+              let loaded = try? await IncidentsAPI(api: model.api).districtContacts(district) else { return }
+        contacts = loaded
+        if districtContact == nil { districtContact = loaded.defaultUserId }
     }
 
     private func load() async {
@@ -592,7 +658,7 @@ struct MaintenanceReportView: View {
     private func record() async {
         guard let workflow, let action,
               let body = workflow.request(action, notes: notes, description: description, groupId: groupId,
-                                          newGroupTitle: newGroupTitle) else { return }
+                                          newGroupTitle: newGroupTitle, districtContact: districtContact) else { return }
         working = true
         defer { working = false }
         do {

@@ -18,6 +18,7 @@
 		2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */; };
 		44CA30771FCCFC9A1F46441F /* DemoWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C1617C9169B704B9433F21 /* DemoWork.swift */; };
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
+		579D819C97A388A7D48031BA /* ReportMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 269C178A641FC67E6142BB11 /* ReportMedia.swift */; };
 		586D79AA03DC3DE543D242B4 /* GalleryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
 		5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BD4538642D56D52AACFE19 /* DemoServer.swift */; };
@@ -44,6 +45,7 @@
 		D0DE8754749DC291E96E08CE /* MyWorkViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */; };
 		E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */; };
 		E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C79A78C23480075CFA148688 /* SketchpadViews.swift */; };
+		F46F4D31428D1E2930B3DAC8 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5367D2DACD4A77222E5BC39B /* SplashView.swift */; };
 		FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */; };
 		FDC62F41A7DD0E74C473E711 /* ERISApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85ADD49DC017F3F55EB8E19 /* ERISApp.swift */; };
 /* End PBXBuildFile section */
@@ -61,12 +63,14 @@
 /* Begin PBXFileReference section */
 		165D83936FD9007D7B9909A5 /* CreateIncidentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateIncidentView.swift; sourceTree = "<group>"; };
 		16BD4538642D56D52AACFE19 /* DemoServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoServer.swift; sourceTree = "<group>"; };
+		269C178A641FC67E6142BB11 /* ReportMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportMedia.swift; sourceTree = "<group>"; };
 		2E8560894A4728D677214030 /* RootViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootViews.swift; sourceTree = "<group>"; };
 		304C10E2CBA732244FA1B0EA /* MemoWebEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoWebEditor.swift; sourceTree = "<group>"; };
 		37F4AC4F0D5C1D401805C47E /* DemoTerrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoTerrain.swift; sourceTree = "<group>"; };
 		3A0581E3CF08485CC2E52F5B /* MemoEditor.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = MemoEditor.html; sourceTree = "<group>"; };
 		4096957882DF657855E7DBEA /* IncidentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentViews.swift; sourceTree = "<group>"; };
 		4B8B885CD4066D0B8A4FE722 /* MappedCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MappedCamera.swift; sourceTree = "<group>"; };
+		5367D2DACD4A77222E5BC39B /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
 		576704982A623A2F1D8DFF28 /* FormPresenceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormPresenceSession.swift; sourceTree = "<group>"; };
 		66F044BEA9FCDD6168ABC415 /* TerrainViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainViews.swift; sourceTree = "<group>"; };
 		6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementDiagramViews.swift; sourceTree = "<group>"; };
@@ -195,8 +199,10 @@
 				EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */,
 				A93BD80FD29F4D09DC775E07 /* OutOfOfficeViews.swift */,
 				9B0406C2726AB58967A07E70 /* PhotoViews.swift */,
+				269C178A641FC67E6142BB11 /* ReportMedia.swift */,
 				2E8560894A4728D677214030 /* RootViews.swift */,
 				C79A78C23480075CFA148688 /* SketchpadViews.swift */,
+				5367D2DACD4A77222E5BC39B /* SplashView.swift */,
 				B24DB41A2A1AA31C2ADA284A /* SubmissionViews.swift */,
 				66F044BEA9FCDD6168ABC415 /* TerrainViews.swift */,
 			);
@@ -352,9 +358,11 @@
 				252B6D4585C6891A71D36DA6 /* OfflineSync.swift in Sources */,
 				86AE64320D15B735CB93B754 /* OutOfOfficeViews.swift in Sources */,
 				9DF92CCCD5EF58B62848979A /* PhotoViews.swift in Sources */,
+				579D819C97A388A7D48031BA /* ReportMedia.swift in Sources */,
 				AD7DD33F31277AFCC3D2C491 /* RoadData.swift in Sources */,
 				4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */,
 				E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */,
+				F46F4D31428D1E2930B3DAC8 /* SplashView.swift in Sources */,
 				E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */,
 				7D70D5CB6B9DB1974652994F /* TerrainViews.swift in Sources */,
 			);

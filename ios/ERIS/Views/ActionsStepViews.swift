@@ -10,16 +10,19 @@ struct WorkflowDrafts {
 }
 
 /// Step 4, Actions, as in the Expo editor: the immediate and follow-up
-/// actions, the lanes left open, and telling the maintenance coordinator
-/// about immediate actions with a justification.
+/// actions, the lanes left open, and delivering the immediate actions to the
+/// supervisor and the District Contact, even from a draft.
 struct GisaActionsSections: View {
     @Binding var editor: GisaEditor
     @Binding var message: String
     let canEdit: Bool
     let lookups: GisaLookups
     let notices: [GisaWorkflow.CoordinatorNotice]
+    let waitingDeliveries: [QueuedDelivery]
     let notifying: Bool
     let notify: () -> Void
+    /// Scrolls Deliver Now clear of the keyboard's Done bar, which takes taps across its full width.
+    var showDeliver: () -> Void = {}
 
     enum ActionGroup: String {
         case immediate = "Immediate Actions", followUp = "Follow-up Actions"
@@ -37,21 +40,30 @@ struct GisaActionsSections: View {
                               error: editor.errors["open_highway_traffic_lanes_count"])
             }
         }
-        if !editor.actions.immediate.isEmpty || !notices.isEmpty {
+        if canEdit || !notices.isEmpty || !waitingDeliveries.isEmpty {
             Section {
-                if !editor.actions.immediate.isEmpty && canEdit {
-                    NotesField(label: "Emergency Justification Message", text: $message, editable: !notifying)
+                if canEdit {
+                    NotesField(label: "Description", text: $message, editable: !notifying, typing: showDeliver)
                     Button(action: notify) {
                         HStack {
-                            Text(notifying ? "Notifying…" : "Notify Coordinator").bold()
+                            Text(notifying ? "Delivering…" : "Deliver Now").bold()
                             if notifying { Spacer(); ProgressView() }
                         }
                     }
-                    .disabled(notifying)
+                    .disabled(notifying || ImmediateDeliveries.problem(actions: editor.actions.immediate, description: message) != nil)
+                    .id("deliver-now")
+                }
+                ForEach(waitingDeliveries) { waiting in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(waiting.problem ?? "Waiting to send").font(.caption.bold()).foregroundStyle(.orange)
+                        Text(GisaWorkflow.actionLabels(waiting.actions, lookups: lookups).joined(separator: ", ")).font(.caption)
+                        Text(waiting.description).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
                 ForEach(notices) { notice in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Notified\(ServerDate.display(notice.createdAt).map { " \($0)" } ?? "")")
+                        Text("Delivered\(ServerDate.display(notice.createdAt).map { " \($0)" } ?? "")")
                             .font(.caption.bold())
                         if !notice.actions.isEmpty {
                             Text(GisaWorkflow.actionLabels(notice.actions, lookups: lookups).joined(separator: ", "))
@@ -62,11 +74,9 @@ struct GisaActionsSections: View {
                     .accessibilityElement(children: .combine)
                 }
             } header: {
-                Text("Maintenance Coordinator")
+                Text("Deliver Immediate Actions")
             } footer: {
-                Text(canEdit && !editor.actions.immediate.isEmpty
-                     ? "Saves the form, then sends the immediate actions and this message to the maintenance coordinator."
-                     : "Notices sent from this form.")
+                Text("Tells the supervisor and the District Contact right away. They can't open this draft.")
             }
         }
         Section("Follow-up Actions") {
@@ -159,6 +169,8 @@ struct GisaReviewStatusSections: View {
     let working: Bool
     let decide: (SubmissionsAPI.ReviewDecision) -> Void
     let openAssessment: (Int) -> Void
+    /// Scrolls the decision buttons clear of the keyboard's Done bar.
+    var showDecision: () -> Void = {}
     @State private var confirming: SubmissionsAPI.ReviewDecision?
 
     var body: some View {
@@ -175,11 +187,12 @@ struct GisaReviewStatusSections: View {
         }
         if GisaWorkflow.decidesHere(detail) {
             Section {
-                NotesField(label: "Review Comment", text: $comment, editable: !working)
+                NotesField(label: "Review Comment", text: $comment, editable: !working, typing: showDecision)
                 Button("Approve") { confirming = .approve }
                     .bold().disabled(working)
                 Button("Return for Correction", role: .destructive) { confirming = .reject }
                     .disabled(working)
+                    .id("review-decision")
             } header: {
                 Text("Reviewer Decision")
             } footer: {
@@ -217,6 +230,8 @@ struct GisaSubmitSections: View {
     let fix: (GisaWorkflow.Requirement.Kind) -> Void
     let submit: () -> Void
     let openAssessment: (Int) -> Void
+    /// Scrolls Submit clear of the keyboard's Done bar.
+    var showSubmit: () -> Void = {}
     @State private var confirming = false
 
     var body: some View {
@@ -269,9 +284,10 @@ struct GisaSubmitSections: View {
         case .form:
             let resubmit = detail.submission.status == "REJECTED"
             Section {
-                NotesField(label: "Comment (optional)", text: $comment, editable: !working)
+                NotesField(label: "Comment (optional)", text: $comment, editable: !working, typing: showSubmit)
                 Button(working ? "Working…" : (resubmit ? "Resubmit for Review" : "Submit for Review")) { confirming = true }
                     .bold().disabled(working)
+                    .id("submit-for-review")
             } header: {
                 Text("Send for Review")
             } footer: {

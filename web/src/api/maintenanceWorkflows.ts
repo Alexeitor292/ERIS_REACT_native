@@ -26,4 +26,4 @@ export const workflowPeople = (district: string, q: string) => api<{ items: Pers
 export const publishWorkflow = (district: string, revision: number, definition: Definition) => api<DistrictWorkflow>(`/maintenance-workflows/${district}`, { method: "PUT", body: JSON.stringify({ revision, definition }) });
 export const maintenanceWork = () => api<{ items: WorkItem[] }>("/maintenance-work/incidents");
 export const maintenanceDetail = (id: number) => api<WorkflowDetail>(`/maintenance-work/incidents/${id}`);
-export const maintenanceAction = (id: number, body: { version: number; action: string; notes: string; description?: string; event_group_id?: number | null; new_group_title?: string | null }) => api<WorkflowDetail>(`/maintenance-work/incidents/${id}/actions`, { method: "POST", body: JSON.stringify(body) });
+export const maintenanceAction = (id: number, body: { version: number; action: string; notes: string; description?: string; event_group_id?: number | null; new_group_title?: string | null; district_contact_user_id?: number | null }) => api<WorkflowDetail>(`/maintenance-work/incidents/${id}/actions`, { method: "POST", body: JSON.stringify(body) });

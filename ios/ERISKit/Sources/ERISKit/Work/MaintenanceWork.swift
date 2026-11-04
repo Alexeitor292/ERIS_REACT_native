@@ -202,13 +202,14 @@ public struct MaintenanceWorkflow: Decodable, Equatable, Sendable {
 
     /// The request for an action. Notes are required; a referral names its
     /// Incident Group, or a new group's title (nil: the incident's own name).
-    public func request(_ action: Action, notes: String, description: String?, groupId: Int?, newGroupTitle: String?) -> [String: JSONValue]? {
+    public func request(_ action: Action, notes: String, description: String?, groupId: Int?, newGroupTitle: String?, districtContact: Int? = nil) -> [String: JSONValue]? {
         let notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !notes.isEmpty else { return nil }
         var body: [String: JSONValue] = ["version": .number(Double(version)), "action": .string(action.rawValue), "notes": .string(notes)]
         if action.changesDescription { body["description"] = .string(description ?? "") }
         if action == .geotech {
             body["event_group_id"] = groupId.map { .number(Double($0)) } ?? .null
+            if let districtContact { body["district_contact_user_id"] = .number(Double(districtContact)) }
             let title = (newGroupTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             body["new_group_title"] = groupId == nil && !title.isEmpty ? .string(title) : .null
         }

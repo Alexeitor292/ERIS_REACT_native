@@ -207,6 +207,24 @@ An Office Chief, a Branch Chief or an administrator can add anyone operational
 as **Consulted**, for information only. `FINALIZED` exists only on records
 approved before routing v2; the finalize endpoint now answers 410.
 
+## District Contact and Immediate Actions
+
+When maintenance sends an incident to GeoTech, by triage or a district workflow's
+decision, it names a **District Contact**: someone on that district's lists or in
+its workflow. The hand-off starts on the district's default, set on Organization ›
+Maintenance by its coordinators, workflow managers or an administrator, and can be
+changed each time. It can't go without one, unless the district has nobody to name.
+Their name fills the form's District Contact section, and they are told as the
+assessment moves. Being one gives no access to a form still in draft.
+
+**Immediate Actions are the one thing a draft can send.** On the form's Actions,
+Staff select the actions, describe what happened and choose **Deliver**. The notice
+goes at once to the supervisor of the person filling it out (a Staff member's branch
+chief, or a Senior Specialist's office chief) and to the District Contact, and it
+carries the actions and description itself, so nobody has to open the form. With no
+connection, the iPhone keeps it and delivers it when one returns, and the notice says
+when it was written. `services/district_contact.py`, `routes/field_notices.py`.
+
 ## 5. My Work
 
 **My Work** lists every step waiting on the signed-in person: triage for

@@ -11,10 +11,17 @@ struct AssessmentRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Assessment #\(assessment.id)").font(.headline)
-                Spacer()
-                AssessmentStateBadge(state: assessment.state)
+            // Side by side only while both fit: at a large text size, one above the other.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Text("Assessment #\(assessment.id)").font(.headline).fixedSize()
+                    Spacer()
+                    AssessmentStateBadge(state: assessment.state).fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Assessment #\(assessment.id)").font(.headline)
+                    AssessmentStateBadge(state: assessment.state)
+                }
             }
             Text("Incident #\(assessment.incidentId) · \(assessment.officeLabel) · District \(assessment.district ?? "—")")
                 .font(.caption)
@@ -43,7 +50,8 @@ struct AssessmentStateBadge: View {
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .overlay(Capsule().stroke(color))
+            // Not a capsule: at a large text size the label takes two lines and would touch its curve.
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(color))
     }
 }
 
@@ -62,6 +70,7 @@ struct AssessmentDetailView: View {
     @State private var branchChiefId = PersonPicker.initialValue()
     @State private var staffId = PersonPicker.initialValue()
     @State private var seniorId = PersonPicker.initialValue()
+    @State private var confirmingSubmit = false
     @State private var seniors: [PickerSection] = []
     @State private var notes = ""
     @State private var error: String?
@@ -109,10 +118,20 @@ struct AssessmentDetailView: View {
                 LabeledContent("Incident", value: "#\(assessment.incidentId)")
                 LabeledContent("Office", value: assessment.officeLabel)
                 if let branch = assessment.branchLabel { LabeledContent("Branch", value: branch) }
-                if let submissionId = assessment.submissionId {
+            }
+
+            // The form is what this screen is for, so it is the one thing that stands out.
+            if let submissionId = assessment.submissionId {
+                Section {
                     NavigationLink(value: SubmissionRoute(id: submissionId)) {
-                        Text("Open technical form #\(submissionId)")
+                        Label("Open technical form #\(submissionId)", systemImage: "doc.text")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(minHeight: 44)
                     }
+                    // A list ignores button styles on a link: the row itself is the button.
+                    .listRowBackground(Color.accentColor)
+                    .tint(.white)
                 }
             }
 
@@ -145,10 +164,19 @@ struct AssessmentDetailView: View {
 
             if actions.submit {
                 Section {
-                    Button("Submit for review") {
-                        run { try await $0.submit(assessment.id, notes: notes) }
-                    }
-                    .disabled(working)
+                    // A step down from the form, and never one tap: it leaves this person's hands.
+                    Button("Submit for review") { confirmingSubmit = true }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                        .disabled(working)
+                        .confirmationDialog("Submit for review?", isPresented: $confirmingSubmit, titleVisibility: .visible) {
+                            Button("Submit") {
+                                run { try await $0.submit(assessment.id, notes: notes) }
+                            }
+                            Button("Keep Working", role: .cancel) {}
+                        } message: {
+                            Text("Make sure the form is finished. It cannot be edited until it is returned.")
+                        }
                 }
             }
 

@@ -55,6 +55,10 @@ public enum Triage {
         public var revisionFields: [String] = []
         /// Duplicate only.
         public var duplicateOf: Int?
+        /// Assessment required only: who is kept informed. Needed when the district
+        /// has anyone who could be named.
+        public var districtContact: Int?
+        public var contactRequired = false
 
         public init(incidentId: Int) {
             self.incidentId = incidentId
@@ -64,7 +68,9 @@ public enum Triage {
         public var blocker: String? {
             switch disposition {
             case nil: return "Choose what happens to this report."
-            case .assessmentRequired?: return group == nil ? "Choose its Incident Group, or start a new one." : nil
+            case .assessmentRequired?:
+                if group == nil { return "Choose its Incident Group, or start a new one." }
+                return contactRequired && districtContact == nil ? "Choose a District Contact." : nil
             case .needsReporterInformation?:
                 return revisionFields.isEmpty && notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? "Say what the reporter should correct." : nil
@@ -81,6 +87,7 @@ public enum Triage {
             if !notes.isEmpty { body["notes"] = .string(notes) }
             switch disposition {
             case .assessmentRequired:
+                if let districtContact { body["district_contact_user_id"] = .number(Double(districtContact)) }
                 switch group {
                 case .existing(let id)?:
                     body["event_group"] = .object(["mode": .string("EXISTING"), "event_group_id": .number(Double(id))])

@@ -34,7 +34,12 @@ final class AppModel: ObservableObject {
     init(baseURL: URL = AppModel.configuredBaseURL) {
         var api = APIClient(baseURL: baseURL, store: KeychainSessionStore())
         #if DEBUG
-        if DemoServer.isEnabled { api = DemoServer.makeClient() }
+        if DemoServer.isEnabled {
+            api = DemoServer.makeClient()
+            // Each demo starts on the iPhone's own text: a test's choice is not the next one's.
+            UserDefaults.standard.removeObject(forKey: AppTextSize.storageKey)
+            UserDefaults.standard.removeObject(forKey: AppTextSize.boldKey)
+        }
         #endif
         auth = AuthService(api: api, provider: MSALTokenProvider())
     }

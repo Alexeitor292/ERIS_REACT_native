@@ -127,6 +127,8 @@ final class OfflineSync: ObservableObject {
         guard !sending, !waiting.isEmpty else { return }
         sending = true
         defer { sending = false }
+        // Emergencies first: immediate actions are what someone is waiting on.
+        await ImmediateDeliveries(api: api, store: store).sendAll()
         let sync = FormSync(api: api, store: store), reports = IncidentSync(api: api, store: store, me: userId)
         // Reports first: they are the newest news from the field.
         if await reports.sendAll() != .unreachable {

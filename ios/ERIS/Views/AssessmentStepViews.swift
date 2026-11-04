@@ -87,6 +87,9 @@ struct NotesField: View {
     let label: String
     @Binding var text: String
     let editable: Bool
+    /// Called on focus and as the text grows, to keep a button below clear of the keyboard.
+    var typing: (() -> Void)?
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -95,6 +98,9 @@ struct NotesField: View {
                 .lineLimit(3...10)
                 .disabled(!editable)
                 .accessibilityLabel(label)
+                .focused($focused)
+                .onChange(of: focused) { if focused { typing?() } }
+                .onChange(of: text) { if focused { typing?() } }
         }
     }
 }

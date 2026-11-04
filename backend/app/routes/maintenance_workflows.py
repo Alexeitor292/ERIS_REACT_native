@@ -28,6 +28,7 @@ class Action(BaseModel):
     notes: str = Field(min_length=1, max_length=4000)
     description: str | None = Field(default=None, max_length=20000)
     event_group_id: int | None = Field(default=None, ge=1)
+    district_contact_user_id: int | None = Field(default=None, ge=1)
     new_group_title: str | None = Field(default=None, max_length=255)
 
 
@@ -197,6 +198,9 @@ def act(incident_id: int, payload: Action, db: Session = Depends(get_db), user=D
                 if workflow["state"].get("decision") and workflow["state"]["decision"] != decision:
                     raise HTTPException(409, "Use the same Incident Group as the first decision maker")
                 state["decision"] = decision
+                # Who it names is not part of agreeing on the outcome: the last one named stands.
+                if payload.action == "GEOTECH" and payload.district_contact_user_id:
+                    state["district_contact_user_id"] = payload.district_contact_user_id
                 step = definition["steps"][old_step]
                 complete = step["rule"] == "ANY" or mw.users_for(definition, step["duty_ids"]) <= set(state["approved_user_ids"])
                 if complete:
@@ -214,7 +218,8 @@ def act(incident_id: int, payload: Action, db: Session = Depends(get_db), user=D
                             event_group_id=payload.event_group_id, title=payload.new_group_title or incident["title"],
                             description=None, notes=notes)
                         assessments_routes._triage_assessment_required(db, incident, user,
-                            IncidentTriageRequest(disposition="ASSESSMENT_REQUIRED", notes=notes), notes)
+                            IncidentTriageRequest(disposition="ASSESSMENT_REQUIRED", notes=notes,
+                                                  district_contact_user_id=state.get("district_contact_user_id")), notes)
                     else:
                         assessments_routes._triage_no_assessment(db, incident, uid, notes)
         mw.save_state(db, workflow, state, outcome)

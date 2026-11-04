@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronRight, HardHat, Plus, Radio, Star, TriangleAlert, X } from "lucide-react";
 
 import { DISTRICT_HQ, type MaintenanceDistrict } from "../../../api/orgTree";
+import { DistrictContactDefault } from "../../fieldNotices/DistrictContactPicker";
 
 type Kind = "coordinators" | "crew";
 
@@ -59,6 +60,7 @@ export default function MaintenanceDistricts({
               </button>
               {isOpen ? (
                 <div className="grid gap-3 border-t border-[var(--line)] bg-[var(--panel-soft)] px-4 py-3 lg:grid-cols-2">
+                  <DistrictContactDefault district={d.district} />
                   <Section
                     title="Maintenance Coordinators"
                     icon={<Radio size={14} />}

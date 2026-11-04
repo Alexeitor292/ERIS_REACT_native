@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { maintenanceAction, maintenanceDetail, type WorkflowDetail } from "../../api/maintenanceWorkflows";
 import { api } from "../../api/client";
 import { formatWhen } from "./IncidentReportParts";
+import { type DistrictContacts } from "../../api/fieldNotices";
+import { HandoffContactPicker } from "../fieldNotices/DistrictContactPicker";
+import { contactMissing } from "../fieldNotices/fieldNoticeModel";
 
 const input = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm";
 const button = `${input} hover:bg-[var(--panel-soft)] disabled:opacity-50`;
@@ -14,6 +17,8 @@ export default function MaintenanceWorkflowPanel({ incidentId, description, onCh
   const [choice, setChoice] = useState("");
   const [group, setGroup] = useState("");
   const [groupTitle, setGroupTitle] = useState("");
+  const [contacts, setContacts] = useState<DistrictContacts | null>(null);
+  const [contactId, setContactId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -37,7 +42,7 @@ export default function MaintenanceWorkflowPanel({ incidentId, description, onCh
     try {
       const next = await maintenanceAction(incidentId, { version: workflow.version, action: choice, notes,
         ...(choice === "EDIT" || choice === "RESUBMIT" ? { description: text } : {}),
-        ...(choice === "GEOTECH" ? { event_group_id: group ? Number(group) : null, new_group_title: group ? null : groupTitle.trim() || null } : {}),
+        ...(choice === "GEOTECH" ? { district_contact_user_id: contactId, event_group_id: group ? Number(group) : null, new_group_title: group ? null : groupTitle.trim() || null } : {}),
       });
       setWorkflow(next); setChoice(""); setNotes(""); setEditing(false); setNotice(next.outcome ? (next.outcome === "GEOTECH" ? "Sent to GeoTech." : "Maintenance will handle this incident. The maintenance review is complete.") : "Your action was recorded.");
       onChanged?.();
@@ -64,8 +69,8 @@ export default function MaintenanceWorkflowPanel({ incidentId, description, onCh
       {!!options.length && <fieldset className="space-y-3" disabled={busy}><legend className="mb-2 text-sm font-semibold">Your next action</legend>
         <div className="grid gap-2">{options.map(([value, label]) => <label key={value} className="flex items-center gap-2 text-sm"><input type="radio" name={`maintenance-action-${incidentId}`} value={value} checked={choice === value} onChange={() => { setChoice(value); setEditing(value === 'EDIT' || value === 'RESUBMIT'); }} />{label}</label>)}</div>
         {editing && <label className="grid gap-1 text-sm">Report description (updating restarts review at step one)<textarea rows={5} className={input} value={text} onChange={e => setText(e.target.value)} /></label>}
-        {choice === "GEOTECH" && <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 text-sm">Incident Group<select className={input} disabled={!!workflow.state.decision} value={group} onChange={e => setGroup(e.target.value)}><option value="">Create a new Incident Group</option>{workflow.groups.map(g => <option key={g.id} value={g.id}>{g.title}</option>)}</select></label>{!group && <label className="grid gap-1 text-sm">New group name (optional)<input className={input} disabled={!!workflow.state.decision} value={groupTitle} placeholder="Use this incident’s name" onChange={e => setGroupTitle(e.target.value)} /></label>}<p className="text-xs text-muted sm:col-span-2">The referral goes to the district’s configured GeoTech office. With unanimous approval, all decision makers agree on the same outcome and Incident Group.</p></div>}
-        {choice && <><label className="grid gap-1 text-sm">Review notes / reason (required)<textarea className={input} rows={3} value={notes} onChange={e => setNotes(e.target.value)} /></label><button type="button" disabled={!notes.trim()} onClick={() => void confirm()} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Recording…" : "Record action"}</button></>}
+        {choice === "GEOTECH" && <div className="grid gap-3 sm:grid-cols-2"><div className="sm:col-span-2"><HandoffContactPicker district={workflow.district} value={contactId} onChange={setContactId} onLoaded={setContacts} /></div><label className="grid gap-1 text-sm">Incident Group<select className={input} disabled={!!workflow.state.decision} value={group} onChange={e => setGroup(e.target.value)}><option value="">Create a new Incident Group</option>{workflow.groups.map(g => <option key={g.id} value={g.id}>{g.title}</option>)}</select></label>{!group && <label className="grid gap-1 text-sm">New group name (optional)<input className={input} disabled={!!workflow.state.decision} value={groupTitle} placeholder="Use this incident’s name" onChange={e => setGroupTitle(e.target.value)} /></label>}<p className="text-xs text-muted sm:col-span-2">The referral goes to the district’s configured GeoTech office. With unanimous approval, all decision makers agree on the same outcome and Incident Group.</p></div>}
+        {choice && <><label className="grid gap-1 text-sm">Review notes / reason (required)<textarea className={input} rows={3} value={notes} onChange={e => setNotes(e.target.value)} /></label><button type="button" disabled={!notes.trim() || (choice === "GEOTECH" && contactMissing(contacts?.candidates, contactId))} onClick={() => void confirm()} className="rounded-md bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Recording…" : "Record action"}</button></>}
       </fieldset>}
       {workflow.can_edit && <label className="grid gap-1 text-sm">Attach evidence<input type="file" disabled={busy} onChange={async e => {
         const file = e.target.files?.[0]; if (!file) return;

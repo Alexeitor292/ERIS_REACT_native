@@ -130,6 +130,23 @@ def deny_public_only_unless_maintenance_reporter(user=Depends(get_current_user),
     return user
 
 
+def deny_public_only_unless_maintenance_duty(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """``deny_public_only``, except for anyone with a step in a district's workflow.
+
+    Duties come from the workflow rather than a role, so someone Guest by role can
+    still decide a report and name its District Contact.
+    """
+    if is_public_only(user):
+        from .services import maintenance_workflows  # imports the app's routes; deferred to avoid a cycle
+
+        if not maintenance_workflows.summary(db, int(user["id"])):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions for this operation",
+            )
+    return user
+
+
 def require_roles(required: list[str]):
     def _guard(user=Depends(get_current_user)):
         have = set(user["roles"])

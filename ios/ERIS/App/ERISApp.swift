@@ -9,12 +9,19 @@ struct ERISApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
+    @AppStorage(AppTextSize.storageKey) private var textStep = AppTextSize.system
+    @AppStorage(AppTextSize.boldKey) private var textBold = false
+    @State private var showSplash = SplashView.shouldPlay
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environmentObject(model)
-                .preferredColorScheme(theme.colorScheme)
+            ZStack {
+                RootView()
+                    .environmentObject(model)
+                    .preferredColorScheme(theme.colorScheme)
+                    .modifier(AppTextModifier(step: textStep, bold: textBold))
+                if showSplash { SplashView { showSplash = false } }
+            }
                 .task {
                     delegate.model = model
                     await model.start()
@@ -24,6 +31,25 @@ struct ERISApp: App {
                     _ = MSALPublicClientApplication.handleMSALResponse(url, sourceApplication: nil)
                 }
         }
+    }
+}
+
+/// The app's own text size and weight, when the person chose them on Account.
+private struct AppTextModifier: ViewModifier {
+    let step: Int
+    let bold: Bool
+
+    func body(content: Content) -> some View {
+        // One modifier either way: an if here would rebuild the whole app on a
+        // change of size, dropping the open screen and any unsaved form.
+        content
+            .dynamicTypeSize(range)
+            .environment(\.legibilityWeight, bold ? .bold : nil)
+    }
+
+    private var range: ClosedRange<DynamicTypeSize> {
+        if let size = AppTextSize.size(step) { return size...size }
+        return .xSmall ... .accessibility5
     }
 }
 

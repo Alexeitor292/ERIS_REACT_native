@@ -295,7 +295,8 @@ struct SubmissionDetailView: View {
                                 choose: { choosingConflicts = true })
             GisaReviewStatusSections(detail: detail, comment: $drafts.reviewComment, working: working,
                                      decide: { decision in Task { await review(decision) } },
-                                     openAssessment: { id in Task { await open(assessment: id, saving: false) } })
+                                     openAssessment: { id in Task { await open(assessment: id, saving: false) } },
+                                     showDecision: { showAboveKeyboard("review-decision", scroller) })
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(SubmissionDescriptor.text(district: form["district"], county: form["county"], route: form["route"],
@@ -325,7 +326,9 @@ struct SubmissionDetailView: View {
             case .actions:
                 GisaActionsSections(editor: editor, message: $drafts.notifyMessage, canEdit: canEdit, lookups: lookups,
                                     notices: GisaWorkflow.coordinatorNotices(detail.workflowEvents ?? []),
-                                    notifying: working, notify: { Task { await notifyCoordinator() } })
+                                    waitingDeliveries: offline.waiting.deliveries.filter { $0.submissionId == submissionId },
+                                    notifying: working, notify: { Task { await deliverImmediateActions() } },
+                                    showDeliver: { showAboveKeyboard("deliver-now", scroller) })
             case .gallery:
                 GisaLibrarySection(detail: detail, canEdit: canEdit, uploading: galleryUploading, opening: openingFile,
                                    waiting: waitingFiles,
@@ -346,7 +349,8 @@ struct SubmissionDetailView: View {
                                    canEdit: canEdit, comment: $drafts.submitComment, working: working || saving,
                                    fix: { kind in withAnimation { step = GisaStep.fixing(kind) } },
                                    submit: { Task { await submit() } },
-                                   openAssessment: { id in Task { await open(assessment: id, saving: canEdit) } })
+                                   openAssessment: { id in Task { await open(assessment: id, saving: canEdit) } },
+                                   showSubmit: { showAboveKeyboard("submit-for-review", scroller) })
             }
 
             if let next = GisaStep(rawValue: step.rawValue + 1) {
@@ -584,25 +588,36 @@ struct SubmissionDetailView: View {
 
     // MARK: Notifying, sending for review and deciding
 
-    /// Saves, then sends the immediate actions and the message to the
-    /// maintenance coordinator, as the Expo editor's Notify Coordinator does.
-    private func notifyCoordinator() async {
-        guard let current = editor else { return }
-        if let problem = GisaWorkflow.notifyProblem(immediate: current.actions.immediate, message: drafts.notifyMessage) {
-            alert = problem
-            return
+    /// Delivers the chosen immediate actions now, whatever state the form is in:
+    /// nothing else about it has to be finished, and it does not need saving first.
+    /// Moves a button up from under the keyboard's Done bar, whose invisible band takes
+    /// taps across the full width. Waits for the keyboard to finish rising.
+    private func showAboveKeyboard(_ id: String, _ scroller: ScrollViewProxy) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            withAnimation { scroller.scrollTo(id, anchor: .center) }
         }
-        guard await save(quietly: true) else { return }
+    }
+
+    private func deliverImmediateActions() async {
+        guard let current = editor else { return }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         working = true
         defer { working = false }
         do {
-            try await SubmissionsAPI(api: model.api).notifyCoordinator(
-                submissionId, message: drafts.notifyMessage.trimmingCharacters(in: .whitespacesAndNewlines))
+            let result = try await ImmediateDeliveries(api: model.api, store: offline.store)
+                .deliver(submissionId, actions: current.actions.immediate, description: drafts.notifyMessage)
             drafts.notifyMessage = ""
-            await load()
-            alert = .init(title: "Coordinator Notified", message: "Immediate actions were sent to the maintenance coordinator.")
+            offline.refresh()
+            switch result {
+            case .delivered(let supervisor, let contact):
+                await load()
+                alert = .init(title: "Delivered", message: ImmediateDeliveries.outcome(supervisor: supervisor, contact: contact))
+            case .kept:
+                alert = .init(title: "Kept on This iPhone", message: "There's no connection. It will be delivered automatically when there is one.")
+            }
         } catch {
-            alert = .init(title: "Notify failed", message: model.handle(error))
+            alert = .init(title: "Not Delivered", message: model.handle(error))
         }
     }
 

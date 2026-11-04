@@ -59,7 +59,7 @@ def _guards(route: APIRoute) -> set[str]:
     while stack:
         dependency = stack.pop()
         call = dependency.call
-        if call is deps.deny_public_only or call is deps.deny_public_only_unless_maintenance_reporter:
+        if call in (deps.deny_public_only, deps.deny_public_only_unless_maintenance_reporter, deps.deny_public_only_unless_maintenance_duty):
             found.add("deny_public_only")
         elif getattr(call, "__qualname__", "").startswith("require_roles."):
             found.add("require_roles")

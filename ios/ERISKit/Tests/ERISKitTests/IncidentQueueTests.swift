@@ -17,6 +17,7 @@ private final class ReportServer: HTTPTransport, @unchecked Sendable {
     var workflow: [[String: Any]] = []
     private(set) var posts = 0
     private(set) var uploads: [Int] = []
+    private(set) var uploadKinds: [String] = []
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (status, body): (Int, Any) = try lock.locked {
@@ -49,6 +50,8 @@ private final class ReportServer: HTTPTransport, @unchecked Sendable {
                 return all.first { $0["id"] as? Int == id }.map { (200, ["incident": $0]) } ?? (404, ["detail": "no"])
             case ("POST", let p) where p.hasSuffix("/attachments"):
                 uploads.append(Int(p.split(separator: "/")[2])!)
+                uploadKinds.append(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "kind" }?.value ?? "")
                 return (200, ["attachment_id": 1])
             default:
                 return (404, ["detail": "Not found"])
@@ -95,6 +98,27 @@ final class IncidentQueueTests: XCTestCase {
         XCTAssertEqual(online, .sent)
         XCTAssertEqual(server.posts, 1)
         XCTAssertEqual(server.uploads, [100, 100])
+        XCTAssertTrue(store.queuedIncidents().isEmpty)
+    }
+
+    func testAVideoOnAReportWaitsWithItAndGoesAsAVideo() async {
+        let photo = QueuedIncident.File(fileName: "photo-1.jpg", mimeType: "image/jpeg", kind: .photo)
+        let video = QueuedIncident.File(fileName: "video-1.mp4", mimeType: "video/mp4", kind: .video)
+        let report = QueuedIncident(draft: draft, files: [photo, video])
+        store.queueIncidentFile(Data([1]), incident: report.id, file: photo.id)
+        store.queueIncidentFile(Data([2, 3]), incident: report.id, file: video.id)
+        store.queueIncident(report, files: [:])
+        XCTAssertEqual(store.incidentFile(report, video), Data([2, 3]))
+
+        server.reachable = false
+        let offline = await sync.sendAll()
+        XCTAssertEqual(offline, .unreachable)
+        XCTAssertEqual(store.queuedIncidents().count, 1)
+
+        server.reachable = true
+        let online = await sync.sendAll()
+        XCTAssertEqual(online, .sent)
+        XCTAssertEqual(server.uploadKinds, ["PHOTO", "VIDEO"])
         XCTAssertTrue(store.queuedIncidents().isEmpty)
     }
 

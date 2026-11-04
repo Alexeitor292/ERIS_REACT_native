@@ -113,6 +113,50 @@ struct MapsLicenseNote: View {
     }
 }
 
+/// How a site area's handles read while it is drawn: a circle is a corner of the
+/// area, to drag; a square with a plus adds a corner there.
+private enum SiteAreaHandles {
+    private static let red = UIColor(red: 0.84, green: 0.15, blue: 0.16, alpha: 1)
+
+    static func apply(to style: GeometryEditorStyle) {
+        style.vertexSymbol = corner(selected: false)
+        style.feedbackVertexSymbol = corner(selected: false)
+        style.selectedVertexSymbol = corner(selected: true)
+        style.midVertexSymbol = addCorner(side: 20)
+        style.selectedMidVertexSymbol = addCorner(side: 24)
+    }
+
+    private static func corner(selected: Bool) -> SimpleMarkerSymbol {
+        let symbol = SimpleMarkerSymbol(style: .circle, color: selected ? red : .white, size: selected ? 20 : 16)
+        symbol.outline = SimpleLineSymbol(style: .solid, color: selected ? .white : red, width: 2)
+        return symbol
+    }
+
+    private static func addCorner(side: CGFloat) -> PictureMarkerSymbol {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            let box = CGRect(x: 1, y: 1, width: side - 2, height: side - 2)
+            UIColor.white.setFill()
+            UIBezierPath(rect: box).fill()
+            red.setStroke()
+            let frame = UIBezierPath(rect: box)
+            frame.lineWidth = 2
+            frame.stroke()
+            let plus = UIBezierPath()
+            let inset = side * 0.28, middle = side / 2
+            plus.move(to: CGPoint(x: inset, y: middle))
+            plus.addLine(to: CGPoint(x: side - inset, y: middle))
+            plus.move(to: CGPoint(x: middle, y: inset))
+            plus.addLine(to: CGPoint(x: middle, y: side - inset))
+            plus.lineWidth = 2
+            plus.stroke()
+        }
+        let symbol = PictureMarkerSymbol(image: image)
+        symbol.width = Double(side)
+        symbol.height = Double(side)
+        return symbol
+    }
+}
+
 /// The technical form's site areas on a map: draw, reshape or remove them
 /// around the site's location, stored in `geometry_json` exactly as the web
 /// stores them (one Polygon, or a MultiPolygon for several).
@@ -199,7 +243,13 @@ final class SiteAreaEditorModel: ObservableObject {
     /// (no connection, no key), so areas can still be drawn.
     @Published private(set) var map = Map(basemapStyle: .arcGISImagery)
     @Published private(set) var basemapMissing = false
-    let editor = GeometryEditor()
+    let editor: GeometryEditor = {
+        let editor = GeometryEditor()
+        let tool = VertexTool()
+        SiteAreaHandles.apply(to: tool.style)
+        editor.tool = tool
+        return editor
+    }()
     let siteOverlay = GraphicsOverlay()
     let areasOverlay = GraphicsOverlay()
     @Published private(set) var areas: [SiteAreas.Area] = []

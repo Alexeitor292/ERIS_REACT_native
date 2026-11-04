@@ -299,6 +299,8 @@ class IncidentTriageRequest(BaseModel):
     # ASSESSMENT_REQUIRED only: the Incident Group, committed in the same
     # transaction as the decision. Omitted when the report is already grouped.
     event_group: TriageEventGroupChoice | None = None
+    # ASSESSMENT_REQUIRED only: who the hand-off names; omitted, the district's default.
+    district_contact_user_id: int | None = Field(default=None, ge=1)
 
 
 class AssessmentDelegateBranchRequest(BaseModel):

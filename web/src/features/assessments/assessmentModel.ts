@@ -120,7 +120,7 @@ export function assessmentStateLabelFor(
   }
   return (
     {
-      PENDING_OFFICE_DELEGATION: "Awaiting routing",
+      PENDING_OFFICE_DELEGATION: "Needs routing",
       PENDING_ENGINEER_ASSIGNMENT: "Awaiting Staff assignment",
       DRAFT: "Draft",
       REVISION_REQUESTED: "Revision requested",
@@ -221,6 +221,7 @@ export function assignmentRoleLabel(role: string): string {
 const EVENT_TYPE_LABELS: Record<string, string> = {
   ENGINEER_ASSIGNED: "Staff assigned",
   SENIOR_ENGINEER_ASSIGNED: "Senior Specialist assigned",
+  OFFICE_DELEGATED: "Handed to a branch chief",
 };
 
 export function assessmentEventLabel(eventType: string): string {
@@ -435,7 +436,7 @@ export function stepOwnership(
  * action itself, not "act on it". Most specific power first.
  */
 export function workActionLabel(state: AssessmentState | string, permissions: AssessmentPermissions, hasSubmission: boolean): string {
-  if (permissions.submit) return hasSubmission ? "Send it for review" : "Start the technical submission";
+  if (permissions.submit) return hasSubmission ? "Send for review" : "Start the technical submission";
   if (permissions.review) return "Review it";
   if (permissions.assignEngineer) return state === "PENDING_ENGINEER_ASSIGNMENT" ? "Assign Staff" : "Reassign Staff";
   if (permissions.delegate || permissions.assignSeniorEngineer) return state === "PENDING_OFFICE_DELEGATION" ? "Route it" : "Change who has it";
@@ -504,4 +505,69 @@ export function submissionIdsOf(assessment: Pick<Assessment, "submission_id" | "
   const ids = [...(assessment.submission_ids ?? [])];
   if (assessment.submission_id != null && !ids.includes(assessment.submission_id)) ids.push(assessment.submission_id);
   return ids;
+}
+
+/** The office as a list reads it: "South", from "Office of Geotechnical Design South". */
+export function shortOfficeName(name: string): string {
+  return name.replace(/^Office of Geotechnical Design\s+/i, "").trim() || name;
+}
+
+/** Where an assessment sits, in a few words: "South · Branch A · D07". */
+export function assessmentPlace(
+  assessment: SnapshotAssessment & { district?: string | null },
+  lookup?: OfficeNameLookup,
+): string {
+  const district = assessment.district?.trim();
+  return [
+    shortOfficeName(assessmentOfficeName(assessment, lookup)),
+    assessmentBranchName(assessment),
+    district ? `D${district.padStart(2, "0")}` : null,
+  ].filter(Boolean).join(" · ");
+}
+
+type PersonFields = Pick<Assessment, "state" | "routing_path"> &
+  Partial<Pick<Assessment, "assigned_user_name" | "branch_chief_name">>;
+
+/** Who reviews this assessment, which its route decides; null until it has one. */
+export function reviewerName(assessment: Pick<PersonFields, "routing_path" | "branch_chief_name">): string | null {
+  if (assessment.routing_path === "BRANCH") return assessment.branch_chief_name || "Branch chief";
+  if (assessment.routing_path === "SENIOR_ENGINEER") return "Office chief";
+  return null;
+}
+
+/** Who the step is waiting on, by name when known; null once there is no next step. */
+export function waitingWho(assessment: PersonFields): string | null {
+  const author = assessment.assigned_user_name
+    || (assessment.routing_path === "SENIOR_ENGINEER" ? "Assigned Senior Specialist" : "Assigned Staff");
+  switch (assessment.state) {
+    case "PENDING_OFFICE_DELEGATION": return "Office chief";
+    case "PENDING_ENGINEER_ASSIGNMENT": return assessment.branch_chief_name || "Branch chief";
+    case "DRAFT":
+    case "REVISION_REQUESTED": return author;
+    case "SUBMITTED": return reviewerName(assessment) ?? "Reviewer";
+    default: return null;
+  }
+}
+
+/** The next step, in one short line: "Alicia completes form #7". */
+export function nextStepLine(assessment: PersonFields, formId: number | null): string | null {
+  const who = waitingWho(assessment);
+  if (!who) return null;
+  switch (assessment.state) {
+    case "PENDING_OFFICE_DELEGATION": return `${who} routes this assessment`;
+    case "PENDING_ENGINEER_ASSIGNMENT": return `${who} assigns Staff`;
+    case "DRAFT": return formId != null ? `${who} completes form #${formId}` : `${who} starts the form`;
+    case "REVISION_REQUESTED": return `${who} makes the requested changes`;
+    default: return `${who} reviews this assessment`;
+  }
+}
+
+/** A history row's name: what a triage decided, else what happened. */
+export function eventTitle(event: { event_type: string; disposition?: string | null }): string {
+  return event.disposition ? humanizeCode(event.disposition) : assessmentEventLabel(event.event_type);
+}
+
+/** An incident's title without the date it ends with: "07-LA-002-38.000 - 09/22/26". */
+export function withoutTrailingDate(title: string): string {
+  return title.replace(/\s+[-·]\s+\d{1,2}\/\d{1,2}\/\d{2,4}$/, "").trim();
 }

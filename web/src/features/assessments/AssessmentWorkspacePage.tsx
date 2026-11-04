@@ -153,6 +153,7 @@ export default function AssessmentWorkspacePage() {
     <AppShell title="Assessments">
       <div className="grid gap-3.5 p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-2">
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search" className="min-w-40 flex-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
           {/* A viewer has one state — approved — so the filter would be a
               one-entry list that implies the others are hidden from them. */}
           {viewer ? null : (
@@ -178,26 +179,15 @@ export default function AssessmentWorkspacePage() {
               {branchChoices.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
             </select>
           ) : null}
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search assessments, incidents, or submissions" className="min-w-40 flex-1 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]" />
-          <span className="text-xs text-muted">{filtered.length} of {items.length} {viewer ? "approved records" : "assessments"}</span>
-          <button type="button" onClick={refreshAll} disabled={loading} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50">{loading ? "Refreshing…" : "Refresh"}</button>
+          <span className="text-[13px] text-muted">
+            {filtered.length === items.length ? items.length : `${filtered.length} of ${items.length}`} {viewer ? "approved records" : "assessments"}
+          </span>
         </div>
-
-        {viewer ? (
-          <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
-            Approved assessments and the technical submissions attached to them. Work still in progress is not part of the record.
-          </div>
-        ) : (
-          <div className="rounded-md border border-[var(--line)] bg-[var(--panel-soft)] px-3 py-2 text-sm text-muted">
-            Read-only record view of every assessment and its attached technical submissions. Steps assigned to your role are performed from <Link to="/my-work" className="font-medium text-[var(--brand)] hover:underline">My Work</Link>.
-          </div>
-        )}
 
         {error ? <div className="rounded-md border border-[color:color-mix(in_oklab,var(--bad)_45%,transparent)] bg-[color:color-mix(in_oklab,var(--bad)_10%,transparent)] px-3 py-2 text-sm text-[var(--bad)]">{error}</div> : null}
 
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(320px,0.7fr)_minmax(0,1.8fr)]">
           <section className="flex max-h-[860px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)]">
-            <div className="border-b border-[var(--line)] bg-[var(--panel-soft)] px-4 py-2.5 text-[13px] text-muted">{filtered.length} of {items.length} assessments</div>
             <div className="grid flex-1 content-start gap-2 overflow-auto p-2">
               {filtered.length === 0 ? <div className="p-4 text-sm text-muted">{loading ? "Loading assessments…" : "No assessments match the current filters."}</div> : filtered.map((assessment) => (
                 <AssessmentRailCard

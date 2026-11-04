@@ -51,6 +51,12 @@ extension OfflineStore {
         updateIncident(incident)
     }
 
+    /// One file for a report about to be queued, written on its own so long videos
+    /// aren't all in memory together.
+    public func queueIncidentFile(_ data: Data, incident: UUID, file: UUID) {
+        writeFile(data, to: "incidents/\(incident.uuidString)/\(file.uuidString).bin")
+    }
+
     public func updateIncident(_ incident: QueuedIncident) {
         guard let data = try? Self.encoder.encode(incident) else { return }
         writeFile(data, to: "incidents/\(incident.id.uuidString)/report.json")

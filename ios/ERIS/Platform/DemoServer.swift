@@ -1,4 +1,5 @@
 #if DEBUG
+import AVFoundation
 import ERISKit
 import Foundation
 import SwiftUI
@@ -137,6 +138,9 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
                 return upload(request, sectionKey: query.first { $0.name == "section_key" }?.value,
                               kind: query.first { $0.name == "kind" }?.value)
             }
+            if request.httpMethod == "POST", path.hasPrefix("/incidents/"), path.hasSuffix("/attachments") {
+                return reportFile(request, kind: query.first { $0.name == "kind" }?.value)
+            }
             actingFor = request.value(forHTTPHeaderField: "X-ERIS-Acting-For").flatMap(Int.init)
             return route(request.httpMethod ?? "GET", path, query, body)
         }
@@ -144,6 +148,18 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "application/json"])!
         return (data, response)
+    }
+
+    /// A report's photo or video, refused as ERIS's users would find it: a video that
+    /// isn't an MP4 a browser could play, or a photo that isn't a JPEG.
+    private func reportFile(_ request: URLRequest, kind: String?) -> (Int, Any) {
+        let data = request.httpBody ?? Data()
+        let wanted = kind == "VIDEO" ? "Content-Type: video/mp4" : "Content-Type: image/jpeg"
+        let isMP4 = data.range(of: Data("ftyp".utf8)) != nil
+        guard data.range(of: Data(wanted.utf8)) != nil, kind != "VIDEO" || isMP4 else {
+            return (422, ["detail": "The demo server expected \(wanted)."])
+        }
+        return (200, ["attachment_id": 9000])
     }
 
     private func route(_ method: String, _ path: String, _ query: [URLQueryItem], _ body: [String: Any]) -> (Int, Any) {
@@ -193,6 +209,14 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             // With no ids, all of them, as the server does.
             readNotices.formUnion(body["ids"] as? [Int] ?? DemoData.notices.compactMap { $0["id"] as? Int })
             return (200, ["unread": DemoData.unread(readNotices: readNotices)])
+        case ("POST", ["incidents"]):
+            var filed = body
+            filed["id"] = 900 + incidents.count
+            filed["reporter_user_id"] = 7
+            filed["current_stage"] = "COORDINATOR_REVIEW"
+            filed["status"] = "NEW"
+            incidents.insert(filed, at: 0)
+            return (200, ["incident": filed])
         case ("GET", ["incidents"]):
             return (200, ["items": incidents])
         case ("GET", let p) where p.count == 2 && p[0] == "incidents":
@@ -285,6 +309,14 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             me["acting"] = ["delegation_id": 1, "user_id": DemoData.meId, "full_name": "Demo User"]
             me["acting_options"] = actingOptions
             return (200, me)
+        case ("GET", let p) where p.count == 2 && p[0] == "district-contacts":
+            return (200, ["default_user_id": 50, "can_edit": true, "district": p[1],
+                          "candidates": [["id": 50, "full_name": "Ana Ruiz"], ["id": 51, "full_name": "Ben Ortiz"]]])
+        case ("POST", ["submissions", "501", "immediate-actions", "deliver"]):
+            let codes = body["actions"] as? [String] ?? []
+            formEvent("COORDINATOR_NOTIFIED", to: "DRAFT",
+                      comment: "Immediate actions: \(codes.joined(separator: ", ")) | Message: \(body["description"] as? String ?? "")")
+            return (200, ["delivered": true, "already": false, "told": [50, 21], "supervisor_told": true, "contact_told": true])
         case ("GET", ["delegations"]):
             return (200, ["given": delegations, "received": [], "acting_options": actingOptions])
         case ("GET", ["delegations", "people"]):
@@ -943,3 +975,54 @@ extension DemoData {
     ]
 }
 #endif
+
+/// Stands in for the camera where there is none, so tests can follow the same path.
+enum DemoCamera {
+    @MainActor
+    static func take(_ mode: ReportCapture) async -> SystemCamera.Taken? {
+        switch mode {
+        case .photo:
+            return .photo(picture(.systemTeal))
+        case .video:
+            return await movie().map(SystemCamera.Taken.video)
+        }
+    }
+
+    private static func picture(_ color: UIColor) -> UIImage {
+        let size = CGSize(width: 640, height: 360)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            color.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    /// One second of a plain colour, as the camera's file would be: a QuickTime movie.
+    private static func movie() async -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+        guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return nil }
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 640, AVVideoHeightKey: 360,
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 640, kCVPixelBufferHeightKey as String: 360,
+        ])
+        writer.add(input)
+        guard writer.startWriting() else { return nil }
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<10 {
+            while !input.isReadyForMoreMediaData { try? await Task.sleep(nanoseconds: 10_000_000) }
+            guard let pool = adaptor.pixelBufferPool else { return nil }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+            guard let buffer else { return nil }
+            CVPixelBufferLockBaseAddress(buffer, [])
+            memset(CVPixelBufferGetBaseAddress(buffer), Int32(frame * 20), CVPixelBufferGetDataSize(buffer))
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 10))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        return writer.status == .completed ? url : nil
+    }
+}

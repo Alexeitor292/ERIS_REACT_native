@@ -62,6 +62,7 @@ from ..schemas.common import (
     IncidentTriageRequest,
 )
 from ..services import delegations
+from ..services import district_contact
 from ..services import notifications as notifications_svc
 from ..services import org_directory
 from ..services import org_tree
@@ -346,6 +347,9 @@ def _record_event(
 ) -> None:
     """Append an immutable row to the assessment/triage timeline."""
     metadata = delegations.stamp(db, metadata)
+    district_contact.tell_about_event(
+        db, incident_id=incident_id, assessment_id=assessment_id, event_type=event_type, actor_id=actor_user_id,
+    )
     db.execute(
         text(
             """
@@ -700,6 +704,7 @@ def _triage_assessment_required(
     incident_id = int(incident["id"])
     actor_id = int(user["id"])
     district = incident.get("district")
+    district_contact.assign(db, incident, payload.district_contact_user_id, actor_id=actor_id)
 
     # Resolve destination office: configurable routing, with optional audited
     # override (coordinator/admin only, which the guard already enforces).

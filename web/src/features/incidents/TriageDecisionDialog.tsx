@@ -18,6 +18,9 @@ import {
   triageRequestBody,
   type TriageDraft,
 } from "./triageDecisionModel";
+import { type DistrictContacts } from "../../api/fieldNotices";
+import { HandoffContactPicker } from "../fieldNotices/DistrictContactPicker";
+import { contactMissing } from "../fieldNotices/fieldNoticeModel";
 
 const inputClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--brand)]";
 const buttonClass = "rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50";
@@ -62,6 +65,8 @@ export default function TriageDecisionDialog({
   // closing the side panel animates out instead of vanishing mid-transition.
   const [pickerMounted, setPickerMounted] = useState(expanded);
   const [busy, setBusy] = useState(false);
+  const [contacts, setContacts] = useState<DistrictContacts | null>(null);
+  const [contactId, setContactId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -99,11 +104,15 @@ export default function TriageDecisionDialog({
     [incident, reports],
   );
 
-  const blocker = triageBlocker(draft);
+  const needsContact = draft.disposition === "ASSESSMENT_REQUIRED" && contactMissing(contacts?.candidates, contactId);
+  const blocker = triageBlocker(draft) ?? (needsContact ? "Choose a District Contact." : null);
 
   async function confirm() {
-    const body = triageRequestBody(draft);
-    if (!body) return;
+    const decided = triageRequestBody(draft);
+    if (!decided) return;
+    const body = draft.disposition === "ASSESSMENT_REQUIRED" && contactId != null
+      ? { ...decided, district_contact_user_id: contactId }
+      : decided;
     setBusy(true);
     setError(null);
     try {
@@ -181,6 +190,10 @@ export default function TriageDecisionDialog({
               {routing?.office_name ? <>The office chief of <b>{routing.office_name}</b> routes the assessment next. </> : null}
               Choose the Incident Group it belongs to <span className="hidden md:inline">on the right</span><span className="md:hidden">below</span>.
             </div>
+          ) : null}
+
+          {draft.disposition === "ASSESSMENT_REQUIRED" ? (
+            <HandoffContactPicker district={district} value={contactId} onChange={setContactId} onLoaded={setContacts} />
           ) : null}
 
           {draft.disposition === "NEEDS_REPORTER_INFORMATION" ? (

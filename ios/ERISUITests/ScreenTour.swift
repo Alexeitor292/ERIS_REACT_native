@@ -48,6 +48,13 @@ final class ScreenTour: XCTestCase {
         }
     }
 
+    /// Two steps, on purpose: the button, then the question it asks.
+    private func submitForReview(file: StaticString = #filePath, line: UInt = #line) {
+        tap(reveal(app.buttons["Submit for review"]), file: file, line: line)
+        XCTAssertTrue(text(containing: "Make sure the form is finished").waitForExistence(timeout: 10), file: file, line: line)
+        tap(app.sheets.buttons["Submit"].exists ? app.sheets.buttons["Submit"] : app.buttons["Submit"], file: file, line: line)
+    }
+
     private var formLink: XCUIElement {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Open technical form")).firstMatch
     }
@@ -85,7 +92,7 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(app.staticTexts["Draft"].waitForExistence(timeout: 10))
 
         // Assignee submits; the reviewer approves.
-        tap(app.buttons["Submit for review"])
+        submitForReview()
         tap(app.buttons["Approve"])
         XCTAssertTrue(app.staticTexts["Approved"].waitForExistence(timeout: 10))
         app.swipeUp()
@@ -525,14 +532,17 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(text(containing: "Open highway traffic, Remove landslide debris").waitForExistence(timeout: 5))
         replace(reveal(field("Open Highway Traffic Lanes")), with: "1")
 
-        let message = reveal(field("Emergency Justification Message"))
+        let message = reveal(field("Description"))
         tap(message)
         message.typeText("Rocks on the northbound lane.")
-        tap(reveal(app.buttons["Notify Coordinator"]))
-        dismissAlert("Coordinator Notified")
+        snap("immediate-actions-deliver")
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "t")], timeout: 1)
+        XCTAssertGreaterThan(app.keyboards.count, 0)
+        app.buttons["Deliver Now"].tap()
+        dismissAlert("Delivered")
         // The notice stays on the form, so it is not sent twice by mistake.
         XCTAssertTrue(reveal(text(containing: "Rocks on the northbound lane.")).exists)
-        XCTAssertEqual(field("Emergency Justification Message").value as? String ?? "", "")
+        XCTAssertEqual(field("Description").value as? String ?? "", "")
         snap("actions-coordinator-notified")
 
         tap(reveal(app.buttons["actions-follow-up"]))
@@ -563,7 +573,7 @@ final class ScreenTour: XCTestCase {
         XCTAssertFalse(app.buttons["Submit for Review"].exists, "the server sends it with its assessment")
         tap(reveal(app.buttons["Save and Open Assessment #5"]))
         XCTAssertTrue(app.navigationBars["Assessment #5"].waitForExistence(timeout: 10))
-        tap(app.buttons["Submit for review"])
+        submitForReview()
         XCTAssertTrue(app.buttons["Approve"].waitForExistence(timeout: 10), "now in review")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         // The form went with it: no longer editable, and reviewed on the assessment.
@@ -748,6 +758,105 @@ final class ScreenTour: XCTestCase {
         snap("move-work-chosen")
         tap(app.buttons["move-confirm"])
         XCTAssertTrue(text(containing: "Their work stayed with them").waitForExistence(timeout: 15))
+    }
+
+    /// Only that it gets out of the way: XCTest gets control after the animation has
+    /// played, so seeing it takes a screen recording of a launch.
+    func testTheOpeningAnimationLeavesTheAppReady() {
+        app.launchArguments += ["-ERISDemoSplash", "YES", "-ERISDemoRoles", "STAFF"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["My Work"].waitForExistence(timeout: 10))
+        tap(app.tabBars.buttons["Account"])
+        XCTAssertTrue(app.navigationBars["Account"].waitForExistence(timeout: 10))
+    }
+
+    func testTheLargestTextStillFitsTheScreens() {
+        app.launchArguments += ["-appTextSize", "6", "-appTextBold", "YES"]
+        launch(roles: "BRANCH_CHIEF")
+        tap(app.tabBars.buttons["My Work"])
+        XCTAssertTrue(app.staticTexts["My Work"].waitForExistence(timeout: 10))
+        snap("large-text-my-work")
+        tap(app.tabBars.buttons["Notifications"])
+        snap("large-text-notifications")
+        tap(app.tabBars.buttons["Account"])
+        snap("large-text-account")
+    }
+
+    func testTextSizeIsChosenOnAccount() {
+        launch(roles: "STAFF")
+        tap(app.tabBars.buttons["Account"])
+        let same = reveal(app.switches["text-same-as-iphone"])
+        XCTAssertEqual(same.value as? String, "1")
+        flip(same)
+        XCTAssertTrue(reveal(app.sliders["text-size"]).exists)
+        snap("text-size-setting")
+        flip(reveal(app.switches["text-same-as-iphone"]))
+        XCTAssertFalse(app.sliders["text-size"].exists)
+    }
+
+    func testADeliveryMadeWithNoConnectionWaitsAndGoes() {
+        launch()
+        openDemoForm(step: "Actions")
+        tap(app.buttons["actions-immediate"])
+        tap(app.buttons["Open highway traffic"])
+        tap(app.navigationBars["Immediate Actions"].buttons["Done"])
+        setConnection(false)
+        let message = reveal(field("Description"))
+        tap(message)
+        message.typeText("Rocks on the northbound lane.")
+        // With the keyboard still up: nobody should have to put it away first.
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "t")], timeout: 1)
+        XCTAssertGreaterThan(app.keyboards.count, 0)
+        snap("deliver-with-keyboard")
+        app.buttons["Deliver Now"].tap()
+        dismissAlert("Kept on This iPhone")
+        let waiting = text(containing: "Waiting to send")
+        XCTAssertTrue(reveal(waiting).exists)
+        snap("delivery-waiting")
+        setConnection(true)
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: waiting)
+        waitForExpectations(timeout: 60)
+    }
+
+    /// The demo stands in for the camera: the files it makes take the real path,
+    /// and its server refuses anything but a JPEG and a browser-ready MP4.
+    func testAReportTakesPhotosAndVideosFromTheCameraOrLibrary() {
+        launch(roles: "MAINTENANCE_CREW")
+        tap(app.tabBars.buttons["Report"])
+        tap(app.buttons["Report an Incident"])
+        tap(reveal(app.buttons["Take Photo"]))
+        XCTAssertTrue(reveal(app.staticTexts["Photo 1"]).waitForExistence(timeout: 10))
+        tap(reveal(app.buttons["Record Video"]))
+        XCTAssertTrue(reveal(app.staticTexts["Video 1"]).waitForExistence(timeout: 30))
+        tap(reveal(app.buttons["Take Photo"]))
+        XCTAssertTrue(reveal(app.staticTexts["Photo 2"]).waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(app.buttons["Photo or Video Library"]).exists)
+        snap("report-photos-and-videos")
+
+        tap(reveal(app.buttons["Remove Photo 1"]))
+        XCTAssertFalse(app.staticTexts["Photo 2"].waitForExistence(timeout: 1))
+
+        // Nothing is lost to a stray Cancel.
+        tap(app.navigationBars.buttons["Cancel"])
+        XCTAssertTrue(app.buttons["Discard"].waitForExistence(timeout: 5))
+        snap("report-discard-asks")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
+
+        for (label, value) in [("Latitude", "37.73"), ("Longitude", "-122.19"), ("District", "4"),
+                               ("County", "ALA"), ("Route", "880"), ("Post mile", "12.3")] {
+            replace(revealAbove(app.textFields[label]), with: value)
+        }
+        tap(app.navigationBars.buttons["Submit"])
+        XCTAssertTrue(text(containing: "Report filed.").waitForExistence(timeout: 20), "not filed: \(app.staticTexts.allElementsBoundByIndex.map(\.label).suffix(6))")
+    }
+
+    func testAHandOffStartsOnTheDistrictsContact() {
+        launch()
+        tap(app.staticTexts["Triage · Report #14"])
+        XCTAssertTrue(text(containing: "Rocks up to 0.5 m").waitForExistence(timeout: 10))
+        tap(reveal(row("Assessment required")))
+        XCTAssertTrue(reveal(text(containing: "Ana Ruiz")).waitForExistence(timeout: 10), "the district's default")
+        snap("triage-district-contact")
     }
 
     func testTheThemeIsChosenOnAccountAndKept() {
@@ -942,7 +1051,7 @@ final class ScreenTour: XCTestCase {
     func testAStagingBuildRunsTheMapsUnderDeveloperLicensing() {
         launch(roles: "STAFF")
         tap(app.tabBars.buttons["Account"])
-        XCTAssertTrue(text(containing: "Staging").waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(text(containing: "Staging")).waitForExistence(timeout: 10))
         let licensing = app.descendants(matching: .any)["maps-licensing"]
         XCTAssertTrue(reveal(licensing).exists)
         XCTAssertTrue(text(containing: "Developer licensing (staging build)").exists, "the server's license is not used")
@@ -1091,6 +1200,23 @@ final class ScreenTour: XCTestCase {
         expectation(for: sent, evaluatedWith: app.staticTexts["correction-waiting"])
         waitForExpectations(timeout: 90)
         tap(app.buttons["Done"])
+    }
+
+    func testSubmittingForReviewAsksFirstAndTheFormIsTheMainAction() {
+        launch(roles: "STAFF")
+        tap(app.tabBars.buttons["My Work"])
+        tap(reveal(app.staticTexts["Assessment #5"]))
+        XCTAssertTrue(formLink.waitForExistence(timeout: 10))
+        snap("assessment-form-first")
+        tap(reveal(app.buttons["Submit for review"]))
+        XCTAssertTrue(text(containing: "Make sure the form is finished").waitForExistence(timeout: 10))
+        snap("assessment-submit-confirm")
+        // Tapping away cancels: iOS shows this question as a popover.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        XCTAssertTrue(app.staticTexts["Draft"].waitForExistence(timeout: 10), "nothing was sent")
+        XCTAssertFalse(app.buttons["Approve"].exists)
+        submitForReview()
+        XCTAssertFalse(app.staticTexts["Draft"].waitForExistence(timeout: 3), "sent")
     }
 
     func testStaffSeeOnlyTheirOwnStep() {

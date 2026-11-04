@@ -36,6 +36,7 @@ from .routes.maintenance_workflows import router as maintenance_workflows_router
 from .routes.user_layouts import router as user_layouts_router
 from .routes.site_history import router as site_history_router
 from .routes.delegations import router as delegations_router
+from .routes.field_notices import router as field_notices_router
 from .routes.sharing import router as sharing_router
 from .routes.notifications import router as notifications_router
 from .routes.drone_surveys import router as drone_surveys_router
@@ -128,6 +129,7 @@ app.include_router(user_layouts_router)
 app.include_router(site_history_router)
 app.include_router(sharing_router)
 app.include_router(delegations_router)
+app.include_router(field_notices_router)
 app.include_router(notifications_router)
 app.include_router(drone_surveys_router)
 app.include_router(cracks_router)
