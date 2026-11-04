@@ -1,5 +1,8 @@
 import XCTest
 @testable import ERISKit
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// The iPhone reads Esri's tiles itself so it gets the website's heights.
 final class EsriElevationTests: XCTestCase {
@@ -82,7 +85,9 @@ final class EsriElevationTests: XCTestCase {
         let flat = header() + part(0, 0, 0, 1) + part(0, 0, 0, 7.5)
         let holes = header() + part(0, 0, 0, 0) + part(1, 1, 1, 0) + Data([2])
         let elevation = EsriElevation { level, _, _ in
-            asked.lock.withLock { _ = asked.levels.insert(level) }
+            asked.lock.lock()
+            asked.levels.insert(level)
+            asked.lock.unlock()
             return level >= 15 ? holes : flat
         }
         let heights = try await elevation.heights(at: spots)
@@ -128,6 +133,7 @@ final class EsriElevationTests: XCTestCase {
         (lon: -121.43108360095157, lat: 35.86906782733851, z: 333.3665745403912)
     ]
 
+    #if !canImport(FoundationNetworking)
     /// Reaches Esri, like the next one: the whole measurement comes out as the website's did.
     func testALiveMeasurementEqualsTheWebsite() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["ERIS_LIVE_ESRI"] == "1", "needs the network")
@@ -156,4 +162,5 @@ final class EsriElevationTests: XCTestCase {
             XCTAssertEqual(try XCTUnwrap(height), expected.z, accuracy: 0.001)
         }
     }
+    #endif
 }

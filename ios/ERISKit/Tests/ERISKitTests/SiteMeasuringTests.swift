@@ -1,5 +1,8 @@
 import XCTest
 @testable import ERISKit
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Held to the numbers the website's siteTerrainModel.ts gives for the same slope.
 final class SiteMeasuringTests: XCTestCase {
