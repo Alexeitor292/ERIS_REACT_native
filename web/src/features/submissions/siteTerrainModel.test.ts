@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bearingLabel, buildSamplePlan, compareSurfaces, comparisonFieldValues, fitPlane, localFrame, measureSiteArea, measurementFieldValues, pointsAlong, pointsAlongPath, profileLine, type Ring, type Sample } from "./siteTerrainModel.ts";
+import { scarpSuggestion, bearingLabel, buildSamplePlan, compareSurfaces, comparisonFieldValues, fitPlane, localFrame, measureSiteArea, measurementFieldValues, pointsAlong, pointsAlongPath, profileLine, type Ring, type Sample } from "./siteTerrainModel.ts";
 
 // A 40 m (east-west) x 60 m (north-south) rectangle near Muir Beach.
 const LON0 = -122.58;
@@ -159,4 +159,57 @@ test("points along a drawn path follow each segment, with distances along the wh
   assert.ok(Math.abs(xy[2][0] - 100) < 0.5 && Math.abs(xy[2][1]) < 0.5); // the corner, 100 m along
   assert.ok(Math.abs(xy[3][0] - 100) < 0.5 && Math.abs(xy[3][1] - 50) < 0.5);
   assert.deepEqual(pointsAlongPath([], 5), []);
+});
+
+test("the guides lie where the measurements were taken", () => {
+  // A plane falling due south at 1 in 2, over the outline and around it.
+  const plan = buildSamplePlan([OUTLINE]);
+  const height = ([lon, lat]: [number, number]) => 100 + frame.toXY([lon, lat])[1] * 0.5;
+  const toSamples = (points: Array<[number, number]>) => points.map((p) => ({ lon: p[0], lat: p[1], z: height(p) }));
+  const m = measureSiteArea([OUTLINE], toSamples(plan.inside), toSamples(plan.around))!;
+  const { slope, width, low, high, band } = m.guides;
+  const xy = (p: readonly number[]) => frame.toXY([p[0], p[1]]);
+
+  // Down the fall line: from north of the middle to south of it, over the outline's length.
+  assert.ok(xy(slope.top)[1] > xy(slope.bottom)[1]);
+  assert.ok(Math.abs(Math.abs(xy(slope.top)[1] - xy(slope.bottom)[1]) - m.horizontalLengthM) < 0.5);
+  // The drop along it is the fitted slope, and it sits clear of the ground.
+  const run = Math.hypot(xy(slope.top)[0] - xy(slope.bottom)[0], xy(slope.top)[1] - xy(slope.bottom)[1]);
+  assert.ok(Math.abs((Math.atan((slope.top[2] - slope.bottom[2]) / run) * 180) / Math.PI - m.landslideSlopeDeg) < 0.1);
+  assert.ok(slope.top[2] > height([slope.top[0], slope.top[1]]));
+  // Across it, over the outline's width.
+  assert.ok(Math.abs(Math.hypot(xy(width[0])[0] - xy(width[1])[0], xy(width[0])[1] - xy(width[1])[1]) - m.widthM) < 0.5);
+  // The height is taken between real spots on the ground.
+  assert.equal(high[2] - low[2], m.slopeHeightM);
+  assert.ok(xy(high)[1] > xy(low)[1]);
+  assert.ok(band);
+});
+
+test("a scarp is suggested from the drop at the head of the slide, and only there", () => {
+  const spot = (north: number, historical: number | null, actual: number | null, historicalSea = false) => ({
+    point: frame.toLonLat([0, north]), historical, actual, historicalSea,
+  });
+  // Top to bottom through the outline (it spans 30 m north to 30 m south), starting outside it.
+  const norths = [40, 25, 20, 15, 10, 5, 0, -5, -10, -15, -20, -25, -40];
+  const section = norths.map((north) => spot(north, 100, 100));
+  section[0] = spot(40, 150, 100); // Outside the outline: not the slide.
+  section[2] = spot(20, 100, 96.5);
+  section[3] = spot(15, 100, 92);
+  section[11] = spot(-25, 100, 80); // A bigger drop, but low on the slope.
+  const suggestion = scarpSuggestion([OUTLINE], section);
+  assert.equal(suggestion?.heightM, 8);
+  assert.deepEqual(suggestion?.point, section[3].point);
+  assert.equal(suggestion?.beforeM, 100);
+  assert.equal(suggestion?.nowM, 92);
+});
+
+test("no scarp is suggested without a real drop, or from the sea", () => {
+  const spot = (north: number, historical: number | null, actual: number | null, historicalSea = false) => ({
+    point: frame.toLonLat([0, north]), historical, actual, historicalSea,
+  });
+  const norths = [25, 15, 5, -5, -15, -25];
+  assert.equal(scarpSuggestion([OUTLINE], norths.map((n) => spot(n, 100, 99.9))), null, "within the noise");
+  assert.equal(scarpSuggestion([OUTLINE], norths.map((n) => spot(n, 100, 90, true))), null, "water is not a crown");
+  assert.equal(scarpSuggestion([OUTLINE], norths.map((n) => spot(n, 100, null))), null, "no survey there");
+  assert.equal(scarpSuggestion([OUTLINE], [spot(25, 100, 90)]), null, "too few spots to tell");
 });

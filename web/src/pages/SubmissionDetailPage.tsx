@@ -14,7 +14,6 @@ import { useAuth } from "../auth/AuthContext";
 import SubmissionDetailHeader from "../features/submissions/SubmissionDetailHeader";
 import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewerSupport";
 import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
-import SubmissionMeasurementContext from "../features/submissions/SubmissionMeasurementContext";
 import { DroneSurveyProvider } from "../features/submissions/drone/DroneSurveyContext";
 import SubmitConfirmDialog from "../features/submissions/SubmitConfirmDialog";
 import SiteMeasurementsPanel, { MEASURE_KEYS, type MeasureValues } from "../features/submissions/SiteMeasurementsPanel";
@@ -1744,7 +1743,7 @@ export default function SubmissionDetailPage() {
                   <SectionHeading
                     icon={<Ruler size={16} />}
                     title="Measurements"
-                    subtitle="The slide's dimensions, taken in the field or measured from the terrain under the area drawn on the map."
+                    subtitle="The slide's dimensions, taken in the field or suggested from the terrain and drone surveys."
                   />
                   <SectionAttachmentsButton
                     count={sectionCount(CARD_SECTION_KEYS.measurements)}
@@ -1752,17 +1751,15 @@ export default function SubmissionDetailPage() {
                     canAdd={canEdit}
                   />
                 </div>
-                <div className="grid gap-5 lg:grid-cols-2">
-                  <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
-                    <SubmissionMeasurementContext submissionId={data.submission.id} gisa={data.gisa} onReload={load} geometryJson={geom} height={560} />
-                  </div>
-                  <SiteMeasurementsPanel
-                    values={Object.fromEntries(MEASURE_KEYS.map((key) => [key, draft[key]])) as MeasureValues}
-                    onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
-                    geojson={geom}
-                    canEdit={canEdit}
-                  />
-                </div>
+                <SiteMeasurementsPanel
+                  submissionId={data.submission.id}
+                  gisa={data.gisa}
+                  onReload={load}
+                  values={Object.fromEntries(MEASURE_KEYS.map((key) => [key, draft[key]])) as MeasureValues}
+                  onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+                  geojson={geom}
+                  canEdit={canEdit}
+                />
               </PresenceArea>
             ) : null}
 

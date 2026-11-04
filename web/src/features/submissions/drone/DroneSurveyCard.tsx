@@ -1,110 +1,91 @@
 import { useState, type ReactNode } from "react";
-import { ArrowLeftRight, Crosshair, Layers, Loader2, Plane, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeftRight, Crosshair, Layers, Loader2, Trash2, Upload, X } from "lucide-react";
 
 import { FT_PER_M } from "../siteTerrainModel";
 import { MAX_ARCHIVED_BYTES, useDroneSurveys, type NewSurvey } from "./DroneSurveyContext";
 import { dateFromFileName, VERTICAL_UNIT_LABEL, type VerticalUnit } from "./readDroneFiles";
 import { flownOutOfOrder, surveyTitle } from "./surveyLabels";
 import { useTerrainSource } from "../../../components/terrainSource";
-import { flownAfter, monthYearRange, terrainSourceText } from "../../../components/terrainSourceModel";
+import { flownAfter, terrainSourceText } from "../../../components/terrainSourceModel";
 
 const button = "inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50";
 const input = "w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1.5 text-xs";
 const ft = (m: number | null | undefined) => (m == null ? "—" : `${(m * FT_PER_M).toFixed(1)} ft`);
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024 * 1024 ? 0 : 1)} MB`;
 
+/** Which survey is the ground now, and what it is compared with. */
+export function SurveyPickers() {
+  const drone = useDroneSurveys();
+  if (!drone || drone.surveys.length < 2) return null;
+  const field = "h-11 max-w-56 rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 text-sm";
+  return (
+    <>
+      <label className="inline-flex items-center gap-1.5 text-sm text-muted">
+        Before
+        <select className={field} value={drone.baselineId ?? ""} onChange={(e) => drone.setBaselineId(e.target.value ? Number(e.target.value) : null)}>
+          <option value="">Terrain model</option>
+          {drone.surveys.filter((s) => s.id !== drone.activeId).map((s) => <option key={s.id} value={s.id}>{surveyTitle(s)}</option>)}
+        </select>
+      </label>
+      <label className="inline-flex items-center gap-1.5 text-sm text-muted">
+        Now
+        <select className={field} value={drone.activeId ?? ""} onChange={(e) => drone.setActiveId(e.target.value ? Number(e.target.value) : null)}>
+          {drone.surveys.map((s) => <option key={s.id} value={s.id}>{surveyTitle(s)}</option>)}
+        </select>
+      </label>
+    </>
+  );
+}
+
 /**
- * Drone surveys under the 3D view: add one (its elevation file and
- * orthomosaic), compare it with the terrain model or an earlier survey, show
- * either in 3D, line its heights up with the terrain model, and capture points
- * on both surfaces.
+ * The drone surveys on this form: add one (its elevation file and orthomosaic),
+ * see what it is and how its heights were lined up with the terrain model, remove it.
  */
-export default function DroneSurveyCard() {
+export default function SurveysPanel() {
   const drone = useDroneSurveys();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The terrain model's source at the survey, to say when "before" may already show the event.
+  const grid = drone?.active?.grid ?? null;
+  const terrain = useTerrainSource(grid ? [(grid.west + grid.east) / 2, (grid.north + grid.south) / 2] : null);
   if (!drone) return null;
   const { active, baseline, surveys, canEdit } = drone;
   const survey = active?.survey ?? null;
-  const beforeTitle = baseline ? surveyTitle(baseline.survey) : "terrain model";
-  // The terrain model's source at the survey: its flight year goes on "Before".
-  const grid = active?.grid ?? null;
-  const terrain = useTerrainSource(grid ? [(grid.west + grid.east) / 2, (grid.north + grid.south) / 2] : null);
-  const terrainYear = terrain ? monthYearRange(terrain.flownFrom, terrain.flownTo, true) : "";
   const terrainAfter = !baseline && flownAfter(terrain, survey?.captured_on);
 
-  if (!surveys.length && !canEdit) return null;
-
   return (
-    <section aria-labelledby="drone-survey-title" className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Plane size={15} className="text-[var(--accent)]" aria-hidden />
-        <h3 id="drone-survey-title" className="text-sm font-semibold">Drone survey</h3>
-        {surveys.length > 1 ? (
-          <div className="flex flex-wrap items-center gap-1.5 text-xs">
-            <label className="inline-flex items-center gap-1.5">
-              <span className="font-semibold text-muted">Now</span>
-              <select className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={drone.activeId ?? ""} onChange={(e) => drone.setActiveId(Number(e.target.value))}>
-                {surveys.map((s) => <option key={s.id} value={s.id}>{surveyTitle(s)}</option>)}
-              </select>
-            </label>
-            <label className="inline-flex items-center gap-1.5">
-              <span className="font-semibold text-muted">compared with</span>
-              <select className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-2 py-1 text-xs" value={drone.baselineId ?? ""} onChange={(e) => drone.setBaselineId(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">Terrain model</option>
-                {surveys.filter((s) => s.id !== drone.activeId).map((s) => <option key={s.id} value={s.id}>{surveyTitle(s)}</option>)}
-              </select>
-            </label>
-          </div>
-        ) : null}
-        {canEdit && !adding ? (
-          <button type="button" onClick={() => setAdding(true)} className={`${button} ml-auto`}>
-            <Upload size={13} aria-hidden /> {surveys.length ? "Add another survey" : "Add a drone survey"}
-          </button>
-        ) : null}
-      </div>
+    <section aria-label="Drone surveys" className="grid gap-3">
+      {canEdit && !adding ? (
+        <button type="button" onClick={() => setAdding(true)} className={`${button} min-h-11 justify-center`}>
+          <Upload size={13} aria-hidden /> {surveys.length ? "Add another survey" : "Add a drone survey"}
+        </button>
+      ) : null}
       {!surveys.length && !adding ? (
-        <p className="mt-1 text-xs text-muted">
-          Upload the elevation model (DSM or DEM GeoTIFF) and orthomosaic exported from DroneDeploy, Pix4D, Metashape or Site Scan. They are laid over the terrain model only where the drone flew, so you can compare the original ground with the ground now.
+        <p className="text-xs text-muted">
+          A survey adds the ground now, what changed, volumes and a suggested main scarp height. Upload its elevation model (DSM or DEM GeoTIFF) and orthomosaic from DroneDeploy, Pix4D, Metashape or Site Scan.
         </p>
       ) : null}
-      {drone.error ? <p className="mt-2 text-xs text-[var(--bad)]">{drone.error}</p> : null}
-      {error ? <p className="mt-2 text-xs text-[var(--bad)]">{error}</p> : null}
+      {drone.error ? <p className="text-xs text-[var(--bad)]">{drone.error}</p> : null}
+      {error ? <p className="text-xs text-[var(--bad)]">{error}</p> : null}
 
       {adding ? <AddSurvey onClose={() => setAdding(false)} onError={setError} /> : null}
 
       {survey && baseline && flownOutOfOrder(baseline.survey, survey) ? (
-        <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--warn-text)]">
+        <p className="flex flex-wrap items-center gap-2 text-xs text-[var(--warn-text)]">
           The survey compared with was flown after the one shown as now, so ground lost and gained read reversed.
           <button type="button" className={button} onClick={drone.swapBaseline}><ArrowLeftRight size={13} aria-hidden /> Swap them</button>
         </p>
       ) : null}
 
       {survey && active ? (
-        <div className="mt-3 grid gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div role="radiogroup" aria-label="Ground shown in 3D" className="inline-flex overflow-hidden rounded-md border border-[var(--line)] text-xs font-medium">
-              {[[false, `Before (${baseline ? baseline.survey.captured_on ?? "earlier survey" : terrainYear ? `terrain model, ${terrainYear}` : "terrain model"})`], [true, `Now (drone${survey.captured_on ? `, ${survey.captured_on}` : ""})`]].map(([value, label]) => (
-                <button key={String(value)} type="button" role="radio" aria-checked={drone.showSurface === value} onClick={() => drone.setShowSurface(value as boolean)}
-                  className={`px-2.5 py-1.5 ${drone.showSurface === value ? "bg-[var(--accent)] text-white" : "bg-[var(--panel)] hover:bg-[var(--panel-soft)]"}`}>
-                  {label as string}
-                </button>
-              ))}
-            </div>
-            {canEdit ? (
-              <button type="button" onClick={() => drone.setCapturing(!drone.capturing)} className={`${button} ${drone.capturing ? "border-[var(--accent)] text-[var(--accent)]" : ""}`} aria-pressed={drone.capturing}>
-                <Crosshair size={13} aria-hidden /> {drone.capturing ? "Click the 3D view to capture · stop" : "Capture points"}
-              </button>
-            ) : null}
-          </div>
-
+        <div className="grid gap-3">
           {terrainAfter && terrain ? (
             <p className="text-xs text-[var(--warn-text)]">
               The terrain model here ({terrainSourceText(terrain)}) was flown after this survey, so "Before" may already show the event.
               {surveys.length > 1 ? " Compare with an earlier survey instead." : " Add an earlier survey to compare with, if there is one."}
             </p>
           ) : null}
-          <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+          <dl className="grid gap-x-4 gap-y-1 text-xs">
             <Fact label="Flown">{survey.captured_on ?? "date not given"}{survey.source ? ` · ${survey.source}` : ""}</Fact>
             <Fact label="Files">{[survey.dsm_filename, survey.ortho_filename].filter(Boolean).join(" · ") || "—"}</Fact>
             <Fact label="Patch">{survey.cols} × {survey.rows} cells{survey.resolution_m ? ` · ${(survey.resolution_m * FT_PER_M).toFixed(2)} ft (${survey.resolution_m.toFixed(2)} m) each` : ""}{survey.source_crs ? ` · from ${survey.source_crs}` : ""}</Fact>
@@ -113,8 +94,6 @@ export default function DroneSurveyCard() {
             </Fact>
             <HeightsFacts />
           </dl>
-
-          <Points />
 
           {canEdit ? (
             <div className="flex justify-end">
@@ -131,7 +110,28 @@ export default function DroneSurveyCard() {
             </div>
           ) : null}
         </div>
-      ) : surveys.length ? <p className="mt-2 text-xs text-muted"><Loader2 size={12} className="mr-1 inline animate-spin" aria-hidden />Loading the survey…</p> : null}
+      ) : surveys.length ? <p className="text-xs text-muted"><Loader2 size={12} className="mr-1 inline animate-spin" aria-hidden />Loading the survey…</p> : null}
+    </section>
+  );
+}
+
+/** Points captured on both surfaces by clicking the map. */
+export function PointsPanel() {
+  const drone = useDroneSurveys();
+  if (!drone) return null;
+  if (!drone.active) return <p className="text-xs text-muted">Add a drone survey to capture points on the ground before and now.</p>;
+  return (
+    <section aria-label="Points" className="grid gap-3">
+      {drone.canEdit ? (
+        <button
+          type="button"
+          onClick={() => drone.setCapturing(!drone.capturing)}
+          className={`${button} min-h-11 justify-center ${drone.capturing ? "border-[var(--accent)] text-[var(--accent)]" : ""}`}
+        >
+          <Crosshair size={13} aria-hidden /> {drone.capturing ? "Click the map to capture · stop" : "Capture points"}
+        </button>
+      ) : null}
+      <Points />
     </section>
   );
 }

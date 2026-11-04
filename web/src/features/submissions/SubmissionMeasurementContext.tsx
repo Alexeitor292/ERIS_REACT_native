@@ -1,64 +1,76 @@
-import { lazy, Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { lazy, Suspense, useState } from "react";
 
 import { api } from "../../api/client";
 import type { Gisa, GisaTerrainGrid } from "../../api/types";
 
 const InteractiveTerrainScene = lazy(() => import("../../components/InteractiveTerrainScene"));
-import DroneSurveyCard from "./drone/DroneSurveyCard";
+import type { Guide } from "./measurements/measurementGuides";
 import { useDroneSurveys } from "./drone/DroneSurveyContext";
 
-/**
- * Measurement context = the 3D terrain scene only. The elevation-profile block, the
- * road-inventory context block, and the USGS sampled-relief diagnostic were removed
- * from the submission detail view (backend endpoints and stored data are untouched).
- *
- * The compact "Sample terrain" action is kept because the scene's terrain-extent and
- * road-bearing overlays read the cached USGS grid produced by that endpoint.
- */
-export default function SubmissionMeasurementContext({
+/** Samples the USGS grid that the 3D view's terrain extent and road bearing overlays read. */
+export function TerrainSamplesControl({
   submissionId,
   gisa,
   onReload,
-  geometryJson,
-  height = 460,
 }: {
   submissionId: number;
   gisa: Gisa | null;
   onReload: () => Promise<void>;
-  /** The areas as currently drawn on the location map; defaults to the saved geometry. */
-  geometryJson?: unknown;
-  height?: number;
 }) {
-  const [terrainFetching, setTerrainFetching] = useState(false);
-  const [terrainError, setTerrainError] = useState<string | null>(null);
-  const [searchParams] = useSearchParams();
-  const deepLinkTerrain = searchParams.get("section") === "terrain";
+  const [fetching, setFetching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const terrain = gisa?.elevation_terrain ?? null;
 
-  useEffect(() => {
-    if (!deepLinkTerrain) return;
-    const timer = window.setTimeout(() => {
-      document.getElementById("terrain-3d-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [deepLinkTerrain]);
-
-  async function sampleTerrain(force: boolean) {
-    setTerrainFetching(true);
-    setTerrainError(null);
+  async function sample() {
+    setFetching(true);
+    setError(null);
     try {
       await api<{ terrain: GisaTerrainGrid }>(`/submissions/${submissionId}/gisa/terrain-grid`, {
         method: "POST",
-        body: JSON.stringify({ force, road_bearing_deg: null }),
+        body: JSON.stringify({ force: true, road_bearing_deg: null }),
       });
       await onReload();
-    } catch (error: any) {
-      setTerrainError(error?.message ?? "Terrain sampling failed");
+    } catch (e: any) {
+      setError(e?.message ?? "Terrain sampling failed");
     } finally {
-      setTerrainFetching(false);
+      setFetching(false);
     }
   }
 
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <button
+        type="button"
+        disabled={fetching}
+        onClick={sample}
+        className="min-h-11 rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 font-medium hover:bg-[var(--panel-soft)] disabled:opacity-50"
+      >
+        {fetching ? "Sampling…" : terrain ? "Refresh terrain samples" : "Sample terrain"}
+      </button>
+      {terrain?.checked_at ? <span className="text-muted">Sampled {terrain.checked_at.slice(0, 10)}</span> : null}
+      {error ? <span className="text-[var(--bad)]">{error}</span> : null}
+      {terrain?.error ? <span className="text-[var(--bad)]">{terrain.error}</span> : null}
+    </div>
+  );
+}
+
+/** The 3D terrain with the drone survey laid over it and the measurements drawn on it. */
+export default function SubmissionMeasurementContext({
+  submissionId,
+  gisa,
+  geometryJson,
+  height = 460,
+  guides,
+  guideFitKey,
+}: {
+  submissionId: number;
+  gisa: Gisa | null;
+  /** The areas as currently drawn on the location map; defaults to the saved geometry. */
+  geometryJson?: unknown;
+  height?: number;
+  guides?: Array<Guide & { hot: boolean }>;
+  guideFitKey?: string;
+}) {
   const terrain = gisa?.elevation_terrain ?? null;
   const drone = useDroneSurveys();
   const active = drone?.active ?? null;
@@ -95,26 +107,7 @@ export default function SubmissionMeasurementContext({
 
 
   return (
-    <div id="terrain-3d-section" className="mb-2">
-      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">3D terrain</div>
-        <div className="flex flex-wrap items-center gap-2">
-          {terrain?.checked_at ? (
-            <span className="text-[10px] text-muted" title="USGS 3DEP grid sampled around the submission point">
-              Terrain samples {terrain.checked_at.slice(0, 10)}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            disabled={terrainFetching}
-            onClick={() => sampleTerrain(true)}
-            className="rounded border border-[var(--line)] bg-[var(--panel-soft)] px-2 py-0.5 text-[10px] font-medium hover:brightness-95 disabled:opacity-40"
-          >
-            {terrainFetching ? "Sampling…" : terrain ? "Refresh terrain samples" : "Sample terrain"}
-          </button>
-        </div>
-      </div>
-
+    <div id="terrain-3d-section">
       <div className="map-stack-guard">
         <Suspense
           fallback={
@@ -141,14 +134,14 @@ export default function SubmissionMeasurementContext({
             drone={droneScene}
             onPick={onPick}
             section={section}
+            guides={guides}
+            guideFitKey={guideFitKey}
+            embedded
           />
         </Suspense>
       </div>
 
-      {terrainError ? <div className="mt-1 text-[10px] text-[var(--bad)]">{terrainError}</div> : null}
       {pickError ? <div className="mt-1 text-[10px] text-[var(--bad)]">{pickError}</div> : null}
-      {terrain?.error ? <div className="mt-1 text-[10px] text-[var(--bad)]">{terrain.error}</div> : null}
-      <DroneSurveyCard />
     </div>
   );
 }

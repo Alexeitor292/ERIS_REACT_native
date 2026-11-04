@@ -22,6 +22,9 @@ struct GisaMeasurementsSection: View {
     var body: some View {
         let gisa = photos.detail?.gisa
         Section {
+            Label("This data has not been reviewed by land surveyors. Take it as a suggestion, not as fact.", systemImage: "exclamationmark.triangle")
+                .font(.callout).foregroundStyle(.orange)
+                .accessibilityIdentifier("measurements-not-surveyed")
             if let context = RoadInventoryContext(gisa: gisa) {
                 Label("Road inventory context active", systemImage: "road.lanes").foregroundStyle(.green)
                 ForEach(context.rows, id: \.label) { row in LabeledContent(row.label, value: row.value) }

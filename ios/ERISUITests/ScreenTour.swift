@@ -376,6 +376,7 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(revealAbove(text(containing: "120° · manual override")).exists)
         snap("gisa-measurements-refreshed")
 
+        XCTAssertTrue(revealAbove(text(containing: "not been reviewed by land surveyors")).exists)
         replace(reveal(app.textFields["Landslide Width, ft (Wd)"]), with: "45")
         snap("gisa-measurements-fields")
         tap(app.buttons["Save"])

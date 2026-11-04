@@ -41,6 +41,7 @@ import {
   type ServiceHealth,
 } from "./terrainScene";
 import { attachTerrainSourceBadge } from "./terrainSourceBadge";
+import type { Guide } from "../features/submissions/measurements/measurementGuides";
 
 type Props = {
   location?: { latitude: number | null; longitude: number | null } | null;
@@ -57,6 +58,12 @@ type Props = {
   onPick?: ((lon: number, lat: number) => void) | null;
   /** A section line drawn on the ground (S1, S2, …), dashed while being drawn, and the spot the chart points at. */
   section?: { points: LonLat[]; drawing: boolean; hover: LonLat | null; fallLine?: boolean } | null;
+  /** The measurements drawn on the ground, the one being looked at highlighted. */
+  guides?: Array<Guide & { hot: boolean }>;
+  /** The view frames the guides once per value of this key (the area they belong to). */
+  guideFitKey?: string;
+  /** Inside a screen that already fills the window: no Full screen button. */
+  embedded?: boolean;
 };
 
 export type DroneSceneSurvey = {
@@ -98,6 +105,9 @@ export default function InteractiveTerrainScene({
   drone = null,
   onPick = null,
   section = null,
+  guides = [],
+  guideFitKey = "",
+  embedded = false,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -106,6 +116,9 @@ export default function InteractiveTerrainScene({
   const overlayRef = useRef<GraphicsLayer | null>(null);
   const droneGraphicsRef = useRef<GraphicsLayer | null>(null);
   const sectionGraphicsRef = useRef<GraphicsLayer | null>(null);
+  const guideDrapedRef = useRef<GraphicsLayer | null>(null);
+  const guideRaisedRef = useRef<GraphicsLayer | null>(null);
+  const guideFittedRef = useRef("");
   const droneMediaRef = useRef<Layer | null>(null);
   const droneSeaRef = useRef<Layer | null>(null);
   const worldGroundRef = useRef<Layer[] | null>(null);
@@ -184,11 +197,18 @@ export default function InteractiveTerrainScene({
     const sectionGraphics = new GraphicsLayer({ title: "Section line" });
     (sectionGraphics as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "on-the-ground" };
     sectionGraphicsRef.current = sectionGraphics;
+    const guideDraped = new GraphicsLayer({ title: "Measurements on the ground" });
+    (guideDraped as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "on-the-ground" };
+    guideDrapedRef.current = guideDraped;
+    // Slopes and heights stand off the ground, each point at its own height.
+    const guideRaised = new GraphicsLayer({ title: "Measurements above the ground" });
+    (guideRaised as unknown as { elevationInfo: unknown }).elevationInfo = { mode: "absolute-height" };
+    guideRaisedRef.current = guideRaised;
 
     const map = new Map({
       basemap: basemapIdFor(basemapMode),
       ground: "world-elevation",
-      layers: [overlay, droneGraphics, sectionGraphics],
+      layers: [overlay, droneGraphics, sectionGraphics, guideDraped, guideRaised],
     });
     mapRef.current = map;
 
@@ -248,6 +268,9 @@ export default function InteractiveTerrainScene({
       cancelled = true;
       droneGraphicsRef.current = null;
       sectionGraphicsRef.current = null;
+      guideDrapedRef.current = null;
+      guideRaisedRef.current = null;
+      guideFittedRef.current = "";
       droneMediaRef.current = null;
       droneSeaRef.current = null;
       worldGroundRef.current = null;
@@ -493,6 +516,50 @@ export default function InteractiveTerrainScene({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionKey, status]);
 
+  // ---- The measurements, drawn where they were taken -------------------------
+  const guidesKey = JSON.stringify(guides);
+  useEffect(() => {
+    const draped = guideDrapedRef.current;
+    const raised = guideRaisedRef.current;
+    if (!draped || !raised) return;
+    draped.removeAll();
+    raised.removeAll();
+    const framing: Polyline[] = [];
+    for (const guide of guides) {
+      const color = guide.hot ? [255, 209, 102, 1] : [255, 255, 255, 1];
+      for (const line of guide.lines) {
+        const geometry = new Polyline({ hasZ: !line.draped, paths: [line.path as number[][]], spatialReference: WGS84 });
+        framing.push(geometry);
+        (line.draped ? draped : raised).add(
+          new Graphic({
+            geometry,
+            symbol: { type: "simple-line", color, width: line.dashed ? 2 : guide.hot ? 5 : 3, style: line.dashed ? "dash" : "solid" } as never,
+          }),
+        );
+      }
+      const [longitude, latitude, z] = guide.label.at;
+      (guide.label.draped ? draped : raised).add(
+        new Graphic({
+          geometry: new Point({ longitude, latitude, z, spatialReference: WGS84 }),
+          symbol: {
+            type: "text",
+            text: guide.label.text,
+            color,
+            haloColor: [15, 23, 42, 0.95],
+            haloSize: 2,
+            font: { size: guide.hot ? 15 : 13, weight: "bold" },
+          } as never,
+        }),
+      );
+    }
+    const view = viewRef.current;
+    if (view && framing.length && guideFittedRef.current !== guideFitKey) {
+      guideFittedRef.current = guideFitKey;
+      view.when(() => view.goTo(framing, { animate: false })).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guidesKey, guideFitKey, status]);
+
   // ---- Fullscreen (real Fullscreen API + CSS fallback) -----------------------
   const toggleFullscreen = useCallback(async () => {
     const el = wrapperRef.current;
@@ -581,7 +648,7 @@ export default function InteractiveTerrainScene({
       <div ref={containerRef} className="absolute inset-0" />
 
       {/* Incident summary + attribution panel */}
-      <div className="pointer-events-none absolute left-2 top-2 z-10 max-w-[min(92%,360px)] rounded-md bg-black/55 px-2.5 py-1.5 text-white backdrop-blur-sm">
+      <div className={`pointer-events-none absolute top-2 z-10 ${embedded ? "left-14" : "left-2"} max-w-[min(92%,360px)] rounded-md bg-black/55 px-2.5 py-1.5 text-white backdrop-blur-sm`}>
         <div className="text-[11px] font-semibold leading-tight">{incidentLabel || "Incident location"}</div>
         <div className="text-[10px] leading-tight text-white/80">{summary}</div>
         <div className="mt-0.5 text-[8px] leading-tight text-white/55">
@@ -616,14 +683,16 @@ export default function InteractiveTerrainScene({
           >
             Reset view
           </button>
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="rounded bg-white/85 px-2 py-1 text-[10px] font-medium text-slate-800 shadow hover:bg-white"
-            title={fullscreen ? "Exit full screen" : "Full screen"}
-          >
-            {fullscreen ? "Exit full screen" : "Full screen"}
-          </button>
+          {embedded ? null : (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="rounded bg-white/85 px-2 py-1 text-[10px] font-medium text-slate-800 shadow hover:bg-white"
+              title={fullscreen ? "Exit full screen" : "Full screen"}
+            >
+              {fullscreen ? "Exit full screen" : "Full screen"}
+            </button>
+          )}
         </div>
       </div>
 

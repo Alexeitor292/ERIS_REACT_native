@@ -102,17 +102,39 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    see each area's size in square metres and acres. Areas save as the form's
    geometry the moment they change (one area as a GeoJSON Polygon, several as a
    MultiPolygon), the same geometry the mobile app draws. Below the GISA
-   sheet, **Measurements** puts the 3D terrain beside the landslide sketch and
-   its fields (H, α, Wd, Ld, Hs, β, Lr, Wr). **Measure** samples Esri World
-   Elevation (the finest resolution that covers the whole area) inside a drawn
-   area and in a band around it, in the browser. It then proposes β and α
-   (planes fitted inside and around), Ld along the fall line, Wd across it, and
-   H (the area's relief, 2nd to 98th percentile). Hs, Lr and Wr
-   are measured in the field.
-   Proposals fill empty fields, or one field at a time. Nothing is saved until
-   the author saves the draft. Hs stays a field measurement.
+   sheet, **Measurements** shows the landslide sketch and its fields (H, α, Wd,
+   Ld, Hs, β, Lr, Wr), and **Open workspace** opens a full-screen screen for
+   measuring them. The workspace carries the only 3D map, so the form page stays
+   light, and it says, as the form does, that the data has not been reviewed by
+   land surveyors and is a suggestion, not fact.
 
-   **Drone surveys.** Under the 3D view, **Add a drone survey** takes the
+   Opening the workspace measures by itself, without saving anything; **Measure
+   again** does it on request and keeps the comparison with the survey. It samples
+   Esri World Elevation (the finest resolution that covers the whole area) inside a
+   drawn area and in a band around it, in the browser. It then suggests β and α
+   (planes fitted inside and around), Ld along the fall line, Wd across it, and H
+   (the area's relief, 2nd to 98th percentile). Lr and Wr are measured on site.
+   Suggestions fill empty fields, or one field at a time. Nothing is saved until
+   the author saves the draft.
+
+   Each value has an eye button that draws it on the map, so it can be judged
+   against the ground: Ld and Wd follow the ground, H stands between its low and
+   high spots, and α and β are triangles raised just clear of the ground they were
+   fitted to. With a drone survey the map shows **Before** or **Now**, one at a
+   time, and a value shows on the ground it was measured on; switching one on goes
+   there. A second 3D map side by side was left out for the graphics load it adds.
+
+   **Main scarp height (Hs).** A drone survey suggests it: the largest drop
+   between the two grounds in the upper third of the area, down the fall line.
+   It is never part of **Use the suggested values**: someone chooses it, and it
+   stays marked for review on site.
+
+   **Profile and displacement.** Under the map, the ground along the section
+   (down the fall line, or a line drawn on the map), and with a drone survey the
+   displacement along it on the same distances. Pointing at the graph moves a dot
+   on the map.
+
+   **Drone surveys.** In the workspace's Surveys tab, **Add a drone survey** takes the
    elevation model (DSM or DEM GeoTIFF) and, optionally, the orthomosaic
    exported from DroneDeploy, Pix4D or similar software. The browser reads the
    files (any projected or geographic coordinate system, heights in metres,
