@@ -222,7 +222,8 @@ final class MyWorkTests: XCTestCase {
     func testWhoHasAQueueAndWhatTheirsDrawsOn() {
         XCTAssertTrue(MyWork.hasQueue(roles: ["GUEST"], maintenanceDuties: true), "a maintenance duty is enough")
         XCTAssertFalse(MyWork.hasQueue(roles: ["GUEST"], maintenanceDuties: false))
-        XCTAssertTrue(MyWork.hasQueue(roles: ["MAINTENANCE_COORDINATOR"], maintenanceDuties: false))
+        XCTAssertFalse(MyWork.hasQueue(roles: ["MAINTENANCE"], maintenanceDuties: false), "the role alone gives no queue")
+        XCTAssertTrue(MyWork.hasQueue(roles: ["MAINTENANCE"], maintenanceDuties: true))
         XCTAssertEqual(MyWork.assessmentLists(roles: ["OFFICE_CHIEF"]).map(\.queue), [.officeChief, .officeChiefReview])
         let staff = MyWork.assessmentLists(roles: ["STAFF"])
         XCTAssertEqual(staff.map(\.queue), [.assignee])
@@ -237,11 +238,12 @@ final class AppTabTests: XCTestCase {
     }
 
     func testEachPersonGetsTheToolsTheirJobNeedsAndNothingToBrowse() {
-        XCTAssertEqual(tabs(["MAINTENANCE_CREW"]), [.report, .notifications, .account])
+        XCTAssertEqual(tabs(["MAINTENANCE"], reports: true), [.report, .notifications, .account], "a district reporter")
+        XCTAssertEqual(tabs(["MAINTENANCE"]), [.notifications, .account], "the role alone gives nothing to do")
         XCTAssertEqual(tabs(["GUEST"], duties: true, reports: true), [.myWork, .report, .notifications, .account],
                        "a district reporter who also reviews")
         XCTAssertEqual(tabs(["GUEST"], duties: true), [.myWork, .notifications, .account], "a district reviewer")
-        XCTAssertEqual(tabs(["MAINTENANCE_COORDINATOR"]), [.myWork, .notifications, .account])
+        XCTAssertEqual(tabs(["MAINTENANCE"], duties: true), [.myWork, .notifications, .account], "a Maintenance reviewer")
         XCTAssertEqual(tabs(["OFFICE_CHIEF"]), [.myWork, .notifications, .account])
         XCTAssertEqual(tabs(["BRANCH_CHIEF"]), [.myWork, .notifications, .account])
         XCTAssertEqual(tabs(["STAFF"]), [.myWork, .notifications, .account])
@@ -251,9 +253,9 @@ final class AppTabTests: XCTestCase {
     }
 
     func testAFormSharedWithSomeoneWithNoQueueBringsMyWork() {
-        XCTAssertEqual(AppTab.visible(roles: ["MAINTENANCE_CREW"], maintenanceDuties: false, reportsForMaintenance: false),
+        XCTAssertEqual(AppTab.visible(roles: ["MAINTENANCE"], maintenanceDuties: false, reportsForMaintenance: true),
                        [.report, .notifications, .account])
-        XCTAssertEqual(AppTab.visible(roles: ["MAINTENANCE_CREW"], maintenanceDuties: false, reportsForMaintenance: false, hasForms: true),
+        XCTAssertEqual(AppTab.visible(roles: ["MAINTENANCE"], maintenanceDuties: false, reportsForMaintenance: true, hasForms: true),
                        [.myWork, .report, .notifications, .account])
     }
 
@@ -266,7 +268,7 @@ final class AppTabTests: XCTestCase {
     }
 
     func testTheAppIsForPeoplePlacedInTheOrganizationAndAdministrators() throws {
-        for role in ["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF", "SENIOR_SPECIALIST", "STAFF", "MAINTENANCE_COORDINATOR", "MAINTENANCE_CREW"] {
+        for role in ["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF", "SENIOR_SPECIALIST", "STAFF", "MAINTENANCE"] {
             XCTAssertTrue(AppAccess.allowed(try person([role])), role)
         }
         XCTAssertFalse(AppAccess.allowed(try person(["GUEST"])))

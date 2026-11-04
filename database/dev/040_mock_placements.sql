@@ -56,11 +56,11 @@ SELECT p.user_id, r.id FROM org_user_profiles p
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND p.office_id IS NOT NULL;
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT DISTINCT c.user_id, r.id FROM org_coordinator_coverage c
-  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE_COORDINATOR'
+  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE'
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND c.is_active = 1;
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT DISTINCT c.user_id, r.id FROM org_district_crew c
-  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE_CREW'
+  JOIN users u ON u.id = c.user_id JOIN roles r ON r.name = 'MAINTENANCE'
  WHERE u.email LIKE 'mock.%@dot.ca.gov' AND c.is_active = 1;
 INSERT IGNORE INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u JOIN roles r ON r.name = 'GUEST'

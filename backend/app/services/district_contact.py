@@ -96,8 +96,6 @@ def can_set_default(db: Session, user: dict, district: str) -> bool:
         return True
     from . import maintenance_workflows as mw  # imports the app's routes; deferred to avoid a cycle
 
-    if district in org_tree.maintenance_places(db, int(user["id"]))["coordinator"]:
-        return True
     definition = db.execute(text("SELECT definition_json FROM maintenance_workflows WHERE district = :d"), {"d": district}).scalar()
     return bool(definition) and int(user["id"]) in mw.unpack(definition)["manager_user_ids"]
 

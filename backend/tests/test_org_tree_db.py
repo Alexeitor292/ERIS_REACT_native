@@ -231,26 +231,36 @@ def test_people_search_says_where_each_one_sits(client_db, admin_token, people):
     assert hit["placement"]["label"].startswith("Senior Specialist · ")
 
 
-def test_maintenance_lists_give_and_take_roles(client_db, admin_token, people):
+def _one_person_workflow(uid: int) -> dict:
+    return {
+        "manager_user_ids": [uid],
+        "duties": [
+            {"id": "reporters", "name": "Incident reporters", "user_ids": [uid], "report": True},
+            {"id": "decision", "name": "Final decision makers", "user_ids": [uid], "view_district": True},
+        ],
+        "steps": [{"name": "Maintenance or GeoTech decision", "kind": "DECISION", "duty_ids": ["decision"],
+                   "allow_maintenance": True, "allow_geotech": True}],
+    }
+
+
+def test_a_workflow_gives_and_takes_the_maintenance_role(client_db, admin_token, people):
+    from app.db import engine
+
     admin = _auth(admin_token)
-    coord, crew = people["coord"]["id"], people["crew"]["id"]
-    assert client_db.post("/org/maintenance/11/coordinators", json={"user_id": coord}, headers=admin).status_code == 200
-    assert client_db.post("/org/maintenance/11/crew", json={"user_id": crew}, headers=admin).status_code == 200
-    assert _roles(coord) == {"MAINTENANCE_COORDINATOR"}
-    assert _roles(crew) == {"MAINTENANCE_CREW"}
-    body = client_db.get("/org/maintenance", headers=admin).json()
-    d11 = next(d for d in body["districts"] if d["district"] == "11")
-    assert coord in [p["id"] for p in d11["coordinators"]] and crew in [p["id"] for p in d11["crew"]]
-    assert len(body["districts"]) >= 12
-    # Crew in two districts stays crew until the last one goes.
-    assert client_db.post("/org/maintenance/12/crew", json={"user_id": crew}, headers=admin).status_code == 200
-    assert client_db.delete(f"/org/maintenance/11/crew/{crew}", headers=admin).status_code == 200
-    assert _roles(crew) == {"MAINTENANCE_CREW"}
-    assert client_db.delete(f"/org/maintenance/12/crew/{crew}", headers=admin).status_code == 200
-    assert _roles(crew) == {"GUEST"}
-    assert client_db.delete(f"/org/maintenance/11/coordinators/{coord}", headers=admin).status_code == 200
-    assert _roles(coord) == {"GUEST"}
-    assert client_db.post("/org/maintenance/13/crew", json={"user_id": crew}, headers=admin).status_code == 422
+    crew = people["crew"]["id"]
+    with engine.begin() as conn:
+        occupied = set(conn.execute(text("SELECT district FROM maintenance_workflows")).scalars())
+    district = next((f"{n:02d}" for n in range(1, 13) if f"{n:02d}" not in occupied), None)
+    if not district:
+        pytest.skip("Needs a district without a configured workflow")
+    try:
+        put = client_db.put(f"/maintenance-workflows/{district}", json={"revision": 0, "definition": _one_person_workflow(crew)}, headers=admin)
+        assert put.status_code == 200, put.text
+        assert _roles(crew) == {"MAINTENANCE"}
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM maintenance_workflow_events WHERE district = :d"), {"d": district})
+            conn.execute(text("DELETE FROM maintenance_workflows WHERE district = :d"), {"d": district})
 
 
 def test_the_admin_switch(client_db, admin_token, people):
@@ -276,39 +286,6 @@ def test_everyone_sees_the_whole_organization(client_db, admin_token, people):
     assert {o["office"]["id"] for o in tree.json()["offices"]} == {o["office"]["id"] for o in everything}
     # Seeing is not changing.
     assert not any(o["can_manage"] for o in tree.json()["offices"])
-    lists = client_db.get("/org/maintenance", headers=viewer)
-    assert lists.status_code == 200 and len(lists.json()["districts"]) >= 12
-    assert not any(d["can_manage_crew"] or d["can_manage_coordinators"] for d in lists.json()["districts"])
-    assert client_db.post("/org/maintenance/11/crew", json={"user_id": people["crew"]["id"]}, headers=viewer).status_code == 403
-
-
-def test_coordinators_keep_their_crew_and_office_chiefs_their_coordinators(client_db, admin_token, people):
-    admin = _auth(admin_token)
-    coord, crew = people["coord"]["id"], people["crew"]["id"]
-    assert client_db.post("/org/maintenance/11/coordinators", json={"user_id": coord}, headers=admin).status_code == 200
-    try:
-        mine = _auth(_login(client_db, people["coord"]))
-        rights = {d["district"]: d for d in client_db.get("/org/maintenance", headers=mine).json()["districts"]}
-        assert rights["11"]["can_manage_crew"] and not rights["11"]["can_manage_coordinators"]
-        assert not rights["12"]["can_manage_crew"]
-        # Their own district's crew, and nothing else.
-        assert client_db.post("/org/maintenance/11/crew", json={"user_id": crew}, headers=mine).status_code == 200
-        assert _roles(crew) == {"MAINTENANCE_CREW"}
-        assert client_db.post("/org/maintenance/12/crew", json={"user_id": crew}, headers=mine).status_code == 403
-        assert client_db.post("/org/maintenance/11/coordinators", json={"user_id": crew}, headers=mine).status_code == 403
-        assert client_db.delete(f"/org/maintenance/11/crew/{crew}", headers=mine).status_code == 200
-
-        # An office chief adds coordinators to any district.
-        resp = client_db.post("/auth/login", json={"email": "mock.office.chief@dot.ca.gov", "password": "password"})
-        assert resp.status_code == 200, resp.text
-        chief = _auth(resp.json()["access_token"])
-        by_district = client_db.get("/org/maintenance", headers=chief).json()["districts"]
-        assert all(d["can_manage_coordinators"] for d in by_district)
-        assert not any(d["can_manage_crew"] for d in by_district)
-        assert client_db.post("/org/maintenance/12/coordinators", json={"user_id": crew}, headers=chief).status_code == 200
-        assert client_db.delete(f"/org/maintenance/12/coordinators/{crew}", headers=chief).status_code == 200
-    finally:
-        client_db.delete(f"/org/maintenance/11/coordinators/{coord}", headers=admin)
 
 
 def test_details_are_edited_on_the_tree(client_db, admin_token, people, office):

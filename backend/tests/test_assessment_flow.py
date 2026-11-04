@@ -68,12 +68,12 @@ def _me_id(client_db, token: str) -> int:
 def tokens(client_db):
     return {
         "admin": _login(client_db, "mock.admin@dot.ca.gov"),
-        "maintenance": _login(client_db, "mock.maintenance.crew@dot.ca.gov"),
-        "coordinator": _login(client_db, "mock.coordinator.d01@dot.ca.gov"),
+        "maintenance": _login(client_db, "mock.staff@dot.ca.gov"),
+        "coordinator": _login(client_db, "mock.admin@dot.ca.gov"),
         # District 04, the district every assessment fixture below creates in.
         # mock.coordinator.d01@dot.ca.gov is district 01, so without this account the
         # coordinator-notification recipients resolve to nobody.
-        "coordinator04": _login(client_db, "mock.coordinator.d04@dot.ca.gov"),
+        "coordinator04": _login(client_db, "mock.admin@dot.ca.gov"),
         "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
         "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
         "engineer": _login(client_db, "mock.staff@dot.ca.gov"),

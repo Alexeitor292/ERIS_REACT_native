@@ -6,8 +6,7 @@
 // nothing here accepts one.
 
 export const ROLES = {
-  MAINTENANCE_CREW: "MAINTENANCE_CREW",
-  MAINTENANCE_COORDINATOR: "MAINTENANCE_COORDINATOR",
+  MAINTENANCE: "MAINTENANCE",
   OFFICE_CHIEF: "OFFICE_CHIEF",
   BRANCH_CHIEF: "BRANCH_CHIEF",
   SENIOR_SPECIALIST: "SENIOR_SPECIALIST",
@@ -19,8 +18,7 @@ export const ROLES = {
 export type RoleCode = (typeof ROLES)[keyof typeof ROLES];
 
 const ROLE_LABELS: Record<RoleCode, string> = {
-  MAINTENANCE_CREW: "Maintenance Crew",
-  MAINTENANCE_COORDINATOR: "Maintenance Coordinator",
+  MAINTENANCE: "Maintenance",
   OFFICE_CHIEF: "Office Chief",
   BRANCH_CHIEF: "Branch Chief",
   SENIOR_SPECIALIST: "Senior Specialist",
@@ -29,9 +27,8 @@ const ROLE_LABELS: Record<RoleCode, string> = {
   ADMIN: "Administrator",
 };
 
-const MAINTENANCE_REPORTING = new Set<string>([ROLES.MAINTENANCE_CREW]);
+const MAINTENANCE_REPORTING = new Set<string>([ROLES.MAINTENANCE]);
 const OPERATIONAL = new Set<string>([
-  ROLES.MAINTENANCE_COORDINATOR,
   ROLES.OFFICE_CHIEF,
   ROLES.BRANCH_CHIEF,
   ROLES.STAFF,
@@ -73,13 +70,13 @@ export function isPublicOnly(roles: string[] | undefined): boolean {
   return set.some((r) => PUBLIC_VIEW.has(r));
 }
 
-/** Every role that does work in ERIS — operational plus the Maintenance Crew, never the guest. */
+/** Every role that does work in ERIS — operational plus Maintenance, never the guest. */
 export function isWorkforceUser(roles: string[] | undefined): boolean {
   return isOperationalUser(roles) || (roles ?? []).some((r) => MAINTENANCE_REPORTING.has(r));
 }
 
 export function canTriage(roles: string[] | undefined): boolean {
-  return isAdmin(roles) || hasRole(roles, ROLES.MAINTENANCE_COORDINATOR);
+  return isAdmin(roles);
 }
 
 export function canDelegateBranch(roles: string[] | undefined): boolean {
@@ -112,11 +109,11 @@ export function isAssessmentAuthor(roles: string[] | undefined): boolean {
 
 /**
  * Roles allowed to file an incident report from the phone — exactly the
- * server's FIELD_REPORTING_ROLES: the Maintenance Crew, Staff and
+ * server's FIELD_REPORTING_ROLES: Staff and
  * administrators.
  */
 export function canReportIncident(roles: string[] | undefined): boolean {
-  return isAdmin(roles) || hasRole(roles, ROLES.MAINTENANCE_CREW) || hasRole(roles, ROLES.STAFF);
+  return isAdmin(roles) || hasRole(roles, ROLES.STAFF);
 }
 
 export function assessmentStateLabel(state: string): string {

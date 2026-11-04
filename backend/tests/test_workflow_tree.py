@@ -46,8 +46,8 @@ def _me_id(client_db, token: str) -> int:
 def tokens(client_db):
     return {
         "admin": _login(client_db, "mock.admin@dot.ca.gov"),
-        "maintenance": _login(client_db, "mock.maintenance.crew@dot.ca.gov"),
-        "coordinator": _login(client_db, "mock.coordinator.d01@dot.ca.gov"),
+        "maintenance": _login(client_db, "mock.staff@dot.ca.gov"),
+        "coordinator": _login(client_db, "mock.admin@dot.ca.gov"),
         "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
         "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
         "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
@@ -112,7 +112,7 @@ class TestNewReport:
         assert triage["status"] in ("CURRENT", "UNASSIGNED")
         if triage["status"] == "CURRENT":
             assert triage["user"]["user_id"] == ids["coordinator"]
-            assert tree["current_owner"]["role"] == "MAINTENANCE_COORDINATOR"
+            assert tree["current_owner"]["role"] == "MAINTENANCE"
         for key in ("OFFICE_DELEGATION", "BRANCH_ASSIGNMENT", "ENGINEER_ASSESSMENT", "ASSESSMENT_REVIEW"):
             assert _node(tree, key)["status"] == "PENDING"
         # Approval is terminal in routing v2, so there is no finalization step.
@@ -309,7 +309,7 @@ class TestNeedsInfoLoop:
         assert triage["status"] == "WAITING_ON_REPORTER"
         assert tree["overall_status"] == "WAITING_ON_REPORTER"
         # The bottleneck owner is the reporter (Maintenance Crew member).
-        assert tree["current_owner"]["role"] == "MAINTENANCE_CREW"
+        assert tree["current_owner"]["role"] == "MAINTENANCE"
         assert tree["current_owner"]["user_id"] == ids["maintenance"]
         # Downstream not falsely advanced.
         assert _node(tree, "ENGINEER_ASSESSMENT")["status"] == "PENDING"

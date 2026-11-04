@@ -210,7 +210,7 @@ def build_workflow_tree(
     # ----- Node 1: Reporter submission -----
     node(
         "REPORTER_SUBMISSION",
-        "MAINTENANCE_CREW",
+        "MAINTENANCE",
         "Incident report submitted",
         COMPLETED,
         user=user_of(incident.get("reporter_user_id")),
@@ -225,7 +225,7 @@ def build_workflow_tree(
         coord = stage_assignees.get("COORDINATOR")
         node(
             "COORDINATOR_TRIAGE",
-            "MAINTENANCE_COORDINATOR",
+            "MAINTENANCE",
             "Coordinator triage",
             CURRENT if coord else UNASSIGNED,
             user=user_of(coord),
@@ -236,7 +236,7 @@ def build_workflow_tree(
             # Loop: coordinator requested info; the reporter must update.
             node(
                 "COORDINATOR_TRIAGE",
-                "MAINTENANCE_COORDINATOR",
+                "MAINTENANCE",
                 "More information requested",
                 WAITING_ON_REPORTER,
                 user=_event_user(triage_ev) or user_of(incident.get("triage_decided_by_user_id")),
@@ -249,7 +249,7 @@ def build_workflow_tree(
             coord = stage_assignees.get("COORDINATOR")
             node(
                 "COORDINATOR_TRIAGE",
-                "MAINTENANCE_COORDINATOR",
+                "MAINTENANCE",
                 "Coordinator triage (resumed after reporter update)",
                 CURRENT if coord else UNASSIGNED,
                 user=user_of(coord),
@@ -264,7 +264,7 @@ def build_workflow_tree(
         }.get(disposition, "Coordinator triage")
         node(
             "COORDINATOR_TRIAGE",
-            "MAINTENANCE_COORDINATOR",
+            "MAINTENANCE",
             label,
             COMPLETED,
             user=_event_user(triage_ev) or user_of(incident.get("triage_decided_by_user_id")),
@@ -465,8 +465,8 @@ def build_workflow_tree(
         if current_node["status"] == WAITING_ON_REPORTER:
             owner_user = user_of(incident.get("reporter_user_id"))
             current_owner = {
-                "role": "MAINTENANCE_CREW",
-                "role_title": _ROLE_TITLES["MAINTENANCE_CREW"],
+                "role": "MAINTENANCE",
+                "role_title": _ROLE_TITLES["MAINTENANCE"],
                 "user_id": owner_user["user_id"] if owner_user else None,
                 "full_name": owner_user["full_name"] if owner_user else None,
                 "email": owner_user["email"] if owner_user else None,

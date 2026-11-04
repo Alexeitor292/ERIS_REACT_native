@@ -42,12 +42,12 @@ def _login(client_db, email: str) -> str:
 
 @pytest.fixture(scope="module")
 def coordinator_token(client_db):
-    return _login(client_db, "mock.coordinator.d01@dot.ca.gov")
+    return _login(client_db, "mock.admin@dot.ca.gov")
 
 
 @pytest.fixture(scope="module")
 def reporter_token(client_db):
-    return _login(client_db, "mock.maintenance.crew@dot.ca.gov")
+    return _login(client_db, "mock.staff@dot.ca.gov")
 
 
 @pytest.fixture

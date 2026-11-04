@@ -707,8 +707,8 @@ final class ScreenTour: XCTestCase {
 
     func testThereIsNoFormsTabAndASharedFormWaitsInMyWork() {
         app.launchArguments += ["-ERISDemoSharedForm", "YES"]
-        launch(roles: "MAINTENANCE_CREW")
-        XCTAssertTrue(app.tabBars.buttons["My Work"].waitForExistence(timeout: 20), "crew have My Work once a form is shared")
+        launch(roles: "MAINTENANCE")
+        XCTAssertTrue(app.tabBars.buttons["My Work"].waitForExistence(timeout: 20), "their queue holds the shared form")
         XCTAssertEqual(tabNames(), ["My Work", "Report", "Notifications", "Account"])
         tap(app.tabBars.buttons["My Work"])
         XCTAssertTrue(app.staticTexts["Shared with you"].waitForExistence(timeout: 10))
@@ -853,7 +853,7 @@ final class ScreenTour: XCTestCase {
     /// The demo stands in for the camera: the files it makes take the real path,
     /// and its server refuses anything but a JPEG and a browser-ready MP4.
     func testAReportTakesPhotosAndVideosFromTheCameraOrLibrary() {
-        launch(roles: "MAINTENANCE_CREW")
+        launch(roles: "MAINTENANCE")
         tap(app.tabBars.buttons["Report"])
         tap(app.buttons["Report an Incident"])
         tap(reveal(app.buttons["Take Photo"]))
@@ -973,8 +973,9 @@ final class ScreenTour: XCTestCase {
     }
 
     func testAReporterHasReportingAndNothingElse() {
-        launch(roles: "MAINTENANCE_CREW")
-        XCTAssertEqual(tabNames(), ["Report", "Notifications", "Account"])
+        launch(roles: "MAINTENANCE")
+        XCTAssertEqual(tabNames(), ["My Work", "Report", "Notifications", "Account"])
+        tap(app.tabBars.buttons["Report"])
         XCTAssertTrue(app.buttons["Report an Incident"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Settlement at the bridge approach"].waitForExistence(timeout: 10), "their own report")
         XCTAssertFalse(app.staticTexts["Rockfall on SR-1"].exists, "not anyone else's")
@@ -1091,7 +1092,7 @@ final class ScreenTour: XCTestCase {
     }
 
     func testAReportMadeOfflineIsFiledWhenTheConnectionReturns() {
-        launch(roles: "MAINTENANCE_CREW")
+        launch(roles: "MAINTENANCE")
         tap(app.tabBars.buttons["Account"])
         let toggle = reveal(app.switches["demo-offline"])
         flip(toggle)

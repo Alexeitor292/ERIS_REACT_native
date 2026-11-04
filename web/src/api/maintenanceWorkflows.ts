@@ -6,7 +6,6 @@ export type Person = {
   email?: string;
   is_active?: boolean;
   placement?: { label?: string | null };
-  maintenance?: { coordinator?: string[]; crew?: string[] };
 };
 export type Duty = { id: string; name: string; user_ids: number[]; report: boolean; view_district: boolean; edit_report: boolean };
 export type Step = { name: string; kind: "REVIEW" | "DECISION"; duty_ids: string[]; notify_duty_ids: string[]; rule: "ANY" | "ALL"; request_information: boolean; allow_maintenance: boolean; allow_geotech: boolean };

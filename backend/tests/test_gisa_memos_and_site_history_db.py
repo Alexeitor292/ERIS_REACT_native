@@ -91,8 +91,8 @@ class TestSiteHistory:
         return int(resp.json()["incident"]["id"])
 
     def test_one_list_with_each_incidents_maintenance_under_it(self, client_db, staff, form):
-        crew = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
-        coordinator = _login(client_db, "mock.coordinator.d01@dot.ca.gov")
+        crew = _login(client_db, "mock.staff@dot.ca.gov")
+        coordinator = _login(client_db, "mock.admin@dot.ca.gov")
         in_record = self._report(client_db, crew, "Earlier slide")
         closed = self._report(client_db, crew, "Debris on shoulder")
         repeat = self._report(client_db, crew, "Same slide again")
@@ -176,7 +176,7 @@ class TestSiteHistory:
         assert relation() == "DIFFERENT_TYPE"
 
     def test_only_operational_roles_may_read_it(self, client_db, form, viewer_token):
-        crew = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
+        crew = _login(client_db, "mock.staff@dot.ca.gov")
         assert client_db.get(f"/submissions/{form}/site-history", headers=crew).status_code == 403
         guest = {"Authorization": f"Bearer {viewer_token}"}
         assert client_db.get(f"/submissions/{form}/site-history", headers=guest).status_code == 403

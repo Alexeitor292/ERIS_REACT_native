@@ -10,7 +10,7 @@ from ..db import get_db
 from ..deps import require_roles
 from ..roles import (
     GUEST,
-    MAINTENANCE_CREW,
+    MAINTENANCE,
     OPERATIONAL_ROLES,
     is_maintenance_only,
     is_public_only,
@@ -25,7 +25,7 @@ router = APIRouter(tags=["incident-classification"])
 # Promise.all as the role-gated assessments call, so a 403 sets the error banner
 # and the incident rows are never rendered (org model design §4.5, §8).
 CLASSIFICATION_READ_ROLES = sorted(
-    OPERATIONAL_ROLES | {MAINTENANCE_CREW, GUEST}
+    OPERATIONAL_ROLES | {MAINTENANCE, GUEST}
 )
 _LABEL_BY_CODE = {str(item["code"]): str(item["label"]) for item in GISA_INCIDENT_TYPE_LUT}
 _OFFICIAL_STATES = {"SUBMITTED", "APPROVED", "FINALIZED"}

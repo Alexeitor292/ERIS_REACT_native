@@ -3,7 +3,7 @@ import Foundation
 /// My Work: the one queue of everything waiting on the signed-in person, as
 /// the web's MyWorkPage builds it.
 ///
-///  - Maintenance Coordinator: field reports awaiting triage.
+///  - Administrator: field reports awaiting triage.
 ///  - Anyone with district maintenance duties: reports at their step of the
 ///    district's maintenance workflow (and, on request, the others they can read).
 ///  - Office Chief: assessments to route, and Senior Specialist-route reviews.

@@ -26,7 +26,7 @@ def tokens(client_db, admin_token):
         "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
         "engineer": _login(client_db, "mock.staff@dot.ca.gov"),
         "other_staff": _login(client_db, "mock.staff.2@dot.ca.gov"),
-        "coordinator": _login(client_db, "mock.coordinator.d04@dot.ca.gov"),
+        "coordinator": _login(client_db, "mock.admin@dot.ca.gov"),
     }
 
 

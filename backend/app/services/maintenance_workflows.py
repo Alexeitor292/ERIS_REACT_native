@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import text
 
-from ..roles import FIELD_REPORTING_ROLES, is_admin
+from ..roles import FIELD_REPORTING_ROLES, is_admin, is_maintenance_only
 from ..user_metadata import normalize_district_code
 
 
@@ -139,7 +139,9 @@ def authorize_report(db, user, district):
     if workflow:
         allowed = is_admin(user) or capability(workflow["definition"], int(user["id"]), "report")
     else:
-        allowed = bool(set(user["roles"]) & set(FIELD_REPORTING_ROLES))
+        # No workflow yet: Staff and administrators may still report. Maintenance reports
+        # only through a workflow, which is where its reporting duty comes from.
+        allowed = bool(set(user["roles"]) & set(FIELD_REPORTING_ROLES)) and not is_maintenance_only(user)
     if not allowed:
         raise HTTPException(403, "You do not have reporting duty for this district")
     return workflow

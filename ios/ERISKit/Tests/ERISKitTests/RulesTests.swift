@@ -4,7 +4,7 @@ import XCTest
 /// Ported from mobile/src/utils/roleModel.test.ts and notificationRoutes.test.ts.
 final class RoleModelTests: XCTestCase {
     let retired = [
-        "MAINTENANCE", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
+        "MAINTENANCE_CREW", "MAINTENANCE_COORDINATOR", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
         "GEOTECH_BRANCH_CHIEF", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_ENGINEER", "FIELD_WORKER",
         "CALTRANS_VIEWER", "REVIEWER",
     ]
@@ -20,9 +20,9 @@ final class RoleModelTests: XCTestCase {
         ]
     }
 
-    func testTheRolesAreTheSevenWorkRolesAndTheAdministrator() {
+    func testTheRolesAreTheSixWorkRolesAndTheAdministrator() {
         XCTAssertEqual(Role.allCases.map { RoleModel.label($0.rawValue) }, [
-            "Maintenance Crew", "Maintenance Coordinator", "Office Chief", "Branch Chief",
+            "Maintenance", "Office Chief", "Branch Chief",
             "Senior Specialist", "Staff", "Guest", "Administrator",
         ])
         for role in Role.allCases {
@@ -38,9 +38,9 @@ final class RoleModelTests: XCTestCase {
     }
 
     func testEachRoleReachesItsOwnWork() {
-        XCTAssertTrue(RoleModel.canReportIncident(["MAINTENANCE_CREW"]))
-        XCTAssertTrue(RoleModel.isMaintenanceOnly(["MAINTENANCE_CREW"]))
-        XCTAssertTrue(RoleModel.canTriage(["MAINTENANCE_COORDINATOR"]))
+        XCTAssertFalse(RoleModel.canReportIncident(["MAINTENANCE"]))
+        XCTAssertTrue(RoleModel.isMaintenanceOnly(["MAINTENANCE"]))
+        XCTAssertFalse(RoleModel.canTriage(["MAINTENANCE"]))
         XCTAssertTrue(RoleModel.canDelegateBranch(["OFFICE_CHIEF"]))
         XCTAssertTrue(RoleModel.canAssignEngineer(["BRANCH_CHIEF"]))
         XCTAssertTrue(RoleModel.isAssessmentAuthor(["STAFF"]))
@@ -48,7 +48,6 @@ final class RoleModelTests: XCTestCase {
         XCTAssertFalse(RoleModel.isStaff(["SENIOR_SPECIALIST"]))
         XCTAssertFalse(RoleModel.has(["STAFF"], .seniorSpecialist))
         XCTAssertFalse(RoleModel.canReportIncident(["SENIOR_SPECIALIST"]))
-        XCTAssertFalse(RoleModel.canReportIncident(["MAINTENANCE_COORDINATOR"]))
     }
 
     func testTheGuestIsReadOnlyUnlessAnotherRoleSaysOtherwise() {

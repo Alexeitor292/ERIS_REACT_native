@@ -48,9 +48,9 @@ def _feed(client_db, token):
     return client_db.get("/notifications?limit=50", headers=_auth(token)).json()["items"]
 
 
-def test_the_default_is_set_by_the_districts_coordinator_and_read_by_the_hand_off(client_db, who):
+def test_the_default_is_set_by_an_administrator_and_read_by_the_hand_off(client_db, who):
     coordinator = who["ids"]["coordinator"]
-    answer = client_db.put("/district-contacts/04", json={"user_id": coordinator}, headers=_auth(who["tokens"]["coordinator"]))
+    answer = client_db.put("/district-contacts/04", json={"user_id": coordinator}, headers=_auth(who["tokens"]["admin"]))
     assert answer.status_code == 200, answer.text
     assert answer.json()["default_user_id"] == coordinator
     assert client_db.put("/district-contacts/04", json={"user_id": coordinator}, headers=_auth(who["tokens"]["staff"])).status_code == 403

@@ -91,7 +91,6 @@ def _incident(*, district="04", office_code="WEST", reporter_user_id=99, inciden
 
 # One code per role since 20260923_roles_consolidated; the retired codes grant
 # nothing (see test_a_retired_code_gets_no_feed).
-COORDINATOR = (roles.MAINTENANCE_COORDINATOR,)
 OFFICE_CHIEF = (roles.OFFICE_CHIEF,)
 BRANCH_CHIEF = (roles.BRANCH_CHIEF,)
 
@@ -102,24 +101,12 @@ BRANCH_CHIEF = (roles.BRANCH_CHIEF,)
 
 
 class TestIncidentScopeAccess:
-    @pytest.mark.parametrize("role", COORDINATOR)
-    def test_coordinator_is_narrowed_to_their_district(self, role):
-        user = _user(role, district="04")
-        # Inside the district: allowed.
-        incidents_routes._ensure_incident_scope_access(user, _incident(district="04"))
-        # Outside it: refused. Before the canonical fix, the canonical name fell
-        # through this branch entirely and read every district in the state.
+    def test_maintenance_reads_only_their_own_reports(self):
+        # The role alone gives no district: more comes only from a workflow (mw.can_read).
+        user = _user(roles.MAINTENANCE, district="04", user_id=7)
+        incidents_routes._ensure_incident_scope_access(user, _incident(district="07", reporter_user_id=7))
         with pytest.raises(HTTPException) as excinfo:
-            incidents_routes._ensure_incident_scope_access(user, _incident(district="07", office_code="SOUTH"))
-        assert excinfo.value.status_code == 403
-        assert "district" in excinfo.value.detail.lower()
-
-    @pytest.mark.parametrize("role", COORDINATOR)
-    def test_a_coordinator_with_no_district_reads_nothing(self, role):
-        # Fail closed: an unrecorded district is not a licence for statewide read.
-        user = _user(role, district=None)
-        with pytest.raises(HTTPException) as excinfo:
-            incidents_routes._ensure_incident_scope_access(user, _incident(district="04"))
+            incidents_routes._ensure_incident_scope_access(user, _incident(district="04", reporter_user_id=8))
         assert excinfo.value.status_code == 403
 
     @pytest.mark.parametrize("role", OFFICE_CHIEF + BRANCH_CHIEF)
@@ -137,7 +124,7 @@ class TestIncidentScopeAccess:
         )
 
     def test_a_maintenance_field_worker_reads_only_their_own_report(self):
-        user = _user(roles.MAINTENANCE_CREW, user_id=7)
+        user = _user(roles.MAINTENANCE, user_id=7)
         incidents_routes._ensure_incident_scope_access(user, _incident(reporter_user_id=7))
         with pytest.raises(HTTPException) as excinfo:
             incidents_routes._ensure_incident_scope_access(user, _incident(reporter_user_id=8))
@@ -161,23 +148,6 @@ def _filters(user, covered=()):
 
 
 class TestMobileScopeFilters:
-    @pytest.mark.parametrize("role", COORDINATOR)
-    def test_coordinator_gets_a_district_filter_not_an_empty_feed(self, role):
-        where, params = _filters(_user(role, district="04"))
-        assert where != ["1=0"], "a canonically-named coordinator fell through to an empty feed"
-        assert "COORDINATOR_REVIEW" in where[0]
-        assert params["coord_district_0"] == "04"
-        # The four district spellings the free-text column actually holds.
-        assert params["coord_district_0p"] == "4"
-
-    def test_the_districts_on_their_lists_count_too(self):
-        # A coordinator on District 5's list with District 4 at home triages both.
-        where, params = _filters(_user(roles.MAINTENANCE_COORDINATOR, district="04"), covered=["5"])
-        assert sorted(v for k, v in params.items() if k.startswith("coord_district_") and not k.endswith("p")) == ["04", "05"]
-        # On a list, with no home district at all, is enough.
-        where, params = _filters(_user(roles.MAINTENANCE_COORDINATOR, district=None), covered=["11"])
-        assert where != ["1=0"] and params["coord_district_0"] == "11"
-
     @pytest.mark.parametrize("role", OFFICE_CHIEF)
     def test_office_chief_gets_an_office_filter(self, role):
         where, params = _filters(_user(role, office_code="WEST"))
@@ -195,10 +165,9 @@ class TestMobileScopeFilters:
     @pytest.mark.parametrize(
         "role,district,office_code",
         [
-            (roles.MAINTENANCE_COORDINATOR, "04", None),
             (roles.OFFICE_CHIEF, None, "WEST"),
             (roles.BRANCH_CHIEF, None, "WEST"),
-            (roles.MAINTENANCE_CREW, None, None),
+            (roles.MAINTENANCE, None, None),
             (roles.STAFF, None, None),
         ],
     )
@@ -208,7 +177,7 @@ class TestMobileScopeFilters:
 
     @pytest.mark.parametrize(
         "code",
-        ["MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF", "GEOTECH_BRANCH_CHIEF", "MAINTENANCE", "FIELD_WORKER", "GEOTECH_ENGINEER", "REVIEWER"],
+        ["MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF", "GEOTECH_BRANCH_CHIEF", "MAINTENANCE_CREW", "MAINTENANCE_COORDINATOR", "FIELD_WORKER", "GEOTECH_ENGINEER", "REVIEWER"],
     )
     def test_a_retired_code_gets_no_feed(self, code):
         assert _filters(_user(code, district="04", office_code="WEST"))[0] == ["1=0"]
@@ -222,7 +191,7 @@ class TestMobileScopeFilters:
         assert "assignment_stage = 'ENGINEER'" in staff_where[0]
 
     def test_a_field_worker_sees_only_their_own_reports(self):
-        where, params = _filters(_user(roles.MAINTENANCE_CREW, user_id=7))
+        where, params = _filters(_user(roles.MAINTENANCE, user_id=7))
         assert "i.reporter_user_id = :mobile_uid" in where[0]
         assert params["mobile_uid"] == 7
 
@@ -234,7 +203,6 @@ class TestMobileScopeFilters:
         # recorded has no office feed to show. What the canonical fix changed is
         # that a chief WITH an office no longer lands in it.
         assert _filters(_user(roles.OFFICE_CHIEF, office_code=None))[0] == ["1=0"]
-        assert _filters(_user(roles.MAINTENANCE_COORDINATOR, district=None))[0] == ["1=0"]
         assert _filters(_user("REVIEWER"))[0] == ["1=0"]
 
     def test_a_read_only_viewer_gets_no_mobile_feed(self):
@@ -243,9 +211,9 @@ class TestMobileScopeFilters:
         assert _filters(_user(roles.GUEST))[0] == ["1=0"]
 
     def test_several_roles_union_rather_than_override(self):
-        user = _user(roles.MAINTENANCE_COORDINATOR, district="04", office_code="WEST")
-        user["roles"] = [roles.MAINTENANCE_COORDINATOR, roles.OFFICE_CHIEF]
+        user = _user(roles.MAINTENANCE, office_code="WEST", user_id=7)
+        user["roles"] = [roles.MAINTENANCE, roles.OFFICE_CHIEF]
         where, params = _filters(user)
         assert " OR " in where[0]
-        assert params["coord_district_0"] == "04"
+        assert params["mobile_uid"] == 7
         assert params["office_chief_office"] == "WEST"

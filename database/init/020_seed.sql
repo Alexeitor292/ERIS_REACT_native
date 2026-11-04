@@ -1,10 +1,9 @@
 -- Database-agnostic seed (no `USE <db>;`): the caller selects the target DB
 -- (docker-entrypoint MARIADB_DATABASE, or `mysql <dbname> < 020_seed.sql`).
--- The ERIS roles: seven work roles and the Administrator, one code each
+-- The ERIS roles: six work roles and the Administrator, one code each
 -- (app/roles.py; migration 20260923_roles_consolidated retired every older code).
 INSERT INTO roles (name, description) VALUES
-('MAINTENANCE_CREW', 'Maintenance Crew: files field reports and follows their own'),
-('MAINTENANCE_COORDINATOR', 'Maintenance Coordinator: triages field reports for their district'),
+('MAINTENANCE', 'Maintenance: own reports, plus what their district''s workflow assigns them'),
 ('OFFICE_CHIEF', 'Office Chief: routes their GeoTech office''s assessments and reviews the Senior Specialist route'),
 ('BRANCH_CHIEF', 'Branch Chief: assigns Staff and reviews the branch route'),
 ('SENIOR_SPECIALIST', 'Senior Specialist: fills assessments the office chief assigns directly'),

@@ -5,18 +5,6 @@ const searchInput = "w-full rounded-lg border border-[var(--line)] bg-[var(--pan
 
 type Suggestion = { label: string; people: Person[] };
 
-function affiliation(person: Person, district: string): string {
-  const roles: string[] = [];
-  for (const code of person.maintenance?.coordinator || []) {
-    roles.push(`District ${Number(code)} coordinator${Number(code) === Number(district) ? " · this district" : ""}`);
-  }
-  for (const code of person.maintenance?.crew || []) {
-    roles.push(`District ${Number(code)} crew${Number(code) === Number(district) ? " · this district" : ""}`);
-  }
-  if (person.placement?.label) roles.push(person.placement.label);
-  return roles.join(" · ");
-}
-
 export default function WorkflowPeoplePicker({ district, label, ids, people, suggestions = [], onPeople, onChange, disabled }: {
   district: string;
   label: string;
@@ -116,7 +104,7 @@ export default function WorkflowPeoplePicker({ district, label, ids, people, sug
       {error && resolvedKey === searchKey && <p role="alert" className="text-sm text-[var(--bad)]">{error}</p>}
       {!!availableHits.length && <ul className="max-h-56 overflow-y-auto rounded-lg border border-[var(--line)]" aria-label={`${label} search results`}>
         {availableHits.map(person => {
-          const where = affiliation(person, district);
+          const where = person.placement?.label;
           return <li key={person.id} className="border-b border-[var(--line)] last:border-0"><button type="button" className="block w-full px-3 py-2 text-left hover:bg-[var(--panel-soft)]" onClick={() => add([person])}>
             <span className="block text-sm font-medium">{person.full_name}</span>
             <span className="block text-xs text-muted">{person.email || "No email listed"}{where && ` · ${where}`}</span>

@@ -42,7 +42,6 @@ from ..roles import (
     BRANCH_CHIEF,
     OFFICE_CHIEF,
     GISA_AUTHOR_ROLES,
-    MAINTENANCE_COORDINATOR,
     OPERATIONAL_ROLES,
     has_role,
     is_admin,
@@ -75,7 +74,7 @@ from . import incidents as incidents_routes
 router = APIRouter(tags=["assessments"])
 
 # Guard role lists (canonical + legacy aliases).
-TRIAGE_ROLES = [MAINTENANCE_COORDINATOR] + [ADMIN]
+TRIAGE_ROLES = [ADMIN]
 OFFICE_CHIEF_ROLES = [OFFICE_CHIEF] + [ADMIN]
 BRANCH_CHIEF_ROLES = [BRANCH_CHIEF] + [ADMIN]
 WORKLOAD_ROLES = [OFFICE_CHIEF, BRANCH_CHIEF, ADMIN]

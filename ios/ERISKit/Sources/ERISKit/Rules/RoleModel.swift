@@ -4,8 +4,7 @@ import Foundation
 /// mobile/src/utils/roleModel.ts. For showing and hiding UI only: the server
 /// enforces every permission.
 public enum Role: String, CaseIterable, Sendable {
-    case maintenanceCrew = "MAINTENANCE_CREW"
-    case maintenanceCoordinator = "MAINTENANCE_COORDINATOR"
+    case maintenance = "MAINTENANCE"
     case officeChief = "OFFICE_CHIEF"
     case branchChief = "BRANCH_CHIEF"
     case seniorSpecialist = "SENIOR_SPECIALIST"
@@ -15,8 +14,7 @@ public enum Role: String, CaseIterable, Sendable {
 
     public var label: String {
         switch self {
-        case .maintenanceCrew: return "Maintenance Crew"
-        case .maintenanceCoordinator: return "Maintenance Coordinator"
+        case .maintenance: return "Maintenance"
         case .officeChief: return "Office Chief"
         case .branchChief: return "Branch Chief"
         case .seniorSpecialist: return "Senior Specialist"
@@ -28,9 +26,9 @@ public enum Role: String, CaseIterable, Sendable {
 }
 
 public enum RoleModel {
-    static let maintenanceReporting: Set<String> = [Role.maintenanceCrew.rawValue]
+    static let maintenanceReporting: Set<String> = [Role.maintenance.rawValue]
     static let operational: Set<String> = [
-        Role.maintenanceCoordinator.rawValue, Role.officeChief.rawValue, Role.branchChief.rawValue,
+        Role.officeChief.rawValue, Role.branchChief.rawValue,
         Role.staff.rawValue, Role.seniorSpecialist.rawValue, Role.admin.rawValue,
     ]
     // GUEST is deliberately not operational: read-only over approved records.
@@ -60,16 +58,17 @@ public enum RoleModel {
         isOperationalUser(roles) || roles.contains { maintenanceReporting.contains($0) }
     }
 
-    public static func canTriage(_ roles: [String]) -> Bool { isAdmin(roles) || has(roles, .maintenanceCoordinator) }
+    public static func canTriage(_ roles: [String]) -> Bool { isAdmin(roles) }
     public static func canDelegateBranch(_ roles: [String]) -> Bool { isAdmin(roles) || has(roles, .officeChief) }
     public static func canAssignEngineer(_ roles: [String]) -> Bool { isAdmin(roles) || has(roles, .branchChief) }
     public static func isStaff(_ roles: [String]) -> Bool { isAdmin(roles) || has(roles, .staff) }
     public static func isSeniorSpecialist(_ roles: [String]) -> Bool { isAdmin(roles) || has(roles, .seniorSpecialist) }
     public static func isAssessmentAuthor(_ roles: [String]) -> Bool { isStaff(roles) || isSeniorSpecialist(roles) }
 
-    /// Exactly the server's FIELD_REPORTING_ROLES.
+    /// Staff and administrators. Maintenance reports only with a reporting duty in a
+    /// district's workflow, which the server tells us separately.
     public static func canReportIncident(_ roles: [String]) -> Bool {
-        isAdmin(roles) || has(roles, .maintenanceCrew) || has(roles, .staff)
+        isAdmin(roles) || has(roles, .staff)
     }
 
     public static func assessmentStateLabel(_ state: String) -> String {

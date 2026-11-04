@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..services import maintenance_workflows as mw
 from ..db import get_db
 from ..deps import require_roles
-from ..roles import ADMIN, MAINTENANCE_COORDINATOR, MAINTENANCE_CREW, STAFF, has_role, is_admin
+from ..roles import ADMIN, MAINTENANCE, STAFF, is_admin
 from . import event_groups as event_group_routes
 from . import incidents as incidents_routes
 from ..services import org_directory
@@ -71,7 +71,7 @@ def _record_group_move_if_needed(
 def discard_provisional_incident(
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles([MAINTENANCE_CREW, STAFF, MAINTENANCE_COORDINATOR, ADMIN])),
+    user=Depends(require_roles([MAINTENANCE, STAFF, ADMIN])),
 ):
     mw.legacy_action(db, incident_id)
     """Discard an intake Incident only before it receives historical identity."""
@@ -88,11 +88,8 @@ def discard_provisional_incident(
     if str(incident["current_stage"]).upper() != "COORDINATOR_REVIEW":
         raise HTTPException(status_code=409, detail="Only coordinator-review Incidents are provisional")
 
-    if not is_admin(user) and not has_role(user, MAINTENANCE_COORDINATOR):
-        if int(incident["reporter_user_id"]) != int(user["id"]):
-            raise HTTPException(status_code=403, detail="Only the reporter or Maintenance Coordinator may discard this provisional Incident")
-    elif not is_admin(user):
-        incidents_routes._ensure_incident_district_access(user, incident.get("district"), db=db)
+    if not is_admin(user) and int(incident["reporter_user_id"]) != int(user["id"]):
+        raise HTTPException(status_code=403, detail="Only the reporter or an administrator may discard this report")
 
     event_group_id = int(incident["event_group_id"]) if incident.get("event_group_id") is not None else None
 
@@ -136,7 +133,7 @@ def coordinator_approve_incident(
     payload: IncidentCoordinatorApprovalRequest,
     incident_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    user=Depends(require_roles([MAINTENANCE_COORDINATOR, ADMIN])),
+    user=Depends(require_roles([ADMIN])),
 ):
     mw.legacy_action(db, incident_id)
     group_incident = event_group_routes._incident_row(db, incident_id)

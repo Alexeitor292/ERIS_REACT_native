@@ -649,10 +649,10 @@ enum DemoData {
 
     static func me(roles: [String]) -> [String: Any] {
         ["id": meId, "email": "demo.user@dot.ca.gov", "full_name": "Demo User", "roles": roles,
-         // `-ERISDemoDuties YES`: a district maintenance duty that reports and reviews.
+         // `-ERISDemoDuties YES`, or the Maintenance role: a district duty that includes reporting.
          "acting_options": UserDefaults.standard.bool(forKey: "ERISDemoActing")
             ? [["delegation_id": 1, "user_id": awayId, "full_name": "Jordan Chen", "ends_on": "2099-01-31"]] : [],
-         "maintenance_districts": UserDefaults.standard.bool(forKey: "ERISDemoDuties")
+         "maintenance_districts": UserDefaults.standard.bool(forKey: "ERISDemoDuties") || roles.contains("MAINTENANCE")
             ? [["district": "04", "report": true, "manage": false]] : [],
          "org": ["office_name": "Office of Geotechnical Design West", "office_short_name": "OGD West",
                  "branch_name": "Branch C", "home_district": "04", "job_title": "Transportation Engineer"]]
@@ -665,10 +665,10 @@ enum DemoData {
          "body": "Incident #12, Branch C", "link": "/assessments/3", "actor": "Office Chief",
          "created_at": "2026-10-28T08:15:00Z", "read": false],
         ["id": 2, "kind": "INCIDENT_CREATED", "title": "New incident reported on I-880",
-         "body": "Slope failure near PM 12.3", "link": "/incidents/12", "actor": "Maintenance Crew",
+         "body": "Slope failure near PM 12.3", "link": "/incidents/12", "actor": "Maintenance",
          "created_at": "2026-10-27T16:40:00Z", "read": false],
         ["id": 3, "kind": "INCIDENT_CREATED", "title": "New incident reported on SR-17",
-         "body": "Rockfall near PM 4.1", "link": "/incidents/12", "actor": "Maintenance Crew",
+         "body": "Rockfall near PM 4.1", "link": "/incidents/12", "actor": "Maintenance",
          "created_at": "2026-10-26T10:05:00Z", "read": true],
         ["id": 4, "kind": "ASSESSMENT_ASSIGNED", "title": "Assessment #2 was waiting for a Staff member",
          "body": "Incident #9, Branch C", "link": "/assessments/3", "actor": "Office Chief",

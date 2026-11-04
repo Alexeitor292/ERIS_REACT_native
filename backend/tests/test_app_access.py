@@ -20,7 +20,7 @@ def no_duties(monkeypatch):
 
 @pytest.mark.parametrize(
     "role",
-    ["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF", "SENIOR_SPECIALIST", "STAFF", "MAINTENANCE_COORDINATOR", "MAINTENANCE_CREW"],
+    ["ADMIN", "OFFICE_CHIEF", "BRANCH_CHIEF", "SENIOR_SPECIALIST", "STAFF"],
 )
 def test_everyone_placed_and_administrators_may(no_duties, role):
     assert app_access.may_use_app(None, person(role))

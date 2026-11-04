@@ -52,7 +52,7 @@ def tokens(client_db, admin_token, senior_engineer_token):
         # District 04 — the district these fixtures create in. mock.coordinator.d01@dot.ca.gov
         # is district 01, so without this account every "the coordinator was
         # notified" assertion would pass vacuously against an empty list.
-        "coordinator04": _login(client_db, "mock.coordinator.d04@dot.ca.gov"),
+        "coordinator04": _login(client_db, "mock.admin@dot.ca.gov"),
         "officechief": _login(client_db, "mock.office.chief@dot.ca.gov"),
         "branchchief": _login(client_db, "mock.branch.chief@dot.ca.gov"),
         "engineer": _login(client_db, "mock.staff@dot.ca.gov"),

@@ -20,7 +20,7 @@ import {
 } from "./roleModel.ts";
 
 const RETIRED = [
-  "MAINTENANCE", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
+  "MAINTENANCE_CREW", "MAINTENANCE_COORDINATOR", "MAINTENANCE_FIELD_WORKER", "MAINT_COORDINATOR", "GEOTECH_OFFICE_CHIEF",
   "GEOTECH_BRANCH_CHIEF", "GEOTECH_ENGINEER", "GEOTECH_SENIOR_ENGINEER", "FIELD_WORKER",
   "CALTRANS_VIEWER", "REVIEWER",
 ];
@@ -30,9 +30,9 @@ const GATES = [
   canAssignEngineer, isStaff, isSeniorSpecialist, isAssessmentAuthor, canReportIncident, isAdmin,
 ];
 
-test("the roles are the seven work roles and the Administrator, none called an engineer", () => {
+test("the roles are the six work roles and the Administrator, none called an engineer", () => {
   assert.deepEqual(Object.values(ROLES).map(roleLabel), [
-    "Maintenance Crew", "Maintenance Coordinator", "Office Chief", "Branch Chief",
+    "Maintenance", "Office Chief", "Branch Chief",
     "Senior Specialist", "Staff", "Guest", "Administrator",
   ]);
   for (const code of Object.values(ROLES)) assert.doesNotMatch(roleLabel(code), /engineer/i);
@@ -46,9 +46,9 @@ test("a retired code opens nothing on the phone", () => {
 });
 
 test("each role reaches its own work", () => {
-  assert.equal(canReportIncident([ROLES.MAINTENANCE_CREW]), true);
-  assert.equal(isMaintenanceOnly([ROLES.MAINTENANCE_CREW]), true);
-  assert.equal(canTriage([ROLES.MAINTENANCE_COORDINATOR]), true);
+  assert.equal(canReportIncident([ROLES.MAINTENANCE]), false);
+  assert.equal(isMaintenanceOnly([ROLES.MAINTENANCE]), true);
+  assert.equal(canTriage([ROLES.ADMIN]), true);
   assert.equal(canDelegateBranch([ROLES.OFFICE_CHIEF]), true);
   assert.equal(canAssignEngineer([ROLES.BRANCH_CHIEF]), true);
   assert.equal(isAssessmentAuthor([ROLES.STAFF]), true);
@@ -57,7 +57,6 @@ test("each role reaches its own work", () => {
   assert.equal(hasRole([ROLES.STAFF], ROLES.SENIOR_SPECIALIST), false);
   // Exactly the server's FIELD_REPORTING_ROLES.
   assert.equal(canReportIncident([ROLES.SENIOR_SPECIALIST]), false);
-  assert.equal(canReportIncident([ROLES.MAINTENANCE_COORDINATOR]), false);
 });
 
 test("the guest is read-only unless another role says otherwise", () => {

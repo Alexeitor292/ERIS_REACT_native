@@ -87,6 +87,11 @@ def publish(district: str, payload: Publish, db: Session = Depends(get_db), user
                 (district, revision, definition_json, updated_by_user_id) VALUES (:d, :r, :p, :u)"""), values)
         mw.event(db, district=district, actor=int(user["id"]), action="WORKFLOW_PUBLISHED",
                  metadata={"revision": revision + 1, "definition": definition})
+        # Being in a workflow is what makes someone Maintenance; leaving the last one ends it.
+        from ..services.org_tree import sync_roles
+        before = mw.participants(current["definition"]) if current else set()
+        for uid in sorted(before | users):
+            sync_roles(db, uid)
         db.commit()
         return {"district": district, "revision": revision + 1, "definition": definition, "can_manage": mw.can_manage(user, definition)}
     except IntegrityError:

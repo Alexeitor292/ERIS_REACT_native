@@ -260,7 +260,7 @@ export default function IncidentsOperationsPage() {
           )}
           <span className="text-xs text-muted">{visible.length} of {viewer ? visible.length : items.length} {viewer ? "approved records" : "incidents"}</span>
           <div className="ml-auto flex gap-2">
-            {canReportIncident(me?.roles) ? (
+            {canReportIncident(me?.roles, !!me?.maintenance_districts?.some((district) => district.report)) ? (
               <button type="button" onClick={() => setCreatePanelOpen((open) => !open)} className="rounded-md bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white hover:brightness-95">
                 {createPanelOpen ? "Close the form" : "Report an incident"}
               </button>

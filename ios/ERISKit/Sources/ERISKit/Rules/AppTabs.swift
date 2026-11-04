@@ -17,7 +17,7 @@ public enum AppTab: String, CaseIterable, Identifiable, Sendable {
                                hasForms: Bool = false) -> [AppTab] {
         var tabs: [AppTab] = []
         if hasForms || MyWork.hasQueue(roles: roles, maintenanceDuties: maintenanceDuties) { tabs.append(.myWork) }
-        if RoleModel.isAdmin(roles) || RoleModel.has(roles, .maintenanceCrew) || reportsForMaintenance { tabs.append(.report) }
+        if RoleModel.isAdmin(roles) || reportsForMaintenance { tabs.append(.report) }
         return tabs + [.notifications, .account]
     }
 
@@ -27,12 +27,12 @@ public enum AppTab: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Who may use the app: anyone placed in an office or on a district list, anyone
-/// with a step in a district's maintenance workflow, and administrators. The
+/// Who may use the app: anyone placed in an office, anyone with a part in a
+/// district's maintenance workflow, and administrators. The
 /// server decides (`services/app_access.py`, every request); this says the same
 /// to a server that has not been updated yet.
 public enum AppAccess {
-    public static let refusal = "ERIS Mobile is for people placed in an office or on a district's maintenance list. "
+    public static let refusal = "ERIS Mobile is for people placed in an office or in a district's maintenance workflow. "
         + "Ask your chief or an ERIS administrator to place you, or use ERIS on the web."
 
     public static func allowed(_ me: Me) -> Bool {

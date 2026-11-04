@@ -121,8 +121,8 @@ def test_handing_it_to_the_chief_who_has_it_is_refused(client_db, routed):
 
 
 def test_a_triage_step_is_done_once_the_report_is_decided(client_db, admin_token):
-    crew = _login(client_db, "mock.maintenance.crew@dot.ca.gov")
-    coordinator = _login(client_db, "mock.coordinator.d01@dot.ca.gov")
+    crew = _login(client_db, "mock.staff@dot.ca.gov")
+    coordinator = _login(client_db, "mock.admin@dot.ca.gov")
     report = client_db.post(
         "/incidents",
         json={
