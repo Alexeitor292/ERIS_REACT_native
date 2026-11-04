@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		081E8971FF2C1063845E1FF7 /* IncidentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4096957882DF657855E7DBEA /* IncidentViews.swift */; };
 		0F93C5AB4CC86645842EA8C3 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8179064C0312B2FDA75A3216 /* AppModel.swift */; };
-		1289FEB61399B9FC12257709 /* MeasurementDiagramViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */; };
 		18F9A10935B792C843FFF9CF /* MemoWebEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304C10E2CBA732244FA1B0EA /* MemoWebEditor.swift */; };
 		19D56F7B9D03141E7D9D4E79 /* LocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C467160FFD1AAD51AA080E35 /* LocationProvider.swift */; };
 		1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */; };
@@ -20,6 +19,7 @@
 		4C33C0300EA775852C7D6066 /* RootViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8560894A4728D677214030 /* RootViews.swift */; };
 		579D819C97A388A7D48031BA /* ReportMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 269C178A641FC67E6142BB11 /* ReportMedia.swift */; };
 		586D79AA03DC3DE543D242B4 /* GalleryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */; };
+		58D0966389839962D390D066 /* TerrainSampling.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBBAEB6674F8B916D5A041B8 /* TerrainSampling.swift */; };
 		59930E61FF4775A1A7FEB1F2 /* MSAL in Frameworks */ = {isa = PBXBuildFile; productRef = 64D9E0837A5828840AA493A6 /* MSAL */; };
 		5FF22448608B8AB050D7C0CE /* DemoServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BD4538642D56D52AACFE19 /* DemoServer.swift */; };
 		670EEA3BF70DF8B073C25EB3 /* MoveWorkViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02D4FB49496AC27AC7FA5B7 /* MoveWorkViews.swift */; };
@@ -73,7 +73,6 @@
 		5367D2DACD4A77222E5BC39B /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
 		576704982A623A2F1D8DFF28 /* FormPresenceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormPresenceSession.swift; sourceTree = "<group>"; };
 		66F044BEA9FCDD6168ABC415 /* TerrainViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainViews.swift; sourceTree = "<group>"; };
-		6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementDiagramViews.swift; sourceTree = "<group>"; };
 		6B2E66F767C917B799CEE40A /* ActionsStepViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionsStepViews.swift; sourceTree = "<group>"; };
 		6CBDA1CA4B2E5C4CCBAEF859 /* GalleryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryViews.swift; sourceTree = "<group>"; };
 		6F512DD806D519EBE0761F4A /* KeychainSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSessionStore.swift; sourceTree = "<group>"; };
@@ -94,6 +93,7 @@
 		C467160FFD1AAD51AA080E35 /* LocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationProvider.swift; sourceTree = "<group>"; };
 		C4BBDF6C696D17CE2A57F5E1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C79A78C23480075CFA148688 /* SketchpadViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SketchpadViews.swift; sourceTree = "<group>"; };
+		DBBAEB6674F8B916D5A041B8 /* TerrainSampling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainSampling.swift; sourceTree = "<group>"; };
 		DFF20351D38B6B00AD59CF87 /* ERISKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ERISKit; path = ERISKit; sourceTree = SOURCE_ROOT; };
 		E02D4FB49496AC27AC7FA5B7 /* MoveWorkViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveWorkViews.swift; sourceTree = "<group>"; };
 		E669CA3155DB27B42D1C70F2 /* ScreenTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTour.swift; sourceTree = "<group>"; };
@@ -132,6 +132,7 @@
 				947DB096C5A7E07D59F63717 /* MSALTokenProvider.swift */,
 				A292A7CF2D2C5976DE180BA9 /* OfflineSync.swift */,
 				92AA8EDC99BC32A3CF3C4C80 /* RoadData.swift */,
+				DBBAEB6674F8B916D5A041B8 /* TerrainSampling.swift */,
 			);
 			path = Platform;
 			sourceTree = "<group>";
@@ -193,7 +194,6 @@
 				AD680A8A59F17F50D36980FA /* GisaEditorViews.swift */,
 				4096957882DF657855E7DBEA /* IncidentViews.swift */,
 				827616E660C0B94B84C77CCF /* MapViews.swift */,
-				6941381B3D42C55DF2456F17 /* MeasurementDiagramViews.swift */,
 				FAB6CBDEA5CD38EC31BEA9C8 /* MeasurementViews.swift */,
 				E02D4FB49496AC27AC7FA5B7 /* MoveWorkViews.swift */,
 				EC4149C7E2F9CEBC13F5FD24 /* MyWorkViews.swift */,
@@ -350,7 +350,6 @@
 				FB5032090EC572A17F792936 /* MSALTokenProvider.swift in Sources */,
 				88DC3B60EE23973EF8C9457A /* MapViews.swift in Sources */,
 				2CECEFF89F127B58C02211CF /* MappedCamera.swift in Sources */,
-				1289FEB61399B9FC12257709 /* MeasurementDiagramViews.swift in Sources */,
 				1FAA7C35CFC5BDBF98C8D872 /* MeasurementViews.swift in Sources */,
 				18F9A10935B792C843FFF9CF /* MemoWebEditor.swift in Sources */,
 				670EEA3BF70DF8B073C25EB3 /* MoveWorkViews.swift in Sources */,
@@ -364,6 +363,7 @@
 				E99F0128179AEA6F9BD27EFA /* SketchpadViews.swift in Sources */,
 				F46F4D31428D1E2930B3DAC8 /* SplashView.swift in Sources */,
 				E22FC303390E4D23BCCBB6E3 /* SubmissionViews.swift in Sources */,
+				58D0966389839962D390D066 /* TerrainSampling.swift in Sources */,
 				7D70D5CB6B9DB1974652994F /* TerrainViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -442,7 +442,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -519,7 +519,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -584,7 +584,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

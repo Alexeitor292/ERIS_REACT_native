@@ -134,6 +134,18 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    displacement along it on the same distances. Pointing at the graph moves a dot
    on the map.
 
+   **On the iPhone.** Measurements is built for typing in what was collected: the
+   sketch (tap it to read it large), the eight values grouped as on the website,
+   sliders for the angles and **Next** above the keyboard. They save with the form,
+   with or without a signal. **Measure** suggests values from an area drawn on the
+   map with the same calculations and the same Esri elevation as the website, read
+   tile by tile the way the website's library reads them, so the values match. The
+   tiles are kept on the iPhone once read. With no signal and no copy it uses the
+   terrain kept on the iPhone and says the values can differ. It reads the drone surveys uploaded on the website, kept on
+   the iPhone once read, and shows what changed, the profile and the displacement.
+   Surveys are added on the website. The iPhone has no values drawn on a map and no
+   hand-drawn section line.
+
    **Drone surveys.** In the workspace's Surveys tab, **Add a drone survey** takes the
    elevation model (DSM or DEM GeoTIFF) and, optionally, the orthomosaic
    exported from DroneDeploy, Pix4D or similar software. The browser reads the

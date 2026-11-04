@@ -148,10 +148,12 @@ struct CreateIncidentView: View {
     }
 
     private func open(_ mode: ReportCapture) {
+        #if DEBUG
         if ReportCapture.isDemo {
             Task { await add(DemoCamera.take(mode)) }
             return
         }
+        #endif
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .denied, .restricted:
             status = "Camera access is off. Allow it in Settings, or choose from the library."

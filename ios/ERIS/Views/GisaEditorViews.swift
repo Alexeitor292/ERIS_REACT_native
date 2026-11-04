@@ -11,6 +11,8 @@ struct SubmissionDetailView: View {
     @EnvironmentObject private var offline: OfflineSync
     /// When the form shown was kept on this iPhone, because ERIS could not be reached.
     @State private var keptAt: Date?
+    /// What was measured on this form, so it survives moving between steps.
+    @StateObject private var measuring = SiteMeasuringModel()
     /// Changes kept on this iPhone that can no longer be sent, and why.
     @State private var strandedNote: String?
     @State private var autosave: Task<Void, Never>?
@@ -319,7 +321,8 @@ struct SubmissionDetailView: View {
                 GisaHeaderSections(editor: editor, canEdit: canEdit)
             case .body:
                 // Every Body field is editable here; saving keeps any the screen does not show.
-                GisaBodySections(editor: editor, canEdit: canEdit, lookups: lookups)
+                GisaBodySections(editor: editor, canEdit: canEdit, lookups: lookups,
+                                 goToMap: { withAnimation { step = .header } })
             case .assessment:
                 GisaAssessmentSections(editor: editor, canEdit: canEdit, writers: presence?.writers ?? [:],
                                        open: { openMemo = MemoRoute(key: $0) })
@@ -363,6 +366,7 @@ struct SubmissionDetailView: View {
         .onChange(of: step) { withAnimation { scroller.scrollTo("steps", anchor: .top) } }
         }
         .scrollDismissesKeyboard(.interactively)
+        .environmentObject(measuring)
         .environment(\.gisaPhotos, GisaPhotoContext(
             detail: detail, canEdit: canEdit, busySection: uploadingSection, waiting: waitingFiles,
             add: { section, source in
@@ -1013,6 +1017,7 @@ struct GisaBodySections: View {
     @Binding var editor: GisaEditor
     let canEdit: Bool
     let lookups: GisaLookups
+    var goToMap: () -> Void = {}
 
     private func binding(_ key: String) -> Binding<String> {
         Binding(get: { editor.form[key] }, set: { editor.set(key, $0) })
@@ -1073,7 +1078,7 @@ struct GisaBodySections: View {
         GisaMaterialSection(editor: $editor, canEdit: canEdit)
         GisaPavementSection(editor: $editor, canEdit: canEdit)
         GisaVegetationWaterSections(editor: $editor, canEdit: canEdit)
-        GisaMeasurementsSection(editor: $editor, canEdit: canEdit)
+        GisaMeasurementsSection(editor: $editor, canEdit: canEdit, goToMap: goToMap)
     }
 }
 

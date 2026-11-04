@@ -7,7 +7,7 @@ struct SplashView: View {
     /// The demo skips it, so tests start on the app, unless asked (`-ERISDemoSplash YES`).
     static var shouldPlay: Bool {
         #if DEBUG
-        if DemoServer.isEnabled { return UserDefaults.standard.bool(forKey: "ERISDemoSplash") }
+        if DemoMode.isOn { return UserDefaults.standard.bool(forKey: "ERISDemoSplash") }
         #endif
         return true
     }

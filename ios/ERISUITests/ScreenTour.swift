@@ -357,56 +357,87 @@ final class ScreenTour: XCTestCase {
         XCTAssertTrue(reveal(app.buttons["Seep"]).isSelected, "still chosen after the reload")
     }
 
-    func testMeasurements() {
+    private func use(_ identifier: String) -> XCUIElement { app.descendants(matching: .any).matching(identifier: identifier).firstMatch }
+
+    func testMeasurementsAreTypedIn() {
         launch()
         openForm()
         tap(app.buttons["Body"])
-        XCTAssertTrue(reveal(text(containing: "Road inventory context active")).exists)
-        // The diagram below makes the list long enough to scroll past it; come back up if so.
-        let orientation = text(containing: "48° · auto-detected from map")
-        if !reveal(orientation).isHittable { _ = revealAbove(orientation) }
-        XCTAssertTrue(orientation.exists)
-        snap("gisa-measurements-profile")
+        XCTAssertTrue(reveal(text(containing: "not been reviewed by land surveyors")).exists)
 
-        // A manual bearing overrides detection.
-        tap(reveal(app.buttons["Set road orientation manually"]))
-        replace(reveal(app.textFields["Bearing (°)"]), with: "120")
-        tap(reveal(app.buttons["Refresh Elevation Profile"]))
-        XCTAssertTrue(app.buttons["Refresh Elevation Profile"].waitForExistence(timeout: 10))
-        XCTAssertTrue(revealAbove(text(containing: "120° · manual override")).exists)
-        snap("gisa-measurements-refreshed")
+        // The sketch opens large, to read its symbols in the field.
+        tap(reveal(use("measurement-sketch")))
+        XCTAssertTrue(app.navigationBars["Landslide Sketch"].waitForExistence(timeout: 5))
+        snap("measurements-sketch")
+        tap(app.navigationBars["Landslide Sketch"].buttons["Done"])
 
-        XCTAssertTrue(revealAbove(text(containing: "not been reviewed by land surveyors")).exists)
-        replace(reveal(app.textFields["Landslide Width, ft (Wd)"]), with: "45")
-        snap("gisa-measurements-fields")
-        tap(app.buttons["Save"])
+        XCTAssertFalse(text(containing: "Road inventory").exists, "the road geometry is gone")
+        XCTAssertFalse(app.buttons["Fetch Elevation Profile"].exists)
+        XCTAssertFalse(use("measurement-diagram").exists)
+
+        // Next moves through the values with the keyboard up.
+        let height = reveal(app.textFields["measure_slope_height_ft"])
+        tap(height)
+        height.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "1117")
+        snap("measurements-typing")
+        tap(app.buttons["Next"])
+        let original = app.textFields["measure_original_slope_deg"]
+        original.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "33.5")
+        XCTAssertEqual(original.value as? String, "33.5")
+        tap(app.buttons["Next"])
+        let width = app.textFields["measure_landslide_width_ft"]
+        width.typeText("45")
+        XCTAssertEqual(width.value as? String, "45")
+        tap(app.buttons["Done"].firstMatch)
+        XCTAssertTrue(reveal(text(containing: "Measure on site")).exists)
+        snap("measurements-fields")
+
+        // With no area drawn, the way to measure is the map.
+        tap(reveal(app.buttons["Go to the Map"]))
+        XCTAssertTrue(reveal(use("site-areas-map")).waitForExistence(timeout: 10))
+
+        tap(app.navigationBars.buttons["Save"])
         XCTAssertTrue(app.alerts["Saved"].waitForExistence(timeout: 10))
     }
 
-    func testCrossSectionDiagram() {
+    func testMeasurementsFitAtTheLargestText() {
+        app.launchArguments += ["-appTextSize", "6", "-appTextBold", "YES"]
         launch()
         openForm()
         tap(app.buttons["Body"])
-        let diagram = app.descendants(matching: .any)["measurement-diagram"]
-        XCTAssertTrue(reveal(diagram).exists)
-        XCTAssertTrue(diagram.label.contains("Landslide Through Road"))
-        snap("gisa-diagram-through")
+        let original = app.textFields["measure_original_slope_deg"]
+        for _ in 0..<40 where !original.exists { app.swipeUp() }
+        XCTAssertTrue(reveal(original).exists)
+        snap("measurements-large-text")
+    }
 
-        // A slide above the road, on both sides, with the ground rising on each.
-        tap(reveal(app.segmentedControls.buttons["Above"]))
-        tap(reveal(app.segmentedControls.buttons["Both"]))
-        tap(reveal(app.segmentedControls.buttons["Crown"]))
-        XCTAssertTrue(diagram.label.contains("Landslide Above Road"))
-        _ = reveal(diagram)
-        snap("gisa-diagram-above")
+    func testASlopeIsMeasuredFromTheTerrainAndDroneSurveys() {
+        app.launchArguments += ["-ERISDemoMeasuredArea", "YES"]
+        launch()
+        openForm()
+        tap(app.buttons["Body"])
+        let measure = reveal(use("measure-site"))
+        XCTAssertTrue(reveal(use("measure-now")).exists)
+        snap("measuring-before")
+        tap(measure)
 
-        tap(reveal(app.buttons["diagram-full-screen"]))
-        let done = app.buttons["Done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 10))
-        Thread.sleep(forTimeInterval: 2)
-        snap("gisa-diagram-full-screen")
-        tap(done)
-        XCTAssertTrue(diagram.waitForExistence(timeout: 10))
+        // Before and now, each from its own ground, and how far the ground moved.
+        XCTAssertTrue(use("measure-use-all").waitForExistence(timeout: 30), "no suggestions")
+        snap("measuring-suggestions")
+        XCTAssertTrue(reveal(text(containing: "Before and Now")).exists)
+        XCTAssertTrue(reveal(use("profile-chart")).exists)
+        XCTAssertTrue(reveal(use("displacement-chart")).exists)
+        snap("measuring-profile")
+
+        // Together they fill five values, never the scarp: that one is left for someone to review.
+        tap(revealAbove(use("measure-use-all")))
+        XCTAssertEqual(revealAbove(app.textFields["measure_main_scarp_height_ft"]).value as? String ?? "", "")
+        XCTAssertTrue(text(containing: "Please review it on site").exists)
+        snap("measuring-scarp-review")
+        XCTAssertFalse((revealAbove(app.textFields["measure_slope_height_ft"]).value as? String ?? "").isEmpty)
+        tap(reveal(use("use-measure_main_scarp_height_ft")))
+        XCTAssertFalse((reveal(app.textFields["measure_main_scarp_height_ft"]).value as? String ?? "").isEmpty)
+        XCTAssertTrue(text(containing: "Please review it on site").exists, "still marked after it is used")
     }
 
     func testAFieldAColleagueAlsoChangedIsChosenNotOverwritten() {

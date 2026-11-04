@@ -1,0 +1,159 @@
+import XCTest
+@testable import ERISKit
+
+/// The iPhone reads Esri's tiles itself so it gets the website's heights.
+final class EsriElevationTests: XCTestCase {
+    /// A real tile (level 7, row 50, column 20), read by a decoder held to the website.
+    private static let realTile = "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CLC5IFfkeCYSGiwDw7AL8iAxgsWPbBW5sgJCh5nwQCIoiKLwC5yjPyCNMcEZIWAAMMAFgAB6+AeAES7wxACgEMwYAAUACBoAAGCFzxAddKNMcAGI30hDjHlGEXV1czK8FMOCN18kwzI89Gv5mnBUVHdDmnNZkSvDk2PXp61rFHZShWU752lTP0alpX0baHbVlxoFYgMnzVNEDNgM4jzbvLBCx7abMzInZHqJMYLWzkqYxX8nXBCFO4xlVtVrzbgJKMuav69MxkSI1Ev8dm6YXNOMbgehpX7PyveFbOFjn8Qfpj9+1aqqo6tgNziQdEjoIfcRJ7qQ9XZN+ZuyuRGCCW0AiRAgVTWsAe84ZBOwnQFMOm9DjCwBABALEAuokPogBf4J14EYojKbEULBBbALfsJCYTrdQGZBGZ85iiEkIjvAARvjKxEqcQJFk2VlE+ozM1pVl+WHUwQCAgICAgICAgICAgICAgICAgICAgKBAIp5AAAAACICAACkhxZ1AABE7gAAAAC1c4MAsORYaQAAAAACAAAA5JwChgAAAEcAAAAAwwEAAADMDDIAAAAAAAAAAATMCAAAAABIAAAAAAMAAAAAwJYVAAAAAAAAAAAoCwAAAAAAAAAAAAAAAAAAAACADAAAAAAAAAAACAEAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAABAKZdP4x5OF9FTTdJjwIVeXtduf75nmEjDqJ11ka9dTf4fRmfJBiN4Q/hM4ciH1ZCQ+SgSppxIY1BoOIu/LLywy6tcVeHapIVGcpDQjAhNaMiIOY1y0PNMYEsFelhJJEYWHFo8h6FF7AEMbALTbFCghTmMbHjLeA4jmNGwRG3MBSiEzItxQNjNDNaHd1xENEfQ2GxMjH6N+nyIqIeV1AnwRR+I49BE/IoExLlAAC+DiYiN1EUKPGGsydp0DkBoF4PQ4wsh8IqvnyanZdzR6FTwVvskop/w9lJKslnkSc3UxYk1JecVGOUUgfkFUEqHpMv8xzVKrZCJGEJ/+KSQRN4AADwD49gAgICAgICAgICAgICAgICAgICAgICAoEAinkmuAAAVxFv8KqXYwIAAOxb8d5XAWqn2HlA3YFTBAAAAIrvLkcq6hkgAACAaLcCAABhmpquAEjBtwAAAAC6BAQAphtpPgAAAKQAAAAAfQ0EAQDwzz8AAAAABQAAADmKwcYAAAAAAAAAAELNAgAAALRAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIEAiyzSGW1Pzn7lwzgHxOgyoCkql6rsYsskZ7LSoi8iahqXKmmGJdZgQJg3SsmMOFdoIAAAAACKAA44AAAAAAAAAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAAAA"
+
+    func testARealTileIsRead() throws {
+        let tile = try ElevationTile(data: try XCTUnwrap(Data(base64Encoded: Self.realTile)))
+        XCTAssertEqual(tile.width, 257)
+        XCTAssertEqual(tile.height, 257)
+        XCTAssertEqual(Double(tile.values[3001]), 230.2, accuracy: 0.001)
+        let finite = tile.values.filter(\.isFinite)
+        XCTAssertEqual(finite.map(Double.init).reduce(0, +), 3389763.7, accuracy: 1)
+        XCTAssertEqual(Double(finite.min()!), -0.119, accuracy: 0.001)
+        XCTAssertEqual(Double(finite.max()!), 1682.897, accuracy: 0.001)
+    }
+
+    private func header(height: Int = 2, width: Int = 2, maxError: Double = 0) -> Data {
+        var d = Data("CntZImage ".utf8)
+        for value: Int32 in [11, 8, Int32(height), Int32(width)] { withUnsafeBytes(of: value.littleEndian) { d.append(contentsOf: $0) } }
+        withUnsafeBytes(of: maxError.bitPattern.littleEndian) { d.append(contentsOf: $0) }
+        return d
+    }
+
+    private func part(_ y: Int32, _ x: Int32, _ bytes: Int32, _ maximum: Float) -> Data {
+        var d = Data()
+        for value in [y, x, bytes] { withUnsafeBytes(of: value.littleEndian) { d.append(contentsOf: $0) } }
+        withUnsafeBytes(of: maximum.bitPattern.littleEndian) { d.append(contentsOf: $0) }
+        return d
+    }
+
+    func testATileWithNoDataIsAllHoles() throws {
+        let tile = try ElevationTile(data: header() + part(0, 0, 0, 0) + part(1, 1, 1, 0) + Data([2]))
+        XCTAssertTrue(tile.values.allSatisfy(\.isNaN))
+    }
+
+    func testAFlatTileIsOneHeight() throws {
+        let tile = try ElevationTile(data: header() + part(0, 0, 0, 1) + part(0, 0, 0, 7.5))
+        XCTAssertEqual(tile.values, [7.5, 7.5, 7.5, 7.5])
+    }
+
+    func testEachKindOfBlockIsRead() throws {
+        // One block, stuffed: offset 10 as a 16-bit whole number, four 8-bit values, in steps of 0.5.
+        let stuffed = header(maxError: 0.25) + part(0, 0, 0, 1) + part(1, 1, 12, 100)
+            + Data([0b0100_0001, 10, 0, 0b1000_1000, 4]) + Data([3, 2, 1, 0])
+        XCTAssertEqual(try ElevationTile(data: stuffed).values, [10, 10.5, 11, 11.5])
+
+        let constant = header() + part(0, 0, 0, 1) + part(1, 1, 3, 100) + Data([0b0100_0011, 42, 0])
+        XCTAssertEqual(try ElevationTile(data: constant).values, [42, 42, 42, 42])
+
+        let zero = header() + part(0, 0, 0, 1) + part(1, 1, 1, 100) + Data([2])
+        XCTAssertEqual(try ElevationTile(data: zero).values, [0, 0, 0, 0])
+
+        var plain = Data([0])
+        for value: Float in [1, 2, 3, 4] { withUnsafeBytes(of: value.bitPattern.littleEndian) { plain.append(contentsOf: $0) } }
+        let raw = header() + part(0, 0, 0, 1) + part(1, 1, 17, 100) + plain
+        XCTAssertEqual(try ElevationTile(data: raw).values, [1, 2, 3, 4])
+    }
+
+    func testAnythingElseIsRefused() {
+        XCTAssertThrowsError(try ElevationTile(data: Data("{\"error\": 404}".utf8)))
+        XCTAssertThrowsError(try ElevationTile(data: header()), "cut short")
+    }
+
+    func testHeightsAreReadBetweenPosts() {
+        let tile = ElevationTile(width: 2, height: 2, values: [0, 10, 20, 30])
+        XCTAssertEqual(tile.height(atX: 0, y: 0), 0)
+        XCTAssertEqual(tile.height(atX: 1, y: 1), 30)
+        XCTAssertEqual(tile.height(atX: 0.5, y: 0.5), 15)
+        XCTAssertNil(ElevationTile(width: 2, height: 2, values: [.nan, 10, 20, 30]).height(atX: 0.5, y: 0.5))
+    }
+
+    func testTheFinestLevelHoldingEveryPointIsUsed() async throws {
+        final class Asked: @unchecked Sendable {
+            let lock = NSLock()
+            var levels = Set<Int>()
+        }
+        let asked = Asked()
+        let spots = [SiteTerrain.Spot(lon: -121.433, lat: 35.866)]
+        let flat = header() + part(0, 0, 0, 1) + part(0, 0, 0, 7.5)
+        let holes = header() + part(0, 0, 0, 0) + part(1, 1, 1, 0) + Data([2])
+        let elevation = EsriElevation { level, _, _ in
+            asked.lock.withLock { _ = asked.levels.insert(level) }
+            return level >= 15 ? holes : flat
+        }
+        let heights = try await elevation.heights(at: spots)
+        XCTAssertEqual(heights, [7.5])
+        XCTAssertEqual(asked.levels, [14, 15, 16], "goes coarser only until every point has data")
+
+        let nothing = try await EsriElevation { _, _, _ in nil }.heights(at: spots)
+        XCTAssertEqual(nothing, [nil])
+    }
+
+    func testAFailedFetchIsNotTakenForNoData() async {
+        struct Offline: Error {}
+        do {
+            _ = try await EsriElevation { _, _, _ in throw Offline() }.heights(at: [SiteTerrain.Spot(lon: -121, lat: 35)])
+            XCTFail("should throw, so the iPhone falls back to what it keeps")
+        } catch {
+            XCTAssertTrue(error is Offline)
+        }
+    }
+
+    func testTheTilesKeptCoverTheAreaAndTheSection() {
+        let ring = [(-0.0016, 0.0026), (0.0016, 0.0026), (0.0018, -0.0022), (-0.0018, -0.0022), (-0.0016, 0.0026)]
+            .map { SiteTerrain.Spot(lon: -121.433 + $0.0, lat: 35.866 + $0.1) }
+        let plan = SiteTerrain.samplePlan([ring])
+        let spots = SiteTerrain.spotsToKeep([ring])
+        XCTAssertEqual(spots.count, plan.inside.count + plan.around.count + 4)
+        let line = SiteTerrain.profileLine([ring], bearingDeg: 190, marginM: max(10, plan.bufferM))
+        XCTAssertLessThan(spots.map(\.lat).min()!, line.bottom.lat)
+        XCTAssertGreaterThan(spots.map(\.lat).max()!, line.top.lat)
+    }
+
+    // MARK: The website's own answers
+
+    /// Heights the website's ArcGIS library returned for these points (2.39 m level).
+    private static let websiteHeights: [(lon: Double, lat: Double, z: Double)] = [
+        (lon: -121.43473484813961, lat: 35.86385317080625, z: 0.8991617560386658),
+        (lon: -121.43473484813961, lat: 35.86459812173943, z: 0.8991617560386658),
+        (lon: -121.43236153746739, lat: 35.86564105304588, z: 101.55616854605691),
+        (lon: -121.43455228578021, lat: 35.8669819647256, z: 151.03616444430523),
+        (lon: -121.43144872567038, lat: 35.86847186659197, z: 317.0318306758439),
+        (lon: -121.43528253521782, lat: 35.86400216099288, z: 0.8991617560386658),
+        (lon: -121.43126616331098, lat: 35.868024896032054, z: 290.5899406728907),
+        (lon: -121.43108360095157, lat: 35.86906782733851, z: 333.3665745403912)
+    ]
+
+    /// Reaches Esri, like the next one: the whole measurement comes out as the website's did.
+    func testALiveMeasurementEqualsTheWebsite() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["ERIS_LIVE_ESRI"] == "1", "needs the network")
+        let (lon, lat) = (-121.433, 35.866)
+        let area: SiteAreas.Area = [[[lon - 0.0016, lat + 0.0026], [lon + 0.0016, lat + 0.0026], [lon + 0.0018, lat - 0.0022],
+                                     [lon - 0.0018, lat - 0.0022], [lon - 0.0016, lat + 0.0026]]]
+        let elevation = EsriElevation { level, row, col in
+            try await URLSession.shared.data(from: URL(string: "\(EsriElevation.serviceURL)/\(level)/\(row)/\(col)")!).0
+        }
+        let result = try await SiteMeasureResult.measure(area: area, terrain: elevation, now: nil, before: nil)
+        XCTAssertEqual(result.suggestions, [
+            "measure_slope_height_ft": "1041", "measure_landslide_width_ft": "1744", "measure_landslide_length_ft": "2326",
+            "measure_landslide_slope_deg": "30.2", "measure_original_slope_deg": "26.7",
+        ])
+    }
+
+    /// Reaches Esri, so it only runs when asked: ERIS_LIVE_ESRI=1 swift test --filter EsriElevationTests
+    func testLiveTilesMatchTheWebsiteWithinAMillimetre() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["ERIS_LIVE_ESRI"] == "1", "needs the network")
+        let elevation = EsriElevation { level, row, col in
+            let url = URL(string: "\(EsriElevation.serviceURL)/\(level)/\(row)/\(col)")!
+            return try await URLSession.shared.data(from: url).0
+        }
+        let heights = try await elevation.heights(at: Self.websiteHeights.map { SiteTerrain.Spot(lon: $0.lon, lat: $0.lat) })
+        for (height, expected) in zip(heights, Self.websiteHeights) {
+            XCTAssertEqual(try XCTUnwrap(height), expected.z, accuracy: 0.001)
+        }
+    }
+}

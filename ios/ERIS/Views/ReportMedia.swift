@@ -126,8 +126,8 @@ enum ReportCapture: String, Identifiable {
     var id: String { rawValue }
 
     /// Tests run where there is no camera, so the demo stands in for one.
-    static var available: Bool { UIImagePickerController.isSourceTypeAvailable(.camera) || DemoServer.isEnabled }
-    static var isDemo: Bool { !UIImagePickerController.isSourceTypeAvailable(.camera) }
+    static var available: Bool { UIImagePickerController.isSourceTypeAvailable(.camera) || DemoMode.isOn }
+    static var isDemo: Bool { DemoMode.isOn && !UIImagePickerController.isSourceTypeAvailable(.camera) }
 }
 
 /// The iPhone's own camera, in one mode.

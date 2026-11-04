@@ -124,6 +124,7 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             assessments[five]["submission_id"] = NSNull()
         }
         gisa["revision"] = revision
+        if DemoGround.areaDrawn { gisa["geometry_json"] = DemoGround.geometry }
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -131,6 +132,10 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
         if DemoNetwork.offline { throw APIError.transport("The Internet connection appears to be offline.") }
         let url = request.url!
         let path = url.path.hasPrefix("/api") ? String(url.path.dropFirst(4)) : url.path
+        if path.hasPrefix("/submissions/501/drone-surveys/"), path.hasSuffix("/patch") {
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+            return (DemoGround.patch(now: path.contains("/2/")), response)
+        }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         let (status, object) = lock.locked {
@@ -225,11 +230,8 @@ final class DemoTransport: HTTPTransport, @unchecked Sendable {
             return (200, ["items": DemoData.submissions])
         case ("GET", let p) where p.count == 2 && p[0] == "submissions":
             return p[1] == "501" ? (200, submissionDetail) : notFound
-        case ("POST", ["submissions", "501", "gisa", "elevation-profile"]):
-            let bearing = body["road_bearing_deg"] as? Double
-            let profile = DemoData.elevationProfile(bearing: bearing ?? 47.6, source: bearing == nil ? "arcgis_postmile_geometry" : "request")
-            gisa["elevation_profile"] = profile
-            return (200, ["elevation_profile": profile])
+        case ("GET", ["submissions", "501", "drone-surveys"]):
+            return (200, ["items": DemoGround.surveysOnTheForm])
         case ("GET", ["gisa", "lookups"]):
             return (200, DemoData.lookups)
         case ("PATCH", ["submissions", "501", "gisa"]):
@@ -798,8 +800,6 @@ enum DemoData {
             See Figure 1.1.
             """,
         "measure_slope_height_ft": 32.0, "measure_original_slope_deg": 34.0,
-        "road_inventory_context": roadInventoryContext,
-        "elevation_profile": elevationProfile(bearing: 47.6, source: "arcgis_postmile_geometry"),
     ]
 
     // Literals are typed and kept small: mixed-type ones are slow for Xcode 16's type checker in CI.
@@ -807,34 +807,6 @@ enum DemoData {
         "county_code": "ALA", "route_name": "880", "begin_pm": 11.2, "end_pm": 13.0,
         "terrain_code": "R", "left_lanes": 4, "right_lanes": 4,
     ]
-    static let roadInventoryContext: [String: Any] = [
-        "dataset_version_id": 3, "segment_id": 812, "match_method": "nearest_segment",
-        "checked_at": "2026-10-27 15:05:00", "snapshot": roadInventorySnapshot,
-    ]
-
-    /// Ground across the road: a cut slope rising on the right.
-    static func elevationProfile(bearing: Double, source: String) -> [String: Any] {
-        var points: [[String: Any]] = []
-        for offset in stride(from: -30.0, through: 30.0, by: 5.0) {
-            let rise: Double = offset > 0 ? offset * 0.9 : offset * 0.1
-            let elevation: Double = 40 + rise
-            var point: [String: Any] = ["offset_m": offset, "lat": 37.7312, "lon": -122.1975]
-            point["source"] = "usgs_3dep"
-            point["elevation_ft"] = elevation
-            points.append(point)
-        }
-        var metadata: [String: Any] = ["road_bearing_deg_used": bearing, "road_bearing_source": source]
-        metadata["half_width_m"] = 30
-        metadata["spacing_m"] = 5
-        metadata["classification_requires_bearing"] = true
-        let profile: [String: Any] = ["points": points, "metadata": metadata]
-        var out: [String: Any] = ["source": "usgs_3dep", "checked_at": "2026-10-27 15:05:00", "classification": "CUT"]
-        out["classification_reason"] = NSNull()
-        out["confidence"] = 0.82
-        out["error"] = NSNull()
-        out["profile"] = profile
-        return out
-    }
 
     static let lookups: [String: Any] = [
         // As backend/app/constants/gisa_lookups.py lists them.
@@ -974,7 +946,6 @@ extension DemoData {
         ] as [Any],
     ]
 }
-#endif
 
 /// Stands in for the camera where there is none, so tests can follow the same path.
 enum DemoCamera {
@@ -1026,3 +997,55 @@ enum DemoCamera {
         return writer.status == .completed ? url : nil
     }
 }
+
+/// A slope to measure in the demo (`-ERISDemoMeasuredArea YES`): an area drawn on it and
+/// two drone surveys, before and after a scarp opened high up and debris settled lower down.
+enum DemoGround {
+    static let lon = -122.1975, lat = 37.7312
+    static var areaDrawn: Bool { UserDefaults.standard.bool(forKey: "ERISDemoMeasuredArea") }
+
+    static var geometry: [String: Any] {
+        ["type": "Polygon", "coordinates": [[[lon - 0.0016, lat + 0.0026], [lon + 0.0016, lat + 0.0026],
+                                             [lon + 0.0018, lat - 0.0022], [lon - 0.0018, lat - 0.0022],
+                                             [lon - 0.0016, lat + 0.0026]]]]
+    }
+
+    static var surveysOnTheForm: [[String: Any]] {
+        guard areaDrawn else { return [] }
+        func survey(_ id: Int, _ label: String, _ date: String, compareWith: Any) -> [String: Any] {
+            ["id": id, "label": label, "dsm_filename": "\(label).tif", "captured_on": date, "source": "DroneDeploy",
+             "vertical_offset_m": 0, "compare_with_survey_id": compareWith]
+        }
+        return [survey(2, "Post-event", "2017-05-27", compareWith: 1), survey(1, "Pre-event", "2017-05-19", compareWith: NSNull())]
+    }
+
+    static func before(_ spot: SiteTerrain.Spot) -> Double {
+        let (x, y) = ((spot.lon - lon) / 0.004, (spot.lat - lat) / 0.004)
+        return 300 + 240 * y + 12 * sin(x * 4)
+    }
+
+    private static func now(_ spot: SiteTerrain.Spot) -> Double {
+        let (x, y) = ((spot.lon - lon) / 0.004, (spot.lat - lat) / 0.004)
+        var z = before(spot)
+        if abs(x) < 0.45 {
+            if y < 0.5, y > 0 { z -= 30 * min(1, (0.5 - y) / 0.1) * (y / 0.5 + 0.15) }
+            if y <= 0, y > -0.5 { z += 24 * sin(-y / 0.5 * .pi) }
+        }
+        return z
+    }
+
+    static func patch(now isNow: Bool) -> Data {
+        let (cols, rows) = (160, 160)
+        let (west, east, south, north) = (lon - 0.004, lon + 0.004, lat - 0.004, lat + 0.004)
+        var values = [Float](repeating: 0, count: cols * rows)
+        for r in 0..<rows {
+            for c in 0..<cols {
+                let spot = SiteTerrain.Spot(lon: west + (Double(c) + 0.5) / Double(cols) * (east - west),
+                                            lat: north - (Double(r) + 0.5) / Double(rows) * (north - south))
+                values[r * cols + c] = Float(isNow ? now(spot) : before(spot))
+            }
+        }
+        return DroneGrid(west: west, south: south, east: east, north: north, cols: cols, rows: rows, values: values).patch()
+    }
+}
+#endif
