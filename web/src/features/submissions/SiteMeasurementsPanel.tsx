@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, Info, Loader2, MapPinned, Mountain, PenLine, Route as RouteIcon, Undo2 } from "lucide-react";
+import { Check, Info, Loader2, MapPinned, Mountain, PenLine, Undo2 } from "lucide-react";
 
 import { SliderField } from "./gisaFields";
-import RoadwayEncroachment, { type RoadIdentity } from "./RoadwayEncroachment";
 
 import { areasFromGeoJson, formatArea, polygonAreaSqM } from "../../components/siteAreasModel";
 import { sampleElevations } from "./terrainElevation";
@@ -43,8 +42,8 @@ export const MEASURE_KEYS = [
 export type MeasureKey = (typeof MEASURE_KEYS)[number];
 export type MeasureValues = Record<MeasureKey, string>;
 
-/** Where a proposed value can come from: the terrain model, the rebuilt roadway, or only the field. */
-type FieldSpec = { key: MeasureKey; symbol: ReactNode; name: string; unit: "ft" | "°"; source: "terrain" | "road" | "field" };
+/** Where a proposed value can come from: the terrain model, or only the field. */
+type FieldSpec = { key: MeasureKey; symbol: ReactNode; name: string; unit: "ft" | "°"; source: "terrain" | "field" };
 
 // Grouped as the reference sketch groups them: the slope, the slide, the road.
 const GROUPS: Array<{ title: string; fields: FieldSpec[] }> = [
@@ -67,8 +66,8 @@ const GROUPS: Array<{ title: string; fields: FieldSpec[] }> = [
   {
     title: "Roadway encroached",
     fields: [
-      { key: "measure_roadway_length_ft", symbol: <>L<sub>r</sub></>, name: "Length", unit: "ft", source: "road" },
-      { key: "measure_roadway_width_ft", symbol: <>W<sub>r</sub></>, name: "Width", unit: "ft", source: "road" },
+      { key: "measure_roadway_length_ft", symbol: <>L<sub>r</sub></>, name: "Length", unit: "ft", source: "field" },
+      { key: "measure_roadway_width_ft", symbol: <>W<sub>r</sub></>, name: "Width", unit: "ft", source: "field" },
     ],
   },
 ];
@@ -124,13 +123,11 @@ export default function SiteMeasurementsPanel({
   onChange,
   geojson,
   canEdit,
-  road,
 }: {
   values: MeasureValues;
   onChange: (patch: Partial<MeasureValues>) => void;
   geojson: unknown;
   canEdit: boolean;
-  road: RoadIdentity;
 }) {
   const areas = useMemo(() => areasFromGeoJson(geojson), [geojson]);
   const [areaIndex, setAreaIndex] = useState(0);
@@ -157,7 +154,6 @@ export default function SiteMeasurementsPanel({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TerrainResult | null>(null);
   const [applied, setApplied] = useState<number | null>(null);
-  const [roadProposal, setRoadProposal] = useState<{ areaKey: string; values: Partial<Record<MeasureKey, string>> } | null>(null);
   const stale = result != null && result.key !== measureKey;
   const proposed = result && !stale ? result.proposed : {};
 
@@ -455,7 +451,7 @@ export default function SiteMeasurementsPanel({
                       : "The terrain model predates the slide and the drone survey is only as good as its flight and processing. Check both in the field."
                     : "The elevation model usually predates the slide, so these describe the slope as it was mapped. Check them in the field."}
                 </li>
-                <li>Hs is too small to read from the model: measure it in the field. Lr and Wr come from the roadway panel below.</li>
+                <li>Hs is too small to read from the model, and Lr and Wr need the road: measure them in the field.</li>
                 {result.missing ? <li>{result.missing} points had no elevation data and were left out.</li> : null}
               </ul>
             </details>
@@ -463,32 +459,13 @@ export default function SiteMeasurementsPanel({
         ) : null}
       </div>
 
-      {area ? (
-        <RoadwayEncroachment
-          area={area}
-          areaKey={areaKey}
-          road={road}
-          values={{ measure_roadway_length_ft: values.measure_roadway_length_ft, measure_roadway_width_ft: values.measure_roadway_width_ft }}
-          canEdit={canEdit}
-          onProposal={(proposal) => setRoadProposal({ areaKey, values: proposal })}
-          onFill={(patch) => onChange(patch)}
-        />
-      ) : null}
-
       <div className="space-y-4">
         {GROUPS.map((group) => (
           <fieldset key={group.title} disabled={!canEdit} className="min-w-0">
             <legend className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.title}</legend>
             <div className="grid gap-3 sm:grid-cols-2">
               {group.fields.map((field) => {
-                const suggestion =
-                  field.source === "terrain"
-                    ? proposed[field.key as MeasurementField]
-                    : field.source === "road" && roadProposal?.areaKey === areaKey
-                      ? roadProposal.values[field.key]
-                      : undefined;
-                const SourceIcon = field.source === "road" ? RouteIcon : Mountain;
-                const sourceName = field.source === "road" ? "roadway" : "terrain";
+                const suggestion = field.source === "terrain" ? proposed[field.key as MeasurementField] : undefined;
                 const matches = suggestion != null && sameNumber(values[field.key], suggestion);
                 return (
                   <div key={field.key} className="min-w-0">
@@ -526,21 +503,21 @@ export default function SiteMeasurementsPanel({
                     {suggestion != null ? (
                       matches ? (
                         <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--good)]">
-                          <Check size={12} /> Matches the {sourceName}
+                          <Check size={12} /> Matches the terrain
                         </div>
                       ) : canEdit ? (
                         <button
                           type="button"
-                          onClick={() => (field.source === "road" ? onChange({ [field.key]: suggestion }) : fill([field.key as MeasurementField]))}
+                          onClick={() => fill([field.key as MeasurementField])}
                           className="mt-1 inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)] hover:bg-[color:color-mix(in_oklab,var(--accent)_10%,var(--panel))]"
-                          title={`Use the value measured from the ${sourceName}`}
+                          title="Use the value measured from the terrain"
                         >
-                          <SourceIcon size={11} /> {suggestion}
+                          <Mountain size={11} /> {suggestion}
                           {field.unit === "°" ? "°" : " ft"} · Use
                         </button>
                       ) : (
                         <div className="mt-1 text-[11px] text-muted">
-                          {field.source === "road" ? "Roadway" : "Terrain"}: {suggestion}
+                          Terrain: {suggestion}
                           {field.unit === "°" ? "°" : " ft"}
                         </div>
                       )

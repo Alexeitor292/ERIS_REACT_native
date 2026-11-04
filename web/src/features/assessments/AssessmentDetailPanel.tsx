@@ -24,6 +24,7 @@ import { loadOfficeDirectory } from "../../api/org";
 import type { Incident, Submission } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { SubmissionStatusBadge } from "../submissions/SubmissionDetailPrimitives";
+import SubmitConfirmDialog from "../submissions/SubmitConfirmDialog";
 import { buildSubmissionDisplayTitle } from "../../utils/submissionLabel";
 import { canAssignEngineer, canDelegateBranch, isAdmin, isSeniorSpecialist, isStaff } from "../../utils/roleModel";
 import PersonPicker from "./PersonPicker";
@@ -271,6 +272,7 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
   const [context, setContext] = useState<IncidentContext>({ incident: null, eventGroupId: null });
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState("");
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   const [branchList, setBranchList] = useState<{ groups: PickerGroup[]; items: RoutingUserOption[] }>(EMPTY_OPTIONS);
   const [seniorEngineerList, setSeniorEngineerList] = useState<{ groups: PickerGroup[]; items: RoutingUserOption[] }>(EMPTY_OPTIONS);
   const [engineerOptions, setEngineerOptions] = useState<{ groups: PickerGroup[]; items: AssignmentUserOption[] }>(EMPTY_OPTIONS);
@@ -620,7 +622,17 @@ export default function AssessmentDetailPanel({ detail, submissionsById, mode, o
                   </>
                 ) : null}
                 {permissions.submit ? (
-                  <button type="button" disabled={busy || submissionIds.length === 0} className={btnPrimary} onClick={() => run(() => submitAssessment(assessment.id, notes.trim() || undefined))}>Submit for review</button>
+                  <button type="button" disabled={busy || submissionIds.length === 0} className={btnPrimary} onClick={() => setConfirmingSubmit(true)}>Submit for review</button>
+                ) : null}
+                {confirmingSubmit ? (
+                  <SubmitConfirmDialog
+                    busy={busy}
+                    onClose={() => setConfirmingSubmit(false)}
+                    onConfirm={() => {
+                      setConfirmingSubmit(false);
+                      run(() => submitAssessment(assessment.id, notes.trim() || undefined));
+                    }}
+                  />
                 ) : null}
                 {permissions.review ? (
                   <>

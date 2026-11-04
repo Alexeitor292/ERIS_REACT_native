@@ -16,6 +16,7 @@ import SubmissionReviewerSupport from "../features/submissions/SubmissionReviewe
 import SubmissionAccessSharing from "../features/submissions/SubmissionAccessSharing";
 import SubmissionMeasurementContext from "../features/submissions/SubmissionMeasurementContext";
 import { DroneSurveyProvider } from "../features/submissions/drone/DroneSurveyContext";
+import SubmitConfirmDialog from "../features/submissions/SubmitConfirmDialog";
 import SiteMeasurementsPanel, { MEASURE_KEYS, type MeasureValues } from "../features/submissions/SiteMeasurementsPanel";
 import SubmissionLocationHero from "../features/submissions/SubmissionLocationHero";
 import SubmissionLibrary from "../features/submissions/SubmissionLibrary";
@@ -756,6 +757,7 @@ export default function SubmissionDetailPage() {
     void saveDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resaveTick]);
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   async function submitDraft() {
     // A linked form is sent for review on its assessment; the server 409s here.
     if (assessmentLinked) {
@@ -1611,12 +1613,22 @@ export default function SubmissionDetailPage() {
           submitLabel={data?.submission.status === "REJECTED" ? "Resubmit for review" : "Submit for review"}
           onRefresh={load}
           onSaveDraft={saveDraft}
-          onSubmitDraft={submitDraft}
+          onSubmitDraft={() => setConfirmingSubmit(true)}
           onApprove={() => review("APPROVE")}
           onReject={() => review("REJECT")}
           onDelete={onDeleteSubmission}
         />
 
+        {confirmingSubmit ? (
+          <SubmitConfirmDialog
+            resubmit={data?.submission.status === "REJECTED"}
+            onClose={() => setConfirmingSubmit(false)}
+            onConfirm={() => {
+              setConfirmingSubmit(false);
+              void submitDraft();
+            }}
+          />
+        ) : null}
         <PresenceBar others={presence.others} />
         {conflict && !conflictOpen ? (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-[color:color-mix(in_oklab,var(--warn-text)_45%,var(--line))] bg-[color:color-mix(in_oklab,var(--warn-text)_8%,var(--panel))] px-3 py-2 text-sm" role="status">
@@ -1749,7 +1761,6 @@ export default function SubmissionDetailPage() {
                     onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
                     geojson={geom}
                     canEdit={canEdit}
-                    road={{ county: countyCodeFromNameOrCode(draft.county), route: draft.route, postMile: draft.post_mile, district: draft.district }}
                   />
                 </div>
               </PresenceArea>

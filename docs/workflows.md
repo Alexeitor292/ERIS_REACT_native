@@ -107,12 +107,8 @@ DRAFT ──submit──► SUBMITTED ──approve──► APPROVED (final)
    Elevation (the finest resolution that covers the whole area) inside a drawn
    area and in a band around it, in the browser. It then proposes β and α
    (planes fitted inside and around), Ld along the fall line, Wd across it, and
-   H (the area's relief, 2nd to 98th percentile). **Measure road** rebuilds the
-   highway from its centerline and the road inventory at the form's route and
-   postmile (lanes, traveled way, shoulders and median), then proposes Lr (the
-   centerline length the area covers, along the curve) and Wr (the widest
-   roadway it covers at one station), with which lanes it reaches and a plan
-   sketch. Without an inventory row it assumes two 12 ft lanes and says so.
+   H (the area's relief, 2nd to 98th percentile). Hs, Lr and Wr
+   are measured in the field.
    Proposals fill empty fields, or one field at a time. Nothing is saved until
    the author saves the draft. Hs stays a field measurement.
 

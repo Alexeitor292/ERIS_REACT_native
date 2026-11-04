@@ -45,6 +45,11 @@ export default function OutOfOfficeSection() {
     setOverview(await myDelegations());
   }, []);
 
+  // The profile menu's Out of office link lands here.
+  useEffect(() => {
+    if (window.location.hash === "#out-of-office") document.getElementById("out-of-office")?.scrollIntoView();
+  }, []);
+
   useEffect(() => {
     if (acting) return;
     load().catch((e: Error) => setError(e.message));
@@ -59,7 +64,7 @@ export default function OutOfOfficeSection() {
 
   if (acting) {
     return (
-      <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 md:p-5">
+      <section id="out-of-office" className="scroll-mt-20 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 md:p-5">
         <h2 className="text-base font-semibold">Out of office</h2>
         <p className="mt-1 text-sm text-muted">This is set as yourself. Go back to your own work to change it.</p>
       </section>
@@ -136,7 +141,7 @@ export default function OutOfOfficeSection() {
   );
 
   return (
-    <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 md:p-5">
+    <section id="out-of-office" className="scroll-mt-20 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 md:p-5">
       <div className="max-w-2xl">
         <h2 className="text-base font-semibold">Out of office</h2>
         <p className="mt-1 text-sm text-muted">

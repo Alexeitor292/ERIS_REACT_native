@@ -1,10 +1,10 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, LogOut, Moon, Settings, Sun, Users, Waves } from "lucide-react";
+import { CalendarOff, ChevronDown, LogOut, Moon, Settings, Sun, Users, Waves } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
-import { roleLabel } from "../utils/roleModel";
+import { isPublicOnly, roleLabel } from "../utils/roleModel";
 import { useUiSettings } from "./UiSettingsContext";
 
 const THEMES = [
@@ -118,7 +118,12 @@ export default function ProfileMenu({ orgLine }: { orgLine: string | null }) {
             ) : null}
 
             <div className="border-t border-[var(--line)] p-1.5">
-              <Link to="/settings" role="menuitem" onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-[var(--panel-soft)]">
+{me && !isPublicOnly(me.roles) ? (
+                <Link to="/settings#out-of-office" role="menuitem" onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-[var(--panel-soft)]">
+                  <CalendarOff size={16} className="text-muted" aria-hidden /> Out of office
+                </Link>
+              ) : null}
+                            <Link to="/settings" role="menuitem" onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-[var(--panel-soft)]">
                 <Settings size={16} className="text-muted" aria-hidden /> Settings
               </Link>
               <button
