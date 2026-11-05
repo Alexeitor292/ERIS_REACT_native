@@ -288,6 +288,25 @@ Indexes:
 - `idx_org_crew_user` on `user_id, is_active`
 - `uk_org_crew` on `district, user_id` (unique)
 
+### `org_district_settings`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `district` | varchar(8) | no |  | PK |
+| `contact_user_id` | bigint | yes |  | FK |
+| `updated_by_user_id` | bigint | yes |  | FK |
+| `updated_at` | datetime | no | current_timestamp() ON UPDATE current_timestamp() |  |
+
+References:
+
+- `contact_user_id` → `users.id` (on delete set null)
+- `updated_by_user_id` → `users.id` (on delete set null)
+
+Indexes:
+
+- `fk_district_setting_contact` on `contact_user_id`
+- `fk_district_setting_editor` on `updated_by_user_id`
+
 ### `org_office_districts`
 
 | Column | Type | Null | Default | Key |
@@ -597,6 +616,7 @@ Indexes:
 | `resolved_at` | datetime | yes |  |  |
 | `resolved_by_user_id` | bigint | yes |  | FK |
 | `resolution_comment` | text | yes |  |  |
+| `district_contact_user_id` | bigint | yes |  | FK |
 | `road_inventory_dataset_version_id` | bigint | yes |  | FK |
 | `road_inventory_segment_id` | bigint | yes |  | FK |
 | `road_inventory_snapshot_json` | longtext | yes |  |  |
@@ -612,6 +632,7 @@ Indexes:
 References:
 
 - `approved_by_user_id` → `users.id` (on delete set null)
+- `district_contact_user_id` → `users.id` (on delete set null)
 - `duplicate_of_incident_id` → `incidents.id` (on delete set null)
 - `duplicate_of_location_id` → `incident_locations.id` (on delete set null)
 - `event_group_id` → `event_groups.id`
@@ -626,6 +647,7 @@ References:
 Indexes:
 
 - `fk_incident_approved_by` on `approved_by_user_id`
+- `fk_incident_district_contact` on `district_contact_user_id`
 - `fk_incident_location_reviewed_by` on `location_reviewed_by_user_id`
 - `fk_incident_reporter` on `reporter_user_id`
 - `fk_incident_resolved_by` on `resolved_by_user_id`
@@ -884,10 +906,6 @@ Indexes:
 | `open_highway_traffic_lanes_count` | integer | yes |  |  |
 | `pavement_ground_annotation_layout_json` | longtext | yes |  |  |
 | `pavement_ground_cracks` | tinyint | no | 0 |  |
-| `crack_length_ft` | decimal(10, 2) | yes |  |  |
-| `crack_horizontal_in` | decimal(10, 2) | yes |  |  |
-| `crack_vertical_in` | decimal(10, 2) | yes |  |  |
-| `crack_depth_in` | decimal(10, 2) | yes |  |  |
 | `settlement_in` | decimal(10, 2) | yes |  |  |
 | `bulge_in` | decimal(10, 2) | yes |  |  |
 | `indented_by_rocks` | tinyint | no | 0 |  |
@@ -1022,6 +1040,50 @@ Indexes:
 
 - `idx_gisa_actions_code` on `action_code`
 - `idx_gisa_actions_group` on `action_group`
+
+### `submission_gisa_cracks`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no |  | PK |
+| `submission_id` | bigint | no |  | FK |
+| `client_uuid` | char(36) | no |  | UK |
+| `sort_order` | integer | no |  |  |
+| `label` | varchar(80) | yes |  |  |
+| `latitude` | decimal(10, 7) | yes |  |  |
+| `longitude` | decimal(10, 7) | yes |  |  |
+| `location_source` | varchar(16) | yes |  |  |
+| `geometry_json` | longtext | yes |  |  |
+| `trend_deg` | decimal(5, 1) | yes |  |  |
+| `orientation` | varchar(16) | yes |  |  |
+| `length_ft` | decimal(10, 2) | yes |  |  |
+| `width_in` | decimal(10, 2) | yes |  |  |
+| `horizontal_disp_in` | decimal(10, 2) | yes |  |  |
+| `vertical_disp_in` | decimal(10, 2) | yes |  |  |
+| `depth_in` | decimal(10, 2) | yes |  |  |
+| `notes` | text | yes |  |  |
+| `photo_attachment_id` | bigint | yes |  | FK |
+| `annotations_json` | longtext | yes |  |  |
+| `revision` | integer | no | 1 |  |
+| `created_by_user_id` | bigint | no |  | FK |
+| `updated_by_user_id` | bigint | yes |  | FK |
+| `created_at` | datetime | no | current_timestamp() |  |
+| `updated_at` | datetime | no | current_timestamp() ON UPDATE current_timestamp() |  |
+
+References:
+
+- `created_by_user_id` → `users.id`
+- `photo_attachment_id` → `attachments.id` (on delete set null)
+- `submission_id` → `submissions.id` (on delete cascade)
+- `updated_by_user_id` → `users.id` (on delete set null)
+
+Indexes:
+
+- `fk_gisa_crack_creator` on `created_by_user_id`
+- `fk_gisa_crack_editor` on `updated_by_user_id`
+- `fk_gisa_crack_photo` on `photo_attachment_id`
+- `idx_gisa_crack_submission` on `submission_id, sort_order, id`
+- `uq_gisa_crack_client_uuid` on `client_uuid` (unique)
 
 ### `submission_gisa_incident_types`
 
@@ -1763,3 +1825,82 @@ Indexes:
 - `idx_terrain_cross_sections_created_by` on `created_by_user_id`
 - `idx_terrain_cross_sections_project` on `caltrans_project_id, updated_at`
 - `uk_terrain_cross_sections_key` on `cross_section_key` (unique)
+
+## Other
+
+### `delegated_actions`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no |  | PK |
+| `delegation_id` | bigint | no |  | FK |
+| `actor_user_id` | bigint | no |  | FK |
+| `acting_for_user_id` | bigint | no |  | FK |
+| `method` | varchar(8) | no |  |  |
+| `path` | varchar(255) | no |  |  |
+| `created_at` | datetime | no | current_timestamp() |  |
+
+References:
+
+- `acting_for_user_id` → `users.id` (on delete cascade)
+- `actor_user_id` → `users.id` (on delete cascade)
+- `delegation_id` → `user_delegations.id` (on delete cascade)
+
+Indexes:
+
+- `fk_delegated_action_actor` on `actor_user_id`
+- `fk_delegated_action_for` on `acting_for_user_id`
+- `ix_delegated_action_delegation` on `delegation_id, created_at`
+
+### `immediate_action_deliveries`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no |  | PK |
+| `submission_id` | bigint | no |  | FK |
+| `actor_user_id` | bigint | no |  | FK |
+| `client_uuid` | char(36) | no |  | UK |
+| `actions_json` | longtext | no |  |  |
+| `description` | text | no |  |  |
+| `written_at` | datetime | yes |  |  |
+| `created_at` | datetime | no | current_timestamp() |  |
+
+References:
+
+- `actor_user_id` → `users.id`
+- `submission_id` → `submissions.id` (on delete cascade)
+
+Indexes:
+
+- `fk_immediate_delivery_actor` on `actor_user_id`
+- `ix_immediate_delivery_submission` on `submission_id, created_at`
+- `uq_immediate_delivery_client` on `client_uuid` (unique)
+
+### `user_delegations`
+
+| Column | Type | Null | Default | Key |
+| --- | --- | --- | --- | --- |
+| `id` | bigint | no |  | PK |
+| `delegator_user_id` | bigint | no |  | FK |
+| `delegate_user_id` | bigint | no |  | FK |
+| `starts_on` | date | no |  |  |
+| `ends_on` | date | no |  |  |
+| `note` | varchar(500) | yes |  |  |
+| `created_by_user_id` | bigint | no |  | FK |
+| `created_at` | datetime | no | current_timestamp() |  |
+| `cancelled_at` | datetime | yes |  |  |
+| `cancelled_by_user_id` | bigint | yes |  | FK |
+
+References:
+
+- `cancelled_by_user_id` → `users.id` (on delete set null)
+- `created_by_user_id` → `users.id`
+- `delegate_user_id` → `users.id` (on delete cascade)
+- `delegator_user_id` → `users.id` (on delete cascade)
+
+Indexes:
+
+- `fk_delegation_canceller` on `cancelled_by_user_id`
+- `fk_delegation_creator` on `created_by_user_id`
+- `ix_delegation_delegate` on `delegate_user_id, starts_on, ends_on`
+- `ix_delegation_delegator` on `delegator_user_id, starts_on, ends_on`

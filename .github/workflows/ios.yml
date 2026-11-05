@@ -25,6 +25,8 @@ jobs:
   eriskit:
     name: ERISKit tests (Linux)
     runs-on: ubuntu-latest
+    # Pinned: GitHub's Ubuntu images do not all come with Swift.
+    container: swift:6.4-noble
     steps:
       - uses: actions/checkout@v4
       - name: Swift version
