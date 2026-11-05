@@ -5,6 +5,8 @@
 // old page, the router changes page, and once the new page has rendered (its
 // AppShell calls `pageRendered`) the snapshots animate (index.css, eris-page).
 
+import { prefersReducedMotion } from "./shellModel";
+
 type Navigate = (to: string) => void;
 
 let settle: (() => void) | null = null;
@@ -14,7 +16,8 @@ type DocumentWithTransitions = Document & { startViewTransition?: (update: () =>
 /** Change page with a view transition when the browser offers one; otherwise at once. */
 export function navigateWithTransition(navigate: Navigate, to: string): void {
   const doc = document as DocumentWithTransitions;
-  if (typeof doc.startViewTransition !== "function" || document.visibilityState !== "visible") {
+  // Asked for less motion: change page at once, whatever the app setting says.
+  if (typeof doc.startViewTransition !== "function" || document.visibilityState !== "visible" || prefersReducedMotion()) {
     navigate(to);
     return;
   }

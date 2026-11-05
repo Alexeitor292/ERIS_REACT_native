@@ -1,5 +1,8 @@
 import XCTest
 @testable import ERISKit
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 private let snake: JSONDecoder = {
     let decoder = JSONDecoder()

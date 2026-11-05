@@ -2,7 +2,7 @@
 
 The Caltrans ERIS iPhone app: SwiftUI, Microsoft Entra sign-in through MSAL and
 Microsoft Authenticator, APNs push. The build contract is
-[docs/ios-native-app.md](../docs/ios-native-app.md); the Expo app in
+[docs/ios-native-app.md](../docs/development/ios.md); the Expo app in
 [`mobile/`](../mobile) is the reference until this app reaches parity.
 
 | Folder | What it is |

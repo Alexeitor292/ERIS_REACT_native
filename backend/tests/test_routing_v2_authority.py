@@ -20,7 +20,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from tests.org_people import People
+from tests.org_people import PASSWORD, People
 
 pytestmark = pytest.mark.db
 
@@ -646,7 +646,12 @@ class TestRedelegationFromSubmitted:
             f"/admin/users/{first['id']}", headers=admin_headers, json={"is_active": True}
         )
         assert reactivated.status_code == 200, reactivated.text
-        # Disabling ended their sessions: they sign in again.
+        # Deactivation ended the old chief's sessions, and reinstatement does
+        # not revive them: they sign in again (later tests reuse the new token).
+        stale = client_db.post(
+            f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(first["token"])
+        )
+        assert stale.status_code == 401, stale.text
         first["token"] = placed.login(first)["Authorization"].split(" ", 1)[1]
         old = client_db.post(
             f"/assessments/{aid}/review", json={"action": "APPROVE"}, headers=_auth(first["token"])

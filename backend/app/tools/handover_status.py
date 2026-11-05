@@ -1,6 +1,6 @@
 """Report whether administrator handover is complete. Read-only.
 
-Handover (docs/caltrans-podman.md, "Entra sign-in and handover") ends when:
+Handover (docs/operations/caltrans-podman.md, "Entra sign-in and handover") ends when:
 
   * at least two active administrators sign in through Entra (one for
     recovery), so losing one person does not lock the deployment;

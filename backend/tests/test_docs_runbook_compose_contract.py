@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-COMPOSE_FILES = [REPO / "docker" / "docker-compose.yml", REPO / "docker" / "docker-compose.proxmox.yml"]
-RUNBOOK = REPO / "docs" / "offline-scene-package-operator-runbook.md"
+COMPOSE_FILES = [REPO / "deploy" / "compose" / "docker-compose.yml", REPO / "deploy" / "compose" / "docker-compose.proxmox.yml"]
+RUNBOOK = REPO / "docs" / "operations" / "offline-scene-packages.md"
 ADR = REPO / "docs" / "decisions" / "adr-offline-road-context-source.md"
 
 WORKER_SERVICE = "offline-scene-worker"

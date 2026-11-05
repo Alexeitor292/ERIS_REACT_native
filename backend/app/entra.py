@@ -20,15 +20,17 @@ from urllib.parse import urlencode, urlparse
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Cookie, HTTPException, Query, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from . import entra_credential
 from .config import settings
 from .db import SessionLocal
+from .rate_limit import limit_sign_in, limit_sign_in_navigation
 from .routes.auth import start_session
 from .sessions import CLIENT_BEARER, CLIENT_WEB, is_browser, set_session_cookies
 
@@ -123,7 +125,10 @@ def _verify_entra_jwt(token: str, *, tenant: str, audiences: set[str]) -> dict:
     key_issuer = matches[0].get("issuer")
     if key_issuer and key_issuer.replace("{tenantid}", tenant) != issuer:
         raise ValueError("signing key issuer mismatch")
-    claims = jwt.decode(token, matches[0], algorithms=["RS256"], issuer=issuer, options={"verify_aud": False})
+    # PyJWK builds an RSA public key object from the JWK, so the key can only
+    # ever verify RS256: it is never usable as an HMAC secret.
+    claims = jwt.decode(token, jwt.PyJWK(matches[0], algorithm="RS256").key, algorithms=["RS256"],
+                        issuer=issuer, options={"verify_aud": False})
     audience = claims.get("aud")
     if not isinstance(audience, str) or audience not in audiences:
         raise ValueError("unexpected audience")
@@ -139,7 +144,7 @@ def _validate_id_token(token: str, *, tenant: str, client: str, nonce: str) -> d
         if claims.get("nonce") != nonce:
             raise ValueError("nonce mismatch")
         return claims
-    except (httpx.HTTPError, JWTError, ValueError, TypeError, KeyError) as exc:
+    except (httpx.HTTPError, PyJWTError, ValueError, TypeError, KeyError) as exc:
         raise HTTPException(401, "Entra identity could not be verified") from exc
 
 
@@ -177,7 +182,7 @@ def _validate_mobile_access_token(token: str) -> dict:
         if scope_name not in str(claims.get("scp") or "").split():
             raise ValueError("token lacks the ERIS API scope")
         return claims
-    except (httpx.HTTPError, JWTError, ValueError, TypeError, KeyError) as exc:
+    except (httpx.HTTPError, PyJWTError, ValueError, TypeError, KeyError) as exc:
         raise HTTPException(401, "Entra identity could not be verified") from exc
 
 
@@ -197,7 +202,7 @@ def _linked_active_user(db, tenant: str, identity: dict) -> dict | None:
     return user
 
 
-@router.get("/start")
+@router.get("/start", dependencies=[Depends(limit_sign_in_navigation)])
 def start():
     try:
         tenant, client, redirect = _configuration()
@@ -220,7 +225,7 @@ def start():
     return response
 
 
-@router.get("/callback")
+@router.get("/callback", dependencies=[Depends(limit_sign_in_navigation)])
 def callback(request: Request, code: str | None = Query(default=None), state: str | None = Query(default=None),
              error: str | None = Query(default=None), eris_entra_state: str | None = Cookie(default=None)):
     try:
@@ -250,7 +255,7 @@ def callback(request: Request, code: str | None = Query(default=None), state: st
             token_response.raise_for_status()
             id_token = token_response.json()["id_token"]
         identity = _validate_id_token(id_token, tenant=tenant, client=client, nonce=nonce)
-    except (JWTError, ValueError, KeyError, httpx.HTTPError, HTTPException) as exc:
+    except (PyJWTError, ValueError, KeyError, httpx.HTTPError, HTTPException) as exc:
         audit.warning("entra_sign_in_failed reason=%s", type(exc).__name__)
         return _login_redirect("failed")
 
@@ -273,7 +278,7 @@ class NativeSignIn(BaseModel):
     access_token: str = Field(min_length=20, max_length=16384)
 
 
-@router.post("/native")
+@router.post("/native", dependencies=[Depends(limit_sign_in)])
 def native(body: NativeSignIn, request: Request):
     """Exchange the mobile app's Entra access token for an ERIS bearer session.
 

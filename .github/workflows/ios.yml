@@ -6,7 +6,7 @@ name: iOS
 # Caltrans Mac needs nothing but Xcode to open it.
 on:
   push:
-    branches: [main, "claude/ios-swift-app"]
+    branches: [main]
     paths: ["ios/**", ".github/workflows/ios.yml", "web/src/memoIos/**", "web/src/features/submissions/memo*",
             "web/src/index.css", "web/scripts/build-memo-ios.mjs", "web/package-lock.json"]
   pull_request:

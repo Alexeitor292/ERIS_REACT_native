@@ -1,0 +1,93 @@
+name: Docs
+
+# Keeps the documentation honest: every relative link resolves, and the
+# generated references (API routes, ERD, schema) match the code and a fully
+# migrated MariaDB. A failing run uploads the regenerated files as the
+# "generated-docs" artifact: download it, copy the files into docs/, commit.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    name: Docs (links + API reference)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Relative links and anchors
+        run: python scripts/docs/check_links.py
+      - name: API reference matches the routes
+        run: python scripts/docs/generate_api_reference.py --check
+
+  schema:
+    name: Docs (ERD + schema reference from a migrated MariaDB)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: rootpassword
+          MARIADB_DATABASE: eris_docs
+          MARIADB_USER: eris_user
+          MARIADB_PASSWORD: docs_placeholder_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=15
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: eris_docs
+      DB_USER: eris_user
+      DB_PASS: docs_placeholder_password
+      JWT_SECRET: docs_placeholder_secret
+      S3_ACCESS_KEY: docs_s3_access
+      S3_SECRET_KEY: docs_s3_secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      # The same path a production install takes: the init SQL MariaDB runs on
+      # a new volume, then every Alembic revision.
+      - name: Load the init SQL
+        run: |
+          for file in 010_schema.sql 015_photo_capture_corrections.sql 020_seed.sql; do
+            mysql -h 127.0.0.1 -u root -prootpassword eris_docs < "database/init/$file"
+          done
+      - name: Migrate to head
+        working-directory: backend
+        run: |
+          alembic stamp 0001_baseline
+          alembic upgrade head
+      - name: Regenerate the ERD and schema reference
+        run: python scripts/docs/generate_schema_docs.py --url "mysql+pymysql://root:rootpassword@127.0.0.1:3306/eris_docs"
+      - name: Upload the generated files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-docs
+          path: |
+            docs/data/erd.md
+            docs/data/schema-reference.md
+      - name: Committed files are current
+        run: |
+          git add -N docs/data/erd.md docs/data/schema-reference.md
+          git diff --exit-code -- docs/data/erd.md docs/data/schema-reference.md || {
+            echo "::error::docs/data/erd.md or schema-reference.md is stale. Download the generated-docs artifact and commit it."
+            exit 1
+          }

@@ -27,6 +27,18 @@ if _backend_dir not in sys.path:
 
 
 @pytest.fixture(autouse=True)
+def sign_in_rate_limit_off(monkeypatch):
+    """The suite signs in far more often than a person could; tests of the
+    limit itself (test_rate_limit.py) turn it back on."""
+    from app.rate_limit import sign_in_limiter
+
+    sign_in_limiter.reset()
+    monkeypatch.setattr(sign_in_limiter, "limit", 0)
+    yield sign_in_limiter
+    sign_in_limiter.reset()
+
+
+@pytest.fixture(autouse=True)
 def package_reference_fixture(monkeypatch):
     from app.services import road_inventory_packages as packages
 

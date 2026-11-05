@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
-from jose import jwt
+import jwt
 
 from app import entra, entra_credential
 from app.config import Settings, settings

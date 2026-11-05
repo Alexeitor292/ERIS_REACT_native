@@ -1,6 +1,6 @@
 // The terrain model the technical form measures against: USGS 3DEP, read through ERIS from the
 // same tiles as the iPhone, so both get the same heights. The 3D map still shows Esri's ground,
-// which is for looking at; values that get saved come from here. See docs/map-licensing.md.
+// which is for looking at; values that get saved come from here. See docs/operations/map-licensing.md.
 
 import { appConfig } from "../../config";
 import { groundSpacingM, heightsAt, readElevationTile, type ElevationTile, type LonLat } from "./elevationTile";
